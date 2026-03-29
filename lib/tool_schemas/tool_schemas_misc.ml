@@ -4,6 +4,21 @@ open Types
 
 let schemas : tool_schema list = [
   {
+    name = "masc_config";
+    description = "Return the effective runtime configuration with source attribution (env var or default) for each setting. \
+Sensitive values (tokens, passwords) are masked. Use to inspect or verify the server config without restarting. \
+Pass category to filter results to a single section.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("category", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional category filter: server, auth, transport, storage, runtime, rate_limiting, chain, inference, keeper, dashboard");
+        ]);
+      ]);
+    ];
+  };
+  {
     name = "masc_transport_status";
     description = "Return the active transport surfaces and runtime counters for HTTP, gRPC, WebSocket, and WebRTC. \
 Use when selecting a client transport or debugging whether realtime transports are enabled and reachable.";
@@ -266,6 +281,35 @@ Pair with masc_tool_admin_snapshot for a broader admin view including auth and c
         ("offset", `Assoc [
           ("type", `String "integer");
           ("description", `String "Skip first N tools for pagination (default 0)");
+        ]);
+      ]);
+    ];
+  };
+  {
+    name = "masc_config_snapshot";
+    description = "Return a read-only snapshot of the current runtime configuration. \
+Env vars are categorized (server, storage, transport, chain, inference, keeper, dashboard) \
+with source (env or default) and sensitivity flags. Sensitive values are masked.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    name = "masc_feature_flags";
+    description = "List all boolean feature flags with their canonical defaults, runtime values, \
+lifecycle state, and source (env or default). Flags are grouped by category: transport, tool, \
+keeper, dashboard, inference, runtime. Filter by category or show only overridden flags.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("category", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by category (transport, tool, keeper, dashboard, inference, runtime)");
+        ]);
+        ("only_overridden", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, show only flags where runtime value differs from default");
         ]);
       ]);
     ];

@@ -33,6 +33,7 @@
  (libraries
   masc_types
   masc_core
+  masc_config
   masc_log
   masc_backend
   masc_eio_context

@@ -126,7 +126,6 @@ let () =
   register_module_tag ~schemas:Tool_improve_loop.schemas ~tag:Mod_improve_loop;
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
   register_module_tag ~schemas:Tool_research.schemas ~tag:Mod_research;
-  register_module_tag ~schemas:Tool_model_catalog.schemas ~tag:Mod_model_catalog;
   (* God Schema decomposition: register modules that now own their schemas *)
   register_module_tag ~schemas:Tool_task.schemas ~tag:Mod_task;
   register_module_tag ~schemas:Tool_control.schemas ~tag:Mod_control;
@@ -134,9 +133,9 @@ let () =
   register_module_tag ~schemas:Tool_council_oas.schemas ~tag:Mod_council;
   register_module_tag ~schemas:Tool_relay.schemas ~tag:Mod_relay;
   register_module_tag ~schemas:Tool_handover.schemas ~tag:Mod_handover;
+  register_module_tag ~schemas:Tool_hat.schemas ~tag:Mod_hat;
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
   (* Monolithic schema decomposition: modules that now export their own schemas *)
-  register_module_tag ~schemas:Tool_run.schemas ~tag:Mod_run;
   register_module_tag ~schemas:Tool_code.schemas ~tag:Mod_code;
   register_module_tag ~schemas:Tool_code_write.schemas ~tag:Mod_code_write;
   register_module_tag ~schemas:Tool_library.schemas ~tag:Mod_library;

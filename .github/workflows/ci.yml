@@ -56,6 +56,7 @@ jobs:
         run: |
           chmod +x scripts/check-doc-truth.sh scripts/check-version-truth.sh
           scripts/check-doc-truth.sh
+          scripts/check-version-truth.sh
 
       - name: Fetch base branch for health ratchet
         if: github.event_name == 'pull_request'
@@ -291,6 +292,11 @@ jobs:
         run: |
           chmod +x scripts/check-eio-conventions.sh
           scripts/check-eio-conventions.sh
+
+      - name: Check feature flag consistency
+        run: |
+          chmod +x scripts/check-feature-flag-consistency.sh
+          scripts/check-feature-flag-consistency.sh
 
       - name: Build with warnings as errors
         run: |

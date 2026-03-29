@@ -56,7 +56,14 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         let ok, body = Turn.handle_keeper_up ctx resolved_args in
         if not ok then
           (false, body)
-        else
+        else begin
+          (* Apply per-persona shard configuration after keeper creation *)
+          let name = Safe_ops.json_string ~default:"" "name" resolved_args in
+          if name <> "" then
+            (match Safe_ops.json_string_list "shards" resolved_args with
+             | _ :: _ as shard_names ->
+                 Tool_shard.set_agent_shards name shard_names
+             | [] -> ());
           let created_json =
             try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
           in
@@ -70,3 +77,4 @@ let handle_keeper_create_from_persona ctx args : tool_result =
               ]
           in
           (true, Yojson.Safe.pretty_to_string json)
+        end

@@ -99,7 +99,7 @@ let run_turn
         ~fallback:(fun () -> 2048)
   in
   (* 1. Ensure session directory tree exists.
-     Both the base perpetual dir AND the trace-specific session dir must
+     Both the base traces dir AND the trace-specific session dir must
      exist before any file I/O (checkpoint load, history persist).
      In filesystem fallback mode (PG unavailable), these directories may
      not have been created by keeper_up if it only registered in-memory. *)
@@ -152,6 +152,10 @@ let run_turn
   in
   (* 6. Append user message and persist *)
   let user_msg = Agent_sdk.Types.user_msg user_message in
+  (* Capture history BEFORE appending the current user_msg.
+     OAS Agent.run appends user_msg from ~goal internally, so passing it
+     in initial_messages would cause duplication. *)
+  let history_messages = ctx_work.messages in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
   Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
   let checkpoint_sidecar =
@@ -196,7 +200,7 @@ let run_turn
       ~session_id:meta.trace_id
       ~system_prompt:turn_system_prompt
       ~tools
-      ~initial_messages:ctx_work.messages
+      ~initial_messages:history_messages
       ~hooks
       ~context_reducer:reducer
       ~memory
@@ -275,6 +279,21 @@ let run_turn
                  (List.length fp.review_tripwires)
              | None -> ())
           | None -> ());
+         (* Post-turn deterministic memory write.
+            Uses meta-based fallback when [STATE] parsing fails.
+            See RFC #3646 Section 3: Det/NonDet boundary. *)
+         (try
+           let (notes_written, kinds_written) =
+             Keeper_memory_bank.append_memory_notes_from_reply
+               config meta ~turn:result.turns ~reply:response_text
+           in
+           if notes_written > 0 then
+             Log.Keeper.info "keeper:%s memory_write: %d notes, kinds=[%s]"
+               meta.name notes_written (String.concat "," kinds_written)
+         with
+         | exn ->
+           Log.Keeper.warn "keeper:%s memory_write failed: %s"
+             meta.name (Printexc.to_string exn));
          Ok {
            response_text;
            model_used = model;

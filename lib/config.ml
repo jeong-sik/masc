@@ -22,7 +22,6 @@ let raw_all_tool_schemas : Types.tool_schema list =
     @ Tool_keeper.schemas
     @ Tool_operator.schemas
     @ Tool_local_runtime.schemas
-    @ Tool_model_catalog.schemas
     @ Tool_command_plane.schemas
     @ Tool_team_session.schemas
     @ Tool_voice.schemas

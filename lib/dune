@@ -303,6 +303,7 @@
    tempo
    tools
    tool_args
+   tool_schema_dsl
    task_sandbox
    tool_fire_task
    tool_improve_loop_schemas
@@ -363,6 +364,7 @@
    tool_model_catalog
    tool_board
    tool_command_plane
+   tool_schema_dsl
    tool_command_plane_support
    tool_command_plane_chain_common
    tool_command_plane_chain_launch
@@ -676,7 +678,9 @@
   tool_improve_loop_types
   tool_improve_loop_gh
   tool_improve_loop_planner
-  tool_improve_loop_executor)
+  tool_improve_loop_executor
+  ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
+  tool_schema_dsl)
  (libraries
    mcp_protocol
    mcp_protocol.eio

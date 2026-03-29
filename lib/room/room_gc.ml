@@ -292,7 +292,7 @@ let gc config ?(days=7) () =
   (* 5. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json)
         and orphan date-split metrics directories (<name>/metrics/ without <name>.json) *)
   let keeper_orphan_count = ref 0 in
-  let pk_dir = Filename.concat (Filename.concat config.base_path ".masc") "perpetual-keepers" in
+  let pk_dir = Filename.concat (Filename.concat config.base_path ".masc") "keepers" in
   if Sys.file_exists pk_dir then begin
     let entries = Sys.readdir pk_dir |> Array.to_list in
     (* Active keepers = those with a .json config file *)

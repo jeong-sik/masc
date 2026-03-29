@@ -392,6 +392,14 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
+  let base_path = deps.get_base_path () in
+  let auth_result =
+    match profile with
+    | Full | Managed_agent ->
+        deps.verify_mcp_auth ~base_path request
+    | Operator_remote ->
+        deps.verify_operator_mcp_auth ~base_path request
+  in
   let legacy_headers =
     match legacy_messages_endpoint with
     | Some _ -> legacy_transport_deprecation_headers
@@ -422,6 +430,11 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
           in
           let response = Httpun.Response.create ~headers `Bad_request in
           Httpun.Reqd.respond_with_string reqd response body
+      | Ok () ->
+      (match auth_result with
+      | Error msg ->
+          respond_mcp_auth_error ~deps request reqd ~session_id
+            ~protocol_version ~extra_headers:legacy_headers msg
       | Ok () ->
       remember_mcp_profile session_id profile;
       (match check_sse_connect_guard session_id with
@@ -531,7 +544,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
             Log.Server.info "SSE connected: %s (active: %d/%d)"
-              session_id client_count Sse.max_clients))
+              session_id client_count Sse.max_clients)))
 
 let sse_simple_handler ~deps request reqd =
   let origin = deps.get_origin request in
@@ -626,7 +639,8 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
   let base_path = deps.get_base_path () in
   let auth_result =
     match profile with
-    | Full | Managed_agent -> Ok ()
+    | Full | Managed_agent ->
+        deps.verify_mcp_auth ~base_path request
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in

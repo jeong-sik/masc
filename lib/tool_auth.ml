@@ -40,13 +40,24 @@ let handle_auth_status ctx _args =
   let status = if cfg.enabled then "✅ Enabled" else "❌ Disabled" in
   let require = if cfg.require_token then "Yes" else "No (optional)" in
   let default = Types.agent_role_to_string cfg.default_role in
+  let bind_host = Server_auth.http_auth_bind_host () in
+  let bind_scope =
+    if Server_auth.http_auth_bind_is_loopback () then "loopback" else "non-loopback"
+  in
+  let http_strict =
+    if Server_auth.http_auth_strict_enabled () then "Yes" else "No"
+  in
   let msg = Printf.sprintf {|🔐 **Authentication Status**
 
 Status: %s
 Require Token: %s
 Default Role: %s
 Token Expiry: %d hours
-|} status require default cfg.token_expiry_hours in
+HTTP Auth Strict: %s
+Bind Host: %s (%s)
+|} status require default cfg.token_expiry_hours http_strict bind_host
+      bind_scope
+  in
   (true, msg)
 
 let handle_auth_create_token ctx args =

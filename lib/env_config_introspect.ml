@@ -59,23 +59,38 @@ let category name entries =
 (* ================================================================ *)
 
 let server_entries = [
-  entry ~default:"(cwd)" "MASC_BASE_PATH" "Base storage directory";
-  entry ~default:"filesystem" "MASC_STORAGE_TYPE" "Backend storage type (filesystem|postgres)";
   entry ~default:"8935" "MASC_HTTP_PORT" "HTTP server port";
   entry ~default:"127.0.0.1" "MASC_HOST" "Server bind host";
   entry ~default:"(derived)" "MASC_HTTP_BASE_URL" "Public HTTP base URL";
   entry ~default:"" "MASC_CLUSTER_NAME" "Cluster name for multi-instance";
+  entry ~default:"(cwd)" "MASC_BASE_PATH" "Base storage directory";
+  entry ~default:"(none)" "MASC_BUILD_GIT_COMMIT" "Build git commit hash";
+]
+
+let auth_entries = [
   entry ~sensitive:true ~default:"(none)" "MASC_ADMIN_TOKEN" "Admin authentication token";
   entry ~default:"true" "MASC_TOOL_AUTH_STRICT" "Require auth for all tool calls";
+  entry ~default:"false" "MASC_HTTP_AUTH_STRICT" "Require auth for HTTP endpoints";
+]
+
+let runtime_entries = [
   entry ~default:"(auto)" "MASC_LOG_LEVEL" "Log level override";
   entry ~default:"true" "MASC_TELEMETRY_ENABLED" "Enable telemetry collection";
   entry ~default:"false" "MASC_PARSE_WARN" "Enable JSON parse warnings";
   entry ~default:"production" "MASC_GOVERNANCE_LEVEL" "Governance enforcement level";
-  entry ~default:"(none)" "MASC_BUILD_GIT_COMMIT" "Build git commit hash";
   entry ~default:"(none)" "MASC_AUTO_RESPOND" "Auto-respond mode";
+  entry ~default:"true" "MASC_DISPATCH_V2" "Enable V2 dispatch engine";
+]
+
+let rate_limiting_entries = [
+  entry ~default:"100.0" "MASC_RATE_LIMIT" "Requests per second";
+  entry ~default:"150" "MASC_RATE_BURST" "Burst capacity";
+  entry ~default:"300.0" "MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC" "Stale bucket cleanup interval (seconds)";
+  entry ~default:"3600.0" "MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC" "Max age for rate limit entries (seconds)";
 ]
 
 let storage_entries = [
+  entry ~default:"filesystem" "MASC_STORAGE_TYPE" "Backend storage type (filesystem|postgres)";
   entry ~sensitive:true ~default:"(none)" "MASC_POSTGRES_URL" "PostgreSQL connection URL";
   entry ~default:"10" "MASC_PG_POOL_SIZE" "PostgreSQL connection pool size";
   entry ~default:"1000" "MASC_PUBSUB_MAX_MESSAGES" "Max pubsub messages per batch";
@@ -144,17 +159,38 @@ let server_meta () =
     ("pid", `Int (Unix.getpid ()));
   ]
 
+let all_categories () = [
+  category "server" server_entries;
+  category "auth" auth_entries;
+  category "transport" transport_entries;
+  category "storage" storage_entries;
+  category "runtime" runtime_entries;
+  category "rate_limiting" rate_limiting_entries;
+  category "chain" chain_entries;
+  category "inference" inference_entries;
+  category "keeper" keeper_entries;
+  category "dashboard" dashboard_entries;
+]
+
 let to_json () =
   `Assoc [
     ("generated_at", `String (Types.now_iso ()));
     ("server", server_meta ());
-    ("categories", `Assoc [
-      category "server" server_entries;
-      category "storage" storage_entries;
-      category "transport" transport_entries;
-      category "chain" chain_entries;
-      category "inference" inference_entries;
-      category "keeper" keeper_entries;
-      category "dashboard" dashboard_entries;
-    ]);
+    ("categories", `Assoc (all_categories ()));
   ]
+
+(** Return config JSON filtered to a single category.
+    Returns the full JSON when [cat] is [None]. *)
+let to_json_filtered ?cat () =
+  match cat with
+  | None -> to_json ()
+  | Some name ->
+    let cats = all_categories () in
+    let filtered =
+      List.filter (fun (k, _) -> k = name) cats
+    in
+    `Assoc [
+      ("generated_at", `String (Types.now_iso ()));
+      ("server", server_meta ());
+      ("categories", `Assoc filtered);
+    ]

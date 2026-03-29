@@ -374,42 +374,56 @@ let append_memory_notes_from_reply
     (meta : keeper_meta)
     ~(turn : int)
     ~(reply : string) : (int * string list) =
-  match parse_state_snapshot_from_reply reply with
-  | None -> (0, [])
-  | Some snapshot ->
-      let notes =
-        memory_candidates_from_snapshot
-          ~soul_profile:meta.soul_profile snapshot
-      in
-      if notes = [] then
-        (0, [])
-      else
-        let now_ts = Time_compat.now () in
-        let path = keeper_memory_bank_path config meta.name in
-        let kinds_acc = ref [] in
-        let seen_kinds : (string, unit) Hashtbl.t = Hashtbl.create 8 in
-        List.iter
-          (fun (kind, text, priority) ->
-            if not (Hashtbl.mem seen_kinds kind) then begin
-              Hashtbl.add seen_kinds kind ();
-              kinds_acc := kind :: !kinds_acc
-            end;
-            append_jsonl_line path
-              (`Assoc
-                [
-                  ("ts", `String (now_iso ()));
-                  ("ts_unix", `Float now_ts);
-                  ("name", `String meta.name);
-                  ("trace_id", `String meta.trace_id);
-                  ("generation", `Int meta.generation);
-                  ("turn", `Int turn);
-                  ("soul_profile", `String meta.soul_profile);
-                  ("kind", `String kind);
-                  ("priority", `Int priority);
-                  ("text", `String text);
-                ]))
-          notes;
-        (List.length notes, List.rev !kinds_acc)
+  let snapshot =
+    match parse_state_snapshot_from_reply reply with
+    | Some s -> s
+    | None ->
+        (* Deterministic fallback: use keeper meta fields as memory source.
+           This guarantees memory write regardless of LLM output format.
+           See RFC #3646 Section 3: Det/NonDet boundary principle. *)
+        {
+          Keeper_memory_policy.goal =
+            (if meta.goal <> "" then Some meta.goal else None);
+          progress = None;
+          next_items = [];
+          decisions = [];
+          open_questions = [];
+          constraints = [];
+        }
+  in
+  let notes =
+    memory_candidates_from_snapshot
+      ~soul_profile:meta.soul_profile snapshot
+  in
+  if notes = [] then
+    (0, [])
+  else
+    let now_ts = Time_compat.now () in
+    let path = keeper_memory_bank_path config meta.name in
+    let kinds_acc = ref [] in
+    let seen_kinds : (string, unit) Hashtbl.t = Hashtbl.create 8 in
+    List.iter
+      (fun (kind, text, priority) ->
+        if not (Hashtbl.mem seen_kinds kind) then begin
+          Hashtbl.add seen_kinds kind ();
+          kinds_acc := kind :: !kinds_acc
+        end;
+        append_jsonl_line path
+          (`Assoc
+            [
+              ("ts", `String (now_iso ()));
+              ("ts_unix", `Float now_ts);
+              ("name", `String meta.name);
+              ("trace_id", `String meta.trace_id);
+              ("generation", `Int meta.generation);
+              ("turn", `Int turn);
+              ("soul_profile", `String meta.soul_profile);
+              ("kind", `String kind);
+              ("priority", `Int priority);
+              ("text", `String text);
+            ]))
+      notes;
+    (List.length notes, List.rev !kinds_acc)
 
 let summarize_memory_bank_lines
     (lines : string list)

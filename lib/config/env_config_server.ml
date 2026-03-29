@@ -1,7 +1,13 @@
 (** Server, transport, and storage environment configuration.
 
     Centralizes MASC_GRPC_*, MASC_WS_*, MASC_STORAGE_*, and related
-    server-level env vars. *)
+    server-level env vars.
+
+    {b NOTE}: This module has zero callers as of v2.162.0.
+    All production code reads from [Env_config_runtime] and other
+    domain-specific config modules. This module is retained for
+    backward compatibility but should not be used for new code.
+    See [Feature_flag_registry] for the canonical flag defaults. *)
 
 open Env_config_core
 
@@ -46,7 +52,7 @@ end
 
 module Webrtc = struct
   let enabled =
-    get_bool ~default:false "MASC_WEBRTC_ENABLED"
+    get_bool ~default:true "MASC_WEBRTC_ENABLED"
 
   let ice_servers_json_opt () =
     Sys.getenv_opt "MASC_WEBRTC_ICE_SERVERS_JSON" |> trim_opt

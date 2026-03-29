@@ -103,7 +103,6 @@ let all_known_tool_names =
     "masc_code_write";
     "masc_collaboration_evidence";
     "masc_collaboration_graph";
-    "masc_compact_context";
     "masc_consolidate_learning";
     "masc_convo_conclude";
     "masc_convo_get";
@@ -689,16 +688,6 @@ let ensure_verification_request fixture =
       fixture.verification_id <- Some req_id;
       req_id
 
-let ensure_cache_entry fixture =
-  ignore
-    (execute_tool_ok fixture ~name:"masc_cache_set"
-       ~arguments:
-         (`Assoc
-           [
-             ("key", `String "tool-matrix-cache");
-             ("value", `String "cached value");
-           ]))
-
 let ensure_webrtc_offer fixture =
   match fixture.webrtc_offer_id with
   | Some offer_id -> offer_id
@@ -807,8 +796,6 @@ let prepare_for_name fixture name =
     ignore (ensure_task fixture);
   if List.mem name [ "masc_plan_get"; "masc_plan_update"; "masc_plan_get_task"; "masc_plan_clear_task" ] then
     ensure_plan_initialized fixture;
-  if List.mem name [ "masc_cache_get"; "masc_cache_delete" ] then
-    ensure_cache_entry fixture;
   if List.mem name [ "masc_board_get"; "masc_board_comment"; "masc_board_vote"; "masc_board_comment_vote" ] then
     ignore (ensure_board_post fixture);
   if List.mem name [ "masc_verify_submit"; "masc_verify_status"; "masc_verify_auto"; "masc_verify_pending" ] then
@@ -988,7 +975,6 @@ let field_value fixture ~tool_name field_name schema =
   | "files" | "channels" -> `List []
   | "bpm" -> `Int 120
   | "param" -> `String "volume"
-  | "value" when tool_name = "masc_cache_set" -> `String "cached value"
   | "value" -> `Float 0.5
   | "replace_all" | "create_dirs" | "dry_run" | "force" | "clear" ->
       `Bool true

@@ -288,6 +288,8 @@ let standard_tools =
     (* Misc *)
     "masc_spawn"; "masc_agents"; "masc_progress";
     "masc_note_add"; "masc_batch_add_tasks";
+    (* Config introspection *)
+    "masc_config";
   ]
 
 (** Pre-built Hashtbl sets for O(1) tier lookups.

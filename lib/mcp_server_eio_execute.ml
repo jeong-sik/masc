@@ -418,8 +418,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | None -> match tag with
     | Mod_plan ->
         Tool_plan.dispatch { config } ~name ~args:arguments
-    | Mod_run ->
-        Tool_run.dispatch { Tool_run.config } ~name ~args:arguments
     | Mod_operator ->
         let ctx = { Tool_operator.config; agent_name; sw; clock;
                     proc_mgr = state.Mcp_server.proc_mgr; mcp_session_id } in
@@ -432,8 +430,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_command_plane.dispatch ctx ~name ~args:arguments
     | Mod_local_runtime ->
         Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name } ~name ~args:arguments
-    | Mod_model_catalog ->
-        Tool_model_catalog.dispatch () ~name ~args:arguments
     | Mod_team_session ->
         let ctx = { Tool_team_session.config; agent_name; sw; clock;
                     proc_mgr = state.Mcp_server.proc_mgr } in
@@ -479,6 +475,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_heartbeat.dispatch { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args:arguments
     | Mod_auth ->
         Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args:arguments
+    | Mod_hat ->
+        Tool_hat.dispatch { Tool_hat.config; agent_name } ~name ~args:arguments
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:arguments
     | Mod_task ->

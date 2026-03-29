@@ -544,6 +544,61 @@ let test_permission_for_tool_keeper_create_from_persona () =
 
 (* keeper policy auth tests removed — policy tools no longer registered in Auth *)
 
+(* ============================================================
+   Tunnel-through-loopback auth tests (#3654)
+   ============================================================ *)
+
+let with_env name value f =
+  let prev = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect ~finally:(fun () ->
+    match prev with
+    | Some v -> Unix.putenv name v
+    | None -> (try Unix.putenv name "" with _ -> ())
+  ) f
+
+let clear_env name f =
+  let prev = Sys.getenv_opt name in
+  (try Unix.putenv name "" with _ -> ());
+  Fun.protect ~finally:(fun () ->
+    match prev with
+    | Some v -> Unix.putenv name v
+    | None -> ()
+  ) f
+
+let test_base_url_non_loopback_enables_strict () =
+  let module SA = Masc_mcp.Server_auth in
+  with_env "MASC_HTTP_BASE_URL" "https://masc.crying.pictures" (fun () ->
+    with_env "MASC_HOST" "127.0.0.1" (fun () ->
+      clear_env "MASC_HTTP_AUTH_STRICT" (fun () ->
+        check bool "tunnel base URL forces strict auth" true
+          (SA.http_auth_strict_enabled ()))))
+
+let test_base_url_localhost_no_strict () =
+  let module SA = Masc_mcp.Server_auth in
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" (fun () ->
+    with_env "MASC_HOST" "127.0.0.1" (fun () ->
+      clear_env "MASC_HTTP_AUTH_STRICT" (fun () ->
+        check bool "localhost base URL no forced strict" false
+          (SA.http_auth_strict_enabled ()))))
+
+let test_base_url_unset_loopback_no_strict () =
+  let module SA = Masc_mcp.Server_auth in
+  clear_env "MASC_HTTP_BASE_URL" (fun () ->
+    with_env "MASC_HOST" "127.0.0.1" (fun () ->
+      with_env "MASC_HTTP_PORT" "8935" (fun () ->
+        clear_env "MASC_HTTP_AUTH_STRICT" (fun () ->
+          check bool "no base URL + loopback = no strict" false
+            (SA.http_auth_strict_enabled ())))))
+
+let test_env_flag_overrides_all () =
+  let module SA = Masc_mcp.Server_auth in
+  with_env "MASC_HTTP_AUTH_STRICT" "true" (fun () ->
+    with_env "MASC_HOST" "127.0.0.1" (fun () ->
+      clear_env "MASC_HTTP_BASE_URL" (fun () ->
+        check bool "env flag forces strict regardless" true
+          (SA.http_auth_strict_enabled ()))))
+
 let test_permission_for_tool_unknown () =
   match Auth.permission_for_tool "unknown_tool_xyz" with
   | None -> ()
@@ -679,5 +734,15 @@ let () =
         test_same_origin_allows_explicit_default_port_https;
       test_case "same-origin allows explicit default port http" `Quick
         test_same_origin_allows_explicit_default_port_http;
+    ];
+    "tunnel_auth (#3654)", [
+      test_case "non-loopback base URL enables strict" `Quick
+        test_base_url_non_loopback_enables_strict;
+      test_case "localhost base URL no strict" `Quick
+        test_base_url_localhost_no_strict;
+      test_case "unset base URL + loopback no strict" `Quick
+        test_base_url_unset_loopback_no_strict;
+      test_case "env flag overrides all" `Quick
+        test_env_flag_overrides_all;
     ];
   ]

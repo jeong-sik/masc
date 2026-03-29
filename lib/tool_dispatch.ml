@@ -151,20 +151,19 @@ let is_join_required name = with_dispatch_ro (fun () -> Hashtbl.mem requires_joi
     ~210 Hashtbl.replace ops. *)
 
 type module_tag =
-  | Mod_plan | Mod_run | Mod_operator | Mod_command_plane
+  | Mod_plan | Mod_operator | Mod_command_plane
   | Mod_local_runtime | Mod_team_session | Mod_voice
   | Mod_portal | Mod_worktree
   | Mod_code | Mod_code_write
   | Mod_council | Mod_a2a | Mod_handover
   | Mod_relay | Mod_heartbeat
-  | Mod_auth | Mod_agent | Mod_task | Mod_room
+  | Mod_auth | Mod_hat | Mod_agent | Mod_task | Mod_room
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper | Mod_mdal
   | Mod_inline
   | Mod_improve_loop
   | Mod_autoresearch
   | Mod_research
-  | Mod_model_catalog
   | Mod_shard
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512

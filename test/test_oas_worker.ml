@@ -743,6 +743,136 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
         (Option.is_some rollover.handoff_json))
 
 (* ================================================================ *)
+(* Same-trace checkpoint continuity regression (OAS #467)            *)
+(* ================================================================ *)
+
+(** Regression for OAS #467: verify that multi-turn checkpoint
+    accumulates messages across save/load cycles within the same trace.
+    Before the fix, Contract_runner.run did not sync state back to the
+    original agent, so checkpoints only contained the current-turn
+    message (1 msg) instead of the full accumulated history. *)
+let test_same_trace_multi_turn_accumulation () =
+  let base_dir = temp_dir "keeper_continuity_multi" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let trace_id = "trace-continuity-multi" in
+      let session =
+        Keeper_exec_context.create_session ~session_id:trace_id ~base_dir
+      in
+      (* Turn 1: save checkpoint with 2 messages *)
+      let ctx_turn1 =
+        Keeper_exec_context.create ~system_prompt:"continuity test" ~max_tokens:4096
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "turn 1 user")
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (Agent_sdk.Types.assistant_msg "turn 1 reply")
+      in
+      let meta = make_keeper_meta ~trace_id () in
+      ignore
+        (Keeper_exec_context.save_oas_checkpoint ~session
+           ~agent_name:meta.agent_name
+           ~model:"llama:auto" ~ctx:ctx_turn1 ~generation:0);
+      (* Turn 2: load checkpoint, verify messages, add more *)
+      let (_session2, loaded_opt) =
+        Keeper_exec_context.load_context_from_checkpoint ~trace_id
+          ~primary_model_max_tokens:4096 ~base_dir
+      in
+      let ctx_turn2 = match loaded_opt with
+        | Some ctx ->
+            Alcotest.(check int) "turn 2 loaded 2 messages from turn 1" 2
+              (List.length ctx.messages);
+            ctx
+        | None -> Alcotest.fail "expected checkpoint after turn 1"
+      in
+      let ctx_turn2 =
+        Keeper_exec_context.append ctx_turn2
+          (Agent_sdk.Types.user_msg "turn 2 user")
+        |> fun ctx ->
+        Keeper_exec_context.append ctx
+          (Agent_sdk.Types.assistant_msg "turn 2 reply")
+      in
+      let session2 =
+        Keeper_exec_context.create_session ~session_id:trace_id ~base_dir
+      in
+      ignore
+        (Keeper_exec_context.save_oas_checkpoint ~session:session2
+           ~agent_name:meta.agent_name
+           ~model:"llama:auto" ~ctx:ctx_turn2 ~generation:1);
+      (* Immediate verify: reload right after second save to isolate
+         save correctness from load correctness (GLM-5 review finding) *)
+      let (_session_imm, immediate_opt) =
+        Keeper_exec_context.load_context_from_checkpoint ~trace_id
+          ~primary_model_max_tokens:4096 ~base_dir
+      in
+      (match immediate_opt with
+       | Some imm ->
+           Alcotest.(check int)
+             "second save persisted 4 messages (save correctness)" 4
+             (List.length imm.messages)
+       | None -> Alcotest.fail "second save produced no loadable checkpoint");
+      (* Final verify: full roundtrip content check *)
+      let (_session3, final_opt) =
+        Keeper_exec_context.load_context_from_checkpoint ~trace_id
+          ~primary_model_max_tokens:4096 ~base_dir
+      in
+      match final_opt with
+      | Some final ->
+          Alcotest.(check int)
+            "final checkpoint contains all 4 accumulated messages" 4
+            (List.length final.messages);
+          Alcotest.(check string) "first message preserved" "turn 1 user"
+            (Agent_sdk.Types.text_of_message (List.nth final.messages 0));
+          Alcotest.(check string) "last message is turn 2 reply" "turn 2 reply"
+            (Agent_sdk.Types.text_of_message (List.nth final.messages 3))
+      | None -> Alcotest.fail "expected checkpoint after turn 2")
+
+(** Verify that checkpoint survives a simulated restart: fresh
+    load_context_from_checkpoint returns non-empty messages after
+    a prior save. This is the core "restart continuity" contract. *)
+let test_restart_continuity_load_oas_non_empty () =
+  let base_dir = temp_dir "keeper_continuity_restart" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let trace_id = "trace-continuity-restart" in
+      let session =
+        Keeper_exec_context.create_session ~session_id:trace_id ~base_dir
+      in
+      (* Save a checkpoint with 3 messages *)
+      let ctx =
+        Keeper_exec_context.create ~system_prompt:"restart test" ~max_tokens:4096
+        |> fun c ->
+        Keeper_exec_context.append c (Agent_sdk.Types.user_msg "msg1")
+        |> fun c ->
+        Keeper_exec_context.append c (Agent_sdk.Types.assistant_msg "msg2")
+        |> fun c ->
+        Keeper_exec_context.append c (Agent_sdk.Types.user_msg "msg3")
+      in
+      let meta = make_keeper_meta ~trace_id () in
+      ignore
+        (Keeper_exec_context.save_oas_checkpoint ~session
+           ~agent_name:meta.agent_name
+           ~model:"llama:auto" ~ctx ~generation:5);
+      (* Simulate restart: fresh load with no runtime state *)
+      let (_fresh_session, loaded_opt) =
+        Keeper_exec_context.load_context_from_checkpoint ~trace_id
+          ~primary_model_max_tokens:4096 ~base_dir
+      in
+      match loaded_opt with
+      | Some loaded ->
+          Alcotest.(check bool)
+            "load_oas returns non-empty messages after restart" true
+            (List.length loaded.messages > 0);
+          Alcotest.(check int) "all 3 messages restored" 3
+            (List.length loaded.messages);
+          Alcotest.(check string) "system prompt restored" "restart test"
+            loaded.system_prompt
+      | None -> Alcotest.fail "checkpoint must survive restart")
+
+(* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
 
@@ -826,5 +956,11 @@ let () =
         test_keeper_oas_handoff_rollover_increments_generation;
       Alcotest.test_case "OAS handoff rollover noops below threshold" `Quick
         test_keeper_oas_handoff_rollover_below_threshold_noop;
+    ];
+    "keeper_checkpoint_continuity", [
+      Alcotest.test_case "same-trace multi-turn accumulation (OAS #467 regression)" `Quick
+        test_same_trace_multi_turn_accumulation;
+      Alcotest.test_case "restart continuity — load_oas returns non-empty messages" `Quick
+        test_restart_continuity_load_oas_non_empty;
     ];
   ]

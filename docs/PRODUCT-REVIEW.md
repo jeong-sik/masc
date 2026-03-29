@@ -8,6 +8,8 @@
 
 The main problem is no longer “there is no product here.” The main problem is that the explanation layers, release truth, and hardening priorities were wider than the front-door promise.
 
+Keeper continuity now fits the same pattern: it is real enough to design and validate, but it should stay a bounded advanced feature until checkpoint truth and readiness evidence are closed.
+
 ## Product Posture by Promise Level
 
 ### 1. Repo coordination
@@ -82,12 +84,14 @@ These matter after the repo-coordination front door is clean.
 - auth hardening for non-local operation
 - REST API contract versioning and error-shape discipline
 - delivery-swarm ergonomics for delegation, verification, and operator diagnosis
+- bounded keeper continuity contract plus checkpoint/readiness evidence
 - richer config and runtime visibility for operators
 
 ## Judgment
 
 - **Repo-local multi-agent coordination**: ready to describe and use
 - **Supervised delivery swarm**: real and worth documenting, but not the first promise
+- **Keeper continuity**: should be described as checkpoint-backed same-trace continuity, not as general memory
 - **Remote or ops-grade product story**: still incomplete and should remain explicit about its gaps
 
 The next useful re-evaluation gate is:

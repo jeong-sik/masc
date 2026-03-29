@@ -266,7 +266,7 @@ end
 (** {1 MODEL Generation Defaults} *)
 
 module Inference_defaults = struct
-  (** Default max_tokens for MODEL generation (used by spawn, chain, perpetual, etc.) *)
+  (** Default max_tokens for MODEL generation (used by spawn, chain, keeper, etc.) *)
   let default_max_tokens =
     get_int ~default:4096 "MASC_INFERENCE_DEFAULT_MAX_TOKENS"
 

@@ -182,48 +182,45 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_con
 
 (** Build the zero-zombie cleanup consumer.
     Runs Room.cleanup_zombies and logs if zombies were found. *)
-let make_zero_zombie_consumer ~room_config
+let make_zero_zombie_consumer ~sw ~room_config
     : (module Pulse.Consumer) =
   (module struct
     let name = "zero-zombie-cleanup"
     let should_act _beat = true
     let on_beat _beat =
-      try
-        let status = Room.cleanup_zombies room_config in
-        let status_trimmed = String.trim status in
-        if String.length status_trimmed > 0 then begin
-          (* Zombie emoji is U+1F9DF (4 bytes in UTF-8: F0 9F A7 9F) *)
-          let has_zombie_indicator =
-            try
-              String.sub status_trimmed 0 (min 4 (String.length status_trimmed)) = "\xf0\x9f\xa7\x9f" ||
-              String.length status_trimmed >= 7 && String.sub status_trimmed 0 7 = "Cleaned"
-            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              Log.Orchestrator.warn "zombie indicator check failed: %s" (Printexc.to_string exn);
-              false
-          in
-          if has_zombie_indicator then
-            Log.Orchestrator.info "[zombie] %s" status_trimmed
-        end;
-        (* Stale claim release: auto-release tasks held beyond TTL *)
-        let ttl = Env_config_runtime.Claim.ttl_seconds in
-        (try
-          let released = Room_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl in
-          if released <> [] then
-            Log.Orchestrator.info "[stale-claims] released %d stale task(s): %s"
-              (List.length released)
-              (String.concat ", " (List.map (fun (tid, agent) ->
-                Printf.sprintf "%s(%s)" tid agent) released))
+      (* Run GC in background fiber to avoid blocking Pulse consumers.
+         Heartbeat and other consumers proceed without waiting for
+         cleanup_zombies I/O. See RFC #3646 M5 / #3626. *)
+      Eio.Fiber.fork ~sw (fun () ->
+        try
+          let status = Room.cleanup_zombies room_config in
+          let status_trimmed = String.trim status in
+          if String.length status_trimmed > 0 then begin
+            let has_zombie_indicator =
+              try
+                String.sub status_trimmed 0 (min 4 (String.length status_trimmed)) = "\xf0\x9f\xa7\x9f" ||
+                String.length status_trimmed >= 7 && String.sub status_trimmed 0 7 = "Cleaned"
+              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                Log.Orchestrator.warn "zombie indicator check failed: %s" (Printexc.to_string exn);
+                false
+            in
+            if has_zombie_indicator then
+              Log.Orchestrator.info "[zombie] %s" status_trimmed
+          end;
+          let ttl = Env_config_runtime.Claim.ttl_seconds in
+          (try
+            let released = Room_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl in
+            if released <> [] then
+              Log.Orchestrator.info "[stale-claims] released %d stale task(s): %s"
+                (List.length released)
+                (String.concat ", " (List.map (fun (tid, agent) ->
+                  Printf.sprintf "%s(%s)" tid agent) released))
+          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+            Log.Orchestrator.warn "[stale-claims] error: %s" (Printexc.to_string exn))
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Log.Orchestrator.warn "[stale-claims] error: %s" (Printexc.to_string exn));
-        Ok ()
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        if Resilience.ZeroZombie.is_benign_error exn then
-          Ok ()
-        else begin
-          let msg = Printf.sprintf "zombie cleanup error: %s" (Printexc.to_string exn) in
-          Log.Orchestrator.warn "[zombie] %s" msg;
-          Error msg
-        end
+          if not (Resilience.ZeroZombie.is_benign_error exn) then
+            Log.Orchestrator.warn "[zombie] error: %s" (Printexc.to_string exn));
+      Ok ()
   end)
 
 (** Start the orchestrator background services using Pulse.
@@ -234,7 +231,7 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
   (* Zero-Zombie cleanup: always enabled, configurable interval *)
   let neo4j_interval = Env_config_governance.Timeouts.neo4j_timeout_sec in
   Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: %.0fs)" neo4j_interval;
-  let zombie_consumer = make_zero_zombie_consumer ~room_config in
+  let zombie_consumer = make_zero_zombie_consumer ~sw ~room_config in
   let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm neo4j_interval) ~lifecycle:Perpetual ~consumers:[zombie_consumer] in
   with_pulse_rw (fun () -> zombie_pulse := Some zp);
   Eio.Fiber.fork ~sw (fun () ->

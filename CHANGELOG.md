@@ -3,6 +3,16 @@
 
 ## [Unreleased]
 
+### Added
+- **Feature flag registry** — `Feature_flag_registry` module with 25 boolean flags, lifecycle state, `masc_feature_flags` tool for runtime enumeration (#3646 H5).
+- **CI feature flag lint** — `check-feature-flag-consistency.sh` detects duplicate `get_bool` calls and registry drift.
+
+### Fixed
+- **WebRTC default mismatch** — `env_config_server.ml` had `MASC_WEBRTC_ENABLED` default=false, corrected to true (matches runtime module, docs, and start script).
+
+### Changed
+- **`env_config_server.ml` marked unused** — zero callers since creation. Added deprecation notice.
+
 ## [2.160.0] - 2026-03-28
 
 ### Added

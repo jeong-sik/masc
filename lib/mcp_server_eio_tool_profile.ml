@@ -55,7 +55,12 @@ READ: use resources/list + resources/read (status/tasks/agents/events/schema) fo
 WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
 WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isolation) → work → masc_transition(done). \
 Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
-Prefer worktrees for parallel work."
+Prefer worktrees for parallel work. \
+TIERS: 202 tools in 3 tiers (each tool has x-tier annotation). \
+Essential (~20): join, leave, status, add_task, transition, broadcast, heartbeat, plan_init/get/set_task/update, who, dashboard, worktree_create. \
+Standard (~55): + board_*, team_session_*, governance, decision_*, handover_*, spawn, agents. \
+Full: all tools. Use masc_tool_help to discover tools beyond essential tier. \
+Pass tier=essential to tools/list to reduce tool count."
 
 let apply_budget_filter ?budget_tokens schemas =
   match budget_tokens with
@@ -162,10 +167,18 @@ let tool_annotations_for_profile _profile tool_name =
     | Some v -> v
     | None -> is_idempotent_tool_name tool_name || read_only
   in
+  let is_deprecated = meta.lifecycle = Tool_catalog.Deprecated in
   let fields =
     [ ("readOnlyHint", `Bool read_only) ]
     @ (if destructive then [ ("destructiveHint", `Bool true) ] else [])
     @ (if idempotent then [ ("idempotentHint", `Bool true) ] else [])
+    @ (if is_deprecated then [ ("deprecated", `Bool true) ] else [])
+    @ (match meta.replacement with
+       | Some r when is_deprecated -> [ ("successor", `String r) ]
+       | _ -> [])
+    @ (match meta.reason with
+       | Some r when is_deprecated -> [ ("deprecationReason", `String r) ]
+       | _ -> [])
   in
   if fields = [] then None else Some (`Assoc fields)
 

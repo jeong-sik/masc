@@ -69,6 +69,7 @@
 | Heartbeat | Smart heartbeat (Emit/Skip_busy/Skip_idle) | IMPL | heartbeat_smart.ml + telemetry 1K+ |
 | Zombie Detection | 300s general, 3600s keeper threshold | IMPL | resilience.ml + GC 증거 |
 | GC Pipeline | 5-phase (detect→transition→release→delete→update) | IMPL | room_gc.ml 491 LOC |
+| WALPH | Retired — loop, state, tools all removed | REMOVED | — |
 | Mention Routing | @mention parsing, stateless/stateful/broadcast | IMPL | mention.ml |
 | Worktree | Git worktree create/remove per agent | IMPL | room_worktree.ml |
 | Multi-Room | Room registry, slugification | IMPL | room_multi.ml + room_rooms.ml |

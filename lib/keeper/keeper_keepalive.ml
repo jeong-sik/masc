@@ -107,49 +107,120 @@ let wakeup_relevant_keeper_for_board_signal
 
 let max_consecutive_heartbeat_failures = 5
 
+(* Per-stage timing accumulator for Phase 0 profiling.
+   In-memory ring of last 100 cycles. Flushed as aggregate at snapshot cadence.
+   No additional file I/O — appended to existing snapshot JSON. *)
+type stage_timing = {
+  presence_ms : float;
+  snapshot_ms : float;
+  board_ms : float;
+  turn_ms : float;
+  recurring_ms : float;
+  improve_ms : float;
+}
+
+let stage_timing_ring_size = 100
+
+let percentile arr p =
+  let n = Array.length arr in
+  if n = 0 then 0.0
+  else
+    let sorted = Array.copy arr in
+    Array.sort Float.compare sorted;
+    let idx = Float.to_int (Float.round (float_of_int (n - 1) *. p)) in
+    sorted.(min idx (n - 1))
+
+let stage_timing_to_json ~ring ~count =
+  let n = min count stage_timing_ring_size in
+  if n = 0 then `Null
+  else
+    let extract field =
+      let arr = Array.init n (fun i -> field ring.(i)) in
+      `Assoc [
+        ("p50", `Float (percentile arr 0.5));
+        ("p95", `Float (percentile arr 0.95));
+        ("max", `Float (percentile arr 1.0));
+        ("samples", `Int n);
+      ]
+    in
+    `Assoc [
+      ("presence", extract (fun t -> t.presence_ms));
+      ("snapshot", extract (fun t -> t.snapshot_ms));
+      ("board", extract (fun t -> t.board_ms));
+      ("turn", extract (fun t -> t.turn_ms));
+      ("recurring", extract (fun t -> t.recurring_ms));
+      ("improve", extract (fun t -> t.improve_ms));
+    ]
+
 let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
     (m : keeper_meta) (stop : bool Atomic.t) ~(wakeup : bool Atomic.t) : unit =
   let keepalive_started_ts = Time_compat.now () in
   let snapshot_interval_sec = Env_config.KeeperRuntime.snapshot_sec in
   let last_snapshot_ts = ref 0.0 in
   let consecutive_failures = ref 0 in
+  (* Phase 0: per-stage timing ring buffer *)
+  let timing_ring = Array.make stage_timing_ring_size
+    { presence_ms = 0.0; snapshot_ms = 0.0; board_ms = 0.0;
+      turn_ms = 0.0; recurring_ms = 0.0; improve_ms = 0.0 } in
+  let timing_count = ref 0 in
+  (* Phase 1: work-as-heartbeat freshness tracking.
+     Updated ONLY on Room.heartbeat_in_room success after turn. *)
+  let last_successful_heartbeat_ts = ref 0.0 in
+  let work_as_hb = Env_config.WorkAsHeartbeat.enabled in
+  let max_silence = Env_config.WorkAsHeartbeat.max_silence_sec in
   let rec loop () =
     if Atomic.get stop then ()
     else (
+            (* Phase 0: timing markers *)
+            let t_presence_start = Time_compat.now () in
             let meta_current =
               match read_meta ctx.config m.name with
               | Ok (Some latest) -> latest
               | _ -> m
             in
-            let meta_current =
-              try
-                let synced = ensure_keeper_room_presence ctx.config meta_current in
-                if synced.joined_room_ids = [] then (
-                  incr consecutive_failures;
-                  Log.Keeper.warn "room presence returned empty rooms (%d/%d)"
-                    !consecutive_failures max_consecutive_heartbeat_failures)
-                else
-                  consecutive_failures := 0;
-                (match write_meta ctx.config synced with
-                 | Ok () -> synced  (* use written value directly, no second read_meta *)
-                 | Error e ->
-                   Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
-                   synced)
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                incr consecutive_failures;
-                Log.Keeper.error "room heartbeat failed (%d/%d): %s"
-                  !consecutive_failures max_consecutive_heartbeat_failures
-                  (Printexc.to_string exn);
-                meta_current
+            (* Phase 1: skip presence sync when recent room heartbeat proves freshness *)
+            let presence_fresh =
+              work_as_hb
+              && t_presence_start -. !last_successful_heartbeat_ts < max_silence
             in
-            if !consecutive_failures >= max_consecutive_heartbeat_failures then (
-              Log.Keeper.error
-                "keeper %s: %d consecutive heartbeat failures, stopping keepalive"
-                m.name max_consecutive_heartbeat_failures;
-              Atomic.set stop true);
-            let now_ts = Time_compat.now () in
+            let meta_current =
+              if presence_fresh then (
+                Log.Keeper.debug "presence sync skipped: fresh heartbeat %.0fs ago"
+                  (t_presence_start -. !last_successful_heartbeat_ts);
+                meta_current)
+              else
+                try
+                  let synced = ensure_keeper_room_presence ctx.config meta_current in
+                  if synced.joined_room_ids = [] then (
+                    incr consecutive_failures;
+                    Log.Keeper.warn "room presence returned empty rooms (%d/%d)"
+                      !consecutive_failures max_consecutive_heartbeat_failures)
+                  else (
+                    consecutive_failures := 0;
+                    last_successful_heartbeat_ts := Time_compat.now ());
+                  (match write_meta ctx.config synced with
+                   | Ok () -> synced
+                   | Error e ->
+                     Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
+                     synced)
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  incr consecutive_failures;
+                  Log.Keeper.error "room heartbeat failed (%d/%d): %s"
+                    !consecutive_failures max_consecutive_heartbeat_failures
+                    (Printexc.to_string exn);
+                  meta_current
+            in
+            (* Phase 2: structured exception instead of silent stop *)
+            if !consecutive_failures >= max_consecutive_heartbeat_failures then
+              raise (Keeper_registry.Keeper_heartbeat_failure {
+                reason = Keeper_registry.Heartbeat_consecutive_failures !consecutive_failures;
+                keeper_name = m.name;
+              });
+            let t_presence_end = Time_compat.now () in
+            let now_ts = t_presence_end in
+            let t_snapshot_start = now_ts in
             if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
             then (
               (try
@@ -274,6 +345,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                              | Some reason -> `String reason
                              | None -> `Null );
                            ("handoff", `Assoc [ ("performed", `Bool false) ]);
+                           ("stage_timing",
+                             stage_timing_to_json ~ring:timing_ring ~count:!timing_count);
                          ]
                      in
                      Dated_jsonl.append metrics_store snapshot;
@@ -308,6 +381,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                  Log.Keeper.error "heartbeat snapshot write failed: %s"
                    (Printexc.to_string exn));
               last_snapshot_ts := now_ts);
+            let t_snapshot_end = Time_compat.now () in
+            let t_board_start = t_snapshot_end in
             let pending_board_events, meta_after_triage =
               let pending_board_events =
                 (try
@@ -327,6 +402,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               in
               (pending_board_events, meta_current)
             in
+            let t_board_end = Time_compat.now () in
+            let t_turn_start = t_board_end in
             let proactive_warmup_elapsed =
               proactive_warmup_sec <= 0
               || now_ts -. keepalive_started_ts
@@ -367,6 +444,24 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    meta_after_triage)
               else meta_after_triage
             in
+            (* Phase 1: work-as-heartbeat — renew point (b).
+               After turn, call Room.heartbeat_in_room to prove room I/O health.
+               On success: refresh freshness lease + reset consecutive_failures.
+               On failure: leave timestamp unchanged → presence sync resumes next cycle. *)
+            (if work_as_hb && proactive_warmup_elapsed then
+               let hb_ok = List.exists (fun room_id ->
+                 try
+                   ignore
+                     (Room.heartbeat_in_room ctx.config ~room_id
+                        ~agent_name:meta_after_proactive.agent_name);
+                   true
+                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false
+               ) meta_after_proactive.joined_room_ids in
+               if hb_ok then (
+                 last_successful_heartbeat_ts := Time_compat.now ();
+                 consecutive_failures := 0));
+            let t_turn_end = Time_compat.now () in
+            let t_recurring_start = t_turn_end in
             (* Recurring task dispatch (#3190) *)
             let _recurring_dispatched =
               try
@@ -394,6 +489,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                   (Printexc.to_string exn);
                 0
             in
+            let t_recurring_end = Time_compat.now () in
+            let t_improve_start = t_recurring_end in
             let base =
               float_of_int
                 keepalive_interval_sec
@@ -408,6 +505,18 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
              | exn ->
                Log.Keeper.warn "improve loop keepalive tick skipped: %s"
                  (Printexc.to_string exn));
+            let t_improve_end = Time_compat.now () in
+            (* Phase 0: push stage timing to ring buffer *)
+            let timing = {
+              presence_ms = (t_presence_end -. t_presence_start) *. 1000.0;
+              snapshot_ms = (t_snapshot_end -. t_snapshot_start) *. 1000.0;
+              board_ms = (t_board_end -. t_board_start) *. 1000.0;
+              turn_ms = (t_turn_end -. t_turn_start) *. 1000.0;
+              recurring_ms = (t_recurring_end -. t_recurring_start) *. 1000.0;
+              improve_ms = (t_improve_end -. t_improve_start) *. 1000.0;
+            } in
+            timing_ring.(!timing_count mod stage_timing_ring_size) <- timing;
+            incr timing_count;
             let jitter = base *. 0.2 *. Random.float 1.0 in  (* intentional: jitter *)
             interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
             if Atomic.get stop then ()

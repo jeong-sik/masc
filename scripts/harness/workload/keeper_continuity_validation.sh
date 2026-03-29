@@ -840,6 +840,27 @@ real_run() {
             && [[ "$(printf '%s' "$status_after" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
             && [[ "$(printf '%s' "$status_after" | jq -r '(.continuity_summary // "") | length > 0')" == "true" ]] \
             && [[ "$(printf '%s' "$status_after" | jq -r '.agent.exists')" == "true" ]]; then
+            # OAS #467 regression guard: verify checkpoint messages > 0
+            recovery_trace_id="$(printf '%s' "$status_after" | jq -r '.meta.trace_id // empty')"
+            if [[ -z "$recovery_trace_id" ]]; then
+              append_phase "checkpoint_truth" "skip" "trace_id missing from status — cannot locate checkpoint" "$snapshot_file" "$heartbeat_file"
+            else
+              ckpt_dir="${BASE_PATH}/.masc/keepers/${KEEPER_NAME}/${recovery_trace_id}"
+              ckpt_file="${ckpt_dir}/${recovery_trace_id}.json"
+              if [[ -f "$ckpt_file" ]]; then
+                if ckpt_msg_count="$(jq '.messages | length' "$ckpt_file")"; then
+                  if [[ "$ckpt_msg_count" -gt 0 ]]; then
+                    append_phase "checkpoint_truth" "pass" "load_oas checkpoint contains ${ckpt_msg_count} messages (OAS #467 regression guard)" "$snapshot_file" "$heartbeat_file"
+                  else
+                    append_phase "checkpoint_truth" "fail" "load_oas checkpoint has 0 messages — OAS #467 regression" "$snapshot_file" "$heartbeat_file"
+                  fi
+                else
+                  append_phase "checkpoint_truth" "error" "checkpoint JSON parse failed at ${ckpt_file} — possible file corruption" "$snapshot_file" "$heartbeat_file"
+                fi
+              else
+                append_phase "checkpoint_truth" "skip" "checkpoint file not found at ${ckpt_file}" "$snapshot_file" "$heartbeat_file"
+              fi
+            fi
             RECOVERY_PASS=1
             append_phase "recovery" "pass" "keeper restarted on the same name and resumed live turns with continuity intact" "$snapshot_file" "$heartbeat_file"
           else

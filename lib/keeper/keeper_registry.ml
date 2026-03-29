@@ -23,10 +23,32 @@ open Keeper_types
 
 module StringMap = Map.Make (String)
 
+(** Structured failure reason for cohort detection in self-preservation.
+    ADT matching replaces string prefix matching for crash_msg grouping. *)
+type failure_reason =
+  | Heartbeat_consecutive_failures of int
+  | Fiber_unresolved
+  | Exception of string
+
+let failure_reason_to_string = function
+  | Heartbeat_consecutive_failures n ->
+      Printf.sprintf "heartbeat_consecutive_failures(%d)" n
+  | Fiber_unresolved -> "fiber_unresolved"
+  | Exception s -> Printf.sprintf "exception(%s)" s
+
+(** Structured exception raised by keeper_keepalive when consecutive
+    heartbeat failures exceed the threshold. *)
+exception Keeper_heartbeat_failure of {
+  reason : failure_reason;
+  keeper_name : string;
+}
+
 type keeper_state =
   | Running
   | Paused
   | Stopped
+  | Crashed  (** Error exit, restart candidate (backoff applies) *)
+  | Dead     (** Restart budget exhausted, tombstone — no re-launch *)
 
 type registry_entry = {
   base_path : string;
@@ -53,6 +75,8 @@ let state_to_string = function
   | Running -> "running"
   | Paused -> "paused"
   | Stopped -> "stopped"
+  | Crashed -> "crashed"
+  | Dead -> "dead"
 
 let registry : registry_entry StringMap.t ref = ref StringMap.empty
 let running_count_atomic = Atomic.make 0
@@ -138,12 +162,14 @@ let set_state ~base_path name state =
   let key = registry_key ~base_path name in
   match StringMap.find_opt key !registry with
   | Some entry ->
-      if entry.state <> state then begin
+      (* Dead is terminal — only unregister can remove a Dead entry *)
+      if entry.state = Dead && state <> Dead then ()
+      else if entry.state <> state then begin
         (match (entry.state, state) with
-         | Running, (Paused | Stopped) ->
+         | Running, (Paused | Stopped | Crashed | Dead) ->
              Atomic.set running_count_atomic
                (max 0 (Atomic.get running_count_atomic - 1))
-         | (Paused | Stopped), Running ->
+         | (Paused | Stopped | Crashed), Running ->
              Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
          | _ -> ());
         put_entry key { entry with state }
@@ -162,6 +188,11 @@ let is_running ~base_path name =
   match get ~base_path name with
   | Some { state = Running; _ } -> true
   | _ -> false
+
+(** True if the keeper has ANY registry entry (regardless of state).
+    Used by reconcile to avoid re-launching Crashed/Dead keepers. *)
+let is_registered ~base_path name =
+  Option.is_some (get ~base_path name)
 
 let count_running ?base_path () =
   match base_path with

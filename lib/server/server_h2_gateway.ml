@@ -406,7 +406,8 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let auth_result =
             match profile with
             | Server_mcp_transport_http.Full
-            | Server_mcp_transport_http.Managed_agent -> Ok None
+            | Server_mcp_transport_http.Managed_agent ->
+                verify_mcp_auth ~base_path httpun_request
             | Server_mcp_transport_http.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
           in

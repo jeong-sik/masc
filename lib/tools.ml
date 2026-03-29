@@ -17,15 +17,18 @@ let raw_schemas : tool_schema list =
   @ Tool_schemas_auth.schemas
   @ Tool_schemas_portal.schemas
   @ Tool_schemas_worktree.schemas
+  @ Tool_cache.schemas
+  @ Tool_goals.schemas
+  @ Tool_run.schemas
   @ Tool_task.schemas
   @ Tool_suspend.schemas
   @ Tool_council_oas.schemas
   @ Tool_relay.schemas
   @ Tool_handover.schemas
   @ Tool_improve_loop.schemas
-  @ Tool_run.schemas
   @ Tool_code.schemas
   @ Tool_code_write.schemas
+  @ Tool_hat.schemas
   @ Tool_library.schemas
   @ Tool_heartbeat.schemas
 

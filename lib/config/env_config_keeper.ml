@@ -151,6 +151,19 @@ module KeeperSupervisor = struct
   (** Interval between supervisor sweep runs (seconds) *)
   let sweep_interval_sec =
     get_float ~default:30.0 "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
+
+  (** Self-preservation: ratio of crashed keepers to trigger suppression *)
+  let self_preservation_ratio =
+    Float.min 1.0 (Float.max 0.0
+      (get_float ~default:0.3 "MASC_KEEPER_SELF_PRESERVATION_RATIO"))
+
+  (** Self-preservation: minimum crashed candidates to trigger *)
+  let self_preservation_min_candidates =
+    max 1 (get_int ~default:2 "MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES")
+
+  (** Dead tombstone TTL: seconds before Dead entries are cleaned up *)
+  let dead_ttl_sec =
+    Float.max 60.0 (get_float ~default:3600.0 "MASC_KEEPER_DEAD_TTL_SEC")
 end
 
 (** {1 Keeper Runtime Configuration} *)
@@ -179,6 +192,21 @@ module AlertDedup = struct
   (** Alert dedup window, clamped to >= 5s. Default: 60. *)
   let window_sec =
     Float.max 5.0 (get_float ~default:60.0 "MASC_ALERT_DEDUP_WINDOW_SEC")
+end
+
+(** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
+
+module WorkAsHeartbeat = struct
+  (** Master switch. When true, successful Room.heartbeat_in_room after a
+      unified turn counts as presence proof, allowing the next cycle to skip
+      the full ensure_keeper_room_presence call. *)
+  let enabled =
+    get_bool ~default:true "MASC_KEEPER_WORK_AS_HEARTBEAT"
+
+  (** Maximum seconds since last successful room heartbeat before presence
+      sync is required again. Must be >= keepalive_interval_sec (30). *)
+  let max_silence_sec =
+    Float.max 30.0 (get_float ~default:120.0 "MASC_KEEPER_MAX_SILENCE_SEC")
 end
 
 (** Print configuration summary for debugging *)

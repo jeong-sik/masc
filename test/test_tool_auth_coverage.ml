@@ -7,6 +7,19 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 let () = Printf.printf "\n=== Tool_auth Coverage Tests ===\n"
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if idx + needle_len > haystack_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  needle_len = 0 || loop 0
+
 (* Test helper — wraps in Eio context so dispatch paths that use
    Eio.Mutex or structured concurrency work correctly. *)
 let test name f =
@@ -50,7 +63,9 @@ let () = test "handle_auth_status" (fun () ->
   let (success, result) = Tool_auth.handle_auth_status ctx args in
   assert success;
   assert (String.length result > 0);
-  assert (String.length result > 0 (* contains emoji *))
+  assert (contains_substring result "Authentication Status");
+  assert (contains_substring result "HTTP Auth Strict:");
+  assert (contains_substring result "Bind Host:")
 )
 
 (* Test auth_enable dispatch *)

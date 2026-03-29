@@ -275,6 +275,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          | Ok () ->
            Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
            start_keepalive ctx meta;
+           (* Apply per-persona shard configuration if present *)
+           (match p.profile_defaults.shards with
+            | Some (_ :: _ as shard_names) ->
+                Tool_shard.set_agent_shards p.name shard_names
+            | Some [] | None -> ());
            Progress.Tracker.complete tracker ~message:"Keeper created" ();
            let json = `Assoc [
              ("name", `String meta.name);

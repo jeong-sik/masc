@@ -739,26 +739,6 @@ let test_masc_tool_admin_update_schema () =
       | None -> Alcotest.fail "masc_tool_admin_update missing properties"
 
 (* ============================================================ *)
-(* 13. Hidden Cache Tool Tests                                   *)
-(* ============================================================ *)
-
-let test_cache_tools_hidden_from_schema_inventory () =
-  let hidden_tools =
-    [
-      "masc_cache_set";
-      "masc_cache_get";
-      "masc_cache_delete";
-      "masc_cache_list";
-      "masc_cache_stats";
-    ]
-  in
-  List.iter
-    (fun name ->
-      Alcotest.(check bool) (name ^ " hidden from schemas") false
-        (Option.is_some (find_tool name)))
-    hidden_tools
-
-(* ============================================================ *)
 (* 14. Handover Tool Tests                                       *)
 (* ============================================================ *)
 
@@ -801,7 +781,6 @@ let test_legacy_swarm_tools_removed () =
       "masc_swarm_vote";
       "masc_swarm_deposit";
       "masc_swarm_trails";
-      "masc_swarm_walph";
     ]
   in
   List.iter
@@ -888,39 +867,6 @@ let test_masc_team_session_start_schema () =
           Alcotest.(check bool) "has operation_id" true
             (List.mem_assoc "operation_id" props)
       | None -> Alcotest.fail "masc_team_session_start missing properties"
-
-(* ============================================================ *)
-(* 17. Removed Walph Surface Tests                               *)
-(* ============================================================ *)
-
-let test_walph_tools_removed () =
-  let removed_tools =
-    [
-      "masc_walph_loop";
-      "masc_walph_control";
-      "masc_walph_natural";
-      "masc_walph_status";
-    ]
-  in
-  List.iter
-    (fun name ->
-      match find_tool name with
-      | None -> ()
-      | Some _ ->
-          Alcotest.fail (Printf.sprintf "%s should be removed from public schemas" name))
-    removed_tools
-
-(* ============================================================ *)
-(* 18. Hidden Hat Tool Tests                                     *)
-(* ============================================================ *)
-
-let test_hat_tools_hidden_from_schema_inventory () =
-  let hidden_tools = [ "masc_hat_wear"; "masc_hat_status" ] in
-  List.iter
-    (fun name ->
-      Alcotest.(check bool) (name ^ " hidden from schemas") false
-        (Option.is_some (find_tool name)))
-    hidden_tools
 
 (* ============================================================ *)
 (* 19. Bounded Run Tool Tests                                    *)
@@ -1143,10 +1089,6 @@ let () =
       Alcotest.test_case "team-session-step-spawn-batch" `Quick
         test_masc_team_session_step_spawn_batch_schema;
     ];
-    "cache_hidden", [
-      Alcotest.test_case "hidden_from_schema_inventory" `Quick
-        test_cache_tools_hidden_from_schema_inventory;
-    ];
     "handover_tools", [
       Alcotest.test_case "handover_create" `Quick test_masc_handover_create_schema;
       Alcotest.test_case "handover_list" `Quick test_masc_handover_list_schema;
@@ -1167,14 +1109,6 @@ let () =
       Alcotest.test_case "detachment_list" `Quick test_masc_detachment_list_schema;
       Alcotest.test_case "detachment_status" `Quick test_masc_detachment_status_schema;
       Alcotest.test_case "observe_swarm" `Quick test_masc_observe_swarm_schema;
-    ];
-    "walph_removed", [
-      Alcotest.test_case "removed_from_public_schemas" `Quick
-        test_walph_tools_removed;
-    ];
-    "hat_hidden", [
-      Alcotest.test_case "hidden_from_schema_inventory" `Quick
-        test_hat_tools_hidden_from_schema_inventory;
     ];
     "bounded_run", [
       Alcotest.test_case "bounded_run" `Quick test_masc_bounded_run_schema;

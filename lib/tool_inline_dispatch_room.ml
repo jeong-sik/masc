@@ -213,6 +213,11 @@ let handle_set_room (ctx : context) : result option =
     else begin
       state.Mcp_server.room_config <- Room.default_config expanded |> Room.config_with_resolved_scope;
       let rc = state.Mcp_server.room_config in
+      (* GC: reap zombie agents when entering a room (uses newly resolved config).
+         Best-effort: GC failure must not block set_room. *)
+      (try ignore (Room.cleanup_zombies rc)
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+         Log.Gc.warn "set_room GC failed: %s" (Printexc.to_string exn));
       let status = if Room.is_initialized rc then "ok" else "(not initialized)" in
       let workspace_note =
         if rc.workspace_path <> rc.base_path then
@@ -231,6 +236,10 @@ let handle_join (ctx : context) : result option =
   let mcp_session_id = ctx.mcp_session_id in
   let caps = arg_get_string_list ctx "capabilities" in
   let result = Room.join config ~agent_name ~capabilities:caps () in
+  (* GC: reap zombie agents on join. Best-effort. *)
+  (try ignore (Room.cleanup_zombies config)
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+     Log.Gc.warn "join GC failed: %s" (Printexc.to_string exn));
   (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
   let nickname =
     try

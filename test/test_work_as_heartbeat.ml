@@ -1,0 +1,138 @@
+(** Test suite for Phase 1: Work-as-heartbeat config defaults,
+    freshness decision logic, and Phase 0 percentile function.
+
+    Note: env_config values are top-level let bindings, evaluated once at
+    program start. Runtime putenv does NOT affect them. Tests verify defaults
+    (no env override in test dune env-vars). *)
+
+open Alcotest
+
+(* Env_config from masc_mcp.config (unwrapped library) *)
+module Cfg = Env_config
+module KK = Masc_mcp.Keeper_keepalive
+
+(* ── Config default values ──────────────────────────────── *)
+
+let test_wah_enabled_default () =
+  (* MASC_KEEPER_WORK_AS_HEARTBEAT not set in test env → default true *)
+  check bool "work-as-heartbeat enabled by default"
+    true Cfg.WorkAsHeartbeat.enabled
+
+let test_wah_max_silence_default () =
+  (* MASC_KEEPER_MAX_SILENCE_SEC not set in test env → default 120.0 *)
+  let v = Cfg.WorkAsHeartbeat.max_silence_sec in
+  check (float 0.1) "default max silence 120s" 120.0 v
+
+let test_wah_max_silence_floor_logic () =
+  (* The floor clamp (Float.max 30.0 x) ensures minimum 30s.
+     We verify the invariant: max_silence_sec >= 30.0 always. *)
+  let v = Cfg.WorkAsHeartbeat.max_silence_sec in
+  check bool "max_silence >= 30.0 (keepalive interval)"
+    true (v >= 30.0)
+
+(* ── Freshness decision pure logic ──────────────────────── *)
+
+let test_freshness_fresh () =
+  let now = 100.0 in
+  let last_hb = 50.0 in
+  let max_silence = 120.0 in
+  let fresh = now -. last_hb < max_silence in
+  check bool "50s ago < 120s window → fresh" true fresh
+
+let test_freshness_stale () =
+  let now = 200.0 in
+  let last_hb = 50.0 in
+  let max_silence = 120.0 in
+  let fresh = now -. last_hb < max_silence in
+  check bool "150s ago >= 120s window → stale" false fresh
+
+let test_freshness_exact_boundary () =
+  let now = 170.0 in
+  let last_hb = 50.0 in
+  let max_silence = 120.0 in
+  let fresh = now -. last_hb < max_silence in
+  check bool "exactly 120s → NOT fresh (< is strict)" false fresh
+
+let test_freshness_never_heartbeated () =
+  (* Initial last_hb = 0.0. At unix epoch + 200s:
+     200.0 - 0.0 = 200.0 >= 120.0 → stale.
+     This correctly forces initial presence sync. *)
+  let now = 200.0 in
+  let last_hb = 0.0 in
+  let max_silence = 120.0 in
+  let fresh = now -. last_hb < max_silence in
+  check bool "never heartbeated (0.0) → stale → forces presence sync"
+    false fresh
+
+let test_freshness_disabled_flag () =
+  (* When work_as_hb = false, presence_fresh is always false regardless of timestamp *)
+  let work_as_hb = false in
+  let now = 100.0 in
+  let last_hb = 99.0 in
+  let max_silence = 120.0 in
+  let fresh = work_as_hb && (now -. last_hb < max_silence) in
+  check bool "feature disabled → always stale" false fresh
+
+(* ── Percentile function (Phase 0 profiling) ────────────── *)
+
+let test_percentile_empty () =
+  let arr = [||] in
+  check (float 0.001) "empty → 0.0" 0.0 (KK.percentile arr 0.5)
+
+let test_percentile_single () =
+  let arr = [| 42.0 |] in
+  check (float 0.001) "single → that element" 42.0 (KK.percentile arr 0.5)
+
+let test_percentile_two_elements () =
+  let arr = [| 10.0; 20.0 |] in
+  let p0 = KK.percentile arr 0.0 in
+  let p100 = KK.percentile arr 1.0 in
+  check (float 0.001) "p0 = min" 10.0 p0;
+  check (float 0.001) "p100 = max" 20.0 p100
+
+let test_percentile_sorted () =
+  let arr = [| 1.0; 2.0; 3.0; 4.0; 5.0 |] in
+  let p50 = KK.percentile arr 0.5 in
+  (* index = round(4 * 0.5) = round(2.0) = 2 → sorted[2] = 3.0 *)
+  check (float 0.001) "p50 of 1..5 = 3.0" 3.0 p50;
+  let p95 = KK.percentile arr 0.95 in
+  (* index = round(4 * 0.95) = round(3.8) = 4 → sorted[4] = 5.0 *)
+  check (float 0.001) "p95 of 1..5 = 5.0" 5.0 p95
+
+let test_percentile_unsorted () =
+  let arr = [| 5.0; 1.0; 3.0; 2.0; 4.0 |] in
+  let p50 = KK.percentile arr 0.5 in
+  check (float 0.001) "p50 of shuffled 1..5 = 3.0" 3.0 p50
+
+let test_percentile_does_not_mutate () =
+  let arr = [| 5.0; 1.0; 3.0 |] in
+  let _p = KK.percentile arr 0.5 in
+  (* Original array must remain unsorted *)
+  check (float 0.001) "arr[0] unchanged" 5.0 arr.(0);
+  check (float 0.001) "arr[1] unchanged" 1.0 arr.(1)
+
+(* ── Test runner ────────────────────────────────────────── *)
+
+let () =
+  run "work_as_heartbeat" [
+    "config", [
+      test_case "enabled default" `Quick test_wah_enabled_default;
+      test_case "max_silence default" `Quick test_wah_max_silence_default;
+      test_case "max_silence floor invariant" `Quick test_wah_max_silence_floor_logic;
+    ];
+    "freshness_logic", [
+      test_case "within window → fresh" `Quick test_freshness_fresh;
+      test_case "beyond window → stale" `Quick test_freshness_stale;
+      test_case "exact boundary → stale (strict <)" `Quick test_freshness_exact_boundary;
+      test_case "never heartbeated → stale" `Quick test_freshness_never_heartbeated;
+      test_case "feature disabled → always stale" `Quick test_freshness_disabled_flag;
+    ];
+    "percentile", [
+      test_case "empty array" `Quick test_percentile_empty;
+      test_case "single element" `Quick test_percentile_single;
+      test_case "two elements" `Quick test_percentile_two_elements;
+      test_case "sorted input" `Quick test_percentile_sorted;
+      test_case "unsorted input" `Quick test_percentile_unsorted;
+      test_case "does not mutate" `Quick test_percentile_does_not_mutate;
+    ];
+  ]

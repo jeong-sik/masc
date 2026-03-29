@@ -194,6 +194,10 @@ module AlertDedup = struct
     Float.max 5.0 (get_float ~default:60.0 "MASC_ALERT_DEDUP_WINDOW_SEC")
 end
 
+(** Shared: keepalive interval, read early so WorkAsHeartbeat can reference it. *)
+let keepalive_interval_sec_ =
+  max 5 (min 300 (get_int ~default:30 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"))
+
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
 
 module WorkAsHeartbeat = struct
@@ -204,9 +208,10 @@ module WorkAsHeartbeat = struct
     get_bool ~default:true "MASC_KEEPER_WORK_AS_HEARTBEAT"
 
   (** Maximum seconds since last successful room heartbeat before presence
-      sync is required again. Must be >= keepalive_interval_sec (30). *)
+      sync is required again. Floor = keepalive interval (dynamic). *)
   let max_silence_sec =
-    Float.max 30.0 (get_float ~default:120.0 "MASC_KEEPER_MAX_SILENCE_SEC")
+    let floor = Float.of_int keepalive_interval_sec_ in
+    Float.max floor (get_float ~default:120.0 "MASC_KEEPER_MAX_SILENCE_SEC")
 end
 
 (** {1 Smart Heartbeat Configuration (Phase 2)} *)
@@ -226,8 +231,7 @@ module KeeperKeepalive = struct
       Range: [5, 300]. This is the foundational timing constant — every
       keeper cycle (presence, snapshot, board scan, turn, recurring) runs
       at this cadence. *)
-  let interval_sec =
-    max 5 (min 300 (get_int ~default:30 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"))
+  let interval_sec = keepalive_interval_sec_
 
   (** Maximum consecutive heartbeat failures before raising
       Keeper_heartbeat_failure (structured crash). Default: 5.

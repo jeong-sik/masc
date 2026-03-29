@@ -24,11 +24,12 @@ let test_wah_max_silence_default () =
   check (float 0.1) "default max silence 120s" 120.0 v
 
 let test_wah_max_silence_floor_logic () =
-  (* The floor clamp (Float.max 30.0 x) ensures minimum 30s.
-     We verify the invariant: max_silence_sec >= 30.0 always. *)
+  (* The floor clamp uses keepalive interval dynamically.
+     We verify: max_silence_sec >= keepalive_interval_sec always. *)
   let v = Cfg.WorkAsHeartbeat.max_silence_sec in
-  check bool "max_silence >= 30.0 (keepalive interval)"
-    true (v >= 30.0)
+  let interval = Float.of_int Cfg.KeeperKeepalive.interval_sec in
+  check bool "max_silence >= keepalive interval"
+    true (v >= interval)
 
 (* ── KeeperKeepalive config defaults ───────────────────── *)
 

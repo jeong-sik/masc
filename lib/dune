@@ -345,7 +345,6 @@
    tool_audit
    tool_rate_limit
    tool_cost
-   tool_walph
    tool_agent
    tool_task
    task_dispatch

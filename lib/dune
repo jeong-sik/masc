@@ -161,6 +161,7 @@
    local_runtime_pool
    retrieval_projection
    sdk_tool_contract
+   tool_schema_dsl
    worker_oas
    worker_runtime
    worker_container_types

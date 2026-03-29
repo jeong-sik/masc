@@ -303,4 +303,3 @@ let string_prop = Tool_schema_dsl.string_prop
 let integer_prop = Tool_schema_dsl.integer_prop
 let boolean_prop = Tool_schema_dsl.boolean_prop
 let string_array_prop = Tool_schema_dsl.string_array_prop
-    ]

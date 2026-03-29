@@ -249,18 +249,25 @@ async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promi
   }
 }
 
-export async function bootKeeper(name: string): Promise<KeeperLifecycleResponse> {
-  const resp = await fetch(`/api/v1/keepers/${encodeURIComponent(name)}/boot`, {
-    method: 'POST',
-    headers: jsonHeaders(),
-  })
-  return safeJsonResponse<KeeperLifecycleResponse>(resp, `Failed to boot ${name}`)
+async function safeKeeperLifecycle(url: string, fallbackError: string): Promise<KeeperLifecycleResponse> {
+  try {
+    const resp = await fetch(url, { method: 'POST', headers: jsonHeaders() })
+    return await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : fallbackError }
+  }
 }
 
-export async function shutdownKeeper(name: string): Promise<KeeperLifecycleResponse> {
-  const resp = await fetch(`/api/v1/keepers/${encodeURIComponent(name)}/shutdown`, {
-    method: 'POST',
-    headers: jsonHeaders(),
-  })
-  return safeJsonResponse<KeeperLifecycleResponse>(resp, `Failed to shut down ${name}`)
+export function bootKeeper(name: string): Promise<KeeperLifecycleResponse> {
+  return safeKeeperLifecycle(
+    `/api/v1/keepers/${encodeURIComponent(name)}/boot`,
+    `Failed to boot ${name}`,
+  )
+}
+
+export function shutdownKeeper(name: string): Promise<KeeperLifecycleResponse> {
+  return safeKeeperLifecycle(
+    `/api/v1/keepers/${encodeURIComponent(name)}/shutdown`,
+    `Failed to shut down ${name}`,
+  )
 }

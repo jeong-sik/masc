@@ -51,6 +51,9 @@ interface TextAreaProps {
   placeholder?: string
   rows?: number
   class?: string
+  name?: string
+  ariaLabel?: string
+  disabled?: boolean
   onInput?: (e: Event) => void
 }
 
@@ -59,6 +62,9 @@ export function TextArea({
   placeholder,
   rows,
   class: cx,
+  name,
+  ariaLabel,
+  disabled,
   onInput,
 }: TextAreaProps) {
   return html`
@@ -66,6 +72,9 @@ export function TextArea({
       class="${INPUT_BASE} px-3 py-2 text-[13px] min-h-[80px] resize-y ${cx ?? ''}"
       placeholder=${placeholder}
       rows=${rows}
+      name=${name}
+      aria-label=${ariaLabel}
+      disabled=${disabled}
       value=${value}
       onInput=${onInput}
     ></textarea>

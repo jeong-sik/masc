@@ -93,7 +93,7 @@ export function Worktrees() {
             ${wt.created_at ? html`
               <div class="mt-1.5 flex justify-between border-t border-card-border/50 pt-2.5 text-[10px] text-text-dim">
                 <span>생성됨</span>
-                <span>${new Date(wt.created_at).toLocaleString()}</span>
+                <span>${new Date(wt.created_at).toLocaleString('ko-KR')}</span>
               </div>
             ` : null}
           </div>

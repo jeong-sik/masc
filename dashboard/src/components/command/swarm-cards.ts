@@ -1,5 +1,7 @@
 import { html } from 'htm/preact'
 import { StatusChip } from '../common/status-chip'
+
+const timeOnlyFmt = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
 import type {
   CommandPlaneSwarmBlocker,
   CommandPlaneSwarmChecklistItem,
@@ -92,7 +94,7 @@ export function SwarmWorkerGrid({ total }: { total: number }) {
 export function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEvent }) {
   const ts = event.timestamp ? new Date(event.timestamp) : null
   const validTs = ts && !isNaN(ts.getTime()) ? ts : null
-  const timeStr = validTs ? `${String(validTs.getHours()).padStart(2, '0')}:${String(validTs.getMinutes()).padStart(2, '0')}` : ''
+  const timeStr = validTs ? timeOnlyFmt.format(validTs) : ''
   return html`
     <div class="flex items-start gap-2 relative py-1 text-[0.82rem]">
       <span class="swarm-event-dot ${toneClass(event.tone)}"></span>

@@ -22,16 +22,18 @@ let make_loop_memory (ctx : Tool_autoresearch_repo_synthesis.context)
     (state : Autoresearch.loop_state) =
   let memory =
     Memory_oas_bridge.create_memory
-    ~agent_name:autoresearch_lesson_agent_name
-    ~base_dir:(Filename.concat ctx.base_path ".masc")
-    ~session_id:("autoresearch-" ^ state.loop_id)
-    ()
+      ~agent_name:autoresearch_lesson_agent_name
+      ~base_dir:(Filename.concat ctx.base_path ".masc")
+      ~session_id:("autoresearch-" ^ state.loop_id)
+      ()
   in
   ignore
     (Memory_oas_bridge.seed_episodes
        ~memory
        ~agent_name:autoresearch_lesson_agent_name
        ~limit:20);
+  (* Load ALL procedures without threshold — autoresearch needs recent
+     lessons that may not yet meet top_procedures' adaptive threshold. *)
   Procedural_memory.load_procedures
     ~agent_name:autoresearch_lesson_agent_name
   |> List.iter (fun proc ->

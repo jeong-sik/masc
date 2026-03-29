@@ -171,18 +171,16 @@ let run_turn
     () in
   let base_dir = Filename.concat config.base_path ".masc" in
   let memory =
-    Memory_oas_bridge.create_memory
+    Memory_oas_bridge.create_memory_full
       ~agent_name
       ~base_dir
       ~session_id:meta.trace_id
+      ~config
+      ~episode_limit:30
+      ~procedure_limit:10
+      ~global_procedure_limit:5
       ()
   in
-  ignore (Memory_oas_bridge.seed_institution ~memory ~config);
-  ignore (Memory_oas_bridge.seed_procedures ~memory ~agent_name:"_global" ~limit:5);
-  ignore (Memory_oas_bridge.seed_memory_bank ~memory ~agent_name ~limit:10);
-  (* 5-tier: Episodic + Procedural seeding (in addition to Long_term above) *)
-  ignore (Memory_oas_bridge.seed_episodes ~memory ~agent_name ~limit:30);
-  ignore (Memory_oas_bridge.seed_procedures_as_oas ~memory ~agent_name ~limit:10);
   let reducer = Agent_sdk.Context_reducer.compose [
     Agent_sdk.Context_reducer.keep_last 30;
     { Agent_sdk.Context_reducer.strategy =

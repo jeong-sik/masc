@@ -153,7 +153,7 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        + prune_dir (Filename.concat masc "events")
        + prune_dir (Filename.concat masc "activity-events")
        + prune_dir (Filename.concat masc "voice_sessions")
-       + (let keepers = Filename.concat masc "perpetual-keepers" in
+       + (let keepers = Filename.concat masc "keepers" in
           if not (Sys.file_exists keepers) then 0
           else
             Array.fold_left (fun acc name ->
@@ -167,15 +167,69 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn -> Log.Misc.error "startup prune failed: %s" (Printexc.to_string exn))
 
+(** Migrate legacy directory names: perpetual->traces, perpetual-keepers->keepers.
+    Moves contents via recursive merge. Conflicting files go to _quarantine/. *)
+let migrate_legacy_dirs (state : Mcp_server.server_state) =
+  let masc = Room.masc_root_dir state.room_config in
+  let quarantine = Filename.concat masc "_quarantine" in
+  let rec migrate_recursive ~old_dir ~new_dir ~rel_path =
+    if not (Sys.file_exists old_dir) then ()
+    else begin
+      Keeper_types.mkdir_p new_dir;
+      Array.iter (fun name ->
+        let old_path = Filename.concat old_dir name in
+        let new_path = Filename.concat new_dir name in
+        let rel = if rel_path = "" then name else Filename.concat rel_path name in
+        if Sys.is_directory old_path then begin
+          if Sys.file_exists new_path then
+            migrate_recursive ~old_dir:old_path ~new_dir:new_path ~rel_path:rel
+          else
+            Sys.rename old_path new_path
+        end else begin
+          if Sys.file_exists new_path then begin
+            let q_path = Filename.concat quarantine rel in
+            Keeper_types.mkdir_p (Filename.dirname q_path);
+            Sys.rename old_path q_path
+          end else
+            Sys.rename old_path new_path
+        end
+      ) (Sys.readdir old_dir);
+      (try
+        if Array.length (Sys.readdir old_dir) = 0 then
+          Sys.rmdir old_dir
+        else
+          Log.Misc.warn "migrate: old dir not empty after migration: %s" old_dir
+      with Sys_error _ -> ())
+    end
+  in
+  let renames = [
+    ("perpetual", "traces");
+    ("keepers", "keepers");
+    ("resident-keepers", "keepers");
+  ] in
+  (try
+    List.iter (fun (old_name, new_name) ->
+      let old_dir = Filename.concat masc old_name in
+      let new_dir = Filename.concat masc new_name in
+      if Sys.file_exists old_dir then begin
+        Log.Misc.info "migrate: %s -> %s" old_name new_name;
+        migrate_recursive ~old_dir ~new_dir ~rel_path:""
+      end
+    ) renames
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Misc.error "legacy dir migration failed: %s" (Printexc.to_string exn))
+
 let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
   (try
-     let perpetual_dir =
-       Filename.concat (Room.masc_root_dir state.room_config) "perpetual"
+     let traces_dir =
+       Filename.concat (Room.masc_root_dir state.room_config) "traces"
      in
-     if Sys.file_exists perpetual_dir then begin
+     if Sys.file_exists traces_dir then begin
        let total = ref 0 in
        Array.iter (fun trace_name ->
-         let trace_dir = Filename.concat perpetual_dir trace_name in
+         let trace_dir = Filename.concat traces_dir trace_name in
          if Sys.is_directory trace_dir then begin
            let files = Sys.readdir trace_dir |> Array.to_list in
            let ckpt_files =
@@ -195,7 +249,7 @@ let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
                end
              ) ckpt_files
          end
-       ) (Sys.readdir perpetual_dir);
+       ) (Sys.readdir traces_dir);
        if !total > 0 then
          Log.Misc.info "startup prune: deleted %d old keeper checkpoint files" !total
      end
@@ -305,6 +359,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ("chain_bootstrap", fun () -> bootstrap_chain_state state);
           ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);
           ("tool_metrics_restore", fun () -> restore_tool_metrics_from_disk state);
+          ("legacy_dir_migration", fun () -> migrate_legacy_dirs state);
           ("jsonl_prune", fun () -> startup_prune_jsonl state);
           ( "keeper_checkpoint_prune",
             fun () -> startup_prune_keeper_checkpoints state );

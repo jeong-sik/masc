@@ -106,7 +106,7 @@ type event = {
   content: string;
 }
 
-(** Keeper metadata parsed from perpetual-keepers/*.json *)
+(** Keeper metadata parsed from keepers/*.json *)
 type keeper = {
   k_name: string;
   k_goal: string;
@@ -561,7 +561,7 @@ let render_keeper_list (state : state) =
   in
 
   if visible_count = 0 then begin
-    Buffer.add_string buf (Printf.sprintf "%s%s%s   %s(no keepers found in .masc/perpetual-keepers/)%s %s%s%s%s\n"
+    Buffer.add_string buf (Printf.sprintf "%s%s%s   %s(no keepers found in .masc/keepers/)%s %s%s%s%s\n"
       Ansi.gray Ansi.box_v Ansi.reset
       Ansi.dim Ansi.reset
       (String.make (max 0 (cols - 50)) ' ')
@@ -987,9 +987,9 @@ let render (state : state) =
   | Keeper_logs -> render_keeper_logs state
   | Keeper_message -> render_keeper_message state
 
-(** Load keepers from .masc/perpetual-keepers/ *)
+(** Load keepers from .masc/keepers/ *)
 let load_keepers (base_path : string) : keeper list =
-  let keepers_dir = Filename.concat (Filename.concat base_path ".masc") "perpetual-keepers" in
+  let keepers_dir = Filename.concat (Filename.concat base_path ".masc") "keepers" in
   if Sys.file_exists keepers_dir && Sys.is_directory keepers_dir then
     Sys.readdir keepers_dir
     |> Array.to_list
@@ -1100,7 +1100,7 @@ let find_metrics_files (base_path : string) (keeper_name : string) : string list
   let metrics_dir = Filename.concat
     (Filename.concat
        (Filename.concat base_path ".masc")
-       "perpetual-keepers")
+       "keepers")
     (Filename.concat keeper_name "metrics") in
   if not (Sys.file_exists metrics_dir && Sys.is_directory metrics_dir) then []
   else begin

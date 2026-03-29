@@ -18,7 +18,7 @@ type file_entry = {
 let classify_path path =
   let base = Filename.basename path in
   let dir = Filename.basename (Filename.dirname path) in
-  if Filename.check_suffix base ".json" && dir = "perpetual-keepers" then "keeper_meta"
+  if Filename.check_suffix base ".json" && dir = "keepers" then "keeper_meta"
   else if Filename.check_suffix base ".metrics.jsonl" then "keeper_metrics_single_file"
   else if Filename.check_suffix base ".memory.jsonl" then "keeper_memory"
   else if Filename.check_suffix base ".feedback.jsonl" then "keeper_feedback"
@@ -168,7 +168,7 @@ let handle_housekeep_prune config args =
       else if String.length store_name > 7
               && String.sub store_name 0 7 = "keeper:" then
         let keeper_name = String.sub store_name 7 (String.length store_name - 7) in
-        Filename.concat (Filename.concat base "perpetual-keepers") (keeper_name ^ "/metrics")
+        Filename.concat (Filename.concat base "keepers") (keeper_name ^ "/metrics")
       else ""
     in
     if store_dir = "" then

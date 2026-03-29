@@ -21,11 +21,11 @@ let ensure_dir_ d =
   d
 
 let keeper_dir_ (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "perpetual-keepers" in
+  let d = Filename.concat (Room.masc_root_dir config) "keepers" in
   ensure_dir_ d
 
 let session_base_dir_ (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "perpetual" in
+  let d = Filename.concat (Room.masc_root_dir config) "traces" in
   ensure_dir_ d
 
 (** Check API key availability using model label strings.
@@ -37,7 +37,7 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
 let keeper_metrics_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".metrics.jsonl")
 
-(** Date-split metrics store: [.masc/perpetual-keepers/<name>/metrics/YYYY-MM/DD.jsonl].
+(** Date-split metrics store: [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)
 let metrics_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
 let metrics_store_mu = Eio.Mutex.create ()

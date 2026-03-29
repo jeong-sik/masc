@@ -498,14 +498,14 @@ let list_persona_summaries () : persona_summary list =
       |> List.sort (fun a b -> String.compare a.persona_name b.persona_name)
 
 let keeper_dir (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "perpetual-keepers" in
+  let d = Filename.concat (Room.masc_root_dir config) "keepers" in
   ensure_dir d
 
 let keeper_meta_path config name =
   Filename.concat (keeper_dir config) (name ^ ".json")
 
 let session_base_dir (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "perpetual" in
+  let d = Filename.concat (Room.masc_root_dir config) "traces" in
   ensure_dir d
 
 let keeper_agent_name name =

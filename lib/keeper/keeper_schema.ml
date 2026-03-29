@@ -273,11 +273,11 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("remove_meta", `Assoc [
           ("type", `String "boolean");
-          ("description", `String "Delete .masc/perpetual-keepers/<name>.json (default: false). Set true only for permanent removal.");
+          ("description", `String "Delete .masc/keepers/<name>.json (default: false). Set true only for permanent removal.");
         ]);
         ("remove_session", `Assoc [
           ("type", `String "boolean");
-          ("description", `String "Delete .masc/perpetual/<trace_id>/ directory (default: false).");
+          ("description", `String "Delete .masc/traces/<trace_id>/ directory (default: false).");
         ]);
       ]);
       ("required", `List [`String "name"]);

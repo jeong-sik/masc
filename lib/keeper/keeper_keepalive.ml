@@ -162,7 +162,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
   let timing_ring = Array.make stage_timing_ring_size
     { presence_ms = 0.0; snapshot_ms = 0.0; board_ms = 0.0;
       turn_ms = 0.0; recurring_ms = 0.0; improve_ms = 0.0 } in
-  let timing_count = ref 0 in
+  let timing_cursor = ref 0 in
+  let timing_filled = ref 0 in
   (* Phase 1: work-as-heartbeat freshness tracking.
      Updated ONLY on Room.heartbeat_in_room success after turn. *)
   let last_successful_heartbeat_ts = ref 0.0 in
@@ -346,7 +347,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                              | None -> `Null );
                            ("handoff", `Assoc [ ("performed", `Bool false) ]);
                            ("stage_timing",
-                             stage_timing_to_json ~ring:timing_ring ~count:!timing_count);
+                             stage_timing_to_json ~ring:timing_ring ~count:!timing_filled);
                          ]
                      in
                      Dated_jsonl.append metrics_store snapshot;
@@ -515,8 +516,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               recurring_ms = (t_recurring_end -. t_recurring_start) *. 1000.0;
               improve_ms = (t_improve_end -. t_improve_start) *. 1000.0;
             } in
-            timing_ring.(!timing_count mod stage_timing_ring_size) <- timing;
-            incr timing_count;
+            timing_ring.(!timing_cursor) <- timing;
+            timing_cursor := (!timing_cursor + 1) mod stage_timing_ring_size;
+            if !timing_filled < stage_timing_ring_size then incr timing_filled;
             let jitter = base *. 0.2 *. Random.float 1.0 in  (* intentional: jitter *)
             interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
             if Atomic.get stop then ()

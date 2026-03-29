@@ -251,6 +251,37 @@ let handle_room_strategy_set ctx args =
               ("project", `String updated.project);
             ]) )
 
+let handle_vote_create ctx args =
+  let topic = get_string args "topic" "" in
+  let options = get_string_list args "options" in
+  let required_votes = get_int args "required_votes" 1 in
+  if String.trim topic = "" then
+    (false, "❌ topic is required")
+  else
+    (true,
+     Room.vote_create ctx.config ~proposer:ctx.agent_name ~topic ~options
+       ~required_votes)
+
+let handle_vote_cast ctx args =
+  let vote_id = get_string args "vote_id" "" in
+  let choice = get_string args "choice" "" in
+  if String.trim vote_id = "" then
+    (false, "❌ vote_id is required")
+  else if String.trim choice = "" then
+    (false, "❌ choice is required")
+  else
+    (true, Room.vote_cast ctx.config ~agent_name:ctx.agent_name ~vote_id ~choice)
+
+let handle_vote_status ctx args =
+  let vote_id = get_string args "vote_id" "" in
+  if String.trim vote_id = "" then
+    (false, "❌ vote_id is required")
+  else
+    (true, Yojson.Safe.pretty_to_string (Room.vote_status ctx.config ~vote_id))
+
+let handle_votes ctx _args =
+  (true, Yojson.Safe.pretty_to_string (Room.list_votes ctx.config))
+
 (* ── State inspection (shared by workflow_guide and check) ──────── *)
 
 type agent_state = {
@@ -395,6 +426,10 @@ let dispatch ctx ~name ~args : result option =
   | "masc_status" -> Some (handle_status ctx args)
   | "masc_init" -> Some (handle_init ctx args)
   | "masc_reset" -> Some (handle_reset ctx args)
+  | "masc_vote_create" -> Some (handle_vote_create ctx args)
+  | "masc_vote_cast" -> Some (handle_vote_cast ctx args)
+  | "masc_vote_status" -> Some (handle_vote_status ctx args)
+  | "masc_votes" -> Some (handle_votes ctx args)
   | "masc_room_strategy_get" -> Some (handle_room_strategy_get ctx args)
   | "masc_room_strategy_set" -> Some (handle_room_strategy_set ctx args)
   | "masc_workflow_guide" -> Some (handle_workflow_guide ctx args)

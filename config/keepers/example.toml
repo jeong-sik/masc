@@ -31,3 +31,9 @@ mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 presence_keepalive = true
 presence_keepalive_sec = 30
+
+# Tool shards — restrict which tool groups are available.
+# Omit or leave empty to grant all default shards (backward compatible).
+# Available: base, board, filesystem, shell, coding, voice, library,
+#            taskboard, governance, autoresearch
+# shards = ["base", "board", "library", "taskboard"]

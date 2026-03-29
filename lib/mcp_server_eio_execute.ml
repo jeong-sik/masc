@@ -479,9 +479,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_cache.dispatch { Tool_cache.config } ~name ~args:arguments
     | Mod_hat ->
         Tool_hat.dispatch { Tool_hat.config; agent_name } ~name ~args:arguments
-    | Mod_walph ->
-        (let ctx : _ Tool_walph.context = { config; agent_name; clock } in
-           Tool_walph.dispatch ctx ~name ~args:arguments)
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:arguments
     | Mod_task ->

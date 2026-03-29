@@ -447,6 +447,45 @@ let test_coding_tools_included_in_defaults () =
          (String.concat ", " missing))
 
 (* ============================================================
+   Per-persona shard configuration tests
+   ============================================================ *)
+
+module Keeper_types_profile = Masc_mcp.Keeper_types_profile
+
+let test_empty_defaults_shards_none () =
+  let d = Keeper_types_profile.empty_keeper_profile_defaults in
+  Alcotest.(check bool) "shards is None" true (d.shards = None)
+
+let test_set_agent_shards_from_persona () =
+  (* Simulate what keeper_persona.ml does after keeper creation:
+     when persona specifies shards, set_agent_shards is called. *)
+  Hashtbl.remove Tool_shard.agent_shards "test-persona-shard";
+  let persona_shards = ["base"; "board"; "library"] in
+  Tool_shard.set_agent_shards "test-persona-shard" persona_shards;
+  let active = Tool_shard.get_agent_shards "test-persona-shard" in
+  Alcotest.(check int) "3 shards" 3 (List.length active);
+  Alcotest.(check bool) "has base" true (List.mem "base" active);
+  Alcotest.(check bool) "has board" true (List.mem "board" active);
+  Alcotest.(check bool) "has library" true (List.mem "library" active);
+  Alcotest.(check bool) "no coding" false (List.mem "coding" active);
+  Alcotest.(check bool) "no shell" false (List.mem "shell" active);
+  (* Verify tools_of_shards returns restricted set *)
+  let tools = Tool_shard.tools_of_shards active in
+  let tool_names = List.map (fun (t : Types.tool_schema) -> t.name) tools in
+  Alcotest.(check bool) "has keeper_board_post" true
+    (List.mem "keeper_board_post" tool_names);
+  Alcotest.(check bool) "no keeper_bash" false
+    (List.mem "keeper_bash" tool_names);
+  Hashtbl.remove Tool_shard.agent_shards "test-persona-shard"
+
+let test_no_shards_gets_defaults () =
+  (* When persona has no shards configured, agent gets all defaults *)
+  Hashtbl.remove Tool_shard.agent_shards "test-no-shard-persona";
+  let active = Tool_shard.get_agent_shards "test-no-shard-persona" in
+  Alcotest.(check int) "matches default count"
+    (List.length Tool_shard.default_shard_names) (List.length active)
+
+(* ============================================================
    Test runner
    ============================================================ *)
 
@@ -542,5 +581,10 @@ let () =
     ("keeper_dispatch_coverage", [
       Alcotest.test_case "all shard tools reachable" `Quick test_keeper_dispatch_coverage;
       Alcotest.test_case "coding included in defaults" `Quick test_coding_tools_included_in_defaults;
+    ]);
+    ("persona_shard_config", [
+      Alcotest.test_case "empty defaults shards None" `Quick test_empty_defaults_shards_none;
+      Alcotest.test_case "set_agent_shards from persona" `Quick test_set_agent_shards_from_persona;
+      Alcotest.test_case "no shards gets defaults" `Quick test_no_shards_gets_defaults;
     ]);
   ]

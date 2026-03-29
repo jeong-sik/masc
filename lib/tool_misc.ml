@@ -707,9 +707,15 @@ let handle_keeper_tool_catalog _ctx args =
   in
   (true, Yojson.Safe.pretty_to_string json)
 
+let handle_config _ctx args : result =
+  let cat = get_string_opt args "category" in
+  let json = Env_config_introspect.to_json_filtered ?cat () in
+  (true, Yojson.Safe.pretty_to_string json)
+
 (* Dispatch function *)
 let dispatch ctx ~name ~args : result option =
   match name with
+  | "masc_config" -> Some (handle_config ctx args)
   | "masc_transport_status" -> Some (handle_transport_status ctx args)
   | "masc_websocket_discovery" -> Some (handle_websocket_discovery ctx args)
   | "masc_webrtc_offer" -> Some (handle_webrtc_offer ctx args)

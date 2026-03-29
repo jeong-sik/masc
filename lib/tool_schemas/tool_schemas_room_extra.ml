@@ -6,6 +6,69 @@ open Types
 
 let schemas : tool_schema list = [
   {
+    name = "masc_vote_create";
+    description = "Create a room vote. Hidden from the default MCP surface but retained for legacy/internal coordination flows.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Vote topic or proposal text.");
+        ]);
+        ("options", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Allowed vote choices.");
+        ]);
+        ("required_votes", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Minimum votes required before resolution.");
+        ]);
+      ]);
+      ("required", `List [`String "topic"; `String "options"]);
+    ];
+  };
+  {
+    name = "masc_vote_cast";
+    description = "Cast a vote in an existing room vote. Hidden from the default MCP surface but retained for legacy/internal coordination flows.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("vote_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Existing vote identifier.");
+        ]);
+        ("choice", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Selected option.");
+        ]);
+      ]);
+      ("required", `List [`String "vote_id"; `String "choice"]);
+    ];
+  };
+  {
+    name = "masc_vote_status";
+    description = "Read a room vote status by id. Hidden from the default MCP surface but retained for legacy/internal coordination flows.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("vote_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Existing vote identifier.");
+        ]);
+      ]);
+      ("required", `List [`String "vote_id"]);
+    ];
+  };
+  {
+    name = "masc_votes";
+    description = "List room votes. Hidden from the default MCP surface but retained for legacy/internal coordination flows.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
     name = "masc_room_strategy_get";
     description = "Read current room-level search strategy and speculation defaults. \
 Use when you need to check routing configuration before modifying it. \

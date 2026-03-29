@@ -13,7 +13,6 @@ include module type of Room_init
 include module type of Room_status
 include module type of Room_task
 include module type of Room_task_schedule
-include module type of Room_walph_eio
 include module type of Room_query
 include module type of Room_portal
 include module type of Room_worktree

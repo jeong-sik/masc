@@ -214,6 +214,8 @@ let sweep_and_recover (ctx : _ context) =
     | Keeper_registry.Running | Keeper_registry.Paused
     | Keeper_registry.Stopped | Keeper_registry.Crashed ->
       (match Eio.Promise.peek entry.done_p with
+      | None when entry.state = Keeper_registry.Stopped ->
+          to_unregister := entry :: !to_unregister
       | None -> ()  (* Alive — skip *)
       | Some `Stopped ->
           to_unregister := entry :: !to_unregister

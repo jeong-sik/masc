@@ -89,10 +89,10 @@ let handle_ag_ui_events ~deps request reqd =
           let missed = Sse.get_events_after last_id in
           List.iter (fun ev -> ignore (send_raw info ev)) missed
       | None -> ());
-      (match
-         (deps.get_sw (), deps.get_clock ())
-       with
-      | Some sw, Some clock ->
+      (match deps.get_runtime_result () with
+      | Ok runtime ->
+          let sw = runtime.sw in
+          let clock = runtime.clock in
           (* Drain fiber for per-session event stream *)
           Eio.Fiber.fork ~sw (fun () ->
               let rec drain () =
@@ -133,4 +133,4 @@ let handle_ag_ui_events ~deps request reqd =
                 | exn ->
                     Log.Server.error "SSE ping loop exited for session %s: %s" info.session_id (Printexc.to_string exn);
                     stop_sse_session info.session_id)
-      | _ -> ())
+      | Error _ -> ())

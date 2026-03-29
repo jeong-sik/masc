@@ -25,7 +25,7 @@ let repo_root () =
 
 let () =
   let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
-  Masc_mcp.Prompt_registry.set_markdown_dir prompts_dir;
+  Prompt_registry.set_markdown_dir prompts_dir;
   Masc_mcp.Prompt_defaults.init ()
 
 let temp_dir () =

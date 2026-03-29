@@ -7,7 +7,6 @@ Usage:
     python3 scripts/analyze_lib_deps.py [--json] [--cycles] [--clusters]
 """
 
-import os
 import re
 import sys
 import json
@@ -85,34 +84,120 @@ def _find_ml_file(module_name: str) -> Path:
     return direct  # fallback even if missing
 
 
+def strip_ocaml_comments_and_strings(content: str) -> str:
+    """Remove OCaml comments/strings while preserving line structure.
+
+    This avoids false positives from module-like tokens in comments/docs and
+    from dotted references inside string literals.
+    """
+
+    out: list[str] = []
+    i = 0
+    comment_depth = 0
+    in_string = False
+    length = len(content)
+
+    while i < length:
+        two = content[i:i + 2]
+        ch = content[i]
+
+        if comment_depth > 0:
+            if two == "(*":
+                comment_depth += 1
+                out.extend("  ")
+                i += 2
+            elif two == "*)":
+                comment_depth -= 1
+                out.extend("  ")
+                i += 2
+            elif ch == "\n":
+                out.append("\n")
+                i += 1
+            else:
+                out.append(" ")
+                i += 1
+            continue
+
+        if in_string:
+            if ch == "\\" and i + 1 < length:
+                if ch == "\n":
+                    out.append("\n")
+                else:
+                    out.append(" ")
+                next_ch = content[i + 1]
+                if next_ch == "\n":
+                    out.append("\n")
+                else:
+                    out.append(" ")
+                i += 2
+            elif ch == '"':
+                in_string = False
+                out.append(" ")
+                i += 1
+            elif ch == "\n":
+                out.append("\n")
+                i += 1
+            else:
+                out.append(" ")
+                i += 1
+            continue
+
+        if two == "(*":
+            comment_depth = 1
+            out.extend("  ")
+            i += 2
+        elif ch == '"':
+            in_string = True
+            out.append(" ")
+            i += 1
+        else:
+            out.append(ch)
+            i += 1
+
+    return "".join(out)
+
+
+def local_module_defs(content: str) -> set[str]:
+    """Find nested module definitions declared inside a file."""
+
+    return set(
+        m.group(1)
+        for m in re.finditer(
+            r"\bmodule\s+(?:rec\s+)?([A-Z][A-Za-z0-9_]*)\s*(?:\(|:|=)",
+            content,
+        )
+    )
+
+
 def extract_module_refs(filepath: Path) -> set[str]:
     """Extract module references from an OCaml source file."""
     if not filepath.exists():
         return set()
 
     content = filepath.read_text(errors="replace")
+    sanitized = strip_ocaml_comments_and_strings(content)
+    local_modules = local_module_defs(sanitized)
     refs: set[str] = set()
 
     # Pattern 1: open Module
-    for m in re.finditer(r"\bopen\s+([A-Z][A-Za-z0-9_]*)", content):
-        refs.add(m.group(1))
+    for m in re.finditer(r"\bopen\s+([A-Z][A-Za-z0-9_]*)", sanitized):
+        module_name = m.group(1)
+        if module_name not in local_modules:
+            refs.add(module_name)
 
     # Pattern 2: Module.something (but not inside strings/comments)
-    # Simple heuristic: skip lines starting with (* or inside strings
-    for line in content.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("(*") or stripped.startswith("\""):
-            continue
+    for line in sanitized.split("\n"):
         for m in re.finditer(r"\b([A-Z][A-Za-z0-9_]*)\.(?![A-Z])", line):
-            refs.add(m.group(1))
+            module_name = m.group(1)
+            if module_name not in local_modules:
+                refs.add(module_name)
 
     # Pattern 3: Module.Constructor or Module.Type (Module.CapitalWord)
-    for line in content.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("(*"):
-            continue
+    for line in sanitized.split("\n"):
         for m in re.finditer(r"\b([A-Z][A-Za-z0-9_]*)\.[A-Z]", line):
-            refs.add(m.group(1))
+            module_name = m.group(1)
+            if module_name not in local_modules:
+                refs.add(module_name)
 
     return refs
 
@@ -300,7 +385,7 @@ def main() -> None:
     graph = build_dependency_graph(modules)
     stats = compute_stats(graph)
 
-    print(f"=== Dependency Statistics ===")
+    print("=== Dependency Statistics ===")
     print(f"Total modules: {stats['total_modules']}")
     print(f"Total edges: {stats['total_edges']}")
     print(f"Avg out-degree: {stats['avg_out_degree']}")
@@ -308,19 +393,19 @@ def main() -> None:
     print(f"Root modules (nothing depends on them): {stats['root_count']}")
     print()
 
-    print(f"=== Top 20 Most-Imported Modules ===")
+    print("=== Top 20 Most-Imported Modules ===")
     for name, count in stats["top_imported"]:
         print(f"  {name}: {count} dependents")
     print()
 
-    print(f"=== Top 20 Heaviest Importers ===")
+    print("=== Top 20 Heaviest Importers ===")
     for name, count in stats["top_importers"]:
         print(f"  {name}: {count} dependencies")
     print()
 
     if "--cycles" in args or "--json" not in args:
         cycles = find_cycles(graph)
-        print(f"=== Circular Dependencies ===")
+        print("=== Circular Dependencies ===")
         print(f"Strongly connected components (cycles): {len(cycles)}")
         for i, scc in enumerate(cycles[:10]):
             print(f"  SCC {i+1} ({len(scc)} modules): {', '.join(scc[:8])}{'...' if len(scc) > 8 else ''}")
@@ -328,7 +413,7 @@ def main() -> None:
 
     if "--clusters" in args or "--json" not in args:
         clusters = identify_clusters(graph, modules)
-        print(f"=== Extraction Candidates (prefix-based, 3+ modules) ===")
+        print("=== Extraction Candidates (prefix-based, 3+ modules) ===")
         for c in clusters[:15]:
             print(
                 f"  {c['prefix']}: {c['module_count']} modules, "

@@ -12,7 +12,6 @@ open Cmdliner
 (** Module aliases *)
 module Http = Masc_mcp.Http_server_eio
 module Http_h2 = Masc_mcp.Http_server_h2
-module Mcp_session = Masc_mcp.Mcp_session
 module Mcp_server = Masc_mcp.Mcp_server
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Room = Masc_mcp.Room
@@ -40,7 +39,7 @@ module Board_dispatch = Masc_mcp.Board_dispatch
 module Board_listener = Masc_mcp.Board_listener
 module Council = Council
 module Task_dispatch = Masc_mcp.Task_dispatch
-module Http_negotiation = Masc_mcp.Mcp_transport_protocol.Http_negotiation
+module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
 module Safe_ops = Safe_ops
@@ -198,9 +197,11 @@ let make_extended_handler routes =
                 resp_body reqd)
         | `DELETE, "/mcp" -> handle_delete_mcp request reqd
         | `DELETE, "/mcp/managed" ->
-            handle_delete_mcp ~profile:Mcp_eio.Managed_agent request reqd
+            handle_delete_mcp
+              ~profile:Server_mcp_transport_http.Managed_agent request reqd
         | `DELETE, "/mcp/operator" ->
-            handle_delete_mcp ~profile:Mcp_eio.Operator_remote request reqd
+            handle_delete_mcp
+              ~profile:Server_mcp_transport_http.Operator_remote request reqd
         | `GET, "/api/v1/board/flairs" ->
             let flairs = List.map Board.flair_to_yojson Board.available_flairs in
             let json = `Assoc [("flairs", `List flairs)] in

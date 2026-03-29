@@ -10,7 +10,6 @@
 
 open Alcotest
 
-module Mcp_session = Masc_mcp.Mcp_session
 module Http_transport = Masc_mcp.Server_mcp_transport_http
 
 (* ============================================================

@@ -1,40 +1,42 @@
 (** Server_mcp_transport_http — SSE/POST MCP transport handler. *)
 
+type tool_profile = Server_mcp_transport_http_types.tool_profile =
+  | Full
+  | Managed_agent
+  | Operator_remote
+
+type runtime = Server_mcp_transport_http_types.runtime = {
+  base_path : string;
+  sw : Eio.Switch.t;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
+  handle_request :
+    ?profile:tool_profile ->
+    ?mcp_session_id:string ->
+    ?auth_token:string ->
+    string ->
+    Yojson.Safe.t;
+  clear_resource_subscriptions_for_session : string -> unit;
+}
+
 include Server_mcp_transport_http_protocol
 include Server_mcp_transport_http_conn
 include Server_mcp_transport_http_respond
 include Server_mcp_transport_http_agui
 
-let env_float_or = Server_mcp_transport_http_sse.env_float_or
+let env_float_or = Server_mcp_transport_http_conn.env_float_or
 
-let sse_retry_ms = 3000
+let body_jsonrpc_method = Server_mcp_transport_http_headers.body_jsonrpc_method
 
-let sse_prime_event () =
-  let id = Sse.next_id () in
-  Printf.sprintf "retry: %d\nid: %d\n\n" sse_retry_ms id
+let sse_prime_event = Server_mcp_transport_http_headers.sse_prime_event
 
-let sse_ping_interval_s = 30.0
+let sse_ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
 
 let post_sse_keepalive_interval_s =
   env_float_or ~name:"MASC_POST_SSE_KEEPALIVE_SEC"
     ~default:sse_ping_interval_s
   |> Float.max 0.1
 
-let get_last_event_id (request : Httpun.Request.t) =
-  match Httpun.Headers.get request.headers "last-event-id" with
-  | Some id -> (
-      try Some (int_of_string id) with Failure _ -> None)
-  | None -> None
-
-let body_jsonrpc_method body_str =
-  try
-    match Yojson.Safe.from_string body_str with
-    | `Assoc fields -> (
-        match List.assoc_opt "method" fields with
-        | Some (`String method_) -> Some (method_, List.mem_assoc "id" fields)
-        | _ -> None)
-    | _ -> None
-  with Yojson.Json_error _ -> None
+let get_last_event_id = Server_mcp_transport_http_headers.get_last_event_id
 
 let body_jsonrpc_id body_str =
   try
@@ -43,29 +45,11 @@ let body_jsonrpc_id body_str =
     | _ -> None
   with Yojson.Json_error _ -> None
 
-let session_cookie_header session_id =
-  ( "set-cookie",
-    Printf.sprintf
-      "mcp-session-id=%s; Path=/; Max-Age=86400; SameSite=Lax"
-      session_id )
+let session_cookie_header = Server_mcp_transport_http_headers.session_cookie_header
 
-let sse_headers ~deps session_id protocol_version origin =
-  [
-    ("content-type", Http_negotiation.sse_content_type);
-    session_cookie_header session_id;
-  ]
-  @ mcp_headers session_id protocol_version
-  @ deps.cors_headers origin
+let sse_headers = Server_mcp_transport_http_headers.sse_headers
 
-let sse_stream_headers ~deps session_id protocol_version origin =
-  [
-    ("content-type", Http_negotiation.sse_content_type);
-    ("cache-control", "no-cache");
-    ("connection", "keep-alive");
-    session_cookie_header session_id;
-  ]
-  @ mcp_headers session_id protocol_version
-  @ deps.cors_headers origin
+let sse_stream_headers = Server_mcp_transport_http_headers.sse_stream_headers
 
 let stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version
     ~accept_warn_headers =
@@ -129,9 +113,9 @@ let should_stream_post_tools_call request body_str accept_mode =
   | Some ("tools/call", true) -> true
   | _ -> false
 
-let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
+let handle_post_mcp ~deps ?(profile = Full) request reqd =
   (* Readiness gate: reject before session/auth if server state is not ready *)
-  if Option.is_none (deps.get_server_state_opt ()) then
+  if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
   let session_id_opt = get_session_id_any request in
@@ -144,16 +128,12 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
   let auth_token = deps.auth_token_from_request request in
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let origin = deps.get_origin request in
-  let base_path =
-    match deps.get_server_state_opt () with
-    | Some s -> s.Mcp_server.room_config.base_path
-    | None -> default_base_path ()
-  in
+  let base_path = deps.get_base_path () in
   let auth_result =
     match profile with
-    | Mcp_eio.Full | Mcp_eio.Managed_agent ->
+    | Full | Managed_agent ->
         deps.verify_mcp_auth ~base_path request
-    | Mcp_eio.Operator_remote ->
+    | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in
   match validate_mcp_session_profile ~profile session_id with
@@ -248,7 +228,9 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                       | Error msg ->
                           respond_mcp_internal_error ~deps request reqd
                             ~session_id ~protocol_version msg
-                      | Ok (state, sw, clock) ->
+                      | Ok runtime ->
+                          let sw = runtime.sw in
+                          let clock = runtime.clock in
                           Eio.Fiber.fork ~sw (fun () ->
                             let response_protocol_version =
                               match protocol_version_from_body body_str with
@@ -274,9 +256,8 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                                 inline_sse := Some info;
                                 spawn_post_sse_keepalive ~sw ~clock info);
                               let response_json =
-                                Mcp_eio.handle_request ~clock ~sw ~profile
-                                  ~mcp_session_id:session_id ?auth_token state
-                                  body_str
+                                runtime.handle_request ?auth_token ~profile
+                                  ~mcp_session_id:session_id body_str
                               in
                               let protocol_version =
                                 get_protocol_version_for_session ~session_id request
@@ -403,9 +384,9 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                                       ("Internal error: "
                                      ^ Printexc.to_string exn))))
 
-let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
+let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
     ?(sse_kind = Sse.Coordinator) request reqd =
-  if Option.is_none (deps.get_server_state_opt ()) then
+  if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
   let origin = deps.get_origin request in
@@ -495,10 +476,10 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
               let missed = Sse.get_events_after last_id in
               List.iter (fun ev -> ignore (send_raw info ev)) missed
           | None -> ());
-          (match
-             (deps.get_sw (), deps.get_clock ())
-           with
-          | Some sw, Some clock ->
+          (match deps.get_runtime_result () with
+          | Ok runtime ->
+              let sw = runtime.sw in
+              let clock = runtime.clock in
               Eio.Fiber.fork ~sw (fun () ->
                   let rec drain () =
                     let event = Eio.Stream.take event_stream in
@@ -546,7 +527,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
                     else
                       Log.Server.error "ping loop error: %s"
                         (Printexc.to_string exn))
-          | _ -> ());
+          | Error _ -> ());
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
             Log.Server.info "SSE connected: %s (active: %d/%d)"
@@ -573,20 +554,16 @@ let sse_simple_handler ~deps request reqd =
 let handle_get_operator_mcp ~deps request reqd =
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
-  let base_path =
-    match deps.get_server_state_opt () with
-    | Some s -> s.Mcp_server.room_config.base_path
-    | None -> default_base_path ()
-  in
+  let base_path = deps.get_base_path () in
   match deps.verify_operator_mcp_auth ~base_path request with
   | Error msg ->
       respond_mcp_auth_error ~deps request reqd ~session_id ~protocol_version
         msg
   | Ok () ->
-      handle_get_mcp ~deps ~profile:Mcp_eio.Operator_remote request reqd
+      handle_get_mcp ~deps ~profile:Operator_remote request reqd
 
 let handle_post_messages ~deps request reqd =
-  if Option.is_none (deps.get_server_state_opt ()) then
+  if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
   let origin = deps.get_origin request in
@@ -613,11 +590,7 @@ let handle_post_messages ~deps request reqd =
   | Some session_id ->
       let protocol_version = get_protocol_version_for_session ~session_id request in
       let auth_token = deps.auth_token_from_request request in
-      let base_path =
-        match deps.get_server_state_opt () with
-        | Some s -> s.Mcp_server.room_config.base_path
-        | None -> default_base_path ()
-      in
+      let base_path = deps.get_base_path () in
       (match deps.verify_mcp_auth ~base_path request with
       | Error msg ->
           respond_mcp_auth_error ~deps request reqd ~session_id
@@ -628,11 +601,12 @@ let handle_post_messages ~deps request reqd =
               | Error msg ->
                   respond_mcp_internal_error ~extra_headers:legacy_headers
                     ~deps request reqd ~session_id ~protocol_version msg
-              | Ok (state, sw, clock) ->
+              | Ok runtime ->
+                  let sw = runtime.sw in
                   Eio.Fiber.fork ~sw (fun () ->
                   let response_json =
-                    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id
-                      ?auth_token state body_str
+                    runtime.handle_request ~mcp_session_id:session_id
+                      ?auth_token body_str
                   in
                   (match response_json with
                   | `Null -> ()
@@ -645,19 +619,15 @@ let handle_post_messages ~deps request reqd =
                   let response = Httpun.Response.create ~headers `Accepted in
                   Httpun.Reqd.respond_with_string reqd response "")))
 
-let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
-  if Option.is_none (deps.get_server_state_opt ()) then
+let handle_delete_mcp ~deps ?(profile = Full) request reqd =
+  if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
   else
-  let base_path =
-    match deps.get_server_state_opt () with
-    | Some s -> s.Mcp_server.room_config.base_path
-    | None -> default_base_path ()
-  in
+  let base_path = deps.get_base_path () in
   let auth_result =
     match profile with
-    | Mcp_eio.Full | Mcp_eio.Managed_agent -> Ok ()
-    | Mcp_eio.Operator_remote ->
+    | Full | Managed_agent -> Ok ()
+    | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
   in
   match auth_result with
@@ -701,7 +671,10 @@ let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
               | Ok () ->
               stop_sse_session session_id;
               Sse.unregister session_id;
-              Mcp_eio.clear_resource_subscriptions_for_session session_id;
+              (match request_runtime_result deps with
+              | Ok runtime ->
+                  runtime.clear_resource_subscriptions_for_session session_id
+              | Error _ -> ());
               forget_mcp_session session_id;
               Log.info ~ctx:"mcp_transport" "Session terminated: %s" session_id;
               let headers =

@@ -63,3 +63,45 @@ module Http_negotiation = struct
     else if allow_legacy then Legacy_accepted
     else Rejected
 end
+
+let supported_protocol_versions =
+  [
+    "2024-11-05";
+    "2025-03-26";
+    "2025-06-18";
+    "2025-11-25";
+  ]
+
+let default_protocol_version = "2025-11-25"
+
+let is_supported_protocol_version version =
+  List.mem version supported_protocol_versions
+
+let normalize_protocol_version version =
+  if is_supported_protocol_version version then version
+  else default_protocol_version
+
+let protocol_version_from_params = function
+  | Some (`Assoc fields) -> (
+      match List.assoc_opt "protocolVersion" fields with
+      | Some (`String version) -> version
+      | _ -> default_protocol_version)
+  | _ -> default_protocol_version
+
+let protocol_version_from_initialize_request_json = function
+  | `Assoc fields -> (
+      match
+        (List.assoc_opt "jsonrpc" fields, List.assoc_opt "method" fields)
+      with
+      | Some (`String "2.0"), Some (`String "initialize") ->
+          let params = List.assoc_opt "params" fields in
+          Some
+            (protocol_version_from_params params |> normalize_protocol_version)
+      | _ -> None)
+  | _ -> None
+
+let protocol_version_from_body body_str =
+  try
+    Yojson.Safe.from_string body_str
+    |> protocol_version_from_initialize_request_json
+  with Yojson.Json_error _ -> None

@@ -93,10 +93,9 @@ let session_info_of_session (session : Team_session_types.session) =
     status = Team_session_types.status_to_string session.status;
     started_at = session.started_at;
     updated_at_iso = session.updated_at_iso;
-    last_event_at = Option.map Command_plane_v2.iso_of_unix session.last_event_at;
-    last_turn_at = Option.map Command_plane_v2.iso_of_unix session.last_turn_at;
+    last_event_at = Option.map iso_of_unix session.last_event_at;
+    last_turn_at = Option.map iso_of_unix session.last_turn_at;
     worker_names = session_worker_names session;
     min_agents_violation_streak = session.min_agents_violation_streak;
     policy_violation_count = List.length session.policy_violations;
   }
-

@@ -5,7 +5,6 @@ open Server_routes_http_pages
 open Server_routes_http_runtime
 
 module Http = Http_server_eio
-module Mcp_eio = Mcp_server_eio
 module Common = Server_routes_http_common
 module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
@@ -151,8 +150,10 @@ let add_routes ~port ~host router =
   |> Http.Router.get "/mcp/operator" handle_get_operator_mcp
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
-  |> Http.Router.post "/mcp/managed" (handle_post_mcp ~profile:Mcp_eio.Managed_agent)
-  |> Http.Router.post "/mcp/operator" (handle_post_mcp ~profile:Mcp_eio.Operator_remote)
+  |> Http.Router.post "/mcp/managed"
+       (handle_post_mcp ~profile:Server_mcp_transport_http.Managed_agent)
+  |> Http.Router.post "/mcp/operator"
+       (handle_post_mcp ~profile:Server_mcp_transport_http.Operator_remote)
   |> Http.Router.post "/webrtc/offer"
        (webrtc_signaling_handler
           ~tool_name:"masc_webrtc_offer"

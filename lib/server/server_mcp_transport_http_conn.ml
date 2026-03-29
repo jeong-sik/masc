@@ -20,15 +20,27 @@ let sse_connect_guard_by_session :
     (string, sse_connect_guard_state) Hashtbl.t =
   Hashtbl.create 256
 
+let env_float_or ~name ~default =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some raw -> (
+      try float_of_string raw with Failure _ -> default)
+
+let env_int_or ~name ~default =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some raw -> (
+      try int_of_string raw with Failure _ -> default)
+
 let sse_reconnect_min_interval_s =
-  Server_mcp_transport_http_sse.env_float_or ~name:"MASC_SSE_RECONNECT_MIN_INTERVAL_S" ~default:0.0
+  env_float_or ~name:"MASC_SSE_RECONNECT_MIN_INTERVAL_S" ~default:0.0
   |> Float.max 0.0
 
 let sse_connect_window_s =
-  Server_mcp_transport_http_sse.env_float_or ~name:"MASC_SSE_CONNECT_WINDOW_S" ~default:0.0 |> Float.max 0.0
+  env_float_or ~name:"MASC_SSE_CONNECT_WINDOW_S" ~default:0.0 |> Float.max 0.0
 
 let sse_connect_max_in_window =
-  Server_mcp_transport_http_sse.env_int_or ~name:"MASC_SSE_CONNECT_MAX_IN_WINDOW" ~default:0 |> max 0
+  env_int_or ~name:"MASC_SSE_CONNECT_MAX_IN_WINDOW" ~default:0 |> max 0
 
 let close_sse_conn info =
   if not info.closed then (

@@ -1,14 +1,13 @@
-module Mcp_eio = Mcp_server_eio
 open Result_syntax
 
-let mcp_protocol_versions = Mcp_server.supported_protocol_versions
+let mcp_protocol_versions = Mcp_transport_protocol.supported_protocol_versions
 
-let mcp_protocol_version_default = Mcp_server.default_protocol_version
+let mcp_protocol_version_default = Mcp_transport_protocol.default_protocol_version
 
 let protocol_version_by_session : (string, string) Hashtbl.t =
   Hashtbl.create 128
 
-let mcp_profile_by_session : (string, Mcp_eio.tool_profile) Hashtbl.t =
+let mcp_profile_by_session : (string, Server_mcp_transport_http_types.tool_profile) Hashtbl.t =
   Hashtbl.create 128
 
 (** Eio-cooperative mutex protecting both Hashtbl tables above.
@@ -54,9 +53,9 @@ let reap_stale_sessions ~is_active_session =
     List.length stale)
 
 let profile_label = function
-  | Mcp_eio.Full -> "/mcp"
-  | Mcp_eio.Managed_agent -> "/mcp/managed"
-  | Mcp_eio.Operator_remote -> "/mcp/operator"
+  | Server_mcp_transport_http_types.Full -> "/mcp"
+  | Server_mcp_transport_http_types.Managed_agent -> "/mcp/managed"
+  | Server_mcp_transport_http_types.Operator_remote -> "/mcp/operator"
 
 let validate_mcp_session_profile ~profile session_id =
   Eio.Mutex.use_ro session_mutex (fun () ->
@@ -70,10 +69,10 @@ let validate_mcp_session_profile ~profile session_id =
 
 let validate_mcp_session_delete_profile ~profile session_id =
   match profile with
-  | Mcp_eio.Operator_remote ->
+  | Server_mcp_transport_http_types.Operator_remote ->
       Eio.Mutex.use_ro session_mutex (fun () ->
           match Hashtbl.find_opt mcp_profile_by_session session_id with
-          | Some Mcp_eio.Operator_remote -> Ok ()
+          | Some Server_mcp_transport_http_types.Operator_remote -> Ok ()
           | Some existing ->
               Error
                 (Printf.sprintf "Session %s belongs to %s, not %s." session_id
@@ -82,21 +81,12 @@ let validate_mcp_session_delete_profile ~profile session_id =
               Error
                 (Printf.sprintf "Session %s is not registered on %s." session_id
                    (profile_label profile)))
-  | Mcp_eio.Full | Mcp_eio.Managed_agent ->
+  | Server_mcp_transport_http_types.Full
+  | Server_mcp_transport_http_types.Managed_agent ->
       validate_mcp_session_profile ~profile session_id
 
 let protocol_version_from_body body_str =
-  try
-    let json = Yojson.Safe.from_string body_str in
-    match Mcp_server.jsonrpc_request_of_yojson json with
-    | Ok req when String.equal req.method_ "initialize" ->
-        let version =
-          Mcp_server.protocol_version_from_params req.params
-          |> Mcp_server.normalize_protocol_version
-        in
-        Some version
-    | _ -> None
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+  Mcp_transport_protocol.protocol_version_from_body body_str
 
 let get_session_id_query target =
   match String.split_on_char '?' target with

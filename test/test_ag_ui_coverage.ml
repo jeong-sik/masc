@@ -1,6 +1,6 @@
 (** AG-UI Protocol Event Bridge Tests *)
 
-open Masc_mcp.Ag_ui
+open Ag_ui
 
 let () = Printexc.record_backtrace true
 

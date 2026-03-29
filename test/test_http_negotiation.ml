@@ -1,7 +1,7 @@
 open Alcotest
 
 let test_accepts_sse_header () =
-  let open Masc_mcp.Mcp_transport_protocol.Http_negotiation in
+  let open Mcp_transport_protocol.Http_negotiation in
   check bool "missing accept" false (accepts_sse_header None);
   check bool "application/json" false (accepts_sse_header (Some "application/json"));
   check bool "wildcard only" false (accepts_sse_header (Some "*/*"));
@@ -13,7 +13,7 @@ let test_accepts_sse_header () =
   ()
 
 let test_accepts_streamable_mcp () =
-  let open Masc_mcp.Mcp_transport_protocol.Http_negotiation in
+  let open Mcp_transport_protocol.Http_negotiation in
   check bool "missing accept" false (accepts_streamable_mcp None);
   check bool "json only" false (accepts_streamable_mcp (Some "application/json"));
   check bool "sse only" false (accepts_streamable_mcp (Some "text/event-stream"));
@@ -25,7 +25,7 @@ let test_accepts_streamable_mcp () =
   ()
 
 let test_classify_mcp_accept () =
-  let open Masc_mcp.Mcp_transport_protocol.Http_negotiation in
+  let open Mcp_transport_protocol.Http_negotiation in
   let check_mode label expected actual =
     let same =
       match (expected, actual) with
@@ -109,7 +109,7 @@ let test_notification_body_relaxes_accept () =
   let mode = Transport.classify_mcp_accept_for_body request body in
   check bool "notification legacy accepted" true
     (match mode with
-    | Masc_mcp.Mcp_transport_protocol.Http_negotiation.Legacy_accepted -> true
+    | Mcp_transport_protocol.Http_negotiation.Legacy_accepted -> true
     | _ -> false)
 
 let test_request_json_only_accepted () =
@@ -123,7 +123,7 @@ let test_request_json_only_accepted () =
   let mode = Transport.classify_mcp_accept_for_body request body in
   check bool "json-only accept is rejected" true
     (match mode with
-    | Masc_mcp.Mcp_transport_protocol.Http_negotiation.Rejected -> true
+    | Mcp_transport_protocol.Http_negotiation.Rejected -> true
     | _ -> false)
 
 let test_initialize_json_only_accepted () =
@@ -137,7 +137,7 @@ let test_initialize_json_only_accepted () =
   let mode = Transport.classify_mcp_accept_for_body request body in
   check bool "initialize with json-only is rejected" true
     (match mode with
-    | Masc_mcp.Mcp_transport_protocol.Http_negotiation.Rejected -> true
+    | Mcp_transport_protocol.Http_negotiation.Rejected -> true
     | _ -> false)
 
 let test_no_accept_header_rejected () =
@@ -151,7 +151,7 @@ let test_no_accept_header_rejected () =
   let mode = Transport.classify_mcp_accept_for_body request body in
   check bool "no accept header is rejected" true
     (match mode with
-    | Masc_mcp.Mcp_transport_protocol.Http_negotiation.Rejected -> true
+    | Mcp_transport_protocol.Http_negotiation.Rejected -> true
     | _ -> false)
 
 let test_initialize_never_uses_sse () =
@@ -166,7 +166,21 @@ let test_initialize_never_uses_sse () =
   in
   check bool "initialize disables sse" false
     (Transport.should_use_sse_for_body request body
-       Masc_mcp.Mcp_transport_protocol.Http_negotiation.Streamable)
+       Mcp_transport_protocol.Http_negotiation.Streamable)
+
+let test_sse_guard_registry_is_shared_with_cleanup_loop () =
+  let module Transport = Masc_mcp.Server_mcp_transport_http in
+  let module Cleanup_view = Masc_mcp.Server_mcp_transport_http_sse in
+  let session_id = "shared-sse-guard-registry" in
+  match Transport.check_sse_connect_guard session_id with
+  | Error (reason, retry_after_s) ->
+      failf "expected first guard insert to succeed, got %s %.3f" reason
+        retry_after_s
+  | Ok () ->
+      check int "cleanup loop sees the same guard table" 1
+        (Cleanup_view.reap_stale_guards ());
+      check int "transport view is already clean after shared reap" 0
+        (Transport.reap_stale_guards ())
 
 let () =
   Eio_main.run @@ fun env ->
@@ -187,5 +201,7 @@ let () =
         test_case "initialize json-only is rejected" `Quick test_initialize_json_only_accepted;
         test_case "no accept header rejected" `Quick test_no_accept_header_rejected;
         test_case "initialize disables sse" `Quick test_initialize_never_uses_sse;
+        test_case "sse guard registry is shared" `Quick
+          test_sse_guard_registry_is_shared_with_cleanup_loop;
       ]);
     ]

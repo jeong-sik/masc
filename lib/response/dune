@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_response)
+ (public_name masc_mcp.response)
+ (modules response)
+ (wrapped false)
+ (libraries yojson time_compat))

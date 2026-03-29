@@ -347,7 +347,7 @@ let projected_refresh_event operations detachments =
   let latest =
     timestamps
     |> List.filter_map (fun timestamp ->
-           match Command_plane_v2.parse_iso_timestamp timestamp with
+           match parse_iso_timestamp timestamp with
            | Some ts -> Some (ts, timestamp)
            | None -> None)
     |> List.sort (fun (left, _) (right, _) -> Float.compare right left)
@@ -368,4 +368,3 @@ let projected_refresh_event operations detachments =
         source = "swarm_projection";
       })
     latest
-

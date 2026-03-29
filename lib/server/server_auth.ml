@@ -2,17 +2,6 @@
 open Types
 open Server_utils
 
-(** Extract Bearer token from Authorization header *)
-let extract_bearer_token request =
-  match Httpun.Headers.get request.Httpun.Request.headers "authorization" with
-  | Some auth_header ->
-    if String.length auth_header > 7 &&
-       String.lowercase_ascii (String.sub auth_header 0 7) = "bearer " then
-      Some (String.sub auth_header 7 (String.length auth_header - 7))
-    else
-      None
-  | None -> None
-
 let trim_opt = function
   | None -> None
   | Some raw ->
@@ -73,54 +62,6 @@ let ensure_strict_http_token_auth ~endpoint auth_config =
   else
     Ok auth_config
 
-(** Verify Bearer token for MCP endpoints *)
-let verify_mcp_auth ~base_path request =
-  let auth_config = Auth.load_auth_config base_path in
-  match ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config with
-  | Error msg -> Error msg
-  | Ok auth_config ->
-      if not auth_config.Types.enabled then
-        Ok None  (* Auth disabled - allow all *)
-      else
-        match extract_bearer_token request with
-        | None when not auth_config.require_token ->
-            Ok None  (* Token not required *)
-        | None ->
-            Error
-              "Authentication required. Use 'Authorization: Bearer <token>' header."
-        | Some token ->
-            (* Try to find agent by token hash *)
-            let token_hash = Auth.sha256_hash token in
-            let creds = Auth.list_credentials base_path in
-            match List.find_opt (fun c -> c.Types.token = token_hash) creds with
-            | None -> Error "Invalid token"
-            | Some cred -> (
-                (* Check expiry *)
-                match cred.expires_at with
-                | None -> Ok (Some cred)
-                | Some exp_str ->
-                    let now = Types.now_iso () in
-                    if now > exp_str then
-                      Error ("Token expired for " ^ cred.agent_name)
-                    else
-                      Ok (Some cred))
-
-let verify_operator_mcp_auth ~base_path request =
-  let auth_config = Auth.load_auth_config base_path in
-  if not auth_config.Types.enabled then
-    Error
-      "/mcp/operator requires room auth enabled with require_token=true."
-  else if not auth_config.require_token then
-    Error "/mcp/operator requires bearer token auth (require_token=true)."
-  else
-    match extract_bearer_token request with
-    | None ->
-        Error "Authentication required. Use 'Authorization: Bearer <token>' header."
-    | Some token -> (
-        match Auth.find_credential_by_token base_path ~token with
-        | Ok cred -> Ok (Some cred)
-        | Error err -> Error (Types.masc_error_to_string err))
-
 let bearer_token_from_header value =
   let prefix_len = 7 in (* String.length "Bearer " *)
   if String.length value > prefix_len
@@ -133,6 +74,42 @@ let auth_token_from_request request =
     (Httpun.Headers.get request.Httpun.Request.headers "authorization")
     bearer_token_from_header
 
+(** Verify Bearer token for MCP endpoints *)
+let verify_mcp_auth ~base_path request =
+  let auth_config = Auth.load_auth_config base_path in
+  match ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config with
+  | Error msg -> Error msg
+  | Ok auth_config ->
+      if not auth_config.Types.enabled then
+        Ok None  (* Auth disabled - allow all *)
+      else
+        match auth_token_from_request request with
+        | None when not auth_config.require_token ->
+            Ok None  (* Token not required *)
+        | None ->
+            Error
+              "Authentication required. Use 'Authorization: Bearer <token>' header."
+        | Some token -> (
+            match Auth.find_credential_by_token base_path ~token with
+            | Ok cred -> Ok (Some cred)
+            | Error err -> Error (Types.masc_error_to_string err))
+
+let verify_operator_mcp_auth ~base_path request =
+  let auth_config = Auth.load_auth_config base_path in
+  if not auth_config.Types.enabled then
+    Error
+      "/mcp/operator requires room auth enabled with require_token=true."
+  else if not auth_config.require_token then
+    Error "/mcp/operator requires bearer token auth (require_token=true)."
+  else
+    match auth_token_from_request request with
+    | None ->
+        Error "Authentication required. Use 'Authorization: Bearer <token>' header."
+    | Some token -> (
+        match Auth.find_credential_by_token base_path ~token with
+        | Ok cred -> Ok (Some cred)
+        | Error err -> Error (Types.masc_error_to_string err))
+
 let agent_from_request request =
   let hdr key = Httpun.Headers.get request.Httpun.Request.headers key in
   let qp key = query_param request key in
@@ -140,26 +117,28 @@ let agent_from_request request =
   first_some [ hdr "x-masc-agent"; hdr "x-masc-agent-name"; qp "agent"; qp "agent_name" ]
   |> Option.map Uri.pct_decode
 
-let effective_port_of_uri (uri : Uri.t) =
-  match Uri.port uri with
-  | Some _ as p -> p
-  | None -> (
-      match Uri.scheme uri with
-      | Some "http" -> Some 80
-      | Some "https" -> Some 443
-      | _ -> None)
+(** Extract host and explicit port only.
+    Host header carries no scheme, so inferring a default port from scheme
+    (80 for http, 443 for https) causes mismatches when the browser Origin
+    uses https (port 443) but we parse Host with a synthetic "http://" prefix
+    (port 80).  Comparing explicit ports avoids this class of bug. *)
 
-let host_port_of_origin origin =
+let default_port_of_scheme = function
+  | Some "http" -> Some 80
+  | Some "https" -> Some 443
+  | _ -> None
+
+(** Returns (host, explicit_port, scheme). *)
+let host_port_scheme_of_origin origin =
   try
     let uri = Uri.of_string origin in
     match Uri.host uri with
     | None -> None
     | Some host ->
-        Some
-          ( String.trim host |> String.lowercase_ascii,
-            effective_port_of_uri uri )
+        Some (String.trim host |> String.lowercase_ascii,
+              Uri.port uri, Uri.scheme uri)
   with exn ->
-    Log.Auth.debug "host_port_of_origin: parse failed for %S: %s"
+    Log.Auth.debug "host_port_scheme_of_origin: parse failed for %S: %s"
       origin (Printexc.to_string exn);
     None
 
@@ -172,9 +151,7 @@ let host_port_of_request request =
         match Uri.host uri with
         | None -> None
         | Some host ->
-            Some
-              ( String.trim host |> String.lowercase_ascii,
-                effective_port_of_uri uri )
+            Some (String.trim host |> String.lowercase_ascii, Uri.port uri)
       with exn ->
         Log.Auth.debug "host_port_of_request: parse failed for %S: %s"
           host_header (Printexc.to_string exn);
@@ -185,18 +162,35 @@ let ensure_same_origin_browser_request request :
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
   | None -> Ok ()
   | Some origin -> (
-      match host_port_of_origin origin, host_port_of_request request with
-      | Some (origin_host, origin_port), Some (request_host, request_port)
-        when String.equal origin_host request_host
-             && origin_port = request_port ->
-          Ok ()
+      match host_port_scheme_of_origin origin, host_port_of_request request with
+      | Some (origin_host, origin_port, scheme),
+        Some (request_host, request_port)
+        when String.equal origin_host request_host ->
+          (* Normalize implicit ports using Origin's scheme so that
+             e.g. Origin "https://h" (port=None→443) matches Host "h:443". *)
+          let default = default_port_of_scheme scheme in
+          let norm p = match p with Some _ -> p | None -> default in
+          if norm origin_port = norm request_port then Ok ()
+          else (
+            Log.Auth.debug
+              "same-origin port mismatch: origin=%S host=%s"
+              origin
+              (match Httpun.Headers.get request.Httpun.Request.headers "host" with
+               | Some h -> Printf.sprintf "%S" h | None -> "<absent>");
+            Error
+              (Types.Forbidden
+                 { agent = "browser";
+                   action = "cross-origin HTTP mutation" }))
       | _ ->
+          Log.Auth.debug
+            "same-origin check failed: origin=%S host=%s"
+            origin
+            (match Httpun.Headers.get request.Httpun.Request.headers "host" with
+             | Some h -> Printf.sprintf "%S" h | None -> "<absent>");
           Error
             (Types.Forbidden
-               {
-                 agent = "browser";
-                 action = "cross-origin HTTP mutation";
-               }))
+               { agent = "browser";
+                 action = "cross-origin HTTP mutation" }))
 
 let http_status_of_auth_error = function
   | Types.Unauthorized _ | Types.InvalidToken _ | Types.TokenExpired _ -> `Unauthorized
@@ -216,13 +210,20 @@ let cors_allow_headers_value =
   "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, \
    Mcp-Protocol-Version, Last-Event-Id, X-MASC-Agent, X-MASC-Agent-Name"
 
-let cors_headers origin = [
-  ("access-control-allow-origin", origin);
-  ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
-  ("access-control-allow-headers", cors_allow_headers_value);
-  ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
-  ("access-control-allow-credentials", "true");
-]
+let cors_headers origin =
+  let base = [
+    ("access-control-allow-origin", origin);
+    ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+    ("access-control-allow-headers", cors_allow_headers_value);
+    ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
+    ("vary", "Origin");
+  ] in
+  (* CORS spec: Access-Control-Allow-Credentials must not be paired with
+     wildcard "*" origin.  Only include it when reflecting a real origin. *)
+  if origin <> "*" then
+    ("access-control-allow-credentials", "true") :: base
+  else
+    base
 
 let respond_json_with_cors ?(status = `OK) request reqd body =
   let origin = get_origin request in
@@ -260,19 +261,19 @@ let with_admin_auth handler request reqd =
           Http_server_eio.Response.json ~status:`Unauthorized
             {|{"error":"Admin token required"}|} reqd
       | Some expected, Some given ->
-          (* Timing-safe comparison: XOR all bytes, accumulate differences.
-             Runs in constant time regardless of where mismatch occurs. *)
-          let len_eq = String.length expected = String.length given in
-          let content_eq =
-            if not len_eq then false
-            else
-              let diff = ref 0 in
-              for i = 0 to String.length expected - 1 do
-                diff := !diff lor (Char.code expected.[i] lxor Char.code given.[i])
-              done;
-              !diff = 0
-          in
-          if len_eq && content_eq then
+          (* Constant-time comparison: always XOR max(len_a, len_b) bytes.
+             Length difference is folded into the diff accumulator so both
+             length and content mismatches cost the same wall-clock time. *)
+          let len_a = String.length expected in
+          let len_b = String.length given in
+          let max_len = max len_a len_b in
+          let diff = ref (len_a lxor len_b) in
+          for i = 0 to max_len - 1 do
+            let a = if i < len_a then Char.code expected.[i] else 0 in
+            let b = if i < len_b then Char.code given.[i] else 0 in
+            diff := !diff lor (a lxor b)
+          done;
+          if !diff = 0 then
             handler state request reqd
           else
             Http_server_eio.Response.json ~status:`Forbidden

@@ -227,6 +227,10 @@ let handle_transport_status _ctx _args : result =
   let json = transport_status_json () in
   (true, Yojson.Safe.pretty_to_string json)
 
+let handle_config_snapshot _ctx _args : result =
+  let json = Env_config_introspect.to_json () in
+  (true, Yojson.Safe.pretty_to_string json)
+
 let handle_feature_flags _ctx args : result =
   let category_filter =
     match U.member "category" args with
@@ -729,6 +733,7 @@ let dispatch ctx ~name ~args : result option =
   | "masc_tool_admin_update" -> Some (handle_tool_admin_update ctx args)
   | "masc_keeper_tool_catalog" -> Some (handle_keeper_tool_catalog ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)
+  | "masc_config_snapshot" -> Some (handle_config_snapshot ctx args)
   | "masc_feature_flags" -> Some (handle_feature_flags ctx args)
   | _ -> None
 

@@ -270,6 +270,16 @@ After masc_tool_admin_snapshot to review current state before making changes.";
     ];
   };
   {
+    name = "masc_config_snapshot";
+    description = "Return a read-only snapshot of the current runtime configuration. \
+Env vars are categorized (server, storage, transport, chain, inference, keeper, dashboard) \
+with source (env or default) and sensitivity flags. Sensitive values are masked.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
     name = "masc_feature_flags";
     description = "List all boolean feature flags with their canonical defaults, runtime values, \
 lifecycle state, and source (env or default). Flags are grouped by category: transport, tool, \

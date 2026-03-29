@@ -113,6 +113,7 @@ let all_known_tool_names =
     "masc_collaboration_evidence";
     "masc_collaboration_graph";
     "masc_config";
+    "masc_config_snapshot";
     "masc_consolidate_learning";
     "masc_convo_conclude";
     "masc_convo_get";

@@ -1861,8 +1861,12 @@ let test_keeper_supervisor_recovers_missing_desired_keeper () =
             ])
       in
       check bool "keeper up ok" true ok;
+      (* Simulate an orphaned keeper: stop keepalive and remove registry
+         entry so reconcile sees a durable keeper on disk with no live
+         entry — the real-world scenario this test targets. *)
       Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
-      check bool "keepalive stopped before recovery" false
+      Masc_mcp.Keeper_registry.unregister ~base_path:config.base_path "sangsu";
+      check bool "keepalive stopped and unregistered before recovery" false
         (Masc_mcp.Keeper_registry.is_running ~base_path:config.base_path "sangsu");
       Masc_mcp.Keeper_supervisor.sweep_and_recover keeper_ctx;
       check bool "keepalive recovered by sweep" true

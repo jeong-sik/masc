@@ -223,12 +223,15 @@ function parseMcpListResponse(raw: string): McpListResponse {
   const line = raw.split('\n').find(l => l.startsWith('data: '))
   const payload = line ? line.slice(6).trim() : raw.trim()
   try {
-    return JSON.parse(payload) as McpListResponse
-  } catch {
-    throw new Error(`tools/list: invalid JSON response (${payload.slice(0, 100)})`)
-  }
+function extractFirstSseDataPayload(raw: string): string {
+  const line = raw.split('\n').find(l => l.startsWith('data: '))
+  return line ? line.slice(6).trim() : raw.trim()
 }
 
+function parseMcpListResponse(raw: string): McpListResponse {
+  const payload = extractFirstSseDataPayload(raw)
+  return parseMcpJsonText(payload) as McpListResponse
+}
 export async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
   await ensureSession()
   const text = await mcpPost({

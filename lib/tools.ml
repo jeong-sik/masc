@@ -45,7 +45,7 @@ let all_schemas_extended =
   @ Tool_schemas_a2a.schemas
   @ Tool_schemas_misc.schemas
   @ Tool_keeper.schemas
-  @ Tool_operator.schemas @ Tool_local_runtime.schemas @ Tool_command_plane.schemas @ Tool_goals.schemas
+  @ Tool_operator.schemas @ Tool_local_runtime.schemas @ Tool_command_plane.schemas
   @ Tool_team_session.schemas @ Tool_voice.schemas @ Tool_shard.schemas
   @ Tool_autoresearch.schemas
   @ Tool_compact.schemas

@@ -481,14 +481,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_relay ->
         Tool_relay.dispatch { Tool_relay.config; agent_name; sw;
           proc_mgr = state.Mcp_server.proc_mgr } ~name ~args:arguments
-    | Mod_goals ->
-        let keeper_ctx = make_keeper_ctx () in
-        let ctx : Tool_goals.context = { config; agent_name;
-          call_keeper_msg = Some (fun keeper_args ->
-            match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:keeper_args with
-            | Some result -> result
-            | None -> (false, "masc_keeper_msg dispatch unavailable")) } in
-        Tool_goals.dispatch ctx ~name ~args:arguments
     | Mod_heartbeat ->
         Tool_heartbeat.dispatch { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args:arguments
     | Mod_auth ->

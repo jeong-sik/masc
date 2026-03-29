@@ -184,6 +184,8 @@ let make_health_json ?(listener = "http/1.1") request =
         shared_pool_injected = shared;
       });
     ("subsystems", Subsystem_health.to_yojson ());
+    ("feature_flags", let features = Dashboard_feature_health.get_all_features () in
+      Dashboard_feature_health.overview_json features);
     ("gc", let s = Gc.stat () in `Assoc [
       ("minor_collections", `Int s.minor_collections);
       ("major_collections", `Int s.major_collections);

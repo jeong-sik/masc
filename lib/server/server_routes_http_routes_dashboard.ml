@@ -216,6 +216,12 @@ let add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) _request reqd)
+  |> Http.Router.get "/api/v1/dashboard/feature-health" (fun _request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = Dashboard_feature_health.json () in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) _request reqd)
 
   (* ── Dashboard delete actions ── *)
 

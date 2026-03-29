@@ -105,6 +105,7 @@ let register_all () =
     "masc_tool_stats"; "masc_tool_help";
     "masc_tool_admin_snapshot"; "masc_tool_admin_update";
     "masc_keeper_tool_catalog";
+    "masc_feature_flags";
   ];
 
   (* ── Mod_shard: Tool_shard ────────────────────────────────────── *)

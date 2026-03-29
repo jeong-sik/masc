@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useState } from 'preact/hooks'
 import type { Keeper, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -241,13 +241,16 @@ export function KeeperConversationPanel({
   const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
   const [showInternal, setShowInternal] = useState(readKeeperChatInternalVisible())
 
-  useEffect(() => {
-    writeKeeperChatMetadataVisible(showMetadata)
-  }, [showMetadata])
-
-  useEffect(() => {
-    writeKeeperChatInternalVisible(showInternal)
-  }, [showInternal])
+  const toggleMetadata = () => {
+    const next = !showMetadata
+    setShowMetadata(next)
+    writeKeeperChatMetadataVisible(next)
+  }
+  const toggleInternal = () => {
+    const next = !showInternal
+    setShowInternal(next)
+    writeKeeperChatInternalVisible(next)
+  }
 
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const rawThread = keeperThreads.value[keeperName] ?? []
@@ -295,14 +298,14 @@ export function KeeperConversationPanel({
             <button
               type="button"
               class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
-              onClick=${() => { setShowMetadata(!showMetadata) }}
+              onClick=${toggleMetadata}
             >
               ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
             </button>
             <button
               type="button"
               class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[#a78bfa]' : ''}"
-              onClick=${() => { setShowInternal(!showInternal) }}
+              onClick=${toggleInternal}
             >
               ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
             </button>

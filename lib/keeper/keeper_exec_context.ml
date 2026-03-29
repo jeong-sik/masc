@@ -191,11 +191,7 @@ let maybe_rollover_oas_handoff
       else
         let now_ts = Time_compat.now () in
         let prev_trace_id = base_meta.trace_id in
-        let new_trace_id =
-          let ts = int_of_float (Time_compat.now () *. 1000.0) in
-          let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
-          Printf.sprintf "trace-%d-%05x" ts hash
-        in
+        let new_trace_id = Keeper_identity.generate_trace_id () in
         let next_generation = current_generation + 1 in
         let new_session =
           create_session ~session_id:new_trace_id ~base_dir
@@ -394,10 +390,7 @@ let compact_if_needed
         in
         (compacted_ctx, Some reason, "applied:" ^ reason)
 
-let generate_trace_id () =
-  let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
-  Printf.sprintf "trace-%d-%05x" ts hash
+let generate_trace_id = Keeper_identity.generate_trace_id
 
 let keeper_board_write_tool_names =
   [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]

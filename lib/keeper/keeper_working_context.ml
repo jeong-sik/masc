@@ -85,7 +85,7 @@ let extract_state_blocks (s : string) : string list =
 (* ================================================================ *)
 
 let ensure_dir path =
-  Fs_compat.mkdir_p path
+  ignore (Keeper_fs.ensure_dir path)
 
 (* ================================================================ *)
 (* Token Estimation                                                  *)

@@ -17,14 +17,8 @@ let chat_dir base_dir =
 let chat_path ~base_dir ~keeper_name =
   Filename.concat (chat_dir base_dir) (sanitize_name keeper_name ^ ".jsonl")
 
-let dir_ensured : (string, bool) Hashtbl.t = Hashtbl.create 4
-
 let ensure_dir_once ~base_dir =
-  let dir = chat_dir base_dir in
-  if not (Hashtbl.mem dir_ensured dir) then begin
-    Fs_compat.mkdir_p dir;
-    Hashtbl.replace dir_ensured dir true
-  end
+  ignore (Keeper_fs.ensure_dir (chat_dir base_dir))
 
 let encode_line ~role ~content ~ts : string =
   Yojson.Safe.to_string

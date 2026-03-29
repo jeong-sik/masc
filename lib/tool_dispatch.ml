@@ -157,7 +157,7 @@ type module_tag =
   | Mod_code | Mod_code_write
   | Mod_council | Mod_a2a | Mod_handover
   | Mod_relay | Mod_heartbeat
-  | Mod_auth | Mod_hat | Mod_walph | Mod_agent | Mod_task | Mod_room
+  | Mod_auth | Mod_cache | Mod_hat | Mod_walph | Mod_agent | Mod_task | Mod_room
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper | Mod_mdal
   | Mod_inline

@@ -126,7 +126,7 @@ let build_https_connector_result () =
             (fun uri
                   (raw : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
                 ->
-              let flow : [> Eio.Flow.two_way_ty ] Eio.Resource.t = (raw :> _) in
+              let flow : [> Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t = (raw :> _) in
               let host =
                 match Uri.host uri with
                 | None -> None

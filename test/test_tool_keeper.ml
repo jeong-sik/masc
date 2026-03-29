@@ -158,6 +158,19 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "provenance" "fallback" resolved.provenance;
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
+let test_direct_reply_mode_prompt_prioritizes_persona () =
+  let prompt =
+    Masc_mcp.Keeper_prompt.append_direct_reply_mode_prompt
+      ~base_prompt:"base prompt"
+  in
+  check bool "keeps base prompt" true (contains_substring prompt "base prompt");
+  check bool "mentions direct chat" true
+    (contains_substring prompt "direct chat with the user");
+  check bool "mentions persona priority" true
+    (contains_substring prompt "Prioritize the keeper's authored persona");
+  check bool "forbids skill headers" true
+    (contains_substring prompt "Do not emit SKILL:")
+
 let keeper_usage ?cost_usd ~input_tokens ~output_tokens () : Agent_sdk.Types.api_usage =
   {
     input_tokens;
@@ -2017,6 +2030,8 @@ let () =
            test_resolved_keeper_skill_route_marks_agent_judgment;
          test_case "resolved skill route falls back when parse missing" `Quick
            test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing;
+         test_case "direct reply prompt prioritizes persona" `Quick
+           test_direct_reply_mode_prompt_prioritizes_persona;
          test_case "keeper merge usage preserves present cost" `Quick
            test_keeper_merge_usage_preserves_present_cost;
          test_case "keeper merge usage sums costs" `Quick

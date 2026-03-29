@@ -151,6 +151,19 @@ module KeeperSupervisor = struct
   (** Interval between supervisor sweep runs (seconds) *)
   let sweep_interval_sec =
     get_float ~default:30.0 "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
+
+  (** Self-preservation: ratio of crashed keepers to trigger suppression *)
+  let self_preservation_ratio =
+    Float.min 1.0 (Float.max 0.0
+      (get_float ~default:0.3 "MASC_KEEPER_SELF_PRESERVATION_RATIO"))
+
+  (** Self-preservation: minimum crashed candidates to trigger *)
+  let self_preservation_min_candidates =
+    max 1 (get_int ~default:2 "MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES")
+
+  (** Dead tombstone TTL: seconds before Dead entries are cleaned up *)
+  let dead_ttl_sec =
+    Float.max 60.0 (get_float ~default:3600.0 "MASC_KEEPER_DEAD_TTL_SEC")
 end
 
 (** {1 Keeper Runtime Configuration} *)

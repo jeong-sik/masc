@@ -58,7 +58,9 @@ This contract is anchored to existing keeper surfaces.
 
 - `masc_keeper_status`
   - primary diagnostic surface
-  - continuity-related fields must remain trustworthy: `trace_id`, `generation`, `trace_history_count`, `continuity_summary`
+  - guaranteed continuity-related fields must remain trustworthy: `trace_id`, `generation`, `trace_history_count`
+  - `continuity_summary` is expected after a validated continuity update and may be empty before the first snapshot exists
+  - `last_continuity_update_ts` is a detailed-status supporting field for operator tie-breaks, not part of the minimal product contract
 - `masc_keeper_list(detailed=true)`
   - lightweight fleet view for continuity and handoff state
 - `docs/KEEPER-CONTINUITY-VALIDATION.md`

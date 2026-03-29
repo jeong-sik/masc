@@ -43,6 +43,12 @@ Keeper continuity is releaseable as an advanced feature only when all of the fol
 
 If any gate is missing, the feature remains internal or validation-only.
 
+For this runbook, `diagnosis closed` means all of the following:
+
+- one root-cause bucket from the diagnosis RFC (`H1`-`H4`) is selected
+- the selected fix path is implemented or explicitly marked as no-code with rationale
+- the validating artifact is attached in PR or release evidence
+
 ## Required Evidence
 
 Each release or promotion decision should capture these artifacts:
@@ -125,6 +131,8 @@ Operator escalation rules:
 - any mismatch between live keeper state and read surfaces blocks promotion until resolved
 
 If these metrics are not yet exported in the current telemetry stack, keeper continuity remains blocked from production promotion until equivalent dashboards or reports are defined.
+
+`Equivalent dashboards or reports` means one reproducible command, dashboard, or generated artifact per required metric, referenced from the PR or release evidence so another operator can re-run the same check.
 
 ## Rollback And Containment
 

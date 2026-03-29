@@ -5,6 +5,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState } from './common/feedback-state'
+import { HEATMAP_COLORS } from '../config/constants'
 import type { ActivityGraphResponse, ActivityGraphTimelineEvent } from '../types'
 
 const DAY_LABELS = ['월', '화', '수', '목', '금', '토', '일'] as const
@@ -16,14 +17,7 @@ const LEFT_MARGIN = 28
 const TOP_PAD = 20
 const LEGEND_HEIGHT = 32
 
-// 5-level color scale: empty -> max intensity
-const COLORS = [
-  '#1e293b', // 0 events
-  '#0e4a5c', // 1-25%
-  '#0e6e7e', // 26-50%
-  '#14919b', // 51-75%
-  '#22d3ee', // 76-100%
-] as const
+const COLORS = HEATMAP_COLORS
 
 interface HeatmapCell {
   day: number

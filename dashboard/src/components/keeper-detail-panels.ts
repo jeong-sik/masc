@@ -5,6 +5,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { formatPct } from '../lib/format-number'
+import { TextInput } from './common/input'
 import type { Keeper, KeeperMetricPoint } from '../types'
 
 // ── Utility functions ────────────────────────────────────
@@ -261,9 +262,7 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="max-h-[460px] overflow-y-auto">
-      <input
-        class="w-full py-2 px-3 mb-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-xs text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--ok-40)]"
-        type="text"
+      <${TextInput}
         placeholder="필드 검색..."
         value=${fieldSearch.value}
         onInput=${(e: Event) => { fieldSearch.value = (e.target as HTMLInputElement).value }}

@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback } from 'preact/hooks'
 import { VirtualList } from '../common/virtual-list'
 import { EmptyState } from '../common/empty-state'
+import { TextInput } from '../common/input'
 import { route } from '../../router'
 import type { DashboardToolInventoryItem } from '../../api'
 import { InventoryRow } from './tool-inventory-row'
@@ -122,12 +123,11 @@ export function FullInventoryView({
       </div>
 
       <div class="flex flex-wrap gap-3 items-center">
-        <input
-          class="w-full px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] focus:border-[var(--accent)]/50 outline-none max-w-[320px]"
-          type="text"
+        <${TextInput}
+          class="max-w-[320px]"
           name="tool_inventory_query"
-          aria-label="도구 인벤토리 검색"
-          autocomplete="off"
+          ariaLabel="도구 인벤토리 검색"
+          autoComplete="off"
           placeholder="도구, 문서, 권한, 대체 도구 검색..."
           value=${searchQuery.value}
           onInput=${(e: Event) => {

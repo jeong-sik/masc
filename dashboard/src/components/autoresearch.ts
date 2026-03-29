@@ -9,6 +9,12 @@ import { EmptyState } from './common/empty-state'
 import { DialogOverlay } from './common/dialog'
 import { TextInput, TextArea } from './common/input'
 import { formatElapsedCompact } from '../lib/format-time'
+import { statusLabel } from '../lib/status-label'
+import {
+  AUTORESEARCH_DEFAULT_MAX_CYCLES,
+  AUTORESEARCH_DEFAULT_CYCLE_TIMEOUT_S,
+  AUTORESEARCH_DEFAULT_MODEL,
+} from '../config/constants'
 import { navigate } from '../router'
 import {
   deleteAutoresearchLoop,
@@ -49,9 +55,9 @@ const formMetricFn = signal('')
 const formTargetFile = signal('')
 const formShowAdvanced = signal(false)
 const formWorkdir = signal('')
-const formMaxCycles = signal('100')
-const formCycleTimeoutS = signal('300')
-const formModelModel = signal('glm')
+const formMaxCycles = signal(String(AUTORESEARCH_DEFAULT_MAX_CYCLES))
+const formCycleTimeoutS = signal(String(AUTORESEARCH_DEFAULT_CYCLE_TIMEOUT_S))
+const formModelModel = signal(AUTORESEARCH_DEFAULT_MODEL)
 const formBaseline = signal('')
 const formPatience = signal('')
 const formBuildVerifyFn = signal('')
@@ -161,16 +167,6 @@ function selectLoop(loopId: string) {
 }
 
 // --- Helpers ---
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case 'running': return '실행 중'
-    case 'completed': return '완료'
-    case 'stopped': return '중단'
-    case 'error': return '오류'
-    default: return status
-  }
-}
 
 function statusColor(status: string): string {
   switch (status) {
@@ -405,9 +401,9 @@ function resetStartFormFields() {
   formTargetFile.value = ''
   formShowAdvanced.value = false
   formWorkdir.value = ''
-  formMaxCycles.value = '100'
-  formCycleTimeoutS.value = '300'
-  formModelModel.value = 'glm'
+  formMaxCycles.value = String(AUTORESEARCH_DEFAULT_MAX_CYCLES)
+  formCycleTimeoutS.value = String(AUTORESEARCH_DEFAULT_CYCLE_TIMEOUT_S)
+  formModelModel.value = AUTORESEARCH_DEFAULT_MODEL
   formBaseline.value = ''
   formPatience.value = ''
   formBuildVerifyFn.value = ''

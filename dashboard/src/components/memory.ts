@@ -6,6 +6,7 @@ import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
 import { EmptyState } from './common/empty-state'
+import { TextInput, TextArea } from './common/input'
 import { stripStateBlocks } from '../keeper-message'
 import {
   boardPosts,
@@ -225,24 +226,19 @@ function NewPostForm() {
 
   return html`
     <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] grid gap-3">
-      <input
-        class="w-full px-3 py-2 rounded-lg bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-[14px] font-medium focus:border-[rgba(71,184,255,0.5)] outline-none placeholder:text-[var(--text-muted)]"
-        type="text"
+      <${TextInput}
         name="board_post_title"
-        aria-label="새 글 제목"
-        autocomplete="off"
+        ariaLabel="새 글 제목"
+        autoComplete="off"
         placeholder="제목"
         value=${newPostTitle.value}
         onInput=${(e: Event) => { newPostTitle.value = (e.target as HTMLInputElement).value }}
       />
-      <textarea
-        class="w-full px-3 py-2 rounded-lg bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] min-h-[80px] resize-y focus:border-[rgba(71,184,255,0.5)] outline-none placeholder:text-[var(--text-muted)]"
-        name="board_post_content"
-        aria-label="새 글 내용"
+      <${TextArea}
         placeholder="내용을 입력하세요..."
         value=${newPostContent.value}
         onInput=${(e: Event) => { newPostContent.value = (e.target as HTMLTextAreaElement).value }}
-      ></textarea>
+      />
       <div class="flex gap-2 justify-end">
         <button type="button"
           class="px-3 py-1.5 rounded-lg text-[13px] border border-[var(--card-border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]"
@@ -504,9 +500,8 @@ function CommentThread({ comments }: { comments: BoardComment[] }) {
 function CommentForm({ postId }: { postId: string }) {
   return html`
     <div class="mt-4 flex gap-2">
-      <input
-        type="text"
-        class="flex-1 py-2 px-3 bg-[var(--white-5)] border border-[var(--border-slate-18)] rounded-lg text-[var(--text-body)] text-[13px] font-[inherit] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[rgba(71,184,255,0.55)] transition-colors"
+      <${TextInput}
+        class="flex-1"
         placeholder="댓글 추가..."
         value=${commentText.value}
         onInput=${(event: Event) => { commentText.value = (event.target as HTMLInputElement).value }}

@@ -281,7 +281,7 @@ describe('Autoresearch surface refresh', () => {
     await flushUi()
 
     expect(retryLoop).toHaveBeenCalledWith('loop-err0')
-    expect(container.textContent).toContain('실행 중')
+    expect(container.textContent).toContain('진행 중')
   })
 
   it('offers a delete action for persisted error loops', async () => {

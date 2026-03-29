@@ -147,7 +147,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
        let trace_id = generate_trace_id () in
          let base_dir = session_base_dir ctx.config in
          (* Ensure full session dir tree, not just base_dir (issue #3019) *)
-         mkdir_p (Filename.concat base_dir trace_id);
+         ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
          let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
            let persona_extended =
              Keeper_types_profile.load_persona_extended p.name

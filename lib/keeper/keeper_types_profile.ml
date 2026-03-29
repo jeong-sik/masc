@@ -122,19 +122,8 @@ let take n xs =
   in
   go n [] xs
 
-let mkdir_p path =
-  Fs_compat.mkdir_p path
-
-(* Directory-creation cache: avoid repeated mkdir_p syscalls for the same path.
-   keeper_dir / session_base_dir are called on every snapshot poll. *)
-let _ensured_dirs : (string, unit) Hashtbl.t = Hashtbl.create 8
-
-let ensure_dir d =
-  if not (Hashtbl.mem _ensured_dirs d) || not (Sys.file_exists d) then begin
-    mkdir_p d;
-    Hashtbl.replace _ensured_dirs d ()
-  end;
-  d
+(* Delegated to Keeper_fs — single fiber-safe ensure_dir implementation. *)
+let ensure_dir = Keeper_fs.ensure_dir
 
 let dedupe_keep_order items =
   let seen = Hashtbl.create (List.length items) in

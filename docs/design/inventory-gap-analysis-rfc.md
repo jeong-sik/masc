@@ -68,7 +68,8 @@ masc-mcp는 95.2% 구현율(spec/C-implementation-status.md)을 보고하지만,
 
 2. **비결정론적 요소는 명시적으로 격리한다.**
    - LLM 출력의 **내용**(무엇을 기억할지)은 비결정론적일 수 있다.
-   - LLM 출력의 **처리**(기억하는 행위 자체)는 결정론적이어야 한다.
+   - LLM 출력의 **처리**(기억하는 행위 자체)는 시스템 소유의 결정론적 경로여야 한다.
+   - tool call은 내용을 더 잘 싣는 보조 경로일 수 있지만, 호출 여부 자체는 모델 행동이므로 단독 guarantee path가 될 수 없다.
    - 경계: `f(nondeterministic_input) → deterministic_side_effect` 는 허용. `if nondeterministic_format then deterministic_action` 은 금지.
 
 3. **결정론적 경로에는 결정론적 검증을 붙인다.**
@@ -154,21 +155,22 @@ ls .masc/perpetual-keepers/ | wc -l
 
 | 계층 | 성격 | 설계 |
 |------|------|------|
-| **Memory write 행위** | 결정론적 (시스템 보장) | 매 턴 종료 후 시스템이 무조건 memory write를 수행. LLM 출력 포맷에 의존하지 않음 |
-| **Memory 내용 생성** | 비결정론적 (LLM 추론) | 턴의 대화 내용을 요약/추출하는 것은 LLM이 하되, 이것은 별도 요약 호출 또는 tool call |
+| **Memory write 행위** | 결정론적 (시스템 보장) | 매 턴 종료 후 시스템 소유 post-turn 경로가 무조건 memory write를 수행. LLM 출력 포맷이나 tool call 존재 여부에 의존하지 않음 |
+| **Memory 내용 생성** | 비결정론적 (LLM 추론) | 턴의 대화 내용을 요약/추출하는 것은 LLM이 하되, 이것은 별도 요약 호출 또는 선택적 tool call |
 | **Memory 내용 부재 시** | 결정론적 fallback | LLM 요약이 실패하더라도, raw turn transcript를 그대로 memory에 저장 (degraded but guaranteed) |
 
 구체적으로 세 가지 접근이 가능하다:
 
-**A. Tool-based memory (권장)**:
+**A. Tool-based memory (선택적 보조 경로)**:
 - `keeper_memory_save` tool을 keeper에게 노출
 - keeper가 tool call로 명시적으로 memory write
-- tool call은 결정론적 dispatch. 내용은 비결정론적이나 write 행위는 보장
-- 실패 시: system prompt에 "매 턴 종료 시 memory_save를 호출하라" 지시 + post-turn hook에서 미호출 감지 → fallback
+- tool call이 발생하면 dispatch와 write 자체는 결정론적
+- 단, tool call 발생 여부는 모델 행동이므로 이것만으로는 memory write guarantee가 되지 않음
+- 따라서 system prompt 지시는 품질 향상 수단일 뿐, 단독 해결책이 아님
 
-**B. Post-turn forced summarization**:
-- `keeper_agent_run.ml`에서 매 턴 종료 시, 별도 LLM 호출로 턴 요약 생성
-- 요약 결과를 `keeper_memory_bank.ml`의 write path로 강제 전달
+**B. Post-turn forced summarization (필수 guarantee path)**:
+- `keeper_agent_run.ml`에서 매 턴 종료 시, 시스템 소유 경로로 별도 LLM 호출 또는 deterministic transform을 실행
+- 생성된 요약/추출 결과를 `keeper_memory_bank.ml`의 write path로 강제 전달
 - LLM 요약 호출 자체가 실패하면 raw transcript fallback
 - 비용: 턴당 1회 추가 LLM 호출
 
@@ -178,7 +180,7 @@ ls .masc/perpetual-keepers/ | wc -l
 - 이것은 모델이 지원하는 경우에만 결정론적 (llama.cpp JSON grammar, Claude tool_use)
 - 모든 모델에서 보장되지 않으므로 단독 사용 불가
 
-**권장**: A + B의 조합. Tool call이 주 경로, post-turn summarization이 fallback. 두 경로 모두 LLM 출력 **포맷**에 의존하지 않음.
+**권장**: B를 guarantee path로 두고, A를 선택적 enrichment path로 결합한다. 즉 system-owned post-turn write가 항상 실행되고, tool call은 salience/selection 품질을 높일 때만 추가한다. 두 경로 모두 LLM 출력 **포맷**에 의존하지 않는다.
 
 **기존 RFC와의 관계**: 기존 RFC의 G1-G3 (dead code 활성화)와 G7 (checkpoint)은 유효. G4-G6 (`[STATE]` 포맷 의존)은 위 접근으로 대체.
 

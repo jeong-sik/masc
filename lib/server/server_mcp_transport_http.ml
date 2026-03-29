@@ -392,11 +392,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
-  let base_path =
-    match deps.get_server_state_opt () with
-    | Some s -> s.Mcp_server.room_config.base_path
-    | None -> default_base_path ()
-  in
+  let base_path = deps.get_base_path () in
   let auth_result =
     match profile with
     | Mcp_eio.Full | Mcp_eio.Managed_agent ->

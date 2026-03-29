@@ -24,7 +24,13 @@ let test_classify_design_doc () =
           "docs/design/contract-driven-agent-loop-rfc.md"));
   Alcotest.(check bool) "docs/spec/... is banned" true
     (Option.is_some
-       (Adversarial_eval.classify_path "docs/spec/13-oas-integration.md"))
+       (Adversarial_eval.classify_path "docs/spec/13-oas-integration.md"));
+  Alcotest.(check bool) "rfc doc outside docs/ is banned" true
+    (Option.is_some
+       (Adversarial_eval.classify_path "tmp/contract-driven-agent-loop-rfc.md"));
+  Alcotest.(check bool) "architecture doc outside docs/ is banned" true
+    (Option.is_some
+       (Adversarial_eval.classify_path "notes/system-architecture.md"))
 
 let test_classify_history () =
   Alcotest.(check bool) "governance_v2.json is banned" true
@@ -43,7 +49,9 @@ let test_classify_allowed () =
   Alcotest.(check bool) "test_foo.ml is allowed" true
     (Option.is_none (Adversarial_eval.classify_path "test_foo.ml"));
   Alcotest.(check bool) "spec_decoder.ml is allowed" true
-    (Option.is_none (Adversarial_eval.classify_path "lib/spec_decoder.ml"))
+    (Option.is_none (Adversarial_eval.classify_path "lib/spec_decoder.ml"));
+  Alcotest.(check bool) "governance source file is allowed" true
+    (Option.is_none (Adversarial_eval.classify_path "lib/governance_pipeline.ml"))
 
 let test_validate_clean_inputs () =
   let inputs =

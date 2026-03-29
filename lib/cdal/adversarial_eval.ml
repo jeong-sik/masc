@@ -70,6 +70,25 @@ let split_path_segments path =
   String.split_on_char '/' path
   |> List.filter (fun segment -> segment <> "" && segment <> ".")
 
+let tokenize_segment segment =
+  let len = String.length segment in
+  let is_token_char = function
+    | 'a' .. 'z' | '0' .. '9' -> true
+    | _ -> false
+  in
+  let rec collect start idx acc =
+    if idx = len then
+      if start < idx then String.sub segment start (idx - start) :: acc else acc
+    else if is_token_char segment.[idx] then
+      collect start (idx + 1) acc
+    else
+      let acc =
+        if start < idx then String.sub segment start (idx - start) :: acc else acc
+      in
+      collect (idx + 1) (idx + 1) acc
+  in
+  List.rev (collect 0 0 [])
+
 let classify_path path =
   let normalized = normalize_path path in
   let lower = Filename.basename normalized in
@@ -83,11 +102,21 @@ let classify_path path =
     List.exists (fun pat ->
       String.starts_with ~prefix:pat lower) patterns
   in
+  let basename_tokens = tokenize_segment lower in
+  let segment_has_token segment token =
+    List.mem token (tokenize_segment segment)
+  in
   let has_doc_dir =
     List.exists
       (fun segment ->
         List.mem segment [ "docs"; "doc"; "design"; "adr"; "rfcs"; "rfc"; "spec"; "specs" ])
       dir_segments
+  in
+  let has_doc_token =
+    List.exists
+      (fun segment ->
+        List.exists (segment_has_token segment) banned_doc_patterns)
+      segments
   in
   let has_room_history =
     List.exists (contains_substring normalized)
@@ -100,15 +129,17 @@ let classify_path path =
         "room/task-history" ]
   in
   let has_governance_history =
-    List.exists (contains_substring normalized)
-      [ "governance"; "session_log"; "session-log"; "retrospective" ]
+    (List.mem "governance" basename_tokens
+     && List.exists (Filename.check_suffix lower)
+          [ ".json"; ".jsonl"; ".yaml"; ".yml"; ".log"; ".txt" ])
+    || List.exists (contains_substring normalized) [ "session_log"; "session-log" ]
+    || (List.mem "retrospective" basename_tokens && has_doc_extension lower)
   in
   if check_patterns banned_readme_patterns then Some Readme
   else if has_room_history then Some Room_history
   else if has_task_history then Some Task_history
   else if has_governance_history then Some Governance_history
-  else if has_doc_dir && has_doc_extension lower then Some Design_doc
-  else if has_doc_extension lower && check_patterns banned_doc_patterns then Some Design_doc
+  else if has_doc_extension lower && (has_doc_dir || has_doc_token) then Some Design_doc
   else None
 
 let validate_inputs inputs =

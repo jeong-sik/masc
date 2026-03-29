@@ -45,10 +45,17 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml + dependencies
-        uses: ./.github/actions/setup-ocaml-deps
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
         with:
           pin-flags: --with-bisect
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
           install-flags: --with-test
           os-packages: ripgrep bc
 
@@ -144,10 +151,17 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml + dependencies
-        uses: ./.github/actions/setup-ocaml-deps
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
         with:
           pin-flags: --with-bisect
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
           install-flags: --with-test
           os-packages: jq
 
@@ -237,8 +251,14 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml + dependencies
-        uses: ./.github/actions/setup-ocaml-deps
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
 
       - name: Build server executable
         run: |
@@ -283,8 +303,14 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml + dependencies
-        uses: ./.github/actions/setup-ocaml-deps
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
         with:
           os-packages: ripgrep
 
@@ -346,8 +372,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup OCaml + dependencies
-        uses: ./.github/actions/setup-ocaml-deps
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
         with:
           install-flags: --with-doc
 

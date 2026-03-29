@@ -241,12 +241,20 @@ export interface KeeperLifecycleResponse {
   error?: string
 }
 
+async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promise<T> {
+  try {
+    return await resp.json() as T
+  } catch {
+    return { ok: false, error: `${fallbackError} (HTTP ${resp.status})` } as T
+  }
+}
+
 export async function bootKeeper(name: string): Promise<KeeperLifecycleResponse> {
   const resp = await fetch(`/api/v1/keepers/${encodeURIComponent(name)}/boot`, {
     method: 'POST',
     headers: jsonHeaders(),
   })
-  return resp.json() as Promise<KeeperLifecycleResponse>
+  return safeJsonResponse<KeeperLifecycleResponse>(resp, `Failed to boot ${name}`)
 }
 
 export async function shutdownKeeper(name: string): Promise<KeeperLifecycleResponse> {
@@ -254,5 +262,5 @@ export async function shutdownKeeper(name: string): Promise<KeeperLifecycleRespo
     method: 'POST',
     headers: jsonHeaders(),
   })
-  return resp.json() as Promise<KeeperLifecycleResponse>
+  return safeJsonResponse<KeeperLifecycleResponse>(resp, `Failed to shut down ${name}`)
 }

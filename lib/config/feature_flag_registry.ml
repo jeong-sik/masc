@@ -97,6 +97,11 @@ let all_flags : flag list = [
     default = true; category = "keeper";
     lifecycle = Active; since = "2.162.0" };
 
+  { env_name = "MASC_KEEPER_SMART_HEARTBEAT";
+    description = "Skip heartbeat cycles when busy (task proves liveness) or extend interval when idle";
+    default = true; category = "keeper";
+    lifecycle = Active; since = "2.163.0" };
+
   { env_name = "MASC_KEEPER_ALERT_ENABLED";
     description = "Master switch for keeper interesting alert detection";
     default = true; category = "keeper";

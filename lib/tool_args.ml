@@ -37,6 +37,38 @@ let get_float_opt args key = Safe_ops.json_float_opt key args
 let get_bool_opt args key = Safe_ops.json_bool_opt key args
 let get_string_list args key = Safe_ops.json_string_list key args
 
+(** {1 Standard Error Codes}
+
+    Machine-readable error codes for deterministic client-side classification.
+    MCP clients can match on [error_code] to decide retry, escalation, or display.
+
+    @since 2.163.0
+    @see <docs/design/api-versioning-design.md> I4 Error Consistency *)
+
+type error_code =
+  | Validation_error      (** Missing or invalid input parameters *)
+  | Not_found             (** Requested resource does not exist *)
+  | Auth_required         (** Authentication needed *)
+  | Permission_denied     (** Authenticated but not authorized *)
+  | Conflict              (** Resource state conflict (e.g. already claimed) *)
+  | Rate_limited          (** Too many requests *)
+  | Timeout               (** Operation timed out *)
+  | Not_implemented       (** Feature exists in schema but not in runtime *)
+  | Internal_error        (** Unexpected server-side failure *)
+  | Precondition_failed   (** Required precondition not met (e.g. room not joined) *)
+
+let error_code_to_string = function
+  | Validation_error -> "validation_error"
+  | Not_found -> "not_found"
+  | Auth_required -> "auth_required"
+  | Permission_denied -> "permission_denied"
+  | Conflict -> "conflict"
+  | Rate_limited -> "rate_limited"
+  | Timeout -> "timeout"
+  | Not_implemented -> "not_implemented"
+  | Internal_error -> "internal_error"
+  | Precondition_failed -> "precondition_failed"
+
 (** {1 Canonical Error/OK Response Helpers}
 
     New tool handlers should use these instead of defining local helpers.
@@ -47,12 +79,27 @@ let error_response message =
   Yojson.Safe.to_string
     (`Assoc [ ("status", `String "error"); ("message", `String message) ])
 
+(** Build a JSON error response string with machine-readable error code:
+    [\{"status":"error","error_code":"validation_error","message":"..."\}]
+
+    Preferred over [error_response] for new tool handlers. *)
+let error_response_typed ~code message =
+  Yojson.Safe.to_string
+    (`Assoc [
+      ("status", `String "error");
+      ("error_code", `String (error_code_to_string code));
+      ("message", `String message);
+    ])
+
 (** Build a JSON OK response string with additional fields. *)
 let ok_response fields =
   Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
 
 (** Convenience: [(false, error_response msg)] *)
 let error_result msg = (false, error_response msg)
+
+(** Convenience: [(false, error_response_typed ~code msg)] *)
+let error_result_typed ~code msg = (false, error_response_typed ~code msg)
 
 (** Convenience: [(true, ok_response fields)] *)
 let ok_result fields = (true, ok_response fields)

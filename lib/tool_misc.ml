@@ -250,11 +250,14 @@ let handle_feature_flags _ctx args : result =
     | None -> flags
     | Some cat -> List.filter (fun (f : Feature_flag_registry.flag) -> f.category = cat) flags
   in
+  let deprecated_tools = Tool_catalog.deprecated_tool_entries in
   let json = `Assoc [
     ("total", `Int (List.length Feature_flag_registry.all_flags));
     ("shown", `Int (List.length flags));
     ("flags", `List (List.map Feature_flag_registry.flag_to_json flags));
-    ("deprecated", `Int (List.length (Feature_flag_registry.deprecated_flags ())));
+    ("deprecated_flags", `Int (List.length (Feature_flag_registry.deprecated_flags ())));
+    ("deprecated_tools", `Int (List.length deprecated_tools));
+    ("deprecated_tool_names", `List (List.map (fun (name, _) -> `String name) deprecated_tools));
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 

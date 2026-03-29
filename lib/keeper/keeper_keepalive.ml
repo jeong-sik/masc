@@ -375,7 +375,13 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                             ~generation:meta_current.generation
                             ~context_ratio:(Keeper_exec_context.context_ratio c)
                             ~message_count:(List.length c.messages)
-                      | None -> ()))
+                      | None -> ());
+                     (* Flush tool usage stats to disk for persistence *)
+                     (try
+                        Keeper_registry.flush_tool_usage
+                          ~base_path:ctx.config.base_path
+                          meta_current.name
+                      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()))
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn ->
@@ -671,6 +677,8 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
   else (
     (* Register in Keeper_registry first — single source of truth. *)
     let reg = Keeper_registry.register ~base_path:ctx.config.base_path m.name m in
+    (* Restore persisted tool usage stats from previous session *)
+    Keeper_registry.restore_tool_usage ~base_path:ctx.config.base_path m.name;
     let stop = reg.fiber_stop in
     let wakeup = reg.fiber_wakeup in
     (* Start optional gRPC heartbeat fiber *)

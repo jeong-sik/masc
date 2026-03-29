@@ -7,6 +7,17 @@ import { signal } from '@preact/signals'
 import { formatPct } from '../lib/format-number'
 import type { Keeper, KeeperMetricPoint } from '../types'
 
+// ── Context pressure thresholds (shared across KPIs, charts) ─
+const CTX_CRITICAL_PCT = 85
+const CTX_WARN_PCT = 70
+const CTX_COLOR_CRITICAL = '#ef4444'
+const CTX_COLOR_WARN = '#f59e0b'
+const CTX_COLOR_OK = '#22c55e'
+
+function ctxColor(pct: number): string {
+  return pct > CTX_CRITICAL_PCT ? CTX_COLOR_CRITICAL : pct > CTX_WARN_PCT ? CTX_COLOR_WARN : CTX_COLOR_OK
+}
+
 // ── Utility functions ────────────────────────────────────
 
 export function formatTokens(n: number | undefined): string {
@@ -64,7 +75,7 @@ function KpiCard({ label, value, hint, tone = 'default', progress }: {
       <div class="text-2xl font-bold ${KPI_VALUE_TONE[tone]} tabular-nums leading-none">${value}</div>
       ${progress != null ? html`
         <div class="w-full h-1 bg-[var(--white-6)] rounded-full overflow-hidden mt-0.5">
-          <div class="h-full rounded-full transition-all duration-500" style="width:${Math.min(progress, 100)}%;background:${progress > 85 ? '#ef4444' : progress > 70 ? '#fbbf24' : '#4ade80'}"></div>
+          <div class="h-full rounded-full transition-all duration-500" style="width:${Math.min(progress, 100)}%;background:${progress > CTX_CRITICAL_PCT ? CTX_COLOR_CRITICAL : progress > CTX_WARN_PCT ? '#fbbf24' : '#4ade80'}"></div>
         </div>
       ` : null}
       ${hint ? html`<div class="text-[10px] text-[var(--text-dim)] leading-snug">${hint}</div>` : null}
@@ -83,8 +94,8 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
       : null
 
   const ctxPct = keeper.context_ratio != null ? Math.round(keeper.context_ratio * 100) : null
-  const ctxTone: KpiTone = ctxPct == null ? 'default' : ctxPct > 85 ? 'bad' : ctxPct > 70 ? 'warn' : ctxPct > 0 ? 'ok' : 'default'
-  const ctxHint = ctxPct != null && ctxPct > 80 ? '한계 접근 중' : undefined
+  const ctxTone: KpiTone = ctxPct == null ? 'default' : ctxPct > CTX_CRITICAL_PCT ? 'bad' : ctxPct > CTX_WARN_PCT ? 'warn' : ctxPct > 0 ? 'ok' : 'default'
+  const ctxHint = ctxPct != null && ctxPct > CTX_WARN_PCT ? '한계 접근 중' : undefined
 
   // Provider-model call statistics from metrics_series
   const modelCounts: Record<string, number> = {}
@@ -170,7 +181,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   if (series.length < 2) {
     const pct = ((keeper.context?.context_ratio ?? 0) * 100)
-    const color = pct > 85 ? '#ef4444' : pct > 70 ? '#f59e0b' : '#22c55e'
+    const color = ctxColor(pct)
     return html`
       <div class="flex items-center gap-3 mb-5 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
         <div class="flex-1 h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
@@ -189,14 +200,14 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
   })
   const polyline = pts.map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
   const lastRatio = ((series[series.length - 1] as KeeperMetricPoint)?.context_ratio ?? 0) * 100
-  const lineColor = lastRatio > 85 ? '#ef4444' : lastRatio > 70 ? '#f59e0b' : '#22c55e'
+  const lineColor = ctxColor(lastRatio)
 
   return html`
     <div class="flex items-center gap-3 mb-5 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded" style="background:#0b1220;">
         <line x1="${pad}" y1="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
-        <line x1="${pad}" y1="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
-        <line x1="${pad}" y1="${(H - pad - 0.85 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.85 * (H - 2 * pad)).toFixed(1)}" stroke="#f59e0b" stroke-dasharray="3,3" stroke-width="0.5"/>
+        <line x1="${pad}" y1="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
+        <line x1="${pad}" y1="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="${CTX_COLOR_WARN}" stroke-dasharray="3,3" stroke-width="0.5"/>
         ${pts.filter(({ p }) => p.is_handoff).map(({ x }) => html`
           <line x1="${x.toFixed(1)}" y1="${pad}" x2="${x.toFixed(1)}" y2="${H - pad}" stroke="#ef4444" stroke-width="1.5" opacity="0.7"/>
         `)}
@@ -207,6 +218,94 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
       </svg>
       <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${lastRatio.toFixed(1)}%</span>
     </div>`
+}
+
+// ── Metrics Charts (Latency + Cost + Model) ─────────────
+
+const SPARKLINE_W = 200
+const SPARKLINE_H = 40
+const SPARKLINE_PAD = 2
+const MODEL_NAME_MAX_LEN = 20
+
+function miniSparkline(
+  data: number[],
+  maxOverride?: number,
+): string {
+  const W = SPARKLINE_W, H = SPARKLINE_H, pad = SPARKLINE_PAD
+  const n = data.length
+  if (n < 2) return ''
+  const maxVal = maxOverride ?? Math.max(...data, 1)
+  return data.map((v, i) => {
+    const x = pad + (i / (n - 1)) * (W - 2 * pad)
+    const y = H - pad - (v / maxVal) * (H - 2 * pad)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+}
+
+export function MetricsCharts({ keeper }: { keeper: Keeper }) {
+  const series = keeper.metrics_series ?? []
+  if (series.length < 2) return null
+
+  const latencies = series.map((p: KeeperMetricPoint) => p.latency_ms ?? 0)
+  const costs = series.map((p: KeeperMetricPoint) => p.cost_usd ?? 0)
+  const W = SPARKLINE_W, H = SPARKLINE_H
+
+  const lastLatency = latencies[latencies.length - 1] ?? 0
+  const totalCost = costs.reduce((a: number, b: number) => a + b, 0)
+
+  // Model switches: detect when model_used changes
+  const modelSwitches: { index: number; model: string }[] = []
+  for (let i = 1; i < series.length; i++) {
+    if ((series[i] as KeeperMetricPoint).model_used !== (series[i - 1] as KeeperMetricPoint).model_used) {
+      modelSwitches.push({ index: i, model: (series[i] as KeeperMetricPoint).model_used })
+    }
+  }
+
+  const latencyLine = miniSparkline(latencies)
+  const costLine = miniSparkline(costs)
+
+  return html`
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
+      ${'' /* Latency */}
+      <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Latency</span>
+          <span class="text-xs font-mono tabular-nums text-[#9ad9ff]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
+        </div>
+        <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+          ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="#9ad9ff" stroke-width="1.5"/>` : null}
+        </svg>
+      </div>
+
+      ${'' /* Cost */}
+      <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Cost</span>
+          <span class="text-xs font-mono tabular-nums text-[#a78bfa]">$${totalCost.toFixed(4)}</span>
+        </div>
+        <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+          ${costLine ? html`<polyline points="${costLine}" fill="none" stroke="#a78bfa" stroke-width="1.5"/>` : null}
+        </svg>
+      </div>
+
+      ${'' /* Model timeline */}
+      ${modelSwitches.length > 0 ? html`
+        <div class="md:col-span-2 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Model Switches</span>
+            <span class="text-[10px] text-[var(--text-dim)]">${modelSwitches.length} switch${modelSwitches.length > 1 ? 'es' : ''}</span>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            ${modelSwitches.map(s => html`
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-[rgba(250,204,21,0.08)] text-[#facc15] border border-[rgba(250,204,21,0.15)] font-mono">
+                T${s.index} -> ${s.model.length > MODEL_NAME_MAX_LEN ? s.model.slice(0, MODEL_NAME_MAX_LEN) + '...' : s.model}
+              </span>
+            `)}
+          </div>
+        </div>
+      ` : null}
+    </div>
+  `
 }
 
 // ── Raw Data (Debug) ─────────────────────────────────────

@@ -20,6 +20,7 @@ import {
   ContextChart,
   EquipmentList,
   KpiGrid,
+  MetricsCharts,
   RawDataDebug,
   RelationshipList,
   TraitsList,
@@ -30,6 +31,7 @@ import {
 } from './keeper-detail-runtime'
 import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
+import { KeeperTrajectoryTimeline } from './keeper-trajectory-timeline'
 import { DialogOverlay } from './common/dialog'
 
 // ── Global overlay state ──────────────────────────────────
@@ -213,6 +215,9 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Context chart ── */}
         <${ContextChart} keeper=${keeper} />
 
+        ${'' /* ── Latency / Cost / Model charts ── */}
+        <${MetricsCharts} keeper=${keeper} />
+
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
 
@@ -267,6 +272,12 @@ export function KeeperDetailOverlay() {
               <//>
             `
             : null}
+
+          <div class="md:col-span-2">
+            <${SectionCard} title="도구 호출 궤적">
+              <${KeeperTrajectoryTimeline} keeperName=${keeper.name} />
+            <//>
+          </div>
 
           <${SectionCard} title="품질 시그널">
             <${RuntimeSignals} keeper=${keeper} />

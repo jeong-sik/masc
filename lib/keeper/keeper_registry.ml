@@ -395,3 +395,60 @@ let tool_usage_of_by_name name =
   | Some entry ->
     Hashtbl.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
     |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
+
+(* -- Tool usage persistence ---------------------------------------- *)
+
+let tool_usage_path ~base_path name =
+  let dir = Filename.concat (Filename.concat base_path ".masc") "keepers" in
+  Filename.concat dir (name ^ ".tool_usage.json")
+
+let flush_tool_usage ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  | None -> ()
+  | Some entry ->
+    let items =
+      Hashtbl.fold (fun tool_name (e : tool_call_entry) acc ->
+        `Assoc [
+          ("tool", `String tool_name);
+          ("count", `Int e.count);
+          ("successes", `Int e.successes);
+          ("failures", `Int e.failures);
+          ("last_used_at", `Float e.last_used_at);
+        ] :: acc
+      ) entry.tool_usage []
+    in
+    let json = `Assoc [
+      ("keeper", `String name);
+      ("flushed_at", `Float (Time_compat.now ()));
+      ("tools", `List items);
+    ] in
+    let path = tool_usage_path ~base_path name in
+    (try
+       Fs_compat.mkdir_p (Filename.dirname path);
+       Fs_compat.save_file path (Yojson.Safe.to_string json ^ "\n")
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+       Log.Keeper.error "flush_tool_usage %s: %s" name (Printexc.to_string exn))
+
+let restore_tool_usage ~base_path name =
+  let path = tool_usage_path ~base_path name in
+  if not (Sys.file_exists path) then ()
+  else
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
+    | None -> ()
+    | Some entry ->
+      (try
+         let content = Fs_compat.load_file path in
+         let json = Yojson.Safe.from_string content in
+         let open Yojson.Safe.Util in
+         let tools = json |> member "tools" |> to_list in
+         List.iter (fun item ->
+           let tool_name = item |> member "tool" |> to_string in
+           let e = {
+             count = item |> member "count" |> to_int;
+             successes = item |> member "successes" |> to_int;
+             failures = item |> member "failures" |> to_int;
+             last_used_at = item |> member "last_used_at" |> to_float;
+           } in
+           Hashtbl.replace entry.tool_usage tool_name e
+         ) tools
+       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())

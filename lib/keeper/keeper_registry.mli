@@ -176,3 +176,9 @@ val find_by_agent_name : string -> registry_entry option
 (** Get tool usage by keeper name (scans all base_paths). *)
 val tool_usage_of_by_name : string ->
   (string * Keeper_types.tool_call_entry) list
+
+(** Flush in-memory tool usage stats to disk for persistence across restarts. *)
+val flush_tool_usage : base_path:string -> string -> unit
+
+(** Restore tool usage stats from disk after keeper re-registration. *)
+val restore_tool_usage : base_path:string -> string -> unit

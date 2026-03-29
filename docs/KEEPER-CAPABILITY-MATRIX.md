@@ -31,17 +31,17 @@ All keepers receive: base + board + fs + shell + library + taskboard + governanc
 Voice tools are added when `policy_voice_enabled = true`.
 `write_done = true` returns empty tool list (session terminated).
 
-## Continuity Contract
+## Continuity Positioning
 
 Keeper continuity is a bounded advanced capability, not a general memory promise.
 
-What the product should promise:
+If productized, the continuity promise is:
 
 - `masc_keeper_msg` can continue a same-trace conversation when checkpoint restore is healthy
 - `masc_keeper_status` and `masc_keeper_list(detailed=true)` expose enough continuity state to diagnose restore and handoff behavior
 - validation should rely on OAS checkpoint truth plus live runtime evidence
 
-What the product should not promise:
+The product should not promise:
 
 - long-term or general conversational memory
 - cross-generation recall

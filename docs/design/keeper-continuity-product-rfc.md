@@ -100,7 +100,7 @@ Avoid:
 
 The feature may be described as a productized advanced capability only when all of the following are true:
 
-- OAS checkpoint diagnosis has identified and closed the root cause of the current continuity regression
+- OAS checkpoint diagnosis has identified and closed the root cause of the current continuity regression, as defined in the production runbook
 - same-trace continuity passes the validation harness on live runtime
 - keeper read surfaces report continuity state truthfully enough for diagnosis
 - the production runbook defines evidence, monitoring, and rollback

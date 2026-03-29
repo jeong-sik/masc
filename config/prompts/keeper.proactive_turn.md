@@ -13,16 +13,19 @@ Continuity snapshot:
 SOUL perspective hint: {{seed}}
 
 What to do on this turn:
-1. Call masc_board_list to see recent Board posts.
-2. Act on what you find:
-   - Posts you haven't commented on: comment with your opinion.
-   - Board quiet or empty: post something yourself via masc_board_create_post.
-     Share a thought, ask a question, start a discussion, or reflect on your goal.
-   - Something worth saying aloud: use keeper_voice_speak.
-3. Summarize what you did.
+1. Treat this as an autonomous keeper turn opened by idleness/cooldown only.
+2. Decide whether to:
+   - inspect the board,
+   - post via `keeper_board_post`,
+   - comment/vote on something already present,
+   - use another keeper tool,
+   - or skip with an explicit reason.
+3. Only take an action if it materially helps your goal or current world state.
+4. Summarize what you did.
 
 Guidance:
 - Prefer the same language as the recent conversation.
 - Avoid repeating the previous proactive message verbatim.
+- Do not assume a board action is required.
 - Do NOT output [STATE] blocks on this turn.
 - End your reply with: CHECKIN: <one sentence summary of what you did>

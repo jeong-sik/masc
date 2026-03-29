@@ -9,9 +9,21 @@ open Keeper_types
 open Keeper_memory
 open Keeper_exec_context
 
+type pending_board_event = {
+  post_id : string;
+  author : string;
+  title : string;
+  preview : string;
+  hearth : string option;
+  post_kind : Board.post_kind;
+  updated_at : float;
+  explicit_mention : bool;
+  matched_targets : string list;
+}
+
 type world_observation = {
   pending_mentions : (string * string) list;
-  pending_board_events : string list;
+  pending_board_events : pending_board_event list;
   idle_seconds : int;
   active_goals : string list;
   continuity_summary : string;
@@ -191,9 +203,9 @@ let bootstrap_window_sec = 300.0
 
 (** Collect recent board activity using cursor-based tracking.
     Cursor state lives in Keeper_registry (board_cursor_ts field).
-    Returns (event summaries, new post count, mention count). *)
+    Returns (structured events, new post count, mention count). *)
 let collect_board_events ~(base_path : string) ~(continuity_summary : string)
-    ~(meta : keeper_meta) : string list * int * int =
+    ~(meta : keeper_meta) : pending_board_event list * int * int =
   try
     let since_ts =
       let ts = Keeper_registry.get_board_cursor_ts ~base_path meta.name in
@@ -205,23 +217,20 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
       Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:20 ()
     in
     Keeper_registry.set_board_cursor_ts ~base_path meta.name cursor_watermark;
+    let self_tokens =
+      [ meta.name; meta.agent_name ]
+      |> List.map (fun value -> String.lowercase_ascii (String.trim value))
+    in
     let recent =
-      List.filter (fun (p : Board.post) -> p.updated_at >= since_ts) posts
-      |> List.filter (fun (p : Board.post) ->
-             let signal : Board_dispatch.keeper_board_signal =
-               {
-                 kind = Board_dispatch.Board_post_created;
-                 post_id = Board.Post_id.to_string p.id;
-                 author = Board.Agent_id.to_string p.author;
-                 title = p.title;
-                 content = p.content;
-                 hearth = p.hearth;
-               }
-             in
-             let matched =
-               board_signal_match ~continuity_summary ~meta ~signal
-             in
-             matched.explicit_mention)
+      List.filter
+        (fun (p : Board.post) ->
+          p.updated_at >= since_ts
+          && not
+               (List.mem
+                  (String.lowercase_ascii
+                     (String.trim (Board.Agent_id.to_string p.author)))
+                  self_tokens))
+        posts
     in
     let new_count = List.length recent in
     let targets =
@@ -252,10 +261,28 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
       in
       List.map
         (fun (p : Board.post) ->
-          Printf.sprintf "[%s] %s: %s"
-            (Board.Agent_id.to_string p.author)
-            p.title
-            (short_preview ~max_len:80 p.content))
+          let signal : Board_dispatch.keeper_board_signal =
+            {
+              kind = Board_dispatch.Board_post_created;
+              post_id = Board.Post_id.to_string p.id;
+              author = Board.Agent_id.to_string p.author;
+              title = p.title;
+              content = p.content;
+              hearth = p.hearth;
+            }
+          in
+          let matched = board_signal_match ~continuity_summary ~meta ~signal in
+          {
+            post_id = Board.Post_id.to_string p.id;
+            author = Board.Agent_id.to_string p.author;
+            title = p.title;
+            preview = short_preview ~max_len:80 p.content;
+            hearth = p.hearth;
+            post_kind = p.post_kind;
+            updated_at = p.updated_at;
+            explicit_mention = matched.explicit_mention;
+            matched_targets = matched.matched_targets;
+          })
         capped
     in
     (events, new_count, mention_count)
@@ -266,7 +293,8 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
       (Printexc.to_string exn);
     ([], 0, 0)
 
-let observe ~(pending_board_events : string list option) ~(config : Room.config)
+let observe ~(pending_board_events : pending_board_event list option)
+    ~(config : Room.config)
     ~(meta : keeper_meta) :
     world_observation =
   let pending_mentions = collect_pending_mentions ~config ~meta in

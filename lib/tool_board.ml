@@ -80,6 +80,39 @@ let visibility_of_string = function
   | "direct" -> Some Board.Direct
   | _ -> None
 
+let meta_source = function
+  | Some (`Assoc fields) -> (
+      match List.assoc_opt "source" fields with
+      | Some (`String source) ->
+          let trimmed = String.lowercase_ascii (String.trim source) in
+          if trimmed = "" then None else Some trimmed
+      | _ -> None)
+  | _ -> None
+
+let resolve_board_post_kind ~author ~(meta_json : Yojson.Safe.t option)
+    (raw_kind : string option) :
+    (Board.post_kind, string) Stdlib.result =
+  let author = String.lowercase_ascii (String.trim author) in
+  let source = meta_source meta_json in
+  let requested =
+    match raw_kind with
+    | Some raw -> Board.post_kind_of_string (String.lowercase_ascii (String.trim raw))
+    | None -> None
+  in
+  match source, requested with
+  | Some "keeper_board_post", Some Board.Automation_post
+  | Some "keeper_board_post", None ->
+      Ok Board.Automation_post
+  | Some "keeper_board_post", Some _ ->
+      Error "keeper board posts must use post_kind=automation"
+  | _, Some Board.Human_post
+  | _, None when author <> "anonymous" ->
+      Ok Board.Human_post
+  | _, Some (Board.Automation_post | Board.System_post) ->
+      Error "masc_board_post only accepts human posts on the public/dashboard surface"
+  | _ ->
+      Ok Board.Human_post
+
 (** {1 Formatters} *)
 
 let format_post (p : Board.post) =
@@ -166,11 +199,7 @@ let handle_post_create args =
   let visibility_str = get_string args "visibility" "internal" in
   let hearth = get_string_opt args "hearth" in
   let thread_id = get_string_opt args "thread_id" in
-  let post_kind =
-    match get_string_opt args "post_kind" with
-    | Some raw -> Board.post_kind_of_string raw
-    | None -> None
-  in
+  let raw_post_kind = get_string_opt args "post_kind" in
   let meta_json =
     match Yojson.Safe.Util.member "meta" args with
     | `Assoc _ as meta -> Some meta
@@ -181,16 +210,18 @@ let handle_post_create args =
     | Some v -> v
     | None -> Board.Internal
   in
-
-  match
-    Board_dispatch.create_post ~author ~content ?title ?body ?post_kind ?meta_json
-      ~visibility ~ttl_hours ?hearth ?thread_id ()
-  with
-  | Ok post ->
-      let json = Board.post_to_yojson post in
-      (true, Printf.sprintf "✅ Post created:\n%s" (Yojson.Safe.pretty_to_string json))
-  | Error e ->
-      (false, Printf.sprintf "❌ %s" (board_error_to_string e))
+  match resolve_board_post_kind ~author ~meta_json raw_post_kind with
+  | Error msg -> (false, "❌ " ^ msg)
+  | Ok post_kind ->
+      match
+        Board_dispatch.create_post ~author ~content ?title ?body ~post_kind ?meta_json
+          ~visibility ~ttl_hours ?hearth ?thread_id ()
+      with
+      | Ok post ->
+          let json = Board.post_to_yojson post in
+          (true, Printf.sprintf "✅ Post created:\n%s" (Yojson.Safe.pretty_to_string json))
+      | Error e ->
+          (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
 (** Sort posts by different criteria *)
 type sort_order = Hot | Trending | Recent | Updated | Discussed
@@ -447,7 +478,7 @@ let handle_hearth_list _args =
 
 let tool_post_create : Types.tool_schema = {
   name = "masc_board_post";
-  description = "Create a post on the MASC internal board for sharing updates, questions, or knowledge with other agents. Use when you have information worth broadcasting or need input from the community.";
+  description = "Create a human-authored post on the MASC internal board for sharing updates, questions, or knowledge with other agents. Keeper and internal automation surfaces use narrower adapters.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -455,7 +486,6 @@ let tool_post_create : Types.tool_schema = {
       ("body", `Assoc [("type", `String "string"); ("description", `String "Canonical visible body text")]);
       ("content", `Assoc [("type", `String "string"); ("description", `String "Post content (max 4000 chars)")]);
       ("author", `Assoc [("type", `String "string"); ("description", `String "Author name")]);
-      ("post_kind", `Assoc [("type", `String "string"); ("description", `String "human|automation|system (optional)")]);
       ("meta", `Assoc [("type", `String "object"); ("description", `String "Optional structured operational metadata")]);
       ("visibility", `Assoc [("type", `String "string"); ("description", `String "public|unlisted|internal|direct (default: internal)")]);
       ("ttl_hours", `Assoc [("type", `String "integer"); ("description", `String "Time-to-live in hours (default: 168, max: 720)")]);
@@ -633,7 +663,7 @@ let tool_migrate : Types.tool_schema = {
 
 let tool_reclassify : Types.tool_schema = {
   name = "masc_board_reclassify";
-  description = "Recompute canonical board post kinds from explicit author/provenance contracts. Hidden admin tool for safe dry-run backfills.";
+  description = "Backfill legacy board rows that predate explicit post_kind contracts. Hidden admin tool for safe dry-run migration only.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [

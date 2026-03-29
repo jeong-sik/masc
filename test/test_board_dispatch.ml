@@ -24,6 +24,36 @@ let with_eio f () =
   Board_dispatch.init_jsonl ();
   f ()
 
+let seed_legacy_keeper_post () =
+  let now = Time_compat.now () in
+  let post_id = Printf.sprintf "legacy-keeper-%06x" (Random.bits ()) in
+  let path = Board.persist_path () in
+  let dir = Filename.dirname path in
+  Fs_compat.mkdir_p dir;
+  let json =
+    `Assoc
+      [
+        ("id", `String post_id);
+        ("author", `String "dm-keeper");
+        ("title", `String "Legacy keeper");
+        ("body", `String "keeper");
+        ("content", `String "keeper");
+        ("visibility", `String "internal");
+        ("created_at", `Float now);
+        ("updated_at", `Float now);
+        ("expires_at", `Float 0.0);
+        ("votes_up", `Int 0);
+        ("votes_down", `Int 0);
+        ("reply_count", `Int 0);
+        ("meta", `Assoc [ ("source", `String "keeper_board_post") ]);
+      ]
+  in
+  Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  post_id
+
 (** {1 Backend Selection} *)
 
 let test_default_backend () =
@@ -39,7 +69,10 @@ let test_backend_returns_jsonl () =
 (** {1 Post CRUD via Dispatch} *)
 
 let test_create_and_get_post () =
-  match Board_dispatch.create_post ~author:"test-agent" ~content:"dispatch test post" () with
+  match
+    Board_dispatch.create_post ~author:"test-agent" ~content:"dispatch test post"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -85,8 +118,10 @@ let test_structured_post_roundtrip () =
             (Board.post_kind_to_string fetched.post_kind)
 
 let test_list_posts () =
-  ignore (Board_dispatch.create_post ~author:"lister" ~content:"list test 1" ());
-  ignore (Board_dispatch.create_post ~author:"lister" ~content:"list test 2" ());
+  ignore (Board_dispatch.create_post ~author:"lister" ~content:"list test 1"
+            ~post_kind:Board.Human_post ());
+  ignore (Board_dispatch.create_post ~author:"lister" ~content:"list test 2"
+            ~post_kind:Board.Human_post ());
   let posts = Board_dispatch.list_posts ~limit:10 () in
   Alcotest.(check bool) "at least 2 posts" true (List.length posts >= 2)
 
@@ -106,10 +141,11 @@ let test_list_posts_with_filters () =
   let is_scoped_author (p : Board.post) =
     List.mem (Board.Agent_id.to_string p.author) scoped_authors
   in
-  ignore (Board_dispatch.create_post ~author:"filter-human" ~content:"human-filter-test" ());
+  ignore (Board_dispatch.create_post ~author:"filter-human" ~content:"human-filter-test"
+            ~post_kind:Board.Human_post ());
   ignore (Board_dispatch.create_post ~author:"filter-harness-bot"
             ~content:"automation" ~visibility:Board.Internal ~ttl_hours:1
-            ~hearth:"dashboard-harness" ());
+            ~hearth:"dashboard-harness" ~post_kind:Board.Automation_post ());
   ignore (Board_dispatch.create_post ~author:"filter-keeper" ~content:"keeper"
             ~post_kind:Board.Automation_post ~meta_json:keeper_meta ());
   let all_posts =
@@ -139,35 +175,31 @@ let test_list_posts_with_filters () =
     (human_only |> List.hd |> fun (p : Board.post) -> Board.Agent_id.to_string p.author)
 
 let test_reclassify_posts_dry_run_and_apply () =
-  let keeper_meta = `Assoc [ ("source", `String "keeper_board_post") ] in
-  match
-    Board_dispatch.create_post ~author:"dm-keeper" ~content:"keeper"
-      ~post_kind:Board.Automation_post ~meta_json:keeper_meta ()
-  with
+  let post_id = seed_legacy_keeper_post () in
+  let dry_run = Board_dispatch.reclassify_posts ~dry_run:true () in
+  Alcotest.(check int) "dry run changed" 1 dry_run.changed;
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok fetched ->
+       Alcotest.(check string) "legacy row resolves as automation" "automation"
+         (Board.post_kind_to_string fetched.post_kind));
+  let applied = Board_dispatch.reclassify_posts ~dry_run:false () in
+  Alcotest.(check int) "apply changed" 1 applied.changed;
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  match Board_dispatch.get_post ~post_id with
   | Error e -> Alcotest.fail (Board.show_board_error e)
-  | Ok post ->
-      let post_id = Board.Post_id.to_string post.id in
-      let dry_run = Board_dispatch.reclassify_posts ~dry_run:true () in
-      Alcotest.(check int) "dry run changed" 0 dry_run.changed;
-      (match Board_dispatch.get_post ~post_id with
-       | Error e -> Alcotest.fail (Board.show_board_error e)
-       | Ok fetched ->
-           Alcotest.(check string) "still automation before apply" "automation"
-             (Board.post_kind_to_string fetched.post_kind));
-      let applied = Board_dispatch.reclassify_posts ~dry_run:false () in
-      Alcotest.(check int) "apply changed" 0 applied.changed;
-      Board_dispatch.reset_for_test ();
-      Board_dispatch.init_jsonl ();
-      match Board_dispatch.get_post ~post_id with
-      | Error e -> Alcotest.fail (Board.show_board_error e)
-      | Ok fetched ->
-          Alcotest.(check string) "persisted as automation" "automation"
-            (Board.post_kind_to_string fetched.post_kind)
+  | Ok fetched ->
+      Alcotest.(check string) "persisted as automation" "automation"
+        (Board.post_kind_to_string fetched.post_kind)
 
 (** {1 Comment Operations} *)
 
 let test_add_and_get_comments () =
-  match Board_dispatch.create_post ~author:"commenter" ~content:"post for comments" () with
+  match
+    Board_dispatch.create_post ~author:"commenter" ~content:"post for comments"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -182,7 +214,10 @@ let test_add_and_get_comments () =
 (** {1 Vote Operations} *)
 
 let test_vote_post () =
-  match Board_dispatch.create_post ~author:"voter-test" ~content:"vote me" () with
+  match
+    Board_dispatch.create_post ~author:"voter-test" ~content:"vote me"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -192,7 +227,10 @@ let test_vote_post () =
           Alcotest.(check int) "score after upvote" 1 score
 
 let test_vote_dedup () =
-  match Board_dispatch.create_post ~author:"dedup-test" ~content:"dedup vote" () with
+  match
+    Board_dispatch.create_post ~author:"dedup-test" ~content:"dedup vote"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -203,7 +241,10 @@ let test_vote_dedup () =
       | Error e -> Alcotest.fail (Board.show_board_error e)
 
 let test_vote_flip () =
-  match Board_dispatch.create_post ~author:"flip-test" ~content:"flip vote" () with
+  match
+    Board_dispatch.create_post ~author:"flip-test" ~content:"flip vote"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -224,18 +265,22 @@ let test_stats () =
   | _ -> Alcotest.fail "stats should be JSON object"
 
 let test_search () =
-  ignore (Board_dispatch.create_post ~author:"searcher" ~content:"unique_dispatch_search_term" ());
+  ignore (Board_dispatch.create_post ~author:"searcher"
+            ~content:"unique_dispatch_search_term" ~post_kind:Board.Human_post ());
   let results = Board_dispatch.search ~query:"unique_dispatch_search_term" ~limit:10 in
   Alcotest.(check bool) "found search result" true (List.length results >= 1)
 
 let test_hearths () =
   ignore (Board_dispatch.create_post ~author:"hearth-test" ~content:"fire topic"
-    ~hearth:"test-hearth" ());
+    ~hearth:"test-hearth" ~post_kind:Board.Human_post ());
   let hearths = Board_dispatch.list_hearths () in
   Alcotest.(check bool) "has hearths" true (List.length hearths >= 1)
 
 let test_set_thread_id () =
-  match Board_dispatch.create_post ~author:"thread-test" ~content:"link me" () with
+  match
+    Board_dispatch.create_post ~author:"thread-test" ~content:"link me"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -254,13 +299,19 @@ let test_flush () =
 (** {1 Validation} *)
 
 let test_empty_content () =
-  match Board_dispatch.create_post ~author:"validator" ~content:"" () with
+  match
+    Board_dispatch.create_post ~author:"validator" ~content:""
+      ~post_kind:Board.Human_post ()
+  with
   | Ok _ -> Alcotest.fail "Expected validation error for empty content"
   | Error (Board.Validation_error _) -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
 let test_invalid_author () =
-  match Board_dispatch.create_post ~author:"" ~content:"valid content" () with
+  match
+    Board_dispatch.create_post ~author:"" ~content:"valid content"
+      ~post_kind:Board.Human_post ()
+  with
   | Ok _ -> Alcotest.fail "Expected validation error for empty author"
   | Error _ -> ()
 

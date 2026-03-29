@@ -62,6 +62,19 @@ let base_observation : WO.world_observation =
     active_agent_count = 0;
   }
 
+let sample_board_event : WO.pending_board_event =
+  {
+    post_id = "board-post-1";
+    author = "alice";
+    title = "Need help";
+    preview = "Please take a look.";
+    hearth = Some "research";
+    post_kind = Masc_mcp.Board.Human_post;
+    updated_at = 0.0;
+    explicit_mention = false;
+    matched_targets = [];
+  }
+
 let test_observation_defaults () =
   let obs = base_observation in
   check int "idle_seconds default" 0 obs.idle_seconds;
@@ -123,7 +136,8 @@ let test_observe_uses_precollected_board_events () =
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
       (match
          Masc_mcp.Board_dispatch.create_post ~author:"alice"
-           ~title:"Need sangsu" ~content:"@test-keeper please check this" ()
+           ~title:"Need sangsu" ~content:"@test-keeper please check this"
+           ~post_kind:Masc_mcp.Board.Human_post ()
        with
       | Ok _ -> ()
       | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e));
@@ -140,6 +154,40 @@ let test_observe_uses_precollected_board_events () =
         (List.length obs.pending_board_events);
       check bool "board event schedules turn" true
         (WO.should_run_unified_turn ~meta:minimal_meta obs))
+
+let test_collect_board_events_keeps_non_mentions () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      (match
+         Masc_mcp.Board_dispatch.create_post ~author:"alice"
+           ~title:"General update" ~content:"No direct mention here"
+           ~post_kind:Masc_mcp.Board.Human_post ()
+       with
+      | Ok _ -> ()
+      | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e));
+      let events, new_count, mention_count =
+        WO.collect_board_events ~base_path:base_dir
+          ~continuity_summary:"goal test-keeper"
+          ~meta:minimal_meta
+      in
+      check int "collects non-mention events" 1 (List.length events);
+      check int "new count includes non-mention" 1 new_count;
+      check int "mention count stays zero" 0 mention_count;
+      match events with
+      | [ event ] ->
+          check bool "explicit mention false" false event.explicit_mention;
+          check (list string) "matched targets empty" [] event.matched_targets
+      | _ -> fail "expected exactly one board event")
 
 let test_scheduled_turn_uses_cooldown_only () =
   let meta =
@@ -448,6 +496,24 @@ let test_metrics_failure_response () =
      in
      found)
 
+let test_prompt_includes_board_activity_section () =
+  let obs =
+    { base_observation with
+      pending_board_events = [ sample_board_event ]
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  check bool "has board activity section" true
+    (let found =
+       try ignore (Str.search_forward (Str.regexp_string "Board Activity") user 0); true
+       with Not_found -> false
+     in found);
+  check bool "includes board event preview" true
+    (let found =
+       try ignore (Str.search_forward (Str.regexp_string "Please take a look.") user 0); true
+       with Not_found -> false
+     in found)
+
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_read"]
@@ -521,6 +587,8 @@ let () =
           test_case "with mentions" `Quick test_observation_with_mentions;
           test_case "uses precollected board events" `Quick
             test_observe_uses_precollected_board_events;
+          test_case "collects non-mention board events" `Quick
+            test_collect_board_events_keeps_non_mentions;
           test_case "scheduled turn uses cooldown only" `Quick
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn respects cooldown" `Quick
@@ -536,6 +604,8 @@ let () =
             test_prompt_mentions_extend_turns_guidance;
           test_case "omits empty sections" `Quick test_prompt_omits_empty_sections;
           test_case "includes mentions" `Quick test_prompt_includes_mentions_section;
+          test_case "includes board activity" `Quick
+            test_prompt_includes_board_activity_section;
           test_case "includes goals" `Quick test_prompt_includes_goals_section;
           test_case "includes context ratio" `Quick test_prompt_includes_context_ratio;
           test_case "includes idle" `Quick test_prompt_includes_idle;

@@ -228,16 +228,19 @@ let post_keeper_alert_board
     if v = "" then None else Some v in
   let visibility = let v = String.trim Env_config.KeeperAlert.board_visibility in
     if v = "" then "internal" else v in
-  let fields = ref [
-    ("author", `String author);
-    ("content", `String alert_text);
-    ("visibility", `String visibility);
-  ] in
-  (match hearth_opt with
-   | Some h -> fields := ("hearth", `String h) :: !fields
-   | None -> ());
-  let (ok, res) = Tool_board.handle_tool "masc_board_post" (`Assoc (List.rev !fields)) in
-  if ok then (true, Some "board_posted") else (false, Some res)
+  let visibility =
+    match Tool_board.visibility_of_string visibility with
+    | Some value -> value
+    | None -> Board.Internal
+  in
+  let meta_json = Some (`Assoc [ ("source", `String "keeper_alert_board") ]) in
+  match
+    Board_dispatch.create_post ~author ~content:alert_text
+      ~post_kind:Board.System_post ?meta_json
+      ~visibility ~ttl_hours:24 ?hearth:hearth_opt ()
+  with
+  | Ok _ -> (true, Some "board_posted")
+  | Error e -> (false, Some (Board.show_board_error e))
 
 let post_keeper_alert_slack
     ~(alert_text : string) : bool * string option =

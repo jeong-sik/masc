@@ -218,7 +218,7 @@ let notify_event t event =
 
 (** {1 Operations} *)
 
-let create_post t ~author ~content ?title ?body ?post_kind ?meta_json
+let create_post t ~author ~content ?title ?body ~post_kind ?meta_json
     ?(visibility=Internal) ?(ttl_hours=Limits.default_ttl_hours) ?hearth ?thread_id () =
   match Agent_id.of_string author with
   | Error e -> Error e
@@ -228,8 +228,7 @@ let create_post t ~author ~content ?title ?body ?post_kind ?meta_json
   let now = Time_compat.now () in
   let expires_at = if ttl = 0 then 0.0 else now +. (float_of_int ttl *. 3600.0) in
   let title, body, normalized_kind, normalized_meta =
-    normalize_post_payload ~author ~content ?title ?body ?post_kind ?meta_json
-      ~visibility ~expires_at ~hearth ()
+    normalize_post_payload ~content ?title ?body ~post_kind ?meta_json ()
   in
   if String.length body > Limits.max_content_length then
     Error (Validation_error (Printf.sprintf "Content too long: %d > %d"
@@ -572,7 +571,14 @@ let reclassify_posts t ?(limit = 5200) ?(dry_run = true) () =
         changed_post_ids := id :: !changed_post_ids
     in
     List.iter (fun (post : post) ->
-      let canonical_kind = classify_post_kind post in
+      let canonical_kind =
+        legacy_migrate_post_kind
+          ~author:(Agent_id.to_string post.author)
+          ~meta_json:post.meta_json
+          ~visibility:post.visibility
+          ~expires_at:post.expires_at
+          ~hearth:post.hearth
+      in
       if canonical_kind = post.post_kind then
         incr unchanged
       else begin

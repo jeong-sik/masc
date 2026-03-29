@@ -169,13 +169,13 @@ let sort_posts_in_memory ~sort_by (posts : Board.post list) =
 
 (** {1 Dispatch Functions} *)
 
-let create_post ~author ~content ?title ?body ?post_kind ?meta_json
+let create_post ~author ~content ?title ?body ~post_kind ?meta_json
     ?(visibility=Board.Internal)
     ?(ttl_hours=Board.Limits.default_ttl_hours) ?hearth ?thread_id () =
   match backend () with
   | Jsonl store ->
       (match
-         Board.create_post store ~author ~content ?title ?body ?post_kind ?meta_json
+         Board.create_post store ~author ~content ?title ?body ~post_kind ?meta_json
            ~visibility ~ttl_hours ?hearth ?thread_id ()
        with
        | Ok post as ok ->
@@ -197,7 +197,7 @@ let create_post ~author ~content ?title ?body ?post_kind ?meta_json
        | Error _ as err -> err)
   | Postgres t ->
       (match
-         Board_pg.create_post t ~author ~content ?title ?body ?post_kind ?meta_json
+         Board_pg.create_post t ~author ~content ?title ?body ~post_kind ?meta_json
            ~visibility ~ttl_hours ?hearth ?thread_id ()
        with
        | Ok post as ok ->

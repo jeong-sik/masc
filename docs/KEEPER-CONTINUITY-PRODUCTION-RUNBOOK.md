@@ -28,6 +28,8 @@ It does not certify:
 - long-term assistant reply recall
 - memory bank resurrection
 
+This document is a future-state release gate. The current product posture can still be `Not done for product promise` while diagnosis or hardening remains open.
+
 ## Release Gate
 
 Keeper continuity is releaseable as an advanced feature only when all of the following are true:
@@ -76,6 +78,8 @@ Minimum acceptable result for release:
 
 The existing harness `PASS` bar is intentionally stricter than the base product contract. It also expects compaction and handoff evidence, which makes it suitable as a production-readiness gate rather than only a minimal feature check.
 
+Compaction and handoff are therefore treated here as resilience evidence for release promotion, not as the minimum user-facing continuity contract.
+
 `PARTIAL` is not production-ready for feature promotion. It is evidence for debugging only.
 
 ### 2. Checkpoint truth validation
@@ -100,7 +104,7 @@ The read surfaces must agree on:
 - active `trace_id`
 - `generation`
 - whether handoff occurred
-- whether continuity summary moved forward after the validated turn
+- whether `continuity_summary` is no longer empty/stale for the validated turn, with `last_continuity_update_ts` from detailed status used as the tie-breaker when needed
 
 ## Monitoring And Alerts
 
@@ -109,8 +113,8 @@ At minimum, monitor:
 - checkpoint save success rate
 - checkpoint load failure rate
 - empty-message checkpoint restore rate
-- keeper continuity validation pass rate
-- keeper resume/restart failure rate
+- keeper continuity validation pass rate from scheduled harness runs or pre-release validation runs
+- keeper resume/restart failure rate from keeper status/metrics telemetry
 
 Operator escalation rules:
 

@@ -55,6 +55,8 @@ Primary continuity fields:
 - `trace_history_count`
 - `continuity_summary`
 
+`continuity_summary` is the latest continuity snapshot text. It may be empty or `null` when no continuity snapshot is available yet; a successful validated turn should eventually replace that empty state with a newer snapshot in detailed keeper status.
+
 ## Triage System
 
 Triage evaluates 9 trigger types on each heartbeat:

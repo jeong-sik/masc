@@ -109,6 +109,9 @@ let wakeup_relevant_keeper_for_board_signal
 let max_consecutive_heartbeat_failures =
   Env_config.KeeperKeepalive.max_consecutive_failures
 
+let max_consecutive_turn_failures =
+  Env_config.KeeperKeepalive.max_consecutive_turn_failures
+
 (* Per-stage timing accumulator for Phase 0 profiling.
    In-memory ring of last 100 cycles. Flushed as aggregate at snapshot cadence.
    No additional file I/O — appended to existing snapshot JSON. *)
@@ -160,6 +163,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
   let snapshot_interval_sec = Env_config.KeeperRuntime.snapshot_sec in
   let last_snapshot_ts = ref 0.0 in
   let consecutive_failures = ref 0 in
+  let consecutive_turn_failures = ref 0 in
   (* Phase 0: per-stage timing ring buffer *)
   let timing_ring = Array.make stage_timing_ring_size
     { presence_ms = 0.0; snapshot_ms = 0.0; board_ms = 0.0;
@@ -477,21 +481,33 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                          ~generation:meta_after_triage.generation
                      with
                      | Error e ->
-                         Log.Keeper.error "unified turn failed: %s" e;
+                         incr consecutive_turn_failures;
+                         Log.Keeper.error "unified turn failed (%d/%d): %s"
+                           !consecutive_turn_failures max_consecutive_turn_failures e;
                          (match read_meta ctx.config meta_after_triage.name with
                           | Ok (Some latest) -> latest
                           | _ -> meta_after_triage)
-                     | Ok updated -> updated
+                     | Ok updated ->
+                         consecutive_turn_failures := 0;
+                         updated
                    else
                      meta_after_triage
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
-                   Log.Keeper.error "unified turn exception: %s"
+                   incr consecutive_turn_failures;
+                   Log.Keeper.error "unified turn exception (%d/%d): %s"
+                     !consecutive_turn_failures max_consecutive_turn_failures
                      (Printexc.to_string exn);
                    meta_after_triage)
               else meta_after_triage
             in
+            (* Turn failure threshold check — separate from heartbeat I/O *)
+            if !consecutive_turn_failures >= max_consecutive_turn_failures then
+              raise (Keeper_registry.Keeper_heartbeat_failure {
+                reason = Keeper_registry.Turn_consecutive_failures !consecutive_turn_failures;
+                keeper_name = m.name;
+              });
             (* Phase 1: work-as-heartbeat — renew point (b).
                After turn, call Room.heartbeat_in_room to prove room I/O health.
                On success: refresh freshness lease + reset consecutive_failures.

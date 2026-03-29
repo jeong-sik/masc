@@ -54,6 +54,7 @@
         test_risk_digest
         test_artifact_store
         test_golden_set
+        test_golden_set_eval
         test_adversarial_eval
         test_labeling
         test_tool_deep_review
@@ -92,6 +93,7 @@
           test_risk_digest
           test_artifact_store
           test_golden_set
+          test_golden_set_eval
           test_adversarial_eval
           test_labeling
           test_tool_deep_review

@@ -123,15 +123,22 @@ let agent_from_request request =
     uses https (port 443) but we parse Host with a synthetic "http://" prefix
     (port 80).  Comparing explicit ports avoids this class of bug. *)
 
-let host_port_of_origin origin =
+let default_port_of_scheme = function
+  | Some "http" -> Some 80
+  | Some "https" -> Some 443
+  | _ -> None
+
+(** Returns (host, explicit_port, scheme). *)
+let host_port_scheme_of_origin origin =
   try
     let uri = Uri.of_string origin in
     match Uri.host uri with
     | None -> None
     | Some host ->
-        Some (String.trim host |> String.lowercase_ascii, Uri.port uri)
+        Some (String.trim host |> String.lowercase_ascii,
+              Uri.port uri, Uri.scheme uri)
   with exn ->
-    Log.Auth.debug "host_port_of_origin: parse failed for %S: %s"
+    Log.Auth.debug "host_port_scheme_of_origin: parse failed for %S: %s"
       origin (Printexc.to_string exn);
     None
 
@@ -155,11 +162,25 @@ let ensure_same_origin_browser_request request :
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
   | None -> Ok ()
   | Some origin -> (
-      match host_port_of_origin origin, host_port_of_request request with
-      | Some (origin_host, origin_port), Some (request_host, request_port)
-        when String.equal origin_host request_host
-             && origin_port = request_port ->
-          Ok ()
+      match host_port_scheme_of_origin origin, host_port_of_request request with
+      | Some (origin_host, origin_port, scheme),
+        Some (request_host, request_port)
+        when String.equal origin_host request_host ->
+          (* Normalize implicit ports using Origin's scheme so that
+             e.g. Origin "https://h" (port=None→443) matches Host "h:443". *)
+          let default = default_port_of_scheme scheme in
+          let norm p = match p with Some _ -> p | None -> default in
+          if norm origin_port = norm request_port then Ok ()
+          else (
+            Log.Auth.debug
+              "same-origin port mismatch: origin=%S host=%s"
+              origin
+              (match Httpun.Headers.get request.Httpun.Request.headers "host" with
+               | Some h -> Printf.sprintf "%S" h | None -> "<absent>");
+            Error
+              (Types.Forbidden
+                 { agent = "browser";
+                   action = "cross-origin HTTP mutation" }))
       | _ ->
           Log.Auth.debug
             "same-origin check failed: origin=%S host=%s"
@@ -168,10 +189,8 @@ let ensure_same_origin_browser_request request :
              | Some h -> Printf.sprintf "%S" h | None -> "<absent>");
           Error
             (Types.Forbidden
-               {
-                 agent = "browser";
-                 action = "cross-origin HTTP mutation";
-               }))
+               { agent = "browser";
+                 action = "cross-origin HTTP mutation" }))
 
 let http_status_of_auth_error = function
   | Types.Unauthorized _ | Types.InvalidToken _ | Types.TokenExpired _ -> `Unauthorized

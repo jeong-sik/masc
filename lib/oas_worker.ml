@@ -468,6 +468,7 @@ let config_for_label
 let run_named
     ~cascade_name
     ~goal
+    ?session_id
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
@@ -529,6 +530,7 @@ let run_named
       transport = transport_resolved;
       allowed_paths;
       working_context;
+      session_id;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in

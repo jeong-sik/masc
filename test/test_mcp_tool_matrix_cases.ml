@@ -346,6 +346,10 @@ let all_known_tool_names =
     "masc_verify_request";
     "masc_verify_status";
     "masc_verify_submit";
+    "masc_vote_cast";
+    "masc_vote_create";
+    "masc_vote_status";
+    "masc_votes";
     "masc_voice_agent";
     "masc_voice_conference_end";
     "masc_voice_conference_start";
@@ -353,9 +357,6 @@ let all_known_tool_names =
     "masc_voice_session_start";
     "masc_voice_sessions";
     "masc_voice_speak";
-    "masc_walph_control";
-    "masc_walph_natural";
-    "masc_walph_status";
     "masc_webrtc_answer";
     "masc_webrtc_offer";
     "masc_websocket_discovery";

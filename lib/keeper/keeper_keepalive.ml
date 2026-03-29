@@ -169,6 +169,10 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
   let last_successful_heartbeat_ts = ref 0.0 in
   let work_as_hb = Env_config.WorkAsHeartbeat.enabled in
   let max_silence = Env_config.WorkAsHeartbeat.max_silence_sec in
+  (* Phase 2: smart heartbeat — adaptive scheduling via Heartbeat_smart *)
+  let smart_hb_enabled = Env_config.SmartHeartbeat.enabled in
+  let smart_hb_config = Heartbeat_smart.default_config in
+  let last_heartbeat_cycle_ts = ref 0.0 in
   let rec loop () =
     if Atomic.get stop then ()
     else (
@@ -179,6 +183,41 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               | Ok (Some latest) -> latest
               | _ -> m
             in
+            (* Phase 2: smart heartbeat — skip cycle when busy or deeply idle *)
+            let smart_hb_decision =
+              if smart_hb_enabled then
+                let agent_status =
+                  if meta_current.paused then Types.Inactive
+                  else match meta_current.current_task_id with
+                    | Some _ -> Types.Busy
+                    | None -> Types.Active
+                in
+                Heartbeat_smart.should_emit
+                  ~config:smart_hb_config
+                  ~agent_status
+                  ~last_activity:!last_successful_heartbeat_ts
+                  ~last_heartbeat:!last_heartbeat_cycle_ts
+              else
+                Heartbeat_smart.Emit
+            in
+            (match smart_hb_decision with
+             | Heartbeat_smart.Skip_busy ->
+               Log.Keeper.debug "smart heartbeat: skip (busy, task=%s)"
+                 (Option.value ~default:"?" meta_current.current_task_id);
+               let base = Heartbeat_smart.effective_interval
+                 ~config:smart_hb_config
+                 ~last_activity:!last_successful_heartbeat_ts in
+               let jitter = base *. 0.2 *. Random.float 1.0 in
+               interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
+               if Atomic.get stop then () else loop ()
+             | Heartbeat_smart.Skip_idle next_time ->
+               let wait = Float.max 1.0 (next_time -. Time_compat.now ()) in
+               Log.Keeper.debug "smart heartbeat: skip (idle, next in %.1fs)" wait;
+               let jitter = wait *. 0.1 *. Random.float 1.0 in
+               interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (wait +. jitter);
+               if Atomic.get stop then () else loop ()
+             | Heartbeat_smart.Emit ->
+               last_heartbeat_cycle_ts := Time_compat.now ());
             (* Phase 1: skip presence sync when recent room heartbeat proves freshness *)
             let presence_fresh =
               work_as_hb
@@ -493,8 +532,12 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             let t_recurring_end = Time_compat.now () in
             let t_improve_start = t_recurring_end in
             let base =
-              float_of_int
-                keepalive_interval_sec
+              if smart_hb_enabled then
+                Heartbeat_smart.effective_interval
+                  ~config:smart_hb_config
+                  ~last_activity:!last_successful_heartbeat_ts
+              else
+                float_of_int keepalive_interval_sec
             in
             (try
                Tool_improve_loop.maybe_tick_from_keepalive ~config:ctx.config

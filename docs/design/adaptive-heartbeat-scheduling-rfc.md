@@ -136,33 +136,47 @@ type config = {
 
 `keeper_keepalive.ml` loop의 각 stage에 타이머 계측을 추가한다.
 
+**Observer effect 방지**: per-stage timing을 매 cycle마다 file에 쓰면 "I/O 병목" 가설을 측정 행위 자체가 악화시킨다. 따라서 **in-memory ring buffer + sampled flush** 방식을 사용한다.
+
 ```ocaml
-(* 예시: 각 stage를 Timer.with_timing으로 감싸기 *)
+(* In-memory ring buffer: cycle마다 메모리에만 기록 *)
+let timing_ring = Ring_buffer.create 100 in  (* 최근 100 cycles *)
+
+(* 각 stage를 Timer.measure로 감싸되 결과는 메모리에만 *)
 let presence_ms = Timer.measure (fun () -> ensure_keeper_room_presence ...) in
 let board_ms = Timer.measure (fun () -> collect_board_events ...) in
-(* ... *)
-Metrics.record ~presence_ms ~board_ms ~snapshot_ms ~turn_ms ~recurring_ms ~improve_ms
+Ring_buffer.push timing_ring { presence_ms; board_ms; ... };
+
+(* Flush: 기존 snapshot cadence (300s)에 맞춰 aggregate를 JSONL에 추가 *)
+(* 새로운 I/O를 만들지 않고 기존 snapshot write에 편승 *)
+if snapshot_due then begin
+  let agg = Ring_buffer.aggregate timing_ring in  (* p50, p95, max *)
+  Dated_jsonl.append metrics_store (add_timing_fields snapshot agg)
+end
 ```
 
-측정값을 기존 metrics JSONL에 추가한다. 최소 1주간 수집 후 분석.
+측정값은 기존 snapshot JSONL write에 필드를 추가하는 방식으로 flush한다. 별도 write를 만들지 않는다. 최소 1주간 수집 후 분석.
 
 **Step 0.2: Config SSOT 정비**
 
 `resilience.ml`의 하드코딩을 env_config로 연결:
 
 ```ocaml
-(* Before *)
+(* Before — resilience.ml *)
 let default_zombie_threshold = 300.0
 
-(* After *)
+(* After — resilience.ml *)
 let default_zombie_threshold =
-  Env_config.Zombie.agent_threshold_sec  (* default 300.0 *)
+  Env_config_runtime.Zombie.threshold_seconds  (* MASC_ZOMBIE_THRESHOLD_SEC, default 300.0 *)
 ```
+
+기존 env var 이름(`MASC_ZOMBIE_THRESHOLD_SEC`, `MASC_KEEPER_ZOMBIE_THRESHOLD_SEC`)과 모듈 이름(`Env_config_runtime.Zombie.threshold_seconds`, `keeper_threshold_seconds`)을 그대로 사용한다. 새 이름을 만들지 않는다.
 
 | File | Change |
 |------|--------|
-| `lib/room/resilience.ml:5,60` | 하드코딩 → `Env_config.Zombie.*` 참조 |
-| `lib/config/env_config_runtime.ml` | `MASC_ZOMBIE_AGENT_THRESHOLD_SEC`, `MASC_ZOMBIE_KEEPER_THRESHOLD_SEC` 추가 |
+| `lib/room/resilience.ml:5` | 하드코딩 `300.0` → `Env_config_runtime.Zombie.threshold_seconds` |
+| `lib/room/resilience.ml:60` | 하드코딩 `3600.0` → `Env_config_runtime.Zombie.keeper_threshold_seconds` |
+| `lib/config/env_config_runtime.ml` | 변경 없음 (이미 `MASC_ZOMBIE_THRESHOLD_SEC`, `MASC_KEEPER_ZOMBIE_THRESHOLD_SEC` 존재) |
 
 ### Phase 1: Work-as-Heartbeat (2-3주, LOW risk)
 
@@ -173,24 +187,42 @@ let default_zombie_threshold =
 | 속성 | 값 |
 |------|-----|
 | Lease owner | Keepalive fiber (유일한 writer) |
-| Renew point (a) | `ensure_keeper_room_presence` 시작 (기존) |
+| Renew point (a) | `ensure_keeper_room_presence` 호출 시 (기존) |
 | Renew point (b) | `run_unified_turn` 완료 직후 (신규) |
 | Max silence budget | `MASC_KEEPER_MAX_SILENCE_SEC` (default 120s) |
 | Turn 중 갱신 | 불가 (fiber blocking). max silence = max turn duration |
-| Supervisor 인식 | `last_turn_completion_ts` < MAX_SILENCE_SEC이면 alive 취급 |
+| Freshness skip | `now - last_turn_completion_ts < MAX_SILENCE_SEC`이면 presence sync skip |
 | False zombie 방지 | Turn 중 presence failure는 consecutive count에서 제외 |
+
+**Scope boundary (필수)**:
+
+`last_turn_completion_ts`는 **room-level freshness** (presence sync skip)에만 사용한다. Supervisor의 fiber liveness 판정(`done_p` Promise)을 override하지 않는다. fiber가 `Crashed`면 `last_turn_completion_ts`와 무관하게 dead이다.
+
+```
+                        ┌─ Supervisor (Path A) ─┐
+done_p: Crashed ───────>│  restart (SSOT)       │  ← last_turn_completion_ts 관여 안 함
+done_p: None (alive) ──>│  skip                 │
+                        └───────────────────────┘
+
+                        ┌─ Keepalive Loop ──────┐
+last_turn_completion_ts │  skip presence sync   │  ← freshness only
+ < MAX_SILENCE_SEC ────>│  (room heartbeat      │
+                        │   already done by turn)│
+                        └───────────────────────┘
+```
 
 **Implementation**:
 
 | Step | File | Change |
 |------|------|--------|
 | 1.1 | `lib/keeper/keeper_registry.ml` | `last_turn_completion_ts : float` 필드 추가 |
-| 1.2 | `lib/keeper/keeper_unified_turn.ml` | Turn 완료 후: (a) `last_turn_completion_ts` 갱신, (b) `Room_gc.heartbeat_in_room` 호출 |
-| 1.3 | `lib/keeper/keeper_keepalive.ml:126` | `now - last_turn_completion_ts < keepalive_interval_sec`이면 presence sync skip |
+| 1.2 | `lib/keeper/keeper_unified_turn.ml` | Turn 완료 후: (a) `last_turn_completion_ts` 갱신, (b) `Room.heartbeat_in_room` 호출 (facade 경유, keeper_coordination.ml:65과 동일 경로) |
+| 1.3 | `lib/keeper/keeper_keepalive.ml:126` | `now - last_turn_completion_ts < MAX_SILENCE_SEC`이면 presence sync skip (lease 기반, 한 사이클이 아닌 silence budget 전체) |
 | 1.4 | `lib/keeper/keeper_keepalive.ml:147` | Self-stop 기준: turn 중이면 consecutive failure 카운트 제외 |
-| 1.5 | `lib/keeper/keeper_supervisor.ml:123` | `last_turn_completion_ts` < MAX_SILENCE_SEC이면 alive 취급 (Promise 판정 보완) |
-| 1.6 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_WORK_AS_HEARTBEAT` (bool, default true), `MASC_KEEPER_MAX_SILENCE_SEC` (int, default 120) |
-| 1.7 | `test/test_work_as_heartbeat.ml` | Turn 완료가 presence sync를 대체하는지 + turn 중 false zombie 방지 검증 |
+| 1.5 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_WORK_AS_HEARTBEAT` (bool, default true), `MASC_KEEPER_MAX_SILENCE_SEC` (int, default 120) |
+| 1.6 | `test/test_work_as_heartbeat.ml` | Turn 완료가 presence sync를 대체하는지 + turn 중 false zombie 방지 검증 |
+
+**삭제된 Step**: 기존 1.5 (supervisor에서 `last_turn_completion_ts`로 alive 보완 판정) — `done_p`가 SSOT이므로 override 금지.
 
 **Feature flag**: `MASC_KEEPER_WORK_AS_HEARTBEAT=false`로 기존 동작 즉시 복원 가능.
 
@@ -200,25 +232,40 @@ let default_zombie_threshold =
 
 **Self-Preservation Rule**:
 
+Ratio-only 조건은 소규모 cluster에서 과도하게 공격적이다 (3 keeper 중 1 crash = 33% → 전원 억제). 따라서 **ratio AND 절대 수** 이중 조건을 적용한다.
+
 ```
 sweep_and_recover에서:
   restart_candidates = len(to_restart)
   total_running = len(entries)
   ratio = restart_candidates / total_running
 
-  if ratio > SELF_PRESERVATION_RATIO (default 0.3):
-    log "self-preservation: %.0f%% keepers need restart, likely infra issue"
-    publish OAS event "keeper_self_preservation_triggered"
-    skip all restarts this cycle
-    next cycle: re-evaluate (suppression은 1 cycle만)
+  (* 이중 조건: ratio 초과 AND 절대 수 초과 *)
+  if ratio > SELF_PRESERVATION_RATIO (default 0.3)
+     AND restart_candidates >= MIN_CANDIDATES_FOR_PRESERVATION (default 2):
+
+    (* 추가 검증: 동일 failure cohort인지 확인 *)
+    (* crash_msg 패턴이 동일하면 공통 원인 가능성 높음 *)
+    let same_cause = all crash messages share common prefix in
+    if same_cause then
+      log "self-preservation: %d/%d keepers (%.0f%%), same cause: %s"
+      publish OAS event "keeper_self_preservation_triggered"
+      skip all restarts this cycle
+    else
+      (* 다른 원인이면 개별 restart 허용 *)
+      proceed with normal restart
+
+  next cycle: re-evaluate (suppression은 1 cycle = 30s만)
 ```
+
+소규모 예시: keeper 3개 중 1개 crash → ratio 33%이지만 candidates=1 < min=2 → 정상 restart. keeper 5개 중 2개 crash, 같은 원인 → ratio 40% AND candidates=2 → 억제.
 
 | Step | File | Change |
 |------|------|--------|
-| 2.1 | `lib/keeper/keeper_supervisor.ml:140` | restart 실행 전 비율 검사 추가 |
-| 2.2 | `lib/keeper/keeper_supervisor.ml` | self-preservation event 발행 |
-| 2.3 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_SELF_PRESERVATION_RATIO` (float, default 0.3) |
-| 2.4 | `test/test_self_preservation.ml` | 30%+ 동시 crash 시 restart 억제 검증 |
+| 2.1 | `lib/keeper/keeper_supervisor.ml:140` | restart 전 ratio + 절대 수 + cohort 검사 추가 |
+| 2.2 | `lib/keeper/keeper_supervisor.ml` | self-preservation event 발행 (cohort pattern 포함) |
+| 2.3 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_SELF_PRESERVATION_RATIO` (float, default 0.3), `MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES` (int, default 2) |
+| 2.4 | `test/test_self_preservation.ml` | (a) 소규모 cluster 1/3 crash → restart 허용, (b) 대규모 같은 원인 → 억제 |
 
 ### Phase 2b: Phi Accrual — gRPC Only (선행조건: gRPC 활성화)
 
@@ -272,7 +319,9 @@ Phase 3 착수 조건:
 | Phase 2b | MEDIUM | gRPC heartbeat ↔ phi detector (new module) | Shadow mode + kill switch |
 | Phase 3 | HIGH | cascade ↔ keeper (new scheduler layer) | 별도 RFC로 분리 |
 
-**가장 큰 위험**: Phase 1에서 `last_turn_completion_ts` 기반 presence skip이 downstream consumer(dashboard, SSE, 다른 agent)가 기대하는 `last_seen` 갱신을 누락시킬 수 있음. Step 1.2에서 turn 완료 시 `heartbeat_in_room`을 명시적으로 호출하여 방지.
+**가장 큰 위험들**:
+1. Phase 1에서 presence skip이 downstream consumer(dashboard, SSE)가 기대하는 `last_seen` 갱신을 누락시킬 수 있음. Step 1.2에서 turn 완료 시 `Room.heartbeat_in_room`을 명시적으로 호출하여 방지.
+2. Phase 1에서 `last_turn_completion_ts`가 supervisor의 `done_p` SSOT를 침범하지 않도록 scope를 엄격히 분리. freshness(presence skip)와 liveness(fiber death)는 독립 관심사.
 
 ## 6. Implementation Checklist
 
@@ -280,12 +329,11 @@ Phase 3 착수 조건:
 - [ ] Phase 0.2: Config SSOT (resilience.ml 하드코딩 → env_config)
 - [ ] Phase 0: 1주 측정 + 결과 기록
 - [ ] Phase 1.1: `last_turn_completion_ts` registry field
-- [ ] Phase 1.2: Unified turn 완료 시 timestamp 갱신 + room heartbeat
-- [ ] Phase 1.3: Presence sync conditional skip
+- [ ] Phase 1.2: Unified turn 완료 시 timestamp 갱신 + `Room.heartbeat_in_room` (facade 경유)
+- [ ] Phase 1.3: Presence sync conditional skip (`MAX_SILENCE_SEC` 기반 lease)
 - [ ] Phase 1.4: Self-stop에서 turn-in-progress 예외
-- [ ] Phase 1.5: Supervisor에서 `last_turn_completion_ts` alive 인정
-- [ ] Phase 1.6: Config (feature flag + max silence)
-- [ ] Phase 1.7: Tests
+- [ ] Phase 1.5: Config (feature flag + max silence)
+- [ ] Phase 1.6: Tests
 - [ ] Phase 2.1-2.4: Self-preservation in supervisor
 - [ ] Phase 2b (gRPC 활성화 후): Phi accrual + shadow mode
 

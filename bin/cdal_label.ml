@@ -80,7 +80,7 @@ let metrics_cmd input_dir workload_name judge_version label_owner
     Printf.eprintf "no labeled verdicts found in %s\n" input_dir;
     exit 1);
   let oc =
-    L.build_output_contract ~workload_name
+    L.build_output_contract ~workload_name ~protocol_version:"v0.1"
       ~judge_protocol_version:judge_version ~label_owner ~metric_owner
       ~total_claims ~drift_note verdicts
   in

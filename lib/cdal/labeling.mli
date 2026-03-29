@@ -32,6 +32,7 @@ type confusion_summary = {
 (** Output contract per protocol Section 7. *)
 type output_contract = {
   workload_name : string;
+  protocol_version : string;
   judge_protocol_version : string;
   label_owner : string;
   metric_owner : string;
@@ -60,9 +61,20 @@ val compute_precision_lenient : confusion_summary -> float
 (** [labeled / total]. *)
 val compute_claim_coverage : labeled:int -> total:int -> float
 
-(** Build a complete output contract from labeled verdicts. *)
+(** Build a complete output contract from labeled verdicts.
+
+    @param workload_name Identifier for the workload being evaluated (e.g. "coding_task").
+    @param protocol_version Version of the labeling protocol artifact schema (e.g. "v0.1").
+    @param judge_protocol_version Version of the judge/evaluator protocol (e.g. "phase1a_v1").
+    @param label_owner Person responsible for labeling (e.g. "human:alice").
+    @param metric_owner Person responsible for metrics interpretation.
+    @param total_claims Total material claims to compute claim_coverage against.
+        This is the denominator: [claim_coverage = labeled_non_drift / total_claims].
+    @param drift_note Free-text note about observed drift, or empty string.
+    @param labeled_verdict list The labeled verdicts to aggregate. *)
 val build_output_contract :
   workload_name:string ->
+  protocol_version:string ->
   judge_protocol_version:string ->
   label_owner:string ->
   metric_owner:string ->

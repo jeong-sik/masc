@@ -152,6 +152,10 @@ let run_turn
   in
   (* 6. Append user message and persist *)
   let user_msg = Agent_sdk.Types.user_msg user_message in
+  (* Capture history BEFORE appending the current user_msg.
+     OAS Agent.run appends user_msg from ~goal internally, so passing it
+     in initial_messages would cause duplication. *)
+  let history_messages = ctx_work.messages in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
   Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
   let checkpoint_sidecar =
@@ -196,7 +200,7 @@ let run_turn
       ~session_id:meta.trace_id
       ~system_prompt:turn_system_prompt
       ~tools
-      ~initial_messages:ctx_work.messages
+      ~initial_messages:history_messages
       ~hooks
       ~context_reducer:reducer
       ~memory

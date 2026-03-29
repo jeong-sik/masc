@@ -37,9 +37,9 @@ let resolved_keeper_args_to_json
     ~name ~persona_name ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ~soul_profile ~will ~needs ~desires ~policy_voice_enabled
     ~room_scope ~scope_kind ~mention_targets
-    ~proactive_enabled
+    ~proactive_enabled ~shards
     ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
-  `Assoc
+  let base =
     [
       ("name", `String name);
       ("persona_name", `String persona_name);
@@ -61,6 +61,13 @@ let resolved_keeper_args_to_json
       ("handoff_threshold", `Float handoff_threshold);
       ("handoff_cooldown_sec", `Int handoff_cooldown_sec);
     ]
+  in
+  let shards_field =
+    match shards with
+    | Some xs -> [("shards", string_list_to_json xs)]
+    | None -> []
+  in
+  `Assoc (base @ shards_field)
 
 let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
   let errors = ref [] in
@@ -188,6 +195,11 @@ let resolved_keeper_args_from_persona args :
               |> first_some defaults.proactive_enabled
               |> Option.value ~default:false
             in
+            let shards =
+              match get_string_list args "shards" with
+              | _ :: _ as xs -> Some xs
+              | [] -> defaults.shards
+            in
             let auto_handoff = get_bool args "auto_handoff" true in
             let handoff_threshold =
               Safe_ops.json_float_opt "handoff_threshold" args
@@ -205,7 +217,7 @@ let resolved_keeper_args_from_persona args :
                 ~instructions ~soul_profile ~will ~needs ~desires
                 ~policy_voice_enabled
                 ~room_scope ~scope_kind ~mention_targets
-                ~proactive_enabled
+                ~proactive_enabled ~shards
                 ~auto_handoff ~handoff_threshold
                 ~handoff_cooldown_sec
             in

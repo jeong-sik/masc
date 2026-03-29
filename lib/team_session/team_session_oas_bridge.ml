@@ -343,6 +343,7 @@ let planned_worker_to_entry_with_state
     name;
     run;
     role;
+    extensions = [];
     get_telemetry = Some (fun () -> !telemetry_ref);
   }
 

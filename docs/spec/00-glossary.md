@@ -157,7 +157,7 @@ Room의 메타데이터 레코드: id, name, description, created_at, created_by
 에이전트의 생존 신호. 주기적으로(기본 2분) 전송하여 에이전트가 활성 상태임을 Room에 알린다. 일정 시간 동안 Heartbeat이 없으면 에이전트가 비활성으로 전환된다. `-> lib/room/heartbeat.mli`
 
 **Walph**
-과거의 반복적 태스크 처리 루프 이름. loop execution은 제거되었고, 현재는 transition-only `walph_control`, `walph_natural`, `walph_status` 표면만 남아 있다. `-> lib/tool_walph.mli`
+과거의 반복적 태스크 처리 루프 이름. 현재 MASC의 supported runtime/tool surface에는 포함되지 않는다.
 
 **Lock**
 공유 리소스에 대한 배타적 접근 제어. Room 내에서 파일이나 Task에 대한 동시 수정을 방지한다.

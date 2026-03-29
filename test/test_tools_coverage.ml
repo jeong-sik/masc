@@ -908,39 +908,25 @@ let test_masc_team_session_start_schema () =
       | None -> Alcotest.fail "masc_team_session_start missing properties"
 
 (* ============================================================ *)
-(* 17. Walph Tool Tests                                          *)
+(* 17. Removed Walph Surface Tests                               *)
 (* ============================================================ *)
 
-let test_masc_walph_loop_removed () =
-  Alcotest.(check bool) "masc_walph_loop removed" false
-    (Option.is_some (find_tool "masc_walph_loop"))
-
-let test_masc_walph_control_schema () =
-  match find_tool "masc_walph_control" with
-  | None -> Alcotest.fail "masc_walph_control not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has command" true (List.mem_assoc "command" props)
-      | None -> Alcotest.fail "masc_walph_control missing properties"
-
-let test_masc_walph_natural_schema () =
-  match find_tool "masc_walph_natural" with
-  | None -> Alcotest.fail "masc_walph_natural not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has message" true (List.mem_assoc "message" props)
-      | None -> Alcotest.fail "masc_walph_natural missing properties"
-
-let test_masc_walph_status_schema () =
-  match find_tool "masc_walph_status" with
-  | None -> Alcotest.fail "masc_walph_status not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props)
-      | None -> Alcotest.fail "masc_walph_status missing properties"
+let test_walph_tools_removed () =
+  let removed_tools =
+    [
+      "masc_walph_loop";
+      "masc_walph_control";
+      "masc_walph_natural";
+      "masc_walph_status";
+    ]
+  in
+  List.iter
+    (fun name ->
+      match find_tool name with
+      | None -> ()
+      | Some _ ->
+          Alcotest.fail (Printf.sprintf "%s should be removed from public schemas" name))
+    removed_tools
 
 (* ============================================================ *)
 (* 18. Hat Tool Tests                                            *)
@@ -1210,11 +1196,9 @@ let () =
       Alcotest.test_case "detachment_status" `Quick test_masc_detachment_status_schema;
       Alcotest.test_case "observe_swarm" `Quick test_masc_observe_swarm_schema;
     ];
-    "walph_tools", [
-      Alcotest.test_case "walph_loop removed" `Quick test_masc_walph_loop_removed;
-      Alcotest.test_case "walph_control" `Quick test_masc_walph_control_schema;
-      Alcotest.test_case "walph_natural" `Quick test_masc_walph_natural_schema;
-      Alcotest.test_case "walph_status" `Quick test_masc_walph_status_schema;
+    "walph_removed", [
+      Alcotest.test_case "removed_from_public_schemas" `Quick
+        test_walph_tools_removed;
     ];
     "hat_tools", [
       Alcotest.test_case "hat_wear" `Quick test_masc_hat_wear_schema;

@@ -479,9 +479,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_heartbeat.dispatch { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args:arguments
     | Mod_auth ->
         Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args:arguments
-    | Mod_walph ->
-        (let ctx : _ Tool_walph.context = { config; agent_name; clock } in
-           Tool_walph.dispatch ctx ~name ~args:arguments)
     | Mod_agent ->
         Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:arguments
     | Mod_task ->

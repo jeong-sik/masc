@@ -477,7 +477,7 @@ type module_tag =
   | Mod_council | Mod_a2a | Mod_handover
   | Mod_relay | Mod_goals | Mod_heartbeat | Mod_encryption
   | Mod_auth | Mod_hat | Mod_audit | Mod_rate_limit
-  | Mod_cost | Mod_walph | Mod_agent | Mod_task | Mod_room
+  | Mod_cost | Mod_agent | Mod_task | Mod_room
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper | Mod_compact | Mod_mdal
   | Mod_notifications | Mod_inline
@@ -485,7 +485,7 @@ type module_tag =
   | Mod_shard | Mod_fire_task
 ```
 
-43개 variant. 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다.
+42개 variant. 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다.
 
 ### 4.4 Tool_result.t (structured)
 

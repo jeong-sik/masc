@@ -22,7 +22,6 @@ let raw_schemas : tool_schema list =
   @ Tool_council_oas.schemas
   @ Tool_relay.schemas
   @ Tool_handover.schemas
-  @ Tool_walph.schemas
   @ Tool_improve_loop.schemas
   @ Tool_run.schemas
   @ Tool_code.schemas

@@ -38,8 +38,6 @@ graph TB
     RT --> RTS[room_task_schedule<br>claim_next / stale]
     RS --> RGC[room_gc<br>zombie / archive]
     RS --> RV[room_vote<br>create / cast]
-    RS --> RW[room_walph<br>sync SM]
-    RW --> RWE[room_walph_eio<br>async loop]
     RS --> RWT[room_worktree<br>create / remove]
     RWT --> RG[room_git<br>git ops]
     RS --> RP[room_portal<br>A2A]
@@ -73,14 +71,12 @@ graph TB
 | Module | LOC | 역할 |
 |--------|-----|------|
 | `room_eio` | 783 | Eio 백엔드 구현 (direct-style async I/O) |
-| `room_walph_eio` | 709 | Walph 비동기 루프 (preset 기반 자동 작업) |
 | `room_task` | 686 | 태스크 CRUD + 상태 전이 |
 | `room_gc` | 491 | 좀비 정리, stale 아카이브, 메시지 정리 |
 | `room_state` | 409 | 상태 읽기/쓰기/갱신 (file lock + PG) |
 | `room_utils_backend_setup` | 348 | PG 백엔드 설정 |
 | `room_query` | 331 | 룸 내 에이전트/태스크 카운트 쿼리 |
 | `room_lifecycle` | 331 | join, rejoin, leave |
-| `room_walph` | 330 | Walph 동기 상태머신 + @walph 파싱 |
 | `room_task_schedule` | 291 | claim_next, starvation prevention |
 
 ---
@@ -354,28 +350,6 @@ vote_create -> vote_cast (N회) -> auto-resolve
 - `required_votes` 도달 시 자동 해결
 - 각 에이전트는 1표만 행사 (중복 투표 거부)
 - 투표 데이터: `.masc/votes/{vote_id}.json`
-
-### 7.2 WALPH Transition State (`room_walph`, `room_walph_eio`)
-
-Walph(Geoffrey Huntley의 Ralph 변형)는 과거의 반복적 태스크 처리 상태머신이다. Loop execution은 제거되었고, 남아 있는 surface는 transition-only inspection/control 용도다.
-
-```
-[idle] --START preset--> [running] --PAUSE--> [paused] --RESUME--> [running]
-                            |                                         |
-                            '--STOP-------------------------------------> [idle]
-```
-
-**동기 구현** (`room_walph`):
-- `@walph` 명령 파싱: `@walph STOP|PAUSE|RESUME|STATUS [args]`
-- `walph_state`: `running`, `paused`, `stop_requested`, `iterations`, `completed`
-
-**비동기 구현** (`room_walph_eio`):
-- transition-only 상태 유지와 정리
-- 추가 필드: `claimed`, `released_on_error`, `consecutive_errors`, `error_backoff_sec`
-
-**동시성 보호**: `Eio.Mutex` + `Eio.Condition` (stdlib Mutex 아님)
-
----
 
 ## 8. Mention Routing (`mention`)
 

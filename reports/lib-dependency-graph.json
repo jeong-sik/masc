@@ -1,9 +1,9 @@
 {
   "stats": {
-    "total_modules": 559,
-    "total_edges": 1855,
+    "total_modules": 553,
+    "total_edges": 1835,
     "avg_out_degree": 3.32,
-    "leaf_count": 160,
+    "leaf_count": 159,
     "root_count": 112
   },
   "top_imported": [
@@ -48,10 +48,6 @@
       20
     ],
     [
-      "Command_plane_v2",
-      20
-    ],
-    [
       "Session",
       19
     ],
@@ -62,6 +58,10 @@
     [
       "Board_dispatch",
       19
+    ],
+    [
+      "Command_plane_v2",
+      16
     ],
     [
       "Keeper_memory",
@@ -256,23 +256,6 @@
     ]
   ],
   "clusters": [
-    {
-      "prefix": "swarm_status",
-      "module_count": 8,
-      "members": [
-        "Swarm_status",
-        "Swarm_status_build",
-        "Swarm_status_classify",
-        "Swarm_status_inputs",
-        "Swarm_status_json",
-        "Swarm_status_lanes",
-        "Swarm_status_parse",
-        "Swarm_status_types"
-      ],
-      "internal_edges": 16,
-      "external_dep_count": 2,
-      "coupling_ratio": 0.889
-    },
     {
       "prefix": "server_mcp",
       "module_count": 10,
@@ -2336,40 +2319,9 @@
     "Subsystem_health": [],
     "Subscriptions": [],
     "Swarm_status": [],
-    "Swarm_status_types": [],
-    "Swarm_status_json": [
-      "Command_plane_v2",
-      "Swarm_status_types"
-    ],
-    "Swarm_status_parse": [
-      "Command_plane_v2",
-      "Swarm_status_json",
-      "Swarm_status_types"
-    ],
-    "Swarm_status_classify": [
-      "Command_plane_v2",
-      "Swarm_status_json",
-      "Swarm_status_types"
-    ],
     "Swarm_status_inputs": [
       "Command_plane_v2",
-      "Swarm_status_json",
-      "Swarm_status_parse",
-      "Swarm_status_types",
       "Team_session_store"
-    ],
-    "Swarm_status_lanes": [
-      "Swarm_status_classify",
-      "Swarm_status_json",
-      "Swarm_status_types"
-    ],
-    "Swarm_status_build": [
-      "Command_plane_v2",
-      "Swarm_status_classify",
-      "Swarm_status_inputs",
-      "Swarm_status_json",
-      "Swarm_status_lanes",
-      "Swarm_status_types"
     ],
     "Swarm_checkpoint": [
       "Room"

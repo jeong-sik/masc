@@ -134,8 +134,12 @@ let get_detail_string json key =
 
 let first_some = Dashboard_utils.first_some
 
+let iso_of_unix = Dashboard_utils.iso_of_unix
+
+let parse_iso_timestamp = Types.parse_iso8601_opt
+
 let parse_timestamp timestamp =
-  Option.bind timestamp Command_plane_v2.parse_iso_timestamp
+  Option.bind timestamp parse_iso_timestamp
 
 let max_timestamp options =
   options
@@ -335,7 +339,7 @@ let narrative_json (lanes : lane list) (timeline : timeline_event list)
     match
       timeline_for_primary_lane
       |> List.filter_map (fun (event : timeline_event) ->
-             match Command_plane_v2.parse_iso_timestamp event.timestamp with
+             match parse_iso_timestamp event.timestamp with
              | Some ts -> Some (ts, event)
              | None -> None)
       |> List.sort (fun (left_ts, _) (right_ts, _) -> Float.compare left_ts right_ts)
@@ -373,4 +377,3 @@ let narrative_json (lanes : lane list) (timeline : timeline_event list)
       ( "lane_id",
         match primary_lane with Some lane -> `String lane.lane_id | None -> `Null );
     ]
-

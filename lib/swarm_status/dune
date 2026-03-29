@@ -1,0 +1,20 @@
+(include_subdirs no)
+
+(library
+ (name masc_swarm_status)
+ (public_name masc_mcp.swarm_status)
+ (modules
+   swarm_status_types
+   swarm_status_json
+   swarm_status_parse
+   swarm_status_classify
+   swarm_status_lanes
+   swarm_status_build)
+ (wrapped false)
+ (libraries
+   masc_types
+   masc_dashboard_utils
+   masc_team_session_types
+   time_compat
+   yojson
+   unix))

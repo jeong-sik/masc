@@ -300,13 +300,7 @@
    subsystem_health
    subscriptions
    swarm_status
-   swarm_status_types
-   swarm_status_json
-   swarm_status_parse
-   swarm_status_classify
    swarm_status_inputs
-   swarm_status_lanes
-   swarm_status_build
    swarm_checkpoint
    telemetry_eio
    tempo
@@ -590,13 +584,7 @@
  server_routes_http_routes_command_plane_read
  server_routes_http_routes_command_plane_write
  server_routes_http_routes_activity
- swarm_status_types
- swarm_status_json
- swarm_status_parse
- swarm_status_classify
  swarm_status_inputs
- swarm_status_lanes
- swarm_status_build
  server_mcp_transport_http_types
  server_mcp_transport_http_session
  server_mcp_transport_http_headers
@@ -798,6 +786,8 @@
    masc_mcp.activity_graph
    ;; Prompt registry and override storage (extracted sub-library)
    masc_mcp.prompt_registry
+   ;; Swarm status core/helpers (wrapper + inputs remain in monolith)
+   masc_mcp.swarm_status
    ;; OpenTelemetry (spans + OTLP exporter + metrics)
    opentelemetry
    opentelemetry-client-cohttp-eio

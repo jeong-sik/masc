@@ -2,7 +2,6 @@
 open Swarm_status_types
 open Swarm_status_json
 open Swarm_status_classify
-open Swarm_status_inputs
 open Swarm_status_lanes
 
 let build_json_from_inputs ~timeline_limit_override ~now
@@ -113,7 +112,7 @@ let build_json_from_inputs ~timeline_limit_override ~now
     in
     (projected_events @ lane_events)
     |> List.filter_map (fun (event : timeline_event) ->
-           match Command_plane_v2.parse_iso_timestamp event.timestamp with
+           match parse_iso_timestamp event.timestamp with
            | Some ts -> Some (ts, event)
            | None -> None)
     |> List.sort (fun (left, _) (right, _) -> Float.compare right left)
@@ -179,7 +178,7 @@ let build_json_from_inputs ~timeline_limit_override ~now
     |> List.filter_map (fun (lane : lane) ->
            match lane.last_movement_at with
            | Some timestamp -> (
-               match Command_plane_v2.parse_iso_timestamp timestamp with
+               match parse_iso_timestamp timestamp with
                | Some ts -> Some (ts, timestamp)
                | None -> None)
            | None -> None)
@@ -220,30 +219,6 @@ let build_json_from_inputs ~timeline_limit_override ~now
           ] );
       ("recommended_next_action", recommendation_to_json recommendation);
     ]
-
-let build_json_from_snapshot ?(timeline_limit_override = timeline_limit)
-    (config : Room_utils.config) snapshot =
-  build_json_from_inputs
-    ~timeline_limit_override
-    ~now:(Time_compat.now ())
-    ~operations:(operation_infos_of_snapshot snapshot)
-    ~detachments:(detachment_infos_of_snapshot snapshot)
-    ~alerts:(alert_infos_of_snapshot snapshot)
-    ~decisions:(decision_infos_of_snapshot snapshot)
-    ~traces:(trace_infos_of_snapshot snapshot)
-    ~sessions:(read_session_infos config)
-
-let build_json ?(timeline_limit_override = timeline_limit)
-    (config : Room_utils.config) =
-  build_json_from_inputs
-    ~timeline_limit_override
-    ~now:(Time_compat.now ())
-    ~operations:(read_operation_infos config)
-    ~detachments:(read_detachment_infos config)
-    ~alerts:(read_alert_infos config)
-    ~decisions:(read_decision_infos config)
-    ~traces:(read_trace_infos ~limit:timeline_limit_override config)
-    ~sessions:(read_session_infos config)
 
 let empty_json =
   let lane kind =

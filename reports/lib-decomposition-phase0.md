@@ -7,11 +7,11 @@ Issue: #3593
 
 | Metric | Value |
 |--------|-------|
-| Sub-libraries extracted | 22 |
-| Monolith modules remaining | 559 (in dependency graph) |
-| Total dependency edges | 1,855 |
+| Sub-libraries extracted | 23 |
+| Monolith modules remaining | 553 (in dependency graph) |
+| Total dependency edges | 1,835 |
 | Avg dependencies per module | 3.32 |
-| Leaf modules (0 internal deps) | 160 |
+| Leaf modules (0 internal deps) | 159 |
 | Root modules (nothing depends on them) | 112 |
 
 ## Critical Finding: 81-Module Cycle
@@ -42,17 +42,17 @@ These modules have the highest in-degree (most depended-upon):
 | Sse | 30 | Server-sent events |
 | Chain_types | 25 | Chain type definitions |
 
-Room (136 dependents = 23% of all modules) is the gravity well.
+Room (136 dependents = 25% of all modules) is the gravity well.
 
 ## Extraction Candidates (by coupling ratio)
 
 High coupling ratio = internal edges dominate over external deps = easier to extract.
-`tool_schemas`, `activity_graph`, and `prompt_registry` are already extracted in
-this branch, so the remaining low-risk candidates start from `swarm_status`.
+`tool_schemas`, `activity_graph`, `prompt_registry`, and the `swarm_status`
+core/helper set are already extracted in this branch, so the next candidates
+start at Batch 2.
 
 | Prefix Group | Modules | Coupling | Ext Deps | Status |
 |-------------|---------|----------|----------|--------|
-| swarm_status | 8 | 0.889 | 2 | Ready |
 | server_mcp | 10 | 0.652 | 8 | Medium |
 | tool_command | 9 | 0.630 | 10 | Medium |
 | dashboard_proof | 5 | 0.556 | 4 | Medium |
@@ -66,7 +66,7 @@ this branch, so the remaining low-risk candidates start from `swarm_status`.
 |-------|---------------|-----------------|
 | Phase 1: masc_chain (47 files) | Lowest coupling | chain_* prefix not in top extraction candidates — Chain_types has 25 dependents, may be harder than expected |
 | Phase 2: masc_command_plane (18 files) | cp_* prefix clear | Not enough cp_* in analysis. May have been renamed. Needs validation |
-| Phase 3: masc_team_session (17 files) | OAS-heavy | team_session: coupling 0.415, 24 ext deps. Medium-hard |
+| Phase 3: masc_team_session (17 files) | OAS-heavy | team_session: coupling 0.436, 22 ext deps. Medium-hard |
 | Phase 4: masc_dashboard (43 files) | server/keeper cross-ref | dashboard_* scattered. dashboard_proof (5) is extractable |
 | Phase 5: masc_server (54 files) | Highest global deps | Mcp_server_eio_execute has 60 deps. Hardest extraction |
 | Phase 6: masc_keeper (71 files) | Deferred | 17 keeper modules in SCC-1. Requires breaking Tool<->Keeper cycle first |
@@ -80,14 +80,14 @@ Completed in this branch:
 1. **tool_schemas** (18 modules, coupling 1.0) — extracted as `masc_mcp.tool_schemas`
 2. **activity_graph** (4 modules, coupling 1.0) — extracted as `masc_mcp.activity_graph`
 3. **prompt_registry** (3 modules, coupling 1.0) — extracted as `masc_mcp.prompt_registry`
+4. **swarm_status** core/helpers (6 modules) — extracted as `masc_mcp.swarm_status`
+   with `Swarm_status` wrapper and `Swarm_status_inputs` left in the monolith to bridge
+   `Command_plane_v2` and `Team_session_store`
 
-Remaining low-risk candidates:
-4. **swarm_status** (8 modules, coupling 0.889) — 2 external deps
-
-**Remaining in Batch 1**: 8 modules.
+**Batch 1 status**: complete. No remaining low-risk 3+ module clusters.
 
 ### Batch 2: Medium-risk extractions
-5. **server_mcp** (10 modules, coupling 0.667)
+5. **server_mcp** (10 modules, coupling 0.652)
 6. **tool_command** (9 modules, coupling 0.630)
 7. **dashboard_proof** (5 modules, coupling 0.556)
 8. **masc_grpc** (5 modules, coupling 0.429)
@@ -108,7 +108,7 @@ With those heuristics corrected, the graph collapses to one real SCC.
 
 ## Next Steps
 
-1. Extract `swarm_status` as the remaining low-risk sub-library
-2. Re-run analysis again once Batch 1 is fully complete
-3. Plan Batch 2 from the updated graph
-4. Re-evaluate whether `masc_chain` is still a sensible Phase 1 target after Batch 1
+1. Start `server_mcp` as the first Batch 2 extraction
+2. Validate whether `tool_command` still follows `server_mcp` after that split
+3. Plan the remaining Batch 2 order from the updated graph
+4. Re-evaluate whether `masc_chain` is still a sensible Phase 1 target after Batch 2

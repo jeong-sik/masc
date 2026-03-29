@@ -7,10 +7,10 @@ Issue: #3593
 
 | Metric | Value |
 |--------|-------|
-| Sub-libraries extracted | 21 |
-| Monolith modules remaining | 562 (in dependency graph) |
-| Total dependency edges | 1,871 |
-| Avg dependencies per module | 3.33 |
+| Sub-libraries extracted | 22 |
+| Monolith modules remaining | 559 (in dependency graph) |
+| Total dependency edges | 1,855 |
+| Avg dependencies per module | 3.32 |
 | Leaf modules (0 internal deps) | 160 |
 | Root modules (nothing depends on them) | 112 |
 
@@ -47,12 +47,11 @@ Room (136 dependents = 23% of all modules) is the gravity well.
 ## Extraction Candidates (by coupling ratio)
 
 High coupling ratio = internal edges dominate over external deps = easier to extract.
-`tool_schemas` and `activity_graph` are already extracted in this branch, so the
-remaining low-risk candidates start from `prompt_registry`.
+`tool_schemas`, `activity_graph`, and `prompt_registry` are already extracted in
+this branch, so the remaining low-risk candidates start from `swarm_status`.
 
 | Prefix Group | Modules | Coupling | Ext Deps | Status |
 |-------------|---------|----------|----------|--------|
-| prompt_registry | 3 | 1.000 | 0 | Ready |
 | swarm_status | 8 | 0.889 | 2 | Ready |
 | server_mcp | 10 | 0.652 | 8 | Medium |
 | tool_command | 9 | 0.630 | 10 | Medium |
@@ -80,12 +79,12 @@ remaining low-risk candidates start from `prompt_registry`.
 Completed in this branch:
 1. **tool_schemas** (18 modules, coupling 1.0) — extracted as `masc_mcp.tool_schemas`
 2. **activity_graph** (4 modules, coupling 1.0) — extracted as `masc_mcp.activity_graph`
+3. **prompt_registry** (3 modules, coupling 1.0) — extracted as `masc_mcp.prompt_registry`
 
 Remaining low-risk candidates:
-3. **prompt_registry** (3 modules, coupling 1.0) — zero external deps
 4. **swarm_status** (8 modules, coupling 0.889) — 2 external deps
 
-**Remaining in Batch 1**: 11 modules.
+**Remaining in Batch 1**: 8 modules.
 
 ### Batch 2: Medium-risk extractions
 5. **server_mcp** (10 modules, coupling 0.667)
@@ -109,7 +108,7 @@ With those heuristics corrected, the graph collapses to one real SCC.
 
 ## Next Steps
 
-1. Extract `prompt_registry` as the next zero-risk sub-library
-2. Extract `swarm_status` and re-run analysis again
-3. Plan Batch 2 from the updated graph once Batch 1 is fully complete
+1. Extract `swarm_status` as the remaining low-risk sub-library
+2. Re-run analysis again once Batch 1 is fully complete
+3. Plan Batch 2 from the updated graph
 4. Re-evaluate whether `masc_chain` is still a sensible Phase 1 target after Batch 1

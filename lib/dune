@@ -171,9 +171,6 @@
    worker_tool_input
    worker_verification
    safe_parse
-   prompt_registry_types
-   prompt_registry_store
-   prompt_registry
    prompt_defaults
    prompt_composer
    chain_types
@@ -799,6 +796,8 @@
    masc_mcp.tool_schemas
    ;; Activity graph event/model cluster (extracted sub-library)
    masc_mcp.activity_graph
+   ;; Prompt registry and override storage (extracted sub-library)
+   masc_mcp.prompt_registry
    ;; OpenTelemetry (spans + OTLP exporter + metrics)
    opentelemetry
    opentelemetry-client-cohttp-eio

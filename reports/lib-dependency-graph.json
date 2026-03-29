@@ -1,8 +1,8 @@
 {
   "stats": {
-    "total_modules": 562,
-    "total_edges": 1871,
-    "avg_out_degree": 3.33,
+    "total_modules": 559,
+    "total_edges": 1855,
+    "avg_out_degree": 3.32,
     "leaf_count": 160,
     "root_count": 112
   },
@@ -103,7 +103,7 @@
     ],
     [
       "Server_runtime_bootstrap",
-      33
+      32
     ],
     [
       "Tools",
@@ -119,7 +119,7 @@
     ],
     [
       "Server_dashboard_http",
-      23
+      22
     ],
     [
       "Tool_inline_dispatch",
@@ -162,11 +162,11 @@
       15
     ],
     [
-      "Server_routes_http_routes_activity",
+      "Mcp_server_eio_call_tool",
       15
     ],
     [
-      "Chain_native_eio",
+      "Tool_task",
       15
     ]
   ],
@@ -256,18 +256,6 @@
     ]
   ],
   "clusters": [
-    {
-      "prefix": "prompt_registry",
-      "module_count": 3,
-      "members": [
-        "Prompt_registry",
-        "Prompt_registry_store",
-        "Prompt_registry_types"
-      ],
-      "internal_edges": 2,
-      "external_dep_count": 0,
-      "coupling_ratio": 1.0
-    },
     {
       "prefix": "swarm_status",
       "module_count": 8,
@@ -494,6 +482,20 @@
       "coupling_ratio": 0.231
     },
     {
+      "prefix": "tool_council",
+      "module_count": 5,
+      "members": [
+        "Tool_council_feed",
+        "Tool_council_helpers",
+        "Tool_council_internal_schemas",
+        "Tool_council_json",
+        "Tool_council_oas"
+      ],
+      "internal_edges": 3,
+      "external_dep_count": 10,
+      "coupling_ratio": 0.231
+    },
+    {
       "prefix": "server_routes",
       "module_count": 12,
       "members": [
@@ -511,22 +513,8 @@
         "Server_routes_http_runtime"
       ],
       "internal_edges": 18,
-      "external_dep_count": 62,
-      "coupling_ratio": 0.225
-    },
-    {
-      "prefix": "tool_council",
-      "module_count": 5,
-      "members": [
-        "Tool_council_feed",
-        "Tool_council_helpers",
-        "Tool_council_internal_schemas",
-        "Tool_council_json",
-        "Tool_council_oas"
-      ],
-      "internal_edges": 3,
-      "external_dep_count": 11,
-      "coupling_ratio": 0.214
+      "external_dep_count": 61,
+      "coupling_ratio": 0.228
     },
     {
       "prefix": "tool_inline",
@@ -588,8 +576,8 @@
         "Chain_executor_search"
       ],
       "internal_edges": 4,
-      "external_dep_count": 24,
-      "coupling_ratio": 0.143
+      "external_dep_count": 23,
+      "coupling_ratio": 0.148
     },
     {
       "prefix": "dashboard_mission",
@@ -643,8 +631,8 @@
         "Dashboard_http_repo_synthesis"
       ],
       "internal_edges": 3,
-      "external_dep_count": 24,
-      "coupling_ratio": 0.111
+      "external_dep_count": 23,
+      "coupling_ratio": 0.115
     },
     {
       "prefix": "keeper_exec",
@@ -670,8 +658,8 @@
         "Server_dashboard_http_runtime_support"
       ],
       "internal_edges": 1,
-      "external_dep_count": 30,
-      "coupling_ratio": 0.032
+      "external_dep_count": 29,
+      "coupling_ratio": 0.033
     },
     {
       "prefix": "dashboard_execution",
@@ -698,7 +686,7 @@
         "Chain_parser_validate"
       ],
       "internal_edges": 0,
-      "external_dep_count": 2,
+      "external_dep_count": 1,
       "coupling_ratio": 0.0
     },
     {
@@ -984,15 +972,13 @@
     "Dashboard_governance": [],
     "Dashboard_governance_judge": [
       "Oas_response",
-      "Oas_worker",
-      "Prompt_registry"
+      "Oas_worker"
     ],
     "Dashboard_operator_judge": [
       "Oas_response",
       "Oas_worker",
       "Operator_approval",
       "Operator_judgment",
-      "Prompt_registry",
       "Room"
     ],
     "Dashboard_surface_readiness": [],
@@ -1123,7 +1109,6 @@
       "Keeper_status_bridge",
       "Keeper_types",
       "Oas_model_resolve",
-      "Prompt_registry",
       "Room"
     ],
     "Dashboard_http_mdal": [
@@ -1171,7 +1156,6 @@
       "Mcp_server",
       "Operator_control",
       "Proactive_refresh",
-      "Prompt_registry",
       "Room",
       "Server_command_plane_http",
       "Server_utils",
@@ -1339,7 +1323,6 @@
       "Board_dispatch",
       "Mcp_server",
       "Mention_inbox",
-      "Prompt_registry",
       "Response",
       "Server_auth",
       "Server_mcp_transport_http",
@@ -1469,7 +1452,6 @@
       "Mcp_server_eio_execute",
       "Prometheus",
       "Prompt_defaults",
-      "Prompt_registry",
       "Room",
       "Server_auth",
       "Server_bootstrap_http",
@@ -1689,16 +1671,8 @@
       "Worker_container_types"
     ],
     "Safe_parse": [],
-    "Prompt_registry_types": [],
-    "Prompt_registry_store": [
-      "Prompt_registry_types"
-    ],
-    "Prompt_registry": [
-      "Prompt_registry_store"
-    ],
     "Prompt_defaults": [
-      "Config_dir_resolver",
-      "Prompt_registry"
+      "Config_dir_resolver"
     ],
     "Prompt_composer": [
       "Team_context"
@@ -1733,8 +1707,7 @@
       "Chain_types"
     ],
     "Chain_parser_parse": [
-      "Chain_types",
-      "Prompt_registry"
+      "Chain_types"
     ],
     "Chain_parser_validate": [
       "Chain_types"
@@ -1810,7 +1783,6 @@
       "Chain_category",
       "Chain_types",
       "Chain_utils",
-      "Prompt_registry",
       "Run_log_eio"
     ],
     "Chain_executor_complex": [
@@ -1870,7 +1842,6 @@
       "Mcp_server",
       "Oas_response",
       "Oas_worker",
-      "Prompt_registry",
       "Provider_adapter",
       "Room"
     ],
@@ -3137,9 +3108,7 @@
     "Contract_composer": [
       "Contract_risk"
     ],
-    "Keeper_deliberation": [
-      "Prompt_registry"
-    ],
+    "Keeper_deliberation": [],
     "Keeper_types_profile": [
       "Config_dir_resolver",
       "Keeper",
@@ -3314,8 +3283,7 @@
     "Keeper_unified_prompt": [
       "Agent_economy",
       "Keeper_types",
-      "Keeper_world_observation",
-      "Prompt_registry"
+      "Keeper_world_observation"
     ],
     "Keeper_unified_turn": [
       "Cascade_inference",
@@ -3336,8 +3304,7 @@
       "Keeper_config",
       "Keeper_memory",
       "Keeper_skill_routing",
-      "Keeper_types",
-      "Prompt_registry"
+      "Keeper_types"
     ],
     "Keeper_coordination": [
       "Keeper_contract",
@@ -3528,7 +3495,6 @@
       "Memory_oas_bridge",
       "Oas_response",
       "Oas_worker",
-      "Prompt_registry",
       "Room",
       "Tool_args",
       "Tool_council_internal_schemas"

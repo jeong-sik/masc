@@ -94,7 +94,7 @@
           test_adversarial_eval
           test_labeling
   )
- (libraries masc_mcp masc_mcp.team_session_types agent_sdk alcotest str yojson mirage-crypto
+ (libraries masc_mcp masc_mcp.team_session_types masc_mcp.prompt_registry agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))
 
 ; ============================================================
@@ -208,7 +208,7 @@
 (test
  (name test_dashboard_labels)
  (modules test_dashboard_labels)
- (libraries masc_mcp alcotest str yojson unix))
+ (libraries masc_mcp masc_mcp.prompt_registry alcotest str yojson unix))
 
 (test
  (name test_dashboard_surface_readiness)

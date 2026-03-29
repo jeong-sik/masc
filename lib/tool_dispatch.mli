@@ -78,7 +78,7 @@ val is_join_required : string -> bool
     to create lazily. *)
 
 type module_tag =
-  | Mod_plan | Mod_run | Mod_operator | Mod_command_plane
+  | Mod_plan | Mod_operator | Mod_command_plane
   | Mod_local_runtime | Mod_team_session | Mod_voice
   | Mod_portal | Mod_worktree
   | Mod_code | Mod_code_write
@@ -91,7 +91,6 @@ type module_tag =
   | Mod_improve_loop
   | Mod_autoresearch
   | Mod_research
-  | Mod_model_catalog
   | Mod_shard
 
 val register_module_tag : schemas:Types.tool_schema list -> tag:module_tag -> unit

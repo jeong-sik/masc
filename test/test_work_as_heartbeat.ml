@@ -107,6 +107,26 @@ let test_timing_ring_size_range () =
   check bool "ring >= 10" true (v >= 10);
   check bool "ring <= 1000" true (v <= 1000)
 
+(* ── Config invariant properties ───────────────────────── *)
+
+let test_config_invariant_silence_ge_interval () =
+  let silence = Cfg.WorkAsHeartbeat.max_silence_sec in
+  let interval = Float.of_int Cfg.KeeperKeepalive.interval_sec in
+  check bool "max_silence >= interval (invariant)" true (silence >= interval)
+
+let test_config_invariant_sweep_independent () =
+  let sweep = Cfg.KeeperSupervisor.sweep_interval_sec in
+  let backoff_base = Cfg.KeeperSupervisor.backoff_base_s in
+  check bool "sweep > 0" true (sweep > 0.0);
+  check bool "backoff_base > 0" true (backoff_base > 0.0);
+  check bool "backoff_max >= backoff_base" true
+    (Cfg.KeeperSupervisor.backoff_max_s >= backoff_base)
+
+let test_config_invariant_debounce_ge_interval () =
+  let debounce = Cfg.KeeperKeepalive.board_debounce_sec in
+  let interval = Float.of_int Cfg.KeeperKeepalive.interval_sec in
+  check bool "board debounce >= interval" true (debounce >= interval)
+
 (* ── Freshness decision pure logic ──────────────────────── *)
 
 let test_freshness_fresh () =
@@ -225,6 +245,11 @@ let () =
       test_case "exact boundary → stale (strict <)" `Quick test_freshness_exact_boundary;
       test_case "never heartbeated → stale" `Quick test_freshness_never_heartbeated;
       test_case "feature disabled → always stale" `Quick test_freshness_disabled_flag;
+    ];
+    "config_invariants", [
+      test_case "max_silence >= interval" `Quick test_config_invariant_silence_ge_interval;
+      test_case "sweep/backoff coherence" `Quick test_config_invariant_sweep_independent;
+      test_case "debounce >= interval" `Quick test_config_invariant_debounce_ge_interval;
     ];
     "percentile", [
       test_case "empty array" `Quick test_percentile_empty;

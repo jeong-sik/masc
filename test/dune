@@ -706,14 +706,12 @@
  (libraries masc_mcp alcotest eio eio_main yojson))
 
 ; A2A Distributed Test (2-process sequential communication)
-; Run with: ./scripts/test_distributed.sh
 (executable
  (name test_a2a_distributed)
  (modules test_a2a_distributed)
  (libraries masc_mcp eio eio_main yojson unix))
 
 ; A2A Concurrent Distributed Test (TRUE parallel writes)
-; Run with: ./scripts/test_concurrent.sh
 (executable
  (name test_concurrent_distributed)
  (modules test_concurrent_distributed)

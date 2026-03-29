@@ -15,21 +15,8 @@ let assoc_field name value = (name, value)
 
 let json_string value = `String value
 
-let string_prop description =
-  `Assoc
-    [
-      assoc_field "type" (`String "string");
-      assoc_field "description" (`String description);
-    ]
-
-let object_schema ?(required = []) properties =
-  let required_json = `List (List.map (fun name -> `String name) required) in
-  `Assoc
-    [
-      assoc_field "type" (`String "object");
-      assoc_field "properties" (`Assoc properties);
-      assoc_field "required" required_json;
-    ]
+let string_prop = Tool_schema_dsl.string_prop
+let object_schema = Tool_schema_dsl.object_schema
 
 let task_item_schema =
   object_schema ~required:[ "title"; "description" ]

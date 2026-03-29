@@ -47,18 +47,6 @@ let register_all () =
     "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
   ];
 
-  (* ── Mod_cache: Tool_cache ────────────────────────────────────── *)
-  reg Mod_cache [
-    "masc_cache_set"; "masc_cache_get"; "masc_cache_delete";
-    "masc_cache_list"; "masc_cache_clear"; "masc_cache_stats";
-  ];
-
-  (* ── Mod_tempo: non-schema tools ────────────────────────────── *)
-  reg Mod_tempo [
-    "masc_tempo_get"; "masc_tempo_set"; "masc_tempo_adjust";
-    "masc_tempo";
-  ];
-
   (* ── Mod_code: Tool_code ──────────────────────────────────────── *)
   reg Mod_code [
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";
@@ -100,20 +88,9 @@ let register_all () =
     "masc_heartbeat_stop"; "masc_heartbeat_list";
   ];
 
-  (* ── Mod_encryption: non-schema tools ───────────────────────── *)
-  reg Mod_encryption [
-    "masc_generate_key";
-  ];
-
   (* ── Mod_hat: non-schema tools ──────────────────────────────── *)
   reg Mod_hat [
     "masc_hat_wear";
-  ];
-
-  (* ── Mod_audit: Tool_audit ────────────────────────────────────── *)
-  reg Mod_audit [
-    "masc_audit_query"; "masc_audit_stats"; "masc_governance_report";
-    "masc_audit_trail";
   ];
 
   (* Mod_cost and Mod_rate_limit: fully covered by schemas — no entries needed *)

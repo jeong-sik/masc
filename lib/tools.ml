@@ -17,25 +17,17 @@ let raw_schemas : tool_schema list =
   @ Tool_schemas_auth.schemas
   @ Tool_schemas_portal.schemas
   @ Tool_schemas_worktree.schemas
-  @ Tool_schemas_fire_task.schemas
   @ Tool_task.schemas
   @ Tool_suspend.schemas
-  @ Tool_cost.schemas
-  @ Tool_rate_limit.schemas
-  @ Tool_encryption.schemas
   @ Tool_council_oas.schemas
   @ Tool_relay.schemas
   @ Tool_handover.schemas
-  @ Tool_tempo.schemas
   @ Tool_walph.schemas
-  @ Tool_hat.schemas
   @ Tool_improve_loop.schemas
-  @ Tool_cache.schemas
   @ Tool_run.schemas
   @ Tool_code.schemas
   @ Tool_code_write.schemas
   @ Tool_library.schemas
-  @ Tool_audit.schemas
   @ Tool_heartbeat.schemas
 
 let all_schemas : tool_schema list = raw_schemas
@@ -47,10 +39,9 @@ let all_schemas_extended =
   @ Tool_schemas_a2a.schemas
   @ Tool_schemas_misc.schemas
   @ Tool_keeper.schemas
-  @ Tool_operator.schemas @ Tool_local_runtime.schemas @ Tool_command_plane.schemas @ Tool_goals.schemas
+  @ Tool_operator.schemas @ Tool_local_runtime.schemas @ Tool_command_plane.schemas
   @ Tool_team_session.schemas @ Tool_voice.schemas @ Tool_shard.schemas
   @ Tool_autoresearch.schemas
-  @ Tool_compact.schemas
 
 (** Get tool by name *)
 let find_tool name =

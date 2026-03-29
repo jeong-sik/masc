@@ -440,18 +440,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_team_session.dispatch ctx ~name ~args:arguments
     | Mod_voice ->
         Tool_voice.dispatch { agent_name; sw; clock; net = state.Mcp_server.net } ~name ~args:arguments
-    | Mod_cache ->
-        Tool_cache.dispatch { Tool_cache.config } ~name ~args:arguments
-    | Mod_tempo ->
-        Tool_tempo.dispatch { Tool_tempo.config; agent_name } ~name ~args:arguments
     | Mod_portal ->
         Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args:arguments
     | Mod_worktree ->
         Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args:arguments
-    | Mod_fire_task ->
-        Tool_fire_task.dispatch { Tool_fire_task.config; agent_name; sw } ~name ~args:arguments
-    | Mod_code_swarm ->
-        Tool_code_swarm.dispatch { Tool_code_swarm.config; agent_name } ~name ~args:arguments
     | Mod_code ->
         Tool_code.dispatch { Tool_code.config; agent_name } ~name ~args:arguments
     | Mod_code_write ->
@@ -483,28 +475,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_relay ->
         Tool_relay.dispatch { Tool_relay.config; agent_name; sw;
           proc_mgr = state.Mcp_server.proc_mgr } ~name ~args:arguments
-    | Mod_goals ->
-        let keeper_ctx = make_keeper_ctx () in
-        let ctx : Tool_goals.context = { config; agent_name;
-          call_keeper_msg = Some (fun keeper_args ->
-            match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:keeper_args with
-            | Some result -> result
-            | None -> (false, "masc_keeper_msg dispatch unavailable")) } in
-        Tool_goals.dispatch ctx ~name ~args:arguments
     | Mod_heartbeat ->
         Tool_heartbeat.dispatch { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args:arguments
-    | Mod_encryption ->
-        Tool_encryption.dispatch { Tool_encryption.state } ~name ~args:arguments
     | Mod_auth ->
         Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args:arguments
-    | Mod_hat ->
-        Tool_hat.dispatch { Tool_hat.config; agent_name } ~name ~args:arguments
-    | Mod_audit ->
-        Tool_audit.dispatch { Tool_audit.config } ~name ~args:arguments
-    | Mod_rate_limit ->
-        Tool_rate_limit.dispatch { Tool_rate_limit.config; agent_name; registry } ~name ~args:arguments
-    | Mod_cost ->
-        Tool_cost.dispatch { Tool_cost.agent_name } ~name ~args:arguments
     | Mod_walph ->
         (let ctx : _ Tool_walph.context = { config; agent_name; clock } in
            Tool_walph.dispatch ctx ~name ~args:arguments)
@@ -537,8 +511,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_library.dispatch { Tool_library.agent_name } ~name ~args:arguments
     | Mod_keeper ->
         Tool_keeper.dispatch (make_keeper_ctx ()) ~name ~args:arguments
-    | Mod_compact ->
-        Tool_compact.dispatch ~name ~args:arguments
     | Mod_mdal ->
         let ctx : Tool_mdal.context = { agent_name; config = Some config;
           sw = Some sw; proc_mgr = state.Mcp_server.proc_mgr;
@@ -591,9 +563,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_shard ->
         let (ok, json) = Tool_shard.execute name arguments in
         Some (ok, Yojson.Safe.to_string json)
-    | Mod_notifications ->
-        Tool_notifications.dispatch state.Mcp_server.session_registry
-          ~agent_name ~name arguments
     | Mod_inline ->
         let inline_ctx : Tool_inline_dispatch.context = {
           config; agent_name; registry; state; sw; clock; arguments;

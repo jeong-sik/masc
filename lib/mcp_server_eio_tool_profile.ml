@@ -162,10 +162,18 @@ let tool_annotations_for_profile _profile tool_name =
     | Some v -> v
     | None -> is_idempotent_tool_name tool_name || read_only
   in
+  let is_deprecated = meta.lifecycle = Tool_catalog.Deprecated in
   let fields =
     [ ("readOnlyHint", `Bool read_only) ]
     @ (if destructive then [ ("destructiveHint", `Bool true) ] else [])
     @ (if idempotent then [ ("idempotentHint", `Bool true) ] else [])
+    @ (if is_deprecated then [ ("deprecated", `Bool true) ] else [])
+    @ (match meta.replacement with
+       | Some r when is_deprecated -> [ ("successor", `String r) ]
+       | _ -> [])
+    @ (match meta.reason with
+       | Some r when is_deprecated -> [ ("deprecationReason", `String r) ]
+       | _ -> [])
   in
   if fields = [] then None else Some (`Assoc fields)
 

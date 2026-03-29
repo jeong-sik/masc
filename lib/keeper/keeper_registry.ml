@@ -439,16 +439,37 @@ let restore_tool_usage ~base_path name =
       (try
          let content = Fs_compat.load_file path in
          let json = Yojson.Safe.from_string content in
-         let open Yojson.Safe.Util in
-         let tools = json |> member "tools" |> to_list in
+         let tools = match json with
+           | `Assoc fields ->
+             (match List.assoc_opt "tools" fields with
+              | Some (`List items) -> items
+              | _ -> [])
+           | _ -> []
+         in
          List.iter (fun item ->
-           let tool_name = item |> member "tool" |> to_string in
-           let e = {
-             count = item |> member "count" |> to_int;
-             successes = item |> member "successes" |> to_int;
-             failures = item |> member "failures" |> to_int;
-             last_used_at = item |> member "last_used_at" |> to_float;
-           } in
-           Hashtbl.replace entry.tool_usage tool_name e
+           try
+             match item with
+             | `Assoc fields ->
+               let str key = match List.assoc_opt key fields with
+                 | Some (`String s) -> s | _ -> raise Exit in
+               let int key = match List.assoc_opt key fields with
+                 | Some (`Int n) -> n | _ -> raise Exit in
+               let float key = match List.assoc_opt key fields with
+                 | Some (`Float f) -> f
+                 | Some (`Int n) -> Float.of_int n
+                 | _ -> raise Exit in
+               let tool_name = str "tool" in
+               let e = {
+                 count = int "count";
+                 successes = int "successes";
+                 failures = int "failures";
+                 last_used_at = float "last_used_at";
+               } in
+               Hashtbl.replace entry.tool_usage tool_name e
+             | _ -> ()
+           with Exit -> ()
          ) tools
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Keeper.warn "restore_tool_usage %s: %s" name (Printexc.to_string exn))

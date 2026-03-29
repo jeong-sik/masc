@@ -9,28 +9,43 @@ import { fetchKeeperTrajectory } from '../api/dashboard'
 import type { TrajectoryEntry, TrajectoryResponse } from '../api/dashboard'
 import { TimeAgo } from './common/time-ago'
 
-// ── State ────────────────────────────────────────────────
+// ── State (per-keeper to avoid cross-keeper corruption) ──
 
-const trajectoryData = signal<TrajectoryResponse | null>(null)
-const trajectoryLoading = signal(false)
-const trajectoryError = signal<string | null>(null)
+type TrajectoryState = {
+  data: TrajectoryResponse | null
+  loading: boolean
+  error: string | null
+}
+
+const trajectoryStates = signal<Record<string, TrajectoryState>>({})
+
+function getState(name: string): TrajectoryState {
+  return trajectoryStates.value[name] ?? { data: null, loading: false, error: null }
+}
+
+function setState(name: string, patch: Partial<TrajectoryState>): void {
+  const prev = getState(name)
+  trajectoryStates.value = { ...trajectoryStates.value, [name]: { ...prev, ...patch } }
+}
 
 export async function loadTrajectory(keeperName: string): Promise<void> {
-  trajectoryLoading.value = true
-  trajectoryError.value = null
+  setState(keeperName, { loading: true, error: null })
   try {
-    trajectoryData.value = await fetchKeeperTrajectory(keeperName, TRAJECTORY_DEFAULT_LIMIT)
+    const data = await fetchKeeperTrajectory(keeperName, TRAJECTORY_DEFAULT_LIMIT)
+    setState(keeperName, { data, loading: false })
   } catch (err) {
-    trajectoryError.value = err instanceof Error ? err.message : 'fetch failed'
-    trajectoryData.value = null
-  } finally {
-    trajectoryLoading.value = false
+    setState(keeperName, {
+      data: null,
+      loading: false,
+      error: err instanceof Error ? err.message : 'fetch failed',
+    })
   }
 }
 
-export function clearTrajectory(): void {
-  trajectoryData.value = null
-  trajectoryError.value = null
+export function clearTrajectory(keeperName: string): void {
+  const next = { ...trajectoryStates.value }
+  delete next[keeperName]
+  trajectoryStates.value = next
 }
 
 // ── Display constants ────────────────────────────────────
@@ -149,18 +164,20 @@ function groupByTurn(entries: TrajectoryEntry[]): Map<number, TrajectoryEntry[]>
 export function KeeperTrajectoryTimeline({ keeperName }: { keeperName: string }) {
   useEffect(() => {
     void loadTrajectory(keeperName)
-    return () => clearTrajectory()
+    return () => clearTrajectory(keeperName)
   }, [keeperName])
 
-  if (trajectoryLoading.value) {
+  const state = getState(keeperName)
+
+  if (state.loading) {
     return html`<div class="text-xs text-[var(--text-muted)] py-4 text-center">궤적 로딩 중...</div>`
   }
 
-  if (trajectoryError.value) {
-    return html`<div class="text-xs text-[#ef4444] py-4 text-center">${trajectoryError.value}</div>`
+  if (state.error) {
+    return html`<div class="text-xs text-[#ef4444] py-4 text-center">${state.error}</div>`
   }
 
-  const data = trajectoryData.value
+  const data = state.data
   if (!data || data.entries.length === 0) {
     return html`<div class="text-xs text-[var(--text-muted)] py-4 text-center">이 세션에 기록된 도구 호출이 없습니다.</div>`
   }

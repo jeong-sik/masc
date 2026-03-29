@@ -660,6 +660,44 @@ let add_routes ~sw ~clock router =
                (Yojson.Safe.to_string (mdal_loops_error_json msg)) reqd
        ) request reqd)
 
+  (* MDAL loop start — POST /api/v1/mdal/loops/start *)
+  |> Http.Router.post "/api/v1/mdal/loops/start" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_mdal_start" (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             let config = state.Mcp_server.room_config in
+             let ctx : Tool_mdal.context =
+               {
+                 agent_name = "dashboard";
+                 config = Some config;
+                 sw = Some sw;
+                 proc_mgr = state.Mcp_server.proc_mgr;
+                 worker_runner = None;
+                 clock = Some clock;
+               }
+             in
+             (match Tool_mdal.dispatch ctx ~name:"masc_mdal_start" ~args with
+             | Some (true, body) ->
+                 Http.Response.json ~compress:true ~request:req
+                   (Printf.sprintf {|{"ok":true,"action":"start","detail":%s}|} body)
+                   reqd
+             | Some (false, body) ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   (Yojson.Safe.to_string
+                      (`Assoc [("ok", `Bool false); ("error", `String body)]))
+                   reqd
+             | None ->
+                 Http.Response.json ~status:`Internal_server_error ~request:req
+                   {|{"ok":false,"error":"dispatch returned None"}|}
+                   reqd)
+           with Yojson.Json_error _ ->
+             Http.Response.json ~status:`Bad_request ~request:req
+               {|{"ok":false,"error":"invalid JSON body"}|}
+               reqd
+         )
+       ) request reqd)
+
   (* MDAL loop stop — POST /api/v1/mdal/loops/stop *)
   |> Http.Router.post "/api/v1/mdal/loops/stop" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_mdal_stop" (fun state req reqd ->

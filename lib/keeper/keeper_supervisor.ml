@@ -52,9 +52,10 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
            publish_lifecycle "stopped" meta.name "normal exit"
          with
          | Keeper_registry.Keeper_heartbeat_failure info ->
-             (* Phase 2: structured crash — heartbeat failures *)
              let reason =
                Keeper_registry.failure_reason_to_string info.reason in
+             Keeper_registry.set_failure_reason ~base_path meta.name
+               (Some info.reason);
              Keeper_registry.set_state ~base_path meta.name
                Keeper_registry.Crashed;
              Keeper_registry.record_crash ~base_path
@@ -64,10 +65,9 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              publish_lifecycle "crashed" meta.name reason
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-             (* Phase 2: structured crash — generic exception *)
-             let reason =
-               Keeper_registry.failure_reason_to_string
-                 (Keeper_registry.Exception (Printexc.to_string exn)) in
+             let fr = Keeper_registry.Exception (Printexc.to_string exn) in
+             let reason = Keeper_registry.failure_reason_to_string fr in
+             Keeper_registry.set_failure_reason ~base_path meta.name (Some fr);
              Keeper_registry.set_state ~base_path meta.name
                Keeper_registry.Crashed;
              Keeper_registry.record_crash ~base_path
@@ -80,10 +80,11 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
         match Eio.Promise.peek reg.done_p with
         | Some _ -> ()  (* Already resolved above *)
         | None ->
-            (* Fallback: fiber terminated without any resolution *)
             let reason =
               Keeper_registry.failure_reason_to_string
                 Keeper_registry.Fiber_unresolved in
+            Keeper_registry.set_failure_reason ~base_path meta.name
+              (Some Keeper_registry.Fiber_unresolved);
             Keeper_registry.record_crash ~base_path
               meta.name (Time_compat.now ()) reason;
             Keeper_registry.record_error ~base_path meta.name reason;
@@ -144,9 +145,16 @@ let reconcile_keepalive_keepers (ctx : _ context) =
                Log.Keeper.info "%s: reconciled durable keeper" meta.name
              end
          | _ -> ())
-(** Phase 2: self-preservation gate.
-    Suppresses restarts when a dominant failure cohort exceeds the
-    ratio threshold AND minimum candidate count. *)
+(** Cohort key from structured failure_reason ADT.
+    Groups failures by variant, ignoring parameters (e.g. failure count). *)
+let cohort_key_of_reason = function
+  | Some (Keeper_registry.Heartbeat_consecutive_failures _) -> "heartbeat_failures"
+  | Some Keeper_registry.Fiber_unresolved -> "fiber_unresolved"
+  | Some (Keeper_registry.Exception _) -> "exception"
+  | None -> "unknown"
+
+(** Self-preservation gate. Suppresses restarts when a dominant failure
+    cohort exceeds ratio threshold AND minimum candidate count. *)
 let apply_self_preservation ~total_keepers to_restart =
   let sp_ratio = Env_config.KeeperSupervisor.self_preservation_ratio in
   let sp_min = Env_config.KeeperSupervisor.self_preservation_min_candidates in
@@ -156,15 +164,13 @@ let apply_self_preservation ~total_keepers to_restart =
   if ratio > sp_ratio
      && n_candidates >= sp_min
   then begin
-    (* Group by failure reason prefix for cohort detection *)
+    (* Group by failure_reason ADT variant (not string prefix) *)
     let cohorts = Hashtbl.create 4 in
-    List.iter (fun ((_entry : Keeper_registry.registry_entry), msg) ->
-      let key =
-        if String.length msg > 30 then String.sub msg 0 30 else msg in
+    List.iter (fun ((entry : Keeper_registry.registry_entry), _msg) ->
+      let key = cohort_key_of_reason entry.last_failure_reason in
       let prev = try Hashtbl.find cohorts key with Not_found -> [] in
-      Hashtbl.replace cohorts key ((_entry, msg) :: prev)
+      Hashtbl.replace cohorts key ((entry, _msg) :: prev)
     ) to_restart;
-    (* Find dominant cohort *)
     let dominant_key, dominant_entries =
       Hashtbl.fold (fun k v (best_k, best_v) ->
         if List.length v > List.length best_v then (k, v) else (best_k, best_v)
@@ -177,7 +183,6 @@ let apply_self_preservation ~total_keepers to_restart =
       publish_lifecycle "self_preservation" "supervisor"
         (Printf.sprintf "%d/%d suppressed, cohort=%s"
            (List.length dominant_entries) n_total dominant_key);
-      (* Return only non-dominant entries for restart *)
       let dominant_set =
         List.map (fun ((e : Keeper_registry.registry_entry), _) -> e.name)
           dominant_entries in

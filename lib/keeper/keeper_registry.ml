@@ -65,6 +65,7 @@ type registry_entry = {
   last_restart_ts : float;
   crash_log : (float * string) list;
   last_error : string option;
+  last_failure_reason : failure_reason option;
   last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
   board_cursor_ts : float;
@@ -118,6 +119,7 @@ let register ~base_path name meta =
     last_restart_ts = 0.0;
     crash_log = [];
     last_error = None;
+    last_failure_reason = None;
     last_agent_count = 0;
     board_wakeups = Hashtbl.create 8;
     board_cursor_ts = 0.0;
@@ -183,6 +185,9 @@ let record_restart ~base_path name =
 
 let record_error ~base_path name err =
   update_entry ~base_path name (fun e -> { e with last_error = Some err })
+
+let set_failure_reason ~base_path name reason =
+  update_entry ~base_path name (fun e -> { e with last_failure_reason = reason })
 
 let is_running ~base_path name =
   match get ~base_path name with

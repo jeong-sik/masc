@@ -144,6 +144,73 @@ let test_dead_to_running_blocked () =
     check string "still dead" "dead" (R.state_to_string e.state);
     check int "still 0 running" 0 (R.count_running ())
 
+(* ── Fix 1: last_failure_reason stored in registry ────── *)
+
+let test_failure_reason_stored () =
+  R.clear ();
+  let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
+  (* Initially None *)
+  (match R.get ~base_path:bp "k1" with
+   | Some e -> check bool "initially None" true (Option.is_none e.last_failure_reason)
+   | None -> fail "expected k1");
+  (* Set a reason *)
+  R.set_failure_reason ~base_path:bp "k1"
+    (Some (R.Heartbeat_consecutive_failures 5));
+  match R.get ~base_path:bp "k1" with
+  | None -> fail "expected k1"
+  | Some e ->
+    check bool "has reason" true (Option.is_some e.last_failure_reason);
+    (match e.last_failure_reason with
+     | Some (R.Heartbeat_consecutive_failures n) ->
+       check int "failure count" 5 n
+     | _ -> fail "expected Heartbeat_consecutive_failures")
+
+let test_failure_reason_cleared_on_reregister () =
+  R.clear ();
+  let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
+  R.set_failure_reason ~base_path:bp "k1"
+    (Some R.Fiber_unresolved);
+  (* Re-register (simulates restart) clears the reason *)
+  let _e2 = R.register ~base_path:bp "k1" (make_meta "k1") in
+  match R.get ~base_path:bp "k1" with
+  | None -> fail "expected k1"
+  | Some e ->
+    check bool "cleared on re-register" true
+      (Option.is_none e.last_failure_reason)
+
+(* ── Fix 2: Cohort detection uses ADT, not string prefix ── *)
+
+module Sup = Masc_mcp.Keeper_supervisor
+
+let test_cohort_key_heartbeat () =
+  let key = Sup.cohort_key_of_reason
+    (Some (R.Heartbeat_consecutive_failures 3)) in
+  check string "heartbeat cohort" "heartbeat_failures" key
+
+let test_cohort_key_fiber () =
+  let key = Sup.cohort_key_of_reason (Some R.Fiber_unresolved) in
+  check string "fiber cohort" "fiber_unresolved" key
+
+let test_cohort_key_exception () =
+  let key = Sup.cohort_key_of_reason
+    (Some (R.Exception "Sys_error(disk full)")) in
+  check string "exception cohort" "exception" key
+
+let test_cohort_key_none () =
+  let key = Sup.cohort_key_of_reason None in
+  check string "unknown cohort" "unknown" key
+
+(* ── Fix 2: Dead tombstone lifecycle ─────────────────── *)
+
+let test_dead_tombstone_is_registered () =
+  R.clear ();
+  let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
+  R.set_state ~base_path:bp "k1" R.Crashed;
+  R.set_state ~base_path:bp "k1" R.Dead;
+  (* Dead keeper is still registered — reconcile must skip *)
+  check bool "Dead is registered" true (R.is_registered ~base_path:bp "k1");
+  check bool "Dead is not running" false (R.is_running ~base_path:bp "k1")
+
 (* ── Test runner ──────────────────────────────────────── *)
 
 let () =
@@ -174,5 +241,18 @@ let () =
     "state_transitions", [
       eio_test "Running → Crashed → Running" test_state_transition_running_crashed_running;
       eio_test "Dead → Running blocked" test_dead_to_running_blocked;
+    ];
+    "failure_reason_field", [
+      eio_test "stored in registry" test_failure_reason_stored;
+      eio_test "cleared on re-register" test_failure_reason_cleared_on_reregister;
+    ];
+    "cohort_detection", [
+      test_case "heartbeat key" `Quick test_cohort_key_heartbeat;
+      test_case "fiber key" `Quick test_cohort_key_fiber;
+      test_case "exception key" `Quick test_cohort_key_exception;
+      test_case "none key" `Quick test_cohort_key_none;
+    ];
+    "dead_tombstone", [
+      eio_test "Dead is registered but not running" test_dead_tombstone_is_registered;
     ];
   ]

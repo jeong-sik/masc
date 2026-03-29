@@ -45,8 +45,14 @@ let save_atomic (path : string) (content : string) : unit =
   let dir = Filename.dirname path in
   ignore (ensure_dir dir);
   let tmp_path = path ^ ".tmp" in
-  Fs_compat.save_file tmp_path content;
-  Unix.rename tmp_path path
+  Fun.protect ~finally:(fun () ->
+    try
+      if Sys.file_exists tmp_path then Sys.remove tmp_path
+    with
+    | Sys_error _ -> ())
+    (fun () ->
+      Fs_compat.save_file tmp_path content;
+      Unix.rename tmp_path path)
 
 (** Atomically save a Yojson value as pretty-printed JSON. *)
 let save_json_atomic (path : string) (json : Yojson.Safe.t) : unit =

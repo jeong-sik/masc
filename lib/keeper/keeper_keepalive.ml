@@ -121,7 +121,7 @@ type stage_timing = {
   improve_ms : float;
 }
 
-let stage_timing_ring_size = 100
+let stage_timing_ring_size = Env_config.KeeperProactive.stage_timing_ring_size
 
 let percentile arr p =
   let n = Array.length arr in
@@ -619,8 +619,8 @@ let process_directive ~agent_name directive =
 
     Requires [grpc_client_ref] to be set (via [set_grpc_client])
     and Eio switch/env to be available in [Eio_context]. *)
-let max_reconnect_attempts = 5
-let reconnect_backoff_sec = 5.0
+let max_reconnect_attempts = Env_config.KeeperGrpc.max_reconnect_attempts
+let reconnect_backoff_sec = Env_config.KeeperGrpc.reconnect_backoff_sec
 
 let run_grpc_heartbeat_fiber ~sw ~stop
     ~(grpc_client : Masc_grpc_client.t)

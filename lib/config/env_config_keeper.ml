@@ -256,4 +256,33 @@ module KeeperKeepalive = struct
       (get_float ~default:0.2 "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"))
 end
 
+(** {1 gRPC Heartbeat Reconnect} *)
+
+module KeeperGrpc = struct
+  (** Maximum gRPC reconnect attempts before stopping the heartbeat fiber.
+      Default: 5. Range: [1, 20]. *)
+  let max_reconnect_attempts =
+    max 1 (min 20 (get_int ~default:5 "MASC_KEEPER_GRPC_MAX_RECONNECT"))
+
+  (** Backoff delay between gRPC reconnect attempts in seconds.
+      Default: 5.0. Range: [1.0, 60.0]. *)
+  let reconnect_backoff_sec =
+    Float.max 1.0 (Float.min 60.0
+      (get_float ~default:5.0 "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"))
+end
+
+(** {1 Proactive Generation} *)
+
+module KeeperProactive = struct
+  (** Maximum proactive generation attempts before falling back.
+      Default: 3. Range: [1, 10]. *)
+  let max_attempts =
+    max 1 (min 10 (get_int ~default:3 "MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS"))
+
+  (** Stage timing ring buffer size for Phase 0 profiling.
+      Default: 100. Range: [10, 1000]. *)
+  let stage_timing_ring_size =
+    max 10 (min 1000 (get_int ~default:100 "MASC_KEEPER_STAGE_TIMING_RING_SIZE"))
+end
+
 (** Print configuration summary for debugging *)

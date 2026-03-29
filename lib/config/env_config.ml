@@ -69,6 +69,12 @@ let print_summary () =
     Env_config_keeper.WorkAsHeartbeat.max_silence_sec;
   Log.Env.info "SmartHeartbeat: enabled=%b"
     Env_config_keeper.SmartHeartbeat.enabled;
+  Log.Env.info "KeeperGrpc: max_reconnect=%d backoff=%.1fs"
+    Env_config_keeper.KeeperGrpc.max_reconnect_attempts
+    Env_config_keeper.KeeperGrpc.reconnect_backoff_sec;
+  Log.Env.info "KeeperProactive: max_attempts=%d timing_ring=%d"
+    Env_config_keeper.KeeperProactive.max_attempts
+    Env_config_keeper.KeeperProactive.stage_timing_ring_size;
   Log.Env.info "SelfPreservation: ratio=%.2f min_candidates=%d dead_ttl=%.0fs"
     Env_config_keeper.KeeperSupervisor.self_preservation_ratio
     Env_config_keeper.KeeperSupervisor.self_preservation_min_candidates
@@ -126,6 +132,10 @@ let to_json () : Yojson.Safe.t =
       "keepalive_board_debounce_sec", float_val Env_config_keeper.KeeperKeepalive.board_debounce_sec;
       "keepalive_sleep_chunk_sec", float_val Env_config_keeper.KeeperKeepalive.sleep_chunk_sec;
       "keepalive_jitter_factor", float_val Env_config_keeper.KeeperKeepalive.jitter_factor;
+      "grpc_max_reconnect", int_val Env_config_keeper.KeeperGrpc.max_reconnect_attempts;
+      "grpc_reconnect_backoff_sec", float_val Env_config_keeper.KeeperGrpc.reconnect_backoff_sec;
+      "proactive_max_attempts", int_val Env_config_keeper.KeeperProactive.max_attempts;
+      "stage_timing_ring_size", int_val Env_config_keeper.KeeperProactive.stage_timing_ring_size;
       "work_as_heartbeat_enabled", bool_val Env_config_keeper.WorkAsHeartbeat.enabled;
       "work_as_heartbeat_max_silence_sec", float_val Env_config_keeper.WorkAsHeartbeat.max_silence_sec;
       "smart_heartbeat_enabled", bool_val Env_config_keeper.SmartHeartbeat.enabled;

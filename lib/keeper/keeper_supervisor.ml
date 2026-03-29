@@ -147,15 +147,14 @@ let reconcile_keepalive_keepers (ctx : _ context) =
 (** Phase 2: self-preservation gate.
     Suppresses restarts when a dominant failure cohort exceeds the
     ratio threshold AND minimum candidate count. *)
-let self_preservation_ratio = 0.3
-let self_preservation_min_candidates = 2
-
 let apply_self_preservation ~total_keepers to_restart =
+  let sp_ratio = Env_config.KeeperSupervisor.self_preservation_ratio in
+  let sp_min = Env_config.KeeperSupervisor.self_preservation_min_candidates in
   let n_candidates = List.length to_restart in
   let n_total = max 1 total_keepers in
   let ratio = float_of_int n_candidates /. float_of_int n_total in
-  if ratio > self_preservation_ratio
-     && n_candidates >= self_preservation_min_candidates
+  if ratio > sp_ratio
+     && n_candidates >= sp_min
   then begin
     (* Group by failure reason prefix for cohort detection *)
     let cohorts = Hashtbl.create 4 in
@@ -171,7 +170,7 @@ let apply_self_preservation ~total_keepers to_restart =
         if List.length v > List.length best_v then (k, v) else (best_k, best_v)
       ) cohorts ("", [])
     in
-    if List.length dominant_entries >= self_preservation_min_candidates then begin
+    if List.length dominant_entries >= sp_min then begin
       Log.Keeper.warn
         "self-preservation: suppressing %d/%d restarts (ratio=%.2f, cohort=%s)"
         (List.length dominant_entries) n_total ratio dominant_key;
@@ -190,9 +189,6 @@ let apply_self_preservation ~total_keepers to_restart =
   end else
     to_restart
 
-(** Dead entry TTL: entries in Dead state older than this are cleaned up. *)
-let dead_ttl_sec = 3600.0
-
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts = Env_config.KeeperSupervisor.max_restarts in
@@ -207,7 +203,7 @@ let sweep_and_recover (ctx : _ context) =
     match entry.state with
     | Keeper_registry.Dead ->
         (* Phase 2: Dead tombstone TTL cleanup *)
-        if now -. entry.last_restart_ts > dead_ttl_sec then begin
+        if now -. entry.last_restart_ts > Env_config.KeeperSupervisor.dead_ttl_sec then begin
           to_unregister := entry :: !to_unregister;
           (* Mark meta as paused so reconcile permanently excludes it *)
           (match read_meta ctx.config entry.name with

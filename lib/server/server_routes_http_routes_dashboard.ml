@@ -638,6 +638,30 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
+  |> Http.Router.post "/api/v1/autoresearch/loops/start" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_autoresearch_start" (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             let base_path = state.Mcp_server.room_config.base_path in
+             (match
+               Dashboard_http_autoresearch.start_loop_json ~base_path ~args
+             with
+             | Ok result ->
+                 Http.Response.json ~compress:true ~request:req
+                   (Yojson.Safe.to_string result) reqd
+             | Error message ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   (Printf.sprintf {|{"ok":false,"error":"%s"}|}
+                      (String.escaped message))
+                   reqd)
+           with Yojson.Json_error _ ->
+             Http.Response.json ~status:`Bad_request ~request:req
+               {|{"ok":false,"error":"invalid JSON body"}|}
+               reqd
+         )
+       ) request reqd)
+
   |> Http.Router.post "/api/v1/autoresearch/loops/delete" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_autoresearch_stop" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->

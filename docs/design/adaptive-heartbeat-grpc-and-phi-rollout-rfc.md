@@ -11,6 +11,8 @@
 - `./adaptive-heartbeat-production-rollout-rfc.md`
 - `./adaptive-heartbeat-observability-slo-spec.md`
 - `./adaptive-heartbeat-validation-and-alert-wiring-spec.md`
+- `./adaptive-heartbeat-phi-enforcement-rfc.md`
+- `./adaptive-heartbeat-safety-harness-spec.md`
 - `../ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`
 - `../TRANSPORT-PRACTICAL-PLAYBOOK.md`
 - `../spec/09-server-transport.md`
@@ -187,7 +189,7 @@ Promotion gate:
 
 이 단계는 **이 RFC의 승인 범위를 넘는다**.
 
-phi가 restart, suppression, or keeper state transition에 관여하려면 별도 enforcement RFC가 필요하다. 그 RFC 없이는 production에서 advisory-only를 넘지 않는다.
+phi가 restart, suppression, or keeper state transition에 관여하려면 별도 enforcement RFC가 필요하다. 현재 follow-up 문서는 [adaptive-heartbeat-phi-enforcement-rfc.md](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-phi-enforcement-rfc.md) 를 canonical source로 본다. 그 RFC 없이는 production에서 advisory-only를 넘지 않는다.
 
 ## 6. Runtime Contract
 
@@ -230,6 +232,10 @@ Before phi advisory:
 - shadow mode 14-day evidence exists
 - false-positive audit exists
 - manual disconnect and reconnect scenarios are reproducible in harness or scripted operator test
+
+Before phi enforcement:
+
+- [adaptive-heartbeat-safety-harness-spec.md](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-safety-harness-spec.md) 의 `phi_enforced` scenario가 pass 해야 한다
 
 ## 8. Alerts and Ownership
 

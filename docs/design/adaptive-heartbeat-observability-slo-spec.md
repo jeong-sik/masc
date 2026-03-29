@@ -11,6 +11,8 @@
 - `./adaptive-heartbeat-production-rollout-rfc.md`
 - `./adaptive-heartbeat-validation-and-alert-wiring-spec.md`
 - `./adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`
+- `./adaptive-heartbeat-phi-enforcement-rfc.md`
+- `./adaptive-heartbeat-safety-harness-spec.md`
 - `./error-handling-and-operations-spec.md`
 - `../PERFORMANCE-SLO.md`
 - `../ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`

@@ -11,6 +11,8 @@
 - `./adaptive-heartbeat-production-rollout-rfc.md`
 - `./adaptive-heartbeat-observability-slo-spec.md`
 - `./adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`
+- `./adaptive-heartbeat-phi-enforcement-rfc.md`
+- `./adaptive-heartbeat-safety-harness-spec.md`
 - `../ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`
 - `../MCP-READPATH-REVALIDATION-RUNBOOK.md`
 - `../KEEPER-CONTINUITY-VALIDATION.md`
@@ -154,6 +156,8 @@ The current harnesses are necessary but not sufficient. Extend them as follows.
 Add a dedicated workload harness before Stage 2 promotion:
 
 `./scripts/harness/workload/adaptive_heartbeat_safety_validation.sh`
+
+Detailed script contract and scenario matrix are defined in `adaptive-heartbeat-safety-harness-spec.md`.
 
 This harness should inject or simulate:
 

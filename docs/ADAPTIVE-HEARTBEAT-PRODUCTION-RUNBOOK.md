@@ -8,6 +8,8 @@
 - `docs/design/adaptive-heartbeat-observability-slo-spec.md`
 - `docs/design/adaptive-heartbeat-validation-and-alert-wiring-spec.md`
 - `docs/design/adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`
+- `docs/design/adaptive-heartbeat-phi-enforcement-rfc.md`
+- `docs/design/adaptive-heartbeat-safety-harness-spec.md`
 - `docs/MCP-READPATH-REVALIDATION-RUNBOOK.md`
 - `docs/TRANSPORT-PRACTICAL-PLAYBOOK.md`
 
@@ -116,6 +118,7 @@ MASC_URL=http://127.0.0.1:8935/mcp ./benchmarks/quick-bench.sh
 Promotion conditions:
 
 - Stage 1 checks remain green
+- dedicated safety harness from `docs/design/adaptive-heartbeat-safety-harness-spec.md` is implemented and passes its Stage 2 scenario set
 - no safety counter increases
 - keepalive and presence-sync p95 do not regress more than 25% from Stage 0 baseline
 - no operator intervention is needed to recover keeper ownership semantics
@@ -213,4 +216,5 @@ Do not continue rollout if any of the following occur:
 ## Notes
 
 - This runbook intentionally reuses existing harnesses. It does not require a new heartbeat-only harness to start rollout.
+- Dedicated injected-fault proof for later stages is specified in `docs/design/adaptive-heartbeat-safety-harness-spec.md`.
 - gRPC and phi-accrual are explicitly out of scope for this production runbook. Follow-up production scope is documented in `docs/design/adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`.

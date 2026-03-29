@@ -11,6 +11,8 @@
 - `./adaptive-heartbeat-observability-slo-spec.md`
 - `./adaptive-heartbeat-validation-and-alert-wiring-spec.md`
 - `./adaptive-heartbeat-grpc-and-phi-rollout-rfc.md`
+- `./adaptive-heartbeat-phi-enforcement-rfc.md`
+- `./adaptive-heartbeat-safety-harness-spec.md`
 - `./error-handling-and-operations-spec.md`
 - `../ADAPTIVE-HEARTBEAT-PRODUCTION-RUNBOOK.md`
 - `../PERFORMANCE-SLO.md`
@@ -158,6 +160,7 @@ Promotion gate:
 Promotion gate:
 
 - Stage 1 gate 유지
+- dedicated safety harness defined in `adaptive-heartbeat-safety-harness-spec.md` passes for Stage 2 scenarios
 - safety counter zero 유지
 - baseline 대비 global API/SSE latency regression 25% 이하
 - no alert burst that requires manual keeper surgery

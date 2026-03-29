@@ -251,6 +251,79 @@ let test_recall_candidates_with_history_appends () =
     check int "3 total" 3 (List.length result);
     check string "checkpoint first" "recent question" (List.hd result))
 
+(* --- E2E memory write → recall integration tests (I1) --- *)
+
+module Keeper_memory_bank = Masc_mcp.Keeper_memory_bank
+module Room = Masc_mcp.Room
+
+(** Create a minimal Room.config for testing with a temp base_path.
+    Uses Room.default_config which creates FileSystem backend. *)
+let make_test_room_config dir =
+  Room.default_config dir
+
+(** E2E: write memory via append_memory_notes_from_reply, then read back via recall.
+    Tests the full pipeline: reply → parse → snapshot → candidates → JSONL → recall.
+    This is the test that was missing (RFC #3646 I1). *)
+let test_memory_write_then_recall_with_state_block () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"e2e-keeper" ~mention_targets:["e2e-keeper"] in
+
+    (* Simulate a keeper reply with [STATE] block *)
+    let reply =
+      "네, 계속 진행하겠습니다.\n\n\
+       [STATE]\n\
+       Goal: test E2E memory pipeline\n\
+       Progress: memory write verified\n\
+       Next: recall verification\n\
+       Decisions: use filesystem storage\n\
+       [/STATE]"
+    in
+
+    let (notes_written, kinds) =
+      Keeper_memory_bank.append_memory_notes_from_reply config meta ~turn:1 ~reply
+    in
+
+    (* Verify write happened *)
+    check bool "at least one note written" true (notes_written > 0);
+    check bool "goal kind present" true (List.mem "goal" kinds);
+
+    (* Verify recall reads back what was written *)
+    let summary =
+      Keeper_memory_recall.read_keeper_memory_summary config
+        ~name:"e2e-keeper" ~max_bytes:100000 ~max_lines:100 ~recent_limit:10
+    in
+    check bool "recall finds notes" true (summary.total_notes > 0);
+    check bool "recall has goal kind" true
+      (List.exists (fun (k, _) -> k = "goal") summary.kind_counts))
+
+(** E2E: write memory via meta-based fallback (no [STATE] block).
+    Verifies the deterministic fallback path from RFC #3646 Section 3. *)
+let test_memory_write_then_recall_meta_fallback () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"fallback-keeper" ~mention_targets:["fallback-keeper"] in
+
+    (* Reply WITHOUT [STATE] block — should trigger meta-based fallback *)
+    let reply = "네, 이해했습니다. 바로 작업을 시작하겠습니다." in
+
+    let (notes_written, kinds) =
+      Keeper_memory_bank.append_memory_notes_from_reply config meta ~turn:1 ~reply
+    in
+
+    (* Meta fallback should write the goal from meta.goal *)
+    check bool "fallback wrote notes" true (notes_written > 0);
+    check bool "fallback wrote goal kind" true (List.mem "goal" kinds);
+
+    (* Recall should find the note *)
+    let summary =
+      Keeper_memory_recall.read_keeper_memory_summary config
+        ~name:"fallback-keeper" ~max_bytes:100000 ~max_lines:100 ~recent_limit:10
+    in
+    check bool "recall finds fallback notes" true (summary.total_notes > 0))
+
 let () =
   run "Keeper_memory"
     [
@@ -288,5 +361,12 @@ let () =
           test_case "handoff alone" `Quick test_prioritized_action_handoff_alone;
           test_case "guardrail default reason" `Quick test_prioritized_action_guardrail_default_reason;
           test_case "to_string all variants" `Quick test_prioritized_action_to_string_all_variants;
+        ] );
+      ( "e2e_memory_pipeline",
+        [
+          test_case "write with [STATE] then recall" `Quick
+            test_memory_write_then_recall_with_state_block;
+          test_case "write via meta fallback then recall" `Quick
+            test_memory_write_then_recall_meta_fallback;
         ] );
     ]

@@ -1,9 +1,10 @@
-(lang dune 3.13)
+(lang dune 3.17)
 
 (name masc_mcp)
 (version 2.161.0)
 
 (generate_opam_files true)
+(implicit_transitive_deps false)
 
 (source
  (github jeong-sik/masc-mcp))
@@ -22,7 +23,7 @@
  (description "MASC Protocol: File-based coordination for Claude, Gemini, and Codex agents")
  (depends
   (ocaml (>= 5.4))
-  (dune (>= 3.13))
+  (dune (>= 3.17))
   ; External dependencies (opam pin)
   (mcp_protocol (>= 1.2.0))
   (ocaml-webrtc (>= 0.2.3))
@@ -35,11 +36,11 @@
   (graphql_parser (>= 0.14.0))
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
-  (cohttp-eio (and (>= 6.0) (< 6.2)))
+  (cohttp-eio (>= 6.0))
   (agent_sdk (>= 0.93.2))
   (uri (>= 4.4))
-  (tls (>= 0.16))
-  (tls-eio (>= 0.16))
+  (tls (>= 2.0))
+  (tls-eio (>= 2.0))
   (domain-name (>= 0.4))
   (ca-certs (>= 0.2))
   (ppx_deriving_yojson (>= 3.6))
@@ -67,8 +68,8 @@
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))
   (pbrt_services (and (>= 3.0) (< 4.0)))
-  (h2 (>= 0.10))
-  (h2-eio (>= 0.10))
+  (h2 (>= 0.13))
+  (h2-eio (>= 0.13))
   (alcotest (and :with-test (>= 1.6)))
   (qcheck-core (and :with-test (>= 0.21)))
   (qcheck-alcotest (and :with-test (>= 0.21)))

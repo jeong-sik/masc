@@ -698,8 +698,12 @@
    caqti-driver-postgresql
    sqlite3
    unix
+   threads
+   logs
+   optint
    re
    re.str
+   re.pcre
    mirage-crypto
    mirage-crypto-ec
    mirage-crypto-rng
@@ -723,8 +727,11 @@
    ;; OCaml 5.x Eio concurrency (required for *_eio.ml modules)
    eio
    eio_main
+   eio.unix
    httpun-eio
+   httpun
    gluten-eio
+   gluten
    ipaddr
    cohttp
    cohttp-eio

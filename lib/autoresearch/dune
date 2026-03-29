@@ -10,4 +10,4 @@
    autoresearch_metric
    autoresearch_git
    autoresearch_file)
- (libraries yojson unix time_compat fs_compat masc_log masc_process agent_sdk eio))
+ (libraries yojson unix time_compat fs_compat masc_log masc_core masc_process agent_sdk eio))

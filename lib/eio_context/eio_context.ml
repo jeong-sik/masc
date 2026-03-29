@@ -110,7 +110,7 @@ let get_switch () =
 let _https_connector_cache :
   (Uri.t ->
    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-   [> Eio.Flow.two_way_ty ] Eio.Resource.t) option ref = ref None
+   [> Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t) option ref = ref None
 
 let https_error message = Error message
 

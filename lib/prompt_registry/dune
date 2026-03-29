@@ -15,5 +15,7 @@
    yojson
    unix
    eio
-   re.str)
+   re
+   re.str
+   re.pcre)
  (preprocess (pps ppx_deriving_yojson)))

@@ -21,6 +21,11 @@ module Resilience = Resilience
 let test_default_zombie_threshold_positive () =
   check bool "positive" true (Resilience.default_zombie_threshold > 0.0)
 
+let test_default_zombie_threshold_matches_env_config () =
+  check (float 0.01) "matches env config"
+    Env_config_runtime.Zombie.threshold_seconds
+    Resilience.default_zombie_threshold
+
 let test_default_zombie_threshold_reasonable () =
   (* Should be between 30 seconds and 24 hours *)
   check bool "reasonable" true
@@ -126,6 +131,16 @@ let test_zombie_custom_threshold () =
   check bool "zombie with threshold" true
     (Resilience.Zombie.is_zombie ~threshold:1.0 old_ts)
 
+let test_keeper_zombie_threshold_matches_env_config () =
+  let old_ts = "2020-01-01T00:00:00Z" in
+  let expected =
+    Resilience.Zombie.is_zombie
+      ~threshold:Env_config_runtime.Zombie.keeper_threshold_seconds
+      old_ts
+  in
+  check bool "keeper threshold uses env config" expected
+    (Resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-demo-agent" old_ts)
+
 (* ============================================================
    ZeroZombie.global_stats Tests
    ============================================================ *)
@@ -151,6 +166,7 @@ let () =
   run "Resilience Coverage" [
     "constants", [
       test_case "zombie threshold positive" `Quick test_default_zombie_threshold_positive;
+      test_case "zombie threshold matches env config" `Quick test_default_zombie_threshold_matches_env_config;
       test_case "zombie threshold reasonable" `Quick test_default_zombie_threshold_reasonable;
       test_case "warning threshold positive" `Quick test_default_warning_threshold_positive;
       test_case "warning < zombie" `Quick test_default_warning_less_than_zombie;
@@ -179,6 +195,7 @@ let () =
       test_case "old agent" `Quick test_zombie_old_agent;
       test_case "invalid timestamp" `Quick test_zombie_invalid_timestamp;
       test_case "custom threshold" `Quick test_zombie_custom_threshold;
+      test_case "keeper threshold matches env config" `Quick test_keeper_zombie_threshold_matches_env_config;
     ];
     "global_stats", [
       test_case "total_cleanups" `Quick test_global_stats_total_cleanups;

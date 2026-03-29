@@ -158,6 +158,35 @@ let reconcile_keepalive_keepers (ctx : _ context) =
                end
              end
          | _ -> ())
+let cleanup_dead_tombstone (ctx : _ context)
+    (entry : Keeper_registry.registry_entry) =
+  match read_meta ctx.config entry.name with
+  | Ok (Some meta) ->
+      let persisted_paused =
+        if meta.paused then true
+        else
+          match write_meta ctx.config { meta with paused = true } with
+          | Ok () -> true
+          | Error err ->
+              Log.Keeper.warn
+                "%s: dead tombstone cleanup paused write failed: %s"
+                entry.name err;
+              false
+      in
+      if persisted_paused then begin
+        Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
+        publish_lifecycle "dead_cleaned" entry.name "paused meta persisted";
+        Log.Keeper.info "%s: dead tombstone cleaned up" entry.name
+      end
+  | Ok None ->
+      Log.Keeper.warn
+        "%s: dead tombstone cleanup skipped (meta missing)"
+        entry.name
+  | Error err ->
+      Log.Keeper.warn
+        "%s: dead tombstone cleanup skipped (%s)"
+        entry.name err
+
 (** Cohort key from structured failure_reason ADT.
     Groups failures by variant, ignoring parameters (e.g. failure count). *)
 let cohort_key_of_reason = function
@@ -210,6 +239,7 @@ let apply_self_preservation ~total_keepers to_restart =
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts = Env_config.KeeperSupervisor.max_restarts in
+  let dead_ttl_sec = Env_config.KeeperSupervisor.dead_ttl_sec in
   let base_path = ctx.config.base_path in
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
@@ -217,45 +247,44 @@ let sweep_and_recover (ctx : _ context) =
   let entries = Keeper_registry.all ~base_path () in
   let to_restart = ref [] in
   let to_unregister = ref [] in
+  let to_mark_dead = ref [] in
+  let to_cleanup_dead = ref [] in
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     match entry.state with
     | Keeper_registry.Dead ->
-        (* Phase 2: Dead tombstone TTL cleanup *)
-        if now -. entry.last_restart_ts > Env_config.KeeperSupervisor.dead_ttl_sec then begin
-          to_unregister := entry :: !to_unregister;
-          (* Mark meta as paused so reconcile permanently excludes it *)
-          (match read_meta ctx.config entry.name with
-           | Ok (Some meta) ->
-               ignore (write_meta ctx.config { meta with paused = true })
-           | _ -> ())
-        end
+        (match entry.dead_since_ts with
+         | Some dead_since when now -. dead_since >= dead_ttl_sec ->
+             to_cleanup_dead := entry :: !to_cleanup_dead
+         | _ -> ())
+    | Keeper_registry.Stopped ->
+        to_unregister := entry :: !to_unregister
     | Keeper_registry.Running | Keeper_registry.Paused
-    | Keeper_registry.Stopped | Keeper_registry.Crashed ->
+    | Keeper_registry.Crashed ->
       (match Eio.Promise.peek entry.done_p with
       | None -> ()  (* Alive — skip *)
       | Some `Stopped ->
           to_unregister := entry :: !to_unregister
       | Some (`Crashed msg) ->
-          if entry.restart_count >= max_restarts then begin
-            (* Phase 2: Dead tombstone instead of unregister *)
-            Keeper_registry.set_state ~base_path entry.name
-              Keeper_registry.Dead;
-            publish_lifecycle "dead" entry.name
-              (Printf.sprintf "restart budget exhausted (%d), last: %s"
-                 max_restarts msg);
-            Log.Keeper.error "%s: restart budget exhausted (%d). Dead."
-              entry.name max_restarts
-          end else begin
+          if entry.restart_count >= max_restarts then
+            to_mark_dead := (entry, msg) :: !to_mark_dead
+          else begin
             let delay = backoff_delay entry.restart_count in
             if now -. entry.last_restart_ts >= delay then
               to_restart := (entry, msg) :: !to_restart
           end)
   ) entries;
-  (* Clean up stopped entries + expired Dead tombstones *)
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     Keeper_registry.unregister ~base_path entry.name
   ) !to_unregister;
-  (* Phase 2: self-preservation gate before restart *)
+  List.iter (fun ((entry : Keeper_registry.registry_entry), msg) ->
+    Keeper_registry.mark_dead ~base_path entry.name ~at:now;
+    publish_lifecycle "dead" entry.name
+      (Printf.sprintf "restart budget exhausted (%d), last: %s"
+         max_restarts msg);
+    Log.Keeper.error "%s: restart budget exhausted (%d). Dead."
+      entry.name max_restarts
+  ) !to_mark_dead;
+  List.iter (cleanup_dead_tombstone ctx) !to_cleanup_dead;
   let active_count =
     List.length (List.filter (fun (e : Keeper_registry.registry_entry) ->
       e.state = Keeper_registry.Running || e.state = Keeper_registry.Crashed

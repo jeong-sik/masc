@@ -28,8 +28,8 @@
   mention
   resilience
   heartbeat
-  heartbeat_smart
-  nickname)
+ heartbeat_smart
+ nickname)
  (libraries
   masc_types
   masc_core

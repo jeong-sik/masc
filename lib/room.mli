@@ -1,8 +1,8 @@
 (** MASC Room - Core coordination hub.
 
     This module ties together all Room sub-modules (utils, state, lifecycle,
-    init, status, task, walph, query, agent, portal, worktree, gc, vote,
-    tempo, multi). *)
+    init, status, task, query, agent, portal, worktree, gc, vote, tempo,
+    multi). *)
 
 (** {1 Included sub-modules} *)
 

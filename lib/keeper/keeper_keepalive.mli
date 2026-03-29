@@ -33,6 +33,10 @@ val run_heartbeat_loop :
   proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
   wakeup:bool Atomic.t -> unit
 
+(** Compute the p-th percentile of a float array.
+    Returns 0.0 for empty arrays. Used by per-stage profiling. *)
+val percentile : float array -> float -> float
+
 val start_keepalive :
   ?proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
 val stop_keepalive : string -> unit

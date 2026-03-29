@@ -181,4 +181,19 @@ module AlertDedup = struct
     Float.max 5.0 (get_float ~default:60.0 "MASC_ALERT_DEDUP_WINDOW_SEC")
 end
 
+(** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
+
+module WorkAsHeartbeat = struct
+  (** Master switch. When true, successful Room.heartbeat_in_room after a
+      unified turn counts as presence proof, allowing the next cycle to skip
+      the full ensure_keeper_room_presence call. *)
+  let enabled =
+    get_bool ~default:true "MASC_KEEPER_WORK_AS_HEARTBEAT"
+
+  (** Maximum seconds since last successful room heartbeat before presence
+      sync is required again. Must be >= keepalive_interval_sec (30). *)
+  let max_silence_sec =
+    Float.max 30.0 (get_float ~default:120.0 "MASC_KEEPER_MAX_SILENCE_SEC")
+end
+
 (** Print configuration summary for debugging *)

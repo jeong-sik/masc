@@ -5,7 +5,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useRef } from 'preact/hooks'
-import { runOperatorAction } from '../api'
+import { currentDashboardActor, runOperatorAction } from '../api'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
@@ -50,18 +50,11 @@ export function closeKeeperDetail() {
 
 // ── Helpers ───────────────────────────────────────────────
 
-function currentOperatorActor(): string {
-  const q = new URLSearchParams(window.location.search)
-  const queryActor = q.get('agent') ?? q.get('agent_name')
-  const storedActor = localStorage.getItem('masc_dashboard_agent_name')
-  const actor = (queryActor ?? storedActor ?? 'dashboard').trim()
-  return actor || 'dashboard'
-}
 
 async function runSocialSweep(): Promise<void> {
   try {
     await runOperatorAction({
-      actor: currentOperatorActor(),
+      actor: currentDashboardActor(),
       action_type: 'social_sweep',
       target_type: 'room',
       payload: {},
@@ -128,7 +121,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
           <div class="flex flex-col gap-3 px-4 pb-4 pt-2">
             <${KeeperDiagnosticSummary} keeper=${keeper} />
             <${KeeperRuntimeActions}
-              actor=${currentOperatorActor()}
+              actor=${currentDashboardActor()}
               keeper=${keeper}
               onSocialSweep=${() => { void runSocialSweep() }}
             />

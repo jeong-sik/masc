@@ -487,6 +487,52 @@ Phase 3 착수 조건:
 1. Phase 1에서 presence skip이 downstream consumer(dashboard, SSE)가 기대하는 `last_seen` 갱신을 누락시킬 수 있음. Step 1.2에서 turn 완료 시 `Room.heartbeat_in_room`을 명시적으로 호출하여 방지.
 2. Phase 1에서 `last_successful_heartbeat_ts`가 supervisor의 `done_p` SSOT를 침범하지 않도록 scope를 엄격히 분리. freshness(presence skip)와 liveness(fiber death)는 독립 관심사.
 
+## 5.1 Keeper State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> Running : register()
+
+    Running --> Stopped : normal exit (stop flag)
+    Running --> Crashed : Keeper_heartbeat_failure
+    Running --> Crashed : generic exception
+    Running --> Crashed : fiber_unresolved (finally)
+    Running --> Paused : pause (future)
+
+    Paused --> Running : resume (future)
+
+    Crashed --> Running : sweep restart (within budget)
+    Crashed --> Dead : sweep (budget exhausted)
+
+    Dead --> [*] : unregister (after TTL)
+
+    Stopped --> [*] : sweep unregister
+
+    note right of Running
+        sweep: skip (fiber alive)
+        reconcile: skip (sweep-owned)
+    end note
+
+    note right of Crashed
+        sweep: restart candidate
+        reconcile: skip (sweep-owned)
+        self-preservation gate applies
+    end note
+
+    note right of Dead
+        sweep: TTL cleanup only
+        reconcile: skip (sweep-owned)
+        set_state to non-Dead: blocked
+    end note
+
+    note right of Stopped
+        done_p resolved: reconcile-eligible
+        done_p unresolved: sweep will handle
+    end note
+```
+
+**Owner 구분**: sweep_and_recover가 Running/Paused/Crashed/Dead를 관리. reconcile_keepalive_keepers는 orphaned(registry에 없음) 또는 Stopped+resolved 상태만 재시작.
+
 ## 6. Implementation Checklist
 
 - [x] Phase 0.1: Per-stage timer 계측 (keeper_keepalive.ml) — #3659

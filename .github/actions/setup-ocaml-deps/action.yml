@@ -21,7 +21,7 @@ runs:
     - name: Setup OCaml
       uses: ocaml/setup-ocaml@v3
       with:
-        ocaml-compiler: 5.4.x
+        ocaml-compiler: 5.4.1
         dune-cache: true
         cache-prefix: oas-otel-02
 

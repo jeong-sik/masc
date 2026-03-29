@@ -25,12 +25,10 @@ let raw_schemas : tool_schema list =
   @ Tool_handover.schemas
   @ Tool_walph.schemas
   @ Tool_improve_loop.schemas
-  @ Tool_cache.schemas
   @ Tool_run.schemas
   @ Tool_code.schemas
   @ Tool_code_write.schemas
   @ Tool_library.schemas
-  @ Tool_audit.schemas
   @ Tool_heartbeat.schemas
 
 let all_schemas : tool_schema list = raw_schemas

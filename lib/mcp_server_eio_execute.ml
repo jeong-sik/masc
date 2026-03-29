@@ -440,8 +440,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_team_session.dispatch ctx ~name ~args:arguments
     | Mod_voice ->
         Tool_voice.dispatch { agent_name; sw; clock; net = state.Mcp_server.net } ~name ~args:arguments
-    | Mod_cache ->
-        Tool_cache.dispatch { Tool_cache.config } ~name ~args:arguments
     | Mod_portal ->
         Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args:arguments
     | Mod_worktree ->
@@ -485,8 +483,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_heartbeat.dispatch { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args:arguments
     | Mod_auth ->
         Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args:arguments
-    | Mod_audit ->
-        Tool_audit.dispatch { Tool_audit.config } ~name ~args:arguments
     | Mod_walph ->
         (let ctx : _ Tool_walph.context = { config; agent_name; clock } in
            Tool_walph.dispatch ctx ~name ~args:arguments)

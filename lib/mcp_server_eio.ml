@@ -140,12 +140,10 @@ let () =
   register_module_tag ~schemas:Tool_walph.schemas ~tag:Mod_walph;
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
   (* Monolithic schema decomposition: modules that now export their own schemas *)
-  register_module_tag ~schemas:Tool_cache.schemas ~tag:Mod_cache;
   register_module_tag ~schemas:Tool_run.schemas ~tag:Mod_run;
   register_module_tag ~schemas:Tool_code.schemas ~tag:Mod_code;
   register_module_tag ~schemas:Tool_code_write.schemas ~tag:Mod_code_write;
   register_module_tag ~schemas:Tool_library.schemas ~tag:Mod_library;
-  register_module_tag ~schemas:Tool_audit.schemas ~tag:Mod_audit;
   register_module_tag ~schemas:Tool_a2a.schemas ~tag:Mod_a2a;
   register_module_tag ~schemas:Tool_heartbeat.schemas ~tag:Mod_heartbeat;
   register_module_tag ~schemas:Tool_misc.schemas ~tag:Mod_misc;

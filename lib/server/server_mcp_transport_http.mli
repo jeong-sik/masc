@@ -1,11 +1,28 @@
+type tool_profile = Server_mcp_transport_http_types.tool_profile =
+  | Full
+  | Managed_agent
+  | Operator_remote
+
+type runtime = Server_mcp_transport_http_types.runtime = {
+  base_path : string;
+  sw : Eio.Switch.t;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
+  handle_request :
+    ?profile:tool_profile ->
+    ?mcp_session_id:string ->
+    ?auth_token:string ->
+    string ->
+    Yojson.Safe.t;
+  clear_resource_subscriptions_for_session : string -> unit;
+}
+
 type deps = {
   get_origin : Httpun.Request.t -> string;
   cors_headers : string -> (string * string) list;
   auth_token_from_request : Httpun.Request.t -> string option;
-  get_server_state_opt : unit -> Mcp_server.server_state option;
+  is_ready : unit -> bool;
+  get_runtime_result : unit -> (runtime, string) result;
   get_base_path : unit -> string;
-  get_sw : unit -> Eio.Switch.t option;
-  get_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t option;
   verify_mcp_auth : base_path:string -> Httpun.Request.t -> (unit, string) result;
   verify_operator_mcp_auth :
     base_path:string -> Httpun.Request.t -> (unit, string) result;
@@ -16,13 +33,13 @@ val mcp_protocol_version_default : string
 val default_base_path : unit -> string
 val is_valid_protocol_version : string -> bool
 val remember_protocol_version : string -> string -> unit
-val remember_mcp_profile : string -> Mcp_server_eio.tool_profile -> unit
+val remember_mcp_profile : string -> tool_profile -> unit
 val forget_mcp_session : string -> unit
 val reap_stale_sessions : is_active_session:(string -> bool) -> int
 val validate_mcp_session_profile :
-  profile:Mcp_server_eio.tool_profile -> string -> (unit, string) result
+  profile:tool_profile -> string -> (unit, string) result
 val validate_mcp_session_delete_profile :
-  profile:Mcp_server_eio.tool_profile -> string -> (unit, string) result
+  profile:tool_profile -> string -> (unit, string) result
 val method_from_body : string -> string option
 val validate_session_requirement :
   session_was_provided:bool -> string -> (unit, string) result
@@ -63,14 +80,14 @@ val reap_stale_guards : unit -> int
 val close_all_sse_connections : unit -> unit
 val handle_post_mcp :
   deps:deps ->
-  ?profile:Mcp_server_eio.tool_profile ->
+  ?profile:tool_profile ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->
   unit
 val handle_get_mcp :
   deps:deps ->
   ?legacy_messages_endpoint:(string -> string) ->
-  ?profile:Mcp_server_eio.tool_profile ->
+  ?profile:tool_profile ->
   ?sse_kind:Sse.session_kind ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->
@@ -82,7 +99,7 @@ val handle_post_messages :
   deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 val handle_delete_mcp :
   deps:deps ->
-  ?profile:Mcp_server_eio.tool_profile ->
+  ?profile:tool_profile ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->
   unit

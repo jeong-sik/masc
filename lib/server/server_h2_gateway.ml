@@ -23,6 +23,11 @@ let make_error_handler () =
   h2_error_handler
 
 let make_request_handler ~sw ~clock ~server_start_time:_ =
+  let mcp_eio_profile_of_transport_profile = function
+    | Server_mcp_transport_http.Full -> Mcp_eio.Full
+    | Server_mcp_transport_http.Managed_agent -> Mcp_eio.Managed_agent
+    | Server_mcp_transport_http.Operator_remote -> Mcp_eio.Operator_remote
+  in
   (* ═══════════════════════════════════════════════════════════════════════
      HTTP/2 Response Helpers - Reduce duplication in handlers
      ═══════════════════════════════════════════════════════════════════════ *)
@@ -285,9 +290,11 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let auth_token = auth_token_from_request httpun_request in
           let protocol_version = get_protocol_version_for_session ~session_id httpun_request in
           let profile =
-            if String.equal path "/mcp/operator" then Mcp_eio.Operator_remote
-            else if String.equal path "/mcp/managed" then Mcp_eio.Managed_agent
-            else Mcp_eio.Full
+            if String.equal path "/mcp/operator"
+            then Server_mcp_transport_http.Operator_remote
+            else if String.equal path "/mcp/managed"
+            then Server_mcp_transport_http.Managed_agent
+            else Server_mcp_transport_http.Full
           in
           (* HTTP-level auth check for MCP endpoints *)
           let base_path = match !server_state with
@@ -296,9 +303,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           let auth_result =
             match profile with
-            | Mcp_eio.Full | Mcp_eio.Managed_agent ->
+            | Server_mcp_transport_http.Full
+            | Server_mcp_transport_http.Managed_agent ->
                 verify_mcp_auth ~base_path httpun_request
-            | Mcp_eio.Operator_remote ->
+            | Server_mcp_transport_http.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
           in
           (match validate_mcp_session_profile ~profile session_id with
@@ -353,6 +361,9 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                  in
                                  let state = get_server_state ()
                                  in
+                                 let profile =
+                                   mcp_eio_profile_of_transport_profile profile
+                                 in
                                  let response_json =
                                    Mcp_eio.handle_request ~clock ~sw ~profile
                                      ~mcp_session_id:session_id ?auth_token state body_str
@@ -382,9 +393,11 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `DELETE, "/mcp" | `DELETE, "/mcp/managed" | `DELETE, "/mcp/operator" ->
           let profile =
-            if String.equal path "/mcp/operator" then Mcp_eio.Operator_remote
-            else if String.equal path "/mcp/managed" then Mcp_eio.Managed_agent
-            else Mcp_eio.Full
+            if String.equal path "/mcp/operator"
+            then Server_mcp_transport_http.Operator_remote
+            else if String.equal path "/mcp/managed"
+            then Server_mcp_transport_http.Managed_agent
+            else Server_mcp_transport_http.Full
           in
           let base_path = match !server_state with
             | Some s -> s.Mcp_server.room_config.base_path
@@ -392,8 +405,9 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           let auth_result =
             match profile with
-            | Mcp_eio.Full | Mcp_eio.Managed_agent -> Ok None
-            | Mcp_eio.Operator_remote ->
+            | Server_mcp_transport_http.Full
+            | Server_mcp_transport_http.Managed_agent -> Ok None
+            | Server_mcp_transport_http.Operator_remote ->
                 verify_operator_mcp_auth ~base_path httpun_request
           in
           (match auth_result with

@@ -22,11 +22,7 @@ let is_http_error_response = function
   | _ -> false
 
 let request_runtime_result (deps : deps) =
-  match (deps.get_server_state_opt (), deps.get_sw (), deps.get_clock ()) with
-  | Some state, Some sw, Some clock -> Ok (state, sw, clock)
-  | None, _, _ -> Error "Server state not initialized"
-  | _, None, _ -> Error "Eio switch not available"
-  | _, _, None -> Error "Eio clock not available"
+  deps.get_runtime_result ()
 
 let env_flag name =
   match Sys.getenv_opt name with

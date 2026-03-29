@@ -197,9 +197,11 @@ let make_extended_handler routes =
                 resp_body reqd)
         | `DELETE, "/mcp" -> handle_delete_mcp request reqd
         | `DELETE, "/mcp/managed" ->
-            handle_delete_mcp ~profile:Mcp_eio.Managed_agent request reqd
+            handle_delete_mcp
+              ~profile:Server_mcp_transport_http.Managed_agent request reqd
         | `DELETE, "/mcp/operator" ->
-            handle_delete_mcp ~profile:Mcp_eio.Operator_remote request reqd
+            handle_delete_mcp
+              ~profile:Server_mcp_transport_http.Operator_remote request reqd
         | `GET, "/api/v1/board/flairs" ->
             let flairs = List.map Board.flair_to_yojson Board.available_flairs in
             let json = `Assoc [("flairs", `List flairs)] in

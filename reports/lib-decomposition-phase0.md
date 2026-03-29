@@ -11,8 +11,8 @@ Issue: #3593
 | Monolith modules remaining | 550 (in dependency graph) |
 | Total dependency edges | 1,804 |
 | Avg dependencies per module | 3.28 |
-| Leaf modules (0 internal deps) | 157 |
-| Root modules (nothing depends on them) | 112 |
+| Leaf modules (0 internal deps) | 158 |
+| Root modules (nothing depends on them) | 111 |
 
 ## Critical Finding: 81-Module Cycle
 
@@ -37,7 +37,7 @@ These modules have the highest in-degree (most depended-upon):
 | Room | 136 | Central state container |
 | Tool_args | 59 | Tool argument types |
 | Keeper_types | 44 | Keeper type definitions |
-| Mcp_server | 39 | MCP protocol server |
+| Mcp_server | 35 | MCP protocol server |
 | Team_session_store | 38 | Session persistence |
 | Sse | 29 | Server-sent events |
 | Chain_types | 25 | Chain type definitions |
@@ -51,10 +51,14 @@ High coupling ratio = internal edges dominate over external deps = easier to ext
 core/helper set, and the `Mcp_session` / `Mcp_transport_protocol` /
 `Response` leaf primitives are already extracted in this branch, so the
 next candidates start at Batch 2 with a cleaner `server_mcp` boundary.
+Recent prep also moved protocol-version parsing into
+`masc_mcp.mcp_transport_protocol` and localized runtime/profile
+conversion at the HTTP/H2 edges, so `server_mcp` now depends on only four
+external clusters: `Ag_ui`, `Sse`, `Transport`, and `Transport_metrics`.
 
 | Prefix Group | Modules | Coupling | Ext Deps | Status |
 |-------------|---------|----------|----------|--------|
-| server_mcp | 10 | 0.737 | 5 | Medium |
+| server_mcp | 10 | 0.800 | 4 | Medium |
 | tool_command | 9 | 0.630 | 10 | Medium |
 | dashboard_proof | 5 | 0.556 | 4 | Medium |
 | tool_improve | 6 | 0.500 | 5 | Medium |
@@ -93,7 +97,7 @@ Completed in this branch:
 **Batch 1 status**: complete. No remaining low-risk 3+ module clusters.
 
 ### Batch 2: Medium-risk extractions
-8. **server_mcp** (10 modules, coupling 0.737, ext deps 5 after primitive extraction)
+8. **server_mcp** (10 modules, coupling 0.800, ext deps 4 after primitive extraction + profile/runtime boundary cleanup)
 9. **tool_command** (9 modules, coupling 0.630)
 10. **dashboard_proof** (5 modules, coupling 0.556)
 11. **masc_grpc** (5 modules, coupling 0.429)
@@ -114,7 +118,7 @@ With those heuristics corrected, the graph collapses to one real SCC.
 
 ## Next Steps
 
-1. Start `server_mcp` as the first Batch 2 extraction from the reduced 5-dependency boundary
+1. Start `server_mcp` as the first Batch 2 extraction from the reduced 4-dependency boundary
 2. Validate whether `tool_command` still follows `server_mcp` after that split
 3. Plan the remaining Batch 2 order from the updated graph
 4. Re-evaluate whether `masc_chain` is still a sensible Phase 1 target after Batch 2

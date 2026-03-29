@@ -353,18 +353,48 @@ let force_json_response = Server_mcp_transport_http.force_json_response
 let get_last_event_id = Server_mcp_transport_http.get_last_event_id
 
 let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
+  let mcp_eio_profile_of_transport_profile = function
+    | Server_mcp_transport_http.Full -> Mcp_server_eio.Full
+    | Server_mcp_transport_http.Managed_agent -> Mcp_server_eio.Managed_agent
+    | Server_mcp_transport_http.Operator_remote ->
+        Mcp_server_eio.Operator_remote
+  in
   {
     get_origin;
     cors_headers;
     auth_token_from_request;
-    get_server_state_opt = current_server_state_opt;
+    is_ready = (fun () -> Option.is_some (current_server_state_opt ()));
+    get_runtime_result =
+      (fun () ->
+        match current_server_state_opt () with
+        | None -> Error "Server state not initialized"
+        | Some state -> (
+            match (state_switch_opt (Some state), state_clock_opt (Some state)) with
+            | Some sw, Some clock ->
+                Ok
+                  {
+                    base_path = state.Mcp_server.room_config.base_path;
+                    sw;
+                    clock;
+                    handle_request =
+                      (fun ?(profile = Server_mcp_transport_http.Full)
+                           ?mcp_session_id
+                           ?auth_token body_str ->
+                        let profile =
+                          mcp_eio_profile_of_transport_profile profile
+                        in
+                        Mcp_server_eio.handle_request ~clock ~sw ~profile
+                          ?mcp_session_id ?auth_token state body_str);
+                    clear_resource_subscriptions_for_session =
+                      Mcp_server_eio.clear_resource_subscriptions_for_session;
+                  }
+            | None, _ -> Error "Eio switch not available"
+            | _, None -> Error "Eio clock not available"));
     get_base_path =
       (fun () ->
         match current_server_state_opt () with
         | Some state -> state.Mcp_server.room_config.base_path
         | None -> Server_mcp_transport_http.default_base_path ());
-    get_sw = (fun () -> state_switch_opt (current_server_state_opt ()));
-    get_clock = (fun () -> state_clock_opt (current_server_state_opt ()));
     verify_mcp_auth =
       (fun ~base_path request ->
         Result.map (fun _ -> ()) (verify_mcp_auth ~base_path request));
@@ -389,7 +419,8 @@ let stop_sse_session = Server_mcp_transport_http.stop_sse_session
 let close_all_sse_connections =
   Server_mcp_transport_http.close_all_sse_connections
 
-let handle_get_mcp ?legacy_messages_endpoint ?(profile = Mcp_eio.Full) ?sse_kind request reqd =
+let handle_get_mcp ?legacy_messages_endpoint
+    ?(profile = Server_mcp_transport_http.Full) ?sse_kind request reqd =
   Server_mcp_transport_http.handle_get_mcp ~deps:(mcp_transport_http_deps ())
     ?legacy_messages_endpoint ~profile ?sse_kind request reqd
 
@@ -405,11 +436,11 @@ let handle_post_messages request reqd =
   Server_mcp_transport_http.handle_post_messages ~deps:(mcp_transport_http_deps ())
     request reqd
 
-let handle_post_mcp ?(profile = Mcp_eio.Full) request reqd =
+let handle_post_mcp ?(profile = Server_mcp_transport_http.Full) request reqd =
   Server_mcp_transport_http.handle_post_mcp ~deps:(mcp_transport_http_deps ())
     ~profile request reqd
 
-let handle_delete_mcp ?(profile = Mcp_eio.Full) request reqd =
+let handle_delete_mcp ?(profile = Server_mcp_transport_http.Full) request reqd =
   Server_mcp_transport_http.handle_delete_mcp ~deps:(mcp_transport_http_deps ())
     ~profile request reqd
 

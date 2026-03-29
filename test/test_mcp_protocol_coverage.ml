@@ -18,6 +18,39 @@ let test_sse_content_type () =
 let test_json_content_type () =
   check string "json content type" "application/json" Http_negotiation.json_content_type
 
+let test_default_protocol_version () =
+  check string "default protocol version" "2025-11-25"
+    Mcp_transport_protocol.default_protocol_version
+
+let test_supported_protocol_versions () =
+  check bool "current version included" true
+    (List.mem "2025-11-25" Mcp_transport_protocol.supported_protocol_versions)
+
+let test_protocol_version_from_params_none () =
+  check string "none falls back to default" "2025-11-25"
+    (Mcp_transport_protocol.protocol_version_from_params None)
+
+let test_protocol_version_from_params_present () =
+  check string "params version" "2025-03-26"
+    (Mcp_transport_protocol.protocol_version_from_params
+       (Some (`Assoc [ ("protocolVersion", `String "2025-03-26") ])))
+
+let test_protocol_version_from_body_initialize () =
+  check (option string) "initialize body version" (Some "2025-06-18")
+    (Mcp_transport_protocol.protocol_version_from_body
+       {|{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-06-18"}}|})
+
+let test_protocol_version_from_body_invalid_normalizes () =
+  check (option string) "invalid initialize version normalizes"
+    (Some "2025-11-25")
+    (Mcp_transport_protocol.protocol_version_from_body
+       {|{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2099-01-01"}}|})
+
+let test_protocol_version_from_body_non_initialize () =
+  check (option string) "non-initialize ignored" None
+    (Mcp_transport_protocol.protocol_version_from_body
+       {|{"jsonrpc":"2.0","method":"tools/list"}|})
+
 (* ============================================================
    accepts_json Tests (new: delegates to SDK with wildcard support)
    ============================================================ *)
@@ -164,6 +197,17 @@ let () =
     "constants", [
       test_case "sse_content_type" `Quick test_sse_content_type;
       test_case "json_content_type" `Quick test_json_content_type;
+      test_case "default_protocol_version" `Quick test_default_protocol_version;
+      test_case "supported_protocol_versions" `Quick test_supported_protocol_versions;
+    ];
+    "protocol_versions", [
+      test_case "from_params none" `Quick test_protocol_version_from_params_none;
+      test_case "from_params present" `Quick test_protocol_version_from_params_present;
+      test_case "from_body initialize" `Quick test_protocol_version_from_body_initialize;
+      test_case "from_body invalid normalizes" `Quick
+        test_protocol_version_from_body_invalid_normalizes;
+      test_case "from_body non_initialize" `Quick
+        test_protocol_version_from_body_non_initialize;
     ];
     "accepts_json", [
       test_case "none" `Quick test_accepts_json_none;

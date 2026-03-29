@@ -3,8 +3,8 @@
     "total_modules": 550,
     "total_edges": 1804,
     "avg_out_degree": 3.28,
-    "leaf_count": 157,
-    "root_count": 112
+    "leaf_count": 158,
+    "root_count": 111
   },
   "top_imported": [
     [
@@ -20,12 +20,12 @@
       44
     ],
     [
-      "Mcp_server",
-      39
-    ],
-    [
       "Team_session_store",
       38
+    ],
+    [
+      "Mcp_server",
+      35
     ],
     [
       "Sse",
@@ -271,9 +271,9 @@
         "Server_mcp_transport_http_types",
         "Server_mcp_transport_ws"
       ],
-      "internal_edges": 14,
-      "external_dep_count": 5,
-      "coupling_ratio": 0.737
+      "internal_edges": 16,
+      "external_dep_count": 4,
+      "coupling_ratio": 0.8
     },
     {
       "prefix": "tool_command",
@@ -468,8 +468,8 @@
         "Server_routes_http_runtime"
       ],
       "internal_edges": 18,
-      "external_dep_count": 59,
-      "coupling_ratio": 0.234
+      "external_dep_count": 60,
+      "coupling_ratio": 0.231
     },
     {
       "prefix": "operator_digest",
@@ -1179,6 +1179,7 @@
       "Server_routes_http_routes_room"
     ],
     "Server_routes_http_common": [
+      "Mcp_server_eio",
       "Server_auth",
       "Server_dashboard_http",
       "Server_utils"
@@ -1225,6 +1226,7 @@
       "Credits_dashboard",
       "Prometheus",
       "Server_auth",
+      "Server_mcp_transport_http",
       "Server_routes_http_common",
       "Server_routes_http_pages",
       "Server_routes_http_runtime",
@@ -1477,9 +1479,9 @@
       "Mcp_server"
     ],
     "Server_mcp_transport_http": [
-      "Mcp_server",
       "Server_mcp_transport_http_conn",
       "Server_mcp_transport_http_headers",
+      "Server_mcp_transport_http_types",
       "Sse"
     ],
     "Server_mcp_transport_http_conn": [
@@ -1499,15 +1501,12 @@
       "Transport"
     ],
     "Server_mcp_transport_http_protocol": [
-      "Mcp_server",
       "Server_mcp_transport_http_headers",
       "Server_mcp_transport_http_types"
     ],
-    "Server_mcp_transport_http_types": [
-      "Mcp_server"
-    ],
+    "Server_mcp_transport_http_types": [],
     "Server_mcp_transport_http_session": [
-      "Mcp_server"
+      "Server_mcp_transport_http_types"
     ],
     "Server_mcp_transport_http_headers": [
       "Server_mcp_transport_http_session",

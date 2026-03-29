@@ -168,6 +168,20 @@ let test_initialize_never_uses_sse () =
     (Transport.should_use_sse_for_body request body
        Masc_mcp.Mcp_transport_protocol.Http_negotiation.Streamable)
 
+let test_sse_guard_registry_is_shared_with_cleanup_loop () =
+  let module Transport = Masc_mcp.Server_mcp_transport_http in
+  let module Cleanup_view = Masc_mcp.Server_mcp_transport_http_sse in
+  let session_id = "shared-sse-guard-registry" in
+  match Transport.check_sse_connect_guard session_id with
+  | Error (reason, retry_after_s) ->
+      failf "expected first guard insert to succeed, got %s %.3f" reason
+        retry_after_s
+  | Ok () ->
+      check int "cleanup loop sees the same guard table" 1
+        (Cleanup_view.reap_stale_guards ());
+      check int "transport view is already clean after shared reap" 0
+        (Transport.reap_stale_guards ())
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -187,5 +201,7 @@ let () =
         test_case "initialize json-only is rejected" `Quick test_initialize_json_only_accepted;
         test_case "no accept header rejected" `Quick test_no_accept_header_rejected;
         test_case "initialize disables sse" `Quick test_initialize_never_uses_sse;
+        test_case "sse guard registry is shared" `Quick
+          test_sse_guard_registry_is_shared_with_cleanup_loop;
       ]);
     ]

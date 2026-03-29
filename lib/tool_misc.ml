@@ -214,7 +214,6 @@ let auth_snapshot_json ctx =
       ("http_auth_strict", `Bool http_auth_strict);
       ("bind_host", `String bind_host);
       ("bind_is_loopback", `Bool bind_is_loopback);
-      ("mcp_remote_requires_token", `Bool http_auth_strict);
       ("operator_remote_requires_token", `Bool true);
       ("credential_count", `Int (List.length credentials));
       ("credentials", `List credentials);

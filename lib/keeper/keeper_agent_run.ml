@@ -221,6 +221,12 @@ let run_turn
     (match result.checkpoint with
      | Some checkpoint -> (
          try
+           (* Unify session_id to trace_id so load_oas can find this
+              checkpoint on the next turn. oas_worker generates a per-turn
+              session_id that differs from trace_id, causing a load miss. *)
+           let checkpoint =
+             { checkpoint with Agent_sdk.Checkpoint.session_id = meta.trace_id }
+           in
            Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir
              checkpoint
          with

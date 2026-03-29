@@ -6,7 +6,6 @@
  (modules
    a2a_types
    a2a_tools
-   ag_ui
    agent_card
    agent_economy
    agent_health
@@ -790,6 +789,8 @@
    masc_mcp.mcp_session
    ;; Response envelope leaf primitive (extracted sub-library)
    masc_mcp.response
+   ;; AG-UI event bridge leaf primitive (extracted sub-library)
+   masc_mcp.ag_ui
    ;; OpenTelemetry (spans + OTLP exporter + metrics)
    opentelemetry
    opentelemetry-client-cohttp-eio

@@ -1,9 +1,9 @@
 {
   "stats": {
-    "total_modules": 550,
-    "total_edges": 1804,
+    "total_modules": 549,
+    "total_edges": 1802,
     "avg_out_degree": 3.28,
-    "leaf_count": 158,
+    "leaf_count": 157,
     "root_count": 111
   },
   "top_imported": [
@@ -272,8 +272,8 @@
         "Server_mcp_transport_ws"
       ],
       "internal_edges": 16,
-      "external_dep_count": 4,
-      "coupling_ratio": 0.8
+      "external_dep_count": 3,
+      "coupling_ratio": 0.842
     },
     {
       "prefix": "tool_command",
@@ -468,8 +468,8 @@
         "Server_routes_http_runtime"
       ],
       "internal_edges": 18,
-      "external_dep_count": 60,
-      "coupling_ratio": 0.231
+      "external_dep_count": 59,
+      "coupling_ratio": 0.234
     },
     {
       "prefix": "operator_digest",
@@ -779,7 +779,6 @@
       "Room",
       "Sse"
     ],
-    "Ag_ui": [],
     "Agent_card": [
       "Masc_grpc_server",
       "Server_webrtc_transport",
@@ -1209,7 +1208,6 @@
       "Transport_metrics"
     ],
     "Server_routes_http_keeper_stream": [
-      "Ag_ui",
       "Audit_log",
       "Keeper",
       "Keeper_alerting",
@@ -1492,7 +1490,6 @@
       "Server_mcp_transport_http_types"
     ],
     "Server_mcp_transport_http_agui": [
-      "Ag_ui",
       "Server_mcp_transport_http_conn",
       "Server_mcp_transport_http_headers",
       "Server_mcp_transport_http_protocol",

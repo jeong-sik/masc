@@ -168,11 +168,38 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
    | exn -> Log.Misc.error "startup prune failed: %s" (Printexc.to_string exn))
 
 (** Migrate legacy directory names: perpetual->traces, perpetual-keepers->keepers.
-    Moves contents via recursive merge. Conflicting files go to _quarantine/. *)
+    Moves contents via recursive merge. Conflicting files go to _quarantine/,
+    except keeper meta files where a fresher valid legacy record may replace a
+    stale or invalid current record. *)
+let keeper_meta_updated_ts path =
+  match Keeper_types.read_meta_file_path path with
+  | Ok (Some meta) ->
+      Some
+        (Resilience.Time.parse_iso8601_opt meta.updated_at
+        |> Option.value ~default:0.0)
+  | Ok None | Error _ -> None
+
+let should_promote_legacy_keeper_meta ~legacy_path ~current_path =
+  match
+    Keeper_types.read_meta_file_path legacy_path,
+    Keeper_types.read_meta_file_path current_path
+  with
+  | Ok (Some _legacy), Ok (Some _current) -> (
+      match
+        keeper_meta_updated_ts legacy_path,
+        keeper_meta_updated_ts current_path
+      with
+      | Some legacy_ts, Some current_ts -> legacy_ts > current_ts
+      | Some _, None -> true
+      | None, Some _ | None, None -> false)
+  | Ok (Some _), Ok None | Ok (Some _), Error _ -> true
+  | _ -> false
+
 let migrate_legacy_dirs (state : Mcp_server.server_state) =
   let masc = Room.masc_root_dir state.room_config in
   let quarantine = Filename.concat masc "_quarantine" in
-  let rec migrate_recursive ~old_dir ~new_dir ~rel_path =
+  let rec migrate_recursive ~old_dir ~new_dir ~rel_path
+      ~prefer_root_keeper_meta_conflicts =
     if not (Sys.file_exists old_dir) then ()
     else begin
       Keeper_types.mkdir_p new_dir;
@@ -183,13 +210,27 @@ let migrate_legacy_dirs (state : Mcp_server.server_state) =
         if Sys.is_directory old_path then begin
           if Sys.file_exists new_path then
             migrate_recursive ~old_dir:old_path ~new_dir:new_path ~rel_path:rel
+              ~prefer_root_keeper_meta_conflicts
           else
             Sys.rename old_path new_path
         end else begin
           if Sys.file_exists new_path then begin
-            let q_path = Filename.concat quarantine rel in
-            Keeper_types.mkdir_p (Filename.dirname q_path);
-            Sys.rename old_path q_path
+            if prefer_root_keeper_meta_conflicts && rel_path = ""
+               && Filename.check_suffix name ".json"
+               && should_promote_legacy_keeper_meta
+                    ~legacy_path:old_path ~current_path:new_path
+            then begin
+              let replaced_q_path =
+                Filename.concat quarantine (Filename.concat "_replaced" rel)
+              in
+              Keeper_types.mkdir_p (Filename.dirname replaced_q_path);
+              Sys.rename new_path replaced_q_path;
+              Sys.rename old_path new_path
+            end else begin
+              let q_path = Filename.concat quarantine rel in
+              Keeper_types.mkdir_p (Filename.dirname q_path);
+              Sys.rename old_path q_path
+            end
           end else
             Sys.rename old_path new_path
         end
@@ -204,7 +245,7 @@ let migrate_legacy_dirs (state : Mcp_server.server_state) =
   in
   let renames = [
     ("perpetual", "traces");
-    ("keepers", "keepers");
+    ("perpetual-keepers", "keepers");
     ("resident-keepers", "keepers");
   ] in
   (try
@@ -214,6 +255,7 @@ let migrate_legacy_dirs (state : Mcp_server.server_state) =
       if Sys.file_exists old_dir then begin
         Log.Misc.info "migrate: %s -> %s" old_name new_name;
         migrate_recursive ~old_dir ~new_dir ~rel_path:""
+          ~prefer_root_keeper_meta_conflicts:(String.equal new_name "keepers")
       end
     ) renames
   with

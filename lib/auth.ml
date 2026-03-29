@@ -271,7 +271,7 @@ let permission_for_tool = function
   | "masc_observe_topology" | "masc_observe_operations"
   | "masc_observe_swarm" | "masc_observe_capacity" | "masc_observe_alerts"
   | "masc_observe_traces"
-  | "masc_voice_sessions" | "masc_voice_agent" | "masc_voice_transcript" ->
+  | "masc_voice_sessions" | "masc_voice_agent" ->
       Some CanReadState
   | "masc_autoresearch_status" -> Some CanReadState
   | "masc_add_task" -> Some CanAddTask

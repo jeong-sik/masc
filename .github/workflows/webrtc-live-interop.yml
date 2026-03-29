@@ -15,11 +15,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup OCaml
-        uses: ocaml/setup-ocaml@v3
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
         with:
-          ocaml-compiler: 5.4.x
-          dune-cache: true
+          ocaml-compiler: "5.4.x"
+          dune-cache: "true"
 
       - name: Setup Node
         uses: actions/setup-node@v6

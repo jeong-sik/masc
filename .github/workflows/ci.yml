@@ -16,10 +16,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  health:
-    name: Health
+  health-and-lint:
+    name: Health & Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -33,17 +33,7 @@ jobs:
           scripts/check-oas-pin.sh
 
       - name: Verify PR sync
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          PR_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          chmod +x scripts/check-pr-sync.sh
-          scripts/check-pr-sync.sh \
-            --head-branch "$PR_HEAD_REF" \
-            --pr-number "$PR_NUMBER" \
-            --expected-head-sha "$PR_HEAD_SHA"
+        uses: ./.github/actions/verify-pr-sync
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
@@ -64,6 +54,28 @@ jobs:
           chmod +x scripts/check-doc-truth.sh scripts/check-version-truth.sh
           scripts/check-doc-truth.sh
           scripts/check-version-truth.sh
+
+      - name: Check Eio conventions
+        run: |
+          chmod +x scripts/check-eio-conventions.sh
+          scripts/check-eio-conventions.sh
+
+      - name: Check feature flag consistency
+        run: |
+          chmod +x scripts/check-feature-flag-consistency.sh
+          scripts/check-feature-flag-consistency.sh
+
+      - name: Build with warnings as errors
+        run: |
+          opam exec -- dune build @install --force
+        env:
+          OCAMLPARAM: "_,warn-error=+a"
+
+      - name: Check gRPC proto descriptor drift
+        run: |
+          sudo apt-get install -y -qq protobuf-compiler
+          chmod +x scripts/gen-grpc-descriptors.sh
+          scripts/gen-grpc-descriptors.sh --check
 
       - name: Fetch base branch for health ratchet
         if: github.event_name == 'pull_request'
@@ -105,17 +117,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify PR sync
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          PR_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          chmod +x scripts/check-pr-sync.sh
-          scripts/check-pr-sync.sh \
-            --head-branch "$PR_HEAD_REF" \
-            --pr-number "$PR_NUMBER" \
-            --expected-head-sha "$PR_HEAD_SHA"
+        uses: ./.github/actions/verify-pr-sync
 
       - name: Run PR hygiene guards
         env:
@@ -139,17 +141,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Verify PR sync
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          PR_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          chmod +x scripts/check-pr-sync.sh
-          scripts/check-pr-sync.sh \
-            --head-branch "$PR_HEAD_REF" \
-            --pr-number "$PR_NUMBER" \
-            --expected-head-sha "$PR_HEAD_SHA"
+        uses: ./.github/actions/verify-pr-sync
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
@@ -239,17 +231,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Verify PR sync
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          PR_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          chmod +x scripts/check-pr-sync.sh
-          scripts/check-pr-sync.sh \
-            --head-branch "$PR_HEAD_REF" \
-            --pr-number "$PR_NUMBER" \
-            --expected-head-sha "$PR_HEAD_SHA"
+        uses: ./.github/actions/verify-pr-sync
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
@@ -280,61 +262,6 @@ jobs:
         run: |
           echo "::notice::Required CI gates: contract harness suite"
           echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN, viewer-local-e2e-check, swarm/team-session workload harnesses"
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Verify PR sync
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          PR_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          chmod +x scripts/check-pr-sync.sh
-          scripts/check-pr-sync.sh \
-            --head-branch "$PR_HEAD_REF" \
-            --pr-number "$PR_NUMBER" \
-            --expected-head-sha "$PR_HEAD_SHA"
-
-      - name: Setup OCaml toolchain
-        uses: ./.github/actions/setup-ocaml-toolchain
-
-      - name: Pin external OCaml dependencies
-        uses: ./.github/actions/pin-ocaml-deps
-
-      - name: Install system and OCaml dependencies
-        uses: ./.github/actions/install-ocaml-deps
-        with:
-          os-packages: ripgrep
-
-      - name: Check Eio conventions
-        run: |
-          chmod +x scripts/check-eio-conventions.sh
-          scripts/check-eio-conventions.sh
-
-      - name: Check feature flag consistency
-        run: |
-          chmod +x scripts/check-feature-flag-consistency.sh
-          scripts/check-feature-flag-consistency.sh
-
-      - name: Build with warnings as errors
-        run: |
-          opam exec -- dune build @install --force
-        env:
-          OCAMLPARAM: "_,warn-error=+a"
-
-      - name: Check gRPC proto descriptor drift
-        run: |
-          sudo apt-get install -y -qq protobuf-compiler
-          chmod +x scripts/gen-grpc-descriptors.sh
-          scripts/gen-grpc-descriptors.sh --check
 
   dashboard:
     name: Dashboard

@@ -38,15 +38,15 @@ jobs:
             scripts/check-version-truth.sh
           fi
 
-      - name: Setup OCaml
-        uses: ocaml/setup-ocaml@v3
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
         with:
-          ocaml-compiler: 5.4.x
+          ocaml-compiler: "5.4.x"
 
-      - name: Pin private dependencies
-        run: |
-          chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh --with-compact-protocol
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-compact-protocol
 
 
       - name: Install libpq (macOS)

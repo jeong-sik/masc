@@ -485,7 +485,7 @@ Phase 3 착수 조건:
 
 **가장 큰 위험들**:
 1. Phase 1에서 presence skip이 downstream consumer(dashboard, SSE)가 기대하는 `last_seen` 갱신을 누락시킬 수 있음. Step 1.2에서 turn 완료 시 `Room.heartbeat_in_room`을 명시적으로 호출하여 방지.
-2. Phase 1에서 `last_turn_completion_ts`가 supervisor의 `done_p` SSOT를 침범하지 않도록 scope를 엄격히 분리. freshness(presence skip)와 liveness(fiber death)는 독립 관심사.
+2. Phase 1에서 `last_successful_heartbeat_ts`가 supervisor의 `done_p` SSOT를 침범하지 않도록 scope를 엄격히 분리. freshness(presence skip)와 liveness(fiber death)는 독립 관심사.
 
 ## 6. Implementation Checklist
 

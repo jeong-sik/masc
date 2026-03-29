@@ -231,10 +231,6 @@ let execute_model_node ctx ~clock ~(exec_fn : exec_fn) ~(node : node) (model : n
           Error msg)
   | _ -> Error "execute_model_node called with non-MODEL node"
 
-(** MASC MCP endpoint - configurable via MASC_MCP_URL env var *)
-let _masc_mcp_url () =
-  Env_config.Chain.mcp_url ()
-
 (** Get MASC agent name from env or default *)
 let masc_agent_name () =
   Env_config.Chain.agent_name

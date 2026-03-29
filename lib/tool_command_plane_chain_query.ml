@@ -480,16 +480,6 @@ let string_member_opt json key =
       if trimmed = "" then None else Some trimmed
   | _ -> None
 
-let _assoc_member_opt json key =
-  match U.member key json with
-  | `Assoc _ as value -> Some value
-  | _ -> None
-
-let _list_member json key =
-  match U.member key json with
-  | `List rows -> rows
-  | _ -> []
-
 let string_json value =
   match value with
   | Some v -> `String v

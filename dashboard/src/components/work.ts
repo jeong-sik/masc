@@ -25,9 +25,9 @@ export function Work() {
     <div class="flex flex-col gap-4">
       <div class="transition-opacity duration-300">
         <${ErrorBoundary} label=${current}>
-          ${current === 'board' ? html`<${TaskCreateForm} /><${Memory} />`
+          ${current === 'board' ? html`<${Memory} />`
             : current === 'evidence' ? html`<${Proof} />`
-            : current === 'planning' ? html`<${Planning} />`
+            : current === 'planning' ? html`<${Planning} /><${TaskCreateForm} />`
             : html`<${Worktrees} />`
           }
         </>

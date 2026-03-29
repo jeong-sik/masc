@@ -145,7 +145,9 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - `POST /mcp` expects `Accept: application/json, text/event-stream`.
 - Legacy `/sse` and `/messages` endpoints are deprecated.
 - Binding to `0.0.0.0` or `::` enables strict auth on MCP routes.
+- Local `/mcp` is the full MCP surface and should be treated as local-first. On non-loopback bind it fails closed unless room auth is enabled with `require_token=true`.
 - `/mcp/operator` is bearer-token only and intentionally exposes a smaller remote-safe surface.
+- Remote-safe exposure means `/mcp/operator` only. Do not expose the full `/mcp` surface to external clients unless you intentionally want the full room tool inventory behind bearer auth.
 
 ## Product and Planning Docs
 

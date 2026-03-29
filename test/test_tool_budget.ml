@@ -113,4 +113,39 @@ let () =
               check bool "no budget" true
                 (Tool_budget.default_budget () = None));
         ] );
+      ( "p3_budget_audit",
+        [
+          test_case "no single tool description exceeds 500 tokens" `Quick (fun () ->
+              let max_per_tool = 500 in
+              let schemas = Masc_mcp.Config.raw_all_tool_schemas in
+              let violations =
+                List.filter_map
+                  (fun (s : Types.tool_schema) ->
+                    let tokens = Tool_budget.estimate_tokens s.description in
+                    if tokens > max_per_tool then
+                      Some (Printf.sprintf "%s: %d tokens" s.name tokens)
+                    else None)
+                  schemas
+              in
+              if violations <> [] then
+                Alcotest.fail
+                  (Printf.sprintf "P3 violation: %d tools exceed %d tokens:\n%s"
+                     (List.length violations) max_per_tool
+                     (String.concat "\n" violations)));
+          test_case "public MCP surface total under 15K tokens" `Quick (fun () ->
+              let max_total = 15000 in
+              let schemas =
+                Masc_mcp.Config.visible_tool_schemas () in
+              let total =
+                List.fold_left
+                  (fun acc (s : Types.tool_schema) ->
+                    acc + Tool_budget.estimate_tokens s.description)
+                  0 schemas
+              in
+              if total > max_total then
+                Alcotest.fail
+                  (Printf.sprintf
+                     "P3 violation: public surface total = %d tokens (limit %d)"
+                     total max_total));
+        ] );
     ]

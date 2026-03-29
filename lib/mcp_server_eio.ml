@@ -117,14 +117,11 @@ let () =
   register_module_tag ~schemas:Tool_voice.schemas ~tag:Mod_voice;
   register_module_tag ~schemas:Tool_portal.schemas ~tag:Mod_portal;
   register_module_tag ~schemas:Tool_worktree.schemas ~tag:Mod_worktree;
-  register_module_tag ~schemas:Tool_fire_task.schemas ~tag:Mod_fire_task;
-  register_module_tag ~schemas:Tool_code_swarm.schemas ~tag:Mod_code_swarm;
   register_module_tag ~schemas:Tool_auth.schemas ~tag:Mod_auth;
   register_module_tag ~schemas:Tool_agent.schemas ~tag:Mod_agent;
   register_module_tag ~schemas:Tool_room.schemas ~tag:Mod_room;
   register_module_tag ~schemas:Tool_agent_timeline.schemas ~tag:Mod_agent_timeline;
   register_module_tag ~schemas:Tool_keeper.schemas ~tag:Mod_keeper;
-  register_module_tag ~schemas:Tool_compact.schemas ~tag:Mod_compact;
   register_module_tag ~schemas:Tool_mdal.schemas ~tag:Mod_mdal;
   register_module_tag ~schemas:Tool_improve_loop.schemas ~tag:Mod_improve_loop;
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;

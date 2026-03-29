@@ -444,10 +444,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args:arguments
     | Mod_worktree ->
         Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args:arguments
-    | Mod_fire_task ->
-        Tool_fire_task.dispatch { Tool_fire_task.config; agent_name; sw } ~name ~args:arguments
-    | Mod_code_swarm ->
-        Tool_code_swarm.dispatch { Tool_code_swarm.config; agent_name } ~name ~args:arguments
     | Mod_code ->
         Tool_code.dispatch { Tool_code.config; agent_name } ~name ~args:arguments
     | Mod_code_write ->
@@ -515,8 +511,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_library.dispatch { Tool_library.agent_name } ~name ~args:arguments
     | Mod_keeper ->
         Tool_keeper.dispatch (make_keeper_ctx ()) ~name ~args:arguments
-    | Mod_compact ->
-        Tool_compact.dispatch ~name ~args:arguments
     | Mod_mdal ->
         let ctx : Tool_mdal.context = { agent_name; config = Some config;
           sw = Some sw; proc_mgr = state.Mcp_server.proc_mgr;

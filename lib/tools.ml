@@ -17,7 +17,6 @@ let raw_schemas : tool_schema list =
   @ Tool_schemas_auth.schemas
   @ Tool_schemas_portal.schemas
   @ Tool_schemas_worktree.schemas
-  @ Tool_schemas_fire_task.schemas
   @ Tool_task.schemas
   @ Tool_suspend.schemas
   @ Tool_council_oas.schemas
@@ -43,7 +42,6 @@ let all_schemas_extended =
   @ Tool_operator.schemas @ Tool_local_runtime.schemas @ Tool_command_plane.schemas
   @ Tool_team_session.schemas @ Tool_voice.schemas @ Tool_shard.schemas
   @ Tool_autoresearch.schemas
-  @ Tool_compact.schemas
 
 (** Get tool by name *)
 let find_tool name =

@@ -151,7 +151,8 @@ let is_join_required name = with_dispatch_ro (fun () -> Hashtbl.mem requires_joi
     ~210 Hashtbl.replace ops. *)
 
 type module_tag =
-  | Mod_plan | Mod_operator | Mod_command_plane
+  | Mod_plan | Mod_cache | Mod_goals | Mod_run | Mod_compact
+  | Mod_operator | Mod_command_plane
   | Mod_local_runtime | Mod_team_session | Mod_voice
   | Mod_portal | Mod_worktree
   | Mod_code | Mod_code_write

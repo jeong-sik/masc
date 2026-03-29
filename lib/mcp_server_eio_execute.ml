@@ -410,6 +410,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let make_keeper_ctx () : _ Tool_keeper.context =
     { config; agent_name; sw; clock; proc_mgr = state.Mcp_server.proc_mgr }
   in
+  let call_keeper_msg args =
+    match Tool_keeper.dispatch (make_keeper_ctx ()) ~name:"masc_keeper_msg" ~args with
+    | Some result -> result
+    | None -> (false, "masc_keeper_msg dispatch unavailable")
+  in
 
   (* Dispatch a single module by tag — creates only that module's context *)
   let dispatch_by_tag (tag : Tool_dispatch.module_tag) : (bool * string) option =
@@ -418,6 +423,16 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | None -> match tag with
     | Mod_plan ->
         Tool_plan.dispatch { config } ~name ~args:arguments
+    | Mod_cache ->
+        Tool_cache.dispatch { Tool_cache.config = config } ~name ~args:arguments
+    | Mod_goals ->
+        Tool_goals.dispatch
+          { Tool_goals.config = config; agent_name; call_keeper_msg = Some call_keeper_msg }
+          ~name ~args:arguments
+    | Mod_run ->
+        Tool_run.dispatch { Tool_run.config = config } ~name ~args:arguments
+    | Mod_compact ->
+        Tool_compact.dispatch ~name ~args:arguments
     | Mod_operator ->
         let ctx = { Tool_operator.config; agent_name; sw; clock;
                     proc_mgr = state.Mcp_server.proc_mgr; mcp_session_id } in

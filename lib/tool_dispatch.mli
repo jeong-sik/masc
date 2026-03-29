@@ -78,7 +78,8 @@ val is_join_required : string -> bool
     to create lazily. *)
 
 type module_tag =
-  | Mod_plan | Mod_operator | Mod_command_plane
+  | Mod_plan | Mod_cache | Mod_goals | Mod_run | Mod_compact
+  | Mod_operator | Mod_command_plane
   | Mod_local_runtime | Mod_team_session | Mod_voice
   | Mod_portal | Mod_worktree
   | Mod_code | Mod_code_write

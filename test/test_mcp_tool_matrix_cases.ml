@@ -89,6 +89,12 @@ let all_known_tool_names =
     "masc_cases";
     "masc_chain_run_get";
     "masc_chain_snapshot";
+    "masc_cache_clear";
+    "masc_cache_delete";
+    "masc_cache_get";
+    "masc_cache_list";
+    "masc_cache_set";
+    "masc_cache_stats";
     "masc_check";
     "masc_circuit_status";
     "masc_claim_next";
@@ -103,6 +109,8 @@ let all_known_tool_names =
     "masc_code_write";
     "masc_collaboration_evidence";
     "masc_collaboration_graph";
+    "masc_compact_context";
+    "masc_config_snapshot";
     "masc_consolidate_learning";
     "masc_convo_conclude";
     "masc_convo_get";
@@ -127,9 +135,15 @@ let all_known_tool_names =
     "masc_execute_dry_run";
     "masc_execution_orders";
     "masc_find_by_capability";
+    "masc_feature_flags";
     "masc_gc";
-    "masc_generate_key";
     "masc_get_metrics";
+    "masc_goal_dispatch";
+    "masc_goal_list";
+    "masc_goal_refresh";
+    "masc_goal_review";
+    "masc_goal_snapshot";
+    "masc_goal_upsert";
     "masc_governance_feed";
     "masc_governance_set";
     "masc_governance_status";
@@ -138,6 +152,8 @@ let all_known_tool_names =
     "masc_handover_create";
     "masc_handover_get";
     "masc_handover_list";
+    "masc_hat_status";
+    "masc_hat_wear";
     "masc_heartbeat";
     "masc_heartbeat_list";
     "masc_heartbeat_result";
@@ -189,7 +205,6 @@ let all_known_tool_names =
     "masc_mdal_swarm_start";
     "masc_memento_mori";
     "masc_messages";
-    "masc_model_catalog";
     "masc_note_add";
     "masc_observe_alerts";
     "masc_observe_capacity";
@@ -314,7 +329,6 @@ let all_known_tool_names =
     "masc_voice_session_start";
     "masc_voice_sessions";
     "masc_voice_speak";
-    "masc_voice_transcript";
     "masc_walph_control";
     "masc_walph_natural";
     "masc_walph_status";

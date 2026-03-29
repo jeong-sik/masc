@@ -105,6 +105,10 @@ let () = Tool_dispatch.init_requires_join_set requires_join_tools
 let () =
   let open Tool_dispatch in
   register_module_tag ~schemas:Tool_plan.schemas ~tag:Mod_plan;
+  register_module_tag ~schemas:Tool_cache.schemas ~tag:Mod_cache;
+  register_module_tag ~schemas:Tool_goals.schemas ~tag:Mod_goals;
+  register_module_tag ~schemas:Tool_run.schemas ~tag:Mod_run;
+  register_module_tag ~schemas:Tool_compact.schemas ~tag:Mod_compact;
   register_module_tag ~schemas:Tool_operator.schemas ~tag:Mod_operator;
   register_module_tag ~schemas:Tool_command_plane.schemas ~tag:Mod_command_plane;
   register_module_tag ~schemas:Tool_local_runtime.schemas ~tag:Mod_local_runtime;

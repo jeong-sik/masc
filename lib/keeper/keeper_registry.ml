@@ -27,12 +27,15 @@ module StringMap = Map.Make (String)
     ADT matching replaces string prefix matching for crash_msg grouping. *)
 type failure_reason =
   | Heartbeat_consecutive_failures of int
+  | Turn_consecutive_failures of int
   | Fiber_unresolved
   | Exception of string
 
 let failure_reason_to_string = function
   | Heartbeat_consecutive_failures n ->
       Printf.sprintf "heartbeat_consecutive_failures(%d)" n
+  | Turn_consecutive_failures n ->
+      Printf.sprintf "turn_consecutive_failures(%d)" n
   | Fiber_unresolved -> "fiber_unresolved"
   | Exception s -> Printf.sprintf "exception(%s)" s
 
@@ -67,6 +70,7 @@ type registry_entry = {
   crash_log : (float * string) list;
   last_error : string option;
   last_failure_reason : failure_reason option;
+  turn_consecutive_failures : int;
   last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
   board_cursor_ts : float;
@@ -122,6 +126,7 @@ let register ~base_path name meta =
     crash_log = [];
     last_error = None;
     last_failure_reason = None;
+    turn_consecutive_failures = 0;
     last_agent_count = 0;
     board_wakeups = Hashtbl.create 8;
     board_cursor_ts = 0.0;
@@ -209,6 +214,19 @@ let record_error ~base_path name err =
 
 let set_failure_reason ~base_path name reason =
   update_entry ~base_path name (fun e -> { e with last_failure_reason = reason })
+
+let increment_turn_failures ~base_path name =
+  update_entry ~base_path name (fun e ->
+    { e with turn_consecutive_failures = e.turn_consecutive_failures + 1 })
+
+let reset_turn_failures ~base_path name =
+  update_entry ~base_path name (fun e ->
+    { e with turn_consecutive_failures = 0 })
+
+let get_turn_failures ~base_path name =
+  match get ~base_path name with
+  | Some e -> e.turn_consecutive_failures
+  | None -> 0
 
 let is_running ~base_path name =
   match get ~base_path name with

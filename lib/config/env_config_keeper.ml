@@ -239,6 +239,12 @@ module KeeperKeepalive = struct
   let max_consecutive_failures =
     max 2 (min 50 (get_int ~default:5 "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES"))
 
+  (** Maximum consecutive unified turn failures before marking keeper as
+      crashed. Covers LLM timeout, rate limit, and other turn errors.
+      Default: 10. Range: [3, 100]. *)
+  let max_consecutive_turn_failures =
+    max 3 (min 100 (get_int ~default:10 "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES"))
+
   (** Board-reactive wakeup debounce in seconds. Prevents rapid repeated
       wakeups from the same board post. Default: 60.0.
       Range: [5, 300]. *)

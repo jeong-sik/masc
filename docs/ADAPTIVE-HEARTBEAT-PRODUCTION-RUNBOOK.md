@@ -88,9 +88,11 @@ Required checks:
 - operator-visible keeper surface shows:
   - `state`
   - `failure_reason`
+  - `failure_streak_count` when `failure_reason=heartbeat_consecutive_failures`
   - `restart_count`
   - `last_successful_heartbeat_age_sec`
   - `dead_ttl_remaining_sec` when `state=Dead`
+  - reconcile exclusion rooted in registry ownership (`is_registered`), not just `is_running=false`
 
 Stop immediately if:
 
@@ -173,6 +175,7 @@ If recovery ownership remains unsafe after soft rollback, redeploy the previous 
 ### `Crashed`
 
 - confirm `failure_reason`
+- if `failure_reason=heartbeat_consecutive_failures`, confirm `failure_streak_count`
 - confirm restart_count is moving under supervisor ownership
 - confirm reconcile is not relaunching the same registered keeper
 
@@ -181,6 +184,7 @@ If recovery ownership remains unsafe after soft rollback, redeploy the previous 
 - confirm `dead_ttl_remaining_sec` is visible
 - do not manually remove registry entry unless you also decide the keeper should re-enter scheduling
 - after TTL cleanup, verify `meta.paused=true`
+- if pause write fails, keep the tombstone registered and retry cleanup rather than unregistering first
 
 ### Self-Preservation Trigger
 
@@ -198,10 +202,10 @@ If recovery ownership remains unsafe after soft rollback, redeploy the previous 
 
 Do not continue rollout if any of the following occur:
 
-- `keeper_dead_resurrection_total > 0`
-- `keeper_reconcile_registered_launch_total > 0`
-- `keeper_false_freshness_skip_total > 0`
-- `keeper_unplanned_self_preservation_total > 0`
+- `masc_keeper_dead_resurrection_total > 0`
+- `masc_keeper_reconcile_registered_launch_total > 0`
+- `masc_keeper_false_freshness_skip_total > 0`
+- `masc_keeper_unplanned_self_preservation_total > 0`
 - read-path harness failure
 - continuity harness failure
 - PERFORMANCE-SLO breach linked to the candidate

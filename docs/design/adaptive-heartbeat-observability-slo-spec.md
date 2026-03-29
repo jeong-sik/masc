@@ -43,6 +43,7 @@ gRPC/Phi가 들어오면 별도 observability spec이 필요하다.
 |---|---|---|
 | `state` | `Running/Paused/Stopped/Crashed/Dead` | yes |
 | `failure_reason` | canonical serialized failure reason | yes for `Crashed` / `Dead` |
+| `failure_streak_count` | integer streak detail for heartbeat failure cohorts | yes when `failure_reason=heartbeat_consecutive_failures` |
 | `restart_count` | supervisor restart budget consumption | yes |
 | `last_restart_ts` | last restart attempt time | yes |
 | `last_successful_heartbeat_age_sec` | freshness lease age | yes |
@@ -64,10 +65,15 @@ Failure grouping은 free-form string matching으로 하지 않는다. Operator s
 Rules:
 
 - `Heartbeat_consecutive_failures of int` 는 serialized operator field에서 `heartbeat_consecutive_failures` 로 normalize 한다.
-- integer streak count는 별도 field or log detail로 남기고, cohort key에는 넣지 않는다.
+- integer streak count는 `failure_streak_count` 로 별도 노출하고, cohort key에는 넣지 않는다.
 - `exception:<summary>` 의 `<summary>` 는 bounded, stable, non-stack-trace string 이어야 한다.
 
 ## 5. Production Metrics
+
+Canonical naming rule:
+
+- `masc_` prefix와 base unit `seconds` 를 canonical metric namespace로 사용한다.
+- prefix 없는 older examples or `_ms` names are legacy draft notation only and must not be used as the production query source.
 
 ### 5.1 Safety Counters
 
@@ -75,10 +81,10 @@ Rules:
 
 | Metric | Meaning |
 |---|---|
-| `keeper_dead_resurrection_total` | `Dead` keeper가 operator action 없이 다시 실행됨 |
-| `keeper_reconcile_registered_launch_total` | registry entry가 있는 keeper를 reconcile이 잘못 재기동 |
-| `keeper_false_freshness_skip_total` | failed room heartbeat 이후 freshness skip 발생 |
-| `keeper_unplanned_self_preservation_total` | operator-injected test가 아닌 suppression 발생 |
+| `masc_keeper_dead_resurrection_total` | `Dead` keeper가 operator action 없이 다시 실행됨 |
+| `masc_keeper_reconcile_registered_launch_total` | registry entry가 있는 keeper를 reconcile이 잘못 재기동 |
+| `masc_keeper_false_freshness_skip_total` | failed room heartbeat 이후 freshness skip 발생 |
+| `masc_keeper_unplanned_self_preservation_total` | operator-injected test가 아닌 suppression 발생 |
 
 이 네 개 중 하나라도 증가하면 rollout은 stop 상태다.
 
@@ -88,16 +94,16 @@ Rules:
 
 | Metric | Required use |
 |---|---|
-| `keeper_presence_sync_attempt_total{result}` | success/error 비율 추적 |
-| `keeper_presence_sync_duration_ms` | stage latency |
-| `keeper_keepalive_cycle_duration_ms` | 전체 keepalive loop latency |
-| `keeper_freshness_skip_total` | skip hit rate |
-| `keeper_room_heartbeat_after_turn_total{result}` | turn 후 heartbeat success/failure |
-| `keeper_state_transition_total{from,to}` | state machine audit |
-| `keeper_restart_total{failure_reason}` | restart pressure 추적 |
-| `keeper_dead_tombstone_total` | exhausted keeper 발생량 |
-| `keeper_dead_cleanup_total` | TTL cleanup 완료량 |
-| `keeper_self_preservation_total{failure_reason}` | dominant cohort suppression 횟수 |
+| `masc_keeper_presence_sync_attempt_total{result}` | success/error 비율 추적 |
+| `masc_keeper_presence_sync_duration_seconds` | stage latency |
+| `masc_keeper_keepalive_cycle_duration_seconds` | 전체 keepalive loop latency |
+| `masc_keeper_freshness_skip_total` | skip hit rate |
+| `masc_keeper_room_heartbeat_after_turn_total{result}` | turn 후 heartbeat success/failure |
+| `masc_keeper_state_transition_total{from,to}` | state machine audit |
+| `masc_keeper_restart_total{failure_reason}` | restart pressure 추적 |
+| `masc_keeper_dead_tombstone_total` | exhausted keeper 발생량 |
+| `masc_keeper_dead_cleanup_total` | TTL cleanup 완료량 |
+| `masc_keeper_self_preservation_total{failure_reason}` | dominant cohort suppression 횟수 |
 
 ## 6. SLO and Alert Policy
 
@@ -115,8 +121,8 @@ Absolute latency 대신 baseline-relative gate를 사용한다.
 |---|---|
 | Safety counters | all zero |
 | Global performance | no PERFORMANCE-SLO breach |
-| Keepalive latency regression | `keeper_keepalive_cycle_duration_ms` p95 must not regress more than 25% vs Stage 0 baseline |
-| Presence sync latency regression | `keeper_presence_sync_duration_ms` p95 must not regress more than 25% vs Stage 0 baseline |
+| Keepalive latency regression | `masc_keeper_keepalive_cycle_duration_seconds` p95 must not regress more than 25% vs Stage 0 baseline |
+| Presence sync latency regression | `masc_keeper_presence_sync_duration_seconds` p95 must not regress more than 25% vs Stage 0 baseline |
 | Operator truth | required fields must be present and internally consistent |
 
 ### 6.3 Alerts
@@ -135,6 +141,7 @@ Runbook and dashboards must be able to answer these without log spelunking:
 
 - Is any keeper currently `Dead`?
 - Why is a keeper `Crashed`?
+- If `failure_reason=heartbeat_consecutive_failures`, what is the current streak count?
 - Is reconcile skipping a keeper because it is registered, paused, or dead?
 - Was the last freshness lease created by a successful room heartbeat?
 - Did self-preservation fire, and for which failure cohort?

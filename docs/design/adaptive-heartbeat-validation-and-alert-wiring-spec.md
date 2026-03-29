@@ -44,10 +44,18 @@ Adaptive heartbeat production validation은 아래 네 층으로 구성한다.
 
 ### 3.1 Keeper Health Fields
 
+This document uses `operator-visible keeper surface` to mean:
+
+- at least one MCP keeper tool surface: `masc_keeper_status` or `masc_keeper_list(detailed=true)`
+- at least one dashboard/operator snapshot surface: dashboard execution keeper sample or equivalent
+
+Production gate requires both categories, not one alone.
+
 | Required field | Primary surface | Secondary surface | Required by |
 |---|---|---|---|
 | `state` | `masc_keeper_status` | `masc_keeper_list(detailed=true)` | Stage 1 |
 | `failure_reason` | `masc_keeper_status` | dashboard execution keeper sample | Stage 1 |
+| `failure_streak_count` | `masc_keeper_status` | dashboard execution keeper sample | Stage 1 when heartbeat failure applies |
 | `restart_count` | `masc_keeper_status` | `masc_keeper_list(detailed=true)` | Stage 1 |
 | `last_restart_ts` | `masc_keeper_status` | dashboard execution keeper sample | Stage 1 |
 | `last_successful_heartbeat_age_sec` | `masc_keeper_status` | `masc_keeper_list(detailed=true)` | Stage 1 |
@@ -61,6 +69,7 @@ Rules:
 - dashboard sample payload is not enough by itself; at least one MCP tool surface must expose the same fields
 - `state=Dead` without `dead_ttl_remaining_sec` is a validation failure
 - `failure_reason` must be normalized, not a raw stack trace
+- `failure_reason=heartbeat_consecutive_failures` 이면 `failure_streak_count` 가 동반되어야 한다
 
 ### 3.2 Transport Fields
 
@@ -93,6 +102,7 @@ Rules:
 - every safety counter must be queryable without log parsing
 - dashboard may summarize them, but Prometheus-style metric or equivalent numeric surface is the source of truth
 - any increment must annotate keeper name, state, and failure cohort in logs or structured event stream
+- injected validation runs must carry a machine-readable `planned_test=true` or equivalent annotation so planned suppression events do not increment `masc_keeper_unplanned_self_preservation_total`
 
 ### 4.2 Health Metrics
 
@@ -130,13 +140,14 @@ The current harnesses are necessary but not sufficient. Extend them as follows.
 - assert keeper sample payload contains required adaptive heartbeat fields
 - assert `state=Dead` sample includes `dead_ttl_remaining_sec`
 - assert `transport-health` remains `fresh` with adaptive fields enabled
+- assert registered `Crashed` or `Dead` keeper is excluded because of registry ownership, not because the fiber is merely not running
 
 `keeper_continuity_validation.sh`:
 
-- assert a failed room heartbeat does not refresh freshness lease
+- inject the specific scenario `turn succeeds but Room.heartbeat_in_room fails`, then assert freshness lease does not refresh
 - assert `Crashed` keeper is not relaunched by reconcile while registered
 - assert `Dead` keeper remains excluded from reconcile until TTL cleanup
-- assert TTL cleanup results in `meta.paused=true`
+- assert TTL cleanup writes `meta.paused=true` before registry unregister; failed pause write must leave the keeper in `Dead`
 
 ### 5.3 New Safety Harness
 
@@ -152,6 +163,12 @@ This harness should inject or simulate:
 - self-preservation dominant cohort burst
 
 The harness is the canonical place to prove safety counters stay zero in the no-fault case and increment in the injected-fault case.
+
+Planned vs unplanned suppression rule:
+
+- fault-injection runs must stamp the run id and `planned_test=true` into emitted artifacts and structured events
+- only suppressions without that annotation count toward `masc_keeper_unplanned_self_preservation_total`
+- if annotation is missing, the event is treated as unplanned by default
 
 ## 6. Alert Routing
 

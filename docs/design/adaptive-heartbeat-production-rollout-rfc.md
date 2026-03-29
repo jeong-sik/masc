@@ -71,19 +71,26 @@ Production operator surface는 아래 state를 canonical truth로 본다.
 |---|---|---|---|
 | `Running` | 정상 실행 중 | none | no |
 | `Paused` | operator or workflow가 의도적으로 멈춤 | none | no |
-| `Stopped` | 정상 종료 후 registry에서 정리 예정 | none | yes, after unregister only |
-| `Crashed` | 오류 종료, backoff/restart 대상 | supervisor restart path | no |
+| `Stopped` | 의도적 종료 또는 정상 종료 후 registry에서 정리 예정. Phase 2 이후 heartbeat failure self-stop은 여기에 오지 않는다 | none | yes, after unregister only |
+| `Crashed` | 오류 종료, backoff/restart 대상. structured `heartbeat_consecutive_failures` self-stop 포함 | supervisor restart path | no |
 | `Dead` | restart budget 소진, 재기동 금지 tombstone | none until TTL cleanup | no |
+
+Migration note:
+
+- Phase 2 implementation 이후 keepalive self-stop due to heartbeat failure는 `Stopped` 가 아니라 structured `Crashed` 로 노출되어야 한다.
+- `Stopped` 는 manual stop, intentional stop, or clean terminal shutdown reserved state다.
+- operator guide, dashboard, and harness assertions must treat `heartbeat_consecutive_failures` as a `Crashed` cohort.
 
 ### 3.3 Recovery Ownership Invariants
 
 아래 규칙은 production invariant다.
 
 - `reconcile_keepalive_keepers` 는 **registry entry가 없는 orphaned durable keeper만** 재기동한다.
+- reconcile exclusion predicate는 `not is_running` 이 아니라 `not is_registered` 다.
 - registered keeper의 recovery ownership은 state와 무관하게 supervisor가 가진다.
 - `Crashed` keeper는 backoff / self-preservation gate를 반드시 통과해야 한다.
 - `Dead` keeper는 TTL cleanup 전까지 절대 reconcile 대상이 아니다.
-- `Dead` TTL cleanup은 `unregister + meta.paused=true` 를 함께 수행해야 한다.
+- `Dead` TTL cleanup은 `meta.paused=true` durable write 성공 후에만 unregister 한다. paused write가 실패하면 entry는 `Dead` tombstone으로 registry에 남아야 한다.
 
 이 invariants 중 하나라도 깨지면 rollout을 stop 하고 rollback or forward-fix 판단으로 바로 전환한다.
 
@@ -107,6 +114,14 @@ Stage 0 산출물:
 - quick-bench 결과
 - operator-visible keeper sample payload
 
+Stage 0 artifact acceptance criteria:
+
+- read-path harness 2회 연속 pass
+- continuity harness 1회 이상 pass
+- benchmark result is within current `PERFORMANCE-SLO.md`
+- keeper sample payload contains the canonical state/ownership fields expected before the candidate rollout
+- each artifact is timestamped and tied to the exact config posture used for baseline
+
 ### Stage 1: Candidate Canary
 
 목적: adaptive heartbeat `default-on` 후보를 작은 범위에서 검증.
@@ -117,6 +132,7 @@ Stage 0 산출물:
 - adaptive flags는 production target defaults 그대로 사용
 - gRPC remains disabled
 - canary 동안 operator가 `Dead`, `Crashed`, `failure_reason`, `last_successful_heartbeat_age_sec` 를 직접 확인할 수 있어야 한다
+- `failure_reason=heartbeat_consecutive_failures` 인 경우 `failure_streak_count` 가 같이 보여야 한다
 
 Promotion gate:
 
@@ -127,6 +143,7 @@ Promotion gate:
 - zero reconcile relaunch of registered keeper
 - zero freshness skip after failed room heartbeat
 - zero unplanned self-preservation trigger
+- explicit proof that reconcile exclusion is keyed by `is_registered`
 
 ### Stage 2: Expanded Cohort Soak
 
@@ -192,6 +209,12 @@ Promotion gate:
 - registered crashed/dead keeper가 reconcile에 의해 다시 뜬다
 - `Dead` tombstone이 operator 의도 없이 사라진다
 - failed room heartbeat가 turn success로 가려진다
+
+Decision rule:
+
+- ownership invariant violation, false freshness skip, or dead resurrection이면 rollback first 다.
+- field omission, alert routing bug, or threshold tuning 문제이지만 ownership invariant는 유지되는 경우에만 forward-fix 후보가 된다.
+- operator가 5분 내에 violation class를 분류하지 못하면 rollback first 를 기본값으로 한다.
 
 ## 7. Exit Criteria
 

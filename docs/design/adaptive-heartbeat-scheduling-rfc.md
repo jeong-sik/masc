@@ -343,7 +343,7 @@ if entry.restart_count >= max_restarts then begin
 end
 ```
 
-Dead entry cleanup: sweep에서 `state = Dead AND now - last_restart_ts > DEAD_TTL`이면 unregister + meta 파일에 `paused = true` 기록 (reconcile의 기존 `not meta.paused` 필터가 영구 제외).
+Dead entry cleanup: sweep에서 `state = Dead AND now - last_restart_ts > DEAD_TTL`이면 먼저 meta 파일에 `paused = true` 를 durable write 하고, 그 write가 성공했을 때만 unregister 한다. paused write가 실패하면 tombstone을 registry에 유지하고 다음 sweep에서 retry 한다. 이렇게 해야 unregister-only 성공으로 orphaned durable keeper가 되어 reconcile re-launch 되는 경로를 막을 수 있다.
 
 **Reconcile 제외 규칙 (필수)**:
 

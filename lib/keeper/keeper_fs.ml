@@ -48,17 +48,20 @@ let save_atomic (path : string) (content : string) : unit =
     Filename.open_temp_file ~temp_dir:dir (Filename.basename path ^ ".") ".tmp"
   in
   let closed = ref false in
+  let renamed = ref false in
   Fun.protect ~finally:(fun () ->
     if not !closed then begin
       close_out_noerr oc;
       closed := true
     end;
-    try Sys.remove tmp_path with Sys_error _ -> ())
+    if not !renamed then
+      try Sys.remove tmp_path with Sys_error _ -> ())
     (fun () ->
       output_string oc content;
       close_out oc;
       closed := true;
-      Unix.rename tmp_path path)
+      Unix.rename tmp_path path;
+      renamed := true)
 
 (** Atomically save a Yojson value as pretty-printed JSON. *)
 let save_json_atomic (path : string) (json : Yojson.Safe.t) : unit =

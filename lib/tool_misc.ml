@@ -192,6 +192,9 @@ let permission_to_json tool_name =
 
 let auth_snapshot_json ctx =
   let cfg = Auth.load_auth_config ctx.config.base_path in
+  let bind_host = Server_auth.http_auth_bind_host () in
+  let bind_is_loopback = Server_auth.http_auth_bind_is_loopback () in
+  let http_auth_strict = Server_auth.http_auth_strict_enabled () in
   let credentials =
     Auth.list_credentials ctx.config.base_path
     |> List.sort (fun (left : Types.agent_credential) right ->
@@ -212,6 +215,10 @@ let auth_snapshot_json ctx =
       ("default_role", `String (Types.agent_role_to_string cfg.default_role));
       ("token_expiry_hours", `Int cfg.token_expiry_hours);
       ("tool_auth_strict", `Bool (Auth.is_tool_auth_strict_enabled ()));
+      ("http_auth_strict", `Bool http_auth_strict);
+      ("bind_host", `String bind_host);
+      ("bind_is_loopback", `Bool bind_is_loopback);
+      ("operator_remote_requires_token", `Bool true);
       ("credential_count", `Int (List.length credentials));
       ("credentials", `List credentials);
     ]

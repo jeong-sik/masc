@@ -284,6 +284,9 @@ let () = test "dispatch_tool_admin_snapshot" (fun () ->
       let json = parse_json result in
       assert (Yojson.Safe.Util.member "tool_inventory" json <> `Null);
       assert (Yojson.Safe.Util.member "auth" json <> `Null);
+      assert (Yojson.Safe.Util.member "http_auth_strict" (Yojson.Safe.Util.member "auth" json) <> `Null);
+      assert (Yojson.Safe.Util.member "bind_host" (Yojson.Safe.Util.member "auth" json) <> `Null);
+      assert (Yojson.Safe.Util.member "bind_is_loopback" (Yojson.Safe.Util.member "auth" json) <> `Null);
       assert (Yojson.Safe.Util.member "mode" json = `Null);
       (* keeper_policies removed with policy_mode purge *)
       assert (Yojson.Safe.Util.member "keeper_policies" json = `Null);

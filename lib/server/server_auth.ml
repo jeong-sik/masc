@@ -56,6 +56,12 @@ let http_auth_strict_enabled () =
   || not (is_loopback_host (configured_bind_host ()))
   || base_url_has_non_loopback_host ()
 
+let http_auth_bind_host () =
+  configured_bind_host ()
+
+let http_auth_bind_is_loopback () =
+  is_loopback_host (configured_bind_host ())
+
 let strict_http_auth_error endpoint =
   Printf.sprintf
     "%s requires room auth enabled with require_token=true when server is \

@@ -21,6 +21,16 @@ let create_store () = {
   last_flush = Time_compat.now ();
 }
 
+(** Remove [value] from the string list stored at [key] in [tbl].
+    Removes the key entirely when the list becomes empty. *)
+let remove_from_list_index tbl key value =
+  match Hashtbl.find_opt tbl key with
+  | None -> ()
+  | Some ids ->
+    match List.filter (fun id -> not (String.equal id value)) ids with
+    | [] -> Hashtbl.remove tbl key
+    | filtered -> Hashtbl.replace tbl key filtered
+
 (** Invalidate caches that depend on post data *)
 let invalidate_post_caches store =
   store.karma_cache <- None;
@@ -67,13 +77,8 @@ let sweep store =
     List.iter (fun cid ->
       (match Hashtbl.find_opt store.comments cid with
        | Some c ->
-           let post_key = Post_id.to_string c.post_id in
-           (match Hashtbl.find_opt store.comments_by_post post_key with
-            | Some ids ->
-                (match List.filter (fun id -> not (String.equal id cid)) ids with
-                 | [] -> Hashtbl.remove store.comments_by_post post_key
-                 | filtered -> Hashtbl.replace store.comments_by_post post_key filtered)
-            | None -> ())
+           remove_from_list_index store.comments_by_post
+             (Post_id.to_string c.post_id) cid
        | None -> ());
       Hashtbl.remove store.comments cid
     ) expired_comments;

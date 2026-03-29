@@ -199,7 +199,7 @@ type https_connector =
   | Https_connector :
       (Uri.t ->
        [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-       [> Eio.Flow.two_way_ty ] Eio.Resource.t)
+       [> Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t)
       -> https_connector
 
 type eio_context = {

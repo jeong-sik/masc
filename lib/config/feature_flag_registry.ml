@@ -92,6 +92,11 @@ let all_flags : flag list = [
     default = true; category = "keeper";
     lifecycle = Active; since = "2.130.0" };
 
+  { env_name = "MASC_KEEPER_WORK_AS_HEARTBEAT";
+    description = "Count successful room heartbeat after a turn as presence proof";
+    default = true; category = "keeper";
+    lifecycle = Active; since = "2.162.0" };
+
   { env_name = "MASC_KEEPER_ALERT_ENABLED";
     description = "Master switch for keeper interesting alert detection";
     default = true; category = "keeper";

@@ -86,12 +86,6 @@ let all_known_tool_names =
     "masc_bounded_run";
     "masc_branch";
     "masc_broadcast";
-    "masc_cache_clear";
-    "masc_cache_delete";
-    "masc_cache_get";
-    "masc_cache_list";
-    "masc_cache_set";
-    "masc_cache_stats";
     "masc_cancellation";
     "masc_case_brief_submit";
     "masc_case_status";
@@ -161,8 +155,6 @@ let all_known_tool_names =
     "masc_handover_create";
     "masc_handover_get";
     "masc_handover_list";
-    "masc_hat_status";
-    "masc_hat_wear";
     "masc_heartbeat";
     "masc_heartbeat_list";
     "masc_heartbeat_result";
@@ -373,11 +365,6 @@ let strict_success_names =
     "masc_board_post";
     "masc_board_vote";
     "masc_broadcast";
-    "masc_cache_delete";
-    "masc_cache_get";
-    "masc_cache_list";
-    "masc_cache_set";
-    "masc_cache_stats";
     "masc_check";
     "masc_claim_next";
     "masc_dashboard";

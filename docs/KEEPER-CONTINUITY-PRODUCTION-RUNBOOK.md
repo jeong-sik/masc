@@ -88,7 +88,7 @@ Compaction and handoff are therefore treated here as resilience evidence for rel
 
 `PARTIAL` is not production-ready for feature promotion. It is evidence for debugging only.
 
-If pre-release validation returns `PARTIAL`, the release gate remains blocked and the result should be escalated back into diagnosis rather than accepted as launch evidence.
+If pre-release validation returns `PARTIAL`, the release gate remains blocked and the result should be escalated back into diagnosis rather than accepted as launch evidence. Reuse one of the existing diagnosis buckets (`H1`-`H4`) when it fits; otherwise open a follow-up diagnosis work item with the harness artifacts attached.
 
 ### 2. Checkpoint truth validation
 
@@ -123,7 +123,7 @@ At minimum, monitor:
 - checkpoint save success rate
 - checkpoint load failure rate
 - empty-message checkpoint restore rate
-- keeper continuity validation pass rate from scheduled harness runs or pre-release validation runs
+- keeper continuity validation pass rate from periodic or pre-release validation runs
 - keeper resume/restart failure rate from keeper status/metrics telemetry
 
 Operator escalation rules:

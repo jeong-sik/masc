@@ -53,7 +53,7 @@ Primary continuity fields:
 - `trace_id`
 - `generation`
 - `trace_history_count`
-- `continuity_summary`
+- `continuity_summary` (optional before the first continuity snapshot exists)
 
 Supporting diagnostic field:
 

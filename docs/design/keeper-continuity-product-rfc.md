@@ -71,7 +71,7 @@ Current implementation already emits the continuity fields above on keeper statu
 ### Non-API implementation details
 
 - raw checkpoint file paths are not part of the product contract
-- `Keeper_checkpoint_store.load_oas` is the continuity source of truth for diagnosis
+- the OAS checkpoint load path is the continuity source of truth for diagnosis
 - fallback legacy checkpoint artifacts may exist, but they must not shape the user-facing promise
 
 ## Product Positioning

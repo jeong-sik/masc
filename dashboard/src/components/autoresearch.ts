@@ -9,6 +9,7 @@ import { EmptyState } from './common/empty-state'
 import { DialogOverlay } from './common/dialog'
 import { TextInput, TextArea } from './common/input'
 import { formatElapsedCompact } from '../lib/format-time'
+import { statusLabel } from '../lib/status-label'
 import { navigate } from '../router'
 import {
   deleteAutoresearchLoop,
@@ -161,16 +162,6 @@ function selectLoop(loopId: string) {
 }
 
 // --- Helpers ---
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case 'running': return '실행 중'
-    case 'completed': return '완료'
-    case 'stopped': return '중단'
-    case 'error': return '오류'
-    default: return status
-  }
-}
 
 function statusColor(status: string): string {
   switch (status) {

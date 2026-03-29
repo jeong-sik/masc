@@ -38,29 +38,59 @@ let publish_lifecycle event_name keeper_name detail =
 
 let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
+  let base_path = ctx.config.base_path in
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     Fun.protect
       (fun () ->
-        Keeper_keepalive.run_heartbeat_loop ~proactive_warmup_sec
-          ctx meta reg.fiber_stop ~wakeup:reg.fiber_wakeup;
-        Keeper_registry.set_state ~base_path:ctx.config.base_path meta.name
-          Keeper_registry.Stopped;
-        Eio.Promise.resolve reg.done_r `Stopped;
-        publish_lifecycle "stopped" meta.name "normal exit")
+        (try
+           Keeper_keepalive.run_heartbeat_loop ~proactive_warmup_sec
+             ctx meta reg.fiber_stop ~wakeup:reg.fiber_wakeup;
+           (* Normal exit: stop flag was set *)
+           Keeper_registry.set_state ~base_path meta.name
+             Keeper_registry.Stopped;
+           Eio.Promise.resolve reg.done_r `Stopped;
+           publish_lifecycle "stopped" meta.name "normal exit"
+         with
+         | Keeper_registry.Keeper_heartbeat_failure info ->
+             (* Phase 2: structured crash — heartbeat failures *)
+             let reason =
+               Keeper_registry.failure_reason_to_string info.reason in
+             Keeper_registry.set_state ~base_path meta.name
+               Keeper_registry.Crashed;
+             Keeper_registry.record_crash ~base_path
+               meta.name (Time_compat.now ()) reason;
+             Keeper_registry.record_error ~base_path meta.name reason;
+             Eio.Promise.resolve reg.done_r (`Crashed reason);
+             publish_lifecycle "crashed" meta.name reason
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             (* Phase 2: structured crash — generic exception *)
+             let reason =
+               Keeper_registry.failure_reason_to_string
+                 (Keeper_registry.Exception (Printexc.to_string exn)) in
+             Keeper_registry.set_state ~base_path meta.name
+               Keeper_registry.Crashed;
+             Keeper_registry.record_crash ~base_path
+               meta.name (Time_compat.now ()) reason;
+             Keeper_registry.record_error ~base_path meta.name reason;
+             Eio.Promise.resolve reg.done_r (`Crashed reason);
+             publish_lifecycle "crashed" meta.name reason))
       ~finally:(fun () ->
-        Keeper_registry.cleanup_tracking ~base_path:ctx.config.base_path meta.name;
+        Keeper_registry.cleanup_tracking ~base_path meta.name;
         match Eio.Promise.peek reg.done_p with
-        | Some _ -> ()  (* Already resolved in the normal path *)
+        | Some _ -> ()  (* Already resolved above *)
         | None ->
-            let msg = "fiber terminated without resolution" in
-            Keeper_registry.record_crash ~base_path:ctx.config.base_path
-              meta.name (Time_compat.now ()) msg;
-            Keeper_registry.record_error ~base_path:ctx.config.base_path
-              meta.name msg;
-            Keeper_registry.set_state ~base_path:ctx.config.base_path meta.name
-              Keeper_registry.Stopped;
-            Eio.Promise.resolve reg.done_r (`Crashed msg);
-            publish_lifecycle "crashed" meta.name msg))
+            (* Fallback: fiber terminated without any resolution *)
+            let reason =
+              Keeper_registry.failure_reason_to_string
+                Keeper_registry.Fiber_unresolved in
+            Keeper_registry.record_crash ~base_path
+              meta.name (Time_compat.now ()) reason;
+            Keeper_registry.record_error ~base_path meta.name reason;
+            Keeper_registry.set_state ~base_path meta.name
+              Keeper_registry.Crashed;
+            Eio.Promise.resolve reg.done_r (`Crashed reason);
+            publish_lifecycle "crashed" meta.name reason))
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     (meta : keeper_meta) =
@@ -97,6 +127,9 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
 
 (* ── Sweep and recover ───────────────────────────────────── *)
 
+(** Phase 2: reconcile only orphaned durable keepers (no registry entry).
+    is_registered checks entry existence regardless of state, so Crashed/Dead
+    keepers are excluded from reconcile. *)
 let reconcile_keepalive_keepers (ctx : _ context) =
   let base_path = ctx.config.base_path in
   Keeper_types.keepalive_keeper_names ctx.config
@@ -104,55 +137,125 @@ let reconcile_keepalive_keepers (ctx : _ context) =
          match read_meta ctx.config name with
          | Ok (Some meta)
            when not meta.paused
-                && not (Keeper_registry.is_running ~base_path meta.name) ->
+                && not (Keeper_registry.is_registered ~base_path meta.name) ->
              supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
              if Keeper_registry.is_running ~base_path meta.name then begin
                publish_lifecycle "reconciled" meta.name "durable keeper";
                Log.Keeper.info "%s: reconciled durable keeper" meta.name
              end
          | _ -> ())
+(** Phase 2: self-preservation gate.
+    Suppresses restarts when a dominant failure cohort exceeds the
+    ratio threshold AND minimum candidate count. *)
+let self_preservation_ratio = 0.3
+let self_preservation_min_candidates = 2
+
+let apply_self_preservation ~total_keepers to_restart =
+  let n_candidates = List.length to_restart in
+  let n_total = max 1 total_keepers in
+  let ratio = float_of_int n_candidates /. float_of_int n_total in
+  if ratio > self_preservation_ratio
+     && n_candidates >= self_preservation_min_candidates
+  then begin
+    (* Group by failure reason prefix for cohort detection *)
+    let cohorts = Hashtbl.create 4 in
+    List.iter (fun ((_entry : Keeper_registry.registry_entry), msg) ->
+      let key =
+        if String.length msg > 30 then String.sub msg 0 30 else msg in
+      let prev = try Hashtbl.find cohorts key with Not_found -> [] in
+      Hashtbl.replace cohorts key ((_entry, msg) :: prev)
+    ) to_restart;
+    (* Find dominant cohort *)
+    let dominant_key, dominant_entries =
+      Hashtbl.fold (fun k v (best_k, best_v) ->
+        if List.length v > List.length best_v then (k, v) else (best_k, best_v)
+      ) cohorts ("", [])
+    in
+    if List.length dominant_entries >= self_preservation_min_candidates then begin
+      Log.Keeper.warn
+        "self-preservation: suppressing %d/%d restarts (ratio=%.2f, cohort=%s)"
+        (List.length dominant_entries) n_total ratio dominant_key;
+      publish_lifecycle "self_preservation" "supervisor"
+        (Printf.sprintf "%d/%d suppressed, cohort=%s"
+           (List.length dominant_entries) n_total dominant_key);
+      (* Return only non-dominant entries for restart *)
+      let dominant_set =
+        List.map (fun ((e : Keeper_registry.registry_entry), _) -> e.name)
+          dominant_entries in
+      List.filter (fun ((e : Keeper_registry.registry_entry), _) ->
+        not (List.mem e.name dominant_set)
+      ) to_restart
+    end else
+      to_restart
+  end else
+    to_restart
+
+(** Dead entry TTL: entries in Dead state older than this are cleaned up. *)
+let dead_ttl_sec = 3600.0
+
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts = Env_config.KeeperSupervisor.max_restarts in
   let base_path = ctx.config.base_path in
-  reconcile_keepalive_keepers ctx;
+  (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
+     This prevents reconcile from re-launching keepers that sweep is about
+     to process (defense-in-depth alongside is_registered check). *)
   let entries = Keeper_registry.all ~base_path () in
   let to_restart = ref [] in
   let to_unregister = ref [] in
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
-    match Eio.Promise.peek entry.done_p with
-    | None -> ()  (* Alive — skip *)
-    | Some `Stopped ->
-        to_unregister := entry :: !to_unregister
-    | Some (`Crashed msg) ->
-        if entry.restart_count >= max_restarts then begin
+    match entry.state with
+    | Keeper_registry.Dead ->
+        (* Phase 2: Dead tombstone TTL cleanup *)
+        if now -. entry.last_restart_ts > dead_ttl_sec then begin
           to_unregister := entry :: !to_unregister;
-          publish_lifecycle "dead" entry.name
-            (Printf.sprintf "restart budget exhausted (%d), last: %s"
-               max_restarts msg);
-          Log.Keeper.error "%s: restart budget exhausted (%d). Dead."
-            entry.name max_restarts
-        end else begin
-          let delay = backoff_delay entry.restart_count in
-          if now -. entry.last_restart_ts >= delay then
-            to_restart := (entry, msg) :: !to_restart
+          (* Mark meta as paused so reconcile permanently excludes it *)
+          (match read_meta ctx.config entry.name with
+           | Ok (Some meta) ->
+               ignore (write_meta ctx.config { meta with paused = true })
+           | _ -> ())
         end
+    | _ ->
+      match Eio.Promise.peek entry.done_p with
+      | None -> ()  (* Alive — skip *)
+      | Some `Stopped ->
+          to_unregister := entry :: !to_unregister
+      | Some (`Crashed msg) ->
+          if entry.restart_count >= max_restarts then begin
+            (* Phase 2: Dead tombstone instead of unregister *)
+            Keeper_registry.set_state ~base_path entry.name
+              Keeper_registry.Dead;
+            publish_lifecycle "dead" entry.name
+              (Printf.sprintf "restart budget exhausted (%d), last: %s"
+                 max_restarts msg);
+            Log.Keeper.error "%s: restart budget exhausted (%d). Dead."
+              entry.name max_restarts
+          end else begin
+            let delay = backoff_delay entry.restart_count in
+            if now -. entry.last_restart_ts >= delay then
+              to_restart := (entry, msg) :: !to_restart
+          end
   ) entries;
-  (* Clean up stopped/dead entries *)
+  (* Clean up stopped entries + expired Dead tombstones *)
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     Keeper_registry.unregister ~base_path entry.name
   ) !to_unregister;
-  (* Restart zombies *)
+  (* Phase 2: self-preservation gate before restart *)
+  let active_count =
+    List.length (List.filter (fun (e : Keeper_registry.registry_entry) ->
+      e.state = Keeper_registry.Running || e.state = Keeper_registry.Crashed
+    ) entries) in
+  let restart_list =
+    apply_self_preservation ~total_keepers:active_count !to_restart in
+  (* Restart crashed keepers *)
   List.iter (fun ((old_entry : Keeper_registry.registry_entry), crash_msg) ->
     match read_meta ctx.config old_entry.name with
     | Ok (Some meta) ->
         let attempt = old_entry.restart_count + 1 in
         let old_crash_log = old_entry.crash_log in
-        (* Re-register — fresh refs for the new fiber *)
         let reg =
           Keeper_registry.register ~base_path old_entry.name meta
         in
-        (* Carry over supervisor history from previous entry *)
         Keeper_registry.restore_supervisor_state ~base_path old_entry.name
           ~restart_count:attempt ~last_restart_ts:now
           ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
@@ -165,5 +268,6 @@ let sweep_and_recover (ctx : _ context) =
         Log.Keeper.error "%s: cannot read meta for restart, removing"
           old_entry.name;
         Keeper_registry.unregister ~base_path old_entry.name
-  ) !to_restart;
+  ) restart_list;
+  (* Phase 2: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ctx

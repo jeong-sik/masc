@@ -212,11 +212,12 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                     (Printexc.to_string exn);
                   meta_current
             in
-            if !consecutive_failures >= max_consecutive_heartbeat_failures then (
-              Log.Keeper.error
-                "keeper %s: %d consecutive heartbeat failures, stopping keepalive"
-                m.name max_consecutive_heartbeat_failures;
-              Atomic.set stop true);
+            (* Phase 2: structured exception instead of silent stop *)
+            if !consecutive_failures >= max_consecutive_heartbeat_failures then
+              raise (Keeper_registry.Keeper_heartbeat_failure {
+                reason = Keeper_registry.Heartbeat_consecutive_failures !consecutive_failures;
+                keeper_name = m.name;
+              });
             let t_presence_end = Time_compat.now () in
             let now_ts = t_presence_end in
             let t_snapshot_start = now_ts in

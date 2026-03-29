@@ -10,10 +10,27 @@
 
 open Keeper_types
 
+(** Structured failure reason for crash cohort detection. *)
+type failure_reason =
+  | Heartbeat_consecutive_failures of int
+  | Fiber_unresolved
+  | Exception of string
+
+val failure_reason_to_string : failure_reason -> string
+
+(** Raised by keeper_keepalive when consecutive heartbeat failures
+    exceed the threshold. Caught by launch_supervised_fiber. *)
+exception Keeper_heartbeat_failure of {
+  reason : failure_reason;
+  keeper_name : string;
+}
+
 type keeper_state =
   | Running
   | Paused
   | Stopped
+  | Crashed
+  | Dead
 
 type registry_entry = {
   base_path : string;
@@ -75,6 +92,10 @@ val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 
 (** Check if a keeper is in Running state. *)
 val is_running : base_path:string -> string -> bool
+
+(** Check if a keeper has ANY registry entry (regardless of state).
+    Used by reconcile to skip Crashed/Dead keepers. *)
+val is_registered : base_path:string -> string -> bool
 
 (** Return the started_at timestamp, or None if not registered. *)
 val started_at : base_path:string -> string -> float option

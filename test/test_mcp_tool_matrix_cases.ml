@@ -128,7 +128,6 @@ let all_known_tool_names =
     "masc_execution_orders";
     "masc_find_by_capability";
     "masc_gc";
-    "masc_generate_key";
     "masc_get_metrics";
     "masc_governance_feed";
     "masc_governance_set";

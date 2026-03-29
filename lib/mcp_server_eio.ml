@@ -74,9 +74,9 @@ let read_only_tools =
    "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
    "masc_transport_status"; "masc_websocket_discovery";
    "masc_worktree_list"; "masc_pending_interrupts";
-   "masc_cost_report"; "masc_portal_status";
+   "masc_portal_status";
    "masc_verify_handoff"; "masc_tool_help";
-   "masc_goal_list"; "masc_team_session_status"; "masc_team_session_report";
+   "masc_team_session_status"; "masc_team_session_report";
    "masc_team_session_list"; "masc_team_session_compare";
    "masc_team_session_events"; "masc_team_session_prove";
    "masc_operator_snapshot"; "masc_operator_digest";
@@ -94,7 +94,6 @@ let requires_join_tools = [
   "masc_operator_action"; "masc_operator_confirm";
   "masc_improve_loop_start"; "masc_improve_loop_pause";
   "masc_improve_loop_resume"; "masc_improve_loop_tick";
-  "masc_code_swarm_plan"; "masc_code_swarm_verify"; "masc_code_swarm_merge";
 ]
 
 let () = Tool_dispatch.init_read_only_set read_only_tools

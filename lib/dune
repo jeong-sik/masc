@@ -380,6 +380,7 @@
    tool_deep_review
    tool_budget
    tool_catalog
+   tool_schema_dsl
    tool_result
    tool_dispatch
    tool_input_validation

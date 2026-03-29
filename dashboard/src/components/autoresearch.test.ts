@@ -89,6 +89,7 @@ async function loadComponentWithApi(api: {
     ...api,
     retryAutoresearchLoop: api.retryAutoresearchLoop ?? vi.fn().mockResolvedValue({ ok: true, action: 'retry' }),
     deleteAutoresearchLoop: api.deleteAutoresearchLoop ?? vi.fn().mockResolvedValue({ ok: true, action: 'delete' }),
+    startAutoresearchLoop: (api as Record<string, unknown>).startAutoresearchLoop ?? vi.fn().mockResolvedValue({ ok: true, action: 'start' }),
   }))
   const module = await import('./autoresearch')
   module.resetAutoresearchState()

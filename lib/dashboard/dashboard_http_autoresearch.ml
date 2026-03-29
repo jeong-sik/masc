@@ -533,3 +533,34 @@ let delete_loop_json ~(base_path : string) ~(loop_id : string) :
                 ("action", `String "delete");
                 ("loop_id", `String loop_id);
               ])
+
+let start_loop_json ~(base_path : string) ~(args : Yojson.Safe.t) :
+    (Yojson.Safe.t, string) result =
+  let ctx : Tool_autoresearch.context =
+    {
+      base_path;
+      agent_name = None;
+      start_operation = None;
+      start_team_session = None;
+      config = None;
+      sw = None;
+      clock = None;
+    }
+  in
+  let result = Tool_autoresearch.handle_start ctx args in
+  match result with
+  | `Assoc fields when List.mem_assoc "error" fields ->
+      let error_msg =
+        match List.assoc "error" fields with
+        | `String msg -> msg
+        | _ -> "unknown error"
+      in
+      Error error_msg
+  | json ->
+      Ok
+        (`Assoc
+          [
+            ("ok", `Bool true);
+            ("action", `String "start");
+            ("loop", json);
+          ])

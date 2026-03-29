@@ -58,10 +58,23 @@ export interface AutoresearchLoopDetail extends AutoresearchLoopSummary {
 
 export interface AutoresearchLoopActionResponse {
   ok: boolean
-  action?: 'retry' | 'delete'
+  action?: 'retry' | 'delete' | 'start'
   loop_id?: string
   loop?: AutoresearchLoopSummary
   error?: string
+}
+
+export interface StartAutoresearchLoopParams {
+  goal: string
+  metric_fn: string
+  target_file: string
+  workdir?: string
+  max_cycles?: number
+  cycle_timeout_s?: number
+  model_model?: string
+  baseline?: number
+  patience?: number
+  build_verify_fn?: string
 }
 
 export function fetchAutoresearchLoops(): Promise<AutoresearchLoopsResponse> {
@@ -81,4 +94,10 @@ export function retryAutoresearchLoop(loopId: string): Promise<AutoresearchLoopA
 
 export function deleteAutoresearchLoop(loopId: string): Promise<AutoresearchLoopActionResponse> {
   return post('/api/v1/autoresearch/loops/delete', { loop_id: loopId })
+}
+
+export function startAutoresearchLoop(
+  params: StartAutoresearchLoopParams,
+): Promise<AutoresearchLoopActionResponse> {
+  return post('/api/v1/autoresearch/loops/start', params)
 }

@@ -1,7 +1,7 @@
 (** Pulse — the beating heart of any Space.
 
     A Space is an abstracted environment where agents exist and act.
-    Keeper Autonomy (perpetual, no end) and TRPG (bounded, session ends) are both Spaces.
+    Keeper Autonomy (traces, no end) and TRPG (bounded, session ends) are both Spaces.
     The only axis of variation is lifecycle: when does the heart stop?
 
     The Pulse is a tick engine driven by two forces:

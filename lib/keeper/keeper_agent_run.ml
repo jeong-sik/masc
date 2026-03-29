@@ -99,7 +99,7 @@ let run_turn
         ~fallback:(fun () -> 2048)
   in
   (* 1. Ensure session directory tree exists.
-     Both the base perpetual dir AND the trace-specific session dir must
+     Both the base traces dir AND the trace-specific session dir must
      exist before any file I/O (checkpoint load, history persist).
      In filesystem fallback mode (PG unavailable), these directories may
      not have been created by keeper_up if it only registered in-memory. *)

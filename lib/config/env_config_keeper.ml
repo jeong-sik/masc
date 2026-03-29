@@ -295,4 +295,14 @@ module KeeperProactive = struct
     max 10 (min 1000 (get_int ~default:100 "MASC_KEEPER_STAGE_TIMING_RING_SIZE"))
 end
 
+(** {1 Tool Execution} *)
+
+module KeeperToolExec = struct
+  (** Maximum consecutive failures for the same (tool_name, args_hash)
+      before blocking further attempts. Prevents infinite retry loops.
+      Default: 3. Range: [2, 20]. *)
+  let max_consecutive_tool_failures =
+    max 2 (min 20 (get_int ~default:3 "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"))
+end
+
 (** Print configuration summary for debugging *)

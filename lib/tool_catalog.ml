@@ -246,6 +246,11 @@ let lifecycle_to_string = function
   | Active -> "active"
   | Deprecated -> "deprecated"
 
+(** Precomputed list of deprecated tools from explicit_metadata.
+    Static — computed once at module init. *)
+let deprecated_tool_entries : (string * metadata) list =
+  List.filter (fun (_name, meta) -> meta.lifecycle = Deprecated) explicit_metadata
+
 (** {1 Tool Tier System}
 
     3-tier tool filtering to reduce the number of tools presented to models.

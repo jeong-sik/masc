@@ -149,6 +149,18 @@ module Response = struct
     let response = Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status in
     Httpun.Reqd.respond_with_string reqd response final_body
 
+  (** Sunset headers for deprecated endpoints per RFC 8594.
+      [date] must be an HTTP-date (RFC 7231 S7.1.1.1), e.g. ["Sat, 01 Jun 2026 00:00:00 GMT"].
+      Usage: [Response.json ~extra_headers:(sunset_headers ~date ~successor) ...] *)
+  let sunset_headers ~date ?successor () =
+    let base = [
+      ("Sunset", date);
+      ("Deprecation", "true");
+    ] in
+    match successor with
+    | Some url -> ("Link", Printf.sprintf "<%s>; rel=\"successor-version\"" url) :: base
+    | None -> base
+
   (** Legacy JSON response without compression check (backwards compatible) *)
   let json_raw ?(status = `OK) body reqd =
     let headers = Httpun.Headers.of_list ([

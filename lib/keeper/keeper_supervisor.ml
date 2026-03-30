@@ -360,7 +360,7 @@ let sweep_and_recover (ctx : _ context) =
                (try
                   Sys.remove path;
                   publish_lifecycle "paused_pruned" name
-                    (Printf.sprintf "stale %.0fs" (now -. (Resilience.Time.parse_iso8601_opt meta.updated_at |> Option.value ~default:0.0)));
+                    (Printf.sprintf "last_updated=%s" meta.updated_at);
                   Log.Keeper.info "%s: stale paused meta pruned" name
                 with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                   Log.Keeper.warn "%s: paused meta prune failed: %s"

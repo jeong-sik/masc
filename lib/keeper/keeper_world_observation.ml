@@ -347,10 +347,15 @@ let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observati
       if meta.runtime.proactive_rt.last_ts <= 0.0 then max_int
       else int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
     in
-    let cooldown_elapsed = since_last_proactive >= meta.proactive.cooldown_sec in
-    let has_actionable_tasks =
-      observation.unclaimed_task_count > 0 || observation.failed_task_count > 0
-    in
-    (* Proactive turn: periodic cooldown OR actionable tasks in backlog.
-       Both paths require cooldown to have elapsed to prevent spin-loops. *)
-    cooldown_elapsed && (meta.proactive.enabled || has_actionable_tasks)
+    if not meta.proactive.enabled then false
+    else
+      let cooldown_elapsed = since_last_proactive >= meta.proactive.cooldown_sec in
+      let has_actionable_tasks =
+        observation.unclaimed_task_count > 0 || observation.failed_task_count > 0
+      in
+      (* When actionable tasks sit in the backlog, use a shorter cooldown
+         (1/3 of normal, floor 60s) so the keeper reacts faster to work.
+         Regular proactive turns still fire on the full cooldown. *)
+      let task_reactive_cooldown = max 60 (meta.proactive.cooldown_sec / 3) in
+      cooldown_elapsed
+      || (has_actionable_tasks && since_last_proactive >= task_reactive_cooldown)

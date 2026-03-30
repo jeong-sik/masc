@@ -518,10 +518,11 @@ let add_routes ~sw ~clock router =
 
   (* Keeper tools — POST /api/v1/keepers/:name/tools
      Body: { "action": "set_allowlist"|"set_denylist"|"add_allow"|"remove_allow"|"add_deny"|"remove_deny",
-             "tools": ["masc_status", ...] } *)
+             "tools": ["masc_status", ...] }
+     Uses with_tool_auth to allow localhost requests without bearer token. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanAdmin
-         (fun state _agent_name req reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_up"
+         (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            let req_path = Http.Request.path req in
            let prefix = "/api/v1/keepers/" in

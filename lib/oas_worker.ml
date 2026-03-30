@@ -231,6 +231,13 @@ let build
     |> Oas.Builder.with_tools config.tools
     |> Oas.Builder.with_guardrails guardrails
   in
+  (* When tools are present, set tool_choice=Auto so models that require
+     explicit tool_choice (e.g. GLM-5.1) will actually invoke tools. *)
+  let builder =
+    if config.tools <> [] then
+      Oas.Builder.with_tool_choice Oas.Types.Auto builder
+    else builder
+  in
   let builder = match config.hooks with
     | Some h -> Oas.Builder.with_hooks h builder
     | None -> builder

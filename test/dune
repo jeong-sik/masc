@@ -1172,3 +1172,9 @@
  (name test_keeper_fs)
  (modules test_keeper_fs)
  (libraries masc_mcp alcotest yojson unix eio eio_main))
+
+; Research log_result: fstat header detection regression (#3993)
+(test
+ (name test_research_log_result)
+ (modules test_research_log_result)
+ (libraries masc_mcp.masc_research alcotest unix))

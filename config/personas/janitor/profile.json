@@ -55,8 +55,8 @@
       "janitor"
     ],
     "tool_tier": "standard",
-    "presence_keepalive": false,
-    "proactive_enabled": false,
+    "presence_keepalive": true,
+    "proactive_enabled": true,
     "execution_scope": "workspace"
   }
 }

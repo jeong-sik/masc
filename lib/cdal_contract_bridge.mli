@@ -1,0 +1,22 @@
+(** Canonical MASC-side Risk_contract composition. *)
+
+val workspace_mutating_tools : string list
+
+val is_workspace_mutating : string -> bool
+
+val allowed_mutations_of_tool_names : string list -> string list
+
+val of_delivery_contract :
+  delivery_contract:Team_session_types.delivery_contract ->
+  tool_names:string list ->
+  Agent_sdk.Risk_contract.t
+
+val of_keeper :
+  keeper_name:string ->
+  goal:string ->
+  scope_kind:string ->
+  execution_scope:string ->
+  allowed_paths:string list ->
+  Agent_sdk.Risk_contract.t
+
+val of_keeper_meta : Keeper_types.keeper_meta -> Agent_sdk.Risk_contract.t

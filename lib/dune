@@ -398,6 +398,7 @@
    keeper_toml_loader
    keeper_contract
    keeper_cdal_contract
+   cdal_contract_bridge
    proof_artifact_reader
    violation_record
    token_usage_record

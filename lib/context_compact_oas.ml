@@ -160,15 +160,16 @@ let summarize_old_messages ~(keep_recent : int)
         | x :: xs -> split (i - 1) (x :: acc) xs
     in
     let old_msgs, recent_msgs = split old_count [] msgs in
-    let rec flush_chunk chunk acc =
+    let flush_chunk chunk acc =
       match summarize_chunk (List.rev chunk) with
       | Some summary -> summary :: acc
       | None -> acc
     in
-    let rec compact_old old chunk acc =
+    let rec compact_old (old : Agent_sdk.Types.message list) chunk acc =
       match old with
       | [] -> List.rev (flush_chunk chunk acc)
-      | ({ content; _ } as m) :: tl ->
+      | m :: tl ->
+        let content = m.content in
         let has_tool_use = List.exists (function Agent_sdk.Types.ToolUse _ -> true | _ -> false) content in
         let has_tool_result = List.exists (function Agent_sdk.Types.ToolResult _ -> true | _ -> false) content in
         if has_tool_use then

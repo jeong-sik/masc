@@ -13,6 +13,7 @@ type 'a context = {
   sw: Eio.Switch.t;
   clock: 'a Eio.Time.clock;
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
+  net: [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
 }
 
 type tool_result = bool * string
@@ -203,6 +204,8 @@ type keeper_profile_defaults = {
   mention_targets : string list;
   proactive_enabled : bool option;
   shards : string list option;
+  allowed_paths : string list option;
+  execution_scope : string option;
 }
 
 type persona_summary = {
@@ -231,6 +234,8 @@ let empty_keeper_profile_defaults = {
   mention_targets = [];
   proactive_enabled = None;
   shards = None;
+  allowed_paths = None;
+  execution_scope = None;
 }
 
 let personas_root_opt () =
@@ -317,6 +322,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            (match strs "shards" with
             | [] -> None
             | xs -> Some xs);
+         allowed_paths =
+           (match strs "allowed_paths" with
+            | [] -> None
+            | xs -> Some xs);
+         execution_scope = str "execution_scope";
        })
 
 let load_keeper_toml (path : string)
@@ -399,6 +409,11 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   (match Safe_ops.json_string_list "shards" keeper_json with
                    | [] -> None
                    | xs -> Some xs);
+                allowed_paths =
+                  (match Safe_ops.json_string_list "allowed_paths" keeper_json with
+                   | [] -> None
+                   | xs -> Some xs);
+                execution_scope = Safe_ops.json_string_opt "execution_scope" keeper_json;
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 

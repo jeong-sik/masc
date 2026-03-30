@@ -316,11 +316,11 @@ let log_result ~(results_file : string) ~(entry : experiment_entry) : unit =
   let header = "experiment\tbuild_ok\ttest_pass_rate\tloc_delta\tfiles_changed\tstatus\tdescription\n" in
   try
     let oc = open_out_gen [ Open_append; Open_creat ] 0o644 results_file in
-    (* Check file size after open to avoid TOCTOU race on needs_header *)
+    (* Use fstat on the underlying fd — pos_out returns 0 for append-opened files *)
     let needs_header =
       try
-        let pos = LargeFile.pos_out oc in
-        pos = Int64.zero
+        let fd = Unix.descr_of_out_channel oc in
+        (Unix.LargeFile.fstat fd).st_size = 0L
       with exn ->
         log_best_effort_failure "results header check" exn;
         false

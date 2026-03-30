@@ -23,7 +23,7 @@ let with_ctx base_path f =
       agent_name = "test-agent";
       sw = None;
       clock = None;
-      proc_mgr = None;
+      proc_mgr = None; net = None;
     }
   in
   f ctx

@@ -1,6 +1,6 @@
 # OCaml build artifacts
 _build/
-_build_codex_fix/
+_build_*/
 *.install
 *.merlin
 .merlin
@@ -77,10 +77,6 @@ infrastructure/**/*.env
 # Agent planning scratch
 planning/
 
-# Stale build directories
-_build_cleanup/
-_build_pr*/
-.ci_build*/
-_build_ci*/
-_build_review*/
+# Scratch files from local workflows
+issue*.md
 .nvimlog

@@ -189,6 +189,15 @@ function authorAvatar(name: string): string {
   return avatars[Math.abs(hash) % avatars.length] ?? '🤖'
 }
 
+function kindLabel(kind: string): string {
+  switch (kind) {
+    case 'human': return '사람'
+    case 'automation': return '자동화'
+    case 'system': return '시스템'
+    default: return kind
+  }
+}
+
 function kindBadgeColor(kind: string): string {
   switch (kind) {
     case 'human': return 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)]'
@@ -200,7 +209,7 @@ function kindBadgeColor(kind: string): string {
 
 function visibilityLabel(vis: string): string | null {
   switch (vis) {
-    case 'internal': return '내부(에이전트 전용)'
+    case 'internal': return '내부'
     case 'unlisted': return '비공개'
     case 'direct': return 'DM'
     case 'public': return null
@@ -567,7 +576,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <span class="text-[11px] text-[var(--text-muted)]">댓글 ${post.comment_count}</span>
 
           <!-- Category badges -->
-          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(kind)}">${kind === 'human' ? '사람' : kind}</span>
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(kind)}">${kindLabel(kind)}</span>
           ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
           ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
 

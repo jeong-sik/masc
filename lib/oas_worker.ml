@@ -361,6 +361,16 @@ let run
     (match result with
     | Ok response -> Ok { response; checkpoint; session_id; turns; trace_ref; proof }
     | Error err ->
+      (match proof with
+       | Some p ->
+         Log.Misc.warn "oas_worker: agent errored with CDAL proof: run_id=%s status=%s"
+           p.run_id
+           (match p.result_status with
+            | Oas.Cdal_proof.Completed -> "completed"
+            | Oas.Cdal_proof.Errored -> "errored"
+            | Oas.Cdal_proof.Timed_out -> "timed_out"
+            | Oas.Cdal_proof.Cancelled -> "cancelled")
+       | None -> ());
       Error (Printf.sprintf "Agent run failed: %s" (Oas.Error.to_string err)))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

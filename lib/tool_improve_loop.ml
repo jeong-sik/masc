@@ -204,7 +204,7 @@ let maybe_tick_from_keepalive ~(config : Room.config) ~(agent_name : string)
      && String.equal state.keeper_name keeper_name
      && tick_due state ~now
   then
-    let ctx = { config; agent_name; sw = Some sw; clock = Some clock; proc_mgr } in
+    let ctx = { config; agent_name; sw = Some sw; clock = Some clock; proc_mgr; net = None } in
     let _ok, _body =
       tick_with_driver default_driver ctx
         (`Assoc [ ("execute", `Bool true) ])

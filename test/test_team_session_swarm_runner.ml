@@ -303,9 +303,12 @@ let test_empty_planned_workers () =
   Eio_guard.enable ();
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp in
-  let swarm_cfg = Team_session_oas_bridge.session_to_swarm_config
-    ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
-    session
+  let swarm_cfg =
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    Team_session_oas_bridge.session_to_swarm_config
+      ~sw ~net ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
+      session
   in
   Alcotest.(check int) "entries empty" 0 (List.length swarm_cfg.entries);
   Alcotest.(check string) "prompt" "test goal" swarm_cfg.prompt
@@ -318,9 +321,12 @@ let test_auto_mode_produces_decentralized () =
   Eio_guard.enable ();
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp in
-  let swarm_cfg = Team_session_oas_bridge.session_to_swarm_config
-    ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
-    session
+  let swarm_cfg =
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    Team_session_oas_bridge.session_to_swarm_config
+      ~sw ~net ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
+      session
   in
   let mode_str = Swarm.Swarm_types.show_orchestration_mode swarm_cfg.mode in
   Alcotest.(check string) "mode decentralized"
@@ -334,9 +340,12 @@ let test_manual_mode_produces_supervisor () =
   Eio_guard.enable ();
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Room.default_config tmp in
-  let swarm_cfg = Team_session_oas_bridge.session_to_swarm_config
-    ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
-    session
+  let swarm_cfg =
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    Team_session_oas_bridge.session_to_swarm_config
+      ~sw ~net ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
+      session
   in
   let mode_str = Swarm.Swarm_types.show_orchestration_mode swarm_cfg.mode in
   Alcotest.(check string) "mode supervisor"

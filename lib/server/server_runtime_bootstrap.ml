@@ -384,6 +384,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                   let env = object
                     method clock = clock
                     method process_mgr = process_mgr
+                    method net = match state.Mcp_server.net with Some n -> n | None -> failwith "net not available"
                   end in
                   Team_session_engine_eio.recover_running_sessions ~sw ~env
                     ~config:state.Mcp_server.room_config );

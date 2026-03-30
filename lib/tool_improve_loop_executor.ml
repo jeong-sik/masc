@@ -62,6 +62,7 @@ let execute_team_session_plan (ctx : _ context) (state : state) (plan : action_p
           sw;
           clock;
           proc_mgr = ctx.proc_mgr;
+          net = ctx.net;
         }
       in
       let args =

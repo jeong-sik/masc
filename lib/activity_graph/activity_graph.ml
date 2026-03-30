@@ -201,6 +201,48 @@ let graph_json config ?room_id ?(kinds = []) ?(limit = 500)
     | Some ms -> List.filter (fun e -> e.ts_ms >= ms) events
     | None -> events
   in
+  let kind_counts_json =
+    let counts = Hashtbl.create 16 in
+    List.iter
+      (fun (e : event) ->
+        let prev = Option.value (Hashtbl.find_opt counts e.kind) ~default:0 in
+        Hashtbl.replace counts e.kind (prev + 1))
+      events;
+    `Assoc
+      (Hashtbl.fold
+         (fun kind count acc -> (kind, `Int count) :: acc)
+         counts []
+      |> List.sort (fun (a, _) (b, _) -> String.compare a b))
+  in
+  let heatmap_json =
+    let matrix = Array.init 7 (fun _ -> Array.make 24 0) in
+    let max_count = ref 0 in
+    List.iter
+      (fun (e : event) ->
+        let tm = Unix.localtime (float_of_int e.ts_ms /. 1000.0) in
+        let day = if tm.tm_wday = 0 then 6 else tm.tm_wday - 1 in
+        let hour = tm.tm_hour in
+        let next_count = matrix.(day).(hour) + 1 in
+        matrix.(day).(hour) <- next_count;
+        if next_count > !max_count then max_count := next_count)
+      events;
+    let matrix_json =
+      `List
+        (Array.to_list
+           (Array.map
+              (fun row ->
+                `List
+                  (Array.to_list
+                     (Array.map (fun count -> `Int count) row)))
+              matrix))
+    in
+    `Assoc
+      [
+        ("matrix", matrix_json);
+        ("max", `Int !max_count);
+        ("total", `Int (List.length events));
+      ]
+  in
   let nodes = Hashtbl.create 64 in
   let edges = Hashtbl.create 96 in
   List.iter (reduce_event ~nodes ~edges) events;
@@ -333,6 +375,8 @@ let graph_json config ?room_id ?(kinds = []) ?(limit = 500)
             ("active_agents", `Int active_agents);
           ] );
       ("stats_history", `List stats_history);
+      ("kind_counts", kind_counts_json);
+      ("heatmap", heatmap_json);
       ("nodes", `List nodes_json);
       ("edges", `List edges_json);
       ("timeline", `List (List.map event_to_yojson timeline));

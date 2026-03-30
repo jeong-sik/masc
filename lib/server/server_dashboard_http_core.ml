@@ -375,6 +375,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
               sw;
               clock;
               proc_mgr;
+              net = None;
               mcp_session_id = None;
             }
           in
@@ -445,6 +446,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
               sw;
               clock;
               proc_mgr;
+              net = None;
               mcp_session_id = None;
             }
           in
@@ -532,6 +534,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
                  sw;
                  clock;
                  proc_mgr = state.Mcp_server.proc_mgr;
+                 net = state.Mcp_server.net;
                  mcp_session_id = None;
                }
              in
@@ -598,6 +601,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
                  sw;
                  clock;
                  proc_mgr = state.Mcp_server.proc_mgr;
+                 net = state.Mcp_server.net;
                  mcp_session_id = None;
                }
              in

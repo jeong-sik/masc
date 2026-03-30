@@ -7,6 +7,7 @@ import { useEffect, useRef } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState, LoadingState } from './common/feedback-state'
 import { fetchSwimlane } from '../api'
+import { registerActivityRefresh } from '../sse-store'
 import type { SwimlaneResponse, AgentSpan } from '../types'
 import { selectedNodeId, highlightedAgentId } from './activity-graph-view'
 import { formatDurationMs } from '../lib/format-time'
@@ -32,12 +33,12 @@ function spanColor(kind: string): string {
   }
 }
 
-async function loadSwimlane() {
+async function loadSwimlane(since?: string) {
   if (swimlaneLoading.value) return
   swimlaneLoading.value = true
   swimlaneError.value = null
   try {
-    swimlaneData.value = await fetchSwimlane()
+    swimlaneData.value = await fetchSwimlane(since)
   } catch (err) {
     swimlaneError.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -210,12 +211,17 @@ function hitTestSpan(
   return null
 }
 
-export function ActivitySwimlane() {
+export function ActivitySwimlane({ since }: { since?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<TooltipInfo | null>(null)
 
-  useEffect(() => { loadSwimlane() }, [])
+  useEffect(() => {
+    void loadSwimlane(since)
+    return registerActivityRefresh(() => {
+      void loadSwimlane(since)
+    })
+  }, [since])
 
   const data = swimlaneData.value
   const loading = swimlaneLoading.value

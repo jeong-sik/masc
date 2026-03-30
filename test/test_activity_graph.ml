@@ -192,6 +192,84 @@ let test_graph_json_tracks_runtime_activity_kinds () =
       check bool "board vote edge captured" true
         (has_edge "votes_on"))
 
+let test_graph_json_reports_kind_counts_and_heatmap_totals () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~room_id:"default" ~kind:"message.broadcast"
+           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~tags:[ "message"; "broadcast" ]
+           ~payload:(`Assoc [ ("content", `String "hello") ])
+           ());
+      ignore
+        (Activity_graph.emit config ~room_id:"default" ~kind:"message.broadcast"
+           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~tags:[ "message"; "broadcast" ]
+           ~payload:(`Assoc [ ("content", `String "world") ])
+           ());
+      ignore
+        (Activity_graph.emit config ~room_id:"default" ~kind:"task.started"
+           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~subject:(Activity_graph.entity ~kind:"task" "task-900")
+           ~tags:[ "task"; "task.started" ]
+           ~payload:(`Assoc [ ("task_id", `String "task-900") ])
+           ());
+      let json =
+        Activity_graph.graph_json config ~room_id:"default" ~limit:20
+          ~timeline_limit:10 ()
+      in
+      let open Yojson.Safe.Util in
+      let kind_counts = json |> member "kind_counts" in
+      let heatmap = json |> member "heatmap" in
+      let matrix = heatmap |> member "matrix" |> to_list in
+      check int "message.broadcast count" 2
+        (kind_counts |> member "message.broadcast" |> to_int);
+      check int "task.started count" 1
+        (kind_counts |> member "task.started" |> to_int);
+      check int "heatmap total matches filtered events" 3
+        (heatmap |> member "total" |> to_int);
+      check int "heatmap rows" 7 (List.length matrix);
+      check bool "heatmap rows expose 24 hours" true
+        (List.for_all (fun row -> List.length (to_list row) = 24) matrix))
+
+let test_agent_spans_json_honors_since_ms () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~room_id:"default" ~kind:"task.started"
+           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~subject:(Activity_graph.entity ~kind:"task" "task-old")
+           ~tags:[ "task"; "task.started" ]
+           ~payload:(`Assoc [ ("task_id", `String "task-old") ])
+           ());
+      ignore (Unix.select [] [] [] 0.02);
+      let cutoff_ms = int_of_float (Time_compat.now () *. 1000.0) in
+      ignore
+        (Activity_graph.emit config ~room_id:"default" ~kind:"task.started"
+           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~subject:(Activity_graph.entity ~kind:"task" "task-new")
+           ~tags:[ "task"; "task.started" ]
+           ~payload:(`Assoc [ ("task_id", `String "task-new") ])
+           ());
+      ignore
+        (Activity_graph.emit config ~room_id:"default" ~kind:"task.done"
+           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~subject:(Activity_graph.entity ~kind:"task" "task-new")
+           ~tags:[ "task"; "task.done" ]
+           ~payload:(`Assoc [ ("task_id", `String "task-new") ])
+           ());
+      let json =
+        Activity_graph.agent_spans_json config ~room_id:"default"
+          ~since_ms:cutoff_ms ~limit:20 ()
+      in
+      let open Yojson.Safe.Util in
+      let spans = json |> member "spans" |> to_list in
+      check int "only recent span remains" 1 (List.length spans);
+      check string "recent span label kept" "task-new"
+        (List.hd spans |> member "label" |> to_string))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -206,5 +284,9 @@ let () =
             test_graph_json_summarizes_relationships;
           test_case "graph summary tracks runtime activity kinds" `Quick
             test_graph_json_tracks_runtime_activity_kinds;
+          test_case "graph summary exposes kind counts and full heatmap totals"
+            `Quick test_graph_json_reports_kind_counts_and_heatmap_totals;
+          test_case "agent spans honor since filter" `Quick
+            test_agent_spans_json_honors_since_ms;
         ] );
     ]

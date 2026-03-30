@@ -18,34 +18,12 @@
 let destructive_check_tools =
   [ "keeper_bash"; "keeper_fs_edit"; "keeper_edit"; "keeper_github" ]
 
-(** Keeper deny list — tools that keepers must never call directly.
-    These are administrative/destructive operations that should only
-    be invoked by operators or through controlled workflows.
-
-    Inspired by Trail of Bits' deny-rule pattern: restrict at the
-    harness level so the model cannot bypass. *)
-let keeper_denied_tools = [
-  (* Admin/destructive operations *)
-  "masc_room_delete";
-  "masc_room_destroy";
-  "masc_force_leave";
-  "masc_force_remove_agent";
-  "masc_admin_reset";
-  "masc_admin_cleanup";
-  "masc_gc_force";
-  "masc_config_set";
-  "masc_config_reset";
-  "masc_spawn";
-  (* Operator privilege escalation *)
-  "masc_operator_action";
-  "masc_operator_confirm";
-  "masc_operator_judgment_write";
-  "masc_execute";
-  "masc_execute_dry_run";
-  (* Raw database operations — keepers must use GraphQL *)
-  "masc_neo4j_query";
-  "masc_pg_query";
-]
+(** Keeper deny list — derived from Tool_catalog surface SSOT.
+    Administrative/destructive operations that should only be invoked
+    by operators or through controlled workflows.
+    Inspired by Trail of Bits' deny-rule pattern. *)
+let keeper_denied_tools =
+  Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
 
 (** Extract command or content string from tool input JSON for screening.
     Reads "command", "cmd" (keeper_github), or "content" keys. *)

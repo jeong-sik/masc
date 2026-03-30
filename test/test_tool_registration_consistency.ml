@@ -196,6 +196,16 @@ let test_no_duplicate_schemas () =
            (List.length dups)
            (String.concat "\n  " dups))
 
+let test_board_delete_tag_registered () =
+  ignore (Masc_mcp.Mcp_server_eio.create_state ~test_mode:true ~base_path:"/tmp/masc-pr3991-tag-reg" ());
+  ignore (Masc_mcp.Tool_dispatch.tag_registry_count ());
+  match Masc_mcp.Tool_dispatch.lookup_tag "masc_board_delete" with
+  | Some Masc_mcp.Tool_dispatch.Mod_inline -> ()
+  | Some _ ->
+      Alcotest.fail "masc_board_delete should route through Mod_inline"
+  | None ->
+      Alcotest.fail "masc_board_delete missing from tag registry"
+
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -215,5 +225,7 @@ let () =
             test_docs_do_not_reintroduce_removed_mode_surface;
           Alcotest.test_case "no duplicate tool schemas" `Quick
             test_no_duplicate_schemas;
+          Alcotest.test_case "board delete tag registered" `Quick
+            test_board_delete_tag_registered;
         ] );
     ]

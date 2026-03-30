@@ -35,6 +35,10 @@
 
 module Swarm = Agent_sdk_swarm
 
+val supported_local_worker_tool_names : string list
+(** Canonical list of tool names supported by local workers in team sessions.
+    Exposed for parity testing against [Tool_catalog.tools_for_surface Local_worker]. *)
+
 val supported_local_worker_tools :
   unit -> (Types.tool_schema list, string) result
 
@@ -86,6 +90,8 @@ val planned_worker_to_entry :
   Team_session_types.planned_worker -> Swarm.Swarm_types.agent_entry
 
 val session_to_swarm_config :
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:Room.config ->
   masc_tools:Types.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->

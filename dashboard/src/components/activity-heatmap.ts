@@ -1,12 +1,12 @@
 // Activity heatmap — Canvas 2D day-of-week x hour-of-day density grid.
-// Derives a 7x24 matrix from ActivityGraphResponse.timeline events.
+// Uses server-projected density from the full filtered event set.
 
 import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { HEATMAP_COLORS } from '../config/constants'
-import type { ActivityGraphResponse, ActivityGraphTimelineEvent } from '../types'
+import type { ActivityGraphResponse } from '../types'
 
 const DAY_LABELS = ['월', '화', '수', '목', '금', '토', '일'] as const
 const HOUR_LABELS = [0, 3, 6, 9, 12, 15, 18, 21] as const
@@ -33,36 +33,6 @@ interface TooltipInfo {
 
 interface HeatmapProps {
   data: ActivityGraphResponse
-}
-
-/** Map JS getDay() (0=Sun) to our 0=Mon index. */
-function jsDateToDayIndex(date: Date): number {
-  const d = date.getDay()
-  return d === 0 ? 6 : d - 1
-}
-
-function buildMatrix(timeline: ActivityGraphTimelineEvent[]): number[][] {
-  const matrix: number[][] = Array.from({ length: 7 }, () =>
-    Array.from({ length: 24 }, () => 0),
-  )
-  for (const event of timeline) {
-    const date = new Date(event.ts_iso)
-    if (isNaN(date.getTime())) continue
-    const day = jsDateToDayIndex(date)
-    const hour = date.getHours()
-    matrix[day]![hour]! += 1
-  }
-  return matrix
-}
-
-function matrixMax(matrix: number[][]): number {
-  let max = 0
-  for (const row of matrix) {
-    for (const val of row) {
-      if (val > max) max = val
-    }
-  }
-  return max
 }
 
 function intensityColor(count: number, max: number): string {
@@ -194,8 +164,9 @@ export function ActivityHeatmap({ data }: HeatmapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<TooltipInfo | null>(null)
 
-  const matrix = buildMatrix(data.timeline)
-  const max = matrixMax(matrix)
+  const matrix = data.heatmap.matrix
+  const max = data.heatmap.max
+  const total = data.heatmap.total
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -273,7 +244,7 @@ export function ActivityHeatmap({ data }: HeatmapProps) {
     }
   }, [data, matrix, max])
 
-  if (data.timeline.length === 0) {
+  if (total === 0) {
     return html`
       <${Card} title="활동 히트맵" testId="activity_heatmap">
         <${EmptyState}>히트맵을 표시할 이벤트가 없습니다.<//>
@@ -284,7 +255,7 @@ export function ActivityHeatmap({ data }: HeatmapProps) {
   return html`
     <${Card} title="활동 히트맵" testId="activity_heatmap">
       <div class="mb-2">
-        <p class="text-[13px] text-[var(--text-muted)]">요일별, 시간대별 활동 밀도를 보여줍니다.</p>
+        <p class="text-[13px] text-[var(--text-muted)]">필터링된 전체 이벤트를 기준으로 요일별, 시간대별 활동 밀도를 보여줍니다.</p>
       </div>
       <div ref=${containerRef} class="relative overflow-x-auto bg-[#0f1117] rounded-xl p-3">
         <canvas ref=${canvasRef} class="block" />

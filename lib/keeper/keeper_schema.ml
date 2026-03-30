@@ -60,6 +60,14 @@ let keeper_schemas : tool_schema list = [
         ("auto_handoff", `Assoc [("type", `String "boolean")]);
         ("handoff_threshold", `Assoc [("type", `String "number")]);
         ("handoff_cooldown_sec", `Assoc [("type", `String "integer")]);
+        ("execution_scope", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "observe_only"; `String "workspace"; `String "local"]);
+        ]);
+        ("allowed_paths", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
       ]);
       ("required", `List [`String "persona_name"]);
     ];
@@ -169,6 +177,16 @@ let keeper_schemas : tool_schema list = [
         ("handoff_cooldown_sec", `Assoc [
           ("type", `String "integer");
           ("description", `String "Minimum seconds between handoffs (default: 300).");
+        ]);
+        ("execution_scope", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "observe_only"; `String "workspace"; `String "local"]);
+          ("description", `String "Execution scope: observe_only (read-only), workspace (write to allowed paths), local (full access). Default: workspace.");
+        ]);
+        ("allowed_paths", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Restrict file writes to these path prefixes. Empty list uses computed defaults based on execution_scope. Use [\"*\"] for explicit full access.");
         ]);
       ]);
       ("required", `List [`String "name"]);

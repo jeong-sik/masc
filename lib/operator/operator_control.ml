@@ -13,6 +13,7 @@ let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
     sw = ctx.sw;
     clock = ctx.clock;
     proc_mgr = ctx.proc_mgr;
+    net = ctx.net;
   }
 
 let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
@@ -74,6 +75,7 @@ let dispatch_team_session_json_as (ctx : 'a context) ~session_id ~requested_acto
       sw = ctx.sw;
       clock = ctx.clock;
       proc_mgr = ctx.proc_mgr;
+      net = ctx.net;
     }
   in
   match Tool_team_session.dispatch team_ctx ~name:tool_name ~args with
@@ -476,6 +478,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
           sw = ctx.sw;
           clock = ctx.clock;
           proc_mgr = ctx.proc_mgr;
+          net = ctx.net;
         }
       in
       let* ok, body =

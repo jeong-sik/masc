@@ -44,7 +44,10 @@ let default_metadata =
     idempotent = None;
   }
 
-let placeholder_tools_enabled () = true
+let placeholder_tools_enabled () =
+  match Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" with
+  | Some "false" | Some "0" -> false
+  | _ -> true
 
 let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = false)
     ?(implementation_status = Adapter) reason =
@@ -165,7 +168,7 @@ let public_mcp_tools =
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
     (* Board — async agent communication *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote";
+    "masc_board_comment"; "masc_board_vote"; "masc_board_delete";
     (* Agent discovery *)
     "masc_agents"; "masc_dashboard"; "masc_agent_card";
     (* Transport *)
@@ -270,7 +273,7 @@ let standard_tools =
     "masc_board_post"; "masc_board_get"; "masc_board_list";
     "masc_board_vote"; "masc_board_comment"; "masc_board_comment_vote";
     "masc_board_search"; "masc_board_stats"; "masc_board_profile";
-    "masc_board_hearths";
+    "masc_board_hearths"; "masc_board_delete";
     (* Team Session *)
     "masc_team_session_start"; "masc_team_session_step";
     "masc_team_session_status"; "masc_team_session_stop";
@@ -375,3 +378,162 @@ let allow_direct_call name =
   | Hidden -> meta.allow_direct_call_when_hidden
 
 let hidden_placeholder_tools () = []
+
+(** {1 Tool Surface System}
+
+    Canonical per-surface tool name lists — the SSOT for tool surface
+    membership. All other modules should derive their allowlists from
+    [tools_for_surface] instead of maintaining independent hardcoded lists.
+
+    To add a tool to a surface: add it to the appropriate list below.
+    To query surface membership at runtime: use [is_on_surface]. *)
+
+type surface =
+  | Public_mcp
+  | Spawned_agent
+  | Local_worker
+  | Session_min
+  | Admin
+  | Keeper_denied
+  | Mdal_auditable
+
+let public_mcp_surface_tools =
+  [
+    (* Room lifecycle *)
+    "masc_start"; "masc_join"; "masc_leave"; "masc_set_room"; "masc_status";
+    (* Messaging *)
+    "masc_broadcast"; "masc_messages"; "masc_who";
+    (* Task coordination *)
+    "masc_add_task"; "masc_batch_add_tasks"; "masc_tasks";
+    "masc_claim_next"; "masc_transition";
+    (* Planning *)
+    "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
+    (* Heartbeat *)
+    "masc_heartbeat";
+    (* Keeper interaction *)
+    "masc_keeper_msg"; "masc_keeper_list"; "masc_keeper_status";
+    "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
+    (* Board *)
+    "masc_board_post"; "masc_board_list"; "masc_board_get";
+    "masc_board_comment"; "masc_board_vote";
+    (* Agent discovery *)
+    "masc_agents"; "masc_dashboard"; "masc_agent_card";
+    (* Transport *)
+    "masc_transport_status"; "masc_websocket_discovery";
+    "masc_webrtc_offer"; "masc_webrtc_answer";
+    (* Utility *)
+    "masc_tool_help"; "masc_check";
+  ]
+
+let spawned_agent_surface_tools =
+  [
+    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
+    "masc_task_history"; "masc_broadcast"; "masc_join"; "masc_leave";
+    "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
+    "masc_messages";
+    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
+    "masc_handover_create"; "masc_handover_list"; "masc_handover_claim";
+    "masc_handover_get";
+    "masc_relay_status"; "masc_relay_checkpoint";
+    "masc_board_list"; "masc_board_post"; "masc_board_comment";
+    "masc_board_vote"; "masc_board_get";
+    "masc_tool_help";
+    "masc_portal_open"; "masc_portal_send"; "masc_portal_status";
+    "masc_team_session_start"; "masc_team_session_step";
+    "masc_team_session_status"; "masc_team_session_events";
+    "masc_team_session_finalize"; "masc_team_session_stop";
+    "masc_team_session_report"; "masc_team_session_list";
+    "masc_a2a_delegate"; "masc_a2a_subscribe";
+    "masc_poll_events"; "masc_spawn";
+  ]
+
+let local_worker_surface_tools =
+  [
+    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
+    "masc_add_task"; "masc_heartbeat";
+    "masc_board_post"; "masc_board_list"; "masc_board_get";
+    "masc_board_comment"; "masc_board_vote"; "masc_board_search";
+    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
+    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
+    "masc_run_init"; "masc_run_plan"; "masc_run_log";
+    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
+    "masc_repair_loop_start"; "masc_repair_loop_status";
+    "masc_repair_loop_iterate"; "masc_repair_loop_stop";
+  ]
+
+let session_min_surface_tools =
+  [
+    "masc_room_status"; "masc_list_tasks"; "masc_claim_next";
+    "masc_set_current_task"; "masc_complete_task"; "masc_add_task";
+    "masc_broadcast"; "masc_heartbeat";
+  ]
+
+let admin_surface_tools =
+  [
+    "masc_auth_create_token";
+    "masc_autoresearch_cycle"; "masc_autoresearch_inject";
+    "masc_autoresearch_start"; "masc_autoresearch_stop";
+    "masc_autoresearch_swarm_start";
+    "masc_repo_synthesis_swarm_start";
+    "masc_policy_freeze_unit"; "masc_policy_kill_switch";
+    "masc_tool_admin_update"; "masc_tool_grant"; "masc_tool_revoke";
+    "masc_operator_action"; "masc_operator_confirm"; "masc_operator_snapshot";
+    "masc_team_session_finalize"; "masc_tool_admin_snapshot";
+  ]
+
+let keeper_denied_surface_tools =
+  [
+    "masc_room_delete"; "masc_room_destroy";
+    "masc_force_leave"; "masc_force_remove_agent";
+    "masc_admin_reset"; "masc_admin_cleanup";
+    "masc_gc_force"; "masc_config_set"; "masc_config_reset";
+    "masc_spawn";
+    "masc_operator_action"; "masc_operator_confirm";
+    "masc_operator_judgment_write";
+    "masc_execute"; "masc_execute_dry_run";
+    "masc_neo4j_query"; "masc_pg_query";
+  ]
+
+let mdal_auditable_surface_tools =
+  [
+    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
+    "masc_worktree_create"; "masc_worktree_list"; "masc_worktree_remove";
+    "masc_run_init"; "masc_run_plan"; "masc_run_log";
+    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
+    "masc_spawn";
+  ]
+
+let tools_for_surface = function
+  | Public_mcp -> public_mcp_surface_tools
+  | Spawned_agent -> spawned_agent_surface_tools
+  | Local_worker -> local_worker_surface_tools
+  | Session_min -> session_min_surface_tools
+  | Admin -> admin_surface_tools
+  | Keeper_denied -> keeper_denied_surface_tools
+  | Mdal_auditable -> mdal_auditable_surface_tools
+
+let all_surfaces =
+  [Public_mcp; Spawned_agent; Local_worker; Session_min;
+   Admin; Keeper_denied; Mdal_auditable]
+
+let surface_sets : (surface * (string, unit) Hashtbl.t) list =
+  List.map (fun surface ->
+    let tools = tools_for_surface surface in
+    let tbl = Hashtbl.create (List.length tools) in
+    List.iter (fun name -> Hashtbl.replace tbl name ()) tools;
+    (surface, tbl)
+  ) all_surfaces
+
+let is_on_surface surface name =
+  match List.assoc_opt surface surface_sets with
+  | Some tbl -> Hashtbl.mem tbl name
+  | None -> false
+
+let surface_to_string = function
+  | Public_mcp -> "public_mcp"
+  | Spawned_agent -> "spawned_agent"
+  | Local_worker -> "local_worker"
+  | Session_min -> "session_min"
+  | Admin -> "admin"
+  | Keeper_denied -> "keeper_denied"
+  | Mdal_auditable -> "mdal_auditable"

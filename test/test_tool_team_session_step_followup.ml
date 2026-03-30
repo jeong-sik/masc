@@ -17,7 +17,7 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
           agent_name = "owner";
           sw;
           clock = Eio.Stdenv.clock env;
-          proc_mgr = None;
+          proc_mgr = None; net = None;
         }
       in
       let start_ok, start_body =
@@ -149,7 +149,7 @@ let test_reconcile_failed_spawn_actor_retains_after_turn () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"retain-failed-spawn-after-turn" |> get_session_id in
   ignore
@@ -190,7 +190,7 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let start_json =
     start_session_exn ctx ~goal:"prove failed spawn and detach visibility"
@@ -363,7 +363,7 @@ let test_report_and_proof_expose_empty_note_turn_evidence () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"empty-note-evidence" |> get_session_id in
   Team_session_store.append_event config session_id ~event_type:"team_turn"

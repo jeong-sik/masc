@@ -107,3 +107,30 @@ val hidden_placeholder_tools : unit -> string list
 
 val implementation_allows_public_visibility : implementation_status -> bool
 (** [true] when an implementation status permits public surface listing. *)
+
+(** {1 Tool Surface System}
+
+    Canonical surface membership SSOT. Use [tools_for_surface] to retrieve
+    the tool name list for a given surface, and [is_on_surface] for O(1)
+    membership checks. *)
+
+type surface =
+  | Public_mcp
+  | Spawned_agent
+  | Local_worker
+  | Session_min
+  | Admin
+  | Keeper_denied
+  | Mdal_auditable
+
+val tools_for_surface : surface -> string list
+(** Canonical tool name list for [surface]. *)
+
+val is_on_surface : surface -> string -> bool
+(** O(1) check: is [name] a member of [surface]? *)
+
+val all_surfaces : surface list
+(** All defined surface variants for iteration. *)
+
+val surface_to_string : surface -> string
+(** Machine-readable surface label. *)

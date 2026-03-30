@@ -9,7 +9,7 @@ let test_step_spawn_batch_records_planned_workers () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"step-spawn-batch-planned-workers" |> get_session_id in
   let selection_note =
@@ -90,7 +90,7 @@ let test_step_spawn_batch_applies_hybrid_routing () =
           agent_name = "owner";
           sw;
           clock = Eio.Stdenv.clock env;
-          proc_mgr = None;
+          proc_mgr = None; net = None;
         }
       in
       with_env "MASC_TEAM_SESSION_MODEL_35B" (Some "qwen35-lead") @@ fun () ->
@@ -272,7 +272,7 @@ let test_status_reports_worker_run_progress_summary () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"worker-run-summary" |> get_session_id in
   let planned_worker runtime_actor spawn_role =
@@ -382,7 +382,7 @@ let test_step_spawn_batch_infers_exact_env_model_tiers () =
           agent_name = "owner";
           sw;
           clock = Eio.Stdenv.clock env;
-          proc_mgr = None;
+          proc_mgr = None; net = None;
         }
       in
       with_env "MASC_TEAM_SESSION_MODEL_35B" (Some "lead-model-exact") @@ fun () ->

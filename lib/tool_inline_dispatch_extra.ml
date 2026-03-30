@@ -291,6 +291,24 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       end;
       Some result
 
+  | "masc_board_delete" ->
+      let (success, _message) as result = Tool_board.handle_tool name arguments in
+      if success then begin
+        let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
+        let notification = `Assoc [
+          ("type", `String "masc/board_delete");
+          ("post_id", `String post_id);
+          ("timestamp", `String (Types.now_iso ()));
+        ] in
+        Mcp_server.sse_broadcast state notification;
+        emit_activity config ~kind:"board.deleted" ~actor:agent_name
+          ~subject:(Activity_graph.entity ~kind:"post" post_id)
+          ~tags:[ "board"; "board.deleted" ]
+          ~payload:(`Assoc [ ("post_id", `String post_id) ])
+          ()
+      end;
+      Some result
+
   | "masc_board_list" | "masc_board_get"
   | "masc_board_stats"
   | "masc_board_search" | "masc_board_profile"

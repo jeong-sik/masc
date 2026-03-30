@@ -107,8 +107,8 @@ let handle_runtime_bench _ctx args : result =
     | `Intlit value -> (
         match parse_int_opt value with
         | Some parsed -> max 3 (min 120 parsed)
-        | None -> 20)
-    | _ -> 20
+        | None -> 8)
+    | _ -> 8
   in
   let prompt =
     match member "prompt" args with

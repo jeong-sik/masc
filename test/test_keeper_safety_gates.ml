@@ -19,6 +19,7 @@ let make_meta
     ?(policy_voice_enabled = false)
     ?(soul_profile = "default")
     ?(name = "test-keeper")
+    ?(tool_allowlist = [])
     () : Keeper_types.keeper_meta =
   let json = `Assoc [
     ("name", `String name);
@@ -26,6 +27,7 @@ let make_meta
     ("trace_id", `String "safety-test-trace");
     ("policy_voice_enabled", `Bool policy_voice_enabled);
     ("soul_profile", `String soul_profile);
+    ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
   ] in
   match Keeper_types.meta_of_json json with
   | Ok meta -> meta
@@ -170,12 +172,11 @@ let test_safe_empty () =
   assert_safe ~msg:"empty string" ""
 
 (* ================================================================ *)
-(* Group 2: Mode-free tool grants (mode removal)                     *)
+(* Group 2: Keeper tool grants with masc_* allowlist gating          *)
 (* ================================================================ *)
 
-(* Mode removal: all keepers get all tools unconditionally.
-   write_done remains the only exposure gate.
-   Safety is enforced through eval_gate deny lists. *)
+(* keeper_* tools are always exposed unless write_done=true.
+   masc_* tools require explicit allowlist entries, with deny-by-default. *)
 
 let test_write_done_kills_all () =
   let meta = make_meta
@@ -207,16 +208,13 @@ let test_voice_disabled () =
   check bool "keeper_voice_speak still available" true (List.mem "keeper_voice_speak" tools);
   check bool "keeper_voice_agent still available" true (List.mem "keeper_voice_agent" tools)
 
-let test_all_keepers_have_research_tools () =
-  (* Mode removal: research tools available to all keepers *)
-  let meta = make_meta ~soul_profile:"default" () in
+let test_research_tools_require_allowlist () =
+  let meta = make_meta ~soul_profile:"research" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let has_any_research = List.exists (fun t ->
-    String.length t > 5 &&
-    (try ignore (Str.search_forward (Str.regexp_string "research") t 0); true
-     with Not_found -> false)
-  ) tools in
-  check bool "has research tools" true has_any_research
+  check bool "research loop blocked by default" false
+    (List.mem "masc_research_start" tools);
+  check bool "autoresearch blocked by default" false
+    (List.mem "masc_autoresearch_cycle" tools)
 
 let test_heuristic_mode_tools () =
   let meta = make_meta () in
@@ -399,7 +397,7 @@ let () =
       test_case "all keepers get full toolset" `Quick test_all_keepers_get_full_toolset;
       test_case "voice enabled" `Quick test_voice_enabled;
       test_case "voice disabled" `Quick test_voice_disabled;
-      test_case "all keepers have research tools" `Quick test_all_keepers_have_research_tools;
+      test_case "research tools require allowlist" `Quick test_research_tools_require_allowlist;
       test_case "heuristic mode" `Quick test_heuristic_mode_tools;
       test_case "voice plus other tools" `Quick test_voice_plus_other_tools;
       test_case "all keepers have shell and coding" `Quick test_all_keepers_have_shell_and_coding;

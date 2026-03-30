@@ -3,7 +3,7 @@
     Architecture:
     - [enqueue_record] pushes to an in-memory Queue (non-yielding).
     - A background drain fiber periodically flushes the queue to
-      Dated_jsonl stores under [.masc/keepers/<name>/crash-events/].
+      Dated_jsonl stores under [<keepers_dir>/<name>/crash-events/].
     - Each keeper gets a cached [Dated_jsonl.t] instance (same pattern
       as [keeper_types_support.ml:metrics_store_cache]).
     - [recent_crashes] reads from disk for dashboard display.
@@ -13,7 +13,7 @@
 (* ── types ───────────────────────────────────────────────────── *)
 
 type crash_event = {
-  base_path : string;
+  keepers_dir : string;
   name : string;
   ts : float;
   reason : string;
@@ -29,10 +29,9 @@ let queue : crash_event Queue.t = Queue.create ()
 let store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
 let store_mu = Eio.Mutex.create ()
 
-let crash_store ~base_path name : Dated_jsonl.t =
-  let masc = Filename.concat base_path ".masc" in
+let crash_store ~keepers_dir name : Dated_jsonl.t =
   let dir = Filename.concat
-    (Filename.concat (Filename.concat masc "keepers") name)
+    (Filename.concat keepers_dir name)
     "crash-events" in
   Eio_guard.with_mutex store_mu (fun () ->
     match Hashtbl.find_opt store_cache dir with
@@ -44,8 +43,8 @@ let crash_store ~base_path name : Dated_jsonl.t =
 
 (* ── enqueue (non-yielding) ──────────────────────────────────── *)
 
-let enqueue_record ~base_path ~name ~ts ~reason ~restart_count =
-  Queue.push { base_path; name; ts; reason; restart_count } queue
+let enqueue_record ~keepers_dir ~name ~ts ~reason ~restart_count =
+  Queue.push { keepers_dir; name; ts; reason; restart_count } queue
 
 (* ── drain fiber ─────────────────────────────────────────────── *)
 
@@ -57,7 +56,7 @@ let drain_batch () =
   List.rev !batch
 
 let write_event (ev : crash_event) =
-  let store = crash_store ~base_path:ev.base_path ev.name in
+  let store = crash_store ~keepers_dir:ev.keepers_dir ev.name in
   let json = `Assoc [
     ("ts", `Float ev.ts);
     ("reason", `String ev.reason);
@@ -81,6 +80,6 @@ let start_drain_fiber ~sw ~clock =
 
 (* ── read (I/O, for dashboard) ───────────────────────────────── *)
 
-let recent_crashes ~base_path ~name ~max_entries =
-  let store = crash_store ~base_path name in
+let recent_crashes ~keepers_dir ~name ~max_entries =
+  let store = crash_store ~keepers_dir name in
   Dated_jsonl.read_recent store max_entries

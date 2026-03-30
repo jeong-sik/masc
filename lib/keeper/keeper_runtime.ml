@@ -3,10 +3,6 @@
 
 open Keeper_types
 
-let maybe_promote_live_persistent_keeper config name =
-  ignore config;
-  ignore name
-
 let ensure_keeper_meta config name =
   match read_meta config name with
   | Ok (Some meta) ->

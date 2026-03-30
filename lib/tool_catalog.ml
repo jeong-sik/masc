@@ -447,8 +447,6 @@ let allow_direct_call name =
   | Default -> true
   | Hidden -> meta.allow_direct_call_when_hidden
 
-let hidden_placeholder_tools () = []
-
 (** {1 Tool Surface System}
 
     Canonical per-surface tool name lists — the SSOT for tool surface

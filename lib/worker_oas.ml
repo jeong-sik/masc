@@ -492,6 +492,17 @@ and run_existing_worker_agent
             }
       | Error err ->
           let detail = Oas.Error.to_string err in
+          (match proof with
+           | Some p ->
+             Log.LocalWorker.warn
+               "worker %s errored with CDAL proof: run_id=%s status=%s (proof persisted by Proof_store)"
+               worker_name p.run_id
+               (match p.result_status with
+                | Oas.Cdal_proof.Completed -> "completed"
+                | Oas.Cdal_proof.Errored -> "errored"
+                | Oas.Cdal_proof.Timed_out -> "timed_out"
+                | Oas.Cdal_proof.Cancelled -> "cancelled")
+           | None -> ());
           let* () =
             Worker_container.append_worker_completion_log
               ~base_path ~team_session_id ~worker_name ~prompt ~tool_names

@@ -290,6 +290,153 @@ let create_team_session_raw_trace ~(config : Room.config) ~(session_id : string)
         agent_name (Oas.Error.to_string err);
       None
 
+let trace_ref_to_json (trace_ref : Oas.Raw_trace.run_ref) =
+  `Assoc
+    [
+      ("worker_run_id", `String trace_ref.worker_run_id);
+      ("path", `String trace_ref.path);
+      ("start_seq", `Int trace_ref.start_seq);
+      ("end_seq", `Int trace_ref.end_seq);
+      ("agent_name", `String trace_ref.agent_name);
+      ( "session_id",
+        match trace_ref.session_id with
+        | Some session_id -> `String session_id
+        | None -> `Null );
+    ]
+
+let preview_text text =
+  String.sub text 0 (min 200 (String.length text))
+
+let preview_text_opt text =
+  let trimmed = String.trim text in
+  if trimmed = "" then None else Some (preview_text trimmed)
+
+let proof_result_status_to_string = function
+  | Oas.Cdal_proof.Completed -> "completed"
+  | Oas.Cdal_proof.Errored -> "errored"
+  | Oas.Cdal_proof.Timed_out -> "timed_out"
+  | Oas.Cdal_proof.Cancelled -> "cancelled"
+
+let worker_name_of_planned_worker ~(fallback : string)
+    (pw : Team_session_types.planned_worker) =
+  match pw.runtime_actor with
+  | Some actor when String.trim actor <> "" -> String.trim actor
+  | _ -> fallback
+
+let is_safe_worker_run_id value =
+  let len = String.length value in
+  len > 0
+  && len <= 128
+  && String.for_all
+       (function
+         | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '.' | '_' | '-' -> true
+         | _ -> false)
+       value
+
+let persist_worker_run_proof_if_present ~(config : Room.config)
+    ~(session_id : string)
+    ~(fallback_name : string)
+    ~(planned_worker : Team_session_types.planned_worker)
+    ~(resolved_model : string option)
+    ~(trace_ref : Oas.Raw_trace.run_ref option)
+    ~(success : bool)
+    ~(output_preview : string option)
+    ~(error : string option)
+    (proof_opt : Oas.Cdal_proof.t option) =
+  match proof_opt with
+  | None -> ()
+  | Some proof ->
+      if not (is_safe_worker_run_id proof.run_id) then
+        Log.Session.warn
+          "team_session_oas_bridge: skipping proof persistence for unsafe worker run id %S"
+          proof.run_id
+      else
+        let worker_run_id = proof.run_id in
+        let worker_name =
+          worker_name_of_planned_worker ~fallback:fallback_name planned_worker
+        in
+        let proof_path =
+          Team_session_store.worker_run_proof_path config session_id worker_run_id
+        in
+        Team_session_store.save_worker_run_proof_json config session_id
+          worker_run_id (Oas.Cdal_proof.to_json proof);
+        Team_session_store.save_worker_run_meta_json config session_id
+          worker_run_id
+          (`Assoc
+            [
+              ("worker_run_id", `String worker_run_id);
+              ("worker_name", `String worker_name);
+              ("mode", `String "swarm");
+              ("status", `String (if success then "completed" else "failed"));
+              ("wait_mode", `String "background");
+              ( "trace_capability",
+                `String
+                  (if Option.is_some trace_ref then "raw" else "summary_only")
+              );
+              ("success", `Bool success);
+              ( "execution_scope",
+                Option.fold ~none:`Null
+                  ~some:(fun scope ->
+                    `String
+                      (Team_session_types.execution_scope_to_string scope))
+                  planned_worker.execution_scope );
+              ( "requested_worker_class",
+                Option.fold ~none:`Null
+                  ~some:(fun kind ->
+                    `String
+                      (Team_session_types.worker_class_to_string kind))
+                  planned_worker.worker_class );
+              ("requested_worker_size", `Null);
+              ("resolved_runtime", `String "oas_swarm");
+              ( "resolved_model",
+                Option.fold ~none:`Null ~some:(fun value -> `String value)
+                  resolved_model );
+              ( "routing_reason",
+                Option.fold ~none:`Null ~some:(fun value -> `String value)
+                  planned_worker.routing_reason );
+              ( "output_preview",
+                Option.fold ~none:`Null ~some:(fun value -> `String value)
+                  output_preview );
+              ("error", Option.fold ~none:`Null ~some:(fun value -> `String value) error);
+              ( "trace_ref",
+                Option.fold ~none:`Null ~some:trace_ref_to_json trace_ref );
+              ("trace_summary", `Null);
+              ("trace_validation", `Null);
+              ("evidence_session_id", `Null);
+              ("oas_worker_run", `Null);
+              ("session_conformance", `Null);
+              ("validated", `Null);
+              ("final_text", Option.fold ~none:`Null ~some:(fun value -> `String value) output_preview);
+              ("stop_reason", `Null);
+              ("failure_reason", Option.fold ~none:`Null ~some:(fun value -> `String value) error);
+              ("ts_iso", `String (Types.now_iso ()));
+              ("cdal_run_id", `String proof.run_id);
+              ("contract_id", `String proof.contract_id);
+              ( "requested_execution_mode",
+                `String
+                  (Oas.Execution_mode.to_string proof.requested_execution_mode)
+              );
+              ( "effective_execution_mode",
+                `String
+                  (Oas.Execution_mode.to_string proof.effective_execution_mode)
+              );
+              ("risk_class", `String (Oas.Risk_class.to_string proof.risk_class));
+              ("result_status", `String (proof_result_status_to_string proof.result_status));
+              ( "tool_trace_refs",
+                `List
+                  (List.map (fun ref_ -> `String ref_) proof.tool_trace_refs)
+              );
+              ( "raw_evidence_refs",
+                `List
+                  (List.map (fun ref_ -> `String ref_) proof.raw_evidence_refs)
+              );
+              ( "checkpoint_ref",
+                Option.fold ~none:`Null ~some:(fun ref_ -> `String ref_)
+                  proof.checkpoint_ref );
+              ("proof_path", `String proof_path);
+              ("proof_present", `Bool true);
+            ])
+
 let make_convergence_metric ~(entry_count : int)
     (success_by_agent : (string, bool) Hashtbl.t) :
     Swarm.Swarm_types.convergence_config option =
@@ -363,6 +510,7 @@ let planned_worker_to_entry_with_state
     let raw_trace =
       create_team_session_raw_trace ~config ~session_id ~agent_name:name
     in
+    let proof_ref = ref None in
     let dispatch_with_defaults ~name:(tool_name : string) ~(args : Yojson.Safe.t)
       =
       dispatch ~name:tool_name
@@ -380,16 +528,31 @@ let planned_worker_to_entry_with_state
           ~cascade_name ~fallback:(fun () -> 0.3))
         ~max_tokens:(Cascade_inference.resolve_max_tokens
           ~cascade_name ~fallback:(fun () -> 4096))
-        ?raw_trace ?contract ~sw
+        ?raw_trace ~proof_ref ?contract ~sw
         ~priority:Llm_provider.Request_priority.Proactive ()
     with
     | Ok result ->
         Hashtbl.replace success_by_agent name true;
         telemetry_ref := telemetry_of_run_result result;
+        let output_preview =
+          Oas.Types.text_of_content result.response.content |> preview_text_opt
+        in
+        let proof_opt =
+          match result.proof with Some _ as proof -> proof | None -> !proof_ref
+        in
+        persist_worker_run_proof_if_present ~config ~session_id
+          ~fallback_name:name ~planned_worker:pw
+          ~resolved_model:(Some result.response.model)
+          ~trace_ref:result.trace_ref ~success:true ~output_preview
+          ~error:None proof_opt;
         Ok result.response
     | Error e ->
         Hashtbl.replace success_by_agent name false;
         telemetry_ref := Swarm.Swarm_types.empty_telemetry;
+        persist_worker_run_proof_if_present ~config ~session_id
+          ~fallback_name:name ~planned_worker:pw ~resolved_model:None
+          ~trace_ref:None ~success:false
+          ~output_preview:(preview_text_opt e) ~error:(Some e) !proof_ref;
         Error
           (Oas.Error.Config
              (Oas.Error.InvalidConfig

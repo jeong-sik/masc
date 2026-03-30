@@ -83,11 +83,12 @@ let verdict_to_string = function
   | Warn reason -> sprintf "WARN: %s" reason
   | Fail reason -> sprintf "FAIL: %s" reason
 
-(** Check if keyword at position 0..len is followed by a word boundary
-    (end of string, space, colon, dash, or newline). Prevents "PASSING" matching as PASS. *)
+(** Check if keyword at position 0..len is followed by a word boundary.
+    A boundary is defined as end of string or a following non-word character.
+    Prevents "PASSING" matching as PASS while allowing "PASS." / "PASS\t...". *)
 let has_keyword_boundary upper len =
-  String.length upper = len
-  || (let c = upper.[len] in c = ' ' || c = ':' || c = '-' || c = '\n' || c = '\r')
+  let tlen = String.length upper in
+  len >= tlen || not (is_word_char upper.[len])
 
 (** Extract reason text after keyword+separator, stripping leading colon/dash. *)
 let extract_reason trimmed keyword_len default_reason =

@@ -7,10 +7,15 @@ import { showTaskCreate, taskCreating, createTask } from './task-manage-state'
 
 const title = signal('')
 const description = signal('')
-const priority = signal('normal')
-const PRIORITY_OPTIONS = [{ value: 'low', label: '낮음' }, { value: 'normal', label: '보통' }, { value: 'high', label: '높음' }, { value: 'critical', label: '긴급' }]
+const priority = signal(2) // numeric priority: 1=low, 2=normal, 3=high, 4=critical
+const PRIORITY_OPTIONS = [
+  { value: '1', label: '낮음' },
+  { value: '2', label: '보통' },
+  { value: '3', label: '높음' },
+  { value: '4', label: '긴급' }
+]
 
-function resetForm() { title.value = ''; description.value = ''; priority.value = 'normal' }
+function resetForm() { title.value = ''; description.value = ''; priority.value = 2 }
 
 export function TaskCreateForm() {
   if (!showTaskCreate.value) {
@@ -34,7 +39,7 @@ export function TaskCreateForm() {
         </div>
         <div class="flex flex-col gap-1 max-w-[200px]">
           <label class="text-[11px] text-[var(--text-muted)] font-medium">우선순위</label>
-          <${Select} value=${priority.value} options=${PRIORITY_OPTIONS} onInput=${(v: string) => { priority.value = v }} />
+          <${Select} value=${String(priority.value)} options=${PRIORITY_OPTIONS} onInput=${(v: string) => { priority.value = Number(v) }} />
         </div>
         <div class="flex gap-2 mt-1">
           <${ActionButton} variant="primary" size="md" disabled=${taskCreating.value || !title.value.trim()}

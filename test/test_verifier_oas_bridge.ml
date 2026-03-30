@@ -216,6 +216,20 @@ let test_parse_verdict_empty_returns_error () =
       "empty verifier output" msg
   | Ok _ -> Alcotest.fail "empty text should return Error"
 
+let test_parse_verdict_rejects_passing_prefix () =
+  match Verifier_oas.parse_verdict "PASSING all checks" with
+  | Error msg ->
+    Alcotest.(check bool) "PASSING rejected" true
+      (String.length msg > 0)
+  | Ok _ -> Alcotest.fail "PASSING should be rejected as invalid verdict"
+
+let test_parse_verdict_rejects_warning_prefix () =
+  match Verifier_oas.parse_verdict "WARNING: system alert" with
+  | Error msg ->
+    Alcotest.(check bool) "WARNING rejected" true
+      (String.length msg > 0)
+  | Ok _ -> Alcotest.fail "WARNING should be rejected as invalid verdict"
+
 (* ================================================================ *)
 (* should_skip (verify fast path)                                    *)
 (* ================================================================ *)
@@ -341,6 +355,10 @@ let () =
         test_parse_verdict_unknown_returns_error;
       Alcotest.test_case "empty -> Error" `Quick
         test_parse_verdict_empty_returns_error;
+      Alcotest.test_case "PASSING prefix rejected" `Quick
+        test_parse_verdict_rejects_passing_prefix;
+      Alcotest.test_case "WARNING prefix rejected" `Quick
+        test_parse_verdict_rejects_warning_prefix;
     ]);
     ("verify_skip", [
       Alcotest.test_case "read-only skips" `Quick test_verify_skips_readonly;

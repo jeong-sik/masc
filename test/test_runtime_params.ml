@@ -420,17 +420,18 @@ let () =
     let clock = Eio.Stdenv.clock env in
     Eio.Switch.run @@ fun sw ->
     Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
+    let keepers_dir = Filename.concat tmp_dir "keepers" in
     Keeper_crash_persistence.enqueue_record
-      ~base_path:tmp_dir ~name:"test-keeper"
+      ~keepers_dir ~name:"test-keeper"
       ~ts:1000.0 ~reason:"heartbeat_failures" ~restart_count:1;
     Keeper_crash_persistence.enqueue_record
-      ~base_path:tmp_dir ~name:"test-keeper"
+      ~keepers_dir ~name:"test-keeper"
       ~ts:1010.0 ~reason:"exception" ~restart_count:2;
     (* Wait for drain fiber to flush (drain interval = 2s) *)
     Eio.Time.sleep clock 3.0;
     let crashes =
       Keeper_crash_persistence.recent_crashes
-        ~base_path:tmp_dir ~name:"test-keeper" ~max_entries:10
+        ~keepers_dir ~name:"test-keeper" ~max_entries:10
     in
     Alcotest.(check bool) "has crash events" true (List.length crashes >= 2);
     (match crashes with

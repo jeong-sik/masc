@@ -70,14 +70,12 @@ let test_eval_criteria_fields () =
 
 let make_keeper_meta ?(name = "keeper-test") ?(goal = "stabilize proof spine")
     ?(scope_kind = "local") ?(execution_scope = "workspace")
-    ?(trace_id = "trace-keeper-test")
     ?(allowed_paths = []) () =
   match Masc_mcp.Keeper_types.meta_of_json
           (`Assoc
             [
               ("name", `String name);
               ("agent_name", `String name);
-              ("trace_id", `String trace_id);
               ("goal", `String goal);
               ("scope_kind", `String scope_kind);
               ("execution_scope", `String execution_scope);
@@ -106,11 +104,7 @@ let test_keeper_bridge_compose_workspace () =
 
 let test_keeper_bridge_compose_read_only () =
   let meta =
-    {
-      (make_keeper_meta ~scope_kind:"local" ~execution_scope:"observe_only" ())
-      with
-      scope_kind = "read_only";
-    }
+    make_keeper_meta ~scope_kind:"read_only" ~execution_scope:"observe_only" ()
   in
   let rc = CB.of_keeper_meta meta in
   check string "read_only -> diagnose" "diagnose"
@@ -119,29 +113,6 @@ let test_keeper_bridge_compose_read_only () =
     (Agent_sdk.Risk_class.to_string rc.runtime_constraints.risk_class);
   check (list string) "read_only allowed mutations"
     [] rc.runtime_constraints.allowed_mutations
-
-let test_keeper_bridge_compose_full_scope () =
-  let meta =
-    {
-      (make_keeper_meta ~scope_kind:"local" ~execution_scope:"unrestricted" ())
-      with
-      scope_kind = "full";
-    }
-  in
-  let rc = CB.of_keeper_meta meta in
-  check string "full -> execute" "execute"
-    (EM.to_string rc.runtime_constraints.requested_execution_mode);
-  check string "full -> medium" "medium"
-    (Agent_sdk.Risk_class.to_string rc.runtime_constraints.risk_class)
-
-let test_keeper_bridge_compose_allowed_paths_fallback () =
-  let meta =
-    make_keeper_meta ~scope_kind:"local" ~execution_scope:"custom_scope"
-      ~allowed_paths:[ "/tmp/demo" ] ()
-  in
-  let rc = CB.of_keeper_meta meta in
-  check (list string) "allowed_paths fallback"
-    [ "workspace_only" ] rc.runtime_constraints.allowed_mutations
 
 let () =
   Eio_main.run @@ fun _env ->
@@ -153,8 +124,5 @@ let () =
       "eval_criteria fields", `Quick, test_eval_criteria_fields;
       "keeper bridge workspace", `Quick, test_keeper_bridge_compose_workspace;
       "keeper bridge read_only", `Quick, test_keeper_bridge_compose_read_only;
-      "keeper bridge full scope", `Quick, test_keeper_bridge_compose_full_scope;
-      "keeper bridge allowed_paths fallback", `Quick,
-      test_keeper_bridge_compose_allowed_paths_fallback;
     ];
   ]

@@ -12,8 +12,12 @@ let workspace_mutating_tools =
 let is_workspace_mutating name =
   List.mem name workspace_mutating_tools
 
+let dedup_strings = Team_session_types.dedup_strings
+
 let allowed_mutations_of_tool_names tool_names =
-  List.filter is_workspace_mutating tool_names
+  tool_names
+  |> List.filter is_workspace_mutating
+  |> dedup_strings
 
 let review_requirement_of_risk_class = function
   | Oas.Risk_class.High | Oas.Risk_class.Critical -> Some "human_review"

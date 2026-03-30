@@ -106,7 +106,7 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
     |> Option.value ~default:0.0
   in
   let activity_ts =
-    let base = max meta.usage.last_turn_ts meta.proactive.last_ts in
+    let base = max meta.runtime.usage.last_turn_ts meta.runtime.proactive_rt.last_ts in
     if base > 0.0 then base else created_ts
   in
   if activity_ts <= 0.0 then 0
@@ -157,7 +157,7 @@ let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
     in
     let base_dir = session_base_dir config in
     let _session, ctx_opt =
-      load_context_from_checkpoint ~trace_id:meta.trace_id
+      load_context_from_checkpoint ~trace_id:meta.runtime.trace_id
         ~primary_model_max_tokens:primary_max_context ~base_dir
     in
     match ctx_opt with
@@ -177,7 +177,7 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
     in
     let base_dir = session_base_dir config in
     let _session, ctx_opt =
-      load_context_from_checkpoint ~trace_id:meta.trace_id
+      load_context_from_checkpoint ~trace_id:meta.runtime.trace_id
         ~primary_model_max_tokens:primary_max_context ~base_dir
     in
     match ctx_opt with
@@ -346,8 +346,8 @@ let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observati
     (* Zero-heuristic scheduling: periodic turns use cooldown only.
        Idle/goal/task scoring stays in the raw world state and is left to the model. *)
     let since_last_proactive =
-      if meta.proactive.last_ts <= 0.0 then max_int
-      else int_of_float (max 0.0 (Time_compat.now () -. meta.proactive.last_ts))
+      if meta.runtime.proactive_rt.last_ts <= 0.0 then max_int
+      else int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
     in
     meta.proactive.enabled
     && since_last_proactive >= meta.proactive.cooldown_sec

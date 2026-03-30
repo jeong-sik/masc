@@ -278,10 +278,10 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                  in
                  let base_dir = session_base_dir ctx.config in
                  (* Ensure session directory tree for filesystem fallback (issue #3019) *)
-                 ignore (Keeper_fs.ensure_dir (Filename.concat base_dir meta_current.trace_id));
+                 ignore (Keeper_fs.ensure_dir (Filename.concat base_dir meta_current.runtime.trace_id));
                  let _session, ctx_opt =
                    load_context_from_checkpoint
-                     ~trace_id:meta_current.trace_id
+                     ~trace_id:meta_current.runtime.trace_id
                      ~primary_model_max_tokens:primary_max_context
                      ~base_dir
                  in
@@ -341,9 +341,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                            ("channel", `String "heartbeat");
                            ("name", `String meta_current.name);
                            ("agent_name", `String meta_current.agent_name);
-                           ("trace_id", `String meta_current.trace_id);
-                           ("generation", `Int meta_current.generation);
-                           ("model_used", `String meta_current.usage.last_model_used);
+                           ("trace_id", `String meta_current.runtime.trace_id);
+                           ("generation", `Int meta_current.runtime.generation);
+                           ("model_used", `String meta_current.runtime.usage.last_model_used);
                            ( "usage",
                              `Assoc
                                [
@@ -401,7 +401,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                             [
                               ("type", `String "keeper_heartbeat");
                               ("name", `String meta_current.name);
-                              ("generation", `Int meta_current.generation);
+                              ("generation", `Int meta_current.runtime.generation);
                               ( "context_ratio",
                                 `Float (Keeper_exec_context.context_ratio c) );
                               ("ts_unix", `Float now_ts);
@@ -416,7 +416,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                       | Some bus ->
                           Oas_events.publish_keeper_snapshot bus
                             ~keeper_name:meta_current.name
-                            ~generation:meta_current.generation
+                            ~generation:meta_current.runtime.generation
                             ~context_ratio:(Keeper_exec_context.context_ratio c)
                             ~message_count:(List.length c.messages)
                       | None -> ());
@@ -477,7 +477,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                        Keeper_unified_turn.run_unified_turn
                          ~config:ctx.config ~meta:meta_after_triage
                          ~observation:obs
-                         ~generation:meta_after_triage.generation
+                         ~generation:meta_after_triage.runtime.generation
                      with
                      | Error e ->
                          Log.Keeper.error "unified turn failed: %s" e;

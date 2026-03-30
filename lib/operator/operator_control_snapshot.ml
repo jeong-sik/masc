@@ -3,7 +3,7 @@ include Operator_pending_confirm
 include Operator_digest
 
 let compute_context_ratio (meta : Keeper_types.keeper_meta) : float option =
-  let input_tokens = meta.usage.last_input_tokens in
+  let input_tokens = meta.runtime.usage.last_input_tokens in
   if input_tokens = 0 then None
   else
     let active_model = Keeper_exec_status.active_model_of_meta meta in
@@ -142,7 +142,7 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
     if fallback_latest <> [] then Some "keeper_metrics" else None
   in
   let fallback_at =
-    let last_autonomous = String.trim meta.last_autonomous_action_at in
+    let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
     if last_autonomous <> "" then Some last_autonomous
     else Some meta.updated_at
   in
@@ -195,7 +195,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = true)
                   ("paused", `Bool true);
                   ("goal", `String meta.goal);
                   ("short_goal", `String meta.short_goal);
-                  ("turn_count", `Int meta.usage.total_turns);
+                  ("turn_count", `Int meta.runtime.usage.total_turns);
                   ("updated_at", `String meta.updated_at);
                   ("created_at", `String meta.created_at);
                 ])
@@ -241,21 +241,21 @@ let keepers_json ?keeper_names ?(include_recent_activity = true)
                   ("pipeline_stage", `String pipeline_stage);
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
-                  ("trace_id", `String meta.trace_id);
+                  ("trace_id", `String meta.runtime.trace_id);
                   ("goal", `String meta.goal);
                   ("short_goal", `String meta.short_goal);
                   ("mid_goal", `String meta.mid_goal);
                   ("long_goal", `String meta.long_goal);
                   ("status", `String agent_status);
                   ("agent", agent_json);
-                  ("generation", `Int meta.generation);
-                  ("turn_count", `Int meta.usage.total_turns);
+                  ("generation", `Int meta.runtime.generation);
+                  ("turn_count", `Int meta.runtime.usage.total_turns);
                   ("context_ratio",
                     (match compute_context_ratio meta with
                      | Some r -> `Float r
                      | None -> `Null));
-                  ("context_tokens", `Int meta.usage.last_total_tokens);
-                  ("last_model_used", `String meta.usage.last_model_used);
+                  ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
+                  ("last_model_used", `String meta.runtime.usage.last_model_used);
                   ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
                   ("keepalive_running", `Bool keepalive_running);
                   ( "next_model_hint",
@@ -265,9 +265,9 @@ let keepers_json ?keeper_names ?(include_recent_activity = true)
                     `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
                   );
                   ( "last_autonomous_action_at",
-                    if String.trim meta.last_autonomous_action_at = "" then `Null
-                    else `String meta.last_autonomous_action_at );
-                  ("autonomous_action_count", `Int meta.autonomous_action_count);
+                    if String.trim meta.runtime.last_autonomous_action_at = "" then `Null
+                    else `String meta.runtime.last_autonomous_action_at );
+                  ("autonomous_action_count", `Int meta.runtime.autonomous_action_count);
                   ("allowed_tool_names", `List (List.map (fun value -> `String value) allowed_tool_names));
                   ("latest_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
                   ("recent_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
@@ -320,26 +320,26 @@ let persistent_agents_json ?keeper_names config =
                   ("runtime_class", `String "keeper");
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
-                  ("trace_id", `String meta.trace_id);
+                  ("trace_id", `String meta.runtime.trace_id);
                   ("goal", `String meta.goal);
                   ("short_goal", `String meta.short_goal);
                   ("mid_goal", `String meta.mid_goal);
                   ("long_goal", `String meta.long_goal);
                   ("status", `String agent_status);
-                  ("generation", `Int meta.generation);
-                  ("turn_count", `Int meta.usage.total_turns);
+                  ("generation", `Int meta.runtime.generation);
+                  ("turn_count", `Int meta.runtime.usage.total_turns);
                   ("context_ratio",
                     (match compute_context_ratio meta with
                      | Some r -> `Float r
                      | None -> `Null));
-                  ("context_tokens", `Int meta.usage.last_total_tokens);
-                  ("last_model_used", `String meta.usage.last_model_used);
+                  ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
+                  ("last_model_used", `String meta.runtime.usage.last_model_used);
                   ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
                   ("next_model_hint", string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta));
                   ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
                   ("last_autonomous_action_at",
-                    if String.trim meta.last_autonomous_action_at = "" then `Null else `String meta.last_autonomous_action_at);
-                  ("autonomous_action_count", `Int meta.autonomous_action_count);
+                    if String.trim meta.runtime.last_autonomous_action_at = "" then `Null else `String meta.runtime.last_autonomous_action_at);
+                  ("autonomous_action_count", `Int meta.runtime.autonomous_action_count);
                   ("updated_at", `String meta.updated_at);
                   ("created_at", `String meta.created_at);
                 ]))

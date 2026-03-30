@@ -148,7 +148,7 @@ let proactive_fallback_reply ~(meta : keeper_meta) ~(idle_seconds : int) : strin
     |]
   in
   let idx =
-    abs (Hashtbl.hash (meta.name, meta.proactive.count_total, idle_seconds))
+    abs (Hashtbl.hash (meta.name, meta.runtime.proactive_rt.count_total, idle_seconds))
     mod Array.length templates
   in
   templates.(idx)

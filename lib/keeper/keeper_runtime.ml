@@ -19,11 +19,28 @@ let ensure_keeper_meta config name =
       | Some v -> v
       | None -> Keeper_config.default_proactive_enabled
     in
-    if meta.proactive.enabled <> target_proactive then begin
-      Log.Keeper.info "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b for %s"
-        meta.proactive.enabled target_proactive meta.name;
+    let target_tool_tier =
+      Option.value ~default:"essential" defaults.tool_tier
+    in
+    let target_extra_masc_tools =
+      Option.value ~default:[] defaults.extra_masc_tools
+    in
+    let needs_update =
+      meta.proactive.enabled <> target_proactive
+      || meta.tool_tier <> target_tool_tier
+      || meta.extra_masc_tools <> target_extra_masc_tools
+    in
+    if needs_update then begin
+      if meta.proactive.enabled <> target_proactive then
+        Log.Keeper.info "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b for %s"
+          meta.proactive.enabled target_proactive meta.name;
+      if meta.tool_tier <> target_tool_tier then
+        Log.Keeper.info "ensure_keeper_meta: re-syncing tool_tier %s -> %s for %s"
+          meta.tool_tier target_tool_tier meta.name;
       let updated = { meta with
         proactive = { meta.proactive with enabled = target_proactive };
+        tool_tier = target_tool_tier;
+        extra_masc_tools = target_extra_masc_tools;
         updated_at = now_iso ();
       } in
       match write_meta config updated with

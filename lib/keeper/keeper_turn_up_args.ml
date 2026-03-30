@@ -38,6 +38,8 @@ type parsed_args = {
   will_opt : string option;
   needs_opt : string option;
   desires_opt : string option;
+  tool_tier_opt : string option;
+  extra_masc_tools_in : string list;
   profile_defaults : keeper_profile_defaults;
   instructions_opt : string option;
 }
@@ -125,6 +127,8 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let will_opt = parse_self_model_opt args "will" in
     let needs_opt = parse_self_model_opt args "needs" in
     let desires_opt = parse_self_model_opt args "desires" in
+    let tool_tier_opt = get_string_opt args "tool_tier" in
+    let extra_masc_tools_in = get_string_list args "extra_masc_tools" in
     Ok {
       name;
       soul_profile_opt;
@@ -156,6 +160,8 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       will_opt;
       needs_opt;
       desires_opt;
+      tool_tier_opt;
+      extra_masc_tools_in;
       profile_defaults;
       instructions_opt;
     }

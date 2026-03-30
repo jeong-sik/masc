@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.176.0] - 2026-03-30
+
+### Added
+- **CDAL risk contract bridge** — canonicalize risk contract composition with typed bridge module (#3927).
+- **Keeper decision logs** — decision logging and tool audit fallback (#3937).
+
+### Changed
+- **Chain config removal** — Chain module removed, fields relocated (#3935, #3936, #3938).
+- **Copilot review followup** — defensive guards from recent PR reviews (#3940).
+
 ## [2.174.0] - 2026-03-30
 
 ### Added

@@ -1,7 +1,15 @@
 # masc-mcp Roadmap
 
-> Current package version: v2.175.0
-> Latest release: v2.174.0 (2026-03-30)
+<<<<<<< HEAD
+> Current package version: v2.176.0
+> Latest release: v2.176.0 (2026-03-30)
+||||||| parent of e452ff3e6 (chore(release): bump version to 2.176.0)
+> Current package version: v2.176.0
+> Latest release: v2.176.0 (2026-03-30)
+=======
+> Current package version: v2.176.0
+> Latest release: v2.176.0 (2026-03-30)
+>>>>>>> e452ff3e6 (chore(release): bump version to 2.176.0)
 > Updated: 2026-03-30
 
 This roadmap is the 6-8 week operating view for `masc-mcp`.

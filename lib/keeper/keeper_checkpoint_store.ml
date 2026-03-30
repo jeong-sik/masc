@@ -128,6 +128,139 @@ let load_latest ~(session_dir : string) : Keeper_working_context.checkpoint opti
 let oas_checkpoint_path ~(session_dir : string) ~(session_id : string) =
   Filename.concat session_dir (session_id ^ ".json")
 
+(* ================================================================ *)
+(* Delta Checkpoint Integration                                      *)
+(* ================================================================ *)
+
+(** Track delta chain length for a session.
+    Returns (chain_length, last_full_checkpoint_id option) *)
+let get_delta_chain_info ~(session_dir : string) : (int * string option) =
+  match list_checkpoints ~session_dir with
+  | [] -> (0, None)
+  | latest :: rest ->
+    (* Walk backwards counting deltas until we hit a full checkpoint *)
+    let rec count_deltas acc checkpoint_files =
+      match checkpoint_files with
+      | [] -> (acc, None)
+      | filename :: remaining ->
+        let checkpoint_id =
+          let prefix_len = String.length checkpoint_prefix in
+          let suffix_len = String.length checkpoint_suffix in
+          let total_len = String.length filename in
+          String.sub filename prefix_len (total_len - prefix_len - suffix_len)
+        in
+        (* Try to load as delta checkpoint *)
+        (match Keeper_checkpoint_delta.load_delta ~session_dir ~checkpoint_id with
+         | None ->
+           (* Not a delta - must be full checkpoint *)
+           (acc, Some checkpoint_id)
+         | Some delta ->
+           match delta.base_checkpoint_id with
+           | None -> (acc, Some checkpoint_id)  (* Delta with no base = treat as full *)
+           | Some _ -> count_deltas (acc + 1) remaining)
+    in
+    count_deltas 0 (latest :: rest)
+
+(** Save checkpoint, using delta format if enabled and appropriate. *)
+let save_with_delta_support
+    ~(session_dir : string)
+    ~(prev_ckpt : Keeper_working_context.checkpoint option)
+    ~(ctx : Keeper_working_context.working_context)
+    ~(generation : int) : Keeper_working_context.checkpoint =
+  let delta_enabled = Env_config_keeper.DeltaCheckpoint.enabled in
+
+  if not delta_enabled then
+    (* Delta disabled - save as full checkpoint *)
+    let ckpt = Keeper_working_context.create_checkpoint ctx ~generation in
+    save ~session_dir ckpt;
+    ckpt
+  else
+    (* Delta enabled - check if we should use delta *)
+    let (chain_length, _last_full_id) = get_delta_chain_info ~session_dir in
+    let max_chain = Env_config_keeper.DeltaCheckpoint.max_chain_length in
+
+    let should_use_delta =
+      Keeper_checkpoint_delta.should_use_delta
+        ~prev_ckpt
+        ~current_messages:ctx.messages
+        ~delta_chain_length:chain_length
+    in
+
+    if should_use_delta && chain_length < max_chain then
+      (match prev_ckpt with
+       | None ->
+         (* No previous checkpoint - save as full *)
+         let ckpt = Keeper_working_context.create_checkpoint ctx ~generation in
+         save ~session_dir ckpt;
+         ckpt
+       | Some base_ckpt ->
+         (* Save as delta checkpoint *)
+         let checkpoint_id = Keeper_working_context.generate_checkpoint_id () in
+         let delta =
+           Keeper_checkpoint_delta.create_delta_checkpoint
+             ~checkpoint_id
+             ~base_ckpt
+             ~ctx
+             ~generation
+         in
+         Keeper_checkpoint_delta.save_delta ~session_dir delta;
+
+         (* Also create a regular checkpoint structure for compatibility *)
+         {
+           Keeper_working_context.checkpoint_id;
+           timestamp = delta.timestamp;
+           generation = delta.generation;
+           message_count = delta.total_message_count;
+           token_count = delta.total_token_count;
+           serialized = Keeper_working_context.serialize_context ctx;
+         })
+    else
+      (* Chain too long or other conditions - save as full checkpoint *)
+      let ckpt = Keeper_working_context.create_checkpoint ctx ~generation in
+      save ~session_dir ckpt;
+      ckpt
+
+(** Load latest checkpoint, reconstructing from delta chain if needed. *)
+let load_latest_with_delta_support
+    ~(session_dir : string)
+    ~(max_tokens : int) : Keeper_working_context.working_context option =
+  let delta_enabled = Env_config_keeper.DeltaCheckpoint.enabled in
+
+  match list_checkpoints ~session_dir with
+  | [] -> None
+  | latest_filename :: _ ->
+    let checkpoint_id =
+      let prefix_len = String.length checkpoint_prefix in
+      let suffix_len = String.length checkpoint_suffix in
+      let total_len = String.length latest_filename in
+      String.sub latest_filename prefix_len (total_len - prefix_len - suffix_len)
+    in
+
+    if not delta_enabled then
+      (* Delta disabled - load as full checkpoint *)
+      (match load_latest ~session_dir with
+       | None -> None
+       | Some ckpt ->
+         Some (Keeper_working_context.restore_checkpoint ckpt ~max_tokens))
+    else
+      (* Delta enabled - try to load as delta chain *)
+      (match Keeper_checkpoint_delta.discover_delta_chain
+               ~session_dir ~latest_checkpoint_id:checkpoint_id with
+       | None ->
+         (* Not a delta chain - load as full checkpoint *)
+         (match load_latest ~session_dir with
+          | None -> None
+          | Some ckpt ->
+            Some (Keeper_working_context.restore_checkpoint ckpt ~max_tokens))
+       | Some chain ->
+         (* Reconstruct from delta chain *)
+         let stats = Keeper_checkpoint_delta.compute_chain_stats chain in
+         Log.Keeper.info "Loading checkpoint from delta chain: %s" stats;
+         Keeper_checkpoint_delta.reconstruct_from_deltas
+           ~base:chain.base
+           ~deltas:chain.deltas
+           ~max_tokens)
+
 let save_oas_error (detail : string) =
   Sys_error (Printf.sprintf "save_oas: %s" detail)
 

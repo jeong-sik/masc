@@ -132,6 +132,16 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active; since = "2.50.0" };
 
+  { env_name = "MASC_KEEPER_DELTA_CHECKPOINT_ENABLED";
+    description = "Enable delta-based checkpoint storage to reduce I/O overhead";
+    default = false; category = "keeper";
+    lifecycle = Experimental; since = "2.170.0" };
+
+  { env_name = "MASC_KEEPER_LAZY_MESSAGE_LOADING";
+    description = "Load checkpoint messages lazily instead of all at once";
+    default = false; category = "keeper";
+    lifecycle = Experimental; since = "2.170.0" };
+
   (* ── Dashboard & Governance ───────────────────────────────── *)
   { env_name = "MASC_DASHBOARD_FIXTURES_ENABLED";
     description = "Load dashboard fixture data for testing";

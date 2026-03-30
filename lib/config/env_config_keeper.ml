@@ -183,6 +183,28 @@ module KeeperRuntime = struct
 
 end
 
+(** {1 Delta Checkpoint Configuration} *)
+
+module DeltaCheckpoint = struct
+  (** Enable delta-based checkpoint storage. Default: false (experimental). *)
+  let enabled =
+    get_bool ~default:false "MASC_KEEPER_DELTA_CHECKPOINT_ENABLED"
+
+  (** Enable lazy message loading from checkpoints. Default: false (experimental). *)
+  let lazy_loading =
+    get_bool ~default:false "MASC_KEEPER_LAZY_MESSAGE_LOADING"
+
+  (** Maximum delta chain length before forcing full checkpoint. Default: 5.
+      Range: [2, 20]. Prevents unbounded delta chains. *)
+  let max_chain_length =
+    max 2 (min 20 (get_int ~default:5 "MASC_KEEPER_DELTA_MAX_CHAIN_LENGTH"))
+
+  (** Minimum messages in checkpoint before enabling delta mode. Default: 3.
+      Range: [1, 20]. Small checkpoints don't benefit from delta. *)
+  let min_messages_for_delta =
+    max 1 (min 20 (get_int ~default:3 "MASC_KEEPER_DELTA_MIN_MESSAGES"))
+end
+
 (** {1 Alert Dedup Configuration} *)
 
 module AlertDedup = struct

@@ -64,9 +64,12 @@ export function registerMissionRefresh(fn: () => void): void {
   _refreshMissionFn = fn
 }
 
-let _refreshActivityFn: (() => void) | null = null
-export function registerActivityRefresh(fn: () => void): void {
-  _refreshActivityFn = fn
+const _refreshActivityFns = new Set<() => void>()
+export function registerActivityRefresh(fn: () => void): () => void {
+  _refreshActivityFns.add(fn)
+  return () => {
+    _refreshActivityFns.delete(fn)
+  }
 }
 
 // --- Debounced scheduling ---
@@ -136,7 +139,9 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
   board:     refreshBoard,
   mdal:      refreshMdal,
   operator:  () => _refreshOperatorFn?.(),
-  activity:  () => _refreshActivityFn?.(),
+  activity:  () => {
+    for (const fn of _refreshActivityFns) fn()
+  },
 }
 
 // --- Named handlers for complex events ---

@@ -189,10 +189,45 @@ export interface ActivityGraphStats {
   [key: string]: number
 }
 
+export interface ActivityGraphHeatmap {
+  matrix: number[][]
+  max: number
+  total: number
+}
+
+export interface ActivityGraphKindCounts {
+  [kind: string]: number
+}
+
+export type ActivityCategory =
+  | 'task'
+  | 'session'
+  | 'message'
+  | 'board'
+  | 'governance'
+  | 'lifecycle'
+  | 'other'
+
+export interface ActionTimelineGroup {
+  id: string
+  category: ActivityCategory
+  actor: string
+  subjectId: string | null
+  title: string
+  summary: string
+  latestTs: string
+  latestTsMs: number
+  rawCount: number
+  kinds: string[]
+  rawEvents: ActivityGraphTimelineEvent[]
+}
+
 export interface ActivityGraphResponse {
   nodes: ActivityGraphNode[]
   edges: ActivityGraphEdge[]
   stats: ActivityGraphStats
+  kind_counts: ActivityGraphKindCounts
+  heatmap: ActivityGraphHeatmap
   timeline: ActivityGraphTimelineEvent[]
   generated_at: string
   window: { limit: number; room_id: string | null; kinds: string[] }

@@ -102,6 +102,8 @@ let test_compact_summarize_old () =
 let test_summarize_old_masks_tool_results_but_preserves_pairing () =
   let tool_id = "call-123" in
   let msgs = [
+    msg Agent_sdk.Types.User "Start by checking the project layout.";
+    msg Agent_sdk.Types.Assistant "The project has lib/ and test/ directories.";
     msg Agent_sdk.Types.User "Find all reducer references in lib/.";
     tool_use_msg ~id:tool_id ~name:"grep_search" ();
     tool_msg ~id:tool_id "3 matches in lib/\nlib/context_compact_oas.ml\nlib/tool_compact.ml";

@@ -14,9 +14,9 @@ type config = {
 }
 
 let default_config = {
-  port = 8935;
-  host = "127.0.0.1";
-  max_connections = 128;
+  port = Env_config_core.masc_http_port_int ();
+  host = Env_config_core.get_string ~default:"127.0.0.1" "MASC_HTTP_HOST";
+  max_connections = Env_config_core.get_int ~default:128 "MASC_HTTP_MAX_CONNECTIONS";
 }
 
 (** HTTP request handler type *)

@@ -82,7 +82,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
   const baseLimit = maxItems ?? 8
   const limit = baseLimit + expandedItems.value
   const totalAvailable = entries.value.length
-  const raw = entries.value.slice(-limit).reverse()
+  const raw = entries.value.slice(0, limit)
 
   if (raw.length === 0) {
     return html`

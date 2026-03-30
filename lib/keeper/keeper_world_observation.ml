@@ -343,11 +343,14 @@ let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observati
   if has_external_event then
     true
   else
-    (* Zero-heuristic scheduling: periodic turns use cooldown only.
-       Idle/goal/task scoring stays in the raw world state and is left to the model. *)
     let since_last_proactive =
       if meta.runtime.proactive_rt.last_ts <= 0.0 then max_int
       else int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
     in
-    meta.proactive.enabled
-    && since_last_proactive >= meta.proactive.cooldown_sec
+    let cooldown_elapsed = since_last_proactive >= meta.proactive.cooldown_sec in
+    let has_actionable_tasks =
+      observation.unclaimed_task_count > 0 || observation.failed_task_count > 0
+    in
+    (* Proactive turn: periodic cooldown OR actionable tasks in backlog.
+       Both paths require cooldown to have elapsed to prevent spin-loops. *)
+    cooldown_elapsed && (meta.proactive.enabled || has_actionable_tasks)

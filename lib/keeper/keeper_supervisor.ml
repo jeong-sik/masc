@@ -32,6 +32,16 @@ let should_cleanup_dead ~now ~dead_ttl_sec
       now -. dead_since >= dead_ttl_sec
   | _ -> false
 
+(** Check if a paused keeper meta file on disk is stale enough to remove. *)
+let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
+  if not meta.paused then false
+  else
+    let updated_ts =
+      Resilience.Time.parse_iso8601_opt meta.updated_at
+      |> Option.value ~default:0.0
+    in
+    updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec
+
 (* ── Event publishing ────────────────────────────────────── *)
 
 let publish_lifecycle event_name keeper_name detail =
@@ -338,5 +348,23 @@ let sweep_and_recover (ctx : _ context) =
           old_entry.name;
         Keeper_registry.unregister ~base_path old_entry.name
   ) restart_list;
-  (* Phase 2: reconcile LAST — only orphaned durable keepers *)
+  (* Phase 2: prune stale paused keeper meta files from disk *)
+  let paused_ttl_sec = Env_config.KeeperSupervisor.paused_cleanup_ttl_sec in
+  Keeper_types.keeper_names ctx.config
+  |> List.iter (fun name ->
+         if Keeper_registry.is_running ~base_path name then ()
+         else
+           match read_meta ctx.config name with
+           | Ok (Some meta) when is_stale_paused_meta ~now ~paused_ttl_sec meta ->
+               let path = Keeper_types.keeper_meta_path ctx.config name in
+               (try
+                  Sys.remove path;
+                  publish_lifecycle "paused_pruned" name
+                    (Printf.sprintf "stale %.0fs" (now -. (Resilience.Time.parse_iso8601_opt meta.updated_at |> Option.value ~default:0.0)));
+                  Log.Keeper.info "%s: stale paused meta pruned" name
+                with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                  Log.Keeper.warn "%s: paused meta prune failed: %s"
+                    name (Printexc.to_string exn))
+           | _ -> ());
+  (* Phase 3: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ctx

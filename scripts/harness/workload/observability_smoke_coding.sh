@@ -5,12 +5,11 @@
 #
 # Prerequisites:
 #   - MASC server built: dune build --root . bin/main_eio.exe
-#   - jq, curl available
+#   - jq, curl, python3 available
 #
 # Environment variables:
 #   PORT                 - server port (auto-assigned if empty)
 #   BASE_PATH            - room base path (temp dir if empty)
-#   LLAMA_SWARM_MODEL    - model name for llama worker (auto-detected if single)
 #   MCP_URL              - override MCP endpoint (auto-derived from PORT)
 #   SERVER_EXE           - path to compiled server executable
 #   SKIP_SERVER_START    - set to 1 to use an existing server
@@ -40,7 +39,6 @@ SKIP_SERVER_START="${SKIP_SERVER_START:-0}"
 HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-120}"
 HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-30}"
 STOP_WAIT_SEC="${STOP_WAIT_SEC:-60}"
-LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
 MCP_SESSION_ID="obs-smoke-coding"
 AGENT_NAME="obs-smoke-coding"
 TEAM_GOAL="Observability smoke: verify tool preview redaction and length limits"
@@ -60,6 +58,11 @@ fi
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "curl is required"
+  exit 1
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required"
   exit 1
 fi
 
@@ -84,24 +87,18 @@ assert_no_api_key() {
 
 assert_max_length() {
   local text="$1" max="${2:-200}"
-  local len=${#text}
+  local len
+  len="$(TEXT_FOR_LEN="$text" python3 - <<'PY'
+import os
+print(len(os.environ["TEXT_FOR_LEN"]))
+PY
+)"
   if [ "$len" -gt "$max" ]; then
     echo "FAIL: length $len exceeds max $max"
     FAIL_COUNT=$((FAIL_COUNT + 1))
     return 1
   fi
   echo "OK: length $len within limit $max"
-  PASS_COUNT=$((PASS_COUNT + 1))
-}
-
-assert_not_null() {
-  local field_name="$1" value="$2"
-  if [ -z "$value" ] || [ "$value" = "null" ]; then
-    echo "FAIL: $field_name is null or empty"
-    FAIL_COUNT=$((FAIL_COUNT + 1))
-    return 1
-  fi
-  echo "OK: $field_name = $value"
   PASS_COUNT=$((PASS_COUNT + 1))
 }
 
@@ -211,22 +208,6 @@ if [ -z "$agent_nickname" ]; then
   exit 1
 fi
 
-# detect llama model
-llama_models_raw="$(call_tool 3 "masc_llama_models" '{}')"
-require_tool_success "$llama_models_raw"
-llama_models_result="$(printf '%s' "$llama_models_raw" | extract_tool_result)"
-
-if [ -z "$LLAMA_SWARM_MODEL" ]; then
-  single_model="$(printf '%s\n' "$llama_models_result" | jq -r 'if (.models | length) == 1 then .models[0] else "" end')"
-  if [ -n "$single_model" ]; then
-    LLAMA_SWARM_MODEL="$single_model"
-    printf '  auto-selected: %s\n' "$LLAMA_SWARM_MODEL"
-  else
-    echo "SKIP: LLAMA_SWARM_MODEL not set and multiple models available"
-    exit 0
-  fi
-fi
-
 # ── step 3: start coding session with worker ──
 
 printf '[3/5] start coding team session with worker\n'
@@ -245,7 +226,7 @@ if [ -z "$TEAM_SESSION_ID" ]; then
 fi
 
 # Spawn a coding worker that will exercise tool calls
-MODEL_SELECTION_NOTE="[model-selection] obs-coding selected $LLAMA_SWARM_MODEL"
+MODEL_SELECTION_NOTE="[routing-note] obs-coding canonical team-session spawn via worker_class/worker_size"
 spawn_raw="$(call_tool 5 "masc_team_session_step" "$(jq -cn \
   --arg s "$TEAM_SESSION_ID" \
   --arg note "$MODEL_SELECTION_NOTE" \
@@ -313,7 +294,8 @@ if [ -n "$tool_output_previews" ]; then
 fi
 
 if [ "$preview_found" -eq 0 ]; then
-  echo "WARN: no tool preview fields found in proof data (worker may not have used tools)"
+  echo "FAIL: no tool preview fields found in proof data"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
 fi
 
 # Also check output_preview fields (worker run level)
@@ -349,7 +331,6 @@ fi
 
 printf '\n[summary]\n'
 printf '  session_id: %s\n' "$TEAM_SESSION_ID"
-printf '  llama_model: %s\n' "$LLAMA_SWARM_MODEL"
 printf '  base_path: %s\n' "$BASE_PATH"
 printf '  log_file: %s\n' "$LOG_FILE"
 printf '  previews_checked: %d\n' "$preview_found"

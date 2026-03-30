@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # observability_smoke_swarm.sh
 #
-# Verify provider_label diversity across multiple keepers with different cascade profiles.
+# Verify cascade/model diversity across multiple keepers with different cascade profiles.
 #
 # Prerequisites:
 #   - MASC server built: dune build --root . bin/main_eio.exe
-#   - jq, curl available
+#   - jq, curl, python3 available
 #
 # Environment variables:
 #   PORT                 - server port (auto-assigned if empty)
@@ -22,7 +22,7 @@
 #   1. Start 2 keepers with different cascade profiles
 #   2. Send a message to each keeper
 #   3. Query operator snapshot for keeper rows
-#   4. Assert: at least 1 distinct provider_label/active_model among keepers
+#   4. Assert: distinct cascade_name values and visible model/cascade evidence across keepers
 #
 # Exit codes:
 #   0 - PASS (or graceful skip if server unavailable)
@@ -65,6 +65,11 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required"
+  exit 1
+fi
+
 if [ "$SKIP_SERVER_START" != "1" ] && [ ! -x "$SERVER_EXE" ]; then
   echo "SKIP: server executable not found: $SERVER_EXE"
   echo "build it first with: dune build --root . bin/main_eio.exe"
@@ -81,17 +86,6 @@ assert_no_api_key() {
     return 1
   fi
   echo "OK: no API key patterns found"
-  PASS_COUNT=$((PASS_COUNT + 1))
-}
-
-assert_not_null() {
-  local field_name="$1" value="$2"
-  if [ -z "$value" ] || [ "$value" = "null" ]; then
-    echo "FAIL: $field_name is null or empty"
-    FAIL_COUNT=$((FAIL_COUNT + 1))
-    return 1
-  fi
-  echo "OK: $field_name = $value"
   PASS_COUNT=$((PASS_COUNT + 1))
 }
 
@@ -279,7 +273,7 @@ fi
 
 HTTP_TIMEOUT_SEC="$ORIG_HTTP_TIMEOUT_SEC"
 
-# ── step 5: query operator snapshot and verify provider diversity ──
+# ── step 5: query operator snapshot and verify diversity ──
 
 printf '[5/5] query operator snapshot for keeper rows\n'
 snapshot_raw="$(call_operator_tool 30 "masc_operator_snapshot" "$(jq -cn --arg actor "$agent_nickname" '{actor:$actor,view:"full"}')")"
@@ -304,8 +298,11 @@ cascade_count="$(printf '%s' "$keeper_rows" | jq '[.[].cascade_name // empty] | 
 
 printf '  cascade names: %s\n' "$(echo "$cascade_names" | tr '\n' ', ')"
 
-# Assert: at least 1 distinct cascade_name (2 if both are different, which they should be)
-assert_gte "distinct_cascade_names" "$cascade_count" 1
+if [ "$KEEPER_A_CASCADE" != "$KEEPER_B_CASCADE" ]; then
+  assert_gte "distinct_cascade_names" "$cascade_count" 2
+else
+  assert_gte "distinct_cascade_names" "$cascade_count" 1
+fi
 
 # Extract active_model / last_model_used diversity
 model_labels="$(printf '%s' "$keeper_rows" | jq -r '

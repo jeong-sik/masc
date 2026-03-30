@@ -429,6 +429,42 @@ let test_risk_payload_beats_contract_risk () =
   Alcotest.(check string) "payload risk beats contract risk"
     "critical" (Gp.risk_level_to_string risk)
 
+let test_risk_payload_beats_low_override () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_keeper_tool_catalog"
+      ~input:(`Assoc [ ("note", `String "rm -rf /tmp/demo") ])
+  in
+  Alcotest.(check string) "payload risk beats low override"
+    "critical" (Gp.risk_level_to_string risk)
+
+let test_risk_contract_beats_low_override () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_keeper_tool_catalog"
+      ~input:
+        (`Assoc
+          [
+            ( "delivery_contract",
+              `Assoc
+                [
+                  ("contract_id", `String "contract-risk-006");
+                  ("summary", `String "critical contract");
+                  ( "required_artifacts",
+                    `List
+                      [
+                        `String "a";
+                        `String "b";
+                        `String "c";
+                        `String "d";
+                        `String "e";
+                      ] );
+                  ("repair_budget", `Int 0);
+                ] );
+            ("tool_names", `List [ `String "keeper_bash" ]);
+          ])
+  in
+  Alcotest.(check string) "contract risk beats low override"
+    "critical" (Gp.risk_level_to_string risk)
+
 (* ── Governance Level Decision Tests ────────────────────────── *)
 
 let test_development_allows_all () =
@@ -773,6 +809,10 @@ let () =
         test_risk_contract_risk_does_not_downgrade_heuristic;
       Alcotest.test_case "payload beats contract risk" `Quick
         test_risk_payload_beats_contract_risk;
+      Alcotest.test_case "payload beats low override" `Quick
+        test_risk_payload_beats_low_override;
+      Alcotest.test_case "contract beats low override" `Quick
+        test_risk_contract_beats_low_override;
       Alcotest.test_case "case insensitive" `Quick test_case_insensitive_matching;
     ];
     "governance_levels", [

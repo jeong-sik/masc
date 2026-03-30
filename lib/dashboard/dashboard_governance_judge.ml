@@ -158,8 +158,8 @@ let fresh_judgments_json ~base_path ~limit =
     | Some iso ->
       (match Dashboard_utils.parse_iso_opt (Some iso) with
        | Some ts -> ts > now
-       | None -> false)
-    | None -> false)
+       | None -> true)
+    | None -> true)
   |> List.sort (fun a b ->
     Float.compare (judgment_generated_at b) (judgment_generated_at a))
   |> List.filteri (fun i _ -> i < limit)

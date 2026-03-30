@@ -2,6 +2,16 @@
 
 module Tool_catalog = Masc_mcp.Tool_catalog
 
+let with_env key value f =
+  let old = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some prev -> Unix.putenv key prev
+      | None -> Unix.putenv key "")
+    f
+
 let () =
   let open Alcotest in
   run "Tool_tier"
@@ -166,5 +176,27 @@ let () =
                 (List.assoc_opt "visibility" fields = None);
               check bool "lifecycle omitted" true
                 (List.assoc_opt "lifecycle" fields = None));
+        ] );
+      ( "placeholder_tools_enabled",
+        [
+          test_case "blank value falls back to enabled default" `Quick (fun () ->
+              with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" "" (fun () ->
+                  check bool "blank defaults to enabled" true
+                    (Tool_catalog.placeholder_tools_enabled ())));
+          test_case "parses falsey variants" `Quick (fun () ->
+              List.iter
+                (fun raw ->
+                  with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" raw (fun () ->
+                      check bool raw false
+                        (Tool_catalog.placeholder_tools_enabled ())))
+                [ "false"; "FALSE"; " false "; "0"; "no"; "NO" ]);
+          test_case "parses truthy and invalid variants as enabled" `Quick
+            (fun () ->
+              List.iter
+                (fun raw ->
+                  with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" raw (fun () ->
+                      check bool raw true
+                        (Tool_catalog.placeholder_tools_enabled ())))
+                [ "true"; "TRUE"; " true "; "1"; "yes"; "YES"; "bogus" ]);
         ] );
     ]

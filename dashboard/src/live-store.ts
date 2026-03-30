@@ -157,6 +157,7 @@ export function eventKindLabel(entry: JournalEntry): string {
   if (type === 'task_update') return 'task'
   if (type === 'board_post') return 'post'
   if (type === 'board_comment') return 'comment'
+  if (type === 'board_delete') return 'deleted'
   if (type === 'keeper_heartbeat') return 'heartbeat'
   if (type === 'keeper_handoff') return 'handoff'
   if (type === 'keeper_compaction') return 'compact'

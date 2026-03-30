@@ -117,6 +117,8 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   'masc/board_post':    { target: 'board' },
   board_comment:        { target: 'board' },
   'masc/board_comment': { target: 'board' },
+  board_delete:         { target: 'board' },
+  'masc/board_delete':  { target: 'board' },
   // MDAL
   mdal_started:    { target: 'mdal', debounceMs: SSE_MDAL_DEBOUNCE_MS },
   mdal_iteration:  { target: 'mdal', debounceMs: SSE_MDAL_DEBOUNCE_MS },

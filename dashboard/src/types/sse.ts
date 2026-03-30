@@ -97,6 +97,7 @@ export type JournalEventType =
   | 'task_update'
   | 'board_post'
   | 'board_comment'
+  | 'board_delete'
   | 'keeper_heartbeat'
   | 'keeper_handoff'
   | 'keeper_compaction'

@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.181.0] - 2026-03-31
+
+### Changed
+- **Capability registry SSOT** — remove Agent_tool_surfaces indirection, use Tool_catalog directly (#4030).
+
+### Added
+- **Observability smoke harness** — 3 live smoke scripts for supervisor/coding/swarm observability verification (#4031).
+- **Governance semantic risk signals** — risk classification uses semantic signals (#4011).
+- **Tool gating** — keeper allowlist/denylist tool gating + dashboard API (#4003).
+
 ## [2.180.0] - 2026-03-30
 
 ### Added

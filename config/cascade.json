@@ -17,7 +17,7 @@
   "keeper_autonomy_models": ["llama:auto", "glm:auto"],
   "keeper_proactive_models": ["llama:auto", "glm:auto"],
   "keeper_deliberation_models": ["llama:auto", "glm:auto"],
-  "keeper_reply_models": ["llama:auto", "glm:auto"],
+  "keeper_reply_models": ["glm:auto", "llama:auto"],
   "keeper_social_models": ["llama:auto", "glm:auto"],
   "keeper_turn_models": ["llama:auto", "glm:auto"],
   "routing_judge_models": ["llama:auto", "glm:auto"],

@@ -138,11 +138,18 @@ let test_keeper_direct_reply_contracts () =
   check bool "operator keeper_message forwards direct reply flag" true
     (file_contains_pattern "lib/operator/operator_control.ml"
        {|("direct_reply", `Bool true)|});
-  (* auto_team_session interception removed in #2908; direct_reply
-     is parsed but unused until a replacement path is wired. *)
   check bool "keeper turn parses direct reply flag" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
-       "get_bool args \"direct_reply\"")
+       "get_bool args \"direct_reply\"");
+  check bool "keeper turn promotes direct replies to reply cascade" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       {|let turn_cascade_name = if direct_reply then "keeper_reply" else "keeper_turn"|});
+  check bool "keeper turn suppresses skill route headers for direct reply" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       "let effective_no_skill_route = no_skill_route || direct_reply");
+  check bool "keeper turn applies direct reply persona prompt" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       "Keeper_prompt.append_direct_reply_mode_prompt")
 
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true

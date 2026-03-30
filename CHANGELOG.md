@@ -1,6 +1,20 @@
 # Changelog
 
 
+## [2.172.0] - 2026-03-30
+
+### Fixed
+- **Dashboard UX overhaul** — CSS cascade conflict 해결 (4개 중복 CSS 파일 제거, -489줄), progressive disclosure로 정보 과잉 축소, 10개 섹션 용어 설명 강화 (#3912).
+- **Council placeholder stubs** — silent no-op 대신 explicit error 반환 (#3914).
+
+### Added
+- **Board bulk delete** — 게시글 다중 선택 삭제, kind 배지 전체 표시, "내부" 태그 → "내부(에이전트 전용)" (#3912).
+- **Keeper cache_system_prompt** — provider prefix cache metrics surface (P1-1b) (#3895).
+
+### Changed
+- **Mitosis runtime removal** — 통합 handoff surface로 단일화 (#3883).
+- **OAS opam floor** — agent_sdk 0.97.0으로 동기화 (#3910).
+
 ## [2.171.0] - 2026-03-30
 
 ### Added

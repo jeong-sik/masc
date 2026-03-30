@@ -155,6 +155,11 @@ let keeper_list_row_json ~runtime_class config name =
             ("proactive_enabled", `Bool meta.proactive.enabled);
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
+            ("social_model", `String meta.social_model);
+            ( "last_speech_act",
+              if String.trim meta.runtime.last_speech_act = ""
+              then `Null
+              else `String meta.runtime.last_speech_act );
             ("skill_route", keeper_list_skill_route_json config meta);
             ("cascade_name", `String meta.cascade_name);
             ("created_at", `String meta.created_at);

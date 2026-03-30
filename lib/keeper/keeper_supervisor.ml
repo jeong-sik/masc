@@ -247,7 +247,7 @@ let cohort_key_of_reason = function
 
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count. *)
-let apply_self_preservation ~total_keepers to_restart =
+let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
   let sp_ratio = Env_config.KeeperSupervisor.self_preservation_ratio in
   let sp_min = Env_config.KeeperSupervisor.self_preservation_min_candidates in
   let n_candidates = List.length to_restart in
@@ -275,6 +275,13 @@ let apply_self_preservation ~total_keepers to_restart =
       publish_lifecycle "self_preservation" "supervisor"
         (Printf.sprintf "%d/%d suppressed, cohort=%s"
            (List.length dominant_entries) n_total dominant_key);
+      Keeper_crash_persistence.enqueue_sp_event
+        ~keepers_dir
+        ~ts:(Time_compat.now ())
+        ~suppressed_count:(List.length dominant_entries)
+        ~total:n_total
+        ~ratio
+        ~dominant_cohort:dominant_key;
       let dominant_set =
         List.map (fun ((e : Keeper_registry.registry_entry), _) -> e.name)
           dominant_entries in
@@ -342,7 +349,9 @@ let sweep_and_recover (ctx : _ context) =
       e.state = Keeper_registry.Running || e.state = Keeper_registry.Crashed
     ) entries) in
   let restart_list =
-    apply_self_preservation ~total_keepers:active_count !to_restart in
+    let keepers_dir =
+      Filename.concat (Room.masc_root_dir ctx.config) "keepers" in
+    apply_self_preservation ~keepers_dir ~total_keepers:active_count !to_restart in
   (* Restart crashed keepers *)
   List.iter (fun ((old_entry : Keeper_registry.registry_entry), crash_msg) ->
     match read_meta ctx.config old_entry.name with

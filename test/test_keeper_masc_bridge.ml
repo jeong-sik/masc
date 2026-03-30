@@ -36,15 +36,19 @@ let test_inject_stores_all_masc () =
   Alcotest.(check bool) "no keeper_time_now" false
     (List.mem "keeper_time_now" names)
 
-(** Default: empty allowlist = no masc_* tools (deny-by-default). *)
-let test_default_locked () =
+(** Default: empty allowlist = unrestricted masc_* exposure. *)
+let test_default_unrestricted () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "empty allowlist = 0 masc tools" 0 (List.length names)
+  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
+  Alcotest.(check bool) "has masc_governance_status" true
+    (List.mem "masc_governance_status" names);
+  Alcotest.(check bool) "has masc_autoresearch_cycle" true
+    (List.mem "masc_autoresearch_cycle" names)
 
-(** Default: allowed_tool_names also blocks shard-sourced masc_* tools. *)
-let test_default_blocks_shard_masc () =
+(** Default: allowed_tool_names also exposes shard-sourced masc_* tools. *)
+let test_default_exposes_shard_masc () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let meta = make_meta () in
   let names = KET.keeper_allowed_tool_names meta in
@@ -53,11 +57,11 @@ let test_default_blocks_shard_masc () =
     (List.mem "keeper_time_now" names);
   Alcotest.(check bool) "has keeper_board_post" true
     (List.mem "keeper_board_post" names);
-  (* masc_* should be blocked *)
-  Alcotest.(check bool) "no masc_status" false (List.mem "masc_status" names);
-  Alcotest.(check bool) "no masc_governance_status" false
+  (* masc_* should also be available when no allowlist restriction is set *)
+  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
+  Alcotest.(check bool) "has masc_governance_status" true
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "no masc_autoresearch_cycle" false
+  Alcotest.(check bool) "has masc_autoresearch_cycle" true
     (List.mem "masc_autoresearch_cycle" names)
 
 (** Allowlist opens specific tools. *)
@@ -83,6 +87,19 @@ let test_deny_overrides_allow () =
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "no masc_broadcast (denied)" false
     (List.mem "masc_broadcast" names)
+
+(** Denylist also restricts the unrestricted empty-allowlist path. *)
+let test_denylist_restricts_unrestricted_default () =
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  let meta = make_meta
+    ~tool_denylist:["masc_status"; "masc_governance_status"] () in
+  let names = KET.keeper_allowed_tool_names meta in
+  Alcotest.(check bool) "no masc_status (denied)" false
+    (List.mem "masc_status" names);
+  Alcotest.(check bool) "no masc_governance_status (denied)" false
+    (List.mem "masc_governance_status" names);
+  Alcotest.(check bool) "other masc tools remain" true
+    (List.mem "masc_autoresearch_cycle" names)
 
 (** Allowlist also gates shard-sourced masc_* in allowed_tool_names. *)
 let test_allowlist_gates_shard_tools () =
@@ -128,12 +145,12 @@ let () =
           Alcotest.test_case "stores all masc_* schemas" `Quick
             test_inject_stores_all_masc;
         ] );
-      ( "deny_by_default",
+      ( "unrestricted_by_default",
         [
-          Alcotest.test_case "empty allowlist = no masc tools" `Quick
-            test_default_locked;
-          Alcotest.test_case "blocks shard-sourced masc_*" `Quick
-            test_default_blocks_shard_masc;
+          Alcotest.test_case "empty allowlist exposes masc tools" `Quick
+            test_default_unrestricted;
+          Alcotest.test_case "exposes shard-sourced masc_*" `Quick
+            test_default_exposes_shard_masc;
         ] );
       ( "allowlist",
         [
@@ -146,6 +163,8 @@ let () =
         [
           Alcotest.test_case "deny overrides allow" `Quick
             test_deny_overrides_allow;
+          Alcotest.test_case "deny restricts unrestricted default" `Quick
+            test_denylist_restricts_unrestricted_default;
         ] );
       ( "dispatch",
         [

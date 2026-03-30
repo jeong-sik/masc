@@ -208,6 +208,19 @@ let handle_keeper_list ctx args : tool_result =
                 if String.trim m.runtime.proactive_rt.last_preview = ""
                 then `Null
                 else `String m.runtime.proactive_rt.last_preview);
+              ("social_model", `String m.social_model);
+              ("last_speech_act",
+                if String.trim m.runtime.last_speech_act = ""
+                then `Null
+                else `String m.runtime.last_speech_act);
+              ("last_blocker",
+                if String.trim m.runtime.last_blocker = ""
+                then `Null
+                else `String m.runtime.last_blocker);
+              ("last_need",
+                if String.trim m.runtime.last_need = ""
+                then `Null
+                else `String m.runtime.last_need);
               ("continuity_summary",
                 if String.trim m.continuity_summary = ""
                 then `Null

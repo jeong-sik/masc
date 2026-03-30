@@ -27,7 +27,7 @@ let make_meta
     ("trace_id", `String "safety-test-trace");
     ("policy_voice_enabled", `Bool policy_voice_enabled);
     ("soul_profile", `String soul_profile);
-    ("tool_allowlist", `List (List.map (fun name -> `String name) tool_allowlist));
+    ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
   ] in
   match Keeper_types.meta_of_json json with
   | Ok meta -> meta
@@ -209,15 +209,11 @@ let test_voice_disabled () =
   check bool "keeper_voice_agent still available" true (List.mem "keeper_voice_agent" tools)
 
 let test_all_keepers_have_research_tools () =
-  let meta =
-    make_meta ~soul_profile:"default"
-      ~tool_allowlist:
-        [ "masc_autoresearch_cycle";
-          "masc_autoresearch_status";
-          "masc_autoresearch_inject";
-          "masc_autoresearch_stop" ]
-      ()
-  in
+  (* #4003: masc_* tools are deny-by-default; allowlist must include them *)
+  let research_allowlist =
+    ["masc_research_start"; "masc_research_status";
+     "masc_autoresearch_cycle"; "masc_autoresearch_status"] in
+  let meta = make_meta ~soul_profile:"default" ~tool_allowlist:research_allowlist () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_any_research = List.exists (fun t ->
     String.length t > 5 &&

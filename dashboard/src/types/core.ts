@@ -72,6 +72,7 @@ export interface BoardPost {
 export interface BoardComment {
   id: string
   post_id: string
+  parent_id?: string | null
   author: string
   content: string
   created_at: string
@@ -534,6 +535,8 @@ export interface KeeperConfigMetrics {
 export interface KeeperConfig {
   name: string
   execution_scope: string
+  allowed_paths: string[]
+  effective_allowed_paths: string[]
   prompt: KeeperConfigPrompt
   execution: KeeperConfigExecution
   compaction: KeeperConfigCompaction

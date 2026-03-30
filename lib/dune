@@ -395,6 +395,7 @@
    eval_calibration
    ;; Keeper contract
    keeper_schema
+   keeper_social_model
    keeper_config
    keeper_toml_loader
    keeper_contract

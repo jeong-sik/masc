@@ -376,15 +376,18 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ("reconcile_active_agents", fun () -> reconcile_active_agents_gauge state);
           ( "recover_running_team_sessions",
             fun () ->
-              match state.Mcp_server.proc_mgr with
-              | None ->
+              match state.Mcp_server.proc_mgr, state.Mcp_server.net with
+              | None, _ ->
                   Log.Server.warn
                     "skipping team session recovery: process_mgr not available"
-              | Some process_mgr ->
+              | Some _process_mgr, None ->
+                  Log.Server.warn
+                    "skipping team session recovery: net not available"
+              | Some process_mgr, Some net ->
                   let env = object
                     method clock = clock
                     method process_mgr = process_mgr
-                    method net = match state.Mcp_server.net with Some n -> n | None -> failwith "net not available"
+                    method net = net
                   end in
                   Team_session_engine_eio.recover_running_sessions ~sw ~env
                     ~config:state.Mcp_server.room_config );

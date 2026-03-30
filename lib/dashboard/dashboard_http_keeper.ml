@@ -10,6 +10,43 @@ open Keeper_status_bridge
 
 include Dashboard_http_keeper_detail
 
+(** Compute keeper health score (0-100). Pure function.
+    Inputs: restart_count, max_restarts, recent_crash_count,
+            is_dead, context_ratio (0.0-1.0). *)
+let compute_health_score
+    ~restart_count ~max_restarts ~recent_crash_count
+    ~is_dead ~context_ratio =
+  if is_dead then 0
+  else
+    let budget_penalty =
+      if max_restarts <= 0 then 0.0
+      else
+        let ratio = float_of_int restart_count /. float_of_int max_restarts in
+        Float.min 1.0 ratio *. 40.0
+    in
+    let crash_penalty =
+      Float.min 30.0 (float_of_int recent_crash_count *. 10.0)
+    in
+    let context_penalty =
+      if context_ratio > 0.9 then 20.0
+      else if context_ratio > 0.8 then 10.0
+      else 0.0
+    in
+    let raw = 100.0 -. budget_penalty -. crash_penalty -. context_penalty in
+    Int.max 0 (Int.min 100 (Float.to_int raw))
+
+(** Estimate seconds until Dead based on current restart_count and
+    exponential backoff schedule. Returns None if already dead or
+    restart_count >= max_restarts. *)
+let estimate_dead_eta_sec ~restart_count ~max_restarts =
+  if max_restarts <= 0 || restart_count >= max_restarts then None
+  else
+    let total = ref 0.0 in
+    for i = restart_count to max_restarts - 1 do
+      total := !total +. Keeper_supervisor.backoff_delay i
+    done;
+    Some !total
+
 let prompt_block_json key =
   let resolved = Prompt_registry.resolve_prompt key in
   `Assoc
@@ -261,6 +298,20 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 let combined_log = match disk_crashes with
                   | [] -> crash_log
                   | _ -> disk_crashes in
+                let sp_events =
+                  (try Keeper_crash_persistence.recent_sp_events
+                    ~keepers_dir ~max_entries:20
+                  with _ -> []) in
+                let ctx_ratio =
+                  match last_metrics with
+                  | Some m -> Safe_ops.json_float "context_ratio" m
+                  | None -> 0.0 in
+                let health_score = compute_health_score
+                  ~restart_count:entry.restart_count
+                  ~max_restarts
+                  ~recent_crash_count:(List.length combined_log)
+                  ~is_dead:(Option.is_some entry.dead_since_ts)
+                  ~context_ratio:ctx_ratio in
                 `Assoc [
                   ("restart_count", `Int entry.restart_count);
                   ("max_restarts", `Int max_restarts);
@@ -273,6 +324,13 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                     match entry.dead_since_ts with
                     | Some ts -> `Float ts
                     | None -> `Null);
+                  ("sp_events", `List sp_events);
+                  ("health_score", `Int health_score);
+                  ("dead_eta_sec",
+                    match estimate_dead_eta_sec
+                      ~restart_count:entry.restart_count ~max_restarts with
+                    | Some eta -> `Float eta
+                    | None -> `Null);
                 ]
             | None ->
                 `Assoc [
@@ -281,6 +339,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ("crash_log", `List []);
                   ("last_failure_reason", `Null);
                   ("dead_since", `Null);
+                  ("sp_events", `List []);
+                  ("health_score", `Int 100);
+                  ("dead_eta_sec", `Null);
                 ]
           in
 
@@ -464,6 +525,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
+              ("social_model", `String m.social_model);
               ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
               ("autonomous_tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
@@ -476,6 +538,18 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 if String.trim m.runtime.proactive_rt.last_reason = ""
                 then `Null
                 else `String m.runtime.proactive_rt.last_reason);
+              ("last_speech_act",
+                if String.trim m.runtime.last_speech_act = ""
+                then `Null
+                else `String m.runtime.last_speech_act);
+              ("last_blocker",
+                if String.trim m.runtime.last_blocker = ""
+                then `Null
+                else `String m.runtime.last_blocker);
+              ("last_need",
+                if String.trim m.runtime.last_need = ""
+                then `Null
+                else `String m.runtime.last_need);
 	              ("last_proactive_preview",
 	                if String.trim m.runtime.proactive_rt.last_preview = ""
 	                then `Null
@@ -692,6 +766,11 @@ let keeper_config_json (config : Room.config) (name : string)
        `Assoc [
          ("name", `String m.name);
          ("execution_scope", `String m.execution_scope);
+         ("allowed_paths",
+           `List (List.map (fun s -> `String s) m.allowed_paths));
+         ("effective_allowed_paths",
+           `List (List.map (fun s -> `String s)
+             (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
          ("pipeline_stage", `String pipeline_stage);
          ("prompt", prompt);
          ("execution", execution);

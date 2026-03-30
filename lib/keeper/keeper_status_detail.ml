@@ -498,6 +498,21 @@ let handle_keeper_status ctx args : tool_result =
              ("noop_turn_count", `Int m.runtime.noop_turn_count);
              ("tool_action_count", `Int m.runtime.autonomous_action_count);
            ]);
+           ("social", `Assoc [
+             ("model", `String m.social_model);
+             ("last_speech_act",
+               if String.trim m.runtime.last_speech_act = ""
+               then `Null
+               else `String m.runtime.last_speech_act);
+             ("last_blocker",
+               if String.trim m.runtime.last_blocker = ""
+               then `Null
+               else `String m.runtime.last_blocker);
+             ("last_need",
+               if String.trim m.runtime.last_need = ""
+               then `Null
+               else `String m.runtime.last_need);
+           ]);
            ("active_team_session_id",
              match m.active_team_session_id with
              | Some session_id -> `String session_id

@@ -74,6 +74,9 @@ type agent_runtime_state = {
   board_reactive_turn_count: int;
   mention_reactive_turn_count: int;
   noop_turn_count: int;
+  last_speech_act: string;
+  last_blocker: string;
+  last_need: string;
 }
 
 (** {1 Keeper meta} *)
@@ -86,6 +89,7 @@ type keeper_meta = {
   mid_goal: string;
   long_goal: string;
   soul_profile: string;
+  social_model: string;
   cascade_name: string;
   will: string;
   needs: string;
@@ -121,6 +125,8 @@ type keeper_meta = {
   (** Currently claimed task ID for cost attribution. *)
   runtime: agent_runtime_state;
 }
+
+val default_social_model : string
 
 val now_iso : unit -> string
 

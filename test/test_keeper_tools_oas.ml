@@ -4,12 +4,19 @@ open Agent_sdk
 open Alcotest
 open Masc_mcp
 
+let autoresearch_allowlist =
+  ["masc_autoresearch_start"; "masc_autoresearch_cycle";
+   "masc_autoresearch_status"; "masc_autoresearch_stop";
+   "masc_autoresearch_inject"; "masc_autoresearch_record_finding";
+   "masc_autoresearch_search_findings";
+   "masc_research_start"; "masc_research_status"]
+
 let make_test_meta ?(name = "test-keeper") ?(tool_allowlist = []) () : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String name); ("agent_name", `String name);
              ("trace_id", `String "test-trace-001");
              ("allowed_paths", `List [`String "*"]);
-             ("tool_allowlist", `List (List.map (fun name -> `String name) tool_allowlist))]) with
+             ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist))]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 
@@ -236,13 +243,14 @@ let test_failure_tracking_is_independent_per_args () =
             (is_guardrail_message message)
       | Ok _ -> fail "guardrail should block original failing args")
 
-let make_research_meta ?(tool_allowlist = []) () : Keeper_types.keeper_meta =
+let make_research_meta ?(tool_allowlist = autoresearch_allowlist) ()
+    : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String "test-researcher");
              ("agent_name", `String "test-researcher");
              ("trace_id", `String "test-trace-research");
              ("soul_profile", `String "research");
-             ("tool_allowlist", `List (List.map (fun name -> `String name) tool_allowlist))]) with
+             ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist))]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_research_meta failed: %s" e)
 
@@ -264,13 +272,8 @@ let test_research_keeper_has_autoresearch_tools () =
   check bool "has status" true has_status
 
 let test_non_research_keeper_has_autoresearch () =
-  let meta =
-    make_test_meta
-      ~tool_allowlist:
-        [ "masc_autoresearch_cycle";
-          "masc_autoresearch_status" ]
-      ()
-  in
+  (* #4003: masc_* deny-by-default; non-research keeper needs allowlist *)
+  let meta = make_test_meta ~tool_allowlist:autoresearch_allowlist () in
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_any = List.exists (fun n ->
     String.length n > 18

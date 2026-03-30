@@ -9,6 +9,7 @@
 open Keeper_types
 open Keeper_memory [@@warning "-33"]
 open Keeper_exec_context [@@warning "-33"]
+module Social = Keeper_social_model
 
 let string_contains_substring ~(needle : string) (haystack : string) : bool =
   let needle_len = String.length needle in
@@ -94,6 +95,7 @@ let append_decision_record
     ~(latency_ms : int)
     ~(outcome : string)
     ~(selected_mode : string)
+    ?social_state
     ?(result : Keeper_agent_run.run_result option = None)
     ?error
     () : unit =
@@ -117,6 +119,27 @@ let append_decision_record
     | None -> 0
   in
   let claim_executed = List.mem "keeper_task_claim" tools_used in
+  let social_fields =
+    match social_state with
+    | None -> []
+    | Some state ->
+        let option_field key = function
+          | Some value -> (key, `String value)
+          | None -> (key, `Null)
+        in
+        [
+          ("social_model", `String state.Social.social_model);
+          ("belief_summary", `String state.belief_summary);
+          option_field "active_desire" state.active_desire;
+          option_field "current_intention" state.current_intention;
+          option_field "blocker" state.blocker;
+          option_field "need" state.need;
+          ("speech_act", `String (Social.speech_act_to_string state.speech_act));
+          ( "delivery_surface",
+            `String
+              (Social.delivery_surface_to_string state.delivery_surface) );
+        ]
+  in
   let suffix_seed =
     match response_preview, error with
     | Some preview, _ -> preview
@@ -125,7 +148,7 @@ let append_decision_record
   in
   let json =
     `Assoc
-      [
+      ([
         ("id", `String (decision_id ~meta ~ts:now_ts ~suffix_seed));
         ("ts", `String (now_iso ()));
         ("ts_unix", `Float now_ts);
@@ -183,6 +206,7 @@ let append_decision_record
                 ]
           | _ -> `Null );
       ]
+      @ social_fields)
   in
   try append_jsonl_line (keeper_decision_log_path config meta.name) json
   with
@@ -195,6 +219,7 @@ let append_decision_record
     No action_taken type — we observe what the agent did, not classify it. *)
 let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
+    ?social_state
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let used_model_id =
@@ -225,6 +250,21 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let is_board_reactive = observation.pending_board_events <> [] in
   let is_mention_reactive = observation.pending_mentions <> [] in
   let rt = meta.runtime in
+  let social_state : Social.social_state =
+    Option.value social_state
+      ~default:
+        Social.
+          {
+            social_model = meta.social_model;
+            belief_summary = "not_recorded";
+            active_desire = None;
+            current_intention = None;
+            blocker = None;
+            need = None;
+            speech_act = Social.Inform;
+            delivery_surface = Social.Visible_reply;
+          }
+  in
   {
     meta with
     updated_at = now_iso ();
@@ -281,6 +321,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         + (if is_autonomous_turn && not has_text && not has_tool_calls then 1 else 0);
       last_autonomous_action_at =
         (if has_tool_calls then now_iso () else rt.last_autonomous_action_at);
+      last_speech_act = Social.speech_act_to_string social_state.speech_act;
+      last_blocker = Option.value ~default:"" social_state.blocker;
+      last_need = Option.value ~default:"" social_state.need;
     };
   }
 
@@ -365,7 +408,7 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
   Dated_jsonl.append metrics_store snapshot
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
-    ~(reason : string) : keeper_meta =
+    ~(reason : string) ?social_state () : keeper_meta =
   let now_ts = Time_compat.now () in
   let preview =
     let trimmed = String.trim reason in
@@ -385,6 +428,21 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         last_reason = "unified:error:" ^ String.trim reason;
         last_preview = preview;
       };
+      last_speech_act =
+        (match social_state with
+         | Some (state : Social.social_state) ->
+             Social.speech_act_to_string state.speech_act
+         | None -> meta.runtime.last_speech_act);
+      last_blocker =
+        (match social_state with
+         | Some (state : Social.social_state) ->
+             Option.value ~default:"" state.blocker
+         | None -> short_preview reason);
+      last_need =
+        (match social_state with
+         | Some (state : Social.social_state) ->
+             Option.value ~default:"" state.need
+         | None -> meta.runtime.last_need);
     };
   }
 
@@ -443,11 +501,16 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       in
       match run_result with
       | Error e ->
+          let social_state =
+            Social.derive_failure_state ~meta ~observation ~reason:e
+          in
           let updated_meta =
             update_metrics_from_failure meta ~latency_ms ~reason:e
+              ~social_state ()
           in
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~outcome:"error" ~selected_mode:"error"
+            ~social_state
             ~error:e ();
           (match write_meta config updated_meta with
            | Ok () -> ()
@@ -476,6 +539,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           end;
           Error e
       | Ok result ->
+          let result, social_state =
+            Social.apply_to_result ~config ~meta ~observation result
+          in
           let used_model_id =
             let strip_latest s =
               if
@@ -521,7 +587,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           (* 6. Observe result and update metrics *)
           let updated_meta =
             update_metrics_from_result rollover.updated_meta ~latency_ms
-              ~observation result
+              ~observation ~social_state result
           in
           (try
              append_metrics_snapshot ~config ~meta:updated_meta ~observation
@@ -540,6 +606,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~outcome:"success"
             ~selected_mode:(selected_mode_of_result result)
+            ~social_state
             ~result:(Some result) ();
           (* 7. Persist updated meta *)
           (match write_meta config updated_meta with

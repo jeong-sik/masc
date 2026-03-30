@@ -602,6 +602,7 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
 export type KeeperConfigUpdatePayload = {
   // Scope
   execution_scope?: 'observe_only' | 'workspace' | 'local'
+  allowed_paths?: string[]
   // Prompt fields
   goal?: string
   short_goal?: string

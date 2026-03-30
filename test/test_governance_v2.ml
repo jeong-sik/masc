@@ -137,6 +137,135 @@ let test_different_action_payload_creates_new_case () =
   check bool "different case id" true (first.case_.id <> second.case_.id);
   check int "two cases" 2 (List.length (GV2.list_cases ~include_test:true base_path))
 
+(* ── Canonical action normalization tests ──────────────── *)
+
+(** "clear_param" and "reset_param" should merge to the same case
+    because clear→reset and param→parameter via canonical synonyms. *)
+let test_synonym_action_merge () =
+  with_base @@ fun () ->
+  let make_action action_type =
+    Some { GV2.action_type; target_type = Some "runtime_param";
+           target_id = Some "db_timeout";
+           payload = Some (`Assoc [("param_key", `String "db_timeout")]) }
+  in
+  let first =
+    match submit ~title:"Clear db_timeout to default"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "clear_param")
+      ~source_refs:[] ~created_by:"agent-a"
+    with Ok v -> v | Error e -> fail e
+  in
+  let second =
+    match submit ~title:"Reset db_timeout"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "reset_param")
+      ~source_refs:[] ~created_by:"agent-b"
+    with Ok v -> v | Error e -> fail e
+  in
+  check bool "synonym actions merge" true second.merged;
+  check string "same case id" first.case_.id second.case_.id
+
+(** "set_param" and "update_param" should merge. *)
+let test_set_update_synonym_merge () =
+  with_base @@ fun () ->
+  let make_action action_type =
+    Some { GV2.action_type; target_type = Some "runtime_param";
+           target_id = Some "max_conn";
+           payload = Some (`Assoc [("param_key", `String "max_conn"); ("value", `Int 100)]) }
+  in
+  let first =
+    match submit ~title:"Set max_conn to 100"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "set_param")
+      ~source_refs:[] ~created_by:"agent-a"
+    with Ok v -> v | Error e -> fail e
+  in
+  let second =
+    match submit ~title:"Update max_conn to 100"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "update_param")
+      ~source_refs:[] ~created_by:"agent-b"
+    with Ok v -> v | Error e -> fail e
+  in
+  check bool "set/update synonym merge" true second.merged;
+  check string "same case id" first.case_.id second.case_.id
+
+(** Truly different actions should NOT merge even with synonyms. *)
+let test_different_canonical_actions_no_merge () =
+  with_base @@ fun () ->
+  let make_action action_type =
+    Some { GV2.action_type; target_type = Some "runtime_param";
+           target_id = Some "db_timeout";
+           payload = Some (`Assoc [("param_key", `String "db_timeout")]) }
+  in
+  let first =
+    match submit ~title:"Set db_timeout"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "set_param")
+      ~source_refs:[] ~created_by:"agent-a"
+    with Ok v -> v | Error e -> fail e
+  in
+  let second =
+    match submit ~title:"Delete db_timeout"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "delete_param")
+      ~source_refs:[] ~created_by:"agent-b"
+    with Ok v -> v | Error e -> fail e
+  in
+  check bool "different canonical actions do not merge" false second.merged;
+  check bool "different case ids" true (first.case_.id <> second.case_.id)
+
+(** "clear_param" and "revert_param" should NOT merge because
+    clear→reset and revert→revert are now distinct canonical groups. *)
+let test_clear_vs_revert_no_merge () =
+  with_base @@ fun () ->
+  let make_action action_type =
+    Some { GV2.action_type; target_type = Some "runtime_param";
+           target_id = Some "db_timeout";
+           payload = Some (`Assoc [("param_key", `String "db_timeout")]) }
+  in
+  let first =
+    match submit ~title:"Clear db_timeout"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "clear_param")
+      ~source_refs:[] ~created_by:"agent-a"
+    with Ok v -> v | Error e -> fail e
+  in
+  let second =
+    match submit ~title:"Revert db_timeout"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "revert_param")
+      ~source_refs:[] ~created_by:"agent-b"
+    with Ok v -> v | Error e -> fail e
+  in
+  check bool "clear vs revert do not merge" false second.merged;
+  check bool "different case ids" true (first.case_.id <> second.case_.id)
+
+(** Different target_type values must produce separate cases. *)
+let test_different_target_type_no_merge () =
+  with_base @@ fun () ->
+  let make_action target_type =
+    Some { GV2.action_type = "set_param"; target_type = Some target_type;
+           target_id = Some "max_conn";
+           payload = Some (`Assoc [("param_key", `String "max_conn"); ("value", `Int 100)]) }
+  in
+  let first =
+    match submit ~title:"Set max_conn"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "runtime_param")
+      ~source_refs:[] ~created_by:"agent-a"
+    with Ok v -> v | Error e -> fail e
+  in
+  let second =
+    match submit ~title:"Set max_conn"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "system_param")
+      ~source_refs:[] ~created_by:"agent-b"
+    with Ok v -> v | Error e -> fail e
+  in
+  check bool "different target_type do not merge" false second.merged;
+  check bool "different case ids" true (first.case_.id <> second.case_.id)
+
 let () =
   run "governance_v2"
     [
@@ -148,5 +277,18 @@ let () =
             test_semantic_title_merge_without_action;
           test_case "different action payload creates new case" `Quick
             test_different_action_payload_creates_new_case;
+        ] );
+      ( "canonical_normalization",
+        [
+          test_case "clear/reset synonym merge" `Quick
+            test_synonym_action_merge;
+          test_case "set/update synonym merge" `Quick
+            test_set_update_synonym_merge;
+          test_case "set vs delete no merge" `Quick
+            test_different_canonical_actions_no_merge;
+          test_case "clear vs revert no merge" `Quick
+            test_clear_vs_revert_no_merge;
+          test_case "different target_type no merge" `Quick
+            test_different_target_type_no_merge;
         ] );
     ]

@@ -104,23 +104,44 @@ let semantic_stopwords =
     "the";
     "this";
     "that";
+    "to";
     "via";
     "with";
   ]
 
+(** Canonical action verb and noun synonyms for case dedup.
+    Groups equivalent terms to a single canonical form so
+    "Clear X to default" and "Reset X" produce the same key. *)
 let canonical_semantic_token token =
   match token with
   | "" -> None
+  (* Infrastructure nouns *)
   | "db" | "database" | "postgres" | "postgresql" -> Some "database"
   | "connection" | "connections" | "connect" -> Some "connection"
   | "timeout" | "timeouts" | "deadline" | "wait" -> Some "timeout"
   | "service" | "services" | "server" -> Some "service"
-  | "restart" | "reboot" | "reload" -> Some "restart"
-  | "increase" | "raise" | "extend" | "bump" -> Some "increase"
-  | "decrease" | "reduce" | "lower" -> Some "decrease"
-  | "param" | "parameter" | "setting" -> Some "parameter"
+  | "param" | "parameter" | "setting" | "config" | "configuration" -> Some "parameter"
   | "second" | "seconds" | "sec" | "secs" -> Some "seconds"
   | "minute" | "minutes" | "min" | "mins" -> Some "minutes"
+  | "value" | "values" | "val" -> Some "value"
+  | "default" | "defaults" | "original" | "initial" -> Some "default"
+  | "limit" | "limits" | "cap" | "ceiling" | "maximum" | "max" -> Some "limit"
+  | "threshold" | "thresholds" -> Some "threshold"
+  (* Action verbs — mutative *)
+  | "set" | "update" | "change" | "modify" | "alter" | "adjust" -> Some "set"
+  | "clear" | "reset" -> Some "reset"
+  | "restore" | "revert" | "rollback" | "undo" -> Some "revert"
+  | "create" | "add" | "new" | "insert" -> Some "create"
+  | "delete" | "remove" | "drop" | "destroy" | "purge" -> Some "delete"
+  | "restart" | "reboot" | "reload" -> Some "restart"
+  | "enable" | "activate" | "turn_on" -> Some "enable"
+  | "disable" | "deactivate" | "turn_off" -> Some "disable"
+  | "increase" | "raise" | "extend" | "bump" | "scale_up" -> Some "increase"
+  | "decrease" | "reduce" | "lower" | "scale_down" | "shrink" -> Some "decrease"
+  (* Action verbs — read/review *)
+  | "review" | "audit" | "inspect" | "check" | "verify" -> Some "review"
+  | "approve" | "accept" | "allow" | "permit" -> Some "approve"
+  | "deny" | "reject" | "block" | "refuse" -> Some "deny"
   | other when List.mem other semantic_stopwords -> None
   | other -> Some other
 
@@ -142,6 +163,19 @@ let rec normalize_json_semantics (json : Yojson.Safe.t) : Yojson.Safe.t =
   | `String value -> `String (normalize_text value)
   | (`Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) as value -> value
 
+(** Canonicalize a compound action string like "set_param" or "clear-param".
+    Splits on underscores/hyphens/spaces, maps each token, and rejoins. *)
+let canonicalize_action_str s =
+  s
+  |> normalize_text
+  |> String.to_seq
+  |> Seq.map (fun ch ->
+       match ch with 'a'..'z' | '0'..'9' -> ch | _ -> ' ')
+  |> String.of_seq
+  |> String.split_on_char ' '
+  |> List.filter_map canonical_semantic_token
+  |> String.concat "_"
+
 let semantic_action_key = function
   | None -> None
   | Some (request : action_request) ->
@@ -157,7 +191,7 @@ let semantic_action_key = function
       Some
         (String.concat "::"
            [
-             normalize_text request.action_type;
+             canonicalize_action_str request.action_type;
              normalize_text (Option.value ~default:"none" request.target_type);
              normalize_text (Option.value ~default:"none" request.target_id);
              payload_key;

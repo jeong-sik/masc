@@ -370,6 +370,28 @@ let handle_keeper_status ctx args : tool_result =
           keeper_model_tools |> List.map (fun tool -> tool.Types.name)
         in
         let allowed_tools = keeper_allowed_tool_names m in
+        let tool_audit_snapshot =
+          match latest_tool_audit_snapshot_from_files ctx.config ~keeper_name:m.name with
+          | Some snapshot -> snapshot
+          | None ->
+              let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
+              let has_runtime_activity =
+                last_autonomous <> ""
+                || m.runtime.autonomous_turn_count > 0
+                || m.runtime.autonomous_action_count > 0
+              in
+              {
+                empty_tool_audit_snapshot with
+                latest_tool_call_count =
+                  (if has_runtime_activity then Some 0 else None);
+                tool_audit_source =
+                  (if has_runtime_activity then Some "keeper_runtime_meta" else None);
+                tool_audit_at =
+                  (if last_autonomous <> "" then Some last_autonomous
+                   else if has_runtime_activity then Some m.updated_at
+                   else None);
+              }
+        in
         let blocked_internal_tools =
           all_internal_tools
           |> List.filter (fun name -> not (List.mem name allowed_tools))
@@ -408,6 +430,21 @@ let handle_keeper_status ctx args : tool_result =
            ("trace_history_count", `Int trace_history_count);
            ("handoff_count_total", `Int trace_history_count);
            ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
+           ("allowed_tool_names", string_list_to_json allowed_tools);
+           ("latest_tool_names",
+             string_list_to_json tool_audit_snapshot.latest_tool_names);
+           ("latest_tool_call_count",
+             match tool_audit_snapshot.latest_tool_call_count with
+             | Some value -> `Int value
+             | None -> `Null);
+           ("tool_audit_source",
+             match tool_audit_snapshot.tool_audit_source with
+             | Some value -> `String value
+             | None -> `Null);
+           ("tool_audit_at",
+             match tool_audit_snapshot.tool_audit_at with
+             | Some value -> `String value
+             | None -> `Null);
            ("lifecycle", `Assoc [
              ("created_at", `String m.created_at);
              ("updated_at", `String m.updated_at);
@@ -499,6 +536,7 @@ let handle_keeper_status ctx args : tool_result =
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
              ("metrics_single_file", `String metrics_path);
              ("memory_bank", `String memory_bank_path);
+             ("decisions", `String (keeper_decision_log_path ctx.config m.name));
              ("policy", `String (keeper_policy_log_path ctx.config m.name));
              ("feedback", `String (keeper_feedback_log_path ctx.config m.name));
              ("dataset_export", `String (keeper_dataset_export_path ctx.config m.name));

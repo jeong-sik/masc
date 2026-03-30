@@ -95,6 +95,10 @@ let () =
             .test_keeper_config_exposes_live_runtime_and_sources;
           Alcotest.test_case "snapshot keeper tool audit fallback" `Quick
             Test_operator_control_keeper.test_snapshot_keeper_tool_audit_fallback;
+          Alcotest.test_case "snapshot keeper tool audit uses decision log"
+            `Quick
+            Test_operator_control_keeper
+            .test_snapshot_keeper_tool_audit_uses_decision_log;
           Alcotest.test_case "keeper msg auto team session bridge" `Quick
             Test_operator_control_keeper.test_keeper_msg_auto_team_session_bridge;
           Alcotest.test_case "operator keeper_message rejects legacy models"

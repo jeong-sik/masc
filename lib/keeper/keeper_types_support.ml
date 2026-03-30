@@ -60,6 +60,9 @@ let keeper_history_path config trace_id =
 let keeper_policy_log_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".policy.jsonl")
 
+let keeper_decision_log_path config name =
+  Filename.concat (keeper_dir_ config) (name ^ ".decisions.jsonl")
+
 let keeper_feedback_log_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".feedback.jsonl")
 

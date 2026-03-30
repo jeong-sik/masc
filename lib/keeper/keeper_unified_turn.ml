@@ -10,6 +10,187 @@ open Keeper_types
 open Keeper_memory [@@warning "-33"]
 open Keeper_exec_context [@@warning "-33"]
 
+let string_contains_substring ~(needle : string) (haystack : string) : bool =
+  let needle_len = String.length needle in
+  let hay_len = String.length haystack in
+  if needle_len = 0 then true
+  else if needle_len > hay_len then false
+  else
+    let rec loop i =
+      if i + needle_len > hay_len then false
+      else if String.sub haystack i needle_len = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
+  string_contains_substring
+    ~needle:(String.lowercase_ascii needle)
+    (String.lowercase_ascii haystack)
+
+let decision_channel_of_observation
+    (observation : Keeper_world_observation.world_observation) : string =
+  if observation.pending_mentions <> [] || observation.pending_board_events <> [] then
+    "turn"
+  else
+    "proactive"
+
+let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
+  let text = String.trim result.response_text in
+  if result.tools_used <> [] then "tool_use"
+  else if text = "" then "noop"
+  else if String.starts_with ~prefix:"SKIP:" text then "skip_text"
+  else "text_response"
+
+let observed_triggers_of_observation
+    (observation : Keeper_world_observation.world_observation) : string list =
+  let triggers = ref [] in
+  let add trigger = triggers := trigger :: !triggers in
+  if observation.pending_mentions <> [] then add "direct_mention";
+  if observation.pending_board_events <> [] then add "board_activity";
+  if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
+  if observation.failed_task_count > 0 then add "failed_task";
+  if observation.active_goals <> [] && observation.idle_seconds > 0 then
+    add "idle_timeout_candidate";
+  if Option.is_some observation.worktree_change_summary then add "worktree_change";
+  List.rev !triggers
+
+let observed_affordances_of_observation
+    (observation : Keeper_world_observation.world_observation) : string list =
+  let affordances = ref [] in
+  let add affordance = affordances := affordance :: !affordances in
+  if observation.pending_mentions <> [] then add "reply_in_room";
+  if observation.pending_board_events <> [] then add "board_post_or_comment";
+  if observation.unclaimed_task_count > 0 then add "task_claim";
+  if observation.failed_task_count > 0 then add "task_audit";
+  if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
+  List.rev !affordances
+
+let response_requests_confirmation (text : string) : bool =
+  let trimmed = String.trim text in
+  trimmed <> ""
+  && (String.contains trimmed '?'
+      || string_contains_substring_ci ~needle:"would you like" trimmed
+      || string_contains_substring_ci ~needle:"do you want" trimmed
+      || string_contains_substring_ci ~needle:"let me know" trimmed
+      || string_contains_substring_ci ~needle:"어떻게 할까" trimmed
+      || string_contains_substring_ci ~needle:"할까" trimmed)
+
+let decision_id ~(meta : keeper_meta) ~(ts : float) ~(suffix_seed : string) : string =
+  let digest =
+    Digest.to_hex
+      (Digest.string
+         (Printf.sprintf "%s|%s|%.6f|%s"
+            meta.name meta.runtime.trace_id ts suffix_seed))
+  in
+  Printf.sprintf "dec-%Ld-%s"
+    (Int64.of_float (ts *. 1000.0))
+    (String.sub digest 0 8)
+
+let append_decision_record
+    ~(config : Room.config)
+    ~(meta : keeper_meta)
+    ~(observation : Keeper_world_observation.world_observation)
+    ~(latency_ms : int)
+    ~(outcome : string)
+    ~(selected_mode : string)
+    ?(result : Keeper_agent_run.run_result option = None)
+    ?error
+    () : unit =
+  let now_ts = Time_compat.now () in
+  let trigger_signals = observed_triggers_of_observation observation in
+  let affordances = observed_affordances_of_observation observation in
+  let tools_used =
+    match result with
+    | Some r -> r.tools_used
+    | None -> []
+  in
+  let response_preview =
+    match result with
+    | Some r when String.trim r.response_text <> "" ->
+        Some (short_preview r.response_text)
+    | _ -> None
+  in
+  let tool_call_count =
+    match result with
+    | Some r -> r.tool_calls_made
+    | None -> 0
+  in
+  let claim_executed = List.mem "keeper_task_claim" tools_used in
+  let suffix_seed =
+    match response_preview, error with
+    | Some preview, _ -> preview
+    | None, Some err -> err
+    | None, None -> selected_mode
+  in
+  let json =
+    `Assoc
+      [
+        ("id", `String (decision_id ~meta ~ts:now_ts ~suffix_seed));
+        ("ts", `String (now_iso ()));
+        ("ts_unix", `Float now_ts);
+        ("audience", `String "internal_human_only");
+        ("trace_id", `String meta.runtime.trace_id);
+        ("generation", `Int meta.runtime.generation);
+        ("keeper_name", `String meta.name);
+        ("agent_name", `String meta.agent_name);
+        ("channel", `String (decision_channel_of_observation observation));
+        ("outcome", `String outcome);
+        ("selected_mode", `String selected_mode);
+        ("selected_mode_source", `String "observed_result");
+        ("latency_ms", `Int latency_ms);
+        ("trigger_signals", `List (List.map (fun s -> `String s) trigger_signals));
+        ("observed_affordances", `List (List.map (fun s -> `String s) affordances));
+        ( "observation",
+          `Assoc
+            [
+              ("pending_mentions", `Int (List.length observation.pending_mentions));
+              ("pending_board_events", `Int (List.length observation.pending_board_events));
+              ("active_goals", `Int (List.length observation.active_goals));
+              ("idle_seconds", `Int observation.idle_seconds);
+              ("context_ratio", `Float observation.context_ratio);
+              ("unclaimed_task_count", `Int observation.unclaimed_task_count);
+              ("failed_task_count", `Int observation.failed_task_count);
+              ("active_agent_count", `Int observation.active_agent_count);
+              ("worktree_change_detected", `Bool (Option.is_some observation.worktree_change_summary));
+            ] );
+        ("tool_call_count", `Int tool_call_count);
+        ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+        ("claim_was_available", `Bool (observation.unclaimed_task_count > 0));
+        ("claim_executed", `Bool claim_executed);
+        ( "response_preview",
+          match response_preview with
+          | Some preview -> `String preview
+          | None -> `Null );
+        ( "response_requests_confirmation",
+          `Bool
+            (match result with
+             | Some r -> response_requests_confirmation r.response_text
+             | None -> false) );
+        ( "error",
+          match error with
+          | Some reason -> `String reason
+          | None -> `Null );
+        ( "cdal_proof",
+          match result with
+          | Some { proof = Some p; _ } ->
+              `Assoc
+                [
+                  ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
+                  ( "result_status",
+                    Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status );
+                  ("tool_trace_count", `Int (List.length p.tool_trace_refs));
+                ]
+          | _ -> `Null );
+      ]
+  in
+  try append_jsonl_line (keeper_decision_log_path config meta.name) json
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Keeper.warn "append decision record failed for %s: %s"
+        meta.name (Printexc.to_string exn)
+
 (** Observe tool call history from run_result to update keeper metrics.
     No action_taken type — we observe what the agent did, not classify it. *)
 let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
@@ -265,6 +446,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let updated_meta =
             update_metrics_from_failure meta ~latency_ms ~reason:e
           in
+          append_decision_record ~config ~meta:updated_meta ~observation
+            ~latency_ms ~outcome:"error" ~selected_mode:"error"
+            ~error:e ();
           (match write_meta config updated_meta with
            | Ok () -> ()
            | Error msg ->
@@ -353,6 +537,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                Log.Keeper.error
                  "write metrics snapshot failed after unified turn: %s"
                  (Printexc.to_string exn));
+          append_decision_record ~config ~meta:updated_meta ~observation
+            ~latency_ms ~outcome:"success"
+            ~selected_mode:(selected_mode_of_result result)
+            ~result:(Some result) ();
           (* 7. Persist updated meta *)
           (match write_meta config updated_meta with
            | Ok () -> ()

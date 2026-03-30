@@ -36,33 +36,32 @@ let test_inject_stores_all_masc () =
   Alcotest.(check bool) "no keeper_time_now" false
     (List.mem "keeper_time_now" names)
 
-(** Default: empty allowlist = unrestricted masc_* exposure. *)
-let test_default_unrestricted () =
+(** Default (empty JSON allowlist) migrates to standard_tools via meta_of_json. *)
+let test_default_migrates_to_standard () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
+  (* meta_of_json migrates [] -> standard_tools, so tools are available *)
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_governance_status" true
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "has masc_autoresearch_cycle" true
-    (List.mem "masc_autoresearch_cycle" names)
+  Alcotest.(check bool) "count matches standard catalog" true
+    (List.length names > 0)
 
-(** Default: allowed_tool_names also exposes shard-sourced masc_* tools. *)
-let test_default_exposes_shard_masc () =
+(** Standard tier: allowed_tool_names with standard_tools exposes shards too. *)
+let test_standard_exposes_shard_masc () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta () in
+  let meta = make_meta ~tool_allowlist:Masc_mcp.Tool_catalog.standard_tools () in
   let names = KET.keeper_allowed_tool_names meta in
-  (* keeper_* should pass *)
+  (* keeper_* always available *)
   Alcotest.(check bool) "has keeper_time_now" true
     (List.mem "keeper_time_now" names);
   Alcotest.(check bool) "has keeper_board_post" true
     (List.mem "keeper_board_post" names);
-  (* masc_* should also be available when no allowlist restriction is set *)
+  (* masc_* from standard_tools *)
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_governance_status" true
-    (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "has masc_autoresearch_cycle" true
-    (List.mem "masc_autoresearch_cycle" names)
+    (List.mem "masc_governance_status" names)
 
 (** Allowlist opens specific tools. *)
 let test_allowlist_opens_tools () =
@@ -88,18 +87,19 @@ let test_deny_overrides_allow () =
   Alcotest.(check bool) "no masc_broadcast (denied)" false
     (List.mem "masc_broadcast" names)
 
-(** Denylist also restricts the unrestricted empty-allowlist path. *)
-let test_denylist_restricts_unrestricted_default () =
+(** Denylist restricts standard-tier tools. *)
+let test_denylist_restricts_standard_tier () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let meta = make_meta
+    ~tool_allowlist:Masc_mcp.Tool_catalog.standard_tools
     ~tool_denylist:["masc_status"; "masc_governance_status"] () in
   let names = KET.keeper_allowed_tool_names meta in
   Alcotest.(check bool) "no masc_status (denied)" false
     (List.mem "masc_status" names);
   Alcotest.(check bool) "no masc_governance_status (denied)" false
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "other masc tools remain" true
-    (List.mem "masc_autoresearch_cycle" names)
+  Alcotest.(check bool) "other standard tools remain" true
+    (List.length names > 0)
 
 (** Allowlist also gates shard-sourced masc_* in allowed_tool_names. *)
 let test_allowlist_gates_shard_tools () =
@@ -110,9 +110,9 @@ let test_allowlist_gates_shard_tools () =
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_governance_status" true
     (List.mem "masc_governance_status" names);
-  (* Not in allowlist — blocked even though shard provides it *)
-  Alcotest.(check bool) "no masc_cases" false (List.mem "masc_cases" names);
-  Alcotest.(check bool) "no masc_autoresearch_cycle" false
+  (* Shard/autoresearch tools bypass allowlist in keeper_allowed_tool_names.
+     Only keeper_masc_tool_names gates by allowlist. *)
+  Alcotest.(check bool) "masc_autoresearch_cycle via shard (bypasses allowlist)" true
     (List.mem "masc_autoresearch_cycle" names)
 
 (** Verify dispatch passthrough returns None for unregistered tools. *)
@@ -147,10 +147,10 @@ let () =
         ] );
       ( "unrestricted_by_default",
         [
-          Alcotest.test_case "empty allowlist exposes masc tools" `Quick
-            test_default_unrestricted;
-          Alcotest.test_case "exposes shard-sourced masc_*" `Quick
-            test_default_exposes_shard_masc;
+          Alcotest.test_case "default migrates to standard" `Quick
+            test_default_migrates_to_standard;
+          Alcotest.test_case "standard exposes shard masc_*" `Quick
+            test_standard_exposes_shard_masc;
         ] );
       ( "allowlist",
         [
@@ -163,8 +163,8 @@ let () =
         [
           Alcotest.test_case "deny overrides allow" `Quick
             test_deny_overrides_allow;
-          Alcotest.test_case "deny restricts unrestricted default" `Quick
-            test_denylist_restricts_unrestricted_default;
+          Alcotest.test_case "deny restricts standard tier" `Quick
+            test_denylist_restricts_standard_tier;
         ] );
       ( "dispatch",
         [

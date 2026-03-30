@@ -475,7 +475,7 @@ let oas_provider_of_label (label : string) : Oas.Provider.config =
       (Llm_provider.Provider_config.make
          ~kind:Llm_provider.Provider_config.Glm
          ~model_id:label
-         ~base_url:"https://open.bigmodel.cn/api/paas/v4"
+         ~base_url:"https://api.z.ai/api/coding/paas/v4"
          ~request_path:"/chat/completions" ())
 
 (** Resolve provider from a model label string.

@@ -391,7 +391,11 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let scope_kind =
       Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
     in
-    let tool_allowlist = Safe_ops.json_string_list "tool_allowlist" json in
+    let tool_allowlist =
+      match Safe_ops.json_string_list "tool_allowlist" json with
+      | [] -> Tool_catalog.standard_tools  (* migrate: empty → standard default *)
+      | xs -> xs
+    in
     let tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
     let room_scope =
       Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope

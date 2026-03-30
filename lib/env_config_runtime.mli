@@ -131,7 +131,6 @@ module Chain : sig
   val history_file_opt : unit -> string option
   val run_store_path_opt : unit -> string option
   val run_log_enabled : unit -> bool
-  val run_log_stream : unit -> bool
   val run_log_path_opt : unit -> string option
   val checkpoint_dir_opt : unit -> string option
   val mcp_url : unit -> string

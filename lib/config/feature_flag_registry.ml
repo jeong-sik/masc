@@ -159,11 +159,6 @@ let all_flags : flag list = [
     default = true; category = "inference";
     lifecycle = Active; since = "2.120.0" };
 
-  { env_name = "MASC_CHAIN_RUN_LOG_STREAM";
-    description = "Stream chain execution logs to disk";
-    default = false; category = "inference";
-    lifecycle = Active; since = "2.130.0" };
-
   (* ── Runtime ──────────────────────────────────────────────── *)
   { env_name = "MASC_ORCHESTRATOR_ENABLED";
     description = "Auto-orchestration background loop";

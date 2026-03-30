@@ -1765,10 +1765,12 @@ let test_parse_agent_status_reads_compressed_filesystem_backend () =
 let test_keeper_bootstrap_marks_stale_explicit_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
+  Masc_mcp.Keeper_registry.clear ();
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
       Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      Masc_mcp.Keeper_registry.clear ();
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -1835,10 +1837,12 @@ let test_keeper_bootstrap_marks_stale_explicit_keeper () =
 let test_keeper_supervisor_recovers_missing_desired_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
+  Masc_mcp.Keeper_registry.clear ();
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
       Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      Masc_mcp.Keeper_registry.clear ();
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -1955,6 +1959,7 @@ let test_keeper_up_recreates_cached_keeper_dir_after_base_reset () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
+  Masc_mcp.Keeper_registry.clear ();
   let base_dir = temp_dir () in
   let keeper_name = "public-sweep-keeper" in
   Fun.protect

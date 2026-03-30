@@ -599,3 +599,42 @@ export function patchKeeperConfig(
     payload,
   )
 }
+
+// --- Keeper trajectory (tool call history) ---
+
+export type TrajectoryGate = {
+  status: 'pass' | 'reject'
+  reason?: string
+}
+
+export type TrajectoryEntry = {
+  ts: number
+  ts_iso: string
+  turn: number
+  round: number
+  tool_name: string
+  args: Record<string, unknown> | string
+  gate: TrajectoryGate
+  result: string | null
+  duration_ms: number
+  error: string | null
+  cost_usd: number
+}
+
+export type TrajectoryResponse = {
+  keeper: string
+  trace_id: string
+  generation: number
+  total_entries: number
+  showing: number
+  entries: TrajectoryEntry[]
+}
+
+export function fetchKeeperTrajectory(
+  name: string,
+  limit?: number,
+): Promise<TrajectoryResponse> {
+  return get<TrajectoryResponse>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/trajectory${limit != null ? `?limit=${limit}` : ''}`,
+  )
+}

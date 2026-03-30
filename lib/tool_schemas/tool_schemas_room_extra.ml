@@ -7,9 +7,7 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_room_strategy_get";
-    description = "Read current room-level search strategy and speculation defaults. \
-Use when you need to check routing configuration before modifying it. \
-Pair with masc_room_strategy_set to update the strategy.";
+    description = "Read current room search strategy and speculation defaults.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -17,9 +15,7 @@ Pair with masc_room_strategy_set to update the strategy.";
   };
   {
     name = "masc_room_strategy_set";
-    description = "Update room-level search strategy and speculation defaults. \
-Use when you want to change the command-plane routing behavior (legacy vs best_first_v1) or toggle speculative routing. \
-Call masc_room_strategy_get first to see current settings.";
+    description = "Update room search strategy (legacy or best_first_v1) and speculation routing defaults.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

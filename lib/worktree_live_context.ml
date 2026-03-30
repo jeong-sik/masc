@@ -31,15 +31,7 @@ let repo_root_for ~base_path =
 
 let current_status_lines ~repo_root =
   let contains_substring text ~substring =
-    let text_len = String.length text in
-    let substring_len = String.length substring in
-    let rec loop idx =
-      if substring_len = 0 then true
-      else if idx > text_len - substring_len then false
-      else if String.sub text idx substring_len = substring then true
-      else loop (idx + 1)
-    in
-    loop 0
+    String_util.contains_substring text substring
   in
   run_git_capture_lines ~workdir:repo_root [ "status"; "--porcelain" ]
   |> Option.value ~default:[]

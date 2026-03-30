@@ -216,6 +216,12 @@ let add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) _request reqd)
+  |> Http.Router.get "/api/v1/dashboard/feature-health" (fun _request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = Dashboard_feature_health.json () in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) _request reqd)
 
   (* ── Dashboard delete actions ── *)
 
@@ -346,6 +352,50 @@ let add_routes ~sw ~clock router =
              in
              Http.Response.json ~status ~compress:true ~request:req
                (Yojson.Safe.to_string json) reqd
+         else if ends_with "/trajectory" then
+           let name = extract_name "/trajectory" in
+           if String.length name = 0 then
+             Http.Response.json ~status:`Bad_request
+               {|{"error":"keeper name is required"}|} reqd
+           else
+             let config = state.Mcp_server.room_config in
+             (match Keeper_types.read_meta config name with
+              | Error e ->
+                Http.Response.json ~status:`Internal_server_error
+                  (Printf.sprintf {|{"error":"%s"}|} (String.escaped e)) reqd
+              | Ok None ->
+                Http.Response.json ~status:`Not_found
+                  (Printf.sprintf {|{"error":"keeper %S not found"}|} name) reqd
+              | Ok (Some m) ->
+                let trajectory_default_limit = 50 in
+                let trajectory_max_limit = 500 in
+                let limit =
+                  Server_utils.int_query_param req "limit"
+                    ~default:trajectory_default_limit
+                  |> max 1 |> min trajectory_max_limit
+                in
+                let masc_root = Filename.concat config.base_path ".masc" in
+                let entries =
+                  Trajectory.read_entries ~masc_root ~keeper_name:m.name
+                    ~trace_id:m.trace_id
+                in
+                let total = List.length entries in
+                let recent =
+                  if total <= limit then entries
+                  else
+                    let drop = total - limit in
+                    List.filteri (fun i _e -> i >= drop) entries
+                in
+                let json = `Assoc [
+                  ("keeper", `String name);
+                  ("trace_id", `String m.trace_id);
+                  ("generation", `Int m.generation);
+                  ("total_entries", `Int total);
+                  ("showing", `Int (List.length recent));
+                  ("entries", `List (List.map (Trajectory.entry_to_json ~result_max_len:2000) recent));
+                ] in
+                Http.Response.json ~compress:true ~request:req
+                  (Yojson.Safe.to_string json) reqd)
          else
            Http.Response.json ~status:`Not_found
              {|{"error":"not found"}|} reqd
@@ -462,6 +512,112 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
+  (* Keeper boot — POST /api/v1/keepers/:name/boot *)
+  |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun state agent_name req reqd ->
+           let req_path = Http.Request.path req in
+           let prefix = "/api/v1/keepers/" in
+           let suffix = "/boot" in
+           let plen = String.length prefix in
+           let slen = String.length suffix in
+           let tlen = String.length req_path in
+           if tlen > plen + slen
+              && String.sub req_path 0 plen = prefix
+              && String.sub req_path (tlen - slen) slen = suffix
+           then
+             let name =
+               String.trim
+                 (String.sub req_path plen (tlen - plen - slen))
+             in
+             if String.length name = 0 then
+               Http.Response.json ~status:`Bad_request
+                 {|{"error":"keeper name is required"}|} reqd
+             else
+               let config = state.Mcp_server.room_config in
+               let keeper_ctx : _ Tool_keeper.context =
+                 {
+                   config;
+                   agent_name;
+                   sw;
+                   clock;
+                   proc_mgr = state.Mcp_server.proc_mgr;
+                 }
+               in
+               let args = `Assoc [("name", `String name)] in
+               (match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up" ~args with
+               | Some (true, body) ->
+                   Http.Response.json ~compress:true ~request:req
+                     (Printf.sprintf {|{"ok":true,"action":"boot","name":"%s","detail":%s}|}
+                        (String.escaped name) body)
+                     reqd
+               | Some (false, body) ->
+                   Http.Response.json ~status:`Bad_request ~request:req
+                     (Yojson.Safe.to_string
+                        (`Assoc [("ok", `Bool false); ("error", `String body)]))
+                     reqd
+               | None ->
+                   Http.Response.json ~status:`Internal_server_error ~request:req
+                     {|{"ok":false,"error":"dispatch returned None"}|}
+                     reqd)
+           else
+             Http.Response.json ~status:`Not_found
+               {|{"error":"not found"}|} reqd
+         ) request reqd)
+
+  (* Keeper shutdown — POST /api/v1/keepers/:name/shutdown *)
+  |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun state agent_name req reqd ->
+           let req_path = Http.Request.path req in
+           let prefix = "/api/v1/keepers/" in
+           let suffix = "/shutdown" in
+           let plen = String.length prefix in
+           let slen = String.length suffix in
+           let tlen = String.length req_path in
+           if tlen > plen + slen
+              && String.sub req_path 0 plen = prefix
+              && String.sub req_path (tlen - slen) slen = suffix
+           then
+             let name =
+               String.trim
+                 (String.sub req_path plen (tlen - plen - slen))
+             in
+             if String.length name = 0 then
+               Http.Response.json ~status:`Bad_request
+                 {|{"error":"keeper name is required"}|} reqd
+             else
+               let config = state.Mcp_server.room_config in
+               let keeper_ctx : _ Tool_keeper.context =
+                 {
+                   config;
+                   agent_name;
+                   sw;
+                   clock;
+                   proc_mgr = state.Mcp_server.proc_mgr;
+                 }
+               in
+               let args = `Assoc [("name", `String name)] in
+               (match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_down" ~args with
+               | Some (true, _body) ->
+                   Http.Response.json ~compress:true ~request:req
+                     (Printf.sprintf {|{"ok":true,"action":"shutdown","name":"%s"}|}
+                        (String.escaped name))
+                     reqd
+               | Some (false, body) ->
+                   Http.Response.json ~status:`Bad_request ~request:req
+                     (Yojson.Safe.to_string
+                        (`Assoc [("ok", `Bool false); ("error", `String body)]))
+                     reqd
+               | None ->
+                   Http.Response.json ~status:`Internal_server_error ~request:req
+                     {|{"ok":false,"error":"dispatch returned None"}|}
+                     reqd)
+           else
+             Http.Response.json ~status:`Not_found
+               {|{"error":"not found"}|} reqd
+         ) request reqd)
+
   (* Agent activity — per-agent tool call stats from telemetry *)
   |> Http.Router.get "/api/v1/agent-activity" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -552,6 +708,91 @@ let add_routes ~sw ~clock router =
          | Error msg ->
              Http.Response.json ~status:`Bad_request
                (Yojson.Safe.to_string (mdal_loops_error_json msg)) reqd
+       ) request reqd)
+
+  (* MDAL loop start — POST /api/v1/mdal/loops/start *)
+  |> Http.Router.post "/api/v1/mdal/loops/start" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_mdal_start" (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             let config = state.Mcp_server.room_config in
+             let ctx : Tool_mdal.context =
+               {
+                 agent_name = "dashboard";
+                 config = Some config;
+                 sw = Some sw;
+                 proc_mgr = state.Mcp_server.proc_mgr;
+                 worker_runner = None;
+                 clock = Some clock;
+               }
+             in
+             (match Tool_mdal.dispatch ctx ~name:"masc_mdal_start" ~args with
+             | Some (true, body) ->
+                 Http.Response.json ~compress:true ~request:req
+                   (Printf.sprintf {|{"ok":true,"action":"start","detail":%s}|} body)
+                   reqd
+             | Some (false, body) ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   (Yojson.Safe.to_string
+                      (`Assoc [("ok", `Bool false); ("error", `String body)]))
+                   reqd
+             | None ->
+                 Http.Response.json ~status:`Internal_server_error ~request:req
+                   {|{"ok":false,"error":"dispatch returned None"}|}
+                   reqd)
+           with Yojson.Json_error _ ->
+             Http.Response.json ~status:`Bad_request ~request:req
+               {|{"ok":false,"error":"invalid JSON body"}|}
+               reqd
+         )
+       ) request reqd)
+
+  (* MDAL loop stop — POST /api/v1/mdal/loops/stop *)
+  |> Http.Router.post "/api/v1/mdal/loops/stop" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_mdal_stop" (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             let loop_id = Safe_ops.json_string_opt "loop_id" json in
+             match loop_id with
+             | None ->
+                 Http.Response.json ~status:`Bad_request ~request:req
+                   {|{"ok":false,"error":"requires {\"loop_id\":\"...\"}"}|}
+                   reqd
+             | Some loop_id ->
+                 let config = state.Mcp_server.room_config in
+                 let ctx : Tool_mdal.context =
+                   {
+                     agent_name = "dashboard";
+                     config = Some config;
+                     sw = None;
+                     proc_mgr = state.Mcp_server.proc_mgr;
+                     worker_runner = None;
+                     clock = None;
+                   }
+                 in
+                 let args = `Assoc [("loop_id", `String loop_id)] in
+                 (match Tool_mdal.dispatch ctx ~name:"masc_mdal_stop" ~args with
+                 | Some (true, body) ->
+                     Http.Response.json ~compress:true ~request:req
+                       (Printf.sprintf {|{"ok":true,"action":"stop","loop_id":"%s","detail":%s}|}
+                          (String.escaped loop_id) body)
+                       reqd
+                 | Some (false, body) ->
+                     Http.Response.json ~status:`Bad_request ~request:req
+                       (Yojson.Safe.to_string
+                          (`Assoc [("ok", `Bool false); ("error", `String body)]))
+                       reqd
+                 | None ->
+                     Http.Response.json ~status:`Internal_server_error ~request:req
+                       {|{"ok":false,"error":"dispatch returned None"}|}
+                       reqd)
+           with Yojson.Json_error _ ->
+             Http.Response.json ~status:`Bad_request ~request:req
+               {|{"ok":false,"error":"invalid JSON body"}|}
+               reqd
+         )
        ) request reqd)
 
   (* Autoresearch loops list — all active + persisted loops *)

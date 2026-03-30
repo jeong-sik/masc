@@ -5,7 +5,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useRef } from 'preact/hooks'
-import { runOperatorAction } from '../api'
+import { currentDashboardActor, runOperatorAction } from '../api'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
@@ -20,6 +20,7 @@ import {
   ContextChart,
   EquipmentList,
   KpiGrid,
+  MetricsCharts,
   RawDataDebug,
   RelationshipList,
   TraitsList,
@@ -30,6 +31,7 @@ import {
 } from './keeper-detail-runtime'
 import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
+import { KeeperTrajectoryTimeline } from './keeper-trajectory-timeline'
 import { DialogOverlay } from './common/dialog'
 
 // ── Global overlay state ──────────────────────────────────
@@ -48,18 +50,11 @@ export function closeKeeperDetail() {
 
 // ── Helpers ───────────────────────────────────────────────
 
-function currentOperatorActor(): string {
-  const q = new URLSearchParams(window.location.search)
-  const queryActor = q.get('agent') ?? q.get('agent_name')
-  const storedActor = localStorage.getItem('masc_dashboard_agent_name')
-  const actor = (queryActor ?? storedActor ?? 'dashboard').trim()
-  return actor || 'dashboard'
-}
 
 async function runSocialSweep(): Promise<void> {
   try {
     await runOperatorAction({
-      actor: currentOperatorActor(),
+      actor: currentDashboardActor(),
       action_type: 'social_sweep',
       target_type: 'room',
       payload: {},
@@ -126,7 +121,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
           <div class="flex flex-col gap-3 px-4 pb-4 pt-2">
             <${KeeperDiagnosticSummary} keeper=${keeper} />
             <${KeeperRuntimeActions}
-              actor=${currentOperatorActor()}
+              actor=${currentDashboardActor()}
               keeper=${keeper}
               onSocialSweep=${() => { void runSocialSweep() }}
             />
@@ -213,6 +208,9 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Context chart ── */}
         <${ContextChart} keeper=${keeper} />
 
+        ${'' /* ── Latency / Cost / Model charts ── */}
+        <${MetricsCharts} keeper=${keeper} />
+
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
 
@@ -267,6 +265,12 @@ export function KeeperDetailOverlay() {
               <//>
             `
             : null}
+
+          <div class="md:col-span-2">
+            <${SectionCard} title="도구 호출 궤적">
+              <${KeeperTrajectoryTimeline} keeperName=${keeper.name} />
+            <//>
+          </div>
 
           <${SectionCard} title="품질 시그널">
             <${RuntimeSignals} keeper=${keeper} />

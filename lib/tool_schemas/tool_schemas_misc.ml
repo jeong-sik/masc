@@ -88,9 +88,7 @@ Use from the answering side after a prior masc_webrtc_offer call.";
   };
   {
     name = "masc_dashboard";
-    description = "Render the MASC dashboard summarizing rooms, agents, and tasks in one view. \
-Use when you need a quick overview of cluster state; set scope='current' for this room only. \
-Pair with masc_agents for agent details, masc_run_list for task details.";
+    description = "Render the MASC dashboard summarizing rooms, agents, and tasks. Set scope='current' for this room only.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -108,9 +106,7 @@ Pair with masc_agents for agent details, masc_run_list for task details.";
   };
   {
     name = "masc_verify_handoff";
-    description = "Compare original and received context to detect semantic drift, information loss, or distortion after handoff. \
-Call after claiming a handoff to verify context integrity (default threshold: 0.85 similarity). \
-Pair with masc_handover_get for the original context, masc_handover_claim for the received.";
+    description = "Compare original and received context to detect semantic drift after handoff (default threshold: 0.85).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -133,9 +129,7 @@ Pair with masc_handover_get for the original context, masc_handover_claim for th
   };
   {
     name = "masc_gc";
-    description = "Run garbage collection: remove zombie agents, archive stale tasks, delete old messages. \
-Call periodically or when the room feels cluttered; defaults to 7-day age threshold. \
-Pair with masc_archive_view to inspect what was archived or masc_cleanup_zombies for agents only.";
+    description = "Run garbage collection: remove zombie agents, archive stale tasks, delete old messages (default: 7-day threshold).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -149,9 +143,7 @@ Pair with masc_archive_view to inspect what was archived or masc_cleanup_zombies
   };
   {
     name = "masc_cleanup_zombies";
-    description = "Remove zombie agents (no heartbeat for 5+ min) and release their file locks. \
-Use when you see stale agents in masc_agents or suspect a crashed session left locks behind. \
-Pair with masc_gc for full room maintenance including old tasks and messages.";
+    description = "Remove zombie agents (no heartbeat for 5+ min) and release their file locks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -159,9 +151,7 @@ Pair with masc_gc for full room maintenance including old tasks and messages.";
   };
   {
     name = "masc_tool_stats";
-    description = "Return in-memory tool usage statistics: top tools by call count, stale tools (30+ days unused), and never-called tools. \
-Use when auditing tool adoption or identifying dead tools for cleanup. \
-Pair with masc_tool_help for details on specific tools. Data resets on server restart.";
+    description = "In-memory tool usage stats: top calls, stale (30+ days), never-called. Resets on server restart.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -175,9 +165,7 @@ Pair with masc_tool_help for details on specific tools. Data resets on server re
   };
   {
     name = "masc_tool_help";
-    description = "Return canonical help text, parameters, and metadata for a specific MASC tool by name. \
-Use when you need detailed usage guidance for a tool beyond its short description. \
-Pair with masc_tool_stats to discover which tools exist.";
+    description = "Return canonical help text, parameters, and metadata for a specific MASC tool by name.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -191,9 +179,7 @@ Pair with masc_tool_stats to discover which tools exist.";
   };
   {
     name = "masc_tool_admin_snapshot";
-    description = "Return a unified admin snapshot of tool inventory, auth/RBAC, and command-plane surfaces. \
-Use when auditing the full server configuration or diagnosing tool visibility issues. \
-Pair with masc_tool_admin_update to apply changes based on the snapshot.";
+    description = "Return a unified admin snapshot of tool inventory, auth/RBAC, and command-plane surfaces.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -256,9 +242,7 @@ After masc_tool_admin_snapshot to review current state before making changes.";
   };
   {
     name = "masc_keeper_tool_catalog";
-    description = "List all visible masc_* tools alongside keeper-internal wrapper coverage, with optional tier/hidden/deprecated filters. \
-Use when auditing which tools the keeper can wrap or checking tool visibility by tier. \
-Pair with masc_tool_admin_snapshot for a broader admin view including auth and command-plane surfaces.";
+    description = "List visible masc_* tools with keeper wrapper coverage, filterable by tier or visibility.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

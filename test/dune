@@ -54,6 +54,7 @@
         test_risk_digest
         test_artifact_store
         test_golden_set
+        test_golden_set_eval
         test_adversarial_eval
         test_labeling
         test_tool_deep_review
@@ -92,6 +93,7 @@
           test_risk_digest
           test_artifact_store
           test_golden_set
+          test_golden_set_eval
           test_adversarial_eval
           test_labeling
           test_tool_deep_review
@@ -1187,6 +1189,12 @@
  (name test_heartbeat_integration)
  (modules test_heartbeat_integration)
  (libraries masc_mcp masc_mcp.config fs_compat alcotest eio eio_main unix))
+
+; Phase 2: Smart heartbeat keepalive integration — agent_status mapping + decisions
+(test
+ (name test_smart_heartbeat_keepalive)
+ (modules test_smart_heartbeat_keepalive)
+ (libraries masc_mcp masc_mcp.config masc_room masc_types alcotest unix))
 
 ; Keeper_fs: atomic writes, ensure_dir consolidation, concurrent safety (#3721)
 (test

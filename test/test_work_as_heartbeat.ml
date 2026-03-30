@@ -24,11 +24,108 @@ let test_wah_max_silence_default () =
   check (float 0.1) "default max silence 120s" 120.0 v
 
 let test_wah_max_silence_floor_logic () =
-  (* The floor clamp (Float.max 30.0 x) ensures minimum 30s.
-     We verify the invariant: max_silence_sec >= 30.0 always. *)
+  (* The floor clamp uses keepalive interval dynamically.
+     We verify: max_silence_sec >= keepalive_interval_sec always. *)
   let v = Cfg.WorkAsHeartbeat.max_silence_sec in
-  check bool "max_silence >= 30.0 (keepalive interval)"
-    true (v >= 30.0)
+  let interval = Float.of_int Cfg.KeeperKeepalive.interval_sec in
+  check bool "max_silence >= keepalive interval"
+    true (v >= interval)
+
+(* ── KeeperKeepalive config defaults ───────────────────── *)
+
+let test_keepalive_interval_default () =
+  check int "default interval 30s" 30 Cfg.KeeperKeepalive.interval_sec
+
+let test_keepalive_interval_range () =
+  let v = Cfg.KeeperKeepalive.interval_sec in
+  check bool "interval >= 5" true (v >= 5);
+  check bool "interval <= 300" true (v <= 300)
+
+let test_keepalive_max_failures_default () =
+  check int "default max failures 5" 5
+    Cfg.KeeperKeepalive.max_consecutive_failures
+
+let test_keepalive_max_failures_range () =
+  let v = Cfg.KeeperKeepalive.max_consecutive_failures in
+  check bool "failures >= 2" true (v >= 2);
+  check bool "failures <= 50" true (v <= 50)
+
+let test_keepalive_board_debounce_default () =
+  check (float 0.1) "default debounce 60s" 60.0
+    Cfg.KeeperKeepalive.board_debounce_sec
+
+let test_keepalive_sleep_chunk_default () =
+  check (float 0.01) "default sleep chunk 2.0s" 2.0
+    Cfg.KeeperKeepalive.sleep_chunk_sec
+
+let test_keepalive_jitter_default () =
+  check (float 0.001) "default jitter 0.2" 0.2
+    Cfg.KeeperKeepalive.jitter_factor
+
+let test_keepalive_jitter_range () =
+  let v = Cfg.KeeperKeepalive.jitter_factor in
+  check bool "jitter >= 0.0" true (v >= 0.0);
+  check bool "jitter <= 0.5" true (v <= 0.5)
+
+(* ── KeeperGrpc config defaults ────────────────────────── *)
+
+let test_grpc_max_reconnect_default () =
+  check int "default grpc max reconnect 5" 5
+    Cfg.KeeperGrpc.max_reconnect_attempts
+
+let test_grpc_max_reconnect_range () =
+  let v = Cfg.KeeperGrpc.max_reconnect_attempts in
+  check bool "reconnect >= 1" true (v >= 1);
+  check bool "reconnect <= 20" true (v <= 20)
+
+let test_grpc_backoff_default () =
+  check (float 0.1) "default grpc backoff 5.0s" 5.0
+    Cfg.KeeperGrpc.reconnect_backoff_sec
+
+let test_grpc_backoff_range () =
+  let v = Cfg.KeeperGrpc.reconnect_backoff_sec in
+  check bool "backoff >= 1.0" true (v >= 1.0);
+  check bool "backoff <= 60.0" true (v <= 60.0)
+
+(* ── KeeperProactive config defaults ──────────────────── *)
+
+let test_proactive_max_attempts_default () =
+  check int "default proactive max attempts 3" 3
+    Cfg.KeeperProactive.max_attempts
+
+let test_proactive_max_attempts_range () =
+  let v = Cfg.KeeperProactive.max_attempts in
+  check bool "attempts >= 1" true (v >= 1);
+  check bool "attempts <= 10" true (v <= 10)
+
+let test_timing_ring_size_default () =
+  check int "default timing ring size 100" 100
+    Cfg.KeeperProactive.stage_timing_ring_size
+
+let test_timing_ring_size_range () =
+  let v = Cfg.KeeperProactive.stage_timing_ring_size in
+  check bool "ring >= 10" true (v >= 10);
+  check bool "ring <= 1000" true (v <= 1000)
+
+(* ── Config invariant properties ───────────────────────── *)
+
+let test_config_invariant_silence_ge_interval () =
+  let silence = Cfg.WorkAsHeartbeat.max_silence_sec in
+  let interval = Float.of_int Cfg.KeeperKeepalive.interval_sec in
+  check bool "max_silence >= interval (invariant)" true (silence >= interval)
+
+let test_config_invariant_sweep_independent () =
+  let sweep = Cfg.KeeperSupervisor.sweep_interval_sec in
+  let backoff_base = Cfg.KeeperSupervisor.backoff_base_s in
+  check bool "sweep > 0" true (sweep > 0.0);
+  check bool "backoff_base > 0" true (backoff_base > 0.0);
+  check bool "backoff_max >= backoff_base" true
+    (Cfg.KeeperSupervisor.backoff_max_s >= backoff_base)
+
+let test_config_invariant_debounce_ge_interval () =
+  let debounce = Cfg.KeeperKeepalive.board_debounce_sec in
+  let interval = Float.of_int Cfg.KeeperKeepalive.interval_sec in
+  check bool "board debounce >= interval" true (debounce >= interval)
 
 (* ── Freshness decision pure logic ──────────────────────── *)
 
@@ -120,12 +217,39 @@ let () =
       test_case "max_silence default" `Quick test_wah_max_silence_default;
       test_case "max_silence floor invariant" `Quick test_wah_max_silence_floor_logic;
     ];
+    "keepalive_config", [
+      test_case "interval default" `Quick test_keepalive_interval_default;
+      test_case "interval range" `Quick test_keepalive_interval_range;
+      test_case "max_failures default" `Quick test_keepalive_max_failures_default;
+      test_case "max_failures range" `Quick test_keepalive_max_failures_range;
+      test_case "board_debounce default" `Quick test_keepalive_board_debounce_default;
+      test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;
+      test_case "jitter default" `Quick test_keepalive_jitter_default;
+      test_case "jitter range" `Quick test_keepalive_jitter_range;
+    ];
+    "grpc_config", [
+      test_case "max_reconnect default" `Quick test_grpc_max_reconnect_default;
+      test_case "max_reconnect range" `Quick test_grpc_max_reconnect_range;
+      test_case "backoff default" `Quick test_grpc_backoff_default;
+      test_case "backoff range" `Quick test_grpc_backoff_range;
+    ];
+    "proactive_config", [
+      test_case "max_attempts default" `Quick test_proactive_max_attempts_default;
+      test_case "max_attempts range" `Quick test_proactive_max_attempts_range;
+      test_case "timing_ring default" `Quick test_timing_ring_size_default;
+      test_case "timing_ring range" `Quick test_timing_ring_size_range;
+    ];
     "freshness_logic", [
       test_case "within window → fresh" `Quick test_freshness_fresh;
       test_case "beyond window → stale" `Quick test_freshness_stale;
       test_case "exact boundary → stale (strict <)" `Quick test_freshness_exact_boundary;
       test_case "never heartbeated → stale" `Quick test_freshness_never_heartbeated;
       test_case "feature disabled → always stale" `Quick test_freshness_disabled_flag;
+    ];
+    "config_invariants", [
+      test_case "max_silence >= interval" `Quick test_config_invariant_silence_ge_interval;
+      test_case "sweep/backoff coherence" `Quick test_config_invariant_sweep_independent;
+      test_case "debounce >= interval" `Quick test_config_invariant_debounce_ge_interval;
     ];
     "percentile", [
       test_case "empty array" `Quick test_percentile_empty;

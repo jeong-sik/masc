@@ -1,0 +1,51 @@
+import { signal } from '@preact/signals'
+import { callMcpTool } from '../../api/mcp'
+import { showToast } from '../common/toast'
+
+export const showTaskCreate = signal(false)
+export const taskCreating = signal(false)
+
+export interface TaskCreateInput { title: string; description: string; priority?: string }
+
+export async function createTask(input: TaskCreateInput): Promise<boolean> {
+  if (!input.title.trim()) { showToast('제목을 입력하세요', 'error'); return false }
+  taskCreating.value = true
+  try {
+    const args: Record<string, unknown> = { title: input.title.trim(), description: input.description.trim() }
+    if (input.priority) args.priority = input.priority
+    await callMcpTool('masc_add_task', args)
+    showToast('태스크 생성 완료', 'success')
+    showTaskCreate.value = false
+    return true
+  } catch (err) {
+    showToast(`태스크 생성 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    return false
+  } finally {
+    taskCreating.value = false
+  }
+}
+
+export const taskClaiming = signal<Record<string, boolean>>({})
+
+export async function claimTask(taskId: string): Promise<void> {
+  taskClaiming.value = { ...taskClaiming.value, [taskId]: true }
+  try {
+    await callMcpTool('masc_claim_next', { task_id: taskId })
+    showToast(`태스크 ${taskId} 클레임 완료`, 'success')
+  } catch (err) {
+    showToast(`클레임 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+  } finally {
+    const next = { ...taskClaiming.value }
+    delete next[taskId]
+    taskClaiming.value = next
+  }
+}
+
+export async function updateTaskPriority(taskId: string, priority: string): Promise<void> {
+  try {
+    await callMcpTool('masc_update_priority', { task_id: taskId, priority })
+    showToast(`우선순위 변경: ${priority}`, 'success')
+  } catch (err) {
+    showToast(`우선순위 변경 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+  }
+}

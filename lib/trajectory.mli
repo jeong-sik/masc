@@ -55,7 +55,8 @@ val tool_cost_estimate : string -> float
 val gate_decision_to_json : gate_decision -> Yojson.Safe.t
 val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
-val entry_to_json : tool_call_entry -> Yojson.Safe.t
+val default_result_truncation : int
+val entry_to_json : ?result_max_len:int -> tool_call_entry -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 
 (** {1 Persistence} *)

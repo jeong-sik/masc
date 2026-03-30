@@ -13,6 +13,7 @@ open Keeper_types
 (** Structured failure reason for crash cohort detection. *)
 type failure_reason =
   | Heartbeat_consecutive_failures of int
+  | Turn_consecutive_failures of int
   | Fiber_unresolved
   | Exception of string
 
@@ -51,6 +52,7 @@ type registry_entry = {
   crash_log : (float * string) list;
   last_error : string option;
   last_failure_reason : failure_reason option;
+  turn_consecutive_failures : int;
   last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
   board_cursor_ts : float;
@@ -88,6 +90,15 @@ val record_error : base_path:string -> string -> string -> unit
 
 (** Set the structured failure reason for cohort detection. *)
 val set_failure_reason : base_path:string -> string -> failure_reason option -> unit
+
+(** Increment turn consecutive failure counter. *)
+val increment_turn_failures : base_path:string -> string -> unit
+
+(** Reset turn consecutive failure counter (on success). *)
+val reset_turn_failures : base_path:string -> string -> unit
+
+(** Get current turn consecutive failure count. *)
+val get_turn_failures : base_path:string -> string -> int
 
 (** Record a crash entry in the crash log (keeps last 5). *)
 val record_crash : base_path:string -> string -> float -> string -> unit
@@ -176,3 +187,9 @@ val find_by_agent_name : string -> registry_entry option
 (** Get tool usage by keeper name (scans all base_paths). *)
 val tool_usage_of_by_name : string ->
   (string * Keeper_types.tool_call_entry) list
+
+(** Flush in-memory tool usage stats to disk for persistence across restarts. *)
+val flush_tool_usage : base_path:string -> string -> unit
+
+(** Restore tool usage stats from disk after keeper re-registration. *)
+val restore_tool_usage : base_path:string -> string -> unit

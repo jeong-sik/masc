@@ -18,7 +18,11 @@ let ensured_dirs : (string, unit) Hashtbl.t = Hashtbl.create 16
 let ensure_dir (path : string) : string =
   Eio_guard.with_mutex dir_mu (fun () ->
     if not (Hashtbl.mem ensured_dirs path) || not (Sys.file_exists path) then begin
-      Fs_compat.mkdir_p path;
+      (try Fs_compat.mkdir_p path
+       with exn ->
+         Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
+           path (Printexc.to_string exn);
+         raise exn);
       Hashtbl.replace ensured_dirs path ()
     end);
   path
@@ -54,8 +58,11 @@ let save_atomic (path : string) (content : string) : unit =
       close_out_noerr oc;
       closed := true
     end;
-    if not !renamed then
-      try Sys.remove tmp_path with Sys_error _ -> ())
+    if not !renamed then begin
+      Log.Keeper.warn "keeper_fs: save_atomic failed path=%s tmp=%s"
+        path tmp_path;
+      try Sys.remove tmp_path with Sys_error _ -> ()
+    end)
     (fun () ->
       output_string oc content;
       close_out oc;

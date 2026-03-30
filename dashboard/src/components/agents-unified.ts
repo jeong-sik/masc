@@ -12,6 +12,7 @@ import { AgentRoster, countRuntimeKinds } from './agent-roster'
 import { AgentProfile } from './agent-profile'
 import { roomTruth } from '../room-truth-store'
 import { resolveRuntimeCounts } from '../runtime-counts'
+import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 
 type AgentsView = 'all' | 'agents' | 'keepers'
 
@@ -97,6 +98,8 @@ export function AgentsUnified() {
         <strong class="mr-2 text-[var(--text-strong)]">${currentViewMeta.label}</strong>
         <span>${currentViewMeta.description} ${currentViewSummary}</span>
       </div>
+
+      ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
 
       <${AgentRoster}
         keeperFilter=${currentView === 'keepers' ? 'keeper-only'

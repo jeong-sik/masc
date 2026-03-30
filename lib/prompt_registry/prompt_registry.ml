@@ -157,12 +157,6 @@ let markdown_dir = store.markdown_dir
 (** Make a storage key from id and version *)
 let make_key ~id ~version = Printf.sprintf "%s@%s" id version
 
-(** Parse a storage key back to id and version *)
-let _parse_key key =
-  match String.split_on_char '@' key with
-  | [id; version] -> Some (id, version)
-  | _ -> None
-
 (** Initialize the registry with optional file persistence *)
 let init ?persist_dir () =
   prompts_dir := persist_dir;

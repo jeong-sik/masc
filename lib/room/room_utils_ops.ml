@@ -2,17 +2,7 @@ open Types
 open Room_utils_backend_setup
 open Room_utils_paths_backend
 
-let contains_substring haystack needle =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len > haystack_len then false
-  else
-    let rec check i =
-      if i > haystack_len - needle_len then false
-      else if String.sub haystack i needle_len = needle then true
-      else check (i + 1)
-    in
-    check 0
+let contains_substring = String_util.contains_substring
 
 let validate_agent_name name =
   (* Delegate to Validation module for consistent security checks *)

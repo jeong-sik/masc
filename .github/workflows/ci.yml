@@ -350,17 +350,20 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Enable corepack and install pnpm
+        run: corepack enable && corepack prepare pnpm@10.31.0 --activate
+
       - name: Install dashboard dependencies
         working-directory: dashboard
-        run: npm install
+        run: pnpm install --frozen-lockfile
 
       - name: TypeScript typecheck
         working-directory: dashboard
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       - name: Run dashboard tests
         working-directory: dashboard
-        run: npm test
+        run: pnpm test
 
   docs:
     name: Documentation

@@ -63,17 +63,7 @@ let status_line_is_healthy line =
   | _ -> false
 
 let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop idx =
-    if idx + needle_len > haystack_len then
-      false
-    else if String.sub haystack idx needle_len = needle then
-      true
-    else
-      loop (idx + 1)
-  in
-  needle_len > 0 && loop 0
+  String_util.contains_substring haystack needle
 
 let looks_like_server_command command =
   List.exists

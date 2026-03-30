@@ -27,12 +27,15 @@ module StringMap = Map.Make (String)
     ADT matching replaces string prefix matching for crash_msg grouping. *)
 type failure_reason =
   | Heartbeat_consecutive_failures of int
+  | Turn_consecutive_failures of int
   | Fiber_unresolved
   | Exception of string
 
 let failure_reason_to_string = function
   | Heartbeat_consecutive_failures n ->
       Printf.sprintf "heartbeat_consecutive_failures(%d)" n
+  | Turn_consecutive_failures n ->
+      Printf.sprintf "turn_consecutive_failures(%d)" n
   | Fiber_unresolved -> "fiber_unresolved"
   | Exception s -> Printf.sprintf "exception(%s)" s
 
@@ -67,6 +70,7 @@ type registry_entry = {
   crash_log : (float * string) list;
   last_error : string option;
   last_failure_reason : failure_reason option;
+  turn_consecutive_failures : int;
   last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
   board_cursor_ts : float;
@@ -122,6 +126,7 @@ let register ~base_path name meta =
     crash_log = [];
     last_error = None;
     last_failure_reason = None;
+    turn_consecutive_failures = 0;
     last_agent_count = 0;
     board_wakeups = Hashtbl.create 8;
     board_cursor_ts = 0.0;
@@ -209,6 +214,19 @@ let record_error ~base_path name err =
 
 let set_failure_reason ~base_path name reason =
   update_entry ~base_path name (fun e -> { e with last_failure_reason = reason })
+
+let increment_turn_failures ~base_path name =
+  update_entry ~base_path name (fun e ->
+    { e with turn_consecutive_failures = e.turn_consecutive_failures + 1 })
+
+let reset_turn_failures ~base_path name =
+  update_entry ~base_path name (fun e ->
+    { e with turn_consecutive_failures = 0 })
+
+let get_turn_failures ~base_path name =
+  match get ~base_path name with
+  | Some e -> e.turn_consecutive_failures
+  | None -> 0
 
 let is_running ~base_path name =
   match get ~base_path name with
@@ -395,3 +413,81 @@ let tool_usage_of_by_name name =
   | Some entry ->
     Hashtbl.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
     |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
+
+(* -- Tool usage persistence ---------------------------------------- *)
+
+let tool_usage_path ~base_path name =
+  let dir = Filename.concat (Filename.concat base_path ".masc") "keepers/tool_usage" in
+  Filename.concat dir (name ^ ".json")
+
+let flush_tool_usage ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  | None -> ()
+  | Some entry ->
+    let items =
+      Hashtbl.fold (fun tool_name (e : tool_call_entry) acc ->
+        `Assoc [
+          ("tool", `String tool_name);
+          ("count", `Int e.count);
+          ("successes", `Int e.successes);
+          ("failures", `Int e.failures);
+          ("last_used_at", `Float e.last_used_at);
+        ] :: acc
+      ) entry.tool_usage []
+    in
+    let json = `Assoc [
+      ("keeper", `String name);
+      ("flushed_at", `Float (Time_compat.now ()));
+      ("tools", `List items);
+    ] in
+    let path = tool_usage_path ~base_path name in
+    (try
+       Fs_compat.mkdir_p (Filename.dirname path);
+       Fs_compat.save_file path (Yojson.Safe.to_string json ^ "\n")
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+       Log.Keeper.error "flush_tool_usage %s: %s" name (Printexc.to_string exn))
+
+let restore_tool_usage ~base_path name =
+  let path = tool_usage_path ~base_path name in
+  if not (Sys.file_exists path) then ()
+  else
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
+    | None -> ()
+    | Some entry ->
+      (try
+         let content = Fs_compat.load_file path in
+         let json = Yojson.Safe.from_string content in
+         let tools = match json with
+           | `Assoc fields ->
+             (match List.assoc_opt "tools" fields with
+              | Some (`List items) -> items
+              | _ -> [])
+           | _ -> []
+         in
+         List.iter (fun item ->
+           try
+             match item with
+             | `Assoc fields ->
+               let str key = match List.assoc_opt key fields with
+                 | Some (`String s) -> s | _ -> raise Exit in
+               let int key = match List.assoc_opt key fields with
+                 | Some (`Int n) -> n | _ -> raise Exit in
+               let float key = match List.assoc_opt key fields with
+                 | Some (`Float f) -> f
+                 | Some (`Int n) -> Float.of_int n
+                 | _ -> raise Exit in
+               let tool_name = str "tool" in
+               let e = {
+                 count = int "count";
+                 successes = int "successes";
+                 failures = int "failures";
+                 last_used_at = float "last_used_at";
+               } in
+               Hashtbl.replace entry.tool_usage tool_name e
+             | _ -> ()
+           with Exit -> ()
+         ) tools
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Keeper.warn "restore_tool_usage %s: %s" name (Printexc.to_string exn))

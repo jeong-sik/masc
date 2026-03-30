@@ -75,13 +75,7 @@ let strip_mcp_prefix name =
   else
     name
 
-let unique_preserve_order items =
-  let rec loop seen = function
-    | [] -> List.rev seen
-    | x :: xs ->
-        if List.mem x seen then loop seen xs else loop (x :: seen) xs
-  in
-  loop [] items
+let unique_preserve_order = Json_util.dedupe_keep_order
 
 let has_agent_name_field (schema : Types.tool_schema) =
   let open Yojson.Safe.Util in

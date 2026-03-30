@@ -37,13 +37,7 @@ type runner =
 let auditable_tool_catalog : string list =
   Agent_tool_surfaces.mdal_auditable_tool_names
 
-let unique_preserve_order items =
-  let rec loop seen = function
-    | [] -> List.rev seen
-    | x :: xs ->
-        if List.mem x seen then loop seen xs else loop (x :: seen) xs
-  in
-  loop [] items
+let unique_preserve_order = Json_util.dedupe_keep_order
 
 let trunc ?(limit = 48) text =
   if String.length text <= limit then text else String.sub text 0 limit

@@ -19,7 +19,7 @@ let json_error message =
 let json_ok fields =
   Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
 
-let string_opt_to_json = function Some v -> `String v | None -> `Null
+let string_opt_to_json = Json_util.string_opt_to_json
 
 (* ── Handlers ────────────────────────────────────────────── *)
 

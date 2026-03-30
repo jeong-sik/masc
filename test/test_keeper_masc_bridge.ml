@@ -3,11 +3,12 @@
 
 module KET = Masc_mcp.Keeper_exec_tools
 
-let make_meta ?(tool_allowlist = []) ?(tool_denylist = []) () =
+let make_meta ?tool_access ?tool_allowlist ?(tool_denylist = []) () =
   let tool_access =
-    match tool_allowlist with
-    | [] -> Masc_mcp.Keeper_types.Unrestricted
-    | names -> Masc_mcp.Keeper_types.Restricted names
+    match tool_access, tool_allowlist with
+    | Some access, _ -> access
+    | None, Some names -> Masc_mcp.Keeper_types.Restricted names
+    | None, None -> Masc_mcp.Keeper_types.Unrestricted
   in
   match Masc_mcp.Keeper_types.meta_of_json
     (`Assoc
@@ -106,6 +107,97 @@ let test_denylist_restricts_unrestricted_default () =
   Alcotest.(check bool) "other masc tools remain" true
     (List.mem "masc_autoresearch_cycle" names)
 
+(** Explicit empty allowlist is restricted, not unrestricted. *)
+let test_restricted_empty_allowlist_blocks_masc () =
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  let meta = make_meta
+    ~tool_access:(Masc_mcp.Keeper_types.Restricted []) () in
+  let names = KET.keeper_masc_tool_names meta in
+  Alcotest.(check int) "no masc tools" 0 (List.length names);
+  Alcotest.(check bool) "masc_status blocked" false
+    (List.mem "masc_status" names)
+
+(** Legacy persisted empty tool_allowlist still maps to unrestricted. *)
+let test_legacy_empty_allowlist_remains_unrestricted () =
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  let meta =
+    match Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String "legacy-keeper");
+          ("agent_name", `String "legacy-keeper");
+          ("trace_id", `String "legacy-trace");
+          ("tool_allowlist", `List []);
+        ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith e
+  in
+  let names = KET.keeper_masc_tool_names meta in
+  Alcotest.(check bool) "legacy empty allowlist still exposes masc tools" true
+    (List.mem "masc_status" names)
+
+(** Restricted JSON preserves an explicit empty tools list. *)
+let test_tool_access_restricted_empty_json_preserved () =
+  let meta =
+    match Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String "restricted-json");
+          ("agent_name", `String "restricted-json");
+          ("trace_id", `String "restricted-json-trace");
+          ( "tool_access",
+            `Assoc
+              [
+                ("kind", `String "restricted");
+                ("tools", `List []);
+              ] );
+        ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith e
+  in
+  match meta.Masc_mcp.Keeper_types.tool_access with
+  | Masc_mcp.Keeper_types.Restricted names ->
+      Alcotest.(check int) "restricted empty preserved" 0 (List.length names)
+  | Masc_mcp.Keeper_types.Unrestricted ->
+      Alcotest.fail "expected Restricted []"
+
+(** Malformed tool_access JSON is rejected. *)
+let test_tool_access_invalid_kind_rejected () =
+  match Masc_mcp.Keeper_types.meta_of_json
+    (`Assoc
+      [
+        ("name", `String "invalid-kind");
+        ("agent_name", `String "invalid-kind");
+        ("trace_id", `String "invalid-kind-trace");
+        ("tool_access", `Assoc [ ("kind", `String "bogus") ]);
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected invalid kind to fail"
+  | Error e ->
+      Alcotest.(check string)
+        "invalid kind error"
+        "invalid keeper tool_access.kind: bogus"
+        e
+
+let test_tool_access_missing_kind_rejected () =
+  match Masc_mcp.Keeper_types.meta_of_json
+    (`Assoc
+      [
+        ("name", `String "missing-kind");
+        ("agent_name", `String "missing-kind");
+        ("trace_id", `String "missing-kind-trace");
+        ("tool_access", `Assoc [ ("tools", `List []) ]);
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected missing kind to fail"
+  | Error e ->
+      Alcotest.(check string)
+        "missing kind error"
+        "keeper tool_access.kind required"
+        e
+
 (** Allowlist also gates shard-sourced masc_* in allowed_tool_names. *)
 let test_allowlist_gates_shard_tools () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
@@ -170,6 +262,19 @@ let () =
             test_deny_overrides_allow;
           Alcotest.test_case "deny restricts unrestricted default" `Quick
             test_denylist_restricts_unrestricted_default;
+          Alcotest.test_case "restricted empty allowlist blocks masc" `Quick
+            test_restricted_empty_allowlist_blocks_masc;
+        ] );
+      ( "meta_json",
+        [
+          Alcotest.test_case "legacy empty allowlist remains unrestricted" `Quick
+            test_legacy_empty_allowlist_remains_unrestricted;
+          Alcotest.test_case "restricted empty json preserved" `Quick
+            test_tool_access_restricted_empty_json_preserved;
+          Alcotest.test_case "invalid kind rejected" `Quick
+            test_tool_access_invalid_kind_rejected;
+          Alcotest.test_case "missing kind rejected" `Quick
+            test_tool_access_missing_kind_rejected;
         ] );
       ( "dispatch",
         [

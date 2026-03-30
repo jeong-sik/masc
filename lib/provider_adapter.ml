@@ -284,12 +284,16 @@ let http_listener_env_explicit () =
 let default_voice_session_base_url () =
   match Sys.getenv_opt "MASC_HTTP_BASE_URL" |> trim_opt with
   | Some base_url -> normalize_base_url base_url
-  | None -> (
-      match http_listener_env_explicit (), legacy_voice_base_url_opt () with
-      | false, Some legacy_base_url -> normalize_base_url legacy_base_url
-      | _ ->
-          Printf.sprintf "http://%s:%s"
-            (Env_config_core.masc_host ()) (Env_config_core.masc_http_port ()))
+  | None ->
+      if http_listener_env_explicit () then
+        Printf.sprintf "http://%s:%s"
+          (Env_config_core.masc_host ()) (Env_config_core.masc_http_port ())
+      else (
+        match legacy_voice_base_url_opt () with
+        | Some legacy_base_url -> normalize_base_url legacy_base_url
+        | None ->
+            Printf.sprintf "http://%s:%s"
+              (Env_config_core.masc_host ()) (Env_config_core.masc_http_port ()))
 
 let compose_voice_endpoint_url ~base_url ~path =
   let base_uri = Uri.of_string base_url in

@@ -246,13 +246,11 @@ let ensure_audio_dir () =
 let provider_metadata_keys =
   [ "provider_name"; "provider_kind"; "provider_family"; "provider_auth"; "endpoint_id"; "endpoint_url" ]
 
-let rec strip_provider_metadata = function
+let strip_provider_metadata = function
   | `Assoc fields ->
       `Assoc
         (fields
-        |> List.filter (fun (key, _) -> not (List.mem key provider_metadata_keys))
-        |> List.map (fun (key, value) -> (key, strip_provider_metadata value)))
-  | `List items -> `List (List.map strip_provider_metadata items)
+        |> List.filter (fun (key, _) -> not (List.mem key provider_metadata_keys)))
   | other -> other
 
 let append_provider_metadata json _endpoint =

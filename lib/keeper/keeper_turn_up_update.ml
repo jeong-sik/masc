@@ -119,18 +119,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     execution_scope =
       Option.value ~default:old.execution_scope p.execution_scope_opt;
     scope_kind;
-    tool_tier =
-      p.tool_tier_opt
-      |> first_some
-           (if String.trim old.tool_tier <> "" then Some old.tool_tier else None)
-      |> first_some p.profile_defaults.tool_tier
-      |> Option.value ~default:"essential";
-    extra_masc_tools =
-      (match p.extra_masc_tools_in with
-       | _ :: _ as xs -> xs
-       | [] ->
-         if old.extra_masc_tools <> [] then old.extra_masc_tools
-         else Option.value ~default:[] p.profile_defaults.extra_masc_tools);
     room_scope;
     voice_enabled =
       Option.value ~default:old.voice_enabled p.voice_enabled_opt;

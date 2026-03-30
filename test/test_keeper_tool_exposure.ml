@@ -12,7 +12,7 @@ open Masc_mcp
    ============================================================ *)
 
 let make_meta ?(name = "test-keeper") ?(soul_profile = "")
-    ?(policy_voice_enabled = false) () : Keeper_types.keeper_meta =
+    ?(policy_voice_enabled = false) ?(tool_allowlist = []) () : Keeper_types.keeper_meta =
   let json =
     `Assoc
       [
@@ -21,6 +21,7 @@ let make_meta ?(name = "test-keeper") ?(soul_profile = "")
         ("trace_id", `String "test-trace-exposure");
         ("soul_profile", `String soul_profile);
         ("policy_voice_enabled", `Bool policy_voice_enabled);
+        ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
       ]
   in
   match Keeper_types.meta_of_json json with
@@ -64,7 +65,7 @@ let test_default_has_voice () =
     (has_tool "keeper_voice_speak" tools)
 
 let test_default_has_governance_tools () =
-  let meta = make_meta () in
+  let meta = make_meta ~tool_allowlist:["masc_governance_status"; "masc_case_brief_submit"] () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has governance status" true
     (has_tool "masc_governance_status" tools);
@@ -72,8 +73,10 @@ let test_default_has_governance_tools () =
     (has_tool "masc_case_brief_submit" tools)
 
 let test_default_has_research_tools () =
-  (* Mode removal: all keepers get autoresearch tools regardless of soul_profile *)
-  let meta = make_meta ~soul_profile:"default" () in
+  (* Autoresearch tools need allowlist since deny-by-default *)
+  let meta = make_meta ~soul_profile:"default"
+    ~tool_allowlist:["masc_autoresearch_cycle"; "masc_autoresearch_status";
+                     "masc_autoresearch_inject"; "masc_autoresearch_stop"] () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
 
@@ -109,9 +112,9 @@ let test_all_keepers_have_shell_readonly () =
    ============================================================ *)
 
 let test_all_keepers_have_coding_tools () =
-  let meta = make_meta () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let coding_names = Tool_code_write.tool_names in
+  let meta = make_meta ~tool_allowlist:(coding_names @ ["masc_worktree_create"; "masc_code_search"]) () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_any_coding = List.exists (fun n -> has_tool n tools) coding_names in
   check bool "coding tools present" true has_any_coding;
   check bool "has worktree create" true
@@ -124,7 +127,9 @@ let test_all_keepers_have_coding_tools () =
    ============================================================ *)
 
 let test_all_keepers_have_autoresearch () =
-  let meta = make_meta ~soul_profile:"teaching" () in
+  let meta = make_meta ~soul_profile:"teaching"
+    ~tool_allowlist:["masc_autoresearch_cycle"; "masc_autoresearch_status";
+                     "masc_autoresearch_inject"; "masc_autoresearch_stop"] () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
 
@@ -164,7 +169,7 @@ let test_any_mode_has_coordination_tools () =
     (has_tool "keeper_broadcast" tools)
 
 let test_any_mode_has_governance_tools () =
-  let meta = make_meta () in
+  let meta = make_meta ~tool_allowlist:["masc_governance_status"; "masc_petition_submit"] () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has governance status" true
     (has_tool "masc_governance_status" tools);
@@ -182,7 +187,8 @@ let test_sufficient_tool_count () =
 
 let test_research_learned_voice_combined () =
   let meta = make_meta ~soul_profile:"research"
-    ~policy_voice_enabled:true () in
+    ~policy_voice_enabled:true
+    ~tool_allowlist:["masc_autoresearch_cycle"; "masc_autoresearch_status"] () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has voice" true (has_tool "keeper_voice_speak" tools);
   check bool "has shell readonly" true (has_tool "keeper_shell_readonly" tools);

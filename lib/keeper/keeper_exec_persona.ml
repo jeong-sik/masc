@@ -38,7 +38,6 @@ let resolved_keeper_args_to_json
     ~instructions ~soul_profile ~will ~needs ~desires ~policy_voice_enabled
     ~room_scope ~scope_kind ~mention_targets
     ~proactive_enabled ~shards
-    ~tool_tier ~extra_masc_tools
     ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
   let base =
     [
@@ -58,8 +57,6 @@ let resolved_keeper_args_to_json
       ("scope_kind", `String scope_kind);
       ("mention_targets", string_list_to_json mention_targets);
       ("proactive_enabled", `Bool proactive_enabled);
-      ("tool_tier", `String tool_tier);
-      ("extra_masc_tools", string_list_to_json extra_masc_tools);
       ("auto_handoff", `Bool auto_handoff);
       ("handoff_threshold", `Float handoff_threshold);
       ("handoff_cooldown_sec", `Int handoff_cooldown_sec);
@@ -203,16 +200,6 @@ let resolved_keeper_args_from_persona args :
               | _ :: _ as xs -> Some xs
               | [] -> defaults.shards
             in
-            let tool_tier =
-              get_string_opt args "tool_tier"
-              |> first_some defaults.tool_tier
-              |> Option.value ~default:"essential"
-            in
-            let extra_masc_tools =
-              match get_string_list args "extra_masc_tools" with
-              | _ :: _ as xs -> xs
-              | [] -> Option.value ~default:[] defaults.extra_masc_tools
-            in
             let auto_handoff = get_bool args "auto_handoff" true in
             let handoff_threshold =
               Safe_ops.json_float_opt "handoff_threshold" args
@@ -231,7 +218,6 @@ let resolved_keeper_args_from_persona args :
                 ~policy_voice_enabled
                 ~room_scope ~scope_kind ~mention_targets
                 ~proactive_enabled ~shards
-                ~tool_tier ~extra_masc_tools
                 ~auto_handoff ~handoff_threshold
                 ~handoff_cooldown_sec
             in

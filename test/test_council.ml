@@ -545,22 +545,21 @@ let contains_substring s sub =
     loop 0
 
 let test_executor_merge_with_valid_pr () =
-  (* Topic with valid PR number should match and extract the number *)
+  (* build_action should produce MergePR with the extracted PR number *)
   match Executor.find_action "Merge PR #42" with
   | None -> fail "should match merge PR pattern"
   | Some mapping ->
-    (* The template uses MergePR 0 as placeholder *)
-    (match mapping.Executor.action with
-     | Executor.GitHubAction (Executor.MergePR 0) -> ()
-     | _ -> fail "expected MergePR 0 placeholder in template");
-    (* extract_number should find 42 from the topic *)
-    (match Executor.extract_number "Merge PR #42" with
-     | Some 42 -> ()
-     | Some n -> fail (Printf.sprintf "expected 42, got %d" n)
-     | None -> fail "should extract 42")
+    let group = Re.exec mapping.Executor.compiled_re
+      (String.lowercase_ascii "Merge PR #42") in
+    (match mapping.Executor.build_action group with
+     | Ok (Executor.GitHubAction (Executor.MergePR 42)) -> ()
+     | Ok (Executor.GitHubAction (Executor.MergePR n)) ->
+       fail (Printf.sprintf "expected MergePR 42, got MergePR %d" n)
+     | Ok _ -> fail "expected GitHubAction MergePR"
+     | Error msg -> fail (Printf.sprintf "build_action failed: %s" msg))
 
 let test_executor_deploy_errors () =
-  (* Deploy stub should error, not pretend to succeed *)
+  (* Deploy build_action should return Error, execute_decision surfaces it *)
   let result = Consensus.Unanimous Consensus.Approve in
   match Executor.execute_decision ~topic:"deploy v2.0" ~result with
   | None -> fail "should return Some (error result), not None"
@@ -570,14 +569,54 @@ let test_executor_deploy_errors () =
       (contains_substring r.output "deploy") true
 
 let test_executor_deploy_not_silent () =
-  (* Verify the deploy mapping still exists but is explicitly blocked *)
+  (* Verify the deploy mapping exists but build_action returns Error *)
   match Executor.find_action "deploy v1.0" with
   | None -> fail "deploy pattern should still match"
   | Some mapping ->
-    (* The template has the echo placeholder *)
-    (match mapping.Executor.action with
-     | Executor.ExecCommand ["echo"; "Deploy placeholder"] -> ()
-     | _ -> fail "expected deploy echo placeholder in template")
+    let group = Re.exec mapping.Executor.compiled_re
+      (String.lowercase_ascii "deploy v1.0") in
+    (match mapping.Executor.build_action group with
+     | Error msg ->
+       check bool "error mentions deploy"
+         (contains_substring msg "deploy") true;
+       check bool "error mentions not implemented"
+         (contains_substring msg "not implemented") true
+     | Ok _ -> fail "deploy build_action should return Error, not Ok")
+
+let test_executor_build_action_close_pr () =
+  (* ClosePR pattern should extract PR number via build_action *)
+  match Executor.find_action "close PR #99" with
+  | None -> fail "should match close PR pattern"
+  | Some mapping ->
+    let group = Re.exec mapping.Executor.compiled_re
+      (String.lowercase_ascii "close PR #99") in
+    (match mapping.Executor.build_action group with
+     | Ok (Executor.GitHubAction (Executor.ClosePR 99)) -> ()
+     | Ok (Executor.GitHubAction (Executor.ClosePR n)) ->
+       fail (Printf.sprintf "expected ClosePR 99, got ClosePR %d" n)
+     | Ok _ -> fail "expected GitHubAction ClosePR"
+     | Error msg -> fail (Printf.sprintf "build_action failed: %s" msg))
+
+let test_executor_describe_merge () =
+  match Executor.find_action "merge PR #77" with
+  | None -> fail "should match"
+  | Some mapping ->
+    let desc = mapping.Executor.describe "merge PR #77" in
+    check bool "describes merge 77"
+      (contains_substring desc "77") true
+
+let test_executor_deploy_version_in_error () =
+  (* build_action error should include the matched version string *)
+  match Executor.find_action "deploy v3.14" with
+  | None -> fail "should match deploy pattern"
+  | Some mapping ->
+    let group = Re.exec mapping.Executor.compiled_re
+      (String.lowercase_ascii "deploy v3.14") in
+    (match mapping.Executor.build_action group with
+     | Error msg ->
+       check bool "error includes version"
+         (contains_substring msg "v3.14") true
+     | Ok _ -> fail "deploy should return Error")
 
 let executor_tests = [
   "find action PR", `Quick, test_executor_find_action_pr;
@@ -585,9 +624,12 @@ let executor_tests = [
   "dry run approve", `Quick, test_executor_dry_run_approve;
   "dry run reject", `Quick, test_executor_dry_run_reject;
   "github argv create issue", `Quick, test_executor_github_argv_create_issue;
-  "merge with valid PR extracts number", `Quick, test_executor_merge_with_valid_pr;
-  "deploy stub errors", `Quick, test_executor_deploy_errors;
-  "deploy pattern exists but blocked", `Quick, test_executor_deploy_not_silent;
+  "merge build_action extracts PR number", `Quick, test_executor_merge_with_valid_pr;
+  "close build_action extracts PR number", `Quick, test_executor_build_action_close_pr;
+  "deploy build_action returns error", `Quick, test_executor_deploy_errors;
+  "deploy pattern exists and blocked via type", `Quick, test_executor_deploy_not_silent;
+  "describe includes PR number", `Quick, test_executor_describe_merge;
+  "deploy error includes version", `Quick, test_executor_deploy_version_in_error;
 ]
 
 (* ============================================================

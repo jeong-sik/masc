@@ -806,7 +806,7 @@
 (test
  (name test_council)
  (modules test_council)
- (libraries council alcotest unix))
+ (libraries council alcotest unix re))
 
 ; ============================================================
 ; Agent Identity tests (OpenClaw-inspired session tracking)

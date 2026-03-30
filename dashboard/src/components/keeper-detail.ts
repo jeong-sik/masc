@@ -149,6 +149,72 @@ function SectionCard({ title, children }: { title: string; children: preact.Comp
   `
 }
 
+// ── Supervisor Diagnostics Panel ────────────────────────
+
+function registryStateBadge(state: string | null) {
+  if (!state) return null
+  const colors: Record<string, { bg: string; text: string }> = {
+    Running: { bg: 'bg-[rgba(34,197,94,0.12)]', text: 'text-[#4ade80]' },
+    Crashed: { bg: 'bg-[rgba(239,68,68,0.15)]', text: 'text-[#ef4444]' },
+    Dead: { bg: 'bg-[rgba(100,116,139,0.15)]', text: 'text-[#94a3b8]' },
+    Stopped: { bg: 'bg-[rgba(234,179,8,0.12)]', text: 'text-[#facc15]' },
+    Paused: { bg: 'bg-[rgba(168,85,247,0.12)]', text: 'text-[#c084fc]' },
+  }
+  const c = colors[state] ?? { bg: 'bg-[rgba(138,163,211,0.1)]', text: 'text-[#86a0cf]' }
+  return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold ${c.bg} ${c.text}">${state}</span>`
+}
+
+function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
+  const diag = (keeper as any).supervisor_diagnostics
+  if (!diag) return null
+  const { restart_count, max_restarts, crash_log, last_failure_reason, dead_since } = diag
+  const budgetPct = max_restarts > 0 ? Math.min(100, (restart_count / max_restarts) * 100) : 0
+  const budgetColor = budgetPct >= 80 ? '#ef4444' : budgetPct >= 50 ? '#f59e0b' : '#4ade80'
+  return html`
+    <${SectionCard} title="Supervisor 진단">
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-[var(--text-muted)]">Fiber 상태</span>
+          ${registryStateBadge((keeper as any).registry_state)}
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-[var(--text-muted)]">재시작 예산</span>
+            <span class="text-xs font-mono text-[var(--text-body)]">${restart_count}/${max_restarts}</span>
+          </div>
+          <div class="w-full h-1.5 rounded-full bg-[var(--white-5)] overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-300" style="width: ${budgetPct}%; background: ${budgetColor}"></div>
+          </div>
+        </div>
+        ${last_failure_reason ? html`
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-[var(--text-muted)]">마지막 실패 원인</span>
+            <span class="text-[11px] font-mono text-[#fb7185]">${last_failure_reason}</span>
+          </div>
+        ` : null}
+        ${dead_since ? html`
+          <div class="py-2 px-3 rounded-lg bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.15)] text-xs text-[#fb7185]">
+            Dead since ${new Date(dead_since * 1000).toLocaleString()}. Reboot 필요.
+          </div>
+        ` : null}
+        ${crash_log && crash_log.length > 0 ? html`
+          <div>
+            <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">Crash 이력</div>
+            <div class="space-y-1 max-h-32 overflow-y-auto">
+              ${crash_log.slice(0, 10).map((e: any) => html`
+                <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[var(--white-3)]">
+                  <span class="font-mono text-[var(--text-muted)]">${new Date((e.ts ?? 0) * 1000).toLocaleTimeString()}</span>
+                  <span class="text-[#fb7185]">${e.reason ?? 'unknown'}</span>
+                </div>
+              `)}
+            </div>
+          </div>
+        ` : null}
+      </div>
+    <//>
+  `
+}
+
 // ── Main Detail Overlay ─────────────────────────────────
 
 export function KeeperDetailOverlay() {
@@ -241,6 +307,9 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Context chart ── */}
         <${ContextChart} keeper=${keeper} />
+
+        ${'' /* ── Supervisor diagnostics ── */}
+        <${SupervisorDiagnosticsPanel} keeper=${keeper} />
 
         ${'' /* ── Latency / Cost / Model charts ── */}
         <${MetricsCharts} keeper=${keeper} />

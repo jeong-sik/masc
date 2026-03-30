@@ -82,8 +82,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                (Some info.reason);
              Keeper_registry.set_state ~base_path meta.name
                Keeper_registry.Crashed;
+             let ts = Time_compat.now () in
              Keeper_registry.record_crash ~base_path
-               meta.name (Time_compat.now ()) reason;
+               meta.name ts reason;
+             let rc = match Keeper_registry.get ~base_path meta.name with
+               | Some e -> e.restart_count | None -> 0 in
+             Keeper_crash_persistence.enqueue_record ~base_path
+               ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
              resolve_done (`Crashed reason);
              publish_lifecycle "crashed" meta.name reason
@@ -94,8 +99,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              Keeper_registry.set_failure_reason ~base_path meta.name (Some fr);
              Keeper_registry.set_state ~base_path meta.name
                Keeper_registry.Crashed;
+             let ts = Time_compat.now () in
              Keeper_registry.record_crash ~base_path
-               meta.name (Time_compat.now ()) reason;
+               meta.name ts reason;
+             let rc = match Keeper_registry.get ~base_path meta.name with
+               | Some e -> e.restart_count | None -> 0 in
+             Keeper_crash_persistence.enqueue_record ~base_path
+               ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
              resolve_done (`Crashed reason);
              publish_lifecycle "crashed" meta.name reason))
@@ -107,8 +117,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                 Keeper_registry.Fiber_unresolved in
             Keeper_registry.set_failure_reason ~base_path meta.name
               (Some Keeper_registry.Fiber_unresolved);
+            let ts = Time_compat.now () in
             Keeper_registry.record_crash ~base_path
-              meta.name (Time_compat.now ()) reason;
+              meta.name ts reason;
+            let rc = match Keeper_registry.get ~base_path meta.name with
+              | Some e -> e.restart_count | None -> 0 in
+            Keeper_crash_persistence.enqueue_record ~base_path
+              ~name:meta.name ~ts ~reason ~restart_count:rc;
             Keeper_registry.record_error ~base_path meta.name reason;
             Keeper_registry.set_state ~base_path meta.name
               Keeper_registry.Crashed;
@@ -272,7 +287,7 @@ let apply_self_preservation ~total_keepers to_restart =
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts = Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
-  let dead_ttl_sec = Float.of_int (Runtime_params.get Governance_registry.keeper_dead_ttl_sec) in
+  let dead_ttl_sec = Runtime_params.get Governance_registry.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about

@@ -149,6 +149,10 @@ let init () =
   add "masc_inference_cache_writes_total" "Total inference cache writes" Counter;
   add "masc_inference_cache_bypass_total" "Total inference cache bypass decisions" Counter;
   add "masc_inference_cache_errors_total" "Total inference cache errors" Counter;
+  add "masc_provider_prefix_cache_creation_tokens_total"
+    "Total provider prefix cache creation tokens (Anthropic)" Counter;
+  add "masc_provider_prefix_cache_read_tokens_total"
+    "Total provider prefix cache read tokens (Anthropic)" Counter;
   register_histogram ~name:"masc_tool_call_duration_seconds"
     ~help:"Tool call latency in seconds" ()
 

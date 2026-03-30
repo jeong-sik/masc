@@ -41,6 +41,9 @@ let worker_run_checkpoint_path config session_id worker_run_id =
 let worker_run_meta_path config session_id worker_run_id =
   Filename.concat (worker_run_dir config session_id worker_run_id) "meta.json"
 
+let worker_run_proof_path config session_id worker_run_id =
+  Filename.concat (worker_run_dir config session_id worker_run_id) "proof.json"
+
 let session_json_path config session_id =
   Filename.concat (session_dir config session_id) "session.json"
 
@@ -332,6 +335,10 @@ let save_worker_run_checkpoint_text config session_id worker_run_id content =
 
 let save_worker_run_meta_json config session_id worker_run_id json =
   let path = worker_run_meta_path config session_id worker_run_id in
+  write_json config path json
+
+let save_worker_run_proof_json config session_id worker_run_id json =
+  let path = worker_run_proof_path config session_id worker_run_id in
   write_json config path json
 
 let immediate_dir_entries config dir =

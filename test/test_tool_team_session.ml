@@ -21,6 +21,8 @@ let () =
             `Quick
             Test_tool_team_session_proof
               .test_report_and_proof_expose_delivery_contract_and_verdict;
+          Alcotest.test_case "proof-aggregates-worker-proof-refs" `Quick
+            Test_tool_team_session_proof.test_proof_aggregates_worker_proof_refs;
           Alcotest.test_case "duration-reached-path" `Quick
             Test_tool_team_session_lifecycle.test_duration_reached_path;
           Alcotest.test_case "recover-elapsed-session" `Quick

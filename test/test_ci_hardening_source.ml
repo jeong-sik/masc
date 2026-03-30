@@ -483,7 +483,7 @@ let test_oas_worker_capability_threading_contracts () =
        "?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->");
   check bool "team session bridge threads switch into oas worker" true
     (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
-       "?raw_trace ?contract ~sw")
+       "?raw_trace ~proof_ref ?contract ~sw")
 
 let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true

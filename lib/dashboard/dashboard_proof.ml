@@ -149,11 +149,20 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
       artifact_paths
     || checkpoints_count > 0
   in
+  let worker_run_meta = Dashboard_proof_actors.worker_run_meta_jsons config session_id in
+  let stored_worker_proof_count =
+    worker_run_meta
+    |> List.fold_left
+         (fun acc json ->
+           match U.member "proof_present" json with
+           | `Bool true -> acc + 1
+           | _ -> acc)
+         0
+  in
   let evidence_present =
     tool_evidence_count > 0 || deliverable_count > 0 || checkpoints_count > 0
-    || Option.is_some proof_doc
+    || Option.is_some proof_doc || stored_worker_proof_count > 0
   in
-  let worker_run_meta = Dashboard_proof_actors.worker_run_meta_jsons config session_id in
   let raw_trace_run_count =
     worker_run_meta
     |> List.fold_left
@@ -239,13 +248,25 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
         Dashboard_proof_verdict.session_summary_json session verdict ~planned_actor_count
           ~active_actor_count ~mentioned_actor_count ~unanswered_actor_count
           ~interaction_count
-          ~evidence_count:(tool_evidence_count + deliverable_count + checkpoints_count)
+          ~evidence_count:
+            (tool_evidence_count + deliverable_count + checkpoints_count
+           + stored_worker_proof_count)
           ~cp_trace_count ~raw_trace_run_count ~validated_worker_run_count
           ~live_verdict ~historical_verdict ~verdict_basis );
       ("timeline", Dashboard_proof_verdict.timeline_json ?session_id ?operation_id events cp_traces);
       ("actor_contributions", `List (Dashboard_proof_actors.actor_contributions_json contributions));
       ("goal_binding", goal_binding);
       ("tool_evidence", tool_evidence);
+      ( "worker_proof_evidence",
+        `List
+          (worker_run_meta
+          |> List.filter (fun json -> U.member "proof_present" json = `Bool true)
+          |> List.fold_left
+               (fun acc json ->
+                 if List.length acc >= 12 then acc
+                 else Dashboard_proof_actors.worker_run_summary_json json :: acc)
+               []
+          |> List.rev) );
       ( "worker_run_evidence",
         `List
           (worker_run_meta

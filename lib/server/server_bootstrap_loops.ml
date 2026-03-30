@@ -169,8 +169,11 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
       ~base_path:state.room_config.base_path
       ~masc_tools:judge_masc_tools ~dispatch:governance_judge_dispatch
       ~build_facts:(fun () ->
-        Dashboard_governance.factual_snapshot_json
-          ~base_path:state.room_config.base_path)
+        let base = Dashboard_governance.factual_snapshot_json
+          ~base_path:state.room_config.base_path in
+        let agents = Room.get_agents_status state.room_config in
+        Operator_control_snapshot.merge_json_objects base
+          (`Assoc [("agents", agents)]))
       ());
   fork_subsystem "operator_judge" (fun () ->
     let operator_judge_ctx : _ Operator_control.context =

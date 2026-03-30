@@ -14,10 +14,11 @@ let infer_execution_mode (meta : Keeper_types.keeper_meta) : Oas.Execution_mode.
   | _ -> Oas.Execution_mode.Execute
 
 let infer_allowed_mutations (meta : Keeper_types.keeper_meta) : string list =
+  let effective = Keeper_alerting_path.effective_allowed_paths ~meta in
   match String.lowercase_ascii meta.execution_scope with
   | "workspace" | "local" -> ["workspace_only"]
   | _ ->
-    if meta.allowed_paths <> [] then ["workspace_only"]
+    if effective <> [] then ["workspace_only"]
     else []
 
 let of_keeper_meta (meta : Keeper_types.keeper_meta)

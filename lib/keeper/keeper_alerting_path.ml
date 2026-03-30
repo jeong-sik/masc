@@ -58,6 +58,23 @@ let resolve_keeper_target_path ~(config : Room.config)
              "path_not_in_allowed_paths: %s (allowed: [%s])"
              raw (String.concat ", " allowed_paths))
 
+(** Compute effective allowed_paths from keeper meta, applying scope-based
+    defaults when the operator has not set an explicit list.
+    - ["*"]          → [] (full access, explicit opt-in)
+    - non-empty list → list as-is (explicit restriction)
+    - [] + workspace → keeper's own dirs (computed default)
+    - [] + otherwise → [] (observe_only blocks writes; local = full access) *)
+let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
+  match meta.allowed_paths with
+  | ["*"] -> []
+  | _ :: _ as explicit -> explicit
+  | [] ->
+    (match String.lowercase_ascii meta.execution_scope with
+     | "workspace" ->
+       [ Printf.sprintf ".masc/keepers/%s/" meta.name;
+         ".masc/traces/" ]
+     | _ -> [])
+
 let truncate_tool_output ?(max_len = 12000) (s : string) : string =
   if String.length s <= max_len then s
   else String.sub s 0 max_len ^ "\n...[truncated]"

@@ -16,6 +16,7 @@ module Web_dashboard = Masc_mcp.Web_dashboard
 let has_repo_root root =
   Sys.file_exists (Filename.concat root "dune-project")
   && Sys.file_exists (Filename.concat (Filename.concat root "dashboard") "package.json")
+  && Sys.file_exists (Filename.concat (Filename.concat root "lib") "web_dashboard.ml")
 
 let rec ascend_repo_root dir =
   if has_repo_root dir then Some dir

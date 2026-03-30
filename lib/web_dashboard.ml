@@ -17,6 +17,7 @@ let assets_root () =
     let root = Filename.dirname (Filename.dirname (Filename.dirname exe_dir)) in
     Filename.concat root "assets"
   in
+  (* MASC_BASE_PATH is the runtime data root for .masc, not a dashboard asset root. *)
   let candidates =
     List.fold_right
       (fun path acc ->

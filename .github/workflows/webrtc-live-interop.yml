@@ -37,6 +37,9 @@ jobs:
           npm --prefix dashboard install --no-save playwright
           npx --prefix dashboard playwright install --with-deps chromium
 
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
       - name: Install OCaml dependencies
         run: |
           for attempt in 1 2 3; do

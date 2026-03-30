@@ -8,11 +8,13 @@ import { governanceToneClass } from '../lib/tone'
 import type { GovernanceTimelineEvent } from '../types'
 import type { RuntimeParamsSurface } from '../api'
 import { setRuntimeParam, clearRuntimeParam } from '../api/dashboard'
+import { showToast } from './common/toast'
 import {
   governanceData,
   runtimeLoading,
   runtimeParams,
   runtimeSurfaces,
+  loadRuntimeParams,
 } from './governance-store'
 import {
   activityKindLabel,
@@ -147,8 +149,11 @@ export function RuntimeParamsPanel() {
                                   if (e.key === 'Enter') {
                                     const val = meta?.value_type === 'float' ? parseFloat(editValue.value) : parseInt(editValue.value, 10)
                                     if (!isNaN(val)) {
-                                      void setRuntimeParam(param.key, val).then(() => {
+                                      void setRuntimeParam(param.key, val).then((res) => {
                                         editingParam.value = null
+                                        const isPetition = res.message?.includes('petition')
+                                        showToast(res.message ?? 'Parameter updated', isPetition ? 'warning' : 'success')
+                                        void loadRuntimeParams()
                                       })
                                     }
                                   } else if (e.key === 'Escape') {
@@ -161,12 +166,15 @@ export function RuntimeParamsPanel() {
                                 onClick=${() => {
                                   const val = meta?.value_type === 'float' ? parseFloat(editValue.value) : parseInt(editValue.value, 10)
                                   if (!isNaN(val)) {
-                                    void setRuntimeParam(param.key, val).then(() => {
+                                    void setRuntimeParam(param.key, val).then((res) => {
                                       editingParam.value = null
+                                      const isPetition = res.message?.includes('petition')
+                                      showToast(res.message ?? 'Parameter updated', isPetition ? 'warning' : 'success')
+                                      void loadRuntimeParams()
                                     })
                                   }
                                 }}
-                              >Apply</button>
+                              >${surface.risk === 'high' ? 'Petition' : 'Apply'}</button>
                               <button type="button"
                                 class="text-[10px] py-0.5 px-1.5 rounded bg-white/5 text-text-muted hover:bg-white/10 cursor-pointer border-none"
                                 onClick=${() => { editingParam.value = null }}
@@ -180,19 +188,21 @@ export function RuntimeParamsPanel() {
                                 <button type="button"
                                   class="text-[10px] py-0.5 px-1.5 rounded bg-white/5 text-text-muted hover:bg-white/10 cursor-pointer border-none"
                                   onClick=${() => {
-                                    void clearRuntimeParam(param.key)
+                                    void clearRuntimeParam(param.key).then((res) => {
+                                      const isPetition = res.message?.includes('petition')
+                                      showToast(res.message ?? 'Parameter reset', isPetition ? 'warning' : 'success')
+                                      void loadRuntimeParams()
+                                    })
                                   }}
-                                >Reset</button>
+                                >${surface.risk === 'high' ? 'Petition Reset' : 'Reset'}</button>
                               ` : null}
-                              ${surface.risk !== 'high' ? html`
-                                <button type="button"
-                                  class="text-[10px] py-0.5 px-1.5 rounded bg-white/5 text-text-muted hover:bg-white/10 cursor-pointer border-none"
-                                  onClick=${() => {
-                                    editingParam.value = param.key
-                                    editValue.value = String(param.current)
-                                  }}
-                                >Edit</button>
-                              ` : null}
+                              <button type="button"
+                                class="text-[10px] py-0.5 px-1.5 rounded ${surface.risk === 'high' ? 'bg-warn/10 text-warn hover:bg-warn/20' : 'bg-white/5 text-text-muted hover:bg-white/10'} cursor-pointer border-none"
+                                onClick=${() => {
+                                  editingParam.value = param.key
+                                  editValue.value = String(param.current)
+                                }}
+                              >${surface.risk === 'high' ? 'Edit (petition)' : 'Edit'}</button>
                             `}
                           </div>
                         </div>

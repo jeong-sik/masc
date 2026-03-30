@@ -534,6 +534,8 @@ export interface KeeperConfigMetrics {
 export interface KeeperConfig {
   name: string
   execution_scope: string
+  allowed_paths: string[]
+  effective_allowed_paths: string[]
   prompt: KeeperConfigPrompt
   execution: KeeperConfigExecution
   compaction: KeeperConfigCompaction

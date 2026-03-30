@@ -735,6 +735,11 @@ let keeper_config_json (config : Room.config) (name : string)
        `Assoc [
          ("name", `String m.name);
          ("execution_scope", `String m.execution_scope);
+         ("allowed_paths",
+           `List (List.map (fun s -> `String s) m.allowed_paths));
+         ("effective_allowed_paths",
+           `List (List.map (fun s -> `String s)
+             (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
          ("pipeline_stage", `String pipeline_stage);
          ("prompt", prompt);
          ("execution", execution);

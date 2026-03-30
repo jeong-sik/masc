@@ -85,6 +85,7 @@ val run_model_by_label :
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
   ?enable_thinking:bool ->
+  ?contract:Oas.Risk_contract.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?priority:Llm_provider.Request_priority.t ->

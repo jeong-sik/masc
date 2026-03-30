@@ -107,7 +107,7 @@ let handle_ag_ui_events ~deps request reqd =
                 if not !(info.stop) then drain ()
               in
               try drain ()
-              with Eio.Cancel.Cancelled _ -> ()
+              with Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
                    Log.Server.error "ag-ui drain loop error: %s"
                      (Printexc.to_string exn));

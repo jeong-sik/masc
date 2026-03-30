@@ -159,9 +159,10 @@ let () =
      registrations so it fills gaps without overwriting correct mappings. *)
   Tool_tag_init.register_all ();
   mark_tag_registry_initialized ();
-  (* Inject masc_* schemas into keeper bridge for profile-based filtering.
-     Must happen after all schemas are assembled. *)
-  Keeper_exec_tools.inject_masc_schemas Tools.all_schemas_extended;
+  (* Inject masc_* schemas into keeper bridge for tier-based filtering.
+     Uses Config.raw_all_tool_schemas which includes Board/MDAL schemas
+     not present in Tools.all_schemas_extended. *)
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
   (* Wire keeper-internal tool call recording to break Config dependency cycle.
      keeper_exec_tools cannot reference Tool_registry directly. *)
   Keeper_exec_tools.on_keeper_tool_call :=

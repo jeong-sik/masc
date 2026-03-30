@@ -173,6 +173,11 @@
  (modules test_dashboard_proof)
  (libraries masc_mcp masc_mcp.team_session_types alcotest eio eio_main yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
+(test
+ (name test_persist_worker_run_snapshot)
+ (modules test_persist_worker_run_snapshot)
+ (libraries masc_mcp masc_mcp.team_session_types alcotest eio eio_main yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
+
 ; Dashboard cache deadlock regression + stampede tests (requires Eio)
 (test
  (name test_dashboard_cache)

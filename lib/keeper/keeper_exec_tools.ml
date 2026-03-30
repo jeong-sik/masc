@@ -81,9 +81,11 @@ let keeper_voice_tool_schemas =
 
 (** Curated masc_* bridge for keepers.
     Schema list is injected at server init to avoid cyclic dependency on Tools.
-    Keep raw masc_* passthrough minimal and move keeper-visible workflows into
-    dedicated shards whenever possible. *)
+    Keeper tool access is controlled per-keeper via tool_tier (essential/standard/full)
+    in persona config, using Tool_catalog tier definitions. *)
 
+(** @deprecated Legacy hardcoded list. Tier-based filtering via Tool_catalog
+    replaces this. Kept for test backward-compatibility reference. *)
 let keeper_passthrough_masc_tool_names =
   [
     "masc_status";
@@ -99,16 +101,30 @@ let masc_schemas_ref : Types.tool_schema list ref = ref []
 let inject_masc_schemas (schemas : Types.tool_schema list) =
   masc_schemas_ref :=
     List.filter (fun (s : Types.tool_schema) ->
-      String.starts_with ~prefix:"masc_" s.name
-      && List.mem s.name keeper_passthrough_masc_tool_names)
+      String.starts_with ~prefix:"masc_" s.name)
       schemas
 
-let keeper_masc_tool_names (_meta : keeper_meta) : string list =
+let keeper_masc_tool_names (meta : keeper_meta) : string list =
+  let tier =
+    Tool_catalog.tier_of_string meta.tool_tier
+    |> Option.value ~default:Tool_catalog.Essential
+  in
   !masc_schemas_ref
-  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> List.filter_map (fun (schema : Types.tool_schema) ->
+    if Tool_catalog.is_in_tier tier schema.name
+       || List.mem schema.name meta.extra_masc_tools
+    then Some schema.name
+    else None)
 
-let keeper_masc_tool_schemas (_meta : keeper_meta) : Types.tool_schema list =
+let keeper_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
+  let tier =
+    Tool_catalog.tier_of_string meta.tool_tier
+    |> Option.value ~default:Tool_catalog.Essential
+  in
   !masc_schemas_ref
+  |> List.filter (fun (schema : Types.tool_schema) ->
+    Tool_catalog.is_in_tier tier schema.name
+    || List.mem schema.name meta.extra_masc_tools)
 
 let dedupe_tool_names names =
   dedupe_keep_order (List.filter (fun name -> String.trim name <> "") names)
@@ -160,8 +176,17 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
       @ Tool_code_write.schemas
       @ (keeper_masc_tool_schemas meta)
     in
-    all_schemas
-    |> List.filter (fun tool -> List.mem tool.Types.name allowed)
+    let result =
+      all_schemas
+      |> List.filter (fun tool -> List.mem tool.Types.name allowed)
+    in
+    let count = List.length result in
+    if count > 100 then
+      Log.Keeper.warn
+        "tool budget exceeded: %d schemas in LLM context (~%dKB estimated). \
+         Consider restricting tool tier."
+        count (count * 470 / 1024);
+    result
 
 let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
   let voice = Voice_bridge.get_voice_for_agent agent_id in

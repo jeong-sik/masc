@@ -139,6 +139,77 @@ let test_workload_template_rejects_mismatched_workload_profile () =
             message
       | Ok _ -> Alcotest.fail "expected workload_template mismatch to fail")
 
+let test_start_operation_uses_legacy_chain_run_id_as_checkpoint_ref () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      with_eio_test base_dir @@ fun config ->
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      let operation =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Resume legacy chain checkpoint");
+              ("chain", `Assoc [ ("run_id", `String "legacy-run-123") ]);
+            ])
+      in
+      Alcotest.(check (option string)) "legacy chain run_id promoted"
+        (Some "legacy-run-123") operation.checkpoint_ref)
+
+let test_operation_json_preserves_chain_null_for_wire_compat () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      with_eio_test base_dir @@ fun config ->
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      let operation =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "company-main");
+              ("objective", `String "Serialize command plane operation");
+            ])
+      in
+      let fields =
+        match Command_plane_v2.operation_to_json operation with
+        | `Assoc fields -> fields
+        | _ -> Alcotest.fail "expected operation JSON object"
+      in
+      let chain_field = List.assoc_opt "chain" fields in
+      Alcotest.(check bool) "chain key present" true (Option.is_some chain_field);
+      Alcotest.(check bool) "chain key is null" true
+        (match chain_field with
+        | Some `Null -> true
+        | _ -> false))
+
+let test_operation_of_json_uses_legacy_chain_run_id_as_checkpoint_ref () =
+  let legacy_json =
+    `Assoc
+      [
+        ("operation_id", `String "op-legacy-chain");
+        ("objective", `String "Load legacy chain snapshot");
+        ("assigned_unit_id", `String "company-main");
+        ("trace_id", `String "trace-legacy-chain");
+        ("created_by", `String "owner");
+        ("status", `String "active");
+        ("chain", `Assoc [ ("run_id", `String "legacy-run-456") ]);
+      ]
+  in
+  match Command_plane_v2.operation_of_json legacy_json with
+  | Some operation ->
+      Alcotest.(check (option string)) "legacy stored chain run_id promoted"
+        (Some "legacy-run-456") operation.checkpoint_ref
+  | None -> Alcotest.fail "expected legacy operation JSON to load"
+
 let test_coding_verify_and_review_require_expected_dependencies () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -417,4 +488,3 @@ let test_intent_forecast_resolves_dependencies_against_all_operations () =
        |> Yojson.Safe.Util.to_list
        |> List.exists (fun value ->
               String.equal (Yojson.Safe.Util.to_string value) "verification_gap")))
-

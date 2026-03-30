@@ -16,7 +16,6 @@
 - **OAS pin ratchet** — track `agent_sdk >= 0.98.0` and `main@08f54b973c993613cb320682337e9a567477b414` (#3965).
 - **Cross-run spec completion** — document late-arrival handling, schema compatibility, and API details (#3951).
 - **CDAL canonical bridge cleanup** — keep the earlier risk contract and review followup train in the 2.176.0 release set (#3927, #3940).
-
 ## [2.174.0] - 2026-03-30
 
 ### Added

@@ -18,6 +18,18 @@ let () =
             `Quick
             Test_command_plane_v2_scheduler_core_a.test_workload_template_rejects_mismatched_workload_profile;
           Alcotest.test_case
+            "start operation uses legacy chain run_id as checkpoint_ref"
+            `Quick
+            Test_command_plane_v2_scheduler_core_a.test_start_operation_uses_legacy_chain_run_id_as_checkpoint_ref;
+          Alcotest.test_case
+            "operation json preserves chain null for wire compat"
+            `Quick
+            Test_command_plane_v2_scheduler_core_a.test_operation_json_preserves_chain_null_for_wire_compat;
+          Alcotest.test_case
+            "operation of json uses legacy chain run_id as checkpoint_ref"
+            `Quick
+            Test_command_plane_v2_scheduler_core_a.test_operation_of_json_uses_legacy_chain_run_id_as_checkpoint_ref;
+          Alcotest.test_case
             "coding verify and review require expected dependencies"
             `Quick
             Test_command_plane_v2_scheduler_core_a.test_coding_verify_and_review_require_expected_dependencies;

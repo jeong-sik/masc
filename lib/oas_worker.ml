@@ -599,6 +599,7 @@ let run_model_by_label
     ?context_reducer
     ?memory
     ?enable_thinking
+    ?contract
     ?on_event
     ?transport
     ?priority
@@ -626,7 +627,7 @@ let run_model_by_label
             ()
         in
         let config = { config with transport = transport_resolved; priority } in
-        (match run ~sw ~net ~config ?on_event goal with
+        (match run ~sw ~net ~config ?on_event ?contract goal with
         | Ok result when accept result.response -> Ok result
         | Ok _ ->
             Error

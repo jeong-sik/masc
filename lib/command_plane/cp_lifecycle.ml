@@ -205,6 +205,11 @@ let dashboard_projection_json ?sessions config =
 let operation_status_json config ?operation_id () =
   list_operations_json ?operation_id config
 
+let legacy_chain_run_id json =
+  match U.member "chain" json with
+  | `Assoc _ as chain_json -> get_string_opt chain_json "run_id"
+  | _ -> None
+
 let company_scope_id_for units source_unit_id target_unit_id =
   option_first_some
     (Option.bind target_unit_id (fun unit_id -> company_ancestor_id units unit_id))
@@ -532,7 +537,10 @@ let start_operation config ~(actor : string) json =
               ~depends_on_operation_ids
         | _ -> Ok ()
       in
-      let checkpoint_ref = get_string_opt json "checkpoint_ref" in
+      let checkpoint_ref =
+        option_first_some (get_string_opt json "checkpoint_ref")
+          (legacy_chain_run_id json)
+      in
       let operation =
         {
           operation_id = next_operation_id ();

@@ -152,6 +152,8 @@ let all_known_tool_names =
     "masc_handover_create";
     "masc_handover_get";
     "masc_handover_list";
+    "masc_hat_status";
+    "masc_hat_wear";
     "masc_heartbeat";
     "masc_heartbeat_list";
     "masc_heartbeat_result";

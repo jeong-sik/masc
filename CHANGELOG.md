@@ -3,17 +3,18 @@
 
 ## [2.172.0] - 2026-03-30
 
-### Fixed
-- **Dashboard UX overhaul** — CSS cascade conflict 해결 (4개 중복 CSS 파일 제거, -489줄), progressive disclosure로 정보 과잉 축소, 10개 섹션 용어 설명 강화 (#3912).
-- **Council placeholder stubs** — silent no-op 대신 explicit error 반환 (#3914).
-
 ### Added
-- **Board bulk delete** — 게시글 다중 선택 삭제, kind 배지 전체 표시, "내부" 태그 → "내부(에이전트 전용)" (#3912).
-- **Keeper cache_system_prompt** — provider prefix cache metrics surface (P1-1b) (#3895).
+- **Keeper lifecycle tests** — bootstrap restore, lifecycle params, crash persistence coverage (#3911).
+- **Cache system prompt plumbing** — P1-1b surface and provider prefix cache metrics (#3895).
+- **Council explicit errors** — silent placeholder stubs replaced with typed errors (#3914).
 
 ### Changed
-- **Mitosis runtime removal** — 통합 handoff surface로 단일화 (#3883).
-- **OAS opam floor** — agent_sdk 0.97.0으로 동기화 (#3910).
+- **Dashboard UX overhaul** — CSS dedup, progressive disclosure, terminology alignment (-347 lines) (#3912).
+- **OAS pin floor** — agent_sdk minimum bumped to 0.97.0 (#3910).
+- **Dashboard asset lookup** — fix basepath and startup tmpfile handling (#3896).
+
+### Removed
+- **Mitosis runtime** — legacy lifecycle removed, handoff surfaces unified (-4,840 lines) (#3883).
 
 ## [2.171.0] - 2026-03-30
 

@@ -570,7 +570,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                Tool_improve_loop.maybe_tick_from_keepalive ~config:ctx.config
                  ~agent_name:meta_after_proactive.agent_name
                  ~keeper_name:meta_after_proactive.name
-                 ~sw:ctx.sw ~clock:ctx.clock ~proc_mgr:ctx.proc_mgr ()
+                 ~sw:ctx.sw ~clock:ctx.clock ~proc_mgr:ctx.proc_mgr
+                 ~net:ctx.net ()
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->

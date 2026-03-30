@@ -550,13 +550,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_autoresearch ->
         let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_
             ~program_note:_ =
-          match state.Mcp_server.proc_mgr with
-          | None -> Error "process_mgr not available"
-          | Some process_mgr ->
-              let net = match state.Mcp_server.net with
-                | Some n -> n
-                | None -> failwith "net not available for team session"
-              in
+          match state.Mcp_server.proc_mgr, state.Mcp_server.net with
+          | None, _ -> Error "process_mgr not available"
+          | Some _process_mgr, None -> Error "net not available for team session"
+          | Some process_mgr, Some net ->
               let env = object
                 method clock = clock
                 method process_mgr = process_mgr

@@ -194,6 +194,15 @@ let run_repair_loop_until_terminal ~sw ~(clock : _ Eio.Time.clock)
       dispatch_supported_tool ~sw ~clock ~config ~name ~args)
     args
 
+let slot_aware_concurrency_cap ~entry_count ~selection_count ~all_discovered
+    ~endpoints_found ~total =
+  if entry_count <= 1 || selection_count <= 0 then
+    entry_count
+  else if all_discovered && endpoints_found > 0 && total > 0 then
+    total
+  else
+    entry_count
+
 (* ── Role mapping ──────────────────────────────────────────────── *)
 
 let role_of_worker_class : Team_session_types.worker_class option -> Swarm.Swarm_types.agent_role =
@@ -577,21 +586,27 @@ let session_to_swarm_config
   in
   (* Slot-aware max_concurrent_agents for local-only sessions *)
   let slot_aware_cap =
-    let all_selections =
-      session.planned_workers
-      |> List.map (fun pw ->
-           cascade_of_worker ~session_cascade:session.model_cascade pw)
-      |> List.sort_uniq String.compare
-    in
-    let config_path = Oas_worker.default_config_path () in
-    let cap =
-      Llm_provider.Cascade_config.local_capacity_for_selections
-        ~sw ~net ?config_path all_selections
-    in
-    if cap.all_discovered && cap.endpoints_found > 0 && cap.total > 0
-       && cap.endpoints_found >= List.length all_selections
-    then cap.total
-    else entry_count
+    if entry_count <= 1 then
+      entry_count
+    else
+      let all_selections =
+        session.planned_workers
+        |> List.map (fun pw ->
+             cascade_of_worker ~session_cascade:session.model_cascade pw)
+        |> List.sort_uniq String.compare
+      in
+      match all_selections with
+      | [] -> entry_count
+      | _ ->
+          let config_path = Oas_worker.default_config_path () in
+          let cap =
+            Llm_provider.Cascade_config.local_capacity_for_selections
+              ~sw ~net ?config_path all_selections
+          in
+          slot_aware_concurrency_cap ~entry_count
+            ~selection_count:(List.length all_selections)
+            ~all_discovered:cap.all_discovered
+            ~endpoints_found:cap.endpoints_found ~total:cap.total
   in
   { entries; mode;
     convergence = make_convergence_metric ~entry_count success_by_agent;

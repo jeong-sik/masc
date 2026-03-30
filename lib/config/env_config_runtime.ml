@@ -108,7 +108,7 @@ end
 
 module Spawn = struct
   (** Default spawn timeout for agent processes (seconds).
-      Used by spawn.ml, spawn_eio.ml, mitosis/mitosis_spawn.ml, and tool_relay.ml.
+      Used by spawn.ml, spawn_eio.ml, and tool_relay.ml.
       Higher value (600s) allows for slow network/API conditions while preventing indefinite hangs. *)
   let timeout_seconds =
     int_of_float (get_float ~default:600.0 "MASC_SPAWN_TIMEOUT_SEC")
@@ -308,11 +308,35 @@ module Transport = struct
   (** Whether OpenAI-compatible endpoint is enabled. Default: false. *)
   let openai_compat_enabled = get_bool ~default:false "MASC_OPENAI_COMPAT"
 
+  (** Force strict auth for all HTTP endpoints. Default: false. *)
+  let http_auth_strict_env_enabled () =
+    get_bool ~default:false "MASC_HTTP_AUTH_STRICT"
+
   (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
       Runtime-readable (tests change this via putenv). *)
   let startup_watchdog_sec () =
     let v = get_float ~default:240.0 "MASC_STARTUP_WATCHDOG_SEC" in
     Float.max 30.0 (Float.min 600.0 v)
+end
+
+module TeamSession = struct
+  (** Enable routing judge in team session dispatch. Default: true. *)
+  let router_judge_enabled () =
+    get_bool ~default:true "MASC_TEAM_SESSION_ROUTER_JUDGE"
+end
+
+module Cdal = struct
+  (** Enable contract-driven proof capture. Default: true. *)
+  let enabled () =
+    get_bool ~default:true "MASC_CDAL_ENABLED"
+
+  (** Enforce contract risk violations. Default: false. *)
+  let risk_enforcement_enabled () =
+    get_bool ~default:false "MASC_CDAL_RISK_ENFORCEMENT"
+
+  (** Aggregate proof bundles across turns. Default: false. *)
+  let proof_aggregation_enabled () =
+    get_bool ~default:false "MASC_CDAL_PROOF_AGGREGATION"
 end
 
 (** {1 Board Configuration} *)

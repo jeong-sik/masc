@@ -68,7 +68,7 @@ jobs:
             "sentinel_keeper_models": ["glm:glm-4.7-flash"],
             "heartbeat_action_models": ["glm:glm-4.7-flash"],
             "heartbeat_wake_models": ["glm:glm-4.7-flash"],
-            "lodge_direct_models": ["glm:glm-4.7-flash"],
+            "autonomy_direct_models": ["glm:glm-4.7-flash"],
             "classification_models": ["glm:glm-4.7-flash"],
             "verifier_models": ["glm:glm-4.7-flash"]
           }

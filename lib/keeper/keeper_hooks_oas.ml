@@ -145,8 +145,23 @@ let make_hooks
           | None -> (0, 0)
         in
         let total_tok = input_tok + output_tok in
+        (* Provider prefix cache token tracking (Anthropic).
+           Non-Anthropic providers report 0 for these fields. *)
+        (match response.usage with
+         | Some u ->
+           let cc = u.cache_creation_input_tokens in
+           let cr = u.cache_read_input_tokens in
+           if cc > 0 then
+             Prometheus.inc_counter
+               "masc_provider_prefix_cache_creation_tokens_total"
+               ~delta:(Float.of_int cc) ();
+           if cr > 0 then
+             Prometheus.inc_counter
+               "masc_provider_prefix_cache_read_tokens_total"
+               ~delta:(Float.of_int cr) ()
+         | None -> ());
         Log.Keeper.info "keeper:%s turn=%d total_turns=%d model=%s tokens=%d"
-          meta.name turn meta.usage.total_turns model total_tok;
+          meta.name turn meta.runtime.usage.total_turns model total_tok;
         (* Emit per-turn cost event for task attribution.
            cost_usd is 0.0 until OAS cascade provides actual cost
            (see oas#393). Token counts are the primary data for now. *)

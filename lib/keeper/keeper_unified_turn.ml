@@ -239,8 +239,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       let max_turns = Keeper_config.keeper_unified_max_turns () in
       let max_cost_usd = Keeper_config.keeper_tool_cost_max_usd () in
       (* 4. Build turn prompt callback: use our unified system prompt *)
-      let build_turn_prompt ~base_system_prompt:_ ~messages:_ =
-        system_prompt
+      let build_turn_prompt ~base_system_prompt:_ ~messages:_
+          : Keeper_agent_run.turn_prompt =
+        (* Unified path already places soft context (continuity, worktree)
+           in the user_message via Keeper_unified_prompt.build_prompt.
+           No dynamic_context needed here. *)
+        { system_prompt; dynamic_context = "" }
       in
       (* 5. Run via OAS Agent.run() *)
       let run_result, latency_ms =
@@ -253,6 +257,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
               ~max_cost_usd
+              ~priority:Llm_provider.Request_priority.Background
               ())
       in
       match run_result with
@@ -269,7 +274,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           Keeper_registry.increment_turn_failures ~base_path meta.name;
           let count = Keeper_registry.get_turn_failures ~base_path meta.name in
           let threshold =
-            Env_config.KeeperKeepalive.max_consecutive_turn_failures
+            Runtime_params.get Governance_registry.keeper_max_turn_failures
           in
           if count >= threshold then begin
             Log.Keeper.error

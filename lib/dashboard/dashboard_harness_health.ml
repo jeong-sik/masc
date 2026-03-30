@@ -31,11 +31,15 @@ type pre_compact_event = {
   trigger : string;
 }
 
-type dna_quality_event = {
+type handoff_event = {
   timestamp : float;
   keeper_name : string;
-  score : float;
-  dimensions : Yojson.Safe.t;
+  trace_id : string;
+  generation : int;
+  next_generation : int option;
+  prev_trace_id : string option;
+  new_trace_id : string option;
+  to_model : string option;
 }
 
 let max_runtime_events = 12
@@ -45,7 +49,6 @@ let runtime_stale_after_s = 30. *. 60.
 let evaluator_stale_after_s = 12. *. 3600.
 
 let pre_compact_store_ref : Dated_jsonl.t option ref = ref None
-let dna_quality_store_ref : Dated_jsonl.t option ref = ref None
 
 let status_to_string = function
   | Healthy -> "healthy"
@@ -75,9 +78,6 @@ let me_root () =
 let pre_compact_store_base_dir () =
   Filename.concat (me_root ()) "data/harness-pre-compact"
 
-let dna_quality_store_base_dir () =
-  Filename.concat (me_root ()) "data/harness-dna-quality"
-
 let get_or_create_store store_ref base_dir_fn =
   match !store_ref with
   | Some store -> store
@@ -89,18 +89,11 @@ let get_or_create_store store_ref base_dir_fn =
 let get_pre_compact_store () =
   get_or_create_store pre_compact_store_ref pre_compact_store_base_dir
 
-let get_dna_quality_store () =
-  get_or_create_store dna_quality_store_ref dna_quality_store_base_dir
-
 let reset_runtime_stores_for_testing () =
-  pre_compact_store_ref := None;
-  dna_quality_store_ref := None
+  pre_compact_store_ref := None
 
 let set_pre_compact_store_for_testing ~base_dir =
   pre_compact_store_ref := Some (Dated_jsonl.create ~base_dir ())
-
-let set_dna_quality_store_for_testing ~base_dir =
-  dna_quality_store_ref := Some (Dated_jsonl.create ~base_dir ())
 
 let json_float_option = function
   | Some value -> `Float value
@@ -211,42 +204,6 @@ let pre_compact_event_of_json json =
         trigger = string_field json "trigger";
       }
 
-let dna_quality_record_json (event : dna_quality_event) =
-  `Assoc
-    [
-      ("record_type", `String "dna_quality");
-      ("timestamp", `Float event.timestamp);
-      ("keeper_name", `String event.keeper_name);
-      ("score", `Float event.score);
-      ("dimensions", event.dimensions);
-    ]
-
-let dna_quality_event_json (event : dna_quality_event) =
-  `Assoc
-    [
-      ("timestamp", `Float event.timestamp);
-      ("keeper_name", `String event.keeper_name);
-      ("score", `Float event.score);
-      ("dimensions", event.dimensions);
-    ]
-
-let dna_quality_event_of_json json =
-  let record_type = string_field json "record_type" in
-  if record_type <> "" && not (String.equal record_type "dna_quality") then None
-  else
-    let dimensions =
-      match Safe_ops.json_member_opt "dimensions" json with
-      | Some value -> value
-      | None -> `Assoc []
-    in
-    Some
-      {
-        timestamp = Safe_ops.json_float ~default:0.0 "timestamp" json;
-        keeper_name = string_field json "keeper_name";
-        score = Safe_ops.json_float ~default:0.0 "score" json;
-        dimensions;
-      }
-
 let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ()
     : harness_verdict_item list =
   let records = read_store_records (Eval_calibration.get_store ()) ?since ?until () in
@@ -271,15 +228,75 @@ let read_pre_compact_events ?since ?until () =
       Float.compare right.timestamp left.timestamp)
     events
 
-let read_dna_quality_events ?since ?until () =
-  let records = read_store_records (get_dna_quality_store ()) ?since ?until () in
-  let events : dna_quality_event list =
-    records |> List.filter_map dna_quality_event_of_json
+let handoff_event_of_metrics_json json =
+  let handoff =
+    match Safe_ops.json_member_opt "handoff" json with
+    | Some value -> value
+    | None -> `Assoc []
+  in
+  if not (Safe_ops.json_bool ~default:false "performed" handoff) then None
+  else
+    let next_generation =
+      match Safe_ops.json_int_opt "to_generation" handoff with
+      | Some value -> Some value
+      | None -> Safe_ops.json_int_opt "new_generation" handoff
+    in
+    Some
+      {
+        timestamp = Safe_ops.json_float ~default:0.0 "ts_unix" json;
+        keeper_name = string_field json "name";
+        trace_id = string_field json "trace_id";
+        generation = Safe_ops.json_int ~default:0 "generation" json;
+        next_generation;
+        prev_trace_id = Safe_ops.json_string_opt "prev_trace_id" handoff;
+        new_trace_id = Safe_ops.json_string_opt "new_trace_id" handoff;
+        to_model = Safe_ops.json_string_opt "to_model" handoff;
+      }
+
+let handoff_event_json (event : handoff_event) =
+  `Assoc
+    [
+      ("timestamp", `Float event.timestamp);
+      ("keeper_name", `String event.keeper_name);
+      ("trace_id", `String event.trace_id);
+      ("generation", `Int event.generation);
+      ( "next_generation",
+        match event.next_generation with Some value -> `Int value | None -> `Null );
+      ( "prev_trace_id",
+        match event.prev_trace_id with Some value -> `String value | None -> `Null );
+      ( "new_trace_id",
+        match event.new_trace_id with Some value -> `String value | None -> `Null );
+      ("to_model", json_string_option event.to_model);
+    ]
+
+let read_keeper_metric_records ?since ?until (config : Room.config) keeper_name =
+  let store = Keeper_types.keeper_metrics_store config keeper_name in
+  match (since, until) with
+  | Some _, _ | _, Some _ ->
+      let since, until = date_bounds ?since ?until () in
+      let start_date = if since = "" then "2020-01-01" else since in
+      let end_date = if until = "" then "2099-12-31" else until in
+      Dated_jsonl.read_range store ~since:start_date ~until:end_date
+  | None, None -> Dated_jsonl.read_recent store max_signal_scan
+
+let read_handoff_events ?since ?until (config : Room.config) =
+  let events =
+    Keeper_types.keeper_names config
+    |> List.concat_map (fun keeper_name ->
+           read_keeper_metric_records ?since ?until config keeper_name
+           |> List.filter_map handoff_event_of_metrics_json)
   in
   List.sort
-    (fun (left : dna_quality_event) (right : dna_quality_event) ->
+    (fun (left : handoff_event) (right : handoff_event) ->
       Float.compare right.timestamp left.timestamp)
     events
+
+let has_any_handoff_events (config : Room.config) =
+  Keeper_types.keeper_names config
+  |> List.exists (fun keeper_name ->
+         read_keeper_metric_records config keeper_name
+         |> List.exists (fun json ->
+                Option.is_some (handoff_event_of_metrics_json json)))
 
 let empty_reason ~has_any ?since ?until () =
   let since, until = date_bounds ?since ?until () in
@@ -295,24 +312,17 @@ let pre_compact_status (latest_event : pre_compact_event option) =
       else if event.context_ratio >= 0.95 || event.token_count >= 50_000 then Warning
       else Healthy
 
-let dna_quality_status (latest_event : dna_quality_event option) =
+let handoff_status (latest_event : handoff_event option) =
   match latest_event with
   | None -> Idle
   | Some event ->
       if is_stale ~threshold_s:runtime_stale_after_s event.timestamp then Stale
-      else
-        let goal_anchor = Safe_ops.json_bool ~default:false "has_goal_anchor" event.dimensions in
-        let task_anchor = Safe_ops.json_bool ~default:false "has_task_anchor" event.dimensions in
-        let recent_context =
-          Safe_ops.json_bool ~default:false "has_recent_context" event.dimensions
-        in
-        let truncation =
-          Safe_ops.json_int ~default:0 "truncation_artifacts" event.dimensions
-        in
-        if event.score < 0.6 || not goal_anchor || not task_anchor
-           || not recent_context || truncation > 0
-        then Warning
-        else Healthy
+      else if
+        Option.is_none event.prev_trace_id
+        || Option.is_none event.new_trace_id
+        || Option.is_none event.next_generation
+      then Warning
+      else Healthy
 
 let evaluator_status ~calibration latest_timestamp =
   let total_verdicts = Safe_ops.json_int ~default:0 "total_verdicts" calibration in
@@ -342,17 +352,17 @@ let latest_by_timestamp timestamp_of items =
 
 let pre_compact_timestamp (event : pre_compact_event) = event.timestamp
 let pre_compact_ratio (event : pre_compact_event) = event.context_ratio
-let dna_quality_timestamp (event : dna_quality_event) = event.timestamp
-let dna_quality_score (event : dna_quality_event) = event.score
+let handoff_timestamp (event : handoff_event) = event.timestamp
+let handoff_generation (event : handoff_event) = event.next_generation
 
 let overview_json
     ~(calibration : Yojson.Safe.t)
     ~(recent_verdicts : harness_verdict_item list)
     ~(latest_pre_compact : pre_compact_event option)
-    ~(latest_dna : dna_quality_event option) =
+    ~(latest_handoff : handoff_event option) =
   let verdict_last = latest_timestamp_of_verdicts recent_verdicts in
   let pre_compact_last = Option.map pre_compact_timestamp latest_pre_compact in
-  let dna_last = Option.map dna_quality_timestamp latest_dna in
+  let handoff_last = Option.map handoff_timestamp latest_handoff in
   let fallback_count = Safe_ops.json_int ~default:0 "fallback_count" calibration in
   let total_verdicts = Safe_ops.json_int ~default:0 "total_verdicts" calibration in
   let fallback_ratio =
@@ -360,7 +370,7 @@ let overview_json
     else float_of_int fallback_count /. float_of_int total_verdicts
   in
   let last_signal_at =
-    max_timestamp verdict_last (max_timestamp pre_compact_last dna_last)
+    max_timestamp verdict_last (max_timestamp pre_compact_last handoff_last)
   in
   `Assoc
     [
@@ -368,16 +378,18 @@ let overview_json
         `String (status_to_string (evaluator_status ~calibration verdict_last)) );
       ( "pre_compact_status",
         `String (status_to_string (pre_compact_status latest_pre_compact)) );
-      ("dna_status", `String (status_to_string (dna_quality_status latest_dna)));
+      ("handoff_status", `String (status_to_string (handoff_status latest_handoff)));
       ("last_signal_at", json_float_option last_signal_at);
       ("evaluator_last_event_at", json_float_option verdict_last);
       ("pre_compact_last_event_at", json_float_option pre_compact_last);
-      ("dna_last_event_at", json_float_option dna_last);
+      ("handoff_last_event_at", json_float_option handoff_last);
       ("fallback_ratio", `Float fallback_ratio);
       ( "latest_pre_compact_ratio",
         json_float_option (Option.map pre_compact_ratio latest_pre_compact) );
-      ( "latest_dna_score",
-        json_float_option (Option.map dna_quality_score latest_dna) );
+      ( "latest_handoff_generation",
+        match Option.bind latest_handoff handoff_generation with
+        | Some value -> `Int value
+        | None -> `Null );
     ]
 
 let record_pre_compact_at ~timestamp ~keeper_name ~context_ratio ~message_count
@@ -403,22 +415,6 @@ let record_pre_compact ~keeper_name ~context_ratio ~message_count ~token_count
     ~context_ratio ~message_count ~token_count ~strategies ~model_family
     ~trigger
 
-let record_dna_quality_at ~timestamp ~keeper_name ~score ~dimensions =
-  let event =
-    {
-      timestamp;
-      keeper_name;
-      score;
-      dimensions;
-    }
-  in
-  Dated_jsonl.append (get_dna_quality_store ()) (dna_quality_record_json event);
-  event
-
-let record_dna_quality ~keeper_name ~score ~dimensions =
-  record_dna_quality_at ~timestamp:(Time_compat.now ()) ~keeper_name ~score
-    ~dimensions
-
 let recent_verdicts_json ?since ?until () =
   `List (List.map verdict_item_json (read_recent_verdicts ?since ?until ()))
 
@@ -441,26 +437,26 @@ let recent_pre_compact_json ?since ?until ~has_any
       ("total_recent", `Int (List.length events));
     ]
 
-let recent_dna_quality_json ?since ?until ~has_any
-    ~(latest : dna_quality_event option) ~(events : dna_quality_event list) () =
-  let status = status_to_string (dna_quality_status latest) in
+let recent_handoffs_json ?since ?until ~has_any
+    ~(latest : handoff_event option) ~(events : handoff_event list) () =
+  let status = status_to_string (handoff_status latest) in
   let recent_events = trim_recent max_runtime_events events in
   `Assoc
     [
       ( "description",
         `String
-          "Shows recent continuity DNA quality checks before keeper mitosis or handoff-style spawn flows continue." );
+          "Shows recent keeper checkpoint rollovers sourced from keeper metrics snapshots." );
       ("status", `String status);
-      ("last_event_at", json_float_option (Option.map dna_quality_timestamp latest));
+      ("last_event_at", json_float_option (Option.map handoff_timestamp latest));
       ( "empty_reason",
         match recent_events with
         | _ :: _ -> `Null
         | [] -> json_string_option (empty_reason ~has_any ?since ?until ()) );
-      ("recent_events", `List (List.map dna_quality_event_json recent_events));
+      ("recent_events", `List (List.map handoff_event_json recent_events));
       ("total_recent", `Int (List.length events));
     ]
 
-let json ?since ?until () =
+let json ~(config : Room.config) ?since ?until () =
   let calibration = Eval_calibration.calibration_stats ?since ?until () in
   let recent_verdicts = read_recent_verdicts ?since ?until () in
   let has_window = Option.is_some since || Option.is_some until in
@@ -477,18 +473,15 @@ let json ?since ?until () =
     if has_window then has_any_records pre_compact_store
     else pre_compact_events <> []
   in
-  let dna_quality_store = get_dna_quality_store () in
-  let dna_quality_events = read_dna_quality_events ?since ?until () in
-  let latest_dna : dna_quality_event option =
-    if has_window then
-      Dated_jsonl.read_recent dna_quality_store 1
-      |> List.filter_map dna_quality_event_of_json
-      |> latest_by_timestamp dna_quality_timestamp
-    else latest_by_timestamp dna_quality_timestamp dna_quality_events
+  let handoff_events = read_handoff_events ?since ?until config in
+  let latest_handoff : handoff_event option =
+    latest_by_timestamp handoff_timestamp handoff_events
   in
-  let dna_quality_has_any =
-    if has_window then has_any_records dna_quality_store
-    else dna_quality_events <> []
+  let handoff_has_any =
+    match handoff_events with
+    | _ :: _ -> true
+    | [] when has_window -> has_any_handoff_events config
+    | [] -> false
   in
   `Assoc
     [
@@ -498,15 +491,15 @@ let json ?since ?until () =
           "Autoresearch tracks the generator loop itself. The safety harness tracks supporting evaluator and long-running continuity rails, so these signals are related but not a direct keep/discard judge for each autoresearch cycle." );
       ( "overview",
         overview_json ~calibration ~recent_verdicts ~latest_pre_compact
-          ~latest_dna );
+          ~latest_handoff );
       ("calibration", calibration);
       ("recent_verdicts", `List (List.map verdict_item_json recent_verdicts));
       ( "pre_compact",
         recent_pre_compact_json ?since ?until
           ~has_any:pre_compact_has_any
           ~latest:latest_pre_compact ~events:pre_compact_events () );
-      ( "dna_quality",
-        recent_dna_quality_json ?since ?until
-          ~has_any:dna_quality_has_any ~latest:latest_dna
-          ~events:dna_quality_events () );
+      ( "recent_handoffs",
+        recent_handoffs_json ?since ?until
+          ~has_any:handoff_has_any ~latest:latest_handoff
+          ~events:handoff_events () );
     ]

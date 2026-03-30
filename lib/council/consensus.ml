@@ -71,6 +71,7 @@ type error =
   | Already_voted of string
   | Quorum_not_met of { required: int; current: int }
   | Invalid_threshold of float
+  | Persistence_failed of string
 [@@deriving show, eq]
 
 (** In-memory session store *)
@@ -274,16 +275,27 @@ let full_session_of_yojson (json : Yojson.Safe.t) : (session, string) result =
   | e ->
     Error (Printf.sprintf "Failed to parse session: %s" (Printexc.to_string e))
 
-(** Save session to disk (write-through) *)
-let save_session (s : session) =
+(** Persist session before mutating in-memory state to avoid state tear. *)
+let persist_session (s : session) : (unit, error) result =
   match !_base_path with
-  | None -> ()  (* No persistence configured *)
+  | None -> Ok ()
   | Some base ->
     let dir = consensus_dir base in
-    ensure_dir dir;
-    let path = session_path base s.id in
-    (try write_json path (full_session_to_yojson s)
-     with Sys_error _ -> ())  (* Best-effort: don't fail mutation on I/O error *)
+    try
+      ensure_dir dir;
+      let path = session_path base s.id in
+      write_json path (full_session_to_yojson s);
+      Ok ()
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e -> Error (Persistence_failed (Printexc.to_string e))
+
+let commit_session (s : session) : (session, error) result =
+  match persist_session s with
+  | Error _ as err -> err
+  | Ok () ->
+    Hashtbl.replace sessions s.id s;
+    Ok s
 
 (** Load all sessions from disk into memory *)
 let load_sessions base =
@@ -353,9 +365,7 @@ let start_voting ~topic ~initiator ?(quorum = 2) ?(threshold = 0.5)
       closed_at = None;
       context;
     } in
-    Hashtbl.replace sessions session.id session;
-    save_session session;
-    Ok session
+    commit_session session
 
 (** Cast a vote in a session *)
 let cast_vote ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.0) () : (session, error) Result.t =
@@ -376,9 +386,7 @@ let cast_vote ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.
         weight;
       } in
       let updated = { session with votes = vote :: session.votes } in
-      Hashtbl.replace sessions session_id updated;
-      save_session updated;
-      Ok updated
+      commit_session updated
 
 (** Count votes by decision type *)
 let count_by_decision votes decision =
@@ -455,9 +463,7 @@ let close_session ~session_id : (session, error) Result.t =
       state = Closed;
       closed_at = Some (Time_compat.now ());
     } in
-    Hashtbl.replace sessions session_id updated;
-    save_session updated;
-    Ok updated
+    commit_session updated
 
 (** Cancel a voting session *)
 let cancel_session ~session_id : (session, error) Result.t =
@@ -469,9 +475,7 @@ let cancel_session ~session_id : (session, error) Result.t =
       state = Cancelled;
       closed_at = Some (Time_compat.now ());
     } in
-    Hashtbl.replace sessions session_id updated;
-    save_session updated;
-    Ok updated
+    commit_session updated
 
 (** Get session by ID *)
 let get_session ~session_id : session option =

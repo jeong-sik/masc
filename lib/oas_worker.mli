@@ -52,6 +52,7 @@ val run_named :
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
+  ?priority:Llm_provider.Request_priority.t ->
   ?memory:Oas.Memory.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
@@ -60,6 +61,7 @@ val run_named :
   ?transport:Masc_grpc_transport.t ->
   ?allowed_paths:string list ->
   ?working_context:Yojson.Safe.t ->
+  ?cache_system_prompt:bool ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
@@ -83,6 +85,7 @@ val run_model_by_label :
   ?memory:Oas.Memory.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
+  ?priority:Llm_provider.Request_priority.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
@@ -104,6 +107,7 @@ val run_named_with_masc_tools :
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
+  ?priority:Llm_provider.Request_priority.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
@@ -124,6 +128,7 @@ val run_model_with_masc_tools :
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
+  ?priority:Llm_provider.Request_priority.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->

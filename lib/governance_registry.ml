@@ -48,6 +48,7 @@ let message_max_count =
     ~validate:(validate_int_range ~min:10 ~max:10000 "message_max_count")
     ~serialize:(fun v -> `Int v)
     ~deserialize:deserialize_int
+    ()
 
 (* ── inference_config surface (High risk) ──────────────────────────── *)
 
@@ -60,6 +61,7 @@ let inference_default_model =
       else Error "model name must be 1-100 chars")
     ~serialize:(fun v -> `String v)
     ~deserialize:deserialize_string
+    ()
 
 let inference_timeout =
   Runtime_params.register
@@ -68,6 +70,7 @@ let inference_timeout =
     ~validate:(validate_float_range ~min:5.0 ~max:300.0 "inference_timeout")
     ~serialize:(fun v -> `Float v)
     ~deserialize:deserialize_float
+    ()
 
 (* ── cost_policy surface ──────────────────────────────────────── *)
 
@@ -82,6 +85,69 @@ let _cost_max_session_usd =
     ~validate:(validate_float_range ~min:0.01 ~max:50.0 "cost_max_session_usd")
     ~serialize:(fun v -> `Float v)
     ~deserialize:deserialize_float
+    ()
+
+(* ── keeper_lifecycle surface (Medium risk) ─────────────────── *)
+
+let keeper_max_hb_failures =
+  Runtime_params.register
+    ~key:"keeper.max_consecutive_hb_failures"
+    ~default:(fun () -> Env_config_keeper.KeeperKeepalive.max_consecutive_failures)
+    ~validate:(validate_int_range ~min:2 ~max:50 "keeper_max_hb_failures")
+    ~serialize:(fun v -> `Int v)
+    ~meta:{ description = "Heartbeat 연속 실패 허용 횟수";
+            value_type = "int";
+            min_value = Some (`Int 2); max_value = Some (`Int 50) }
+    ~deserialize:deserialize_int
+    ()
+
+let keeper_max_turn_failures =
+  Runtime_params.register
+    ~key:"keeper.max_consecutive_turn_failures"
+    ~default:(fun () -> Env_config_keeper.KeeperKeepalive.max_consecutive_turn_failures)
+    ~validate:(validate_int_range ~min:3 ~max:100 "keeper_max_turn_failures")
+    ~serialize:(fun v -> `Int v)
+    ~meta:{ description = "Turn 연속 실패 허용 횟수";
+            value_type = "int";
+            min_value = Some (`Int 3); max_value = Some (`Int 100) }
+    ~deserialize:deserialize_int
+    ()
+
+let keeper_supervisor_max_restarts =
+  Runtime_params.register
+    ~key:"keeper.supervisor_max_restarts"
+    ~default:(fun () -> Env_config_keeper.KeeperSupervisor.max_restarts)
+    ~validate:(validate_int_range ~min:1 ~max:50 "keeper_supervisor_max_restarts")
+    ~serialize:(fun v -> `Int v)
+    ~meta:{ description = "Crash 후 재시작 예산";
+            value_type = "int";
+            min_value = Some (`Int 1); max_value = Some (`Int 50) }
+    ~deserialize:deserialize_int
+    ()
+
+let keeper_keepalive_interval_sec =
+  Runtime_params.register
+    ~key:"keeper.keepalive_interval_sec"
+    ~default:(fun () -> Env_config_keeper.KeeperKeepalive.interval_sec)
+    ~validate:(validate_int_range ~min:5 ~max:300 "keeper_keepalive_interval_sec")
+    ~serialize:(fun v -> `Int v)
+    ~meta:{ description = "Heartbeat 주기(초)";
+            value_type = "int";
+            min_value = Some (`Int 5); max_value = Some (`Int 300) }
+    ~deserialize:deserialize_int
+    ()
+
+let keeper_dead_ttl_sec =
+  Runtime_params.register
+    ~key:"keeper.dead_ttl_sec"
+    ~default:(fun () -> Env_config_keeper.KeeperSupervisor.dead_ttl_sec)
+    ~validate:(validate_float_range ~min:60.0 ~max:86400.0 "keeper_dead_ttl_sec")
+    ~serialize:(fun v -> `Float v)
+    ~meta:{ description = "Dead 상태 유지 시간(초)";
+            value_type = "float";
+            min_value = Some (`Float 60.0); max_value = Some (`Float 86400.0) }
+    ~deserialize:deserialize_float
+    ()
 
 (* ── surface catalog ─────────────────────────────────────────── *)
 
@@ -116,7 +182,26 @@ let surfaces =
       risk = "medium";
       param_keys = [ "cost.max_session_usd" ];
     };
+    {
+      id = "keeper_lifecycle";
+      description = "Keeper heartbeat, supervisor, and restart thresholds";
+      risk = "medium";
+      param_keys = [
+        "keeper.max_consecutive_hb_failures";
+        "keeper.max_consecutive_turn_failures";
+        "keeper.supervisor_max_restarts";
+        "keeper.keepalive_interval_sec";
+        "keeper.dead_ttl_sec";
+      ];
+    };
   ]
+
+(* ── initialization ─────────────────────────────────────────── *)
+
+(** Force module initialization to guarantee all params are registered
+    before [Runtime_params.restore]. Call from server bootstrap. *)
+let ensure_init () =
+  ignore (Runtime_params.get message_max_count)
 
 let surfaces_json () =
   `List

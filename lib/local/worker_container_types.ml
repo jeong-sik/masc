@@ -110,20 +110,6 @@ let extract_prompt_block ~start_marker ~end_marker (text : string) =
       let raw = String.sub text start_idx (end_idx - start_idx) |> String.trim in
       if raw = "" then None else Some raw)
 
-let inject_prompt_full_context ~(prompt : string) ~(tool_name : string)
-    (args : Yojson.Safe.t) =
-  match (tool_name, args) with
-  | "masc_memento_mori", `Assoc fields
-    when not (List.mem_assoc "full_context" fields) -> (
-      match
-        extract_prompt_block ~start_marker:"[FULL_CONTEXT_BEGIN]"
-          ~end_marker:"[FULL_CONTEXT_END]" prompt
-      with
-      | Some full_context ->
-          `Assoc (("full_context", `String full_context) :: fields)
-      | None -> args)
-  | _ -> args
-
 let masc_http_base_url () =
   Env_config.masc_http_base_url ()
 

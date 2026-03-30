@@ -150,7 +150,9 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
           if not (Sys.file_exists keepers) then 0
           else
             Array.fold_left (fun acc name ->
-              acc + prune_dir (Filename.concat (Filename.concat keepers name) "metrics")
+              acc
+              + prune_dir (Filename.concat (Filename.concat keepers name) "metrics")
+              + prune_dir (Filename.concat (Filename.concat keepers name) "crash-events")
             ) 0 (Sys.readdir keepers))
      in
      if total > 0 then
@@ -343,6 +345,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (PG pool) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
+      Governance_registry.ensure_init ();
+      Runtime_params.restore ~base_path;
+      Log.Server.info "Runtime_params restored from %s" base_path;
+      Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
       let t2 = Eio.Time.now clock in
       Log.Server.info "Bootstrap completed in %.1fs" (t2 -. t1);
       Server_bootstrap_loops.install_tooling ~governance_level state;

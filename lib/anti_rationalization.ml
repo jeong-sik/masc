@@ -257,6 +257,7 @@ let review
          ~max_turns:1
          ~temperature:0.0
          ~max_tokens:200
+         ~priority:Llm_provider.Request_priority.Interactive
          ?sw
          ()
      with

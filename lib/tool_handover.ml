@@ -1,4 +1,4 @@
-(** Handover tools - Cellular agent handover DNA *)
+(** Handover tools - Agent handover capsule *)
 
 open Tool_args
 
@@ -44,7 +44,7 @@ let handle_handover_create ctx args =
   match ctx.fs with
   | Some fs ->
       (match Handover_eio.save_handover ~fs ctx.config h with
-       | Ok () -> (true, Printf.sprintf "✅ Handover DNA created: %s" h.id)
+       | Ok () -> (true, Printf.sprintf "✅ Handover capsule created: %s" h.id)
        | Error e -> (false, Printf.sprintf "❌ Failed to save handover: %s" e))
   | None -> (false, "❌ Filesystem not available")
 
@@ -104,7 +104,7 @@ let handle_handover_get ctx args =
 let schemas : Types.tool_schema list = [
   {
     name = "masc_handover_claim";
-    description = "Claim a pending handover to continue the work. You become the successor agent. The handover DNA will be loaded into your context.";
+    description = "Claim a pending handover to continue the work. You become the successor agent. The handover capsule will be loaded into your context.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -122,7 +122,7 @@ let schemas : Types.tool_schema list = [
   };
   {
     name = "masc_handover_claim_and_spawn";
-    description = "Claim a handover AND automatically spawn the successor agent with the DNA. The successor agent will receive the handover context as its initial prompt and begin work immediately.";
+    description = "Claim a handover AND automatically spawn the successor agent with the capsule. The successor agent will receive the handover context as its initial prompt and begin work immediately.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

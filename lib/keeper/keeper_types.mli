@@ -114,7 +114,6 @@ type keeper_meta = {
   active_team_session_id: string option;
   last_team_session_started_at: string;
   team_session_start_count_total: int;
-  last_triage_triggers: string;
   paused: bool;
   current_task_id: string option;
   (** Currently claimed task ID for cost attribution. *)

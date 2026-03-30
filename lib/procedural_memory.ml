@@ -6,7 +6,7 @@
     Thresholds are configurable via MASC_PROC_MIN_EVIDENCE and
     MASC_PROC_MIN_CONFIDENCE environment variables.
 
-    Crystallized procedures are injected into successor agents via DNA hydration.
+    Crystallized procedures are injected into successor agents via capsule hydration.
 
     Storage: .masc/procedures/{agent}/procedures.jsonl
 
@@ -190,7 +190,7 @@ let top_procedures ~agent_name ~limit : procedure list =
   |> List.sort (fun a b -> Float.compare b.confidence a.confidence)
   |> List.filteri (fun i _ -> i < limit)
 
-(** Format procedures for DNA injection. *)
+(** Format procedures for capsule injection. *)
 let format_for_dna ~agent_name ~limit : string =
   let procs = top_procedures ~agent_name ~limit in
   if List.length procs = 0 then ""

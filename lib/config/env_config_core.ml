@@ -263,16 +263,6 @@ let personas_dir_opt () =
 let relay_calibration_enabled () =
   get_bool ~default:true "MASC_RELAY_CALIBRATION_ENABLED"
 
-(** {1 Mitosis Threshold Overrides} *)
-
-(** Raw MASC_MITOSIS_PREPARE_THRESHOLD value. *)
-let mitosis_prepare_threshold_opt () =
-  Sys.getenv_opt "MASC_MITOSIS_PREPARE_THRESHOLD" |> trim_opt
-
-(** Raw MASC_MITOSIS_HANDOFF_THRESHOLD value. *)
-let mitosis_handoff_threshold_opt () =
-  Sys.getenv_opt "MASC_MITOSIS_HANDOFF_THRESHOLD" |> trim_opt
-
 (** {1 Auth} *)
 
 (** Admin token for privileged endpoints. None = admin auth disabled. *)

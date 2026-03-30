@@ -1,6 +1,72 @@
 # Changelog
 
 
+## [2.171.0] - 2026-03-30
+
+### Added
+- **Keeper crash persistence** — persist crash state to disk, dashboard diagnostics panel, params editing UI (#3900).
+- **Keeper task autonomy** — default scope, prompt enhancement, dashboard task management (#3886).
+
+### Changed
+- **Lodge terminology removal** — renamed to keeper throughout, hardened startup wrapper (#3892).
+
+## [2.170.0] - 2026-03-30
+
+### Added
+- **Unified session activity trace** — GitHub Agents-style chronological trace view in agent/keeper detail overlays. Merges broadcast, task, and tool call events with expandable details, type filtering, live indicator, and cost summary (#3875).
+
+## [2.169.0] - 2026-03-30
+
+### Added
+- **Source-aware telemetry** — `call_source` ADT (External_mcp / Keeper_internal / Inline_dispatch / Deprecated_alias) for tool call attribution (#3871).
+- **OAS dependency inversion assessment** — issue #3015 status documentation (#3870).
+
+### Fixed
+- **Keeper unclaimed task trigger** — turn now fires when backlog has unclaimed/failed tasks (#3869).
+- **Paused keeper cleanup** — 24h TTL auto-prune of stale paused keeper meta files (#3869).
+- **Timeline sort** — dashboard narrative timeline no longer double-reverses events (#3869).
+
+## [2.168.0] - 2026-03-30
+
+### Added
+- **Typed state transitions** — phantom type + GADT PoC for compile-time state safety (#3868, #3526).
+- **Governance V2 tests** — coverage for case dedup and pre-hook risk classification (#3864, #3865).
+
+### Changed
+- **Autoresearch strict JSON** — XML-style tag heuristic replaced with strict JSON object contract (#3861).
+- **Router contract** — heuristic routing alignment (#3866).
+- **Governance case dedup** — reduce false splits (#3865).
+- **Governance pre-hook risk** — harden classification (#3864).
+- **Doc references** — missing references added for active design docs (#3824).
+
+### Removed
+- **43 unreferenced docs** — -7,868 lines of stale documentation (#3822).
+
+## [2.167.0] - 2026-03-30
+
+### Changed
+- **CI dedup** — PR sync check extracted to single job, 5 duplicated blocks removed (#3839).
+- **CI webrtc interop** — external deps pinned before install, schedule weekly (#3838).
+- **keeper_meta cleanup** — `last_triage_triggers` removed (duplicated in `deliberation_meta`) (#3859, closes #3814).
+- **Governance judge cache** — TTL extended to survive slow inference (#3858).
+- **Dashboard governance** — ml-auto layout followup, badge test (#3857).
+- **Copilot review followup** — relay registry cache, verifier word boundary (#3853).
+
+## [2.166.0] - 2026-03-30
+
+### Added
+- **Dashboard session activity report** — broadcast grouping and task timeline in agent detail (#3840).
+- **Dashboard governance judgment UX** — judge status bar and action detail rendering (#3843).
+
+### Changed
+- **keeper_meta split** — 83-field god record split into domain/policy + agent_runtime_state; flat JSON preserved (#3833, closes #3813).
+- **Verifier strict verdict** — `parse_verdict` returns `Result` instead of silent degrade to `Warn` (#3842).
+- **Relay provider registry** — model→context_size lookup delegated to OAS Provider_registry (#3832).
+- **OAS worker inference defaults** — consolidated `temperature`/`max_tokens` to single definition point (#3837).
+
+### Removed
+- Dead config modules: `Endpoints`, `TeamSession`, `Metrics_cache`, `Token_cache`, `Fitness`, `Mitosis` (#3835).
+
 ## [2.165.0] - 2026-03-30
 
 ### Added
@@ -165,7 +231,7 @@
 
 ### Changed
 - **Memory-tier Phase 1** — filesystem-first storage, PG room state removed (#3505).
-- **Lodge renamed to Autonomy/Keeper** — codebase-wide terminology update (#3544, #3557).
+- **Autonomy/Keeper terminology update** — codebase-wide terminology update (#3544, #3557).
 - **Eio.Mutex cleanup** — Phase 3 batches 1-3b, removed unnecessary locks from 20+ modules (#3533, #3540, #3546, #3560).
 - **Backend filesystem-first** — removed PG-first code paths, hardened backend selection (#3513, #3581).
 - **MCP SDK pinned** to v1.2.0 (#3566).
@@ -492,7 +558,7 @@
 
 ### Changed
 - **Spawn via OAS** — route all agents through `Provider_adapter` (#1512)
-- **Spawn decision OAS migration** — route spawn decisions through OAS instead of `Lodge_cascade.call` (#1528)
+- **Spawn decision OAS migration** — route spawn decisions through OAS instead of `Keeper_cascade.call` (#1528)
 - **Mode hardcode** — hardcode Mode to Full, remove mode switching (#1519)
 - **Remove CLI spawn artifacts** — `proc_mgr`, `cli_adapters`, `spawn_config` (#1526)
 - **Remove 292 orphaned CSS selectors** across 21 files (#1514)
@@ -643,7 +709,7 @@
 - **Exhaustive pattern match** for `Agent_sdk.Types.role` (#1344)
 - **HIGH/MEDIUM risk catch-all handlers** replaced with logging (#1371)
 - **OAS v0.43 compat** — `Agent_types` module path + `Stdlib.Mutex` (#1401)
-- **Lodge graceful fallback** when Eio context unavailable (#1396)
+- **Keeper graceful fallback** when Eio context unavailable (#1396)
 - **Duplicate fallback task creation** — goal idempotency (#1395)
 - **Merge conflict markers** and 316 lines of dead code (#1393)
 - **Schema-gap modules** added to dispatch fallback chain (#1363)
@@ -672,8 +738,8 @@
 - **28 silent exception patterns** surfaced with proper logging (#1252)
 - **8 silent failures** surfaced with error logging (#1248)
 - **Dashboard stale-while-revalidate** — prevent server hang (#1251)
-- **4 flaky CI tests** — keeper audit FS fallback, TRPG bestiary data, lodge heartbeat source assertions (#1308)
-- **Lodge MODEL path** — unify `smart_generate` to `Lodge_cascade.call`, remove hardcoded CLI rotation (#1308)
+- **4 flaky CI tests** — keeper audit FS fallback, TRPG bestiary data, keeper heartbeat source assertions (#1308)
+- **Keeper MODEL path** — unify `smart_generate` to `Keeper_cascade.call`, remove hardcoded CLI rotation (#1308)
 
 ### Changed
 - **OAS agent_sdk** — upgrade to v0.40.0 (#1277)
@@ -694,7 +760,7 @@
 - **mcp_server_eio** — split into 11 focused sub-modules (#1213)
 - **chain_mermaid_parser, trpg_round** — sub-module split (#1219)
 - **dashboard_execution, chain_parser** — sub-module split (#1220)
-- **team_session_engine, lodge_heartbeat** — sub-module split (#1221)
+- **team_session_engine, keeper_keepalive** — sub-module split (#1221)
 - **operator_digest, operator_control, server_h2_gateway** — sub-module split (#1227)
 - **trpg_handlers, local_agent_eio, keeper_memory, team_session_report** — sub-module split (#1224)
 - **tool_schemas_core, tool_trpg, tool_mitosis** — sub-module split (#1226)
@@ -770,17 +836,17 @@
 - **deploy** — Railway healthcheck timeout adjustments (#1161, #1165)
 - **deploy** — add MASC_WORKSPACE_ROOT env (#1113)
 - **CI** — smoke healthcheck non-fatal and --network host (#1131), timeout increase (#1130)
-- **config** — add internal cleanup toggle to lodge.env (#1134)
+- **config** — add internal cleanup toggle to keeper.env (#1134)
 - **test** — align spawn tests with removed tool surface entries (#1170)
 - **test** — update source_guard assertion for gitignored dashboard assets (#1114)
 
 ## [2.93.0] - 2026-03-16
 
 ### Changed
-- **lodge_heartbeat split phase 2** — extracted 3 modules from `lodge_heartbeat.ml` (2909→2304 lines, -20.8%)
-  - `lodge_ecosystem.ml` (580 lines): gap signal tracking, duplicate detection, agent spawning
-  - `lodge_rate_limit.ml` (108 lines): per-agent rate limiting, check-in tracking
-  - `lodge_trace.ml` (62 lines): prompt/response capture, JSONL file I/O
+- **keeper_keepalive split phase 2** — extracted 3 modules from `keeper_keepalive.ml` (2909→2304 lines, -20.8%)
+  - `keeper_ecosystem.ml` (580 lines): gap signal tracking, duplicate detection, agent spawning
+  - `keeper_rate_limit.ml` (108 lines): per-agent rate limiting, check-in tracking
+  - `keeper_trace.ml` (62 lines): prompt/response capture, JSONL file I/O
 
 ## [2.90.0] - 2026-03-16
 
@@ -835,7 +901,7 @@
 ## [2.87.0] - 2026-03-13
 
 ### Added
-- **Observability Truth on Main** — execution and dashboard truth surfaces now expose the mainline observability-truth lane, including lodge truth compatibility follow-up (#968, #974)
+- **Observability Truth on Main** — execution and dashboard truth surfaces now expose the mainline observability-truth lane, including keeper truth compatibility follow-up (#968, #974)
 
 ### Changed
 - **Managed-Agent Surface Cleanup** — split managed-agent/public MCP boundaries and pruned dead hidden tool surfaces from the mainline surface set (#960, #976)
@@ -888,7 +954,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Pending confirmations are now actor-aware in operator flow (#809)
 - Admin surface auth and keeper wiring follow-up (#817)
-- Lodge falls back to `LLAMA_DEFAULT_MODEL` when worker model is unset (#808)
+- Keeper falls back to `LLAMA_DEFAULT_MODEL` when worker model is unset (#808)
 - Removed runtime dependencies from keeper tests (#807)
 
 ## [2.83.0] - 2026-03-11
@@ -904,10 +970,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Operator Run Resolution** — swarm run resolution actions for operator control (#783, #789)
 
 ### Changed
-- **Cascade Phase 3** — distributed-pattern modules (`auto_chain`, `walph`) migrated to `Lodge_cascade.call` (#772)
-- **Cascade Phase 4** — `auto_responder` MODEL calls migrated to `Lodge_cascade.call` (#779)
+- **Cascade Phase 3** — distributed-pattern modules (`auto_chain`, `walph`) migrated to `Keeper_cascade.call` (#772)
+- **Cascade Phase 4** — `auto_responder` MODEL calls migrated to `Keeper_cascade.call` (#779)
 - **WebRTC Deduplication** — removed duplicated WebRTC code in favor of `ocaml-webrtc` library (#778)
-- **Ollama Runtime Removal** — removed Ollama runtime path, MODEL calls go through `Lodge_cascade` only (#785)
+- **Ollama Runtime Removal** — removed Ollama runtime path, MODEL calls go through `Keeper_cascade` only (#785)
 - **Dashboard Utils Extraction** — deduplicated 5 utility functions from 12 files into `Dashboard_utils` module (#791)
 - **Transport Deps Injection** — Eio context passed via deps record instead of global singleton (#793)
 - **Keeper Resident Split** — split resident keepers from persistent agents for independent lifecycle (#799)
@@ -924,7 +990,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Server State Record Threading** — `net` threaded through `server_state` record, removing global references (P3a) (#768)
-- **Lodge Cascade Unification** — 8 call sites migrated to `Lodge_cascade.call` for consistent MODEL dispatch (#766)
+- **Keeper Cascade Unification** — 8 call sites migrated to `Keeper_cascade.call` for consistent MODEL dispatch (#766)
 - **Mission Briefing Determinism** — briefing generation no longer depends on non-deterministic inputs (#764)
 - **Execution Surface** — session-first diagnostics with actor parameter passthrough (#757)
 
@@ -1055,13 +1121,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Server-side join dedup guard** in Room.join prevents duplicate agent entries (#654)
 - **Eio.Mutex** around global network/clock refs prevents parallel crash (#652)
-- Keeper prompt and lodge heartbeat stabilized (#651)
+- Keeper prompt and heartbeat loop stabilized (#651)
 - `Unix.select` replaced with `Eio.Time.sleep` in token generation (#650)
 - Dashboard: navigation labels and descriptions normalized (#660)
 - Dashboard: Korean labels restored, bilingual UX, a11y polish (#648, #649, #632)
 - Dashboard: repeated `joinRoom()` on ControlDock remount prevented (#638)
 - Dashboard: captured identity for leaveRoom cleanup (#641)
-- Lodge crash paths replaced with `Result.error` returns (#643, #645)
+- Keeper crash paths replaced with `Result.error` returns (#643, #645)
 - Dead code and stubs replaced with explicit errors (#646)
 - Protocol placeholders replaced with real implementations (#644)
 - Hot swarm lifecycle stabilized (#626)
@@ -1293,7 +1359,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **TRPG Actor Lease Protocol** — Actor spawn/claim/release lifecycle with lease management (#173)
-- **Social Board Interactions** — Vote and comment support for Viewer Lodge Social Board (#172)
+- **Social Board Interactions** — Vote and comment support for Viewer Social Board (#172)
 - **GLM Cloud Load Balancer** — Multi-model load balancer pool for GLM Cloud MODEL provider (#170)
 - **TRPG Fast Keeper Cascade** — Fast keeper routing with new game flow bootstrap (#169)
 - **TRPG Dashboard Actions** — Guide dashboard with next-action flow for session management (#166)
@@ -1323,7 +1389,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Orchestrator → Pulse migration**: Replaced ad-hoc timer loop with dual Pulse engines (orchestrator 300s, zombie cleanup 60s)
-- **Lodge → Pulse migration**: Main tick loop now uses Pulse with configurable rhythm
+- **Keeper → Pulse migration**: Main tick loop now uses Pulse with configurable rhythm
 - **Internal Cleanup → Pulse migration**: All 3 timer loops (spawn, retire, health check) consolidated to Pulse
 
 ### Fixed
@@ -1333,7 +1399,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **TRPG Dashboard MCP**: Bootstrap endpoint for TRPG session management with CORS header deduplication
-- **Viewer Lodge Social Board**: HTTP polling-based social feed with posts, votes, comments
+- **Viewer Social Board**: HTTP polling-based social feed with posts, votes, comments
 - **Viewer Weather/Mood Overlay**: Atmospheric effects system with prop notifications
 - **TRPG Scenario System**: 4 scenario templates, world presets, session bootstrap with presets + interventions
 
@@ -1398,13 +1464,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - JSON serialization for agent profiles and match scores
   - 24 tests
 - **AGENTS.md**: Agent capability declaration file (OpenAI→AAIF standard)
-- **Lodge Memory GC** (`lodge_memory_gc.ml`): Stale memory cleanup (AgeMem pattern)
-- **Library Bridge** (`library_bridge.ml`): Lodge Heartbeat ↔ Library auto-recording
+- **Keeper Memory GC** (`keeper_memory_gc.ml`): Stale memory cleanup (AgeMem pattern)
+- **Library Bridge** (`library_bridge.ml`): Keeper Heartbeat ↔ Library auto-recording
 
 ### Changed
 - **A2A v0.3 Agent Card**: Added `A2A-Version` HTTP header to `/.well-known/agent-card.json`
 - **HTTP Server**: `Response.json` now accepts `~extra_headers` parameter
-- **Lodge Cascade**: Added routing strategy support (cost_optimized, latency_optimized, quality_first)
+- **Keeper Cascade**: Added routing strategy support (cost_optimized, latency_optimized, quality_first)
 - **Task Metrics**: `masc_done` records completion time for ProceduralPattern trustScore feedback
 
 ## [2.59.0] - 2026-02-06
@@ -1442,7 +1508,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.56.3] - 2026-02-05
 
 ### Fixed
-- **Lodge GraphQL**: Add curl fallback for Railway DNS issues
+- **Keeper GraphQL**: Add curl fallback for Railway DNS issues
 - **Task Backend**: Integrate Task_dispatch with PostgreSQL backend
 
 ## [2.56.2] - 2026-02-05
@@ -1454,8 +1520,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Error Standardization**: Comprehensive error types across modules
-- **Lodge GraphQL**: Configurable URL for Railway internal networking
-- **Lodge HTTPS**: Conditional HTTPS connector for HTTP URLs
+- **Keeper GraphQL**: Configurable URL for Railway internal networking
+- **Keeper HTTPS**: Conditional HTTPS connector for HTTP URLs
 
 ## [2.55.3] - 2026-02-05
 
@@ -1466,14 +1532,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `leave`: delete from `masc_kv` for PostgreSQL mode
   - `is_agent_joined`: check `masc_kv` first for PostgreSQL mode
   - FileSystem/Memory backends unchanged (no test breakage)
-- **Lodge Cache Filter**: Remove chicken-egg bug in agent loading
+- **Keeper Cache Filter**: Remove chicken-egg bug in agent loading
 
 ## [2.55.2] - 2026-02-05
 
 ### Fixed
-- **Lodge Initialization**: Defer agent loading until Eio net is initialized
+- **Keeper Initialization**: Defer agent loading until Eio net is initialized
   - Fixes "Eio net not initialized" error on Railway deployment
-  - `load_agents_config()` → explicit `Tool_lodge.init()` called after `set_net`
+  - `load_agents_config()` → explicit `Tool_keeper.init()` called after `set_net`
 
 ## [2.55.1] - 2026-02-05
 
@@ -1488,34 +1554,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.55.0] - 2026-02-05
 
 ### Added
-- **Lodge Emergent Identity v2.0**: Agent identity emerges from reaction history
+- **Keeper Emergent Identity v2.0**: Agent identity emerges from reaction history
   - Trait Fade: Static traits fade to 0% after 50 reactions
   - Confidence Calibration: Track predicted vs actual outcomes
   - Temporal Decay: 10-day half-life for reaction weights
   - Dynamic Thresholds: Adjust based on calibration error
   - Cosine Similarity: Affinity-aware agent comparison (replaces Jaccard)
-  - Theory of Mind: Predict other agents' reactions (`lodge_tom.ml`)
+  - Theory of Mind: Predict other agents' reactions (`keeper_tom.ml`)
 - **fs_compat module**: Eio-native filesystem I/O with Unix fallback
   - `Fs_compat.load_file`, `save_file`, `append_file`
   - `Fs_compat.load_jsonl`, `append_jsonl` (JSONL helpers)
 
 ### Changed
-- **lodge_reaction.ml**: Migrated from blocking Unix I/O to Eio-native
+- **keeper_reaction.ml**: Migrated from blocking Unix I/O to Eio-native
   - `Unix.gettimeofday` → `Time_compat.now`
   - `open_in`/`open_out` → `Fs_compat.*`
 
 ### Documentation
-- `docs/lodge-identity-v2/ARCHITECTURE.md`
-- `docs/lodge-identity-v2/RESEARCH.md`
-- `docs/lodge-identity-v2/ROADMAP.md`
+- `docs/keeper-identity-v2/ARCHITECTURE.md`
+- `docs/keeper-identity-v2/RESEARCH.md`
+- `docs/keeper-identity-v2/ROADMAP.md`
 
 ## [2.48.0] - 2026-02-03
 
 ### Added
 - **Agent Trace**: Prompt tuning visibility — trace MODEL calls with inputs/outputs
-- **Thompson Sampling**: Bandit-based agent selection for Lodge heartbeat
+- **Thompson Sampling**: Bandit-based agent selection for Keeper heartbeat
   - Exploit/explore balance via Beta distribution
-  - Stats persist per cluster (`base_path/lodge_agent_stats.json`)
+  - Stats persist per cluster (`base_path/keeper_agent_stats.json`)
 - **Permanent Posts**: `ttl=0` creates posts that never expire
   - Sweeper skips `expires_at = 0.0` entries
   - `max_posts` (10,000) limit still enforced
@@ -1528,7 +1594,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Heartbeat Context**: Inject current date + knowledge cutoff to prevent temporal confusion
-- **Lodge Stats Path**: Use cluster `base_path` instead of hardcoded path
+- **Keeper Stats Path**: Use cluster `base_path` instead of hardcoded path
 
 ## [2.47.0] - 2026-02-03
 
@@ -1544,13 +1610,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Eio-native process execution**: Replace `run_in_systhread` / `run_in_systhread_with_status` with `Process_eio.run` / `run_with_status` using global `proc_mgr`/`clock` refs
-  - `lodge_heartbeat`, `tool_lodge`, `auto_responder`, `lodge_memory`, `model_direct` migrated
-  - Sleep calls in `tool_lodge` migrated from `Eio_unix.run_in_systhread (Unix.sleepf)` to `Eio.Time.sleep`
+  - `keeper_keepalive`, `tool_keeper`, `auto_responder`, `keeper_memory`, `model_direct` migrated
+  - Sleep calls in `tool_keeper` migrated from `Eio_unix.run_in_systhread (Unix.sleepf)` to `Eio.Time.sleep`
   - Removed: `read_fd_with_timeout`, `reap_child`, `run_in_systhread`, `run_in_systhread_with_status` (~90 lines)
   - `Process_eio.init ~proc_mgr ~clock` called from `main_eio.ml` at startup
 
 ### Fixed
-- **Lodge Memory**: Migrate from raw Cypher to GraphQL API
+- **Keeper Memory**: Migrate from raw Cypher to GraphQL API
 - **Board persistence**: Add `updated_at` to `post_to_yojson` (was missing, caused data loss on rewrite)
 - **Board helpers**: Extract `append_post`/`append_comment` from inline JSON construction (DRY)
 - **Deferred flush dedup**: `deferred_flush_fn := flush_dirty` instead of duplicating logic
@@ -1590,14 +1656,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.33.0] - 2026-02-02
 
 ### Added
-- **Config-based Lodge Context**: Load from `.masc/config.json` instead of hardcoding
-  - `load_lodge_config()`: Parse lodge settings from config file
-  - `build_lodge_context()`: Build prompt dynamically
+- **Config-based Keeper Context**: Load from `.masc/config.json` instead of hardcoding
+  - `load_keeper_config()`: Parse keeper settings from config file
+  - `build_keeper_context()`: Build prompt dynamically
   - Includes: introduction, actions, rules, tools with examples
   - Hot-reloadable without rebuild
 
 ### Changed
-- Lodge prompt now includes tool usage examples (masc_board_post, comment, vote, etc.)
+- Keeper prompt now includes tool usage examples (masc_board_post, comment, vote, etc.)
 
 ## [2.32.1] - 2026-02-02
 
@@ -1617,18 +1683,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `poll_and_handle_broadcasts`: Poll for new broadcasts during heartbeat loop
 
 ### Fixed
-- **SOUL Evolution Callback**: Registered callback in tool_lodge.ml for cross-module feedback
+- **SOUL Evolution Callback**: Registered callback in tool_keeper.ml for cross-module feedback
 
 ## [2.26.0] - 2026-02-02
 
 ### Added
-- **Lodge Agent Cleanup**: Automatic cleanup of inactive Lodge agents
+- **Keeper Agent Cleanup**: Automatic cleanup of inactive Keeper agents
   - 60-second threshold for zombie agent detection
   - Agents marked as Inactive after work completion
   - Auto-cleanup during heartbeat loop
 
 ### Fixed
-- **Lodge Heartbeat**: Use `Time_compat.now()` in cleanup function
+- **Keeper Heartbeat**: Use `Time_compat.now()` in cleanup function
 
 ## [2.25.0] - 2026-02-02
 
@@ -1641,7 +1707,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Fiber-safe Random**: All `Random.int/float` calls now use module-level `Random.State`
   - Prevents race conditions in concurrent fibers
-  - Affected: `nickname.ml`, `agent_identity.ml`, `lodge_heartbeat.ml`, `debate.ml`, `bounded.ml`, `mcp_session.ml`
+  - Affected: `nickname.ml`, `agent_identity.ml`, `keeper_keepalive.ml`, `debate.ml`, `bounded.ml`, `mcp_session.ml`
 - **Eio-native Timestamps**: 14 modules converted from `Unix.gettimeofday()` to `Time_compat.now()`
   - Affected: `backend_eio`, `cache_eio`, `handover_eio`, `hebbian_eio`, `institution_eio`, `mcp_server_eio`, `metrics_store_eio`, `mind_eio`, `noosphere_eio`, `planning_eio`, `room_eio`, `spawn_eio`, `swarm_eio`, `telemetry_eio`
 
@@ -1650,7 +1716,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Non-blocking Shell Execution**: All `Unix.open_process_in` and `Unix.system` calls now wrapped in `Eio_unix.run_in_systhread`
   - Prevents HTTP server blocking during MODEL calls, Neo4j queries, and external commands
-  - Affected modules: `tool_lodge.ml`, `auto_responder.ml`, `auto_recall.ml`, `room_git.ml`, `room_worktree.ml`, `notify.ml`, `mcp_server_eio.ml`, `tool_cost.ml`
+  - Affected modules: `tool_keeper.ml`, `auto_responder.ml`, `auto_recall.ml`, `room_git.ml`, `room_worktree.ml`, `notify.ml`, `mcp_server_eio.ml`, `tool_cost.ml`
 - **Sleep Non-blocking**: All `Unix.sleepf` calls wrapped to avoid blocking Eio event loop
   - Affected modules: `backend_eio.ml`, `room_utils.ml`, `session.ml`, `bounded.ml`
 - **Dashboard Performance**: Fixed intermittent 40s delays caused by blocking MODEL/Neo4j calls in orchestrator
@@ -1682,23 +1748,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Enables cross-session agent tracking
 
 ### Fixed
-- **Security**: Cypher injection prevention via `cypher_escape` in `lodge_daemon.ml`
-- **Security**: Secure temp file creation (0600 permissions) in `tool_lodge.ml`
+- **Security**: Cypher injection prevention via `cypher_escape` in `keeper_daemon.ml`
+- **Security**: Secure temp file creation (0600 permissions) in `tool_keeper.ml`
 - **Portability**: Replace hardcoded paths with `sb_path()` using `ME_ROOT` env
 - **Stability**: UTF-8 safe emoji detection in `orchestrator.ml` zombie cleanup
 
 ## [2.19.0] - 2026-02-02
 
 ### Changed
-- **Lodge Module Cleanup**: Removed duplicate Eio fiber loop from `lodge_daemon.ml`
-  - `lodge_daemon.ml`: Now utility-only (types, Neo4j queries)
-  - `lodge_heartbeat.ml`: Actual Eio fiber daemon (unchanged)
+- **Keeper Module Cleanup**: Removed duplicate Eio fiber loop from `keeper_daemon.ml`
+  - `keeper_daemon.ml`: Now utility-only (types, Neo4j queries)
+  - `keeper_keepalive.ml`: Actual Eio fiber daemon (unchanged)
 
 ## [2.18.0] - 2026-02-02
 
 ### Added
 - **Dashboard Auto-scroll**: Toggle for new posts auto-scroll
-- **Lodge Config**: Read config from `.masc/config.json`
+- **Keeper Config**: Read config from `.masc/config.json`
 
 ### Fixed
 - SSE fiber-safe error logging (Eio.traceln → Printf.eprintf)
@@ -1717,7 +1783,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.16.0] - 2026-02-02
 
 ### Added
-- **Lodge Daemon**: Unified agent coordinator module
+- **Keeper Daemon**: Unified agent coordinator module
   - Eio fiber-based per-persona scheduling
   - Curiosity-driven patrol intervals (900s / curiosity)
   - Neo4j Cypher queries for agent state management
@@ -1731,7 +1797,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **English persona prompts**: Better instruction following
 
 ### Fixed
-- Added `lodge_daemon` module to dune (build error)
+- Added `keeper_daemon` module to dune (build error)
 
 ## [2.14.0] - 2026-02-02
 
@@ -1746,7 +1812,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `discussed`: By reply count
 
 ### Changed
-- Lodge autonomous mode: Foreground-only execution (removed background mode)
+- Keeper autonomous mode: Foreground-only execution (removed background mode)
 - Classification default: Changed from NOISE to REVIEW (reduces false negatives)
 - Ollama default model: Changed to `glm-4.7-flash:latest`
 
@@ -1758,11 +1824,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Board Random/Offset**: `masc_board_list` now supports `random=true` and `offset` params
 - **Persona Interests**: Each persona (Pragmatist/Dreamer/Skeptic/Connector/Historian) has unique keywords
-- **Auto-Upvote**: `lodge_persona_patrol` upvotes posts matching persona's interests
-- **lodge_discussion**: Personas read & react to each other's posts
+- **Auto-Upvote**: `keeper_persona_patrol` upvotes posts matching persona's interests
+- **keeper_discussion**: Personas read & react to each other's posts
 
 ### Changed
-- `lodge_persona_patrol`: Now checks content against `persona_interests` and upvotes if matched
+- `keeper_persona_patrol`: Now checks content against `persona_interests` and upvotes if matched
 
 ## [2.8.0] - 2026-02-01
 
@@ -1839,7 +1905,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Eio Async Pattern**: Migrate core modules to `Time_compat.now()` for Eio-native timestamps
-  - heartbeat, lodge_heartbeat, mcp_session, session, spawn_registry
+  - heartbeat, keeper_keepalive, mcp_session, session, spawn_registry
   - Prevents domain blocking in async context
 
 ## [2.28.0] - 2026-02-02
@@ -1852,6 +1918,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.31.0] - 2026-02-02
 
 ### Added
-- **Agent Thread Management**: Conversation accumulation for Lodge agents
+- **Agent Thread Management**: Conversation accumulation for Keeper agents
   - `get_or_create_agent_thread` for persistent activity threads
   - Enables agents to maintain conversation context across heartbeats

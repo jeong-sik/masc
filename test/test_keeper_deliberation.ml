@@ -205,9 +205,9 @@ let test_deliberation_meta_defaults () =
 (* ---------- Keeper meta deliberation fields ---------- *)
 
 let test_keeper_meta_deliberation_fields_roundtrip () =
-  (* deliberation_count/cost/ts removed from keeper_meta (live in
-     deliberation_meta). Verify that old JSON keys are silently ignored
-     and remaining fields parse correctly. *)
+  (* deliberation_count/cost/ts/last_triage_triggers removed from keeper_meta
+     (live in deliberation_meta). Verify that old JSON keys are silently
+     ignored and remaining fields parse correctly. *)
   let json =
     `Assoc
       [
@@ -224,8 +224,7 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
   match Keeper_types.meta_of_json json with
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
-      check string "triage triggers" "direct_mention"
-        meta.last_triage_triggers
+      check string "name preserved" "test-keeper" meta.name
 
 let test_keeper_meta_deliberation_fields_default () =
   let json =
@@ -239,8 +238,7 @@ let test_keeper_meta_deliberation_fields_default () =
   match Keeper_types.meta_of_json json with
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
-      check string "default triage triggers" ""
-        meta.last_triage_triggers
+      check string "name preserved" "test-keeper-2" meta.name
 
 (* ---------- Triage result JSON ---------- *)
 

@@ -26,11 +26,16 @@ type governance_decision = {
 val risk_level_to_string : risk_level -> string
 
 val assess_risk : tool_name:string -> input:Yojson.Safe.t -> risk_level
-(** Classify tool risk based on name patterns and input content.
-    - Critical: destructive ops (delete, force-push, drop, kill, reset, remove, destroy)
-    - High: write ops (create, update, write, deploy, push, merge, set, send)
-    - Medium: state-changing reads (claim, join, leave, start, stop, pause, resume)
-    - Low: everything else (status, list, query, get, view) *)
+(** Classify tool risk using, in order:
+    - tool metadata overrides (readonly/destructive)
+    - payload-sensitive destructive semantics for selected mutation fields
+    - name/action heuristics as a deterministic fallback
+
+    Result classes:
+    - Critical: destructive ops or destructive payload semantics
+    - High: write ops
+    - Medium: state-changing reads
+    - Low: readonly/status/query surfaces *)
 
 val decide :
   governance_level:string ->

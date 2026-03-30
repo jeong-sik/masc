@@ -236,10 +236,50 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | _ -> 0
           in
           let keepalive_running = runtime_keepalive_running config m in
+          let registry_entry =
+            Keeper_registry.get ~base_path:config.base_path m.name in
           let registry_state =
-            match Keeper_registry.get ~base_path:config.base_path m.name with
+            match registry_entry with
             | Some entry -> Some (Keeper_registry.state_to_string entry.state)
             | None -> None
+          in
+          let supervisor_diagnostics =
+            let max_restarts =
+              Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
+            match registry_entry with
+            | Some entry ->
+                let crash_log =
+                  List.map (fun (ts, reason) ->
+                    `Assoc [("ts", `Float ts); ("reason", `String reason)]
+                  ) entry.crash_log in
+                let disk_crashes =
+                  (try Keeper_crash_persistence.recent_crashes
+                    ~base_path:config.base_path ~name:m.name ~max_entries:20
+                  with _ -> []) in
+                let combined_log = match disk_crashes with
+                  | [] -> crash_log
+                  | _ -> disk_crashes in
+                `Assoc [
+                  ("restart_count", `Int entry.restart_count);
+                  ("max_restarts", `Int max_restarts);
+                  ("crash_log", `List combined_log);
+                  ("last_failure_reason",
+                    match entry.last_failure_reason with
+                    | Some r -> `String (Keeper_registry.failure_reason_to_string r)
+                    | None -> `Null);
+                  ("dead_since",
+                    match entry.dead_since_ts with
+                    | Some ts -> `Float ts
+                    | None -> `Null);
+                ]
+            | None ->
+                `Assoc [
+                  ("restart_count", `Int 0);
+                  ("max_restarts", `Int max_restarts);
+                  ("crash_log", `List []);
+                  ("last_failure_reason", `Null);
+                  ("dead_since", `Null);
+                ]
           in
 
           let context =
@@ -346,6 +386,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 match registry_state with
                 | Some state -> `String state
                 | None -> `Null);
+              ("supervisor_diagnostics", supervisor_diagnostics);
               ("agent_name", `String m.agent_name);
               ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
               ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));
@@ -633,6 +674,7 @@ let keeper_config_json (config : Room.config) (name : string)
       (`OK,
        `Assoc [
          ("name", `String m.name);
+         ("execution_scope", `String m.execution_scope);
          ("pipeline_stage", `String pipeline_stage);
          ("prompt", prompt);
          ("execution", execution);

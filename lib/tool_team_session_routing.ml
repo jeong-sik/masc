@@ -97,12 +97,6 @@ let trim_opt = function
 
 let env_trim_opt name = Sys.getenv_opt name |> trim_opt
 
-let bool_env_default name ~default =
-  match env_trim_opt name with
-  | Some ("1" | "true" | "yes" | "on") -> true
-  | Some ("0" | "false" | "no" | "off") -> false
-  | _ -> default
-
 let float_env_default name ~default =
   match env_trim_opt name with
   | Some raw -> (
@@ -286,7 +280,7 @@ let high_risk_keywords =
   [ "security"; "policy"; "final"; "merge"; "customer"; "public"; "external"; "production"; "critical"; "architecture"; "decision" ]
 
 let router_judge_enabled () =
-  bool_env_default "MASC_TEAM_SESSION_ROUTER_JUDGE" ~default:true
+  Env_config.TeamSession.router_judge_enabled ()
 
 let router_judge_timeout_sec () =
   max 5 (int_env_default "MASC_TEAM_SESSION_ROUTER_JUDGE_TIMEOUT_SEC" ~default:15)
@@ -459,7 +453,8 @@ let model_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
         Oas_worker.run_named ~cascade_name:(Env_config.Model_defaults.routing_cascade ())
           ~system_prompt:"You are a routing judge for a hybrid swarm. Output only JSON."
           ~goal:prompt ~max_turns:1
-          ~temperature:0.0 ~max_tokens:220 ()
+          ~temperature:0.0 ~max_tokens:220
+          ~priority:Llm_provider.Request_priority.Proactive ()
       with
       | Ok result -> (
           try
@@ -726,4 +721,3 @@ let annotate_control_hierarchy_for_session
           model_tier;
         })
       specs
-

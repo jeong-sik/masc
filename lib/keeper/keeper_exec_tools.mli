@@ -15,6 +15,11 @@ val keeper_passthrough_masc_tool_names : string list
     Must be called once during server initialization. *)
 val inject_masc_schemas : Types.tool_schema list -> unit
 
+(** Callback for recording keeper-internal tool calls.
+    Set at server initialization to avoid Config dependency cycle. *)
+val on_keeper_tool_call :
+  (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
+
 (** Curated masc_* tool names available for a keeper profile. *)
 val keeper_masc_tool_names : keeper_meta -> string list
 

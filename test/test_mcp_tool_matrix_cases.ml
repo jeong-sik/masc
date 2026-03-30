@@ -203,7 +203,6 @@ let all_known_tool_names =
     "masc_mdal_status";
     "masc_mdal_stop";
     "masc_mdal_swarm_start";
-    "masc_memento_mori";
     "masc_messages";
     "masc_note_add";
     "masc_observe_alerts";
@@ -282,7 +281,6 @@ let all_known_tool_names =
     "masc_runtime_params";
     "masc_runtime_verify";
     "masc_select_agent";
-    "masc_self_introspect";
     "masc_set_param";
     "masc_set_room";
     "masc_spawn";

@@ -113,7 +113,7 @@ Source: `ROADMAP.md` Mid-term
 | Environment variables -> config file | ARCHITECTURE-COMPLEXITY Phase 3 | 50+ env vars 통합 |
 | Binary distribution (brew/npm) | IDEAS #6 | Owner 없음 |
 | Worktree diff broadcast | IDEAS #7 | Owner 없음 |
-| Keeper Autonomy identity v2 Tier 1 | docs/archive/lodge-identity-v2/ | 설계 완료, 구현 미착수 |
+| Keeper Autonomy identity v2 Tier 1 | docs/archive/keeper-autonomy-identity-v2/ | 설계 완료, 구현 미착수 |
 
 ### Historical Mode/Profile Proposal
 
@@ -136,7 +136,7 @@ Source: `ROADMAP.md` Long-term
 
 | Direction | Trigger | Source |
 |-----------|---------|--------|
-| Keeper Autonomy identity v2 Tier 2-3 (ToM, archetypes) | Tier 1이 가치 증명 | docs/archive/lodge-identity-v2/ |
+| Keeper Autonomy identity v2 Tier 2-3 (ToM, archetypes) | Tier 1이 가치 증명 | docs/archive/keeper-autonomy-identity-v2/ |
 | Figma-MCP 통합 (visual heartbeat) | figma-mcp 안정화 | docs/archive/EVOLUTION-PLAN-FIGMA-MCP.md |
 | Cluster mode / multi-node HA | 단일 노드 한계 도달 | IMMORTAL-SERVER-ROADMAP Phase 3 |
 | Chaos engineering framework | Production 장애 패턴 확인 | IMMORTAL-SERVER-ROADMAP Phase 3 |
@@ -261,7 +261,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 | **Memory system** | AGENT-MEMORY-SYSTEM.md (design phase, 811 lines) | Memory tier 계약 (OAS 5-tier 포함) |
 | **TRPG subsystem** | 7개 docs, 미통합 | 분리 패키지 후 자체 spec |
 | **Transport protocol detail** | TRANSPORT-VERIFICATION-CHECKLIST (401 lines) | 09-server-transport.md에 부분 포함, WebRTC/WS 미상세 |
-| **Keeper Autonomy identity** | docs/archive/lodge-identity-v2/ (3 files) | 구현 후 spec 추가 |
+| **Keeper Autonomy identity** | docs/archive/keeper-autonomy-identity-v2/ (3 files) | 구현 후 spec 추가 |
 | **OAS integration contract** | OAS-MASC-BOUNDARY.md (55 lines), oas-masc-state-boundary (278 lines) | OAS delegation 범위 상세화 |
 | **Operational runbook** | COMMAND-PLANE-RUNBOOK, BENCHMARK-RUNBOOK | 운영 절차 통합 spec |
 | **Config reference** | 없음 (env var 50+ 산재) | 환경변수/설정 SSOT |

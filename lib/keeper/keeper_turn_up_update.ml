@@ -116,6 +116,8 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
         p.instructions_opt;
     policy_voice_enabled;
     allowed_paths;
+    execution_scope =
+      Option.value ~default:old.execution_scope p.execution_scope_opt;
     scope_kind;
     room_scope;
     voice_enabled =

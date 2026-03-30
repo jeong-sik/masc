@@ -278,7 +278,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     (match state.Mcp_server.fs with
      | Some fs ->
          (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
-                ~tool_name:name ~agent_id:agent_name ~success ~duration_ms ()
+                ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
+                ~source:"external_mcp" ()
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             log_mcp_exn ~label:"telemetry tracking failed" exn)
      | None -> ());
@@ -287,8 +288,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   if not success then
     Prometheus.record_error ~error_type:name ();
 
-  (* Track in-memory call counter only for declared tool names. *)
-  Tool_registry.record_call_if_known ~tool_name:name ~success ~duration_ms;
+  (* Track in-memory call counter for all declared tool names (including hidden). *)
+  Tool_registry.record_call_if_known ~source:External_mcp ~tool_name:name ~success ~duration_ms ();
 
   let jsonrpc_id_str =
     match id with

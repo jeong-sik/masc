@@ -1,14 +1,14 @@
-(** MASC Handover - Cellular Agent DNA Transfer (Eio Native)
+(** MASC Handover - Agent Capsule Transfer (Eio Native)
 
     Implements the "last will and testament" pattern for agent succession.
-    When an agent dies (context limit, timeout, crash), it leaves behind
+    When an agent exits (context limit, timeout, crash), it leaves behind
     structured state for the next agent to inherit.
 *)
 
 (* Fiber-safe random state for handover ID generation *)
 let handover_rng = Random.State.make_self_init ()
 
-(** Handover record - the "DNA" passed to next agent *)
+(** Handover record - the capsule passed to next agent *)
 type handover_record = {
   id: string;
   from_agent: string;
@@ -219,7 +219,7 @@ let format_as_markdown (h : handover_record) : string =
   let buf = Buffer.create 2048 in
   let add s = Buffer.add_string buf s; Buffer.add_char buf '\n' in
 
-  add "# 🧬 Handover DNA";
+  add "# Handover Capsule";
   add "";
   add (Printf.sprintf "**From**: %s → **To**: %s" h.from_agent
     (Option.value h.to_agent ~default:"(unclaimed)"));
@@ -290,7 +290,7 @@ let build_successor_prompt (h : handover_record) ~additional_instructions : stri
 %s%s
 
 ## Your Mission
-1. Review the DNA above to understand the context
+1. Review the handover capsule above to understand the context
 2. Continue from the pending steps
 3. Use MASC tools (masc_done, masc_broadcast) to coordinate
 4. When finished or hitting limits, create your own handover with masc_handover_create

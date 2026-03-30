@@ -108,6 +108,7 @@ let route_cascade ~message ~system_prompt ~max_tokens ~temperature
       ~max_turns:1
       ~temperature
       ~max_tokens
+      ~priority:Llm_provider.Request_priority.Interactive
       ()
   with
   | Ok result ->

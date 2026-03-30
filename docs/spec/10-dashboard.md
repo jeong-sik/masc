@@ -686,6 +686,7 @@ Execution과 Mission surface는 24시간 cutoff으로 session을 필터링한다
 | 문서 | 경로 |
 |------|------|
 | Dashboard quick links | `README.md` |
+| Dashboard control plane RFC | `docs/rfc/RFC-dashboard-control-plane.md` |
 | Dashboard perf degradation | `memory/masc-dashboard-perf-degradation.md` |
 | Dashboard FF-style design direction | `memory/project_masc-dashboard-ff-design-direction.md` |
 | Keeper detail redesign | `memory/project_dashboard-keeper-detail-redesign.md` |

@@ -504,6 +504,7 @@ let execute_single_agent_run ~sw ~net ~provider ~model ~prompt =
                 ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 2048))
               ~temperature:(Cascade_inference.resolve_temperature
                 ~cascade_name:"provider_benchmark" ~fallback:(fun () -> 0.2))
+              ~priority:Llm_provider.Request_priority.Interactive
               ~sw ?net
               ()
           with

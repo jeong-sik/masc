@@ -127,6 +127,11 @@ module KeeperSupervisor = struct
   (** Dead tombstone TTL: seconds before Dead entries are cleaned up *)
   let dead_ttl_sec =
     Float.max 60.0 (get_float ~default:3600.0 "MASC_KEEPER_DEAD_TTL_SEC")
+
+  (** Paused keeper file TTL: seconds before stale paused keeper meta files
+      are removed from disk. Default: 86400 (24 hours). *)
+  let paused_cleanup_ttl_sec =
+    Float.max 300.0 (get_float ~default:86400.0 "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
 end
 
 (** {1 Keeper Runtime Configuration} *)

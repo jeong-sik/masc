@@ -1,7 +1,7 @@
 (** Autoresearch_codegen — LLM-based code change generation.
 
-    Builds prompts, parses MODEL responses containing <hypothesis> and
-    <modified_code> XML tags, and invokes the cascade for code generation.
+    Builds prompts, parses MODEL responses as a strict JSON object, and
+    invokes the cascade for code generation.
 
     @since 2.80.0 *)
 
@@ -32,69 +32,70 @@ let build_code_change_prompt ~goal ~baseline ~history ~insights
     "</current_code>";
     "";
     "Modify the code to improve the metric score.";
-    "Reply with exactly:";
-    "1. A <hypothesis> tag containing a one-line description of your change";
-    "2. A <modified_code> tag containing the COMPLETE modified file";
+    "Reply with exactly one valid JSON object and nothing else.";
+    "Do not wrap the JSON in markdown or code fences.";
+    "The JSON object must contain:";
+    "1. \"hypothesis\": a one-line description of your change";
+    "2. \"modified_code\": the COMPLETE modified file";
     "";
     "Example format:";
-    "<hypothesis>Increase batch size from 32 to 64 for better throughput</hypothesis>";
-    "<modified_code>";
-    "... complete file content ...";
-    "</modified_code>";
+    {|{"hypothesis":"Increase batch size from 32 to 64 for better throughput","modified_code":"... complete file content ..."}|};
   ])
 
-(** Extract text between XML-style tags. *)
-let extract_tag ~tag text =
-  let open_tag = Printf.sprintf "<%s>" tag in
-  let close_tag = Printf.sprintf "</%s>" tag in
-  let open_len = String.length open_tag in
-  let close_len = String.length close_tag in
-  let text_len = String.length text in
-  let rec find_start i =
-    if i + open_len > text_len then None
-    else if String.sub text i open_len = open_tag then
-      let content_start = i + open_len in
-      find_end content_start content_start
-    else find_start (i + 1)
-  and find_end content_start j =
-    if j + close_len > text_len then None
-    else if String.sub text j close_len = close_tag then
-      Some (String.sub text content_start (j - content_start))
-    else find_end content_start (j + 1)
+(** Strip leading/trailing whitespace-only lines from generated code. *)
+let normalize_modified_code code =
+  let lines = String.split_on_char '\n' code in
+  let rec drop_blank = function
+    | [] -> []
+    | l :: rest ->
+      if String.trim l = "" then drop_blank rest
+      else l :: rest
   in
-  find_start 0
+  let stripped = drop_blank lines in
+  let stripped = List.rev (drop_blank (List.rev stripped)) in
+  String.concat "\n" stripped
 
-(** Parse MODEL response containing <hypothesis> and <modified_code> tags.
-    Returns Ok (hypothesis, modified_code) or Error reason. *)
+let parse_required_string_field ~field json =
+  match Safe_ops.json_member_opt field json with
+  | None ->
+    Result.error (Printf.sprintf "Missing \"%s\" field in MODEL response" field)
+  | Some (`String value) ->
+    let trimmed = String.trim value in
+    if trimmed = "" then
+      Result.error (Printf.sprintf "Empty \"%s\" field in MODEL response" field)
+    else
+      Result.ok value
+  | Some _ ->
+    Result.error (Printf.sprintf "\"%s\" field must be a string in MODEL response" field)
+
+(** Parse MODEL response containing a strict JSON object with hypothesis and
+    modified_code string fields. Returns Ok (hypothesis, modified_code) or
+    Error reason. *)
 let parse_model_code_response response =
-  if String.trim response = "" then
+  let trimmed_response = String.trim response in
+  if trimmed_response = "" then
     Result.error "MODEL returned empty response"
   else
-    match extract_tag ~tag:"hypothesis" response with
-    | None -> Result.error "Missing <hypothesis> tag in MODEL response"
-    | Some h ->
-      let hypothesis = String.trim h in
-      if hypothesis = "" then Result.error "Empty <hypothesis> tag"
-      else
-        match extract_tag ~tag:"modified_code" response with
-        | None -> Result.error "Missing <modified_code> tag in MODEL response"
-        | Some code ->
-          if String.trim code = "" then Result.error "Empty <modified_code> tag"
+    match
+      Safe_ops.parse_json_safe
+        ~context:"autoresearch_codegen.parse_model_code_response"
+        trimmed_response
+    with
+    | Error err -> Result.error err
+    | Ok (`Assoc _ as json) ->
+      (match parse_required_string_field ~field:"hypothesis" json with
+      | Error _ as e -> e
+      | Ok hypothesis ->
+        match parse_required_string_field ~field:"modified_code" json with
+        | Error _ as e -> e
+        | Ok code ->
+          let normalized_code = normalize_modified_code code in
+          if normalized_code = "" then
+            Result.error "Empty \"modified_code\" field in MODEL response"
           else
-            (* Strip all leading/trailing whitespace-only lines *)
-            let trimmed =
-              let lines = String.split_on_char '\n' code in
-              let rec drop_blank = function
-                | [] -> []
-                | l :: rest ->
-                  if String.trim l = "" then drop_blank rest
-                  else l :: rest
-              in
-              let stripped = drop_blank lines in
-              let stripped = List.rev (drop_blank (List.rev stripped)) in
-              String.concat "\n" stripped
-            in
-            Result.ok (hypothesis, trimmed)
+            Result.ok (String.trim hypothesis, normalized_code))
+    | Ok _ ->
+      Result.error "MODEL response must be a JSON object"
 
 (** Generate code change via Cascade "autoresearch" profile.
     Returns Ok (hypothesis, new_code) or Error reason. *)
@@ -109,6 +110,7 @@ let generate_code_change ~goal ~baseline ~history ~insights
         ~cascade_name:"autoresearch" ~fallback:(fun () -> 0.7))
       ~max_tokens:(Cascade_inference.resolve_max_tokens
         ~cascade_name:"autoresearch" ~fallback:(fun () -> 4096))
+      ~priority:Llm_provider.Request_priority.Background
       ()
   with
   | Error e -> Result.error (Printf.sprintf "MODEL call failed: %s" e)

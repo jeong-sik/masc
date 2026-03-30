@@ -19,6 +19,7 @@ type parsed_args = {
   allowed_paths_opt : string list option;
   room_scope_opt : string option;
   scope_kind_opt : string option;
+  execution_scope_opt : string option;
   voice_enabled_opt : bool option;
   voice_channel_opt : string option;
   voice_agent_id_opt : string option;
@@ -70,6 +71,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     in
     let room_scope_opt = get_string_opt args "room_scope" in
     let scope_kind_opt = get_string_opt args "scope_kind" in
+    let execution_scope_opt = get_string_opt args "execution_scope" in
     let voice_enabled_opt = get_bool_opt args "voice_enabled" in
     let voice_channel_opt = get_string_opt args "voice_channel" in
     let voice_agent_id_opt = get_string_opt args "voice_agent_id" in
@@ -135,6 +137,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       allowed_paths_opt;
       room_scope_opt;
       scope_kind_opt;
+      execution_scope_opt;
       voice_enabled_opt;
       voice_channel_opt;
       voice_agent_id_opt;

@@ -48,7 +48,7 @@ Keeper는 OAS의 Persistent Agent를 MASC Room 위에서 운용하는 단위다.
 - **영속적 실행**: keepalive fiber가 주기적으로 heartbeat을 전송하며 에이전트 존재를 유지
 - **자율 행동**: proactive 모드에서 idle 감지 후 자동 메시지 생성
 - **컨텍스트 관리**: 3-tier 임계값 기반으로 compaction → handoff 자동 수행
-- **세대 교체**: context 한도 도달 시 DNA 추출 → successor 에이전트로 handoff
+- **세대 교체**: context 한도 도달 시 checkpoint rollover → successor 세대로 handoff
 
 ### 1.5 Agent vs Keeper
 
@@ -59,7 +59,7 @@ Keeper는 OAS의 Persistent Agent를 MASC Room 위에서 운용하는 단위다.
 | Heartbeat | 선택 | 필수 (keepalive fiber) |
 | Context 관리 | 수동 | 자동 (3-tier 임계값) |
 | Proactive 행동 | 없음 | 지원 (idle 감지, drift, deliberation) |
-| DNA/Handoff | 없음 | 자동 (generation 증가) |
+| Capsule/Handoff | 없음 | 자동 (generation 증가) |
 
 ### 1.6 Generation (세대)
 
@@ -74,7 +74,7 @@ Generation은 keeper의 context handoff 횟수를 나타내는 정수다. keeper
 | 용어 | 의미 |
 |------|------|
 | **Handoff** | 한 에이전트에서 다른 에이전트로 실행 컨텍스트를 전달하는 과정 |
-| **Capsule (DNA)** | handoff 시 압축된 컨텍스트 페이로드 (코드에서는 아직 `dna`로 사용) |
+| **Capsule** | handoff 시 전달되는 압축 컨텍스트 페이로드 |
 | **Compaction** | 컨텍스트 토큰을 줄이기 위한 압축 (tool output 정리, 메시지 병합 등) |
 | **Keepalive** | keeper의 heartbeat fiber, 주기적으로 Room 존재를 갱신 |
 | **Proactive** | 사용자 입력 없이 keeper가 자발적으로 메시지를 생성하는 행동 |
@@ -141,7 +141,7 @@ message 토큰 = (문자열 길이 / 4) + 4
 | 임계값 | 기본값 | 동작 |
 |--------|--------|------|
 | **Compact** | 50% (`compaction_ratio_gate`) | 오래된 메시지 요약, tool output 정리 |
-| **Prepare** | 70% | handoff용 DNA 추출 준비, checkpoint 저장 |
+| **Prepare** | 70% | handoff용 capsule/checkpoint 준비 |
 | **Handoff** | 85% (`handoff_threshold`) | successor 에이전트로 context 전달, generation +1 |
 
 Compaction 전략은 순서대로 적용:
@@ -150,7 +150,7 @@ Compaction 전략은 순서대로 적용:
 3. **DropLowImportance** --- importance 0.3 미만 메시지 삭제
 4. **SummarizeOld** --- 오래된 30% 메시지를 1개 요약 메시지로 압축
 
-### 2.3 Handoff & DNA 추출
+### 2.3 Handoff & Capsule 추출
 
 Handoff 시 보존되는 것과 사라지는 것:
 
@@ -166,12 +166,9 @@ Handoff 시 보존되는 것과 사라지는 것:
 
 **Generation 증가 메커니즘**:
 1. context_ratio가 handoff_threshold 초과
-2. DNA 추출: `succession.ml:extract_dna`가 현재 상태 압축
-3. Cross-model 정규화: `normalize_for_model`이 대상 모델 포맷에 맞게 변환
-   - Llama: Tool 메시지를 User 메시지로 변환
-   - Claude: 연속 동일 role 메시지 병합 (alternating 규칙)
-4. Hydration: DNA를 successor의 system prompt에 주입
-5. generation 카운터 +1, 새 trace_id 발급
+2. `keeper_exec_context`가 checkpoint rollover를 준비하고 successor 세대 메타를 계산
+3. keeper metrics snapshot에 `handoff.performed`, `prev_trace_id`, `new_trace_id`, `new_generation`가 기록된다
+4. successor 세대가 새 `trace_id`와 `generation + 1`로 이어서 실행된다
 
 ### 2.4 Heartbeat 시스템
 
@@ -556,7 +553,7 @@ flowchart TD
 |------|------|----------|
 | 정상 | < 50% | 없음 |
 | Compact 트리거 | >= `compaction_ratio_gate` (기본 50%) | 4-step compaction 실행 |
-| Handoff 준비 | >= 70% | DNA 추출 + checkpoint 저장 |
+| Handoff 준비 | >= 70% | capsule/checkpoint 준비 |
 | 강제 Handoff | >= `handoff_threshold` (기본 85%) | successor 에이전트로 handoff |
 
 수동 대응: `masc_keeper_status`에서 `context_ratio` 확인 후, 필요하면 `compaction_ratio_gate`를 낮추거나 `handoff_threshold`를 조정.
@@ -566,7 +563,7 @@ flowchart TD
 | 증상 | 확인 사항 | 대응 |
 |------|----------|------|
 | generation이 안 올라감 | `auto_handoff` 설정 확인 | `auto_handoff: true` 확인 |
-| DNA 추출 실패 | 메트릭에서 `handoff.performed` 확인 | checkpoint 상태 확인 → 재생성 |
+| capsule/checkpoint 준비 실패 | 메트릭에서 `handoff.performed` 확인 | checkpoint 상태 확인 → 재생성 |
 | successor 시작 실패 | `next_model_hint` 확인 | 해당 모델의 API 접근 가능 여부 확인 |
 | handoff 쿨다운 | `handoff_cooldown_sec` (기본 300초) | 쿨다운 대기 또는 값 조정 |
 

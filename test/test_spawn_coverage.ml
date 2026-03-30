@@ -140,8 +140,9 @@ let test_masc_mcp_tools_has_worktree () =
 let test_masc_mcp_tools_has_handover () =
   check bool "has handover" true (List.mem "mcp__masc__masc_handover_create" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_memento () =
-  check bool "has memento" true (List.mem "mcp__masc__masc_memento_mori" Spawn.masc_mcp_tools)
+let test_masc_mcp_tools_has_relay_status () =
+  check bool "has relay_status" true
+    (List.mem "mcp__masc__masc_relay_status" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_team_session_step () =
   check bool "has team_session_step" true
@@ -213,14 +214,14 @@ let test_lifecycle_suffix_has_heartbeat () =
     (try let _ = Str.search_forward (Str.regexp_string "heartbeat") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-let test_lifecycle_suffix_has_memento () =
-  check bool "has memento" true
-    (try let _ = Str.search_forward (Str.regexp_string "memento_mori") Spawn.masc_lifecycle_suffix 0 in true
+let test_lifecycle_suffix_has_relay_status () =
+  check bool "has relay_status" true
+    (try let _ = Str.search_forward (Str.regexp_string "relay_status") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-let test_lifecycle_suffix_has_context_ratio () =
-  check bool "has context ratio" true
-    (try let _ = Str.search_forward (Str.regexp_string "context_ratio") Spawn.masc_lifecycle_suffix 0 in true
+let test_lifecycle_suffix_has_relay_checkpoint () =
+  check bool "has relay_checkpoint" true
+    (try let _ = Str.search_forward (Str.regexp_string "relay_checkpoint") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
 (* ============================================================
@@ -728,7 +729,7 @@ let () =
       test_case "has tasks" `Quick test_masc_mcp_tools_has_tasks;
       test_case "has worktree" `Quick test_masc_mcp_tools_has_worktree;
       test_case "has handover" `Quick test_masc_mcp_tools_has_handover;
-      test_case "has memento" `Quick test_masc_mcp_tools_has_memento;
+      test_case "has relay_status" `Quick test_masc_mcp_tools_has_relay_status;
       test_case "has team_session_step" `Quick test_masc_mcp_tools_has_team_session_step;
       test_case "has team_session_finalize" `Quick test_masc_mcp_tools_has_team_session_finalize;
       test_case "has a2a_delegate" `Quick test_masc_mcp_tools_has_a2a_delegate;
@@ -749,8 +750,8 @@ let () =
       test_case "has protocol" `Quick test_lifecycle_suffix_has_protocol;
       test_case "has join" `Quick test_lifecycle_suffix_has_join;
       test_case "has heartbeat" `Quick test_lifecycle_suffix_has_heartbeat;
-      test_case "has memento" `Quick test_lifecycle_suffix_has_memento;
-      test_case "has context ratio" `Quick test_lifecycle_suffix_has_context_ratio;
+      test_case "has relay_status" `Quick test_lifecycle_suffix_has_relay_status;
+      test_case "has relay_checkpoint" `Quick test_lifecycle_suffix_has_relay_checkpoint;
     ];
     "default_configs", [
       test_case "not empty" `Quick test_default_configs_not_empty;

@@ -12,11 +12,10 @@ type context = {
 type result = bool * string
 
 let handle_relay_status _ctx args =
-  let messages = get_int args "messages" 0 in
-  let tool_calls = get_int args "tool_calls" 0 in
+  let*! messages = get_int_required args "messages" in
+  let*! tool_calls = get_int_required args "tool_calls" in
   let model = get_string args "model" "claude" in
   let metrics = Relay.estimate_context ~messages ~tool_calls ~model in
-  (* Record actual tokens for calibration if provided *)
   let actual_tokens_opt = match Yojson.Safe.Util.member "actual_tokens" args with
     | `Int n -> Some n
     | _ -> None
@@ -38,7 +37,9 @@ let handle_relay_status _ctx args =
   (true, Yojson.Safe.pretty_to_string json)
 
 let handle_relay_checkpoint _ctx args =
-  let summary = get_string args "summary" "" in
+  let*! summary = get_string_required args "summary" in
+  let*! messages = get_int_required args "messages" in
+  let*! tool_calls = get_int_required args "tool_calls" in
   let current_task = get_string_opt args "current_task" in
   let todos = get_string_list args "todos" in
   let pdca_state = get_string_opt args "pdca_state" in
@@ -50,9 +51,6 @@ let handle_relay_checkpoint _ctx args =
    if goal_ids <> [] then
      Log.Misc.info "[RELAY] active_goal_ids provided but not persisted (goal store not integrated): %s"
        (String.concat "," goal_ids));
-  let cell = Mcp_server.get_cell () in
-  let messages = get_int args "messages" cell.Mitosis.task_count in
-  let tool_calls = get_int args "tool_calls" cell.Mitosis.tool_call_count in
   let metrics = Relay.estimate_context ~messages ~tool_calls ~model:"claude" in
   let _ = Relay.save_checkpoint ~summary ~task:current_task ~todos ~pdca:pdca_state ~files:relevant_files ~metrics in
   let json = `Assoc [
@@ -164,6 +162,7 @@ let schemas : Types.tool_schema list = [
           ("default", `String "claude");
         ]);
       ]);
+      ("required", `List [`String "messages"; `String "tool_calls"]);
     ];
   };
 
@@ -179,6 +178,14 @@ Pair with masc_relay_now to trigger handoff, or masc_relay_status to check if re
         ("summary", `Assoc [
           ("type", `String "string");
           ("description", `String "Brief summary of work done so far");
+        ]);
+        ("messages", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of messages represented by this checkpoint");
+        ]);
+        ("tool_calls", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of tool calls represented by this checkpoint");
         ]);
         ("current_task", `Assoc [
           ("type", `String "string");
@@ -199,7 +206,7 @@ Pair with masc_relay_now to trigger handoff, or masc_relay_status to check if re
           ("description", `String "List of files being worked on");
         ]);
       ]);
-      ("required", `List [`String "summary"]);
+      ("required", `List [`String "summary"; `String "messages"; `String "tool_calls"]);
     ];
   };
 

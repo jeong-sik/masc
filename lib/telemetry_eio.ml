@@ -21,7 +21,7 @@ type event =
   | Task_completed of { task_id: string; duration_ms: int; success: bool }
   | Handoff_triggered of { from_agent: string; to_agent: string; reason: string }
   | Error_occurred of { code: string; message: string; context: string }
-  | Tool_called of { tool_name: string; success: bool; duration_ms: int; agent_id: string option }
+  | Tool_called of { tool_name: string; success: bool; duration_ms: int; agent_id: string option; source: string option }
 [@@deriving yojson, show]
 
 (** Timestamped event record for storage *)
@@ -334,8 +334,8 @@ let track_handoff ?fs config ~from_agent ~to_agent ~reason =
 let track_error ?fs config ~code ~message ~context =
   track ?fs config (Error_occurred { code; message; context })
 
-let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id () =
-  track ?fs config (Tool_called { tool_name; success; duration_ms; agent_id })
+let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id ?source () =
+  track ?fs config (Tool_called { tool_name; success; duration_ms; agent_id; source })
 
 (** Prune telemetry entries older than [max_age_days] days.
     Replaces the old rotate function; date-split makes rewriting unnecessary. *)

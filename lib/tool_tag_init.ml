@@ -21,9 +21,9 @@ let register_all () =
     "masc_verify_pending"; "masc_verify_auto";
     "masc_mcp_session";
     "masc_cancellation"; "masc_subscription"; "masc_progress";
-    "masc_governance_set"; "masc_spawn"; "masc_memento_mori";
+    "masc_governance_set"; "masc_spawn";
     "masc_episode_flush"; "masc_episode_list";
-    "masc_self_introspect"; "masc_recall_search";
+    "masc_recall_search";
     (* board *)
     "masc_board_post"; "masc_board_comment";
     "masc_board_list"; "masc_board_get";

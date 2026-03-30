@@ -376,3 +376,104 @@ let add_routes ~sw ~clock router =
                ]))
          )
        ) request reqd)
+
+  (* Governance Runtime Params: set / clear *)
+  |> Http.Router.post "/api/v1/governance/params/set" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_set_param"
+         (fun state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             let base_path = state.Mcp_server.room_config.base_path in
+             let actor = agent_from_request request
+               |> Option.value ~default:"dashboard" in
+             let submit_petition _ctx _petition_args =
+               (false, "High-risk parameter changes from dashboard require governance petition via CLI")
+             in
+             let ctx = Tool_council_feed.{ base_path; agent_name = actor;
+               room_config = Some state.Mcp_server.room_config } in
+             let (ok, msg) = Tool_council_feed.handle_set_param
+               ~submit_petition ctx args in
+             let status = if ok then `OK else `Bad_request in
+             respond_json_with_cors ~status request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool ok); ("message", `String msg)
+               ]))
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool false);
+                 ("error", `String (Printexc.to_string exn))
+               ]))
+         )
+       ) request reqd)
+
+  |> Http.Router.post "/api/v1/governance/params/clear" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_set_param"
+         (fun state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             let param_key = Yojson.Safe.Util.(member "param_key" args
+               |> to_string_option) |> Option.value ~default:"" in
+             let base_path = state.Mcp_server.room_config.base_path in
+             let actor = agent_from_request request
+               |> Option.value ~default:"dashboard" in
+             if param_key = "" then
+               respond_json_with_cors ~status:`Bad_request request reqd
+                 (Yojson.Safe.to_string (`Assoc [
+                   ("ok", `Bool false); ("error", `String "param_key is required")
+                 ]))
+             else begin
+               let risk = Governance_registry.surfaces
+                 |> List.find_opt (fun (s : Governance_registry.surface) ->
+                      List.mem param_key s.param_keys)
+                 |> Option.map (fun (s : Governance_registry.surface) -> s.risk)
+                 |> Option.value ~default:"low" in
+               if risk = "high" then
+                 respond_json_with_cors request reqd
+                   (Yojson.Safe.to_string (`Assoc [
+                     ("ok", `Bool false);
+                     ("error", `String "High-risk param clear requires governance petition. Use masc_set_param tool.");
+                   ]))
+               else begin
+                 let old_value =
+                   match Runtime_params.registry ()
+                     |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+                   | Some (_, current, _, _, _) -> current
+                   | None -> `Null in
+                 match Runtime_params.clear_by_key param_key with
+                 | Error msg ->
+                   respond_json_with_cors ~status:`Bad_request request reqd
+                     (Yojson.Safe.to_string (`Assoc [
+                       ("ok", `Bool false); ("error", `String msg)
+                     ]))
+                 | Ok () ->
+                   let new_value =
+                     match Runtime_params.registry ()
+                       |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+                     | Some (_, _, default, _, _) -> default
+                     | None -> `Null in
+                   Runtime_params.persist ~base_path;
+                   Runtime_params.record_audit ~base_path
+                     ~key:param_key ~old_value ~new_value ~actor ();
+                   Sse.broadcast
+                     (`Assoc [
+                       ("type", `String "governance_param_changed");
+                       ("param_key", `String param_key);
+                     ]);
+                   respond_json_with_cors request reqd
+                     (Yojson.Safe.to_string (`Assoc [
+                       ("ok", `Bool true);
+                       ("message", `String (Printf.sprintf "Cleared %s to default" param_key));
+                     ]))
+               end
+             end
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool false);
+                 ("error", `String (Printexc.to_string exn))
+               ]))
+         )
+       ) request reqd)

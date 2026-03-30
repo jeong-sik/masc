@@ -170,7 +170,7 @@ For readers encountering deprecated terms in older documentation:
 |-----------------|---------------|---------|
 | relay | Handoff | From early designs based on "relay race" metaphor |
 | handover | Handoff | British English variant, unified to American English |
-| mitosis | Handoff | Biological metaphor from "cell division" design |
+| mitosis | Handoff | Historical biological metaphor removed from the active runtime |
 | DNA | Capsule | Biological metaphor for compressed context |
 | summary | Capsule | Informal term, now formalized as Capsule |
 | cell state | Lifecycle | From cellular biology metaphor |

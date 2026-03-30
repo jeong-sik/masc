@@ -398,6 +398,48 @@ let test_dispatch_reclassify_dry_run () =
   Alcotest.(check int) "changed zero" 0
     Yojson.Safe.Util.(json |> member "changed" |> to_int)
 
+let test_dispatch_delete_success () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let _ok, body = dispatch "masc_board_post"
+    (make_args [("content", `String "to be deleted"); ("author", `String "tester")]) in
+  let post_id =
+    match String.index_opt body '\n' with
+    | Some idx ->
+      let json_str = String.sub body (idx + 1) (String.length body - idx - 1) in
+      (try
+        let json = Yojson.Safe.from_string json_str in
+        json |> Yojson.Safe.Util.member "id" |> Yojson.Safe.Util.to_string
+      with _ -> Alcotest.fail ("Failed to parse post JSON from: " ^ json_str))
+    | None -> Alcotest.fail ("No newline in create response: " ^ body)
+  in
+  let ok_del, msg_del = dispatch "masc_board_delete"
+    (make_args [("post_id", `String post_id)]) in
+  Alcotest.(check bool) "delete ok" true ok_del;
+  Alcotest.(check bool) "delete msg contains id" true
+    (contains_substring msg_del post_id)
+
+let test_dispatch_delete_not_found () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body = dispatch "masc_board_delete"
+    (make_args [("post_id", `String "nonexistent-id")]) in
+  Alcotest.(check bool) "delete not found" false ok;
+  Alcotest.(check bool) "error message present" true
+    (contains_substring body "Delete failed")
+
+let test_dispatch_delete_empty_id () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body = dispatch "masc_board_delete"
+    (make_args [("post_id", `String "")]) in
+  Alcotest.(check bool) "empty id rejected" false ok;
+  Alcotest.(check bool) "error mentions required" true
+    (contains_substring body "required")
+
 let test_post_get_success () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -634,6 +676,9 @@ let () =
           Alcotest.test_case "unknown tool" `Quick test_dispatch_unknown_tool;
           Alcotest.test_case "migrate without pg" `Quick test_dispatch_migrate_without_pg;
           Alcotest.test_case "reclassify dry run" `Quick test_dispatch_reclassify_dry_run;
+          Alcotest.test_case "delete success" `Quick test_dispatch_delete_success;
+          Alcotest.test_case "delete not found" `Quick test_dispatch_delete_not_found;
+          Alcotest.test_case "delete empty id" `Quick test_dispatch_delete_empty_id;
         ] );
       ( "schemas",
         [

@@ -47,20 +47,6 @@ type operation_status =
   | Cancelled
   | Failed
 
-type chain_record = {
-  kind : string;
-  backend : string;
-  chain_id : string option;
-  goal : string option;
-  run_id : string option;
-  status : string;
-  history_event : Yojson.Safe.t option;
-  mermaid : string option;
-  preview_run : Yojson.Safe.t option;
-  viewer_path : string option;
-  last_sync_at : string option;
-}
-
 type operation_record = {
   operation_id : string;
   objective : string;
@@ -82,7 +68,6 @@ type operation_record = {
   created_by : string;
   source : string;
   status : operation_status;
-  chain : chain_record option;
   created_at : string;
   updated_at : string;
 }

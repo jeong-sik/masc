@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [2.178.0] - 2026-03-30
+
+### Changed
+- **Governance Result types** — write functions return `Result` to prevent partial commits (#3979).
+- **Research atomic writes** — restore atomic TSV result log writes (#3980).
+- **HTTP config wiring** — connect http_server_eio defaults to env config (#3984).
+- **Roadmap fix** — remove committed conflict markers (#3985).
+
 ## [2.177.0] - 2026-03-30
 
 ### Added

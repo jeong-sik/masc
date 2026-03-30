@@ -1,0 +1,114 @@
+/* MASC Dashboard — CSS Animations (@keyframes) */
+
+/* ── Pixel avatar animations ──────────────────────────── */
+
+@keyframes avatar-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes avatar-vibrate {
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-1px); }
+  50% { transform: translateX(1px); }
+  75% { transform: translateX(-1px); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes avatar-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.03); opacity: 0.85; }
+}
+
+@keyframes avatar-pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(71, 184, 255, 0); }
+  50% { box-shadow: 0 0 8px 2px rgba(71, 184, 255, 0.3); }
+}
+
+@keyframes avatar-particle {
+  0% { transform: translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateY(-12px) scale(0); opacity: 0; }
+}
+
+/* ── Agent state animations ────────────────────────────── */
+
+@keyframes workingPulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--ok-soft); }
+  50% { box-shadow: 0 0 6px 1px var(--ok-25); }
+}
+
+@keyframes warnBlink {
+  0%, 100% { border-color: var(--warn-28); }
+  50% { border-color: rgba(251, 191, 36, 0.50); }
+}
+
+@keyframes blocker-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.5); }
+}
+
+/* ── Component keyframes (consolidated) ──────────────────── */
+
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
+@keyframes orchestraFlow {
+  to { stroke-dashoffset: -40; }
+}
+
+@keyframes orchestraPulse {
+  0%, 100% { transform: scale(1); opacity: 0.92; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--ok-25); }
+  50% { box-shadow: 0 0 6px 1px var(--ok-12); }
+}
+
+@keyframes activityFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes keeper-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes pulse-ring {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes pipeline-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); }
+  50% { box-shadow: 0 0 4px 1px rgba(96, 165, 250, 0.25); }
+}
+
+@keyframes pipeline-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes keeperPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--ok-40); }
+  50% { opacity: 0.8; box-shadow: 0 0 0 3px rgba(74,222,128,0); }
+}
+
+@keyframes loadingPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}

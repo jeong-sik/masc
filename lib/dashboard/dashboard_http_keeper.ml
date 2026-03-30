@@ -261,6 +261,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 let combined_log = match disk_crashes with
                   | [] -> crash_log
                   | _ -> disk_crashes in
+                let sp_events =
+                  (try Keeper_crash_persistence.recent_sp_events
+                    ~keepers_dir ~max_entries:20
+                  with _ -> []) in
                 `Assoc [
                   ("restart_count", `Int entry.restart_count);
                   ("max_restarts", `Int max_restarts);
@@ -273,6 +277,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                     match entry.dead_since_ts with
                     | Some ts -> `Float ts
                     | None -> `Null);
+                  ("sp_events", `List sp_events);
                 ]
             | None ->
                 `Assoc [
@@ -281,6 +286,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ("crash_log", `List []);
                   ("last_failure_reason", `Null);
                   ("dead_since", `Null);
+                  ("sp_events", `List []);
                 ]
           in
 

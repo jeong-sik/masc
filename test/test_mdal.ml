@@ -111,7 +111,7 @@ let test_builtin_ssim () =
   Alcotest.(check string) "name" "ssim" p.name;
   Alcotest.(check int) "max_iterations" 20 p.max_iterations;
   Alcotest.(check string) "metric_fn is explicit-only" "" p.metric_fn;
-  Alcotest.(check string) "agent" "claude" p.agent
+  Alcotest.(check string) "agent" "auto" p.agent
 
 let test_builtin_coverage () =
   let p = Mdal.builtin_profile "coverage" in

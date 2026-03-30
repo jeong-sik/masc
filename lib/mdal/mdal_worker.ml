@@ -94,6 +94,9 @@ let resolve_model_label ~(agent : string) ~(worker_model : string option) :
         (* Map bare agent names to canonical provider:model via env config.
            Provider_adapter.default_model_for_family resolves from env vars. *)
         match normalized with
+        | "auto" ->
+            (* "auto" defers to cascade: use glm:auto as the cascade entry point *)
+            parse_worker_model "glm:auto"
         | "claude" ->
             (match Provider_adapter.default_model_label_for_family Provider_adapter.Claude_family with
              | Ok label -> parse_worker_model label

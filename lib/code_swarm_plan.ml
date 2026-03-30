@@ -341,7 +341,8 @@ let verify_worker ~pattern (worker : worker_plan) diff =
       match
         Oas_worker.run_named ~cascade_name:"code_swarm_verify"
           ~goal:prompt ~max_turns:1
-          ~temperature:0.0 ~max_tokens:200 ()
+          ~temperature:0.0 ~max_tokens:200
+          ~priority:Oas.Llm_provider.Request_priority.Proactive ()
       with
       | Ok result ->
         (match Verifier_oas.parse_verdict (Oas_response.text_of_response result.Oas_worker.response) with

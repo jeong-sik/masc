@@ -110,6 +110,7 @@ let handle_deep_review (config : Room.config) args : bool * string =
             ~max_turns:1
             ~temperature:0.5
             ~max_tokens:500
+            ~priority:Oas.Llm_provider.Request_priority.Interactive
             ()
         with
         | Ok result ->

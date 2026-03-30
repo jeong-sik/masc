@@ -99,6 +99,7 @@ let execute_spawn_pipeline
                            "MASC_SPAWN_TEMPERATURE" ~default:0.3)
                          ~max_tokens:(Safe_ops.get_env_int_logged
                            "MASC_SPAWN_MAX_TOKENS" ~default:4096)
+                         ~priority:Oas.Llm_provider.Request_priority.Interactive
                          ~sw:ctx.sw
                          ()
                      in

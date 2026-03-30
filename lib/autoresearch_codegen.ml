@@ -110,6 +110,7 @@ let generate_code_change ~goal ~baseline ~history ~insights
         ~cascade_name:"autoresearch" ~fallback:(fun () -> 0.7))
       ~max_tokens:(Cascade_inference.resolve_max_tokens
         ~cascade_name:"autoresearch" ~fallback:(fun () -> 4096))
+      ~priority:Oas.Llm_provider.Request_priority.Background
       ()
   with
   | Error e -> Result.error (Printf.sprintf "MODEL call failed: %s" e)

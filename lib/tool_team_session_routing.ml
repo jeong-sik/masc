@@ -459,7 +459,8 @@ let model_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
         Oas_worker.run_named ~cascade_name:(Env_config.Model_defaults.routing_cascade ())
           ~system_prompt:"You are a routing judge for a hybrid swarm. Output only JSON."
           ~goal:prompt ~max_turns:1
-          ~temperature:0.0 ~max_tokens:220 ()
+          ~temperature:0.0 ~max_tokens:220
+          ~priority:Oas.Llm_provider.Request_priority.Proactive ()
       with
       | Ok result -> (
           try

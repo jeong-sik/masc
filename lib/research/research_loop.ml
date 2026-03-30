@@ -211,6 +211,7 @@ let generate_hypothesis ~sw ~net ~clock ~(config : Research_config.t)
       ~temperature:config.temperature
       ~max_tokens:config.max_tokens
       ~timeout_sec:config.timeout_sec
+      ~priority:Llm_provider.Request_priority.Background
       ()
   with
   | Ok resp ->

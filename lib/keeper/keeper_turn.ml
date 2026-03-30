@@ -203,6 +203,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 ~generation:meta.runtime.generation
                 ?on_event
                 ~trajectory_acc
+                ~priority:Oas.Llm_provider.Request_priority.Interactive
                 ()
             with
             | Error e ->

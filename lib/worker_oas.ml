@@ -222,6 +222,7 @@ let build_agent
     |> Oas.Builder.with_raw_trace raw_trace
     |> Oas.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Oas.Builder.with_description (description_of_meta meta)
+    |> Oas.Builder.with_priority Oas.Llm_provider.Request_priority.Proactive
   in
   Oas.Builder.build_safe builder
   |> Result.map_error Oas.Error.to_string

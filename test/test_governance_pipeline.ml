@@ -388,6 +388,47 @@ let test_risk_contract_risk_non_object_input_falls_back_to_heuristic () =
   Alcotest.(check string) "non-object input keeps heuristic risk"
     "high" (Gp.risk_level_to_string risk)
 
+let test_risk_contract_risk_does_not_downgrade_heuristic () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_create_room"
+      ~input:
+        (`Assoc
+          [
+            ( "delivery_contract",
+              `Assoc
+                [
+                  ("contract_id", `String "contract-risk-004");
+                  ("summary", `String "benign contract");
+                  ("required_artifacts", `List [ `String "report.md" ]);
+                  ("repair_budget", `Int 5);
+                ] );
+          ])
+  in
+  Alcotest.(check string) "contract risk cannot downgrade high heuristic"
+    "high" (Gp.risk_level_to_string risk)
+
+let test_risk_payload_beats_contract_risk () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_team_session_step"
+      ~input:
+        (`Assoc
+          [
+            ( "delivery_contract",
+              `Assoc
+                [
+                  ("contract_id", `String "contract-risk-005");
+                  ("summary", `String "medium contract");
+                  ( "required_artifacts",
+                    `List [ `String "report.md"; `String "test.xml" ] );
+                  ("repair_budget", `Int 3);
+                ] );
+            ("tool_names", `List [ `String "keeper_fs_edit" ]);
+            ("note", `String "rm -rf /tmp/demo");
+          ])
+  in
+  Alcotest.(check string) "payload risk beats contract risk"
+    "critical" (Gp.risk_level_to_string risk)
+
 (* ── Governance Level Decision Tests ────────────────────────── *)
 
 let test_development_allows_all () =
@@ -728,6 +769,10 @@ let () =
         test_risk_contract_risk_empty_tool_names_uses_contract_only;
       Alcotest.test_case "contract risk: non-object input falls back" `Quick
         test_risk_contract_risk_non_object_input_falls_back_to_heuristic;
+      Alcotest.test_case "contract risk: does not downgrade heuristic" `Quick
+        test_risk_contract_risk_does_not_downgrade_heuristic;
+      Alcotest.test_case "payload beats contract risk" `Quick
+        test_risk_payload_beats_contract_risk;
       Alcotest.test_case "case insensitive" `Quick test_case_insensitive_matching;
     ];
     "governance_levels", [

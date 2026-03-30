@@ -33,6 +33,9 @@ let risk_level_to_int = function
   | High -> 2
   | Critical -> 3
 
+let max_risk_level left right =
+  if risk_level_to_int left >= risk_level_to_int right then left else right
+
 let risk_level_of_contract_risk = function
   | Agent_sdk.Risk_class.Low -> Low
   | Agent_sdk.Risk_class.Medium -> Medium
@@ -202,26 +205,28 @@ let classify_with_payload ~tool_name ~input =
   then Some Critical
   else None
 
+let baseline_risk ~tool_name ~input =
+  match classify_with_metadata ~tool_name with
+  | Some level -> level
+  | None -> (
+      match List.assoc_opt tool_name risk_overrides with
+      | Some level -> level
+      | None ->
+          if String.equal tool_name "masc_transition" then
+            match transition_action input with
+            | Some action -> classify_name action
+            | None -> Low
+          else
+            classify_name tool_name)
+
 let assess_risk ~tool_name ~input =
   match classify_with_payload ~tool_name ~input with
   | Some level -> level
   | None -> (
+      let baseline = baseline_risk ~tool_name ~input in
       match classify_with_contract_risk ~tool_name ~input with
-      | Some level -> level
-      | None -> (
-          match classify_with_metadata ~tool_name with
-          | Some level -> level
-          | None ->
-          (* Check explicit overrides after metadata/payload semantics. *)
-          match List.assoc_opt tool_name risk_overrides with
-          | Some level -> level
-          | None ->
-              if String.equal tool_name "masc_transition" then
-                match transition_action input with
-                | Some action -> classify_name action
-                | None -> Low
-              else
-                classify_name tool_name))
+      | Some level -> max_risk_level baseline level
+      | None -> baseline)
 
 (* ── Trace ID generation ────────────────────────────────────── *)
 

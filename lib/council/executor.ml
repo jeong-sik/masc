@@ -49,21 +49,21 @@ let default_mappings : action_mapping list = [
   (* PR merge pattern - PCRE syntax *)
   {
     pattern = "merge pr #?([0-9]+)";
-    action = GitHubAction (MergePR 0);  (* 0 = placeholder, extracted from match *)
+    action = GitHubAction (MergePR 0);  (* placeholder: actual PR# extracted at execution time *)
     requires_unanimous = false;
     min_threshold = 0.6;
   };
   (* PR close pattern *)
   {
     pattern = "close pr #?([0-9]+)";
-    action = GitHubAction (ClosePR 0);
+    action = GitHubAction (ClosePR 0);  (* placeholder: actual PR# extracted at execution time *)
     requires_unanimous = false;
     min_threshold = 0.5;
   };
   (* Deploy pattern *)
   {
     pattern = "deploy (v?[0-9.]+)";
-    action = ExecCommand ["echo"; "Deploy placeholder"];
+    action = ExecCommand ["echo"; "Deploy placeholder"];  (* stub: blocked at execution time *)
     requires_unanimous = true;
     min_threshold = 1.0;
   };
@@ -264,15 +264,33 @@ let execute_decision ~topic ~result : exec_result option =
       let action = match mapping.action with
         | GitHubAction (MergePR _) ->
           (match extract_number topic with
-           | Some n -> GitHubAction (MergePR n)
-           | None -> mapping.action)
+           | Some n -> Ok (GitHubAction (MergePR n))
+           | None ->
+             Error (Printf.sprintf
+               "Council: cannot extract PR number from topic %S — \
+                MergePR requires a valid PR number" topic))
         | GitHubAction (ClosePR _) ->
           (match extract_number topic with
-           | Some n -> GitHubAction (ClosePR n)
-           | None -> mapping.action)
-        | other -> other
+           | Some n -> Ok (GitHubAction (ClosePR n))
+           | None ->
+             Error (Printf.sprintf
+               "Council: cannot extract PR number from topic %S — \
+                ClosePR requires a valid PR number" topic))
+        | ExecCommand ["echo"; "Deploy placeholder"] ->
+          Error (Printf.sprintf
+            "Council: deploy action not implemented for topic %S — \
+             requires deployment pipeline integration" topic)
+        | other -> Ok other
       in
-      Some (execute_action action)
+      (match action with
+       | Ok a -> Some (execute_action a)
+       | Error msg ->
+         Log.Misc.error "Executor: %s" msg;
+         Some { success = false;
+                stdout = "";
+                stderr = msg;
+                output = msg;
+                timestamp = Time_compat.now () })
     end else begin
       Log.Misc.info "Executor: threshold not met for: %s" topic;
       None

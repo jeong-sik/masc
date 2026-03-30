@@ -261,6 +261,11 @@ let test_router_agent_selection () =
   check bool "agents selected" (List.length decision.Router.agents <= 2) true;
   check bool "has reason" (String.length decision.reason > 0) true
 
+let test_router_reason_mentions_heuristic () =
+  let decision = Router.route "implement a function in OCaml" in
+  check bool "heuristic reason prefix"
+    (String.starts_with ~prefix:"Heuristic query class:" decision.reason) true
+
 (* ============================================================
    Balance Tests
    ============================================================ *)
@@ -376,6 +381,7 @@ let router_tests = [
   "complexity simple", `Quick, test_router_complexity_simple;
   "complexity complex", `Quick, test_router_complexity_complex;
   "agent selection", `Quick, test_router_agent_selection;
+  "reason mentions heuristic", `Quick, test_router_reason_mentions_heuristic;
 ]
 
 let balance_tests = [

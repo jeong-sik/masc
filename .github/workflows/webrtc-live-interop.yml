@@ -3,7 +3,8 @@ name: WebRTC Live Interop
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: '15 3 * * *'
+    # Run weekly on Sundays at 3:15 AM UTC (reduced from daily to save CI costs)
+    - cron: '15 3 * * 0'
 
 jobs:
   live-interop:

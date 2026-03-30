@@ -16,10 +16,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pr-sync-check:
+    name: PR Sync Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify PR sync
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          chmod +x scripts/check-pr-sync.sh
+          scripts/check-pr-sync.sh \
+            --head-branch "$PR_HEAD_REF" \
+            --pr-number "$PR_NUMBER" \
+            --expected-head-sha "$PR_HEAD_SHA"
+
   health:
     name: Health
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [pr-sync-check]
+    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout
@@ -31,19 +55,6 @@ jobs:
         run: |
           chmod +x scripts/check-oas-pin.sh
           scripts/check-oas-pin.sh
-
-      - name: Verify PR sync
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          PR_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          chmod +x scripts/check-pr-sync.sh
-          scripts/check-pr-sync.sh \
-            --head-branch "$PR_HEAD_REF" \
-            --pr-number "$PR_NUMBER" \
-            --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
@@ -96,6 +107,7 @@ jobs:
     name: PR Hygiene
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    needs: [pr-sync-check]
     timeout-minutes: 10
 
     steps:
@@ -103,19 +115,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Verify PR sync
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          PR_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          chmod +x scripts/check-pr-sync.sh
-          scripts/check-pr-sync.sh \
-            --head-branch "$PR_HEAD_REF" \
-            --pr-number "$PR_NUMBER" \
-            --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Run PR hygiene guards
         env:
@@ -133,23 +132,12 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    needs: [pr-sync-check]
+    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Verify PR sync
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          PR_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          chmod +x scripts/check-pr-sync.sh
-          scripts/check-pr-sync.sh \
-            --head-branch "$PR_HEAD_REF" \
-            --pr-number "$PR_NUMBER" \
-            --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
@@ -233,23 +221,12 @@ jobs:
     name: Contract Harness
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: [pr-sync-check]
+    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Verify PR sync
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          PR_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          chmod +x scripts/check-pr-sync.sh
-          scripts/check-pr-sync.sh \
-            --head-branch "$PR_HEAD_REF" \
-            --pr-number "$PR_NUMBER" \
-            --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
@@ -285,23 +262,12 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [pr-sync-check]
+    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Verify PR sync
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          PR_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          chmod +x scripts/check-pr-sync.sh
-          scripts/check-pr-sync.sh \
-            --head-branch "$PR_HEAD_REF" \
-            --pr-number "$PR_NUMBER" \
-            --expected-head-sha "$PR_HEAD_SHA"
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
@@ -340,6 +306,8 @@ jobs:
     name: Dashboard
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: [pr-sync-check]
+    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
     steps:
       - name: Checkout

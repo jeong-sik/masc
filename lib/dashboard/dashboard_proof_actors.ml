@@ -109,7 +109,7 @@ let worker_run_validation_failures json =
 
 let worker_run_summary_json json =
   let summary = U.member "trace_summary" json in
-  let base_fields =
+  `Assoc
     [
       ("worker_run_id", U.member "worker_run_id" json);
       ("cdal_run_id", U.member "cdal_run_id" json);
@@ -145,6 +145,7 @@ let worker_run_summary_json json =
       ("stop_reason", if U.member "stop_reason" json <> `Null then U.member "stop_reason" json else U.member "stop_reason" summary);
       ("failure_reason", U.member "failure_reason" json);
       ("error", if U.member "error" json <> `Null then U.member "error" json else U.member "error" summary);
+      ("proof_path", U.member "proof_path" json);
       ("proof_present", U.member "proof_present" json);
       ("tool_trace_refs", U.member "tool_trace_refs" json);
       ("raw_evidence_refs", U.member "raw_evidence_refs" json);
@@ -152,20 +153,6 @@ let worker_run_summary_json json =
       ("session_conformance", U.member "session_conformance" json);
       ("ts_iso", U.member "ts_iso" json);
     ]
-  in
-  let proof_fields =
-    match U.member "proof_run_id" json with
-    | `String _ ->
-        [
-          ("proof_run_id", U.member "proof_run_id" json);
-          ("proof_status", U.member "proof_status" json);
-          ("proof_risk_class", U.member "proof_risk_class" json);
-          ("proof_execution_mode", U.member "proof_execution_mode" json);
-          ("proof_evidence_count", U.member "proof_evidence_count" json);
-        ]
-    | _ -> []
-  in
-  `Assoc (base_fields @ proof_fields)
 
 let actor_activity_state (acc : actor_acc) =
   if acc.observed_event_count > 0 then

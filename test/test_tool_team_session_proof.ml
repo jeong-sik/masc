@@ -9,7 +9,7 @@ let test_proof_exposes_spawn_selection_rationale () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let start_json =
     start_session_exn ctx ~goal:"prove selection rationale visibility"
@@ -164,7 +164,7 @@ let test_report_and_proof_expose_spawn_tool_usage () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let start_json =
     start_session_exn ctx ~goal:"prove spawn tool evidence visibility"
@@ -280,7 +280,7 @@ let test_report_and_proof_expose_delivery_contract_and_verdict () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let session_id =
     start_session_exn ctx ~goal:"prove contract and verdict visibility"
@@ -427,7 +427,7 @@ let test_proof_aggregates_worker_proof_refs () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let session_id =
     start_session_exn ctx ~goal:"aggregate worker proof refs" |> get_session_id
@@ -537,10 +537,6 @@ let test_proof_aggregates_worker_proof_refs () =
     Yojson.Safe.Util.(worker_proof |> member "cdal_run_id" |> to_string);
   Alcotest.(check string) "worker proof contract id" "contract-proof-aggregate"
     Yojson.Safe.Util.(worker_proof |> member "contract_id" |> to_string);
-  Alcotest.(check bool) "worker proof hides proof path" true
-    (Yojson.Safe.Util.(worker_proof |> member "proof_path") = `Null);
-  Alcotest.(check bool) "worker proof hides meta path" true
-    (Yojson.Safe.Util.(worker_proof |> member "meta_path") = `Null);
   Alcotest.(check string) "worker proof manifest ref"
     "proof-store://wr-proof-aggregate/manifest.json"
     Yojson.Safe.Util.(worker_proof |> member "manifest_ref" |> to_string);
@@ -691,7 +687,7 @@ let test_prove_requires_multi_actor_turn_coverage () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
   in
   let participants = [ "tester"; "ally1"; "ally2" ] in
 

@@ -62,6 +62,8 @@ let worker_proof_refs config session_id =
                      match string_member_opt "result_status" proof_json with
                      | Some value -> `String value
                      | None -> `Null );
+                   ("proof_path", `String proof_path);
+                   ("meta_path", `String meta_path);
                    ( "manifest_ref",
                      `String
                        (Agent_sdk.Proof_store.make_ref ~run_id
@@ -83,18 +85,11 @@ let worker_proof_refs config session_id =
                      | Some value -> `String value
                      | None -> `Null );
                  ])
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
+           with exn ->
              Log.Session.warn
                "team_session_report_proof: skipping malformed worker proof json for %s/%s: %s"
                session_id worker_run_id (Printexc.to_string exn);
              None)
-  |> List.sort (fun a b ->
-         let id_of json =
-           Yojson.Safe.Util.(member "worker_run_id" json |> to_string)
-         in
-         String.compare (id_of a) (id_of b))
 
 let proof_markdown ~(session : Team_session_types.session)
     ~(proof_level : Team_session_types.proof_level)
@@ -446,22 +441,6 @@ let generate_proof ?(proof_level = default_proof_level) config
     let spawn_tool_names = collect_spawn_tool_names events in
     let spawn_tool_call_count = sum_spawn_tool_call_count events in
     let write_capable_spawn_count = count_write_capable_spawns events in
-    let projected_worker_proof_count =
-      Team_session_store.list_worker_run_ids config session.session_id
-      |> List.fold_left
-           (fun acc worker_run_id ->
-             let path =
-               Team_session_store.worker_run_meta_path config session.session_id
-                 worker_run_id
-             in
-             match Room_utils.read_json_opt config path with
-             | Some meta -> (
-                 match Yojson.Safe.Util.member "proof_run_id" meta with
-                 | `String _ -> acc + 1
-                 | _ -> acc)
-             | None -> acc)
-           0
-    in
     let min_turn_events = min_turn_events_for_session required_turn_actors in
     let min_communication = min_communication_for_session required_turn_actors in
     let vote_events =
@@ -585,10 +564,9 @@ let generate_proof ?(proof_level = default_proof_level) config
           ("oas_cdal_integration", `Assoc [
             ("contract_wired", `Bool (Option.is_some session.delivery_contract));
             ("proof_schema_version", `Int 1);
-            ("worker_proof_count",
-             `Int (max (List.length worker_proofs) projected_worker_proof_count));
+            ("worker_proof_count", `Int (List.length worker_proofs));
             ("aggregated", `Bool (worker_proofs <> []));
-            ("proof_projected", `Bool (projected_worker_proof_count > 0));
+            ("note", `String "Session proof aggregates worker-level OAS proof refs when present and falls back cleanly for legacy sessions without stored worker proofs.");
           ]);
         ]
     in

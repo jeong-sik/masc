@@ -11,7 +11,36 @@ module Swarm = Agent_sdk_swarm
 module Oas = Agent_sdk
 
 let supported_local_worker_tool_names =
-  Tool_catalog.tools_for_surface Tool_catalog.Local_worker
+  [
+    "masc_status";
+    "masc_tasks";
+    "masc_claim_next";
+    "masc_transition";
+    "masc_add_task";
+    "masc_heartbeat";
+    "masc_board_post";
+    "masc_board_list";
+    "masc_board_get";
+    "masc_board_comment";
+    "masc_board_vote";
+    "masc_board_search";
+    "masc_code_search";
+    "masc_code_symbols";
+    "masc_code_read";
+    "masc_worktree_create";
+    "masc_worktree_remove";
+    "masc_worktree_list";
+    "masc_run_init";
+    "masc_run_plan";
+    "masc_run_log";
+    "masc_run_deliverable";
+    "masc_run_get";
+    "masc_run_list";
+    "masc_repair_loop_start";
+    "masc_repair_loop_status";
+    "masc_repair_loop_iterate";
+    "masc_repair_loop_stop";
+  ]
 
 let supported_local_worker_tools () =
   match
@@ -194,17 +223,6 @@ let run_repair_loop_until_terminal ~sw ~(clock : _ Eio.Time.clock)
       dispatch_supported_tool ~sw ~clock ~config ~name ~args)
     args
 
-let slot_aware_concurrency_cap ~entry_count ~selection_count ~all_discovered
-    ~endpoints_found ~total =
-  if entry_count <= 1 || selection_count <= 0 then
-    entry_count
-  (* Multiple worker selections can legitimately collapse onto one discovered
-     local endpoint, so endpoint coverage is not a 1:1 proxy for slot count. *)
-  else if all_discovered && endpoints_found > 0 && total > 0 then
-    total
-  else
-    entry_count
-
 (* ── Role mapping ──────────────────────────────────────────────── *)
 
 let role_of_worker_class : Team_session_types.worker_class option -> Swarm.Swarm_types.agent_role =
@@ -309,7 +327,6 @@ let is_safe_worker_run_id value =
   let len = String.length value in
   len > 0
   && len <= 128
-  && value <> "." && value <> ".."
   && String.for_all
        (function
          | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '.' | '_' | '-' -> true
@@ -558,7 +575,6 @@ let planned_worker_to_entry
 (* ── session -> swarm_config ───────────────────────────────────── *)
 
 let session_to_swarm_config
-    ~sw ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : Room.config)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
@@ -586,39 +602,15 @@ let session_to_swarm_config
       Some (float_of_int session.duration_seconds)
     else None
   in
-  (* Slot-aware max_concurrent_agents for local-only sessions *)
-  let slot_aware_cap =
-    if entry_count <= 1 then
-      entry_count
-    else
-      let all_selections =
-        session.planned_workers
-        |> List.map (fun pw ->
-             cascade_of_worker ~session_cascade:session.model_cascade pw)
-        |> List.sort_uniq String.compare
-      in
-      match all_selections with
-      | [] -> entry_count
-      | _ ->
-          let config_path = Oas_worker.default_config_path () in
-          let cap =
-            Llm_provider.Cascade_config.local_capacity_for_selections
-              ~sw ~net ?config_path all_selections
-          in
-          slot_aware_concurrency_cap ~entry_count
-            ~selection_count:(List.length all_selections)
-            ~all_discovered:cap.all_discovered
-            ~endpoints_found:cap.endpoints_found ~total:cap.total
-  in
   { entries; mode;
     convergence = make_convergence_metric ~entry_count success_by_agent;
-    max_parallel = max 1 entry_count;
+    max_parallel = max 1 (List.length entries);
     prompt = session.goal; timeout_sec;
     budget = budget_of_session_timeout timeout_sec;
     max_agent_retries = 1;
     collaboration = Some collaboration;
     resource_check = Some (session_runtime_health_check ~config ~session);
-    max_concurrent_agents = Some (max 1 (min entry_count slot_aware_cap));
+    max_concurrent_agents = Some (max 1 (List.length entries));
     enable_streaming = false }
 
 (* ── Inverse: swarm result -> session update ───────────────────── *)

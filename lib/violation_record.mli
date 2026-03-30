@@ -25,8 +25,9 @@ type t = Agent_sdk.Mode_enforcer.violation = {
     Delegates to [Agent_sdk.Mode_enforcer.violation_of_yojson].
 
     @warning This returns [Error] for unrecognized [violation_kind] or
-    [effective_mode]. Callers should surface or propagate parse failures
-    rather than silently dropping violation evidence. *)
+    [effective_mode]. Call sites should decide explicitly whether to surface,
+    aggregate, or ignore parse failures, rather than assuming legacy
+    [Unknown] fallback behavior. *)
 val of_json : Yojson.Safe.t -> (t, string) result
 
 (** Parse an array of violations from JSON.

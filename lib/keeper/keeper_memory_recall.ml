@@ -262,7 +262,7 @@ let keeper_reflection_payload_of_auto_rules (e : keeper_auto_rule_eval) : Yojson
 
 (** Categorize model_id into a family for threshold selection.
     Small local models (llama, qwen) are more susceptible to context
-    anxiety and benefit from earlier mitosis. Large cloud models
+    anxiety and benefit from earlier handoff. Large cloud models
     (claude opus, gemini) handle long context well and prefer compaction.
 
     See: Anthropic "Harness Design" blog — Opus 4.6 removed context
@@ -300,7 +300,7 @@ let classify_model_family (model_id : string) : model_family =
 (** Adjust compaction/handoff thresholds based on model family.
     Returns [(ratio_gate_multiplier, handoff_threshold_multiplier)].
 
-    Small local models: lower thresholds (0.75x) → earlier mitosis.
+    Small local models: lower thresholds (0.75x) → earlier handoff.
     Large cloud models: higher thresholds (1.15x, clamped to 0.95) → prefer compaction.
     Medium/Unknown: no adjustment (1.0x). *)
 let model_threshold_multipliers (family : model_family) : float * float =

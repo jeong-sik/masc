@@ -76,8 +76,6 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc
 | `MASC_CLAIM_TTL_SECONDS` | float | 3600.0 | Task claim 자동 해제 TTL |
 | `MASC_ORCHESTRATOR_INTERVAL` | float | 300.0 | Orchestrator 점검 주기 |
 | `MASC_ORCHESTRATOR_AGENT` | string | `"orchestrator"` | Orchestrator 에이전트명 |
-| `MASC_MITOSIS_INTERVAL_SEC` | float | 300.0 | Mitosis 트리거 주기 |
-| `MASC_MITOSIS_HANDOFF_COOLDOWN_SEC` | float | 60.0 | 핸드오프 쿨다운 |
 | `MASC_SPAWN_TIMEOUT_SEC` | float | 600.0 | 스폰 기본 타임아웃 (10분) |
 | `MASC_SPAWN_CODING_TIMEOUT_SEC` | float | 7200.0 | 코딩 모드 타임아웃 (2시간) |
 | `MASC_SPAWN_GRACE_PERIOD_SEC` | float | 60.0 | SIGTERM 유예 기간 |

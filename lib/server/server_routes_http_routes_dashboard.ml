@@ -209,10 +209,13 @@ let add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/harness-health" (fun _request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_public_read (fun state req reqd ->
          let since = Server_utils.query_param req "since" in
          let until = Server_utils.query_param req "until" in
-         let json = Dashboard_harness_health.json ?since ?until () in
+         let json =
+           Dashboard_harness_health.json ~config:state.Mcp_server.room_config
+             ?since ?until ()
+         in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) _request reqd)

@@ -237,13 +237,8 @@
    mcp_server_eio_tool_profile
    mcp_server_eio_protocol
    metrics_store_eio
-   handoff_quality
-   adaptive_thresholds
    mdal_store
    verification
-   mitosis
-   mitosis_defaults
-   mitosis_dna
    operator_approval
    operator_pending_confirm
    operator_digest
@@ -318,8 +313,6 @@
    tool_bridge
    tool_cache
    tool_tempo
-   mitosis_helpers
-   mitosis_spawn
    tool_portal
    tool_worktree
    tool_a2a
@@ -542,10 +535,6 @@
 (private_modules
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
- mitosis_dna
- mitosis_helpers
- mitosis_spawn
- mitosis_defaults
  board_core
  board_votes
  cp_snapshot_core

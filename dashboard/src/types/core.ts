@@ -533,6 +533,7 @@ export interface KeeperConfigMetrics {
 
 export interface KeeperConfig {
   name: string
+  execution_scope: string
   prompt: KeeperConfigPrompt
   execution: KeeperConfigExecution
   compaction: KeeperConfigCompaction

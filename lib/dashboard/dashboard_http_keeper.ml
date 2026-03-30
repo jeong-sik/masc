@@ -633,6 +633,7 @@ let keeper_config_json (config : Room.config) (name : string)
       (`OK,
        `Assoc [
          ("name", `String m.name);
+         ("execution_scope", `String m.execution_scope);
          ("pipeline_stage", `String pipeline_stage);
          ("prompt", prompt);
          ("execution", execution);

@@ -90,6 +90,91 @@ let normalize_key title action =
   in
   normalized_title ^ "::" ^ action_key
 
+let semantic_stopwords =
+  [
+    "a";
+    "an";
+    "and";
+    "for";
+    "in";
+    "of";
+    "on";
+    "or";
+    "please";
+    "the";
+    "this";
+    "that";
+    "via";
+    "with";
+  ]
+
+let canonical_semantic_token token =
+  match token with
+  | "" -> None
+  | "db" | "database" | "postgres" | "postgresql" -> Some "database"
+  | "connection" | "connections" | "connect" -> Some "connection"
+  | "timeout" | "timeouts" | "deadline" | "wait" -> Some "timeout"
+  | "service" | "services" | "server" -> Some "service"
+  | "restart" | "reboot" | "reload" -> Some "restart"
+  | "increase" | "raise" | "extend" | "bump" -> Some "increase"
+  | "decrease" | "reduce" | "lower" -> Some "decrease"
+  | "param" | "parameter" | "setting" -> Some "parameter"
+  | "second" | "seconds" | "sec" | "secs" -> Some "seconds"
+  | "minute" | "minutes" | "min" | "mins" -> Some "minutes"
+  | other when List.mem other semantic_stopwords -> None
+  | other -> Some other
+
+let semantic_title_key title =
+  Text_similarity.normalize_for_similarity title
+  |> List.filter_map canonical_semantic_token
+  |> List.sort_uniq String.compare
+  |> String.concat " "
+
+let rec normalize_json_semantics (json : Yojson.Safe.t) : Yojson.Safe.t =
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        |> List.map (fun (key, value) ->
+               (normalize_text key, normalize_json_semantics value))
+        |> List.sort (fun (left, _) (right, _) -> String.compare left right))
+  | `List items -> `List (List.map normalize_json_semantics items)
+  | `String value -> `String (normalize_text value)
+  | (`Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) as value -> value
+
+let semantic_action_key = function
+  | None -> None
+  | Some (request : action_request) ->
+      let payload_key =
+        match request.payload with
+        | None -> "null"
+        | Some payload ->
+            payload
+            |> normalize_json_semantics
+            |> Yojson.Safe.sort
+            |> Yojson.Safe.to_string
+      in
+      Some
+        (String.concat "::"
+           [
+             normalize_text request.action_type;
+             normalize_text (Option.value ~default:"none" request.target_type);
+             normalize_text (Option.value ~default:"none" request.target_id);
+             payload_key;
+           ])
+
+let semantically_matches_case ~title ~subject_type ~requested_action
+    (case_ : case_record) =
+  String.equal case_.subject_type subject_type
+  &&
+  match (semantic_action_key requested_action, semantic_action_key case_.requested_action) with
+  | Some left, Some right -> String.equal left right
+  | None, None ->
+      let incoming_title = semantic_title_key title in
+      incoming_title <> ""
+      && String.equal incoming_title (semantic_title_key case_.title)
+  | _ -> false
+
 let stale_test_ttl_sec = 24.0 *. 3600.0
 let stale_artifact_ttl_sec = 12.0 *. 3600.0
 
@@ -304,15 +389,15 @@ let submit_petition base_path ~title ~origin ~subject_type ~risk_class
         all_cases
     in
     let resolved_case =
-      if source_refs <> [] then
-        List.find_opt (fun (case_ : case_record) ->
+      List.find_opt
+        (fun (case_ : case_record) ->
           is_terminal_case_status case_.status
-          && String.equal case_.subject_type subject_type
-          && List.exists (fun ref_ ->
-               List.mem ref_ case_.source_refs) source_refs)
-          all_cases
-      else
-        None
+          &&
+          ((source_refs <> []
+            && String.equal case_.subject_type subject_type
+            && List.exists (fun ref_ -> List.mem ref_ case_.source_refs) source_refs)
+           || semantically_matches_case ~title ~subject_type ~requested_action case_))
+        all_cases
     in
     let now = now_unix () in
     match resolved_case with
@@ -338,7 +423,10 @@ let submit_petition base_path ~title ~origin ~subject_type ~risk_class
             && List.exists (fun ref_ ->
                  List.mem ref_ case_.source_refs) source_refs)
             all_active_cases
-      | None -> None
+      | None ->
+          List.find_opt
+            (semantically_matches_case ~title ~subject_type ~requested_action)
+            all_active_cases
     in
     let case_, merged =
       match existing_case with

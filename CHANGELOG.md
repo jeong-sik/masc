@@ -1,6 +1,22 @@
 # Changelog
 
 
+## [2.168.0] - 2026-03-30
+
+### Added
+- **Typed state transitions** — phantom type + GADT PoC for compile-time state safety (#3868, #3526).
+- **Governance V2 tests** — coverage for case dedup and pre-hook risk classification (#3864, #3865).
+
+### Changed
+- **Autoresearch strict JSON** — XML-style tag heuristic replaced with strict JSON object contract (#3861).
+- **Router contract** — heuristic routing alignment (#3866).
+- **Governance case dedup** — reduce false splits (#3865).
+- **Governance pre-hook risk** — harden classification (#3864).
+- **Doc references** — missing references added for active design docs (#3824).
+
+### Removed
+- **43 unreferenced docs** — -7,868 lines of stale documentation (#3822).
+
 ## [2.167.0] - 2026-03-30
 
 ### Changed

@@ -378,6 +378,110 @@ let test_voice_session_urls_follow_adapter_contract () =
       check string "health uri" "https://voice.example/base/health"
         (Uri.to_string (Masc_mcp.Voice_bridge.voice_health_uri ()))
 
+let test_voice_session_urls_default_to_http_listener () =
+  let config_json =
+    {|
+{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "Roger",
+    "endpoints": [
+      {
+        "id": "elevenlabs-direct",
+        "kind": "elevenlabs_direct",
+        "base_url": "https://api.elevenlabs.io/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      {
+        "id": "openai-stt",
+        "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      {
+        "id": "local-voice-mcp",
+        "kind": "voice_mcp",
+        "enabled": true
+      }
+    ]
+  }
+}
+|}
+  in
+  with_temp_voice_config config_json @@ fun () ->
+      with_env "MASC_HTTP_BASE_URL" "" (fun () ->
+        with_env "MASC_HOST" "127.0.0.1" (fun () ->
+          with_env "MASC_HTTP_PORT" "9315" (fun () ->
+            with_env "VOICE_MCP_HOST" "" (fun () ->
+              with_env "VOICE_MCP_PORT" "" (fun () ->
+                check string "mcp uri defaults to HTTP listener"
+                  "http://127.0.0.1:9315/mcp"
+                  (Uri.to_string (Masc_mcp.Voice_bridge.voice_mcp_uri ()));
+                check string "health uri defaults to HTTP listener"
+                  "http://127.0.0.1:9315/health"
+                  (Uri.to_string (Masc_mcp.Voice_bridge.voice_health_uri ())))))))
+
+let test_voice_session_urls_use_legacy_voice_env_fallback () =
+  let config_json =
+    {|
+{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "Roger",
+    "endpoints": [
+      {
+        "id": "elevenlabs-direct",
+        "kind": "elevenlabs_direct",
+        "base_url": "https://api.elevenlabs.io/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      {
+        "id": "openai-stt",
+        "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      {
+        "id": "local-voice-mcp",
+        "kind": "voice_mcp",
+        "enabled": true
+      }
+    ]
+  }
+}
+|}
+  in
+  with_temp_voice_config config_json @@ fun () ->
+      with_env "MASC_HTTP_BASE_URL" "" (fun () ->
+        with_env "MASC_HOST" "" (fun () ->
+          with_env "MASC_HTTP_PORT" "" (fun () ->
+            with_env "VOICE_MCP_HOST" "127.0.0.1" (fun () ->
+              with_env "VOICE_MCP_PORT" "9444" (fun () ->
+                check string "mcp uri uses legacy voice env"
+                  "http://127.0.0.1:9444/mcp"
+                  (Uri.to_string (Masc_mcp.Voice_bridge.voice_mcp_uri ()));
+                check string "health uri uses legacy voice env"
+                  "http://127.0.0.1:9444/health"
+                  (Uri.to_string (Masc_mcp.Voice_bridge.voice_health_uri ())))))))
+
 let test_voice_speak_without_net_errors () =
   with_ctx_no_net (fun ctx ->
       let ok, body =
@@ -530,8 +634,12 @@ let test_voice_public_config_json () =
   | Ok json ->
       let open Yojson.Safe.Util in
       check string "status" "ok" (json |> member "status" |> to_string);
-      check string "active endpoint id" "railway-proxy"
-        (json |> member "tts" |> member "active_endpoint" |> member "id" |> to_string);
+      check bool "tts active endpoint configured" true
+        (json |> member "tts" |> member "active_endpoint" |> member "configured" |> to_bool);
+      check bool "tts active endpoint enabled" true
+        (json |> member "tts" |> member "active_endpoint" |> member "enabled" |> to_bool);
+      check bool "tts fallback configured false" false
+        (json |> member "tts" |> member "active_endpoint" |> member "fallback_configured" |> to_bool);
       check bool "local playback enabled" true
         (json |> member "local_playback" |> member "enabled" |> to_bool);
       check bool "local playback agent sangsu" true
@@ -540,6 +648,14 @@ let test_voice_public_config_json () =
       check bool "includes sangsu voice" true
         (json |> member "tts" |> member "available_voices" |> to_list
          |> List.exists (function `String "Roger" -> true | _ -> false));
+      check bool "agent voices hidden" true
+        ((json |> member "tts" |> member "agent_voices") = `Null);
+      check bool "endpoint id hidden" true
+        ((json |> member "tts" |> member "active_endpoint" |> member "id") = `Null);
+      check bool "endpoint kind hidden" true
+        ((json |> member "tts" |> member "active_endpoint" |> member "kind") = `Null);
+      check bool "endpoint url hidden" true
+        ((json |> member "tts" |> member "active_endpoint" |> member "endpoint_url") = `Null);
       check bool "local playback enabled surfaced" true
         (json |> member "local_playback" |> member "enabled" |> to_bool)
 
@@ -780,6 +896,10 @@ let () =
             test_voice_request_builder_follows_adapter_contract;
           test_case "voice session urls follow adapter contract" `Quick
             test_voice_session_urls_follow_adapter_contract;
+          test_case "voice session urls default to HTTP listener" `Quick
+            test_voice_session_urls_default_to_http_listener;
+          test_case "voice session urls use legacy voice env fallback" `Quick
+            test_voice_session_urls_use_legacy_voice_env_fallback;
           test_case "speak without net errors" `Quick
             test_voice_speak_without_net_errors;
           test_case "session start no net" `Quick test_voice_session_start_without_net_errors;

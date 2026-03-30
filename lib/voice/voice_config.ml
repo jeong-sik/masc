@@ -199,12 +199,7 @@ let parse_endpoint ~ctx json =
         if Option.is_some base_url then Ok ()
         else Error (Printf.sprintf "%s.base_url is required for openai_compat" ctx)
     | Elevenlabs_direct -> Ok ()
-    | Voice_mcp ->
-        if Option.is_some mcp_url || Option.is_some base_url then Ok ()
-        else
-          Error
-            (Printf.sprintf
-               "%s requires mcp_url or base_url for voice_mcp endpoint" ctx)
+    | Voice_mcp -> Ok ()
   in
   Ok
     {
@@ -405,30 +400,27 @@ let available_voices config =
   :: List.map snd config.tts.agent_voices
   |> unique_strings
 
-let endpoint_public_json endpoint =
-  let endpoint_url =
-    match endpoint.kind with
-    | Openai_compat | Elevenlabs_direct -> endpoint.base_url
-    | Voice_mcp -> (
-        match endpoint.mcp_url with
-        | Some _ as url -> url
-        | None -> endpoint.base_url)
+let endpoint_public_json (endpoints : endpoint list) =
+  let active : endpoint option = select_endpoint endpoints in
+  let fallback_configured =
+    List.fold_left
+      (fun acc (endpoint : endpoint) -> if endpoint.enabled then acc + 1 else acc)
+      0 endpoints
+    > 1
   in
   `Assoc
     [
-      ("id", `String endpoint.id);
-      ("kind", `String (string_of_endpoint_kind endpoint.kind));
-      ("enabled", `Bool endpoint.enabled);
-      ( "endpoint_url",
-        match endpoint_url with Some value -> `String value | None -> `Null );
-      ( "health_url",
-        match endpoint.health_url with Some value -> `String value | None -> `Null );
+      ("configured", `Bool (endpoints <> []));
+      ( "enabled",
+        `Bool
+          (match active with
+          | Some (endpoint : endpoint) -> endpoint.enabled
+          | None -> false) );
+      ("fallback_configured", `Bool fallback_configured);
     ]
 
 let active_endpoint_json endpoints =
-  match select_endpoint endpoints with
-  | Some endpoint -> endpoint_public_json endpoint
-  | None -> `Null
+  endpoint_public_json endpoints
 
 let agent_voices_json config =
   `List
@@ -448,7 +440,6 @@ let public_json config =
             ("default_voice", `String config.tts.default_voice);
             ("available_voices", `List (List.map (fun voice -> `String voice) (available_voices config)));
             ("available_models", `List [ `String config.tts.default_model ]);
-            ("agent_voices", agent_voices_json config);
             ("active_endpoint", active_endpoint_json config.tts.endpoints);
           ] );
       ( "stt",

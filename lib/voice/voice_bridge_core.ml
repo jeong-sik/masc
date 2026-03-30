@@ -8,7 +8,7 @@
     TTS Strategy (priority order):
     1. ElevenLabs API direct (ELEVENLABS_API_KEY)
     2. Railway proxy (ELEVENLABS_PROXY_URL)
-    3. Voice MCP Server (port 8936, legacy)
+    3. Voice MCP session endpoint (HTTP /mcp, legacy VOICE_MCP_* fallback)
     4. text_fallback (silent)
 
     Eio Migration Notes:
@@ -59,9 +59,7 @@ let local_playback_enabled_for_agent agent_id =
   | Error _ -> false
 
 let default_voice_uri path =
-  let host = Env_config_runtime.Voice.default_host in
-  let port = Env_config_runtime.Voice.default_port in
-  Uri.make ~scheme:"http" ~host ~port ~path ()
+  Uri.of_string (Provider_adapter.default_voice_session_url ~path)
 
 let voice_mcp_uri () =
   match load_voice_config () with
@@ -245,37 +243,19 @@ let ensure_audio_dir () =
   else if not (Sys.is_directory dir) then
     log_error "voice audio path exists but is not a directory"
 
-let endpoint_url endpoint =
-  if Provider_adapter.voice_endpoint_supports_http_tts endpoint then
-    Provider_adapter.voice_endpoint_base_url endpoint
-  else
-    match endpoint.Voice_config.kind with
-    | Voice_config.Voice_mcp -> (
-        match endpoint.mcp_url with
-        | Some _ as url -> url
-        | None -> endpoint.base_url)
-    | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
-        Provider_adapter.voice_endpoint_base_url endpoint
+let provider_metadata_keys =
+  [ "provider_name"; "provider_kind"; "provider_family"; "provider_auth"; "endpoint_id"; "endpoint_url" ]
 
-let endpoint_url_json endpoint =
-  match endpoint_url endpoint with
-  | Some value -> `String value
-  | None -> `Null
-
-let append_provider_metadata json endpoint =
-  let adapter = Provider_adapter.voice_adapter_for_endpoint endpoint in
-  match json with
+let rec strip_provider_metadata = function
   | `Assoc fields ->
       `Assoc
         (fields
-        @ [
-            ("provider_name", `String adapter.canonical_name);
-            ( "provider_kind",
-              `String (Provider_adapter.string_of_voice_transport adapter.transport) );
-            ( "provider_family",
-              `String (Provider_adapter.string_of_provider_family adapter.provider_family) );
-            ("provider_auth", `String (Provider_adapter.string_of_auth_mode adapter.auth_mode));
-            ("endpoint_id", `String endpoint.id);
-            ("endpoint_url", endpoint_url_json endpoint);
-          ])
+        |> List.filter (fun (key, _) -> not (List.mem key provider_metadata_keys))
+        |> List.map (fun (key, value) -> (key, strip_provider_metadata value)))
+  | `List items -> `List (List.map strip_provider_metadata items)
   | other -> other
+
+let append_provider_metadata json _endpoint =
+  (* Public voice APIs stay vendor-neutral. Keep provider details in internal
+     config and logs, but do not expose them through tool/API payloads. *)
+  strip_provider_metadata json

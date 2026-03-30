@@ -67,6 +67,8 @@ let test_frontend_transport_routes_present () =
       routes
   in
   Alcotest.(check bool) "GET /ws route" true (has_route `GET "/ws");
+  Alcotest.(check bool) "GET /api/v1/voice/config route" true
+    (has_route `GET "/api/v1/voice/config");
   Alcotest.(check bool) "POST /webrtc/offer route" true
     (has_route `POST "/webrtc/offer");
   Alcotest.(check bool) "POST /webrtc/answer route" true

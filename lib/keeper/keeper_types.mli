@@ -7,14 +7,25 @@
 
 include module type of Keeper_types_profile
 
-(** {1 Compaction state} *)
+(** {1 Policy types (remain in keeper_meta top-level)} *)
 
-type compaction_state = {
+type compaction_policy = {
   profile: string;
   ratio_gate: float;
   message_gate: int;
   token_gate: int;
   cooldown_sec: int;
+}
+
+type proactive_policy = {
+  enabled: bool;
+  idle_sec: int;
+  cooldown_sec: int;
+}
+
+(** {1 Runtime types (embedded in agent_runtime_state)} *)
+
+type compaction_runtime = {
   count: int;
   last_ts: float;
   last_before_tokens: int;
@@ -23,7 +34,12 @@ type compaction_state = {
   last_decision: string;
 }
 
-(** {1 Usage metrics} *)
+type proactive_runtime = {
+  count_total: int;
+  last_ts: float;
+  last_reason: string;
+  last_preview: string;
+}
 
 type usage_metrics = {
   total_turns: int;
@@ -39,16 +55,25 @@ type usage_metrics = {
   last_latency_ms: int;
 }
 
-(** {1 Proactive config} *)
+(** {1 Agent runtime state} *)
 
-type proactive_config = {
-  enabled: bool;
-  idle_sec: int;
-  cooldown_sec: int;
-  count_total: int;
-  last_ts: float;
-  last_reason: string;
-  last_preview: string;
+type agent_runtime_state = {
+  usage: usage_metrics;
+  compaction_rt: compaction_runtime;
+  proactive_rt: proactive_runtime;
+  generation: int;
+  trace_id: string;
+  trace_history: string list;
+  last_handoff_ts: float;
+  last_continuity_update_ts: float;
+  last_autonomous_action_at: string;
+  autonomous_action_count: int;
+  autonomous_turn_count: int;
+  autonomous_text_turn_count: int;
+  autonomous_tool_turn_count: int;
+  board_reactive_turn_count: int;
+  mention_reactive_turn_count: int;
+  noop_turn_count: int;
 }
 
 (** {1 Keeper meta} *)
@@ -56,8 +81,6 @@ type proactive_config = {
 type keeper_meta = {
   name: string;
   agent_name: string;
-  trace_id: string;
-  trace_history: string list;
   goal: string;
   short_goal: string;
   mid_goal: string;
@@ -76,40 +99,36 @@ type keeper_meta = {
   mention_targets: string list;
   joined_room_ids: string list;
   last_seen_seq_by_room: (string * int) list;
-  generation: int;
-  proactive: proactive_config;
-  compaction: compaction_state;
+  proactive: proactive_policy;
+  compaction: compaction_policy;
   auto_handoff: bool;
   handoff_threshold: float;
   handoff_cooldown_sec: int;
   voice_enabled: bool;
   voice_channel: string;
   voice_agent_id: string;
-  last_handoff_ts: float;
   created_at: string;
   updated_at: string;
-  usage: usage_metrics;
-  last_continuity_update_ts: float;
   continuity_summary: string;
   active_goal_ids: string list;
   active_team_session_id: string option;
   last_team_session_started_at: string;
   team_session_start_count_total: int;
-  last_autonomous_action_at: string;
-  autonomous_action_count: int;
-  autonomous_turn_count: int;
-  autonomous_text_turn_count: int;
-  autonomous_tool_turn_count: int;
-  board_reactive_turn_count: int;
-  mention_reactive_turn_count: int;
-  noop_turn_count: int;
   last_triage_triggers: string;
   paused: bool;
   current_task_id: string option;
   (** Currently claimed task ID for cost attribution. *)
+  runtime: agent_runtime_state;
 }
 
 val now_iso : unit -> string
+
+(** {1 Updater helpers for nested record updates} *)
+
+val map_runtime : (agent_runtime_state -> agent_runtime_state) -> keeper_meta -> keeper_meta
+val map_usage : (usage_metrics -> usage_metrics) -> keeper_meta -> keeper_meta
+val map_compaction_rt : (compaction_runtime -> compaction_runtime) -> keeper_meta -> keeper_meta
+val map_proactive_rt : (proactive_runtime -> proactive_runtime) -> keeper_meta -> keeper_meta
 
 (** {1 Legacy model arg rejection} *)
 

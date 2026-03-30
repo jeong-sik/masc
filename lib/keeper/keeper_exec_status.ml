@@ -5,7 +5,7 @@
 open Keeper_types
 
 let active_model_of_meta (m : keeper_meta) : string =
-  if m.usage.last_model_used <> "" then m.usage.last_model_used
+  if m.runtime.usage.last_model_used <> "" then m.runtime.usage.last_model_used
   else
     match Oas_model_resolve.models_of_cascade_name m.cascade_name with
     | model :: _ -> model
@@ -162,7 +162,7 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
 let keeper_error_hint ~agent_status ~meta =
   let agent_error = json_string_opt "error" agent_status in
   let proactive_reason =
-    let reason = String.trim meta.proactive.last_reason in
+    let reason = String.trim meta.runtime.proactive_rt.last_reason in
     if reason = "" then None else Some reason
   in
   let drift_reason = None in

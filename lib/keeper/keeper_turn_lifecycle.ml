@@ -65,8 +65,8 @@ let handle_keeper_down ctx args : tool_result =
               Sys.remove path
           end
         in
-        if validate_name m.trace_id then (
-          let dir = Filename.concat (session_base_dir ctx.config) m.trace_id in
+        if validate_name m.runtime.trace_id then (
+          let dir = Filename.concat (session_base_dir ctx.config) m.runtime.trace_id in
           try rm_rf dir with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             Log.Keeper.error "session dir cleanup failed: %s"
               (Printexc.to_string exn)));

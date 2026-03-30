@@ -122,7 +122,11 @@ let test_keeper_bridge_compose_read_only () =
 
 let test_keeper_bridge_compose_full_scope () =
   let meta =
-    make_keeper_meta ~scope_kind:"full" ~execution_scope:"unrestricted" ()
+    {
+      (make_keeper_meta ~scope_kind:"local" ~execution_scope:"unrestricted" ())
+      with
+      scope_kind = "full";
+    }
   in
   let rc = CB.of_keeper_meta meta in
   check string "full -> execute" "execute"

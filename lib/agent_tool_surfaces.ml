@@ -263,6 +263,88 @@ let local_worker_internal_schemas : Types.tool_schema list =
           ];
     };
     {
+      Types.name = "masc_repair_loop_start";
+      description =
+        "Start a detachable internal code repair loop and persist its initial state.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("plugin_id", `Assoc [ ("type", `String "string") ]);
+                  ("task_spec", `Assoc [ ("type", `String "string") ]);
+                  ("target_mode", `Assoc [ ("type", `String "string") ]);
+                  ("working_dir", `Assoc [ ("type", `String "string") ]);
+                  ("target_file", `Assoc [ ("type", `String "string") ]);
+                  ("source_text", `Assoc [ ("type", `String "string") ]);
+                  ("validator_profile", `Assoc [ ("type", `String "string") ]);
+                  ("model_label", `Assoc [ ("type", `String "string") ]);
+                  ("max_attempts", `Assoc [ ("type", `String "integer") ]);
+                  ("artifact_session_id", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ("required", `List [ `String "task_spec" ]);
+          ];
+    };
+    {
+      Types.name = "masc_repair_loop_status";
+      description = "Read the persisted state of an internal code repair loop.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc [ ("loop_id", `Assoc [ ("type", `String "string") ]) ] );
+            ("required", `List [ `String "loop_id" ]);
+          ];
+    };
+    {
+      Types.name = "masc_repair_loop_iterate";
+      description =
+        "Execute exactly one repair-loop attempt: validate provided code, generate, or repair.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc [ ("loop_id", `Assoc [ ("type", `String "string") ]) ] );
+            ("required", `List [ `String "loop_id" ]);
+          ];
+    };
+    {
+      Types.name = "masc_repair_loop_stop";
+      description = "Stop an internal code repair loop and persist terminal state.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc [ ("loop_id", `Assoc [ ("type", `String "string") ]) ] );
+            ("required", `List [ `String "loop_id" ]);
+          ];
+    };
+    {
+      Types.name = "masc_memento_mori";
+      description =
+        "Check context pressure and auto-handle prepare or handoff when thresholds are crossed.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("context_ratio", `Assoc [ ("type", `String "number") ]);
+                  ("full_context", `Assoc [ ("type", `String "string") ]);
+                  ("summary", `Assoc [ ("type", `String "string") ]);
+                  ("current_task", `Assoc [ ("type", `String "string") ]);
+                  ("target_agent", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ("required", `List [ `String "context_ratio" ]);
+          ];
+    };
+    {
       Types.name = "keeper_research";
       description = "Research a topic using the MODEL and share findings with the board.";
       input_schema =

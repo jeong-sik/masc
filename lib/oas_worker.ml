@@ -97,6 +97,7 @@ type config = {
   named_cascade : Oas.Api.named_cascade option;
   initial_messages : Oas.Types.message list;
   raw_trace : Oas.Raw_trace.t option;
+  enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
   working_context : Yojson.Safe.t option;
@@ -121,6 +122,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     named_cascade = None;
     initial_messages = [];
     raw_trace = None;
+    enable_thinking = None;
     transport = Masc_grpc_transport.from_env ();
     allowed_paths = [];
     working_context = None;
@@ -251,6 +253,10 @@ let build
   in
   let builder = match config.named_cascade with
     | Some nc -> Oas.Builder.with_named_cascade nc builder
+    | None -> builder
+  in
+  let builder = match config.enable_thinking with
+    | Some enabled -> Oas.Builder.with_enable_thinking enabled builder
     | None -> builder
   in
   let builder =
@@ -449,6 +455,7 @@ let config_for_label
     ?hooks
     ?context_reducer
     ?memory
+    ?enable_thinking
     ~(description : string option)
     () : config =
   let provider = resolve_provider_of_label model_label in
@@ -472,6 +479,7 @@ let config_for_label
     hooks;
     context_reducer;
     memory;
+    enable_thinking;
     description;
   }
 
@@ -587,6 +595,7 @@ let run_model_by_label
     ?hooks
     ?context_reducer
     ?memory
+    ?enable_thinking
     ?on_event
     ?transport
     ?priority
@@ -609,7 +618,7 @@ let run_model_by_label
         let config =
           config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
             ~tools ~max_turns ~max_tokens ~temperature ~max_idle_turns ?guardrails ?hooks
-            ?context_reducer ?memory
+            ?context_reducer ?memory ?enable_thinking
             ~description:(Some (Printf.sprintf "model_label:%s" model_label))
             ()
         in
@@ -666,6 +675,7 @@ let run_model_with_masc_tools
     ?guardrails
     ?hooks
     ?memory
+    ?enable_thinking
     ?raw_trace
     ?on_event
     ?transport
@@ -684,7 +694,7 @@ let run_model_with_masc_tools
       let config =
         config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
           ~tools:[] ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
-          ?memory
+          ?memory ?enable_thinking
           ~description:(Some (Printf.sprintf "model_label:%s" model_label))
           ()
       in

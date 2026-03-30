@@ -126,6 +126,7 @@ let () =
   register_module_tag ~schemas:Tool_agent_timeline.schemas ~tag:Mod_agent_timeline;
   register_module_tag ~schemas:Tool_keeper.schemas ~tag:Mod_keeper;
   register_module_tag ~schemas:Tool_mdal.schemas ~tag:Mod_mdal;
+  register_module_tag ~schemas:Tool_repair_loop.schemas ~tag:Mod_repair_loop;
   register_module_tag ~schemas:Tool_improve_loop.schemas ~tag:Mod_improve_loop;
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
   register_module_tag ~schemas:Tool_research.schemas ~tag:Mod_research;

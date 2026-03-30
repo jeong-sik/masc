@@ -166,7 +166,7 @@ let public_mcp_tools =
     "masc_heartbeat";
     (* Keeper interaction *)
     "masc_keeper_msg"; "masc_keeper_list"; "masc_keeper_status";
-    "masc_keeper_up"; "masc_keeper_down";
+    "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
     (* Board — async agent communication *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote";

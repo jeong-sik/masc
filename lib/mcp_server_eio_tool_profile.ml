@@ -271,6 +271,7 @@ let custom_tool_titles : (string * string) list = [
   (* Keeper *)
   ("masc_keeper_up", "Start Keeper");
   ("masc_keeper_msg", "Send Keeper Message");
+  ("masc_keeper_repair", "Keeper Repair");
   ("masc_keeper_status", "Keeper Status");
   ("masc_keeper_down", "Stop Keeper");
   ("masc_keeper_create_from_persona", "Create Keeper from Persona");

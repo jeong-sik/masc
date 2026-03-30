@@ -168,13 +168,12 @@ let summarize_old_messages ~(keep_recent : int)
       | Some summary -> summary :: acc
       | None -> acc
     in
-    let rec compact_old old chunk acc =
+    let rec compact_old (old : Agent_sdk.Types.message list) chunk acc =
       match old with
       | [] -> List.rev (flush_chunk chunk acc)
-      | (m : Agent_sdk.Types.message) :: tl ->
-        let content = m.content in
-        let has_tool_use = List.exists (function Agent_sdk.Types.ToolUse _ -> true | _ -> false) content in
-        let has_tool_result = List.exists (function Agent_sdk.Types.ToolResult _ -> true | _ -> false) content in
+      | m :: tl ->
+        let has_tool_use = List.exists (function Agent_sdk.Types.ToolUse _ -> true | _ -> false) m.content in
+        let has_tool_result = List.exists (function Agent_sdk.Types.ToolResult _ -> true | _ -> false) m.content in
         if has_tool_use then
           compact_old tl [] (m :: flush_chunk chunk acc)
         else if has_tool_result then

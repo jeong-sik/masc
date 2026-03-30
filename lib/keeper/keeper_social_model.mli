@@ -43,7 +43,6 @@ val derive_failure_state :
   social_state
 
 val apply_to_result :
-  config:Room.config ->
   meta:Keeper_types.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   Keeper_agent_run.run_result ->

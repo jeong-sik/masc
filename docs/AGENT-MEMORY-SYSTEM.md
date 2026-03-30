@@ -3,7 +3,7 @@
 **Status**: Design Phase
 **Author**: Vincent & Claude
 **Date**: 2026-02-03
-**Related**: `CELLULAR-AGENT.md`, `MITOSIS.md`, `SPAWN-PERSISTENCE-DESIGN.md`, `CONTENT-DECAY-RESEARCH.md`
+**Related**: `CELLULAR-AGENT.md`, `SPAWN-PERSISTENCE-DESIGN.md`, `CONTENT-DECAY-RESEARCH.md`
 
 ---
 
@@ -661,7 +661,6 @@ RETURN p1, p2, c1, c2 AS potential_contradiction
 | `memory_stream.ml` | Observation → Learning 변환 | `Observation` 타입에서 학습 추출 |
 | `spawn_eio.ml` | 메모리 주입 지점 | `spawn_with_memory` 추가 |
 | `handover.ml` | DNA에 학습 포함 | `key_decisions` → 학습 후보 |
-| `mitosis.ml` | 분열 시 학습 전달 | DNA 압축 시 학습 요약 포함 |
 | `keeper_heartbeat.ml` | Decay 공식 공유 | `post_freshness` 와 동일 모델 |
 
 ---

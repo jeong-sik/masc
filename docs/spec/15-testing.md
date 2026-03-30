@@ -120,7 +120,7 @@ Correctness gate가 아닌 orchestration/benchmark/behavior 실험. Runbook과 �
 | Verification (`test_verif*`) | 3 | `test_verifier_oas_bridge.ml` |
 | Team (`test_team_*`) | 2 | `test_team_session_oas_bridge.ml` |
 | Memory (`test_memory_*`) | 1 | `test_memory_oas_5tier.ml` |
-| 기타 | ~50+ | auth, encryption, spawn, mitosis, bounded, etc. |
+| 기타 | ~50+ | auth, encryption, spawn, bounded, etc. |
 
 ### 4.3 dune 테스트 그룹
 

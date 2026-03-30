@@ -82,8 +82,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                (Some info.reason);
              Keeper_registry.set_state ~base_path meta.name
                Keeper_registry.Crashed;
+             let ts = Time_compat.now () in
              Keeper_registry.record_crash ~base_path
-               meta.name (Time_compat.now ()) reason;
+               meta.name ts reason;
+             let rc = match Keeper_registry.get ~base_path meta.name with
+               | Some e -> e.restart_count | None -> 0 in
+             Keeper_crash_persistence.enqueue_record ~base_path
+               ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
              resolve_done (`Crashed reason);
              publish_lifecycle "crashed" meta.name reason
@@ -94,8 +99,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              Keeper_registry.set_failure_reason ~base_path meta.name (Some fr);
              Keeper_registry.set_state ~base_path meta.name
                Keeper_registry.Crashed;
+             let ts = Time_compat.now () in
              Keeper_registry.record_crash ~base_path
-               meta.name (Time_compat.now ()) reason;
+               meta.name ts reason;
+             let rc = match Keeper_registry.get ~base_path meta.name with
+               | Some e -> e.restart_count | None -> 0 in
+             Keeper_crash_persistence.enqueue_record ~base_path
+               ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
              resolve_done (`Crashed reason);
              publish_lifecycle "crashed" meta.name reason))
@@ -107,8 +117,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                 Keeper_registry.Fiber_unresolved in
             Keeper_registry.set_failure_reason ~base_path meta.name
               (Some Keeper_registry.Fiber_unresolved);
+            let ts = Time_compat.now () in
             Keeper_registry.record_crash ~base_path
-              meta.name (Time_compat.now ()) reason;
+              meta.name ts reason;
+            let rc = match Keeper_registry.get ~base_path meta.name with
+              | Some e -> e.restart_count | None -> 0 in
+            Keeper_crash_persistence.enqueue_record ~base_path
+              ~name:meta.name ~ts ~reason ~restart_count:rc;
             Keeper_registry.record_error ~base_path meta.name reason;
             Keeper_registry.set_state ~base_path meta.name
               Keeper_registry.Crashed;

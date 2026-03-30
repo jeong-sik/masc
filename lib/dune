@@ -490,6 +490,7 @@
    keeper_coordination
    keeper_execution
    keeper_keepalive
+   keeper_crash_persistence
    keeper_chat_store
    keeper_recurring
    keeper_registry

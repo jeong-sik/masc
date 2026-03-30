@@ -308,6 +308,8 @@ let debate_tests = [
 ]
 
 let consensus_persist_path = "/tmp/masc-test-consensus-persist"
+let consensus_storage_dir () =
+  Filename.concat (Filename.concat consensus_persist_path ".masc") "consensus"
 
 let consensus_persist_setup () =
   (try rm_rf consensus_persist_path with _ -> ());
@@ -364,6 +366,56 @@ let test_consensus_persist_closed () =
        check bool "has closed_at" (restored.Consensus.closed_at <> None) true);
     consensus_persist_teardown ()
 
+let test_consensus_persist_start_failure_is_atomic () =
+  consensus_persist_setup ();
+  let dir = consensus_storage_dir () in
+  mkdir_p dir;
+  Unix.chmod dir 0o555;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chmod dir 0o755;
+      consensus_persist_teardown ())
+    (fun () ->
+      match Consensus.start_voting
+              ~topic:"Persist fail start"
+              ~initiator:"alice"
+              ~quorum:2
+              ~threshold:0.5
+              ()
+      with
+      | Ok _ -> fail "start should fail when persistence is unavailable"
+      | Error (Consensus.Persistence_failed _) ->
+        check int "no in-memory sessions" (List.length (Consensus.list_all_sessions ())) 0
+      | Error _ -> fail "expected persistence failure")
+
+let test_consensus_persist_vote_failure_is_atomic () =
+  consensus_persist_setup ();
+  match Consensus.start_voting ~topic:"Persist fail vote" ~initiator:"alice" ~quorum:2 ~threshold:0.5 () with
+  | Error _ -> consensus_persist_teardown (); fail "start failed"
+  | Ok session ->
+    let sid = session.Consensus.id in
+    let dir = consensus_storage_dir () in
+    Unix.chmod dir 0o555;
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.chmod dir 0o755;
+        consensus_persist_teardown ())
+      (fun () ->
+        match Consensus.cast_vote ~session_id:sid ~agent:"bob" ~decision:Consensus.Approve ~reason:"looks good" () with
+        | Ok _ -> fail "vote should fail when persistence is unavailable"
+        | Error (Consensus.Persistence_failed _) ->
+          (match Consensus.get_session ~session_id:sid with
+           | None -> fail "session should remain available in memory"
+           | Some current ->
+             check int "vote count unchanged in memory" (List.length current.Consensus.votes) 0);
+          Consensus.clear_sessions ();
+          Consensus.init ~base_path:consensus_persist_path;
+          (match Consensus.get_session ~session_id:sid with
+           | None -> fail "session should reload from disk"
+           | Some restored ->
+             check int "vote count unchanged on disk" (List.length restored.Consensus.votes) 0)
+        | Error _ -> fail "expected persistence failure")
+
 let consensus_tests = [
   "start voting", `Quick, test_consensus_start;
   "cast vote", `Quick, test_consensus_vote;
@@ -373,6 +425,10 @@ let consensus_tests = [
   "deadlock result", `Quick, test_consensus_deadlock;
   "persistence roundtrip", `Quick, test_consensus_persist_roundtrip;
   "persistence closed session", `Quick, test_consensus_persist_closed;
+  "persistence start failure is atomic", `Quick,
+  test_consensus_persist_start_failure_is_atomic;
+  "persistence vote failure is atomic", `Quick,
+  test_consensus_persist_vote_failure_is_atomic;
 ]
 
 let router_tests = [

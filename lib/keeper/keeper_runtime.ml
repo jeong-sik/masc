@@ -139,6 +139,18 @@ let stop_supervisor_sweep base_path =
       Hashtbl.remove supervisor_sweeps base_path
     | None -> ())
 
+let update_supervisor_sweep_interval base_path interval_sec =
+  with_sweeps_ro (fun () ->
+    match Hashtbl.find_opt supervisor_sweeps base_path with
+    | Some pulse ->
+      let rhythm : Pulse.rhythm =
+        { base_s = interval_sec; min_s = interval_sec;
+          max_s = interval_sec; quiet = (0, 0) }
+      in
+      Pulse.set_rhythm pulse rhythm;
+      true
+    | None -> false)
+
 let start_supervisor_sweep ctx =
   let base_path = ctx.config.base_path in
   if supervisor_sweep_running base_path then ()
@@ -155,11 +167,12 @@ let start_supervisor_sweep ctx =
           Ok ()
       end)
     in
+    let sweep_sec = Runtime_params.get Governance_registry.keeper_supervisor_sweep_sec in
     let p = Pulse.create
       ~clock:ctx.clock
-      ~rhythm:{ Pulse.base_s = Env_config.KeeperSupervisor.sweep_interval_sec;
-                 min_s = Env_config.KeeperSupervisor.sweep_interval_sec;
-                 max_s = Env_config.KeeperSupervisor.sweep_interval_sec;
+      ~rhythm:{ Pulse.base_s = sweep_sec;
+                 min_s = sweep_sec;
+                 max_s = sweep_sec;
                  quiet = (0, 0) }
       ~lifecycle:Perpetual
       ~consumers:[consumer]
@@ -167,8 +180,7 @@ let start_supervisor_sweep ctx =
     with_sweeps_rw (fun () ->
       Hashtbl.replace supervisor_sweeps base_path p);
     Pulse.run ~sw:ctx.sw p;
-    Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)"
-      Env_config.KeeperSupervisor.sweep_interval_sec
+    Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)" sweep_sec
   end
 
 let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =

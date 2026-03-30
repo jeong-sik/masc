@@ -481,9 +481,6 @@ let test_oas_worker_capability_threading_contracts () =
   check bool "oas worker model-by-label accepts threaded net capability" true
     (file_contains_pattern "lib/oas_worker.mli"
        "?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->");
-  check bool "chain native threads runtime net into oas worker" true
-    (file_contains_pattern "lib/chain/chain_native_eio.ml"
-       "?net:runtime.mcp_state.Mcp_server.net");
   check bool "team session bridge threads switch into oas worker" true
     (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
        "?raw_trace ?contract ~sw")

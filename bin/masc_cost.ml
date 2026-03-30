@@ -214,7 +214,7 @@ let () =
   let specs = [
     ("--log", Arg.Unit (fun () -> action := Log), "Log a cost entry");
     ("--report", Arg.Unit (fun () -> action := Report), "Show cost report");
-    ("--agent", Arg.Set_string agent, "Agent name (claude, gemini, codex)");
+    ("--agent", Arg.Set_string agent, "Agent name");
     ("--task", Arg.Set_string task_id, "Task ID");
     ("--model", Arg.Set_string model, "Model name");
     ("--input-tokens", Arg.Set_int input_tokens, "Input tokens");

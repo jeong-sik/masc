@@ -120,7 +120,6 @@
    server_startup_takeover
    server_command_plane_http
    server_command_plane_http_support
-   server_command_plane_http_stream
    server_command_plane_http_mutations
    server_command_plane_http_help
    server_activity_http
@@ -174,44 +173,6 @@
    safe_parse
    prompt_defaults
    prompt_composer
-   chain_types
-   chain_trace_types
-   chain_category
-   chain_stats
-   chain_utils
-   chain_conversation
-   chain_iteration
-   chain_composer
-   chain_evaluator
-   chain_parser
-   chain_parser_helpers
-   chain_parser_parse
-   chain_parser_validate
-   chain_parser_serialize
-   chain_mermaid_parse
-   chain_mermaid_node_content
-   chain_mermaid_graph
-   chain_mermaid_parser
-   chain_compiler
-   chain_registry
-   chain_telemetry
-   chain_error
-   chain_log
-   chain_retry
-   chain_executor_retry
-   chain_adapter_eio
-   checkpoint_store
-   run_log_eio
-   chain_spawn_registry
-   chain_executor_helpers
-   chain_executor_leaf
-   chain_executor_complex
-   chain_executor_search
-   chain_executor_resilience
-   chain_executor_eio
-   chain_orchestrator_eio
-   chain_run_store
-   chain_native_eio
    oas_response
    thompson_sampling
    memory_pg
@@ -254,7 +215,6 @@
    operator_judgment
    notify
    orchestrator
-   otel_chain_subscriber
    otel_config
    otel_dispatch_hook
    otel_spans
@@ -361,10 +321,8 @@
    tool_command_plane
    tool_schema_dsl
    tool_command_plane_support
-   tool_command_plane_chain_common
-   tool_command_plane_chain_launch
-   tool_command_plane_chain_query
    tool_command_plane_mutations
+   tool_command_plane_operations
    tool_command_plane_dispatch
    tool_command_plane_schemas_01
    tool_command_plane_schemas_02
@@ -545,10 +503,6 @@
  dashboard_execution_fixture
  dashboard_execution_sessions
  dashboard_execution_builders
- chain_parser_helpers
- chain_parser_parse
- chain_parser_validate
- chain_parser_serialize
  briefing_json_helpers
  briefing_compactors
  briefing_gaps
@@ -586,15 +540,12 @@
  server_mcp_transport_http_respond
  server_mcp_transport_http_agui
  server_command_plane_http_support
- server_command_plane_http_stream
  server_command_plane_http_mutations
  server_command_plane_http_help
  tool_mdal_handlers
  tool_command_plane_support
- tool_command_plane_chain_common
- tool_command_plane_chain_launch
- tool_command_plane_chain_query
  tool_command_plane_mutations
+ tool_command_plane_operations
  tool_command_plane_dispatch
  tool_command_plane_schemas_01
  tool_command_plane_schemas_02
@@ -621,10 +572,6 @@
   team_session_engine_policy
   team_session_swarm_callbacks
   team_session_swarm_runner
-  ;; chain_mermaid_parser sub-modules
-  chain_mermaid_parse
-  chain_mermaid_node_content
-  chain_mermaid_graph
   ;; worker_container sub-modules
   worker_container_types
   worker_container
@@ -637,10 +584,6 @@
   team_session_report_core
   team_session_report_proof_helpers
   team_session_report_proof
-  ;; godsplit-phase1: chain_executor sub-modules
-  chain_executor_complex
-  chain_executor_search
-  chain_executor_resilience
   ;; godsplit-phase1: file split sub-modules
   tool_team_session_step_exec
   tool_council_feed

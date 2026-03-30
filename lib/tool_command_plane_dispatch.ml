@@ -1,7 +1,6 @@
 open Tool_command_plane_support
-open Tool_command_plane_chain_launch
-open Tool_command_plane_chain_query
 open Tool_command_plane_mutations
+open Tool_command_plane_operations
 
 let dispatch (ctx : (_, _) context) ~name ~args : result option =
   match name with
@@ -20,8 +19,6 @@ let dispatch (ctx : (_, _) context) ~name ~args : result option =
   | "masc_operation_resume" -> Some (handle_operation_resume ctx args)
   | "masc_operation_stop" -> Some (handle_operation_stop ctx args)
   | "masc_operation_finalize" -> Some (handle_operation_finalize ctx args)
-  | "masc_chain_snapshot" -> Some (handle_chain_snapshot ctx)
-  | "masc_chain_run_get" -> Some (handle_chain_run_get ctx args)
   | "masc_dispatch_plan" -> Some (handle_dispatch_plan ctx args)
   | "masc_dispatch_assign" -> Some (handle_dispatch_assign ctx args)
   | "masc_dispatch_rebalance" -> Some (handle_dispatch_rebalance ctx args)

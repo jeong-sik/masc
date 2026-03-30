@@ -715,36 +715,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let json = command_plane_orchestra_http_json ~state httpun_request in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
-      | `GET, "/api/v1/chains/summary" ->
-          let state = get_server_state () in
-          (match command_plane_chain_summary_http_json ~state httpun_request with
-           | Ok json ->
-               h2_respond_json h2_reqd (Yojson.Safe.to_string json)
-                 ~extra_headers:cors
-           | Error message ->
-               h2_respond_json h2_reqd
-                 (Yojson.Safe.to_string (command_plane_error_json message))
-                 ~status:(chain_http_error_status message) ~extra_headers:cors)
-
-      | `GET, "/api/v1/chains/events" ->
-          command_plane_chain_events_h2 ~request:httpun_request h2_reqd
-
-      | `GET, path when String.length path > String.length "/api/v1/chains/runs/"
-                        && String.sub path 0 (String.length "/api/v1/chains/runs/")
-                           = "/api/v1/chains/runs/" ->
-          let state = get_server_state () in
-          let prefix_len = String.length "/api/v1/chains/runs/" in
-          let run_id =
-            String.sub path prefix_len (String.length path - prefix_len)
-          in
-          (match command_plane_chain_run_http_json ~state httpun_request run_id with
-           | Ok json ->
-               h2_respond_json h2_reqd (Yojson.Safe.to_string json)
-                 ~extra_headers:cors
-           | Error message ->
-               h2_respond_json h2_reqd
-                 (Yojson.Safe.to_string (command_plane_error_json message))
-                 ~status:(chain_http_error_status message) ~extra_headers:cors)
       | `GET, "/api/v1/command-plane/policy" ->
           let state = get_server_state () in
           let json = command_plane_policy_status_http_json ~state in

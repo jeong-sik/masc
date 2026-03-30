@@ -93,8 +93,6 @@ let all_known_tool_names =
     "masc_case_brief_submit";
     "masc_case_status";
     "masc_cases";
-    "masc_chain_run_get";
-    "masc_chain_snapshot";
     "masc_check";
     "masc_circuit_status";
     "masc_claim_next";

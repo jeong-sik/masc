@@ -183,7 +183,7 @@ let test_default_config_reviewer () =
 let test_default_config_researcher () =
   let cfg = Hat.default_config Hat.Researcher in
   check string "name" "researcher" cfg.name;
-  check bool "has backend" true (cfg.backend <> None)
+  check bool "backend delegated to cascade" true (cfg.backend = None)
 
 let test_default_config_tester () =
   let cfg = Hat.default_config Hat.Tester in
@@ -400,14 +400,14 @@ let test_config_to_json_backend_null () =
      | _ -> fail "expected Null backend for Builder")
   | _ -> fail "expected Assoc"
 
-let test_config_to_json_backend_some () =
+let test_config_to_json_backend_researcher_null () =
   let cfg = Hat.default_config Hat.Researcher in
   let json = Hat.config_to_json cfg in
   match json with
   | `Assoc fields ->
     (match List.assoc_opt "backend" fields with
-     | Some (`String _) -> ()
-     | _ -> fail "expected String backend for Researcher")
+     | Some `Null -> ()
+     | _ -> fail "expected Null backend for Researcher")
   | _ -> fail "expected Assoc"
 
 (* ============================================================
@@ -571,7 +571,8 @@ let () =
       test_case "to_json has fields" `Quick test_to_json_has_fields;
       test_case "config_to_json has fields" `Quick test_config_to_json_has_fields;
       test_case "config backend null" `Quick test_config_to_json_backend_null;
-      test_case "config backend some" `Quick test_config_to_json_backend_some;
+      test_case "config backend researcher null" `Quick
+        test_config_to_json_backend_researcher_null;
     ];
     "hat_registry", [
       test_case "wear hat" `Quick test_wear_hat;

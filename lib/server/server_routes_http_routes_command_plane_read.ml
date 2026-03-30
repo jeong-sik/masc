@@ -1,5 +1,4 @@
 
-open Server_utils
 open Server_auth
 open Server_routes_http_common
 
@@ -102,38 +101,3 @@ let add_routes router =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
-  |> Http.Router.get "/api/v1/chains/summary" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         match command_plane_chain_summary_http_json ~state req with
-         | Ok json ->
-             Http.Response.json ~compress:true ~request:req
-               (Yojson.Safe.to_string json) reqd
-         | Error message ->
-             Http.Response.json ~status:(chain_http_error_status message) ~request:req
-               (Yojson.Safe.to_string (command_plane_error_json message))
-               reqd
-       ) request reqd)
-
-  |> Http.Router.get "/api/v1/chains/events" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         command_plane_chain_events_http ~request:req reqd
-       ) request reqd)
-
-  |> Http.Router.prefix_get "/api/v1/chains/runs/" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let req_path = Http.Request.path req in
-         (match extract_path_param ~prefix:"/api/v1/chains/runs/" req_path with
-          | None ->
-              Http.Response.json ~status:`Bad_request ~request:req
-                (Yojson.Safe.to_string (command_plane_error_json "run_id is required"))
-                reqd
-          | Some run_id ->
-              (match command_plane_chain_run_http_json ~state req run_id with
-               | Ok json ->
-                   Http.Response.json ~compress:true ~request:req
-                     (Yojson.Safe.to_string json) reqd
-               | Error message ->
-                   Http.Response.json ~status:(chain_http_error_status message) ~request:req
-                     (Yojson.Safe.to_string (command_plane_error_json message))
-                     reqd))
-       ) request reqd)

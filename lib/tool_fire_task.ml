@@ -108,7 +108,7 @@ let run_background_agent config ~agent_cli ~agent_name ~task_id ~goal
 let handle_fire_task ctx args =
   let ( let*! ) = ( let*! ) in
   let*! goal = get_string_required args "goal" in
-  let agent_cli = get_string args "agent" "claude" in
+  let agent_cli = get_string args "agent" (Provider_adapter.default_cli_agent_name ()) in
   let priority = get_int args "priority" 3 in
   let use_worktree = get_bool args "use_worktree" false in
 

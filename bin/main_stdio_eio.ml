@@ -30,7 +30,6 @@ let run_cmd base_path =
       ~mono_clock ~net ~proc_mgr ~fs
   in
   Server_runtime_bootstrap.bootstrap_server_state_blocking state;
-  Server_runtime_bootstrap.bootstrap_chain_state state;
   (* keeper bootstrap delegated to keeper_autoboot subsystem or
      Keeper_runtime.start_existing_keepalives if needed *)
   Server_bootstrap_pg.init_task_backend ();

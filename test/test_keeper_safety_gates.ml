@@ -175,9 +175,8 @@ let test_safe_empty () =
 (* Group 2: Mode-free tool grants (mode removal)                     *)
 (* ================================================================ *)
 
-(* Mode removal: all keepers get all tools unconditionally.
-   write_done remains the only exposure gate.
-   Safety is enforced through eval_gate deny lists. *)
+(* keeper_* tools are exposed by default.
+   masc_* tools remain allowlist-gated, even after mode removal. *)
 
 let test_write_done_kills_all () =
   let meta = make_meta
@@ -404,7 +403,7 @@ let () =
       test_case "all keepers get full toolset" `Quick test_all_keepers_get_full_toolset;
       test_case "voice enabled" `Quick test_voice_enabled;
       test_case "voice disabled" `Quick test_voice_disabled;
-      test_case "all keepers have research tools" `Quick test_all_keepers_have_research_tools;
+      test_case "allowlisted keepers have research tools" `Quick test_all_keepers_have_research_tools;
       test_case "heuristic mode" `Quick test_heuristic_mode_tools;
       test_case "voice plus other tools" `Quick test_voice_plus_other_tools;
       test_case "all keepers have shell and coding" `Quick test_all_keepers_have_shell_and_coding;

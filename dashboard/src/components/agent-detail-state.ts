@@ -144,7 +144,7 @@ export async function refreshAgentDetail(): Promise<void> {
     // Fetch room messages, task histories, timeline, and fitness in parallel
     const [lines, timelineResult, fitnessResult] = await Promise.all([
       fetchRoomMessages(80),
-      fetchAgentTimeline(agentName, 4, 20).catch(() => null),
+      fetchAgentTimeline(agentName, 24, 50).catch(() => null),
       callMcpTool('masc_agent_fitness', { agent_name: agentName, days: 7 })
         .then(raw => JSON.parse(raw) as AgentFitness)
         .catch(() => null),

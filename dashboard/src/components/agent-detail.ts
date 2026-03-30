@@ -11,6 +11,7 @@ import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { keeperIdentityHint } from './common/keeper-identity'
 import { AgentJournalStream } from './agent-detail-journal'
+import { AgentSessionReport } from './agent-detail-session-report'
 import { AgentTimelineSection } from './agent-detail-timeline'
 import { AgentWorkerBrief } from './agent-detail-worker'
 import {
@@ -186,6 +187,8 @@ export function AgentDetailOverlay() {
         </div>
 
         ${detailError.value ? html`<div class="p-4 mb-4 text-bad border border-bad/30 rounded-xl bg-bad/10 shadow-sm font-medium text-sm">${detailError.value}</div>` : null}
+
+        <${AgentSessionReport} agentName=${agentName} />
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
           <${Card} title="할당된 작업">

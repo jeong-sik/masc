@@ -3,7 +3,7 @@
     Runtime-specific settings: zombies, locks, sessions, tempo, decisions,
     cache, orchestrator, spawn, local runtime, federation,
     cancellation, neo4j, voice, custom model, network, timeouts,
-    inference defaults, control plane cleanup, message GC, chain. *)
+    inference defaults, control plane cleanup, message GC. *)
 
 module Zombie : sig
   val threshold_seconds : float
@@ -68,12 +68,16 @@ module Local_runtime : sig
   val server_url : string
   val default_model : string
   val max_tokens : int
+  val llama_swarm_model_opt : unit -> string option
+  val mcp_url : unit -> string
 end
 
 module Llama : sig
   val server_url : string
   val default_model : string
   val max_tokens : int
+  val llama_swarm_model_opt : unit -> string option
+  val mcp_url : unit -> string
 end
 
 module Cancellation : sig
@@ -116,26 +120,6 @@ end
 
 module Message : sig
   val max_count : int
-end
-
-module Chain : sig
-  val judge_model : string
-  val max_depth : int
-  val max_concurrency : int
-  val max_nodes : int
-  val max_fanout : int
-  val log_level_opt : unit -> string option
-  val log_format : unit -> string
-  val source_base_path_opt : unit -> string option
-  val orchestrator_model : unit -> string
-  val history_file_opt : unit -> string option
-  val run_store_path_opt : unit -> string option
-  val run_log_enabled : unit -> bool
-  val run_log_path_opt : unit -> string option
-  val checkpoint_dir_opt : unit -> string option
-  val mcp_url : unit -> string
-  val agent_name : string
-  val llama_swarm_model_opt : unit -> string option
 end
 
 module Transport : sig

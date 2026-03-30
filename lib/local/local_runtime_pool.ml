@@ -131,7 +131,7 @@ let model_of_discovery_status (status : Discovery_cache.endpoint_info) =
   | [] -> (
       match status.props with
       | Some props -> trim_opt (Some props.model)
-      | None -> trim_opt (Env_config.Chain.llama_swarm_model_opt ()))
+      | None -> trim_opt (Env_config.Local_runtime.llama_swarm_model_opt ()))
 
 let max_concurrency_of_discovery_status (status : Discovery_cache.endpoint_info) =
   match status.slots with
@@ -167,7 +167,7 @@ let runtime_of_endpoint_url base_url =
   {
     id = runtime_id_of_base_url base_url;
     base_url;
-    model = trim_opt (Env_config.Chain.llama_swarm_model_opt ());
+    model = trim_opt (Env_config.Local_runtime.llama_swarm_model_opt ());
     max_concurrency =
       int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
         ~default:default_parallel_hint;
@@ -256,7 +256,7 @@ let default_runtime () =
   {
     id = runtime_id_of_base_url base_url;
     base_url;
-    model = trim_opt (Env_config.Chain.llama_swarm_model_opt ());
+    model = trim_opt (Env_config.Local_runtime.llama_swarm_model_opt ());
     max_concurrency =
       int_of_env_default "LLAMA_SERVER_PARALLEL_HINT" ~default:default_parallel_hint;
     active_slots = 0;
@@ -274,7 +274,7 @@ let runtime_from_endpoint base_url =
   {
     id = runtime_id_of_base_url base_url;
     base_url;
-    model = trim_opt (Env_config.Chain.llama_swarm_model_opt ());
+    model = trim_opt (Env_config.Local_runtime.llama_swarm_model_opt ());
     max_concurrency =
       int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
         ~default:default_parallel_hint;
@@ -300,7 +300,7 @@ let current_fingerprint () =
     [
       String.concat "," (Llm_provider.Discovery.endpoints_from_env ());
       Env_config.Llama.server_url;
-      Option.value ~default:"" (Env_config.Chain.llama_swarm_model_opt ());
+      Option.value ~default:"" (Env_config.Local_runtime.llama_swarm_model_opt ());
       Option.value ~default:""
         (Env_config.Worker.llama_runtime_cooldown_sec_opt ());
       string_of_int

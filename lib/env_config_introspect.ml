@@ -109,13 +109,6 @@ let transport_entries = [
   entry ~default:"false" "MASC_OPENAI_COMPAT" "Enable OpenAI-compatible endpoint";
 ]
 
-let chain_entries = [
-  entry ~default:"gemini" "MASC_CHAIN_JUDGE_MODEL" "Chain evaluator/judge model";
-  entry ~default:"20" "MASC_CHAIN_MAX_DEPTH" "Chain max execution depth";
-  entry ~default:"10" "MASC_CHAIN_MAX_CONCURRENCY" "Chain max concurrent nodes";
-  entry ~default:"(derived)" "MASC_MCP_URL" "MCP endpoint URL for chain";
-]
-
 let inference_entries = [
   entry ~default:"30" "MASC_INFERENCE_TIMEOUT_SEC" "Inference call timeout (seconds)";
   entry ~default:"true" "MASC_INFERENCE_CACHE_ENABLED" "Enable inference result cache";
@@ -216,7 +209,6 @@ let all_categories () = [
   category "storage" storage_entries;
   category "runtime" runtime_entries;
   category "rate_limiting" rate_limiting_entries;
-  category "chain" chain_entries;
   category "inference" inference_entries;
   category "keeper" keeper_entries;
   category "keeper_execution" keeper_execution_entries;

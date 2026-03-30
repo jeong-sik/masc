@@ -21,6 +21,7 @@ import {
   selectedDecisionKey,
   submitBrief,
   submitPetition,
+  loadParamAudit,
 } from './governance-store'
 import {
   caseStatusLabel,
@@ -35,7 +36,7 @@ import {
 } from './governance-panels'
 
 // Re-export for consumers that import from './governance'
-export { refreshGovernance, loadRuntimeParams } from './governance-store'
+export { refreshGovernance, loadRuntimeParams, loadParamAudit } from './governance-store'
 
 function GovernanceSummaryStrip() {
   const data = governanceData.value
@@ -271,6 +272,7 @@ function JudgmentsSection() {
 export function Governance() {
   useEffect(() => {
     void refreshGovernance()
+    void loadParamAudit()
   }, [])
 
   return html`

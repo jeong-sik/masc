@@ -3,6 +3,7 @@ import {
   decideGovernanceExecutionOrder,
   fetchDashboardGovernance,
   fetchGovernanceCaseStatus,
+  fetchParamAudit,
   fetchRuntimeParams,
   submitGovernanceCaseBrief,
   submitGovernancePetition,
@@ -27,6 +28,8 @@ import {
   runtimeParams,
   runtimeSurfaces,
   runtimeLoading,
+  paramAuditEntries,
+  paramAuditLoading,
 } from './governance-signals'
 
 async function loadDecisionDetail(item: GovernanceDecisionItem | null) {
@@ -135,5 +138,17 @@ export async function loadRuntimeParams() {
     console.debug('[governance] runtime params load failed (optional)', err instanceof Error ? err.message : err)
   } finally {
     runtimeLoading.value = false
+  }
+}
+
+export async function loadParamAudit(limit = 50) {
+  paramAuditLoading.value = true
+  try {
+    const data = await fetchParamAudit(limit)
+    paramAuditEntries.value = data.entries ?? []
+  } catch (err) {
+    console.debug('[governance] param audit load failed (optional)', err instanceof Error ? err.message : err)
+  } finally {
+    paramAuditLoading.value = false
   }
 }

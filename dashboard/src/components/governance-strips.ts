@@ -15,7 +15,11 @@ import {
   runtimeParams,
   runtimeSurfaces,
   loadRuntimeParams,
+  paramAuditEntries,
+  paramAuditLoading,
+  loadParamAudit,
 } from './governance-store'
+import type { ParamAuditEntry } from '../api'
 import {
   activityKindLabel,
   formatParamValue,
@@ -215,4 +219,63 @@ export function RuntimeParamsPanel() {
           `}
     <//>
   `
+}
+
+export function ParamAuditTrail() {
+  const entries = paramAuditEntries.value
+  const loading = paramAuditLoading.value
+
+  if (entries.length === 0 && !loading) return null
+
+  return html`
+    <${Card} title="파라미터 변경 이력" class="section mb-4">
+      ${loading
+        ? html`<${LoadingState}>이력 로딩 중...<//>`
+        : html`
+            <div class="flex flex-col gap-1.5">
+              ${entries.slice(0, 20).map((entry: ParamAuditEntry) => html`
+                <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-white/3 border border-card-border">
+                  <div class="flex flex-col gap-0.5 flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs font-mono text-accent truncate">${entry.key}</span>
+                      <span class="text-[10px] text-text-dim"><${TimeAgo} timestamp=${entry.timestamp} /></span>
+                    </div>
+                    <div class="flex items-center gap-1 text-[11px]">
+                      <span class="text-text-muted">${formatAuditValue(entry.old_value)}</span>
+                      <span class="text-text-dim">${'\u2192'}</span>
+                      <span class="text-text-strong">${formatAuditValue(entry.new_value)}</span>
+                      <span class="text-text-dim ml-1">by ${entry.actor}</span>
+                    </div>
+                  </div>
+                  <button
+                    class="text-[10px] py-0.5 px-2 rounded bg-white/5 text-text-muted hover:bg-white/10 cursor-pointer border-none shrink-0 ml-2"
+                    onClick=${() => rollbackParam(entry)}
+                  >되돌리기</button>
+                </div>
+              `)}
+            </div>
+          `}
+    <//>
+  `
+}
+
+function formatAuditValue(value: unknown): string {
+  if (value === null || value === undefined) return 'null'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+async function rollbackParam(entry: ParamAuditEntry) {
+  try {
+    const res = await setRuntimeParam(entry.key, entry.old_value, 'rollback from audit trail')
+    if (res.ok) {
+      showToast('파라미터를 이전 값으로 되돌렸습니다', 'success')
+      void loadRuntimeParams()
+      void loadParamAudit()
+    } else {
+      showToast(res.message || '되돌리기 실패', 'error')
+    }
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : '되돌리기 실패', 'error')
+  }
 }

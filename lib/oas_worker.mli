@@ -83,6 +83,7 @@ val run_model_by_label :
   ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
+  ?enable_thinking:bool ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?priority:Llm_provider.Request_priority.t ->
@@ -125,6 +126,7 @@ val run_model_with_masc_tools :
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
+  ?enable_thinking:bool ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->

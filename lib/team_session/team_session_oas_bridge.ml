@@ -36,6 +36,10 @@ let supported_local_worker_tool_names =
     "masc_run_deliverable";
     "masc_run_get";
     "masc_run_list";
+    "masc_repair_loop_start";
+    "masc_repair_loop_status";
+    "masc_repair_loop_iterate";
+    "masc_repair_loop_stop";
   ]
 
 let supported_local_worker_tools () =
@@ -145,6 +149,13 @@ let dispatch_supported_tool ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.conf
     | "masc_run_deliverable" | "masc_run_get" | "masc_run_list" ->
         result_of_option ~tool_name:name
           (Tool_run.dispatch { Tool_run.config = config } ~name ~args)
+    | "masc_repair_loop_start" | "masc_repair_loop_status"
+    | "masc_repair_loop_iterate" | "masc_repair_loop_stop" ->
+        let repair_ctx : _ Tool_repair_loop_types.context =
+          { config; agent_name; sw = Some sw; clock = Some clock; proc_mgr = None }
+        in
+        result_of_option ~tool_name:name
+          (Tool_repair_loop.dispatch repair_ctx ~name ~args)
     | "masc_heartbeat" ->
         result_of_option ~tool_name:name
           (Tool_heartbeat.dispatch
@@ -167,6 +178,50 @@ let dispatch_supported_tool ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.conf
             msg )
   else
     dispatch_impl ()
+
+let parse_tool_json body =
+  try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
+
+let repair_loop_status_of_body body =
+  match parse_tool_json body with
+  | Some json -> Tool_repair_loop_types.status_of_json json
+  | None -> None
+
+let run_repair_loop_until_terminal_with
+    ~(dispatch_tool : name:string -> args:Yojson.Safe.t -> bool * string)
+    (start_args : Yojson.Safe.t) : bool * string =
+  let started_ok, started_body =
+    dispatch_tool ~name:"masc_repair_loop_start" ~args:start_args
+  in
+  match parse_tool_json started_body with
+  | None -> (started_ok, started_body)
+  | Some started_json -> (
+      match Yojson.Safe.Util.member "loop_id" started_json with
+      | `String loop_id ->
+          let rec loop last_ok last_body =
+            match repair_loop_status_of_body last_body with
+            | Some status when Tool_repair_loop_types.is_terminal_status status ->
+                (last_ok, last_body)
+            | Some _ ->
+                let iterate_ok, iterate_body =
+                  dispatch_tool ~name:"masc_repair_loop_iterate"
+                    ~args:(`Assoc [ ("loop_id", `String loop_id) ])
+                in
+                if not iterate_ok && Option.is_none (parse_tool_json iterate_body) then
+                  (iterate_ok, iterate_body)
+                else
+                  loop iterate_ok iterate_body
+            | None -> (last_ok, last_body)
+          in
+          loop started_ok started_body
+      | _ -> (started_ok, started_body))
+
+let run_repair_loop_until_terminal ~sw ~(clock : _ Eio.Time.clock)
+    ~(config : Room.config) args =
+  run_repair_loop_until_terminal_with
+    ~dispatch_tool:(fun ~name ~args ->
+      dispatch_supported_tool ~sw ~clock ~config ~name ~args)
+    args
 
 (* ── Role mapping ──────────────────────────────────────────────── *)
 

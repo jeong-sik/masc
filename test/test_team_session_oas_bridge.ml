@@ -313,7 +313,9 @@ let test_supported_local_worker_tools_present () =
   Alcotest.(check bool) "masc_code_read present" true
     (List.mem "masc_code_read" names);
   Alcotest.(check bool) "masc_run_init present" true
-    (List.mem "masc_run_init" names)
+    (List.mem "masc_run_init" names);
+  Alcotest.(check bool) "masc_repair_loop_start present" true
+    (List.mem "masc_repair_loop_start" names)
 
 let test_dispatch_supported_tool_status () =
   Eio_main.run @@ fun env ->
@@ -346,6 +348,58 @@ let test_dispatch_supported_tool_heartbeat_autojoin () =
   Alcotest.(check bool) "heartbeat dispatch succeeded" true ok;
   Alcotest.(check bool) "worker auto-joined" true
     (Room.is_agent_joined config ~agent_name:"worker-heartbeat")
+
+let test_run_repair_loop_until_terminal_with_fake_dispatch () =
+  let iterate_calls = ref 0 in
+  let dispatch_tool ~name ~args:_ =
+    match name with
+    | "masc_repair_loop_start" ->
+        ( true,
+          Yojson.Safe.to_string
+            (`Assoc
+              [
+                ("loop_id", `String "loop-1");
+                ("status", `String "running");
+                ("attempt_count", `Int 0);
+                ("max_attempts", `Int 2);
+              ]) )
+    | "masc_repair_loop_iterate" ->
+        incr iterate_calls;
+        if !iterate_calls = 1 then
+          ( false,
+            Yojson.Safe.to_string
+              (`Assoc
+                [
+                  ("loop_id", `String "loop-1");
+                  ("status", `String "repairable_failure");
+                  ("attempt_count", `Int 1);
+                  ("max_attempts", `Int 2);
+                ]) )
+        else
+          ( true,
+            Yojson.Safe.to_string
+              (`Assoc
+                [
+                  ("loop_id", `String "loop-1");
+                  ("status", `String "passed");
+                  ("attempt_count", `Int 2);
+                  ("max_attempts", `Int 2);
+                ]) )
+    | other -> Alcotest.failf "unexpected tool call: %s" other
+  in
+  let ok, body =
+    Team_session_oas_bridge.run_repair_loop_until_terminal_with ~dispatch_tool
+      (`Assoc
+        [
+          ("plugin_id", `String "ocaml");
+          ("task_spec", `String "Write only OCaml code for inc : int -> int.");
+        ])
+  in
+  Alcotest.(check bool) "terminal result ok" true ok;
+  Alcotest.(check int) "iterate called twice" 2 !iterate_calls;
+  let json = Yojson.Safe.from_string body in
+  Alcotest.(check string) "status passed" "passed"
+    Yojson.Safe.Util.(json |> member "status" |> to_string)
 
 (* ================================================================ *)
 (* Runner                                                           *)
@@ -396,5 +450,7 @@ let () =
         test_dispatch_supported_tool_status;
       Alcotest.test_case "heartbeat autojoin" `Quick
         test_dispatch_supported_tool_heartbeat_autojoin;
+      Alcotest.test_case "repair loop wrapper iterates until terminal" `Quick
+        test_run_repair_loop_until_terminal_with_fake_dispatch;
     ];
   ]

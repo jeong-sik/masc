@@ -9,10 +9,15 @@ let rec rm_rf path =
     end else
       Unix.unlink path
 
-let temp_dir () =
+let temp_dir ?parent () =
+  let root =
+    match parent with
+    | Some path -> path
+    | None -> Filename.get_temp_dir_name ()
+  in
   let rec pick attempt =
     let dir =
-      Filename.concat (Filename.get_temp_dir_name ())
+      Filename.concat root
         (Printf.sprintf "keeper-tool-test-%d-%d-%d" (Unix.getpid ())
            (int_of_float (Unix.gettimeofday () *. 1000.)) attempt)
     in
@@ -2017,6 +2022,61 @@ let test_keeper_up_recreates_cached_keeper_dir_after_base_reset () =
       check bool "keeper meta recreated" true
         (Sys.file_exists (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)))
 
+let test_keeper_repair_passes_with_provided_source_text () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let working_dir = temp_dir ~parent:(Sys.getcwd ()) () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-repair-demo";
+      rm_rf working_dir;
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        {
+          config;
+          agent_name = "tester";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+        }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, up_body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "keeper-repair-demo");
+              ("goal", `String "Repair OCaml snippets");
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      if not ok then fail up_body;
+      let ok, body =
+        dispatch "masc_keeper_repair"
+          (`Assoc
+            [
+              ("name", `String "keeper-repair-demo");
+              ("task_spec", `String "Write only OCaml code for inc : int -> int.");
+              ("source_text", `String "let inc n = n + 1\n");
+              ("max_attempts", `Int 1);
+              ("working_dir", `String working_dir);
+            ])
+      in
+      check bool "keeper repair ok" true ok;
+      let json = parse_json_exn body in
+      check string "keeper repair status passed" "passed"
+        Yojson.Safe.Util.(json |> member "status" |> to_string);
+      check string "keeper name annotated" "keeper-repair-demo"
+        Yojson.Safe.Util.(json |> member "keeper_name" |> to_string))
+
 let () =
   run "Tool_keeper" [
     ("read_file_tail_lines", [
@@ -2098,6 +2158,8 @@ let () =
            test_keeper_supervisor_recovers_missing_desired_keeper;
          test_case "legacy presence_keepalive false migrates to paused" `Quick
            test_legacy_presence_keepalive_false_migrates_to_paused;
+         test_case "keeper repair passes with provided source_text" `Quick
+           test_keeper_repair_passes_with_provided_source_text;
          test_case "keeper up recreates cached keeper dir after base reset (issue #3710)" `Quick
            test_keeper_up_recreates_cached_keeper_dir_after_base_reset;
          test_case "session dir mkdir_p creates full tree from scratch (issue #3019)" `Quick

@@ -1,9 +1,9 @@
 // Session trace filter — FilterChips wrapper for trace event kinds.
-// Uses pre-computed kindCounts signal (single-pass) instead of per-chip .filter().
+// Receives agentName as prop to avoid global activeTraceAgent dependency.
 
 import { html } from 'htm/preact'
 import { FilterChips } from '../common/filter-chips'
-import { kindCounts, activeTraceAgent, setTraceFilter, traceFilter } from './session-trace-state'
+import { getKindCounts, getTraceFilter, setTraceFilter, _traceSlots } from './session-trace-state'
 import type { TraceEventKind } from './session-trace-state'
 
 type FilterKey = TraceEventKind | 'all'
@@ -17,10 +17,12 @@ const CHIP_DEFS: Array<{ key: FilterKey; label: string }> = [
   { key: 'lifecycle',  label: '생명주기' },
 ]
 
-export function SessionTraceFilter() {
-  const counts = kindCounts.value
-  const currentFilter = traceFilter.value
-  const agent = activeTraceAgent.value
+export function SessionTraceFilter({ agentName }: { agentName: string }) {
+  // Read _traceSlots.value to subscribe to slot changes
+  void _traceSlots.value
+
+  const counts = getKindCounts(agentName)
+  const currentFilter = getTraceFilter(agentName)
 
   const chips = CHIP_DEFS
     .filter(c => c.key === 'all' || (counts[c.key] ?? 0) > 0)
@@ -30,7 +32,7 @@ export function SessionTraceFilter() {
     <${FilterChips}
       chips=${chips}
       value=${currentFilter}
-      onChange=${(key: FilterKey) => { if (agent) setTraceFilter(agent, key) }}
+      onChange=${(key: FilterKey) => { setTraceFilter(agentName, key) }}
       size="sm"
       tone="accent"
     />

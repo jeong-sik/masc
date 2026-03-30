@@ -2,8 +2,9 @@
 // Merges agent-timeline (broadcast/task) and keeper-trajectory (tool calls)
 // into a single chronological event stream.
 // State is keyed per agent to avoid cross-overlay collisions.
+// Each SessionTraceView instance passes its own agentName to derived helpers.
 
-import { signal, computed } from '@preact/signals'
+import { signal } from '@preact/signals'
 import { fetchAgentTimeline, fetchKeeperTrajectory } from '../../api/dashboard'
 import type { AgentTimelineEvent, TrajectoryEntry } from '../../api/dashboard'
 
@@ -45,14 +46,18 @@ interface TraceSlot {
   loading: boolean
   error: string | null
   filter: TraceEventKind | 'all'
+  /** Monotonic fetch token — used to discard stale in-flight responses. */
+  fetchToken: number
 }
 
 // ── Per-agent state map ────────────────────────────────
 
 const traceSlots = signal<Record<string, TraceSlot>>({})
 
+const EMPTY_SLOT: TraceSlot = { events: [], loading: false, error: null, filter: 'all', fetchToken: 0 }
+
 function getSlot(agent: string): TraceSlot {
-  return traceSlots.value[agent] ?? { events: [], loading: false, error: null, filter: 'all' }
+  return traceSlots.value[agent] ?? EMPTY_SLOT
 }
 
 function patchSlot(agent: string, patch: Partial<TraceSlot>): void {
@@ -60,41 +65,35 @@ function patchSlot(agent: string, patch: Partial<TraceSlot>): void {
   traceSlots.value = { ...traceSlots.value, [agent]: { ...prev, ...patch } }
 }
 
-// ── Active agent (the one currently viewed) ────────────
+// ── Per-agent derived helpers ──────────────────────────
+// Components pass their own agentName rather than relying on a global
+// "active" signal, so multiple overlays can coexist without corruption.
 
-export const activeTraceAgent = signal<string | null>(null)
+export function getTraceLoading(agent: string): boolean {
+  return getSlot(agent).loading
+}
 
-// ── Derived signals (read from active agent's slot) ────
+export function getTraceError(agent: string): string | null {
+  return getSlot(agent).error
+}
 
-export const traceLoading = computed(() => {
-  const agent = activeTraceAgent.value
-  return agent ? getSlot(agent).loading : false
-})
+export function getTraceEvents(agent: string): UnifiedTraceEvent[] {
+  return getSlot(agent).events
+}
 
-export const traceError = computed(() => {
-  const agent = activeTraceAgent.value
-  return agent ? getSlot(agent).error : null
-})
+export function getTraceFilter(agent: string): TraceEventKind | 'all' {
+  return getSlot(agent).filter
+}
 
-export const traceEvents = computed(() => {
-  const agent = activeTraceAgent.value
-  return agent ? getSlot(agent).events : []
-})
-
-export const traceFilter = computed(() => {
-  const agent = activeTraceAgent.value
-  return agent ? getSlot(agent).filter : 'all' as const
-})
-
-export const filteredEvents = computed(() => {
-  const filter = traceFilter.value
-  const events = traceEvents.value
+export function getFilteredEvents(agent: string): UnifiedTraceEvent[] {
+  const filter = getTraceFilter(agent)
+  const events = getTraceEvents(agent)
   if (filter === 'all') return events
   return events.filter(e => e.kind === filter)
-})
+}
 
-export const traceSummary = computed<TraceSummary>(() => {
-  const events = traceEvents.value
+export function getTraceSummary(agent: string): TraceSummary {
+  const events = getTraceEvents(agent)
   let tool_call_count = 0
   let broadcast_count = 0
   let task_completed_count = 0
@@ -125,24 +124,20 @@ export const traceSummary = computed<TraceSummary>(() => {
     }
   }
 
-  return {
-    tool_call_count,
-    broadcast_count,
-    task_completed_count,
-    task_claimed_count,
-    heartbeat_count,
-    lifecycle_count,
-    total_cost_usd,
-  }
-})
+  return { tool_call_count, broadcast_count, task_completed_count, task_claimed_count, heartbeat_count, lifecycle_count, total_cost_usd }
+}
 
-/** Pre-computed kind counts for filter chips (avoids repeated .filter() in render). */
-export const kindCounts = computed<Record<TraceEventKind | 'all', number>>(() => {
-  const events = traceEvents.value
+export function getKindCounts(agent: string): Record<TraceEventKind | 'all', number> {
+  const events = getTraceEvents(agent)
   const counts: Record<string, number> = { all: events.length, broadcast: 0, task: 0, tool_call: 0, heartbeat: 0, lifecycle: 0 }
   for (const e of events) counts[e.kind] = (counts[e.kind] ?? 0) + 1
   return counts as Record<TraceEventKind | 'all', number>
-})
+}
+
+// ── Trigger signal ─────────────────────────────────────
+// Components subscribe to this to know when traceSlots changed.
+// Reading traceSlots.value inside a component body tracks reactivity.
+export { traceSlots as _traceSlots }
 
 // ── Filter action ──────────────────────────────────────
 
@@ -152,8 +147,14 @@ export function setTraceFilter(agent: string, filter: TraceEventKind | 'all'): v
 
 // ── Converters ─────────────────────────────────────────
 
+function safeTimestamp(ts: string | undefined | null): number {
+  if (!ts) return Date.now()
+  const parsed = new Date(ts).getTime()
+  return Number.isNaN(parsed) ? Date.now() : parsed
+}
+
 function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTraceEvent {
-  const ts = new Date(evt.ts).getTime()
+  const ts = safeTimestamp(evt.ts)
   const detail = evt.detail ?? {}
 
   if (evt.type === 'broadcast') {
@@ -162,7 +163,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
       return {
         id: `tl-${ts}-hb-${index}`,
         ts,
-        ts_iso: evt.ts,
+        ts_iso: evt.ts ?? new Date(ts).toISOString(),
         kind: 'heartbeat',
         summary: content || 'heartbeat',
         detail,
@@ -171,7 +172,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
     return {
       id: `tl-${ts}-bc-${index}`,
       ts,
-      ts_iso: evt.ts,
+      ts_iso: evt.ts ?? new Date(ts).toISOString(),
       kind: 'broadcast',
       summary: content.slice(0, 120),
       detail,
@@ -183,7 +184,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
   return {
     id: `tl-${ts}-${evt.type}-${index}`,
     ts,
-    ts_iso: evt.ts,
+    ts_iso: evt.ts ?? new Date(ts).toISOString(),
     kind: 'task',
     summary: `${evt.type.replace('task_', '')} ${taskId} ${title}`.trim(),
     detail: { ...detail, type: evt.type },
@@ -191,7 +192,7 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
 }
 
 function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedTraceEvent {
-  const ts = typeof entry.ts === 'number' ? entry.ts : new Date(entry.ts_iso).getTime()
+  const ts = typeof entry.ts === 'number' ? entry.ts : safeTimestamp(entry.ts_iso)
   return {
     id: `tj-${ts}-${entry.tool_name}-T${entry.turn}R${entry.round}-${index}`,
     ts,
@@ -218,8 +219,10 @@ const TIMELINE_LIMIT = 200
 const TRAJECTORY_LIMIT = 100
 
 export async function loadSessionTrace(agentName: string, isKeeper: boolean): Promise<void> {
-  activeTraceAgent.value = agentName
-  patchSlot(agentName, { loading: true, error: null })
+  // Bump fetch token for this agent — any prior in-flight fetch becomes stale.
+  const prevSlot = getSlot(agentName)
+  const token = prevSlot.fetchToken + 1
+  patchSlot(agentName, { loading: true, error: null, fetchToken: token })
 
   try {
     const timelinePromise = fetchAgentTimeline(agentName, TIMELINE_HOURS, TIMELINE_LIMIT)
@@ -229,9 +232,12 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
 
     const [timeline, trajectory] = await Promise.all([timelinePromise, trajectoryPromise])
 
+    // Discard result if slot was closed or a newer fetch was started during await.
+    if (getSlot(agentName).fetchToken !== token) return
+
     const timelineTraces = (timeline.events ?? []).map(timelineEventToTrace)
     const trajectoryTraces = trajectory
-      ? trajectory.entries.map(trajectoryEntryToTrace)
+      ? (trajectory.entries ?? []).map(trajectoryEntryToTrace)
       : []
 
     // Merge, sort by timestamp ascending, deduplicate by id
@@ -245,9 +251,14 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
       return true
     })
 
+    // Final stale check before writing
+    if (getSlot(agentName).fetchToken !== token) return
+
     patchSlot(agentName, { events: deduped, loading: false })
   } catch (err) {
-    // Preserve existing events on refresh failure so the user doesn't lose what they were viewing
+    // Discard if stale
+    if (getSlot(agentName).fetchToken !== token) return
+    // Preserve existing events on refresh failure
     patchSlot(agentName, {
       loading: false,
       error: err instanceof Error ? err.message : 'fetch failed',
@@ -259,7 +270,4 @@ export function closeSessionTrace(agentName: string): void {
   const next = { ...traceSlots.value }
   delete next[agentName]
   traceSlots.value = next
-  if (activeTraceAgent.value === agentName) {
-    activeTraceAgent.value = null
-  }
 }

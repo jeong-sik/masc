@@ -36,10 +36,28 @@ let event_summary json =
       string_field "event_type" json
       |> Option.value ~default:"event"
 
+let event_tool_call_traces json =
+  let detail = detail_of_event json in
+  match Yojson.Safe.Util.member "tool_call_traces" detail with
+  | `List items -> items
+  | _ -> []
+
+let event_provider_label json =
+  let detail = detail_of_event json in
+  string_field "provider_label" detail
+
+let event_trace_ref json =
+  let detail = detail_of_event json in
+  match Yojson.Safe.Util.member "trace_ref" detail with
+  | `Assoc _ as trace_ref -> Some trace_ref
+  | _ -> None
+
 let event_input_preview json =
   let detail = detail_of_event json in
   let candidates =
     [
+      string_field "tool_input_preview" detail;
+      string_field "tool_args_preview" detail;
       string_field "task_description" detail;
       string_field "goal" detail;
       string_field "vote_topic" detail;
@@ -49,12 +67,16 @@ let event_input_preview json =
   in
   match List.find_opt Option.is_some candidates with
   | Some (Some value) -> Some (truncate_preview value)
-  | _ -> None
+  | _ -> (
+      match event_tool_call_traces json with
+      | (`Assoc _ as trace) :: _ -> string_field "tool_input_preview" trace
+      | _ -> None)
 
 let event_output_preview json =
   let detail = detail_of_event json in
   let candidates =
     [
+      string_field "tool_output_preview" detail;
       string_field "message" detail;
       string_field "summary" detail;
       string_field "content" detail;
@@ -63,7 +85,10 @@ let event_output_preview json =
   in
   match List.find_opt Option.is_some candidates with
   | Some (Some value) -> Some (truncate_preview value)
-  | _ -> None
+  | _ -> (
+      match List.rev (event_tool_call_traces json) with
+      | (`Assoc _ as trace) :: _ -> string_field "tool_output_preview" trace
+      | _ -> None)
 
 let event_tool_names json =
   let detail = detail_of_event json in

@@ -131,6 +131,8 @@ let append_spawn_event (env : _ step_env) ?worker_run_id ?spawn_agent ?runtime_a
     ?supervisor_actor ?model_tier ?task_profile ?risk_level
     ?routing_confidence ?routing_reason ?assigned_runtime
     ?spawn_selection_note ?tool_names ?tool_call_count ~success
+    ?tool_call_traces ?tool_input_preview ?tool_args_preview ?tool_output_preview
+    ?provider_label ?thinking_enabled
     ?exit_code
     ?elapsed_ms ?output_preview ?error () =
   let _ = spawn_agent and _ = spawn_model and _ = model_tier in
@@ -236,6 +238,25 @@ let append_spawn_event (env : _ step_env) ?worker_run_id ?spawn_agent ?runtime_a
         ( "tool_call_count",
           Option.fold ~none:`Null ~some:(fun n -> `Int n)
             tool_call_count );
+        ( "tool_call_traces",
+          Option.fold ~none:(`List [])
+            ~some:(fun items -> `List items)
+            tool_call_traces );
+        ( "tool_input_preview",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            tool_input_preview );
+        ( "tool_args_preview",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            tool_args_preview );
+        ( "tool_output_preview",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            tool_output_preview );
+        ( "provider_label",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            provider_label );
+        ( "thinking_enabled",
+          Option.fold ~none:`Null ~some:(fun value -> `Bool value)
+            thinking_enabled );
         ("success", `Bool success);
         ("exit_code", env.deps.int_opt_to_json exit_code);
         ("elapsed_ms", env.deps.int_opt_to_json elapsed_ms);
@@ -252,7 +273,9 @@ let append_spawn_event (env : _ step_env) ?worker_run_id ?spawn_agent ?runtime_a
 let append_delegate_event (env : _ step_env) ~worker_run_id ~worker_name ~delegate_prompt ~success
     ?execution_scope ?wait_mode ?trace_capability
     ?resolved_runtime ?resolved_model ?routing_reason
-    ?tool_names ?tool_call_count ?output_preview ?error () =
+    ?tool_names ?tool_call_count ?tool_call_traces
+    ?tool_input_preview ?tool_args_preview ?tool_output_preview
+    ?provider_label ?thinking_enabled ?output_preview ?error () =
   Team_session_store.append_event env.ctx.config env.session_id
     ~event_type:"team_step_delegate"
     ~detail:
@@ -278,6 +301,25 @@ let append_delegate_event (env : _ step_env) ~worker_run_id ~worker_name ~delega
           ( "tool_call_count",
             Option.fold ~none:`Null ~some:(fun n -> `Int n)
               tool_call_count );
+          ( "tool_call_traces",
+            Option.fold ~none:(`List [])
+              ~some:(fun items -> `List items)
+              tool_call_traces );
+          ( "tool_input_preview",
+            Option.fold ~none:`Null ~some:(fun s -> `String s)
+              tool_input_preview );
+          ( "tool_args_preview",
+            Option.fold ~none:`Null ~some:(fun s -> `String s)
+              tool_args_preview );
+          ( "tool_output_preview",
+            Option.fold ~none:`Null ~some:(fun s -> `String s)
+              tool_output_preview );
+          ( "provider_label",
+            Option.fold ~none:`Null ~some:(fun s -> `String s)
+              provider_label );
+          ( "thinking_enabled",
+            Option.fold ~none:`Null ~some:(fun value -> `Bool value)
+              thinking_enabled );
           ( "output_preview",
             Option.fold ~none:`Null ~some:(fun s -> `String s)
               output_preview );
@@ -330,6 +372,7 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
     ~status
     ~success ?output_preview ?error ?trace_capability ?trace_ref
     ?trace_summary ?trace_validation ?evidence_session_id
+    ?provider_label ?thinking_enabled
     () =
   let checkpoint_path =
     Team_session_store.worker_container_checkpoint_path env.ctx.config
@@ -387,6 +430,24 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
     | Some worker when worker.tool_names <> [] -> worker.tool_names
     | _ -> Option.value ~default:[] tool_names
   in
+  let effective_provider_label =
+    match oas_worker with
+    | Some worker -> (
+        match worker.resolved_provider with
+        | Some _ as value -> value
+        | None ->
+            (match provider_label with
+            | Some _ as value -> value
+            | None ->
+                Option.bind resolved_model
+                  Oas_model_resolve.provider_name_of_label))
+    | None ->
+        (match provider_label with
+        | Some _ as value -> value
+        | None ->
+            Option.bind resolved_model
+              Oas_model_resolve.provider_name_of_label)
+  in
   let effective_resolved_model =
     match oas_worker with
     | Some worker -> (
@@ -415,6 +476,22 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
         | _ -> output_preview)
     | None -> output_preview
   in
+  let tool_call_traces =
+    Option.bind oas_evidence (fun payload ->
+        if payload.tool_call_traces_json = [] then None
+        else Some payload.tool_call_traces_json)
+  in
+  let effective_tool_input_preview =
+    Option.bind oas_evidence (fun payload -> payload.tool_input_preview)
+  in
+  let effective_tool_args_preview =
+    Option.bind oas_evidence (fun payload -> payload.tool_args_preview)
+  in
+  let effective_tool_output_preview =
+    match Option.bind oas_evidence (fun payload -> payload.tool_output_preview) with
+    | Some _ as value -> value
+    | None -> effective_output_preview
+  in
   if Room_utils.path_exists env.ctx.config checkpoint_path then
     Team_session_store.save_worker_run_checkpoint_text env.ctx.config
       env.session_id worker_run_id
@@ -434,10 +511,16 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
         ("requested_worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) requested_worker_class);
         ("requested_worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) requested_worker_size);
         ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
+        ("provider_label", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_provider_label);
         ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_resolved_model);
+        ("thinking_enabled", Option.fold ~none:`Null ~some:(fun value -> `Bool value) thinking_enabled);
         ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
         ("tool_names", `List (List.map (fun name -> `String name) effective_tool_names));
         ("tool_call_count", Option.fold ~none:`Null ~some:(fun n -> `Int n) tool_call_count);
+        ("tool_call_traces", Option.fold ~none:(`List []) ~some:(fun items -> `List items) tool_call_traces);
+        ("tool_input_preview", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_tool_input_preview);
+        ("tool_args_preview", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_tool_args_preview);
+        ("tool_output_preview", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_tool_output_preview);
         ("output_preview", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_output_preview);
         ("error", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_error);
         ("trace_ref", Option.fold ~none:`Null ~some:env.deps.raw_trace_run_ref_to_json effective_trace_ref);

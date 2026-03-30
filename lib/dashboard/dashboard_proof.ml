@@ -226,6 +226,20 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
                     ("event_type", match string_field "event_type" json with Some value -> `String value | None -> `Null);
                     ("tool_names", `List (List.map (fun value -> `String value) (Dashboard_proof_events.event_tool_names json)));
                     ("summary", `String (Dashboard_proof_events.event_summary json));
+                    ( "input_preview",
+                      Option.fold ~none:`Null ~some:(fun value -> `String value)
+                        (Dashboard_proof_events.event_input_preview json) );
+                    ( "output_preview",
+                      Option.fold ~none:`Null ~some:(fun value -> `String value)
+                        (Dashboard_proof_events.event_output_preview json) );
+                    ( "provider_label",
+                      Option.fold ~none:`Null ~some:(fun value -> `String value)
+                        (Dashboard_proof_events.event_provider_label json) );
+                    ( "trace_ref",
+                      Option.fold ~none:`Null ~some:(fun value -> value)
+                        (Dashboard_proof_events.event_trace_ref json) );
+                    ( "tool_call_traces",
+                      `List (Dashboard_proof_events.event_tool_call_traces json) );
                     ("timestamp", match string_field "ts_iso" json with Some value -> `String value | None -> `Null);
                   ])
                :: acc)

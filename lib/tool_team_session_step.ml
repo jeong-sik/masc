@@ -118,6 +118,14 @@ let execute_delegate_pipeline
                     let output_preview =
                       deps.truncate_for_event run_result.output
                     in
+                    let planned_worker =
+                      List.find_opt
+                        (fun w ->
+                          match w.Team_session_types.runtime_actor with
+                          | Some actor -> String.equal actor worker_name
+                          | None -> false)
+                        session.planned_workers
+                    in
                     let trace_summary_json, trace_validation_json =
                       match run_result.raw_trace_run with
                       | Some run_ref -> (
@@ -138,6 +146,12 @@ let execute_delegate_pipeline
                       ~status:`Completed
                       ~resolved_model:run_result.model_used
                       ~resolved_runtime:"local"
+                      ?provider_label:
+                        (Option.bind planned_worker (fun w ->
+                             Option.bind w.spawn_model
+                               Oas_model_resolve.provider_name_of_label))
+                      ?thinking_enabled:
+                        (Option.bind planned_worker (fun w -> w.thinking_enabled))
                       ~tool_names:run_result.tool_names
                       ~tool_call_count:
                         run_result.tool_call_count
@@ -163,22 +177,54 @@ let execute_delegate_pipeline
                          else "summary_only")
                       ~resolved_runtime:"local"
                       ~resolved_model:run_result.model_used
+                      ?provider_label:
+                        (Option.bind planned_worker (fun w ->
+                             Option.bind w.spawn_model
+                               Oas_model_resolve.provider_name_of_label))
+                      ?thinking_enabled:
+                        (Option.bind planned_worker (fun w -> w.thinking_enabled))
                       ~success:true
                       ~tool_names:run_result.tool_names
                       ~tool_call_count:
                         run_result.tool_call_count
+                      ?tool_call_traces:
+                        (Option.bind
+                           (deps.oas_worker_evidence_payload
+                              ~config:ctx.config
+                              ~evidence_session_id:
+                                (Worker_runtime.oas_worker_evidence_session_id
+                                   ~worker_run_id))
+                           (fun payload ->
+                             if payload.tool_call_traces_json = [] then None
+                             else Some payload.tool_call_traces_json))
+                      ?tool_input_preview:
+                        (Option.bind
+                           (deps.oas_worker_evidence_payload
+                              ~config:ctx.config
+                              ~evidence_session_id:
+                                (Worker_runtime.oas_worker_evidence_session_id
+                                   ~worker_run_id))
+                           (fun payload -> payload.tool_input_preview))
+                      ?tool_args_preview:
+                        (Option.bind
+                           (deps.oas_worker_evidence_payload
+                              ~config:ctx.config
+                              ~evidence_session_id:
+                                (Worker_runtime.oas_worker_evidence_session_id
+                                   ~worker_run_id))
+                           (fun payload -> payload.tool_args_preview))
+                      ?tool_output_preview:
+                        (Option.bind
+                           (deps.oas_worker_evidence_payload
+                              ~config:ctx.config
+                              ~evidence_session_id:
+                                (Worker_runtime.oas_worker_evidence_session_id
+                                   ~worker_run_id))
+                           (fun payload -> payload.tool_output_preview))
                       ~routing_reason:
                         (Option.value ~default:"continued_worker"
-                           (List.find_map
-                              (fun w ->
-                                match
-                                  w.Team_session_types.runtime_actor
-                                with
-                                | Some actor
-                                  when String.equal actor worker_name ->
-                                      w.routing_reason
-                                | _ -> None)
-                              session.planned_workers))
+                           (Option.bind planned_worker
+                              (fun w -> w.routing_reason)))
                       ~output_preview ();
                     `Assoc
                       [
@@ -189,7 +235,15 @@ let execute_delegate_pipeline
                         ("status", `String "completed");
                         ("trace_capability", `String (if Option.is_some run_result.raw_trace_run then "raw" else "summary_only"));
                         ("resolved_runtime", `String "local");
+                        ( "provider_label",
+                          Option.fold ~none:`Null ~some:(fun s -> `String s)
+                            (Option.bind planned_worker (fun w ->
+                                 Option.bind w.spawn_model
+                                   Oas_model_resolve.provider_name_of_label)) );
                         ("resolved_model", `String run_result.model_used);
+                        ( "thinking_enabled",
+                          Option.fold ~none:`Null ~some:(fun value -> `Bool value)
+                            (Option.bind planned_worker (fun w -> w.thinking_enabled)) );
                         ( "output",
                           `String run_result.output );
                         ( "output_preview",
@@ -201,6 +255,45 @@ let execute_delegate_pipeline
                             (List.map
                                (fun name -> `String name)
                                run_result.tool_names) );
+                        ( "tool_call_traces",
+                          Option.fold ~none:(`List [])
+                            ~some:(fun items -> `List items)
+                            (Option.bind
+                               (deps.oas_worker_evidence_payload
+                                  ~config:ctx.config
+                                  ~evidence_session_id:
+                                    (Worker_runtime.oas_worker_evidence_session_id
+                                       ~worker_run_id))
+                               (fun payload ->
+                                 if payload.tool_call_traces_json = [] then None
+                                 else Some payload.tool_call_traces_json)) );
+                        ( "tool_input_preview",
+                          Option.fold ~none:`Null ~some:(fun s -> `String s)
+                            (Option.bind
+                               (deps.oas_worker_evidence_payload
+                                  ~config:ctx.config
+                                  ~evidence_session_id:
+                                    (Worker_runtime.oas_worker_evidence_session_id
+                                       ~worker_run_id))
+                               (fun payload -> payload.tool_input_preview)) );
+                        ( "tool_args_preview",
+                          Option.fold ~none:`Null ~some:(fun s -> `String s)
+                            (Option.bind
+                               (deps.oas_worker_evidence_payload
+                                  ~config:ctx.config
+                                  ~evidence_session_id:
+                                    (Worker_runtime.oas_worker_evidence_session_id
+                                       ~worker_run_id))
+                               (fun payload -> payload.tool_args_preview)) );
+                        ( "tool_output_preview",
+                          Option.fold ~none:`Null ~some:(fun s -> `String s)
+                            (Option.bind
+                               (deps.oas_worker_evidence_payload
+                                  ~config:ctx.config
+                                  ~evidence_session_id:
+                                    (Worker_runtime.oas_worker_evidence_session_id
+                                       ~worker_run_id))
+                               (fun payload -> payload.tool_output_preview)) );
                         ( "input_tokens",
                           deps.int_opt_to_json run_result.input_tokens );
                         ( "output_tokens",
@@ -212,11 +305,25 @@ let execute_delegate_pipeline
                             delivery_verdict_json );
                       ]
                 | Error err ->
+                    let planned_worker =
+                      List.find_opt
+                        (fun w ->
+                          match w.Team_session_types.runtime_actor with
+                          | Some actor -> String.equal actor worker_name
+                          | None -> false)
+                        session.planned_workers
+                    in
                     persist_worker_run_snapshot
                       ~worker_run_id ~worker_name
                       ~mode:"delegate" ~wait_mode
                       ~status:`Failed
                       ~resolved_runtime:"local"
+                      ?provider_label:
+                        (Option.bind planned_worker (fun w ->
+                             Option.bind w.spawn_model
+                               Oas_model_resolve.provider_name_of_label))
+                      ?thinking_enabled:
+                        (Option.bind planned_worker (fun w -> w.thinking_enabled))
                       ~success:false ~error:err
                       ~evidence_session_id:
                         (Worker_runtime
@@ -229,6 +336,12 @@ let execute_delegate_pipeline
                       ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
                       ~trace_capability:"summary_only"
                       ~resolved_runtime:"local"
+                      ?provider_label:
+                        (Option.bind planned_worker (fun w ->
+                             Option.bind w.spawn_model
+                               Oas_model_resolve.provider_name_of_label))
+                      ?thinking_enabled:
+                        (Option.bind planned_worker (fun w -> w.thinking_enabled))
                       ~success:false ~error:err ();
                     `Assoc [ ("error", `String err) ]
               in

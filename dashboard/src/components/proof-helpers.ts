@@ -178,8 +178,10 @@ export function workerRunEvidenceLabel(item: DashboardProofWorkerRunEvidence): s
 export function workerRunEvidenceMeta(item: DashboardProofWorkerRunEvidence): string {
   const parts = [
     item.resolved_runtime ?? null,
+    item.provider_label ?? null,
     item.resolved_model ?? null,
     item.mode ?? null,
+    typeof item.thinking_enabled === 'boolean' ? (item.thinking_enabled ? 'thinking on' : 'thinking off') : null,
     typeof item.tool_call_count === 'number' ? `도구 ${item.tool_call_count}` : null,
     typeof item.record_count === 'number' ? `레코드 ${item.record_count}` : null,
   ].filter((value): value is string => Boolean(value))
@@ -188,6 +190,7 @@ export function workerRunEvidenceMeta(item: DashboardProofWorkerRunEvidence): st
 
 export function workerRunEvidencePreview(item: DashboardProofWorkerRunEvidence): string | null {
   return item.final_text
+    ?? item.tool_output_preview
     ?? item.output_preview
     ?? item.error
     ?? item.failure_reason

@@ -314,6 +314,11 @@ export interface DashboardProofToolEvidence {
   event_type?: string | null
   tool_names?: string[]
   summary?: string | null
+  input_preview?: string | null
+  output_preview?: string | null
+  provider_label?: string | null
+  trace_ref?: Record<string, unknown> | null
+  tool_call_traces?: Record<string, unknown>[]
   timestamp?: string | null
 }
 
@@ -331,11 +336,18 @@ export interface DashboardProofWorkerRunEvidence {
   requested_worker_class?: string | null
   requested_worker_size?: string | null
   resolved_runtime?: string | null
+  provider_label?: string | null
   resolved_model?: string | null
+  thinking_enabled?: boolean | null
   routing_reason?: string | null
   tool_names?: string[]
   tool_call_count?: number | null
+  tool_call_traces?: Record<string, unknown>[]
+  tool_input_preview?: string | null
+  tool_args_preview?: string | null
+  tool_output_preview?: string | null
   output_preview?: string | null
+  trace_ref?: Record<string, unknown> | null
   record_count?: number | null
   assistant_block_count?: number | null
   final_text?: string | null

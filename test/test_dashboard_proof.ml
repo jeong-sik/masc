@@ -229,10 +229,27 @@ let seed_worker_run_meta config session_id =
         ("requested_worker_class", `String "executor");
         ("requested_worker_size", `String "lg");
         ("resolved_runtime", `String "llama-8085");
+        ("provider_label", `String "llama");
         ("resolved_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
+        ("thinking_enabled", `Bool false);
         ("routing_reason", `String "explicit_task_profile");
         ("tool_names", `List [ `String "file_write"; `String "shell_exec" ]);
         ("tool_call_count", `Int 2);
+        ( "tool_call_traces",
+          `List
+            [
+              `Assoc
+                [
+                  ("tool_name", `String "file_write");
+                  ("tool_input_preview", `String "{\"path\":\"calc.py\"}");
+                  ("tool_args_preview", `String "{\"path\":\"calc.py\"}");
+                  ("tool_output_preview", `String "write ok");
+                  ("is_error", `Bool false);
+                ];
+            ] );
+        ("tool_input_preview", `String "{\"path\":\"calc.py\"}");
+        ("tool_args_preview", `String "{\"path\":\"calc.py\"}");
+        ("tool_output_preview", `String "write ok");
         ("output_preview", `String "Patched calc.py and verification passed.");
         ("validated", `Bool true);
         ( "proof_path",
@@ -351,12 +368,22 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
         (worker |> U.member "trace_validated" |> U.to_bool);
       check string "worker resolved runtime" "llama-8085"
         (worker |> U.member "resolved_runtime" |> U.to_string);
+      check string "worker provider label" "llama"
+        (worker |> U.member "provider_label" |> U.to_string);
       check string "worker resolved model" "qwen3.5-35b-a3b-ud-q8-xl"
         (worker |> U.member "resolved_model" |> U.to_string);
+      check bool "worker thinking enabled false" false
+        (worker |> U.member "thinking_enabled" |> U.to_bool);
       check string "worker result_status" "completed"
         (worker |> U.member "result_status" |> U.to_string);
       check string "worker final text" "Patched calc.py and verification passed."
-        (worker |> U.member "final_text" |> U.to_string))
+        (worker |> U.member "final_text" |> U.to_string);
+      check string "worker tool input preview" "{\"path\":\"calc.py\"}"
+        (worker |> U.member "tool_input_preview" |> U.to_string);
+      check string "worker tool output preview" "write ok"
+        (worker |> U.member "tool_output_preview" |> U.to_string);
+      check int "worker tool traces count" 1
+        (worker |> U.member "tool_call_traces" |> U.to_list |> List.length))
 
 let test_timeline_json_orders_command_plane_events_by_timestamp () =
   let dir = test_dir () in

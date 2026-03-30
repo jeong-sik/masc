@@ -56,6 +56,10 @@ type oas_worker_evidence = {
   worker_json : Yojson.Safe.t option;
   conformance_json : Yojson.Safe.t option;
   worker : Oas.Sessions.worker_run option;
+  tool_call_traces_json : Yojson.Safe.t list;
+  tool_input_preview : string option;
+  tool_args_preview : string option;
+  tool_output_preview : string option;
 }
 
 type 'a context = {
@@ -144,4 +148,3 @@ type step_deps = {
     Oas.Raw_trace.run_ref ->
     (Yojson.Safe.t * Yojson.Safe.t) option;
 }
-

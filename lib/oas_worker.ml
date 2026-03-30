@@ -285,6 +285,7 @@ let run
     ~(config : config)
     ?(on_event : (Oas.Types.sse_event -> unit) option)
     ?(agent_ref : Oas.Agent.t option ref option)
+    ?(proof_ref : Oas.Cdal_proof.t option ref option)
     ?(contract : Oas.Risk_contract.t option)
     (goal : string)
   : (run_result, string) result =
@@ -328,6 +329,7 @@ let run
         in
         (r, None)
     in
+    (match proof_ref with Some ref_ -> ref_ := proof | None -> ());
     let checkpoint = match config.checkpoint_dir with
       | Some dir ->
         let ckpt = build_checkpoint ~session_id ?working_context:config.working_context agent in
@@ -507,6 +509,7 @@ let run_named
     ?raw_trace
     ?on_event
     ?agent_ref
+    ?proof_ref
     ?contract
     ?transport
     ?(allowed_paths = [])
@@ -560,7 +563,7 @@ let run_named
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in
-  match run ~sw ~net ~config ?on_event ?agent_ref ?contract goal with
+  match run ~sw ~net ~config ?on_event ?agent_ref ?proof_ref ?contract goal with
   | Ok result when accept result.response ->
     record_cascade ~cascade_name ~outcome:`Success;
     Ok result
@@ -635,6 +638,7 @@ let run_named_with_masc_tools
     ?memory
     ?raw_trace
     ?on_event
+    ?proof_ref
     ?contract
     ?transport
     ?priority
@@ -652,7 +656,7 @@ let run_named_with_masc_tools
   ) masc_tools in
   run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
-    ?raw_trace ?on_event ?contract ?transport ?priority ?sw ?net ()
+    ?raw_trace ?on_event ?proof_ref ?contract ?transport ?priority ?sw ?net ()
 
 let run_model_with_masc_tools
     ~(model_label : string)

@@ -112,6 +112,9 @@ let worker_run_summary_json json =
   `Assoc
     [
       ("worker_run_id", U.member "worker_run_id" json);
+      ("cdal_run_id", U.member "cdal_run_id" json);
+      ("contract_id", U.member "contract_id" json);
+      ("result_status", U.member "result_status" json);
       ("worker_name", U.member "worker_name" json);
       ("status", U.member "status" json);
       ("mode", U.member "mode" json);
@@ -142,6 +145,11 @@ let worker_run_summary_json json =
       ("stop_reason", if U.member "stop_reason" json <> `Null then U.member "stop_reason" json else U.member "stop_reason" summary);
       ("failure_reason", U.member "failure_reason" json);
       ("error", if U.member "error" json <> `Null then U.member "error" json else U.member "error" summary);
+      ("proof_path", U.member "proof_path" json);
+      ("proof_present", U.member "proof_present" json);
+      ("tool_trace_refs", U.member "tool_trace_refs" json);
+      ("raw_evidence_refs", U.member "raw_evidence_refs" json);
+      ("checkpoint_ref", U.member "checkpoint_ref" json);
       ("session_conformance", U.member "session_conformance" json);
       ("ts_iso", U.member "ts_iso" json);
     ]

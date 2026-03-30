@@ -57,6 +57,7 @@ val run_named :
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?agent_ref:Oas.Agent.t option ref ->
+  ?proof_ref:Oas.Cdal_proof.t option ref ->
   ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?allowed_paths:string list ->
@@ -105,6 +106,7 @@ val run_named_with_masc_tools :
   ?memory:Oas.Memory.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?proof_ref:Oas.Cdal_proof.t option ref ->
   ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?priority:Llm_provider.Request_priority.t ->

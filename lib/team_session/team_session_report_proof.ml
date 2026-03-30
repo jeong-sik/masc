@@ -2,6 +2,89 @@
 
 include Team_session_report_proof_helpers
 
+let string_member_opt key (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member key json with
+  | `String value when String.trim value <> "" -> Some value
+  | _ -> None
+
+let string_list_member key (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member key json with
+  | `List items ->
+      items
+      |> List.filter_map (function
+             | `String value when String.trim value <> "" -> Some value
+             | _ -> None)
+  | _ -> []
+
+let worker_proof_refs config session_id =
+  Team_session_store.list_worker_run_ids config session_id
+  |> List.filter_map (fun worker_run_id ->
+         let proof_path =
+           Team_session_store.worker_run_proof_path config session_id
+             worker_run_id
+         in
+         if not (Room_utils.path_exists config proof_path) then
+           None
+         else
+           let proof_json = Room_utils.read_json config proof_path in
+           let meta_path =
+             Team_session_store.worker_run_meta_path config session_id
+               worker_run_id
+           in
+           let meta_json =
+             if Room_utils.path_exists config meta_path then
+               Some (Room_utils.read_json config meta_path)
+             else None
+           in
+           let run_id =
+             match string_member_opt "run_id" proof_json with
+             | Some value -> value
+             | None -> worker_run_id
+           in
+           Some
+             (`Assoc
+               [
+                 ("worker_run_id", `String worker_run_id);
+                 ("cdal_run_id", `String run_id);
+                 ( "worker_name",
+                   match meta_json with
+                   | Some meta -> (
+                       match string_member_opt "worker_name" meta with
+                       | Some value -> `String value
+                       | None -> `Null)
+                   | None -> `Null );
+                 ( "contract_id",
+                   match string_member_opt "contract_id" proof_json with
+                   | Some value -> `String value
+                   | None -> `Null );
+                 ( "result_status",
+                   match string_member_opt "result_status" proof_json with
+                   | Some value -> `String value
+                   | None -> `Null );
+                 ("proof_path", `String proof_path);
+                 ("meta_path", `String meta_path);
+                 ( "manifest_ref",
+                   `String
+                     (Agent_sdk.Proof_store.make_ref ~run_id
+                        ~subpath:"manifest.json") );
+                 ( "contract_ref",
+                   `String
+                     (Agent_sdk.Proof_store.make_ref ~run_id
+                        ~subpath:"contract.json") );
+                 ( "tool_trace_refs",
+                   `List
+                     (List.map (fun ref_ -> `String ref_)
+                        (string_list_member "tool_trace_refs" proof_json)) );
+                 ( "raw_evidence_refs",
+                   `List
+                     (List.map (fun ref_ -> `String ref_)
+                        (string_list_member "raw_evidence_refs" proof_json)) );
+                 ( "checkpoint_ref",
+                   match string_member_opt "checkpoint_ref" proof_json with
+                   | Some value -> `String value
+                   | None -> `Null );
+               ]))
+
 let proof_markdown ~(session : Team_session_types.session)
     ~(proof_level : Team_session_types.proof_level)
     ~(score_pct : float) ~(verdict : string) ~(criteria : Yojson.Safe.t list)
@@ -372,6 +455,7 @@ let generate_proof ?(proof_level = default_proof_level) config
               ~min_communication ~communication_total ~vote_events
               ~run_deliverables ~empty_note_turn_count
     in
+    let worker_proofs = worker_proof_refs config session.session_id in
     let total = max 1 (List.length criteria) in
     let passed =
       List.fold_left
@@ -467,12 +551,16 @@ let generate_proof ?(proof_level = default_proof_level) config
                 ("done_delta_total", `Int done_delta_total);
                 ("report_json_exists", `Bool report_json_exists);
                 ("report_md_exists", `Bool report_md_exists);
+                ("worker_proof_count", `Int (List.length worker_proofs));
               ] );
+          ("worker_proofs", `List worker_proofs);
           ("generated_at_iso", `String generated_at_iso);
           ("oas_cdal_integration", `Assoc [
             ("contract_wired", `Bool (Option.is_some session.delivery_contract));
             ("proof_schema_version", `Int 1);
-            ("note", `String "Per-worker OAS proof bundles are captured by Contract_runner when delivery_contract is present. Aggregation into session-level proof is tracked in #3515.");
+            ("worker_proof_count", `Int (List.length worker_proofs));
+            ("aggregated", `Bool (worker_proofs <> []));
+            ("note", `String "Session proof aggregates worker-level OAS proof refs when present and falls back cleanly for legacy sessions without stored worker proofs.");
           ]);
         ]
     in

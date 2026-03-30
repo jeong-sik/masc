@@ -26,64 +26,70 @@ let worker_proof_refs config session_id =
          if not (Room_utils.path_exists config proof_path) then
            None
          else
-           let proof_json = Room_utils.read_json config proof_path in
-           let meta_path =
-             Team_session_store.worker_run_meta_path config session_id
-               worker_run_id
-           in
-           let meta_json =
-             if Room_utils.path_exists config meta_path then
-               Some (Room_utils.read_json config meta_path)
-             else None
-           in
-           let run_id =
-             match string_member_opt "run_id" proof_json with
-             | Some value -> value
-             | None -> worker_run_id
-           in
-           Some
-             (`Assoc
-               [
-                 ("worker_run_id", `String worker_run_id);
-                 ("cdal_run_id", `String run_id);
-                 ( "worker_name",
-                   match meta_json with
-                   | Some meta -> (
-                       match string_member_opt "worker_name" meta with
-                       | Some value -> `String value
-                       | None -> `Null)
-                   | None -> `Null );
-                 ( "contract_id",
-                   match string_member_opt "contract_id" proof_json with
-                   | Some value -> `String value
-                   | None -> `Null );
-                 ( "result_status",
-                   match string_member_opt "result_status" proof_json with
-                   | Some value -> `String value
-                   | None -> `Null );
-                 ("proof_path", `String proof_path);
-                 ("meta_path", `String meta_path);
-                 ( "manifest_ref",
-                   `String
-                     (Agent_sdk.Proof_store.make_ref ~run_id
-                        ~subpath:"manifest.json") );
-                 ( "contract_ref",
-                   `String
-                     (Agent_sdk.Proof_store.make_ref ~run_id
-                        ~subpath:"contract.json") );
-                 ( "tool_trace_refs",
-                   `List
-                     (List.map (fun ref_ -> `String ref_)
-                        (string_list_member "tool_trace_refs" proof_json)) );
-                 ( "raw_evidence_refs",
-                   `List
-                     (List.map (fun ref_ -> `String ref_)
-                        (string_list_member "raw_evidence_refs" proof_json)) );
-                 ( "checkpoint_ref",
-                   match string_member_opt "checkpoint_ref" proof_json with
-                   | Some value -> `String value
-                   | None -> `Null );
-               ]))
+           try
+             let proof_json = Room_utils.read_json config proof_path in
+             let meta_path =
+               Team_session_store.worker_run_meta_path config session_id
+                 worker_run_id
+             in
+             let meta_json =
+               if Room_utils.path_exists config meta_path then
+                 Some (Room_utils.read_json config meta_path)
+               else None
+             in
+             let run_id =
+               match string_member_opt "run_id" proof_json with
+               | Some value -> value
+               | None -> worker_run_id
+             in
+             Some
+               (`Assoc
+                 [
+                   ("worker_run_id", `String worker_run_id);
+                   ("cdal_run_id", `String run_id);
+                   ( "worker_name",
+                     match meta_json with
+                     | Some meta -> (
+                         match string_member_opt "worker_name" meta with
+                         | Some value -> `String value
+                         | None -> `Null)
+                     | None -> `Null );
+                   ( "contract_id",
+                     match string_member_opt "contract_id" proof_json with
+                     | Some value -> `String value
+                     | None -> `Null );
+                   ( "result_status",
+                     match string_member_opt "result_status" proof_json with
+                     | Some value -> `String value
+                     | None -> `Null );
+                   ("proof_path", `String proof_path);
+                   ("meta_path", `String meta_path);
+                   ( "manifest_ref",
+                     `String
+                       (Agent_sdk.Proof_store.make_ref ~run_id
+                          ~subpath:"manifest.json") );
+                   ( "contract_ref",
+                     `String
+                       (Agent_sdk.Proof_store.make_ref ~run_id
+                          ~subpath:"contract.json") );
+                   ( "tool_trace_refs",
+                     `List
+                       (List.map (fun ref_ -> `String ref_)
+                          (string_list_member "tool_trace_refs" proof_json)) );
+                   ( "raw_evidence_refs",
+                     `List
+                       (List.map (fun ref_ -> `String ref_)
+                          (string_list_member "raw_evidence_refs" proof_json)) );
+                   ( "checkpoint_ref",
+                     match string_member_opt "checkpoint_ref" proof_json with
+                     | Some value -> `String value
+                     | None -> `Null );
+                 ])
+           with exn ->
+             Log.Session.warn
+               "team_session_report_proof: skipping malformed worker proof json for %s/%s: %s"
+               session_id worker_run_id (Printexc.to_string exn);
+             None)
 
 let proof_markdown ~(session : Team_session_types.session)
     ~(proof_level : Team_session_types.proof_level)

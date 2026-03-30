@@ -252,6 +252,10 @@ let trace_ref_to_json (trace_ref : Oas.Raw_trace.run_ref) =
 let preview_text text =
   String.sub text 0 (min 200 (String.length text))
 
+let preview_text_opt text =
+  let trimmed = String.trim text in
+  if trimmed = "" then None else Some (preview_text trimmed)
+
 let proof_result_status_to_string = function
   | Oas.Cdal_proof.Completed -> "completed"
   | Oas.Cdal_proof.Errored -> "errored"
@@ -476,10 +480,7 @@ let planned_worker_to_entry_with_state
         Hashtbl.replace success_by_agent name true;
         telemetry_ref := telemetry_of_run_result result;
         let output_preview =
-          let text =
-            Oas.Types.text_of_content result.response.content |> String.trim
-          in
-          if text = "" then None else Some (preview_text text)
+          Oas.Types.text_of_content result.response.content |> preview_text_opt
         in
         let proof_opt =
           match result.proof with Some _ as proof -> proof | None -> !proof_ref
@@ -496,7 +497,7 @@ let planned_worker_to_entry_with_state
         persist_worker_run_proof_if_present ~config ~session_id
           ~fallback_name:name ~planned_worker:pw ~resolved_model:None
           ~trace_ref:None ~success:false
-          ~output_preview:(Some (preview_text e)) ~error:(Some e) !proof_ref;
+          ~output_preview:(preview_text_opt e) ~error:(Some e) !proof_ref;
         Error
           (Oas.Error.Config
              (Oas.Error.InvalidConfig

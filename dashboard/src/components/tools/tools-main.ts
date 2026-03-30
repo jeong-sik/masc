@@ -80,7 +80,7 @@ export function Tools() {
         ${usage
           ? html`
               <div class="text-[12px] text-[var(--text-muted)] mb-2">
-                등록됨 ${usage.registered_count} · 사용된 ${usage.distinct_tools_called} · 미사용 ${usage.never_called_count}
+                등록됨 ${usage.registered_count} (모든 MCP 서버 합산) · 사용된 ${usage.distinct_tools_called} · 미사용 ${usage.never_called_count}
               </div>
             `
           : null}

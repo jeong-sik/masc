@@ -153,19 +153,19 @@ let test_keeper_direct_reply_contracts () =
 
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "cached_surface_or_first_success_json _execution_cache");
   check bool "mission default route serves cached surface immediately" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "cached_surface_or_first_success_json _mission_cache");
   check bool "room truth advertises initializing while execution warms" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
        {|("status", `String "initializing")|});
   check bool "execution render timeout is env-configurable" true
     (file_contains_pattern "lib/dashboard/dashboard_execution.ml"
        "MASC_DASHBOARD_EXECUTION_RENDER_TIMEOUT_S");
   check bool "execution proactive refresh timeout is extended" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S");
   check bool "mission proactive refresh timeout is extended" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
@@ -363,7 +363,7 @@ let test_dashboard_executor_pool_contracts () =
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "run_dashboard_compute ~mode ?net ?mono_clock ~sw ~clock");
   check bool "execution refresh loop uses dashboard compute helper" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~net");
   check bool "server state captures mono_clock for threaded readonly compute" true
     (file_contains_pattern "lib/mcp_server.ml"
@@ -378,7 +378,7 @@ let test_dashboard_executor_pool_contracts () =
     (file_not_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "Eio_context.get_mono_clock ()");
   check bool "execution parameterized path uses dashboard compute helper" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw");
   check bool "server bootstrap wires executor pool into dashboard" true
     (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
@@ -502,7 +502,7 @@ let test_dashboard_timeout_guard_contracts () =
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        "Transport_metrics.transport_health_json");
   check bool "server dashboard transport health helper uses cached surface" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        {|cached_surface_json _transport_health_cache|});
   check bool "mission refresh dedupes inflight fetches" true
     (file_contains_pattern "dashboard/src/mission-actions.ts"
@@ -513,13 +513,13 @@ let test_dashboard_timeout_guard_contracts () =
 
 let test_room_truth_adaptive_timeout_contracts () =
   check bool "shell fiber uses adaptive timeout" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
        "shell_timeout_s");
   check bool "room-truth timeout configurable via env var" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
        "MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S");
   check bool "shell_warmed tracking exists" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "_shell_warmed")
 
 let test_mermaid_xss_contracts () =

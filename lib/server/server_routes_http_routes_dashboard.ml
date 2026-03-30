@@ -430,6 +430,10 @@ let add_routes ~sw ~clock router =
            if String.length name = 0 then
              Http.Response.json ~status:`Bad_request
                {|{"error":"keeper name is required"}|} reqd
+           else if not (Keeper_config.validate_name name) then
+             Http.Response.json ~status:`Bad_request
+               (Printf.sprintf {|{"error":"invalid keeper name: %S"}|}
+                  (String.escaped name)) reqd
            else
              let config = state.Mcp_server.room_config in
              (match Keeper_types.read_meta config name with

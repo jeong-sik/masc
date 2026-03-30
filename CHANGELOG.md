@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [2.182.0] - 2026-03-31
+
+### Added
+- **Observation masking** — mask summarized tool results with structured stubs (#4043).
+- **Judge slot backoff** — per-cycle slot backoff for governance and operator judges (#4041).
+
+### Fixed
+- **Keeper tool_choice** — set tool_choice=Auto, relax dashboard tools API auth (#4042).
+- **Voice config boundaries** — reset voice configuration boundaries (#4027).
+- **Governance case dedup** — expand canonical action normalization (#4020).
+- **Release dates** — fix v2.181.0 updated timestamps (#4052, #4056).
+
 ## [2.181.0] - 2026-03-31
 
 ### Added

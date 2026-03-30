@@ -110,6 +110,13 @@ val nudge : t -> reason:string -> unit
     automatically when the predicate returns true. *)
 val shutdown : t -> unit
 
+(** Update the rhythm configuration. Takes effect on the next beat cycle.
+    Non-yielding — safe to call from any fiber. *)
+val set_rhythm : t -> rhythm -> unit
+
+(** Current rhythm configuration. *)
+val get_rhythm : t -> rhythm
+
 (** {1 Queries} *)
 
 (** Current runtime statistics. *)

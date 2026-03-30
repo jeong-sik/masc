@@ -113,6 +113,18 @@ let keeper_max_turn_failures =
     ~deserialize:deserialize_int
     ()
 
+let keeper_supervisor_sweep_sec =
+  Runtime_params.register
+    ~key:"keeper.supervisor_sweep_sec"
+    ~default:(fun () -> Env_config_keeper.KeeperSupervisor.sweep_interval_sec)
+    ~validate:(validate_float_range ~min:10.0 ~max:120.0 "keeper_supervisor_sweep_sec")
+    ~serialize:(fun v -> `Float v)
+    ~meta:{ description = "Supervisor sweep 주기(초)";
+            value_type = "float";
+            min_value = Some (`Float 10.0); max_value = Some (`Float 120.0) }
+    ~deserialize:deserialize_float
+    ()
+
 let keeper_supervisor_max_restarts =
   Runtime_params.register
     ~key:"keeper.supervisor_max_restarts"

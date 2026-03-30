@@ -64,7 +64,7 @@ let recovery_config_from_env () = {
 
 type t = {
   clock      : any_clock;
-  rhythm     : rhythm;
+  mutable rhythm : rhythm;
   lifecycle  : lifecycle;
   mutable consumers : (module Consumer) list;
   (* nudge signaling — Stream is cancellation-safe under Fiber.first *)
@@ -286,6 +286,13 @@ let nudge t ~reason =
 let shutdown t =
   if not (is_shutdown t) then
     Eio.Promise.resolve t.shutdown_r ()
+
+let set_rhythm t rhythm =
+  t.rhythm <- rhythm;
+  Log.Pulse.info "rhythm updated: base=%.1fs min=%.1fs max=%.1fs"
+    rhythm.base_s rhythm.min_s rhythm.max_s
+
+let get_rhythm t = t.rhythm
 
 let stats t =
   let uptime = (now t.clock) -. t.start_ts in

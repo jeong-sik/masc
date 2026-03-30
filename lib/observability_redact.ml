@@ -91,6 +91,8 @@ let build_tool_call_trace_json ?tool_use_id ~tool_name ~input
       ("kind", `String "tool_use");
       ( "tool_input_preview",
         match input_preview with Some s -> `String s | None -> `Null );
+      ( "tool_args_preview",
+        match input_preview with Some s -> `String s | None -> `Null );
       ( "tool_output_preview",
         match output_preview with Some s -> `String s | None -> `Null );
       ("is_error", match is_error with Some b -> `Bool b | None -> `Null);
@@ -115,13 +117,13 @@ let summarize_tool_call_traces (traces : Yojson.Safe.t list) :
       traces
   in
   let tool_input_preview = first_non_null "tool_input_preview" in
-  let tool_args_preview =
-    List.find_map
-      (fun json ->
-        match member "tool_args_preview" json with
-        | `String s when String.trim s <> "" -> Some (String.trim s)
-        | _ -> None)
-      traces
+  let tool_args_preview = first_non_null "tool_args_preview" in
+  let tool_output_preview =
+    List.rev traces
+    |> List.find_map
+         (fun json ->
+           match member "tool_output_preview" json with
+           | `String s when String.trim s <> "" -> Some (String.trim s)
+           | _ -> None)
   in
-  let tool_output_preview = first_non_null "tool_output_preview" in
   (tool_input_preview, tool_args_preview, tool_output_preview)

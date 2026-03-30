@@ -86,6 +86,7 @@ export function classifyJournalKind(entry: JournalEntry): 'board' | 'tasks' | 'k
   switch (entry.eventType) {
     case 'board_post':
     case 'board_comment':
+    case 'board_delete':
       return 'board'
     case 'task_update':
       return 'tasks'

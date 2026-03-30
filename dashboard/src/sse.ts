@@ -8,6 +8,7 @@ import {
   updateOasKeeperSnapshot,
   oasLastKeeperTick,
   oasTotalEvents,
+  removeBoardPost,
 } from './store'
 import {
   defaultJournalSeverity,
@@ -300,6 +301,23 @@ function handleEvent(event: SSEEvent): void {
           source: event.source,
           narrativeText: formatBoardNarrative('댓글', event.author ?? agent, event.content ?? event.message),
           preview: normalizePreview(event.content ?? event.message),
+          postId: event.post_id,
+        },
+      )
+      break
+    case 'board_delete':
+    case 'masc/board_delete':
+      removeBoardPost(event.post_id)
+      addTypedJournalEntry(
+        agent,
+        `Post deleted: ${event.post_id ?? 'unknown'}`,
+        'board',
+        'board_delete',
+        {
+          author: event.author ?? agent,
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(agent)}가 게시글을 삭제했습니다`,
           postId: event.post_id,
         },
       )

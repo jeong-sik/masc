@@ -205,6 +205,11 @@ let dashboard_projection_json ?sessions config =
 let operation_status_json config ?operation_id () =
   list_operations_json ?operation_id config
 
+let legacy_chain_run_id json =
+  match U.member "chain" json with
+  | `Assoc _ as chain_json -> get_string_opt chain_json "run_id"
+  | _ -> None
+
 let company_scope_id_for units source_unit_id target_unit_id =
   option_first_some
     (Option.bind target_unit_id (fun unit_id -> company_ancestor_id units unit_id))
@@ -339,25 +344,10 @@ let apply_operation_assignment config ~(actor : string) (operation : operation_r
 
 let update_operation_status config ~(actor : string) ~operation_id ~status ~note ~event_type =
   with_operation config operation_id (fun operations current ->
-      let next_chain_status =
-        match status with
-        | Planned -> Some "pending"
-        | Active -> Some "running"
-        | Paused -> Some "paused"
-        | Cancelled -> Some "cancelled"
-        | Completed -> Some "completed"
-        | Failed -> Some "failed"
-      in
       let updated =
         {
           current with
           status;
-          chain =
-            (match current.chain, next_chain_status with
-            | Some chain, Some chain_status ->
-                Some { chain with status = chain_status }
-            | None, Some _ -> None
-            | existing, None -> existing);
           note =
             (match note, current.note with
             | Some value, _ -> Some value
@@ -547,41 +537,9 @@ let start_operation config ~(actor : string) json =
               ~depends_on_operation_ids
         | _ -> Ok ()
       in
-      let chain =
-        match U.member "chain" json with
-        | (`Assoc _ as chain_json) -> (
-            match get_string_opt chain_json "kind", get_string_opt chain_json "status" with
-            | Some kind, Some status ->
-                Some
-                  {
-                    kind;
-                    backend = get_string_default chain_json "backend" "legacy";
-                    chain_id = get_string_opt chain_json "chain_id";
-                    goal = get_string_opt chain_json "goal";
-                    run_id = get_string_opt chain_json "run_id";
-                    status;
-                    history_event =
-                      (match U.member "history_event" chain_json with
-                      | `Null -> None
-                      | `Assoc _ as json -> Some json
-                      | _ -> None);
-                    mermaid = get_string_opt chain_json "mermaid";
-                    preview_run =
-                      (match U.member "preview_run" chain_json with
-                      | `Null -> None
-                      | `Assoc _ as json -> Some json
-                      | _ -> None);
-                    viewer_path = get_string_opt chain_json "viewer_path";
-                    last_sync_at = get_string_opt chain_json "last_sync_at";
-                  }
-            | _ -> None)
-        | _ -> None
-      in
       let checkpoint_ref =
-        match get_string_opt json "checkpoint_ref", chain with
-        | Some value, _ -> Some value
-        | None, Some { run_id = Some run_id; _ } -> Some run_id
-        | None, _ -> None
+        option_first_some (get_string_opt json "checkpoint_ref")
+          (legacy_chain_run_id json)
       in
       let operation =
         {
@@ -612,7 +570,6 @@ let start_operation config ~(actor : string) json =
              with
             | Some value -> value
             | None -> Active);
-          chain;
           created_at = Types.now_iso ();
           updated_at = Types.now_iso ();
         }

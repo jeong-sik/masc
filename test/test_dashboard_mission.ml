@@ -624,41 +624,94 @@ let test_dashboard_mission_http_cache_isolation () =
 
 let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
   let keeper_name = "audit-keeper-assembly-fixture" in
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Lib.A2a_tools.emit_heartbeat_task
-    ~agent:keeper_name
-    ~goal:"Mission keeper audit fixture"
-    ~context:"dashboard mission assembly"
-    ~allowed_tools:[ "masc_board_get"; "masc_board_vote" ]
-    ();
-  let briefs =
-    Lib.Dashboard_mission_assembly.build_keeper_briefs
-      [
-        `Assoc
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room_utils.default_config dir in
+      Lib.A2a_tools.emit_heartbeat_task
+        ~agent:keeper_name
+        ~goal:"Mission keeper audit fixture"
+        ~context:"dashboard mission assembly"
+        ~allowed_tools:[ "masc_board_get"; "masc_board_vote" ]
+        ();
+      let briefs =
+        Lib.Dashboard_mission_assembly.build_keeper_briefs config
           [
-            ("name", `String keeper_name);
-            ("agent_name", `String keeper_name);
-            ("status", `String "offline");
-            ("updated_at", `String (Types.now_iso ()));
-            ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_vote" ]);
-            ("latest_tool_names", `List []);
-            ("latest_tool_call_count", `Null);
-            ("tool_audit_source", `Null);
-            ("tool_audit_at", `Null);
-          ];
-      ]
-  in
-  let open Yojson.Safe.Util in
-  let brief =
-    briefs |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
-  in
-  check bool "heartbeat task allowed tools present" true
-    ((brief |> member "allowed_tool_names" |> to_list) <> []);
-  check string "heartbeat task source wins in keeper brief" "heartbeat_task"
-    (brief |> member "tool_audit_source" |> to_string);
-  check bool "no observed tools without evidence" true
-    ((brief |> member "latest_tool_names" |> to_list) = [])
+            `Assoc
+              [
+                ("name", `String keeper_name);
+                ("agent_name", `String keeper_name);
+                ("status", `String "offline");
+                ("updated_at", `String (Types.now_iso ()));
+                ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_vote" ]);
+                ("latest_tool_names", `List []);
+                ("latest_tool_call_count", `Null);
+                ("tool_audit_source", `Null);
+                ("tool_audit_at", `Null);
+              ];
+          ]
+      in
+      let open Yojson.Safe.Util in
+      let brief =
+        briefs |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
+      in
+      check bool "heartbeat task allowed tools present" true
+        ((brief |> member "allowed_tool_names" |> to_list) <> []);
+      check string "heartbeat task source wins in keeper brief" "heartbeat_task"
+        (brief |> member "tool_audit_source" |> to_string);
+      check bool "no observed tools without evidence" true
+        ((brief |> member "latest_tool_names" |> to_list) = []))
+
+let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
+  let keeper_name = "audit-keeper-decision-fixture" in
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room_utils.default_config dir in
+      Room_utils.mkdir_p
+        (Filename.dirname (Lib.Keeper_types.keeper_decision_log_path config keeper_name));
+      Fs_compat.append_jsonl
+        (Lib.Keeper_types.keeper_decision_log_path config keeper_name)
+        (`Assoc
+          [
+            ("ts", `String (Types.now_iso ()));
+            ("selected_mode", `String "text_response");
+            ("tool_call_count", `Int 0);
+            ("tools_used", `List []);
+          ]);
+      let briefs =
+        Lib.Dashboard_mission_assembly.build_keeper_briefs config
+          [
+            `Assoc
+              [
+                ("name", `String keeper_name);
+                ("agent_name", `String keeper_name);
+                ("status", `String "active");
+                ("updated_at", `String (Types.now_iso ()));
+                ("allowed_tool_names", `List [ `String "masc_board_get" ]);
+                ("latest_tool_names", `List []);
+                ("latest_tool_call_count", `Null);
+                ("tool_audit_source", `Null);
+                ("tool_audit_at", `Null);
+              ];
+          ]
+      in
+      let open Yojson.Safe.Util in
+      let brief =
+        briefs |> List.find (fun row -> row |> member "name" |> to_string = keeper_name)
+      in
+      check string "decision log source present in keeper brief" "keeper_decision_log"
+        (brief |> member "tool_audit_source" |> to_string);
+      check int "decision log zero tool count preserved" 0
+        (brief |> member "latest_tool_call_count" |> to_int);
+      check bool "decision log still reports empty tool list" true
+        ((brief |> member "latest_tool_names" |> to_list) = []))
 
 let () =
   Alcotest.run "Dashboard Mission"
@@ -677,5 +730,7 @@ let () =
             test_dashboard_mission_http_cache_isolation;
           Alcotest.test_case "keeper brief prefers heartbeat task" `Quick
             test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task;
+          Alcotest.test_case "keeper brief uses decision log fallback" `Quick
+            test_dashboard_mission_keeper_tool_audit_uses_decision_log;
         ] );
     ]

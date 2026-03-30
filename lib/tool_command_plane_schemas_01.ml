@@ -148,11 +148,6 @@ After masc_unit_define; follow with masc_dispatch_tick to materialize detachment
             ("active_goal_ids", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
             ("note", string_prop "Optional operator note.");
             ("status", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "planned"; `String "active"; `String "paused" ]) ]);
-            ("orchestration_kind", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "native"; `String "chain_dsl" ]); ("description", `String "native (default) or chain_dsl") ]);
-            ("chain_id", string_prop "Preset native chain id. Mutually exclusive with chain_goal.");
-            ("chain_goal", string_prop "Goal string for native chain orchestration. Mutually exclusive with chain_id.");
-            ("chain_input", `Assoc [ ("type", `String "object"); ("description", `String "Optional JSON input forwarded to chain.run input.") ]);
-            ("chain_checkpoint_enabled", boolean_prop ~default:true "Enable native checkpoint capture for chain.run.");
           ];
     };
     {
@@ -225,26 +220,6 @@ After the operation's detachments report completion; pair with masc_observe_trac
           [
             ("operation_id", string_prop "Managed operation id.");
             ("note", string_prop "Optional completion note.");
-          ];
-    };
-    {
-      name = "masc_chain_snapshot";
-      description =
-        "Summarize native chain runtime state and run history, linked back to CPv2 managed operations. \
-Use when reviewing chain-backed operation execution or debugging chain runs. \
-Pair with masc_chain_run_get to fetch details of a specific run.";
-      input_schema = object_schema [];
-    };
-    {
-      name = "masc_chain_run_get";
-      description =
-        "Fetch detailed results from the chain run store for a completed chain run by run_id. \
-Use when inspecting the output, steps, or errors of a specific chain execution. \
-After masc_chain_snapshot identifies the run_id.";
-      input_schema =
-        object_schema ~required:[ "run_id" ]
-          [
-            ("run_id", string_prop "Native chain run id from a chain-backed operation.");
           ];
     };
     {

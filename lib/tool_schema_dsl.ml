@@ -25,14 +25,6 @@ let string_array_prop description =
       ("items", `Assoc [ ("type", `String "string") ]);
     ]
 
-let enum_prop ~values description =
-  `Assoc
-    [
-      ("type", `String "string");
-      ("description", `String description);
-      ("enum", `List (List.map (fun v -> `String v) values));
-    ]
-
 let object_schema ?(required = []) properties =
   `Assoc
     [

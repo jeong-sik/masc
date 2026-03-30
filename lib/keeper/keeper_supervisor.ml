@@ -32,6 +32,16 @@ let should_cleanup_dead ~now ~dead_ttl_sec
       now -. dead_since >= dead_ttl_sec
   | _ -> false
 
+(** Check if a paused keeper meta file on disk is stale enough to remove. *)
+let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
+  if not meta.paused then false
+  else
+    let updated_ts =
+      Resilience.Time.parse_iso8601_opt meta.updated_at
+      |> Option.value ~default:0.0
+    in
+    updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec
+
 (* ── Event publishing ────────────────────────────────────── *)
 
 let publish_lifecycle event_name keeper_name detail =
@@ -46,6 +56,8 @@ let publish_lifecycle event_name keeper_name detail =
 let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
   let base_path = ctx.config.base_path in
+  let keepers_dir =
+    Filename.concat (Room.masc_root_dir ctx.config) "keepers" in
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     let resolved = ref false in
     let resolve_done value =
@@ -72,8 +84,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                (Some info.reason);
              Keeper_registry.set_state ~base_path meta.name
                Keeper_registry.Crashed;
+             let ts = Time_compat.now () in
              Keeper_registry.record_crash ~base_path
-               meta.name (Time_compat.now ()) reason;
+               meta.name ts reason;
+             let rc = match Keeper_registry.get ~base_path meta.name with
+               | Some e -> e.restart_count | None -> 0 in
+             Keeper_crash_persistence.enqueue_record ~keepers_dir
+               ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
              resolve_done (`Crashed reason);
              publish_lifecycle "crashed" meta.name reason
@@ -84,8 +101,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              Keeper_registry.set_failure_reason ~base_path meta.name (Some fr);
              Keeper_registry.set_state ~base_path meta.name
                Keeper_registry.Crashed;
+             let ts = Time_compat.now () in
              Keeper_registry.record_crash ~base_path
-               meta.name (Time_compat.now ()) reason;
+               meta.name ts reason;
+             let rc = match Keeper_registry.get ~base_path meta.name with
+               | Some e -> e.restart_count | None -> 0 in
+             Keeper_crash_persistence.enqueue_record ~keepers_dir
+               ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
              resolve_done (`Crashed reason);
              publish_lifecycle "crashed" meta.name reason))
@@ -97,8 +119,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                 Keeper_registry.Fiber_unresolved in
             Keeper_registry.set_failure_reason ~base_path meta.name
               (Some Keeper_registry.Fiber_unresolved);
+            let ts = Time_compat.now () in
             Keeper_registry.record_crash ~base_path
-              meta.name (Time_compat.now ()) reason;
+              meta.name ts reason;
+            let rc = match Keeper_registry.get ~base_path meta.name with
+              | Some e -> e.restart_count | None -> 0 in
+            Keeper_crash_persistence.enqueue_record ~keepers_dir
+              ~name:meta.name ~ts ~reason ~restart_count:rc;
             Keeper_registry.record_error ~base_path meta.name reason;
             Keeper_registry.set_state ~base_path meta.name
               Keeper_registry.Crashed;
@@ -261,8 +288,8 @@ let apply_self_preservation ~total_keepers to_restart =
 
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
-  let max_restarts = Env_config.KeeperSupervisor.max_restarts in
-  let dead_ttl_sec = Env_config.KeeperSupervisor.dead_ttl_sec in
+  let max_restarts = Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
+  let dead_ttl_sec = Runtime_params.get Governance_registry.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
@@ -338,5 +365,23 @@ let sweep_and_recover (ctx : _ context) =
           old_entry.name;
         Keeper_registry.unregister ~base_path old_entry.name
   ) restart_list;
-  (* Phase 2: reconcile LAST — only orphaned durable keepers *)
+  (* Phase 2: prune stale paused keeper meta files from disk *)
+  let paused_ttl_sec = Env_config.KeeperSupervisor.paused_cleanup_ttl_sec in
+  Keeper_types.keeper_names ctx.config
+  |> List.iter (fun name ->
+         if Keeper_registry.is_running ~base_path name then ()
+         else
+           match read_meta ctx.config name with
+           | Ok (Some meta) when is_stale_paused_meta ~now ~paused_ttl_sec meta ->
+               let path = Keeper_types.keeper_meta_path ctx.config name in
+               (try
+                  Sys.remove path;
+                  publish_lifecycle "paused_pruned" name
+                    (Printf.sprintf "last_updated=%s" meta.updated_at);
+                  Log.Keeper.info "%s: stale paused meta pruned" name
+                with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                  Log.Keeper.warn "%s: paused meta prune failed: %s"
+                    name (Printexc.to_string exn))
+           | _ -> ());
+  (* Phase 3: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ctx

@@ -116,7 +116,21 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
         p.instructions_opt;
     policy_voice_enabled;
     allowed_paths;
+    execution_scope =
+      Option.value ~default:old.execution_scope p.execution_scope_opt;
     scope_kind;
+    tool_tier =
+      p.tool_tier_opt
+      |> first_some
+           (if String.trim old.tool_tier <> "" then Some old.tool_tier else None)
+      |> first_some p.profile_defaults.tool_tier
+      |> Option.value ~default:"essential";
+    extra_masc_tools =
+      (match p.extra_masc_tools_in with
+       | _ :: _ as xs -> xs
+       | [] ->
+         if old.extra_masc_tools <> [] then old.extra_masc_tools
+         else Option.value ~default:[] p.profile_defaults.extra_masc_tools);
     room_scope;
     voice_enabled =
       Option.value ~default:old.voice_enabled p.voice_enabled_opt;
@@ -127,7 +141,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     voice_agent_id =
       Option.value ~default:old.voice_agent_id p.voice_agent_id_opt;
     mention_targets;
-    proactive = { old.proactive with
+    proactive = {
       enabled =
         Option.value
           ~default:old.proactive.enabled
@@ -139,7 +153,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
         Option.value ~default:old.proactive.cooldown_sec p.proactive_cooldown_sec_opt
         |> normalize_proactive_cooldown_sec;
     };
-    compaction = { old.compaction with
+    compaction = {
       profile = compaction_profile;
       ratio_gate = compaction_ratio_gate;
       message_gate = compaction_message_gate;

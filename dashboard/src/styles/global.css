@@ -1,259 +1,17 @@
 @import "tailwindcss";
 
-/* MASC Dashboard — global layout and visual language */
-
-@theme {
-  --color-bg-0: #0b1220;
-  --color-bg-1: #111a2e;
-  --color-bg-2: #16213c;
-  --color-card: rgba(16, 24, 42, 0.92);
-  --color-card-border: rgba(138, 163, 211, 0.2);
-  --color-text-strong: #eaf1ff;
-  --color-text-body: #c0d2f2;
-  --color-text-muted: #a8bfdf;
-  --color-accent: #47b8ff;
-  --color-accent-soft: rgba(71, 184, 255, 0.16);
-  --color-ok: #4ade80;
-  --color-warn: #fbbf24;
-  --color-bad: #ef4444;
-  --color-ff-navy: #0a1628;
-  --color-ff-navy-light: #122040;
-  --color-ff-gold: #c8a84e;
-  --color-ff-gold-bright: #e8cc70;
-  --color-ff-gold-dim: rgba(200, 168, 78, 0.25);
-  --color-ff-crystal: #47b8ff;
-  --color-ff-border: rgba(200, 168, 78, 0.35);
-  --color-ff-border-subtle: rgba(200, 168, 78, 0.12);
-  --color-ff-border-hover: rgba(200, 168, 78, 0.6);
-  --color-ff-panel: rgba(10, 22, 40, 0.92);
-  --color-agent-working: #7ae09a;
-  --color-agent-idle: #b8cae8;
-  --color-agent-offline: #5a6478;
-  --color-agent-busy: #f0c060;
-
-  /* Tone variants */
-  --bad-light: #f87171;
-  --warn-bright: #f97316;
-  --radius-lg: 12px;
-  --radius-md: 8px;
-  --radius-sm: 6px;
-
-  --font-size-2xs: 11px;
-  --font-size-xs: 12px;
-  --font-size-sm: 13px;
-  --font-size-base: 14px;
-  --font-size-md: 15px;
-  --font-size-lg: 16px;
-
-  --color-text-dim: #a0a8b4;
-  --color-text-slate: #b0bfd4;
-  --color-text-slate-light: #cbd5e1;
-  --color-cyan: #22d3ee;
-  --color-purple: #a78bfa;
-}
-
-:root {
-  --bg-0: #0b1220;
-  --card: rgba(16, 24, 42, 0.92);
-  --card-border: rgba(138, 163, 211, 0.2);
-  --text-strong: #eaf1ff;
-  --text-body: #c0d2f2;
-  --text-muted: #a8bfdf;
-  --accent: #47b8ff;
-  --accent-soft: rgba(71, 184, 255, 0.16);
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --bad: #ef4444;
-  --radius-lg: 12px;
-  --radius-md: 8px;
-  --radius-sm: 6px;
-  --header-h: 94px;
-
-  /* Agent status (soft tones) */
-  --agent-working: #7ae09a;
-  --agent-busy: #f0c060;
-
-  /* Tone variants */
-  --bad-light: #f87171;
-  --warn-bright: #f97316;
-
-  /* White overlay (glass morphism tints) */
-  --white-2: rgba(255, 255, 255, 0.02);
-  --white-3: rgba(255, 255, 255, 0.03);
-  --white-3h: rgba(255, 255, 255, 0.035);
-  --white-4: rgba(255, 255, 255, 0.04);
-  --white-5: rgba(255, 255, 255, 0.05);
-  --white-6: rgba(255, 255, 255, 0.06);
-  --white-8: rgba(255, 255, 255, 0.08);
-  --white-10: rgba(255, 255, 255, 0.10);
-  --white-12: rgba(255, 255, 255, 0.12);
-  --white-20: rgba(255, 255, 255, 0.20);
-  --white-25: rgba(255, 255, 255, 0.25);
-  --white-30: rgba(255, 255, 255, 0.30);
-  --white-35: rgba(255, 255, 255, 0.35);
-  --white-40: rgba(255, 255, 255, 0.40);
-  --white-50: rgba(255, 255, 255, 0.50);
-  --white-55: rgba(255, 255, 255, 0.55);
-  --white-60: rgba(255, 255, 255, 0.60);
-  --white-70: rgba(255, 255, 255, 0.70);
-  --white-72: rgba(255, 255, 255, 0.72);
-  /* Border slate (138, 163, 211) */
-  --border-slate-8: rgba(138, 163, 211, 0.08);
-  --border-slate-12: rgba(138, 163, 211, 0.12);
-  --border-slate-16: rgba(138, 163, 211, 0.16);
-  --border-slate-18: rgba(138, 163, 211, 0.18);
-  --border-slate-22: rgba(138, 163, 211, 0.22);
-  --border-slate-35: rgba(138, 163, 211, 0.35);
-  /* OK / green (74, 222, 128) */
-  --ok-10: rgba(74, 222, 128, 0.10);
-  --ok-12: rgba(74, 222, 128, 0.12);
-  --ok-soft: rgba(74, 222, 128, 0.15);
-  --ok-22: rgba(74, 222, 128, 0.22);
-  --ok-24: rgba(74, 222, 128, 0.24);
-  --ok-25: rgba(74, 222, 128, 0.25);
-  --ok-30: rgba(74, 222, 128, 0.30);
-  --ok-35: rgba(74, 222, 128, 0.35);
-  --ok-40: rgba(74, 222, 128, 0.40);
-  /* Bad / red */
-  --bad-soft: rgba(239, 68, 68, 0.15);
-  --bad-12: rgba(239, 68, 68, 0.12);
-  /* Warn / yellow (251, 191, 36) */
-  --warn-soft: rgba(251, 191, 36, 0.15);
-  --warn-12: rgba(251, 191, 36, 0.12);
-  /* Accent / blue (71, 184, 255) */
-  --accent-8: rgba(71, 184, 255, 0.08);
-  --accent-10: rgba(71, 184, 255, 0.10);
-  --accent-12: rgba(71, 184, 255, 0.12);
-  --accent-20: rgba(71, 184, 255, 0.20);
-  /* Cyan (34, 211, 238) */
-  --cyan-12: rgba(34, 211, 238, 0.12);
-  --cyan-16: rgba(34, 211, 238, 0.16);
-  /* FF gold (200, 168, 78) */
-  --ff-gold-15: rgba(200, 168, 78, 0.15);
-
-  /* Bad / red (248, 113, 113) */
-  --bad-8: rgba(248, 113, 113, 0.08);
-  --bad-15: rgba(248, 113, 113, 0.15);
-  --bad-30: rgba(248, 113, 113, 0.3);
-
-  /* FF gold (200, 168, 78) */
-  --ff-gold-8: rgba(200, 168, 78, 0.08);
-  --ff-gold-10: rgba(200, 168, 78, 0.1);
-  --ff-gold-20: rgba(200, 168, 78, 0.2);
-
-  /* Slate gray (148, 163, 184) */
-  --slate-gray-8: rgba(148, 163, 184, 0.08);
-  --slate-gray-10: rgba(148, 163, 184, 0.1);
-  --slate-gray-12: rgba(148, 163, 184, 0.12);
-  --slate-gray-15: rgba(148, 163, 184, 0.15);
-  --slate-gray-20: rgba(148, 163, 184, 0.2);
-
-  /* FF navy (10, 22, 40) */
-  --ff-navy-44: rgba(10, 22, 40, 0.44);
-  --ff-navy-60: rgba(10, 22, 40, 0.6);
-
-  /* Blue-400 (96, 165, 250) */
-  --blue-400-8: rgba(96, 165, 250, 0.08);
-  --blue-400-15: rgba(96, 165, 250, 0.15);
-
-  /* OK / green (74, 222, 128) */
-  --ok-8: rgba(74, 222, 128, 0.08);
-  --ok-18: rgba(74, 222, 128, 0.18);
-  --ok-20: rgba(74, 222, 128, 0.2);
-  --ok-48: rgba(74, 222, 128, 0.48);
-
-  /* Accent / crystal blue (71, 184, 255) */
-  --accent-14: rgba(71, 184, 255, 0.14);
-  --accent-18: rgba(71, 184, 255, 0.18);
-
-  /* White overlay — extended */
-  --white-45: rgba(255, 255, 255, 0.45);
-  --white-56: rgba(255, 255, 255, 0.56);
-  --white-68: rgba(255, 255, 255, 0.68);
-  --white-78: rgba(255, 255, 255, 0.78);
-  --white-82: rgba(255, 255, 255, 0.82);
-  --white-90: rgba(255, 255, 255, 0.9);
-
-  /* Warn / yellow (251, 191, 36) */
-  --warn-15: rgba(251, 191, 36, 0.15);
-  --warn-20: rgba(251, 191, 36, 0.2);
-  --warn-28: rgba(251, 191, 36, 0.28);
-  --warn-30: rgba(251, 191, 36, 0.3);
-
-  /* Frost (226, 232, 240) */
-  --frost-72: rgba(226, 232, 240, 0.72);
-
-  /* Border slate (138, 163, 211) */
-  --border-slate-30: rgba(138, 163, 211, 0.3);
-
-  /* Dark panels (15, 23, 42) */
-  --panel-dark-60: rgba(15, 23, 42, 0.6);
-
-  /* Font-size scale */
-  --fs-2xs: 11px;
-  --fs-xs: 12px;
-  --fs-sm: 13px;
-  --fs-base: 14px;
-  --fs-md: 15px;
-  --fs-lg: 16px;
-
-  /* Extended text scale */
-  --text-dim: #a0a8b4;
-  --text-slate: #b0bfd4;
-  --text-slate-light: #cbd5e1;
-
-  /* Extended palette */
-  --cyan: #22d3ee;
-  --purple: #a78bfa;
-  --text-near-white: #f8fafc;
-
-  /* Stacking layers (low -> high) */
-  --z-layout: 1;
-  --z-tab-sticky: 30;
-  --z-header: 40;
-  /* Overlay z-index: fallback values in each component (keeper:3020 agent:3030 trpg:3040 toast:3070 tooltip:3080) */
-}
-
-/* box-sizing/margin/padding reset removed — Tailwind v4 preflight handles this.
-   Unlayered CSS overrides @layer utilities, breaking p-*, m-*, gap-* etc. */
-
-html,
-body {
-  min-height: 100%;
-}
-
-html {
-  overflow-y: scroll;
-  scrollbar-gutter: stable;
-}
-
-body {
-  font-family: "IBM Plex Sans KR", "IBM Plex Sans", "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
-  color: var(--text-body);
-  line-height: 1.5;
-  background:
-    radial-gradient(circle at 88% 14%, rgba(74, 222, 128, 0.10), transparent 20%),
-    linear-gradient(180deg, #06101d 0%, #0b1220 48%, #070d18 100%);
-  background-attachment: fixed;
-  position: relative;
-}
-
-/* Grid overlay removed for readability */
-
-#app {
-  position: relative;
-  min-height: 100vh;
-  z-index: 1;
-}
-
-a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-a:hover {
-  text-decoration: underline;
-}
+/* MASC Dashboard — Utilities and Component Styles
+ * 
+ * Foundation styles are now in separate files:
+ *   - tokens.css: @theme design tokens
+ *   - variables.css: :root CSS custom properties
+ *   - base.css: html, body, #app base styles
+ *   - keyframes.css: all @keyframes animations
+ * 
+ * This file contains:
+ *   - Reusable @utility blocks
+ *   - Component-specific styles (mixed @utility and raw CSS)
+ */
 
 /* ── Card / Section / Headline base styles ─────────────────
    These classes are used across the dashboard but previously had
@@ -822,119 +580,6 @@ tbody tr:hover {
 @media (max-width: 1100px) {
 }
 
-@keyframes fadeSlide {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
-
-@media (max-width: 1200px) {
-}
-@media (max-width: 880px) {
-  :root { --header-h: 86px; }
-  .stats-grid { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); }
-}
-@media (max-width: 768px) {
-}
-
-/* prefers-reduced-motion handled by Tailwind motion-reduce: */
-
-/* ── Status / badges ── */
-/* connection-status/status-dot/event-count/pill/ctx-fill → Tailwind inline */
-
-/* status-dot-inline (dynamic status classes used by StatusBadge) */
-@utility status-dot-inline {
-  &.in_progress, &.running { background: var(--warn); }
-  &.interrupted, &.listening { background: #38bdf8; }
-  &.inactive, &.offline { background: #5f7199; }
-  &.active { background: var(--ok); }
-  &.busy, &.stopped { background: var(--text-slate); }
-  &.error { background: #fb7185; }
-}
-
-/* ── Animations (merged from animations.css) ── */
-/* ── Pixel avatar animations ──────────────────────────── */
-
-@keyframes avatar-bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
-}
-
-@keyframes avatar-vibrate {
-  0% { transform: translateX(0); }
-  25% { transform: translateX(-1px); }
-  50% { transform: translateX(1px); }
-  75% { transform: translateX(-1px); }
-  100% { transform: translateX(0); }
-}
-
-@keyframes avatar-breathe {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.03); opacity: 0.85; }
-}
-
-@keyframes avatar-pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(71, 184, 255, 0); }
-  50% { box-shadow: 0 0 8px 2px rgba(71, 184, 255, 0.3); }
-}
-
-@keyframes avatar-particle {
-  0% { transform: translateY(0) scale(1); opacity: 1; }
-  100% { transform: translateY(-12px) scale(0); opacity: 0; }
-}
-
-/* ── Agent state animations ────────────────────────────── */
-@keyframes workingPulse {
-  0%, 100% { box-shadow: 0 0 0 0 var(--ok-soft); }
-  50% { box-shadow: 0 0 12px 2px var(--ok-25); }
-}
-
-@keyframes warnBlink {
-  0%, 100% { border-color: var(--warn-28); }
-  50% { border-color: rgba(251, 191, 36, 0.50); }
-}
-
-/* ── Component keyframes (consolidated) ──────────────────── */
-@keyframes blocker-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.4); }
-  50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.7); }
-}
-@keyframes orchestraFlow { to { stroke-dashoffset: -40; } }
-@keyframes orchestraPulse {
-  0%, 100% { transform: scale(1); opacity: 0.92; }
-  50% { transform: scale(1.06); opacity: 1; }
-}
-@keyframes livePulse {
-  0%, 100% { box-shadow: 0 0 0 0 var(--ok-25); }
-  50% { box-shadow: 0 0 8px 2px var(--ok-12); }
-}
-@keyframes activityFadeIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes keeper-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-@keyframes pulse-ring {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-@keyframes pipeline-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); }
-  50% { box-shadow: 0 0 6px 2px rgba(96, 165, 250, 0.35); }
-}
-@keyframes pipeline-badge-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-@keyframes keeperPulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--ok-40); }
-  50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(74,222,128,0); }
-}
 
 /* State tone utilities */
 @utility tone-border-ok { border-color: var(--ok-24); }
@@ -1885,7 +1530,7 @@ button.council-row.selected {
 .pipeline-stage-node.active.stage-thinking .pipeline-stage-dot {
   background: rgba(96, 165, 250, 0.7);
   border-color: rgba(96, 165, 250, 0.9);
-  animation: pipeline-pulse 1.5s ease-in-out infinite;
+  animation: pipeline-pulse 2.5s ease-in-out infinite;
 }
 
 .pipeline-stage-node.active.stage-tool_use .pipeline-stage-dot {
@@ -2190,4 +1835,10 @@ button.council-row.selected {
     box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.6);
   }
   .activity-dot--live-pulse { animation: none; }
+  .pulse-working { animation: none; }
+  .pipeline-stage-node.active.stage-thinking .pipeline-stage-dot { animation: none; }
+  .pipeline-stage-badge.stage-thinking { animation: none; }
+  [class*="avatar-pulse-glow"] { animation: none; }
+  [style*="workingPulse"] { animation: none; }
+  [style*="keeperPulse"] { animation: none; }
 }

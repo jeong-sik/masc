@@ -109,13 +109,6 @@ let transport_entries = [
   entry ~default:"false" "MASC_OPENAI_COMPAT" "Enable OpenAI-compatible endpoint";
 ]
 
-let chain_entries = [
-  entry ~default:"gemini" "MASC_CHAIN_JUDGE_MODEL" "Chain evaluator/judge model";
-  entry ~default:"20" "MASC_CHAIN_MAX_DEPTH" "Chain max execution depth";
-  entry ~default:"10" "MASC_CHAIN_MAX_CONCURRENCY" "Chain max concurrent nodes";
-  entry ~default:"(derived)" "MASC_MCP_URL" "MCP endpoint URL for chain";
-]
-
 let inference_entries = [
   entry ~default:"30" "MASC_INFERENCE_TIMEOUT_SEC" "Inference call timeout (seconds)";
   entry ~default:"true" "MASC_INFERENCE_CACHE_ENABLED" "Enable inference result cache";
@@ -132,6 +125,56 @@ let keeper_entries = [
   entry ~default:"300" "MASC_KEEPER_SNAPSHOT_SEC" "Keeper keepalive snapshot interval";
   entry ~default:"false" "MASC_KEEPER_DEBUG" "Enable keeper debug logging";
   entry ~default:"0.10" "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" "Daily deliberation budget (USD)";
+  entry ~default:"5" "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS" "Supervisor max restart attempts";
+  entry ~default:"10.0" "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S" "Supervisor backoff base delay (seconds)";
+  entry ~default:"300.0" "MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S" "Supervisor backoff max delay (seconds)";
+  entry ~default:"0.3" "MASC_KEEPER_SELF_PRESERVATION_RATIO" "Self-preservation eviction ratio";
+  entry ~default:"5" "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES" "Max heartbeat failures before crash";
+  entry ~default:"10" "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES" "Max turn failures before crash";
+]
+
+let keeper_execution_entries = [
+  entry ~default:"0.5" "MASC_KEEPER_COMPACT_RATIO" "Context compaction trigger ratio";
+  entry ~default:"240" "MASC_KEEPER_COMPACT_MAX_MESSAGES" "Max messages before compaction";
+  entry ~default:"0" "MASC_KEEPER_COMPACT_MAX_TOKENS" "Max tokens before compaction (0=disabled)";
+  entry ~default:"0.10" "MASC_KEEPER_COST_GATE_USD" "Per-turn cost gate (USD)";
+  entry ~default:"0.50" "MASC_KEEPER_TOOL_COST_MAX_USD" "Max tool call cost (USD)";
+  entry ~default:"0.4" "MASC_KEEPER_UNIFIED_TEMP" "Unified turn temperature";
+  entry ~default:"2048" "MASC_KEEPER_UNIFIED_MAX_TOKENS" "Unified turn max output tokens";
+  entry ~default:"20" "MASC_KEEPER_UNIFIED_MAX_TURNS" "Unified turn max tool loops";
+  entry ~default:"3" "MASC_KEEPER_MAX_TOOL_ROUNDS" "Max tool loop rounds per turn";
+  entry ~default:"4000" "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS" "Autonomous execution max tokens";
+  entry ~default:"0.55" "MASC_KEEPER_PROACTIVE_TEMP_LOW" "Proactive temperature (low urgency)";
+  entry ~default:"0.75" "MASC_KEEPER_PROACTIVE_TEMP_MID" "Proactive temperature (mid urgency)";
+  entry ~default:"0.9" "MASC_KEEPER_PROACTIVE_TEMP_HIGH" "Proactive temperature (high urgency)";
+  entry ~default:"0.72" "MASC_KEEPER_PROACTIVE_SIMILARITY" "Proactive similarity threshold";
+]
+
+let keeper_guardrail_entries = [
+  entry ~default:"0.86" "MASC_KEEPER_RULE_REFLECT_REPETITION" "Reflection repetition threshold";
+  entry ~default:"0.06" "MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX" "Plan goal alignment max";
+  entry ~default:"0.10" "MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX" "Plan response alignment max";
+  entry ~default:"0.90" "MASC_KEEPER_RULE_GUARDRAIL_REPETITION" "Guardrail repetition threshold";
+  entry ~default:"0.04" "MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX" "Guardrail goal alignment max";
+  entry ~default:"0.08" "MASC_KEEPER_RULE_GUARDRAIL_RESPONSE_ALIGNMENT_MAX" "Guardrail response alignment max";
+  entry ~default:"0.70" "MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN" "Guardrail context minimum";
+]
+
+let autonomy_entries = [
+  entry ~default:"3" "MASC_AUTONOMY_QUIET_START" "Quiet hours start (0-23)";
+  entry ~default:"7" "MASC_AUTONOMY_QUIET_END" "Quiet hours end (0-23)";
+  entry ~default:"12" "MASC_AUTONOMY_MAX_STARVATION_TICKS" "Max agent starvation ticks";
+  entry ~default:"0.7" "MASC_AUTONOMY_THOMPSON_WEIGHT" "Thompson sampling weight";
+  entry ~default:"0.95" "MASC_AUTONOMY_VOTE_DECAY_FACTOR" "Vote decay factor";
+]
+
+let level2_entries = [
+  entry ~default:"0.85" "MASC_DRIFT_THRESHOLD" "Drift detection threshold";
+  entry ~default:"0.4" "MASC_DRIFT_JACCARD_WEIGHT" "Drift Jaccard weight";
+  entry ~default:"0.6" "MASC_DRIFT_COSINE_WEIGHT" "Drift cosine weight";
+  entry ~default:"0.075" "MASC_HEBBIAN_RATE" "Hebbian learning rate";
+  entry ~default:"0.01" "MASC_HEBBIAN_DECAY" "Hebbian decay rate";
+  entry ~default:"100" "MASC_LOCK_WARN_MS" "Lock contention warning threshold (ms)";
 ]
 
 let dashboard_entries = [
@@ -166,9 +209,12 @@ let all_categories () = [
   category "storage" storage_entries;
   category "runtime" runtime_entries;
   category "rate_limiting" rate_limiting_entries;
-  category "chain" chain_entries;
   category "inference" inference_entries;
   category "keeper" keeper_entries;
+  category "keeper_execution" keeper_execution_entries;
+  category "keeper_guardrails" keeper_guardrail_entries;
+  category "autonomy" autonomy_entries;
+  category "level2" level2_entries;
   category "dashboard" dashboard_entries;
 ]
 

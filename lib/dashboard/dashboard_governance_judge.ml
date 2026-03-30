@@ -65,11 +65,12 @@ let option_to_yojson f = function Some value -> f value | None -> `Null
 
 let interval_sec () = Env_config.Dashboard_config.governance_judge_interval_sec
 
-let cache_ttl_sec () = float_of_int (interval_sec () * 2)
+let cache_ttl_sec () =
+  float_of_int (max (interval_sec () * 4) 600)
 
 let enabled () = Env_config.Dashboard_config.governance_judge_enabled
 
-let keeper_name = "operator-judge"
+let keeper_name = "governance-judge"
 
 let get_state base_path =
   with_outer_rw (fun () ->
@@ -149,6 +150,20 @@ let latest_judgments base_path =
   with_lock st (fun () ->
       if Hashtbl.length st.judgments = 0 then st.judgments <- load_latest_from_disk base_path;
       Hashtbl.to_seq_values st.judgments |> List.of_seq)
+
+let fresh_judgments_json ~base_path ~limit =
+  let now = Unix.gettimeofday () in
+  latest_judgments base_path
+  |> List.filter (fun j ->
+    match j |> member "expires_at" |> to_string_option with
+    | Some iso ->
+      (match Dashboard_utils.parse_iso_opt (Some iso) with
+       | Some ts -> ts > now
+       | None -> true)
+    | None -> true)
+  |> List.sort (fun a b ->
+    Float.compare (judgment_generated_at b) (judgment_generated_at a))
+  |> List.filteri (fun i _ -> i < limit)
 
 let runtime_status base_path =
   let st = get_state base_path in
@@ -287,6 +302,7 @@ let compute_judgments
   match
     Oas_worker.run_named_with_masc_tools ~cascade_name:"governance_judge"
       ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
+      ~priority:Llm_provider.Request_priority.Background
       ()
   with
   | Error message -> Error message

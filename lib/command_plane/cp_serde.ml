@@ -90,6 +90,11 @@ let get_string_list json key =
       |> dedup_strings
   | _ -> []
 
+let legacy_chain_run_id json =
+  match U.member "chain" json with
+  | `Assoc _ as chain_json -> get_string_opt chain_json "run_id"
+  | _ -> None
+
 let operation_workload_profile (operation : operation_record) =
   Cp_search_fabric.normalized_workload_profile operation.workload_profile
 
@@ -394,25 +399,6 @@ let unit_of_json json =
           }
 
 let operation_to_json (operation : operation_record) =
-  let chain_json =
-    match operation.chain with
-    | Some chain ->
-        `Assoc
-          [
-            ("kind", `String chain.kind);
-            ("backend", `String chain.backend);
-            ("chain_id", match chain.chain_id with Some value -> `String value | None -> `Null);
-            ("goal", match chain.goal with Some value -> `String value | None -> `Null);
-            ("run_id", match chain.run_id with Some value -> `String value | None -> `Null);
-            ("status", `String chain.status);
-            ("history_event", match chain.history_event with Some value -> value | None -> `Null);
-            ("mermaid", match chain.mermaid with Some value -> `String value | None -> `Null);
-            ("preview_run", match chain.preview_run with Some value -> value | None -> `Null);
-            ("viewer_path", match chain.viewer_path with Some value -> `String value | None -> `Null);
-            ("last_sync_at", match chain.last_sync_at with Some value -> `String value | None -> `Null);
-          ]
-    | None -> `Null
-  in
   `Assoc
     [
       ("operation_id", `String operation.operation_id);
@@ -441,41 +427,15 @@ let operation_to_json (operation : operation_record) =
       ("created_by", `String operation.created_by);
       ("source", `String operation.source);
       ("status", `String (string_of_operation_status operation.status));
-      ("chain", chain_json);
+      ("chain", `Null);
       ("created_at", `String operation.created_at);
       ("updated_at", `String operation.updated_at);
     ]
 
+(* operation_of_json tolerates a legacy "chain" key in stored JSON for
+   backwards compatibility and keeps chain.run_id as a checkpoint_ref
+   fallback without reintroducing chain_record. *)
 let operation_of_json json =
-  let chain_of_json = function
-    | (`Assoc _ as value) -> (
-        match get_string_opt value "kind", get_string_opt value "status" with
-        | Some kind, Some status ->
-            Some
-              {
-                kind;
-                backend = get_string_default value "backend" "legacy";
-                chain_id = get_string_opt value "chain_id";
-                goal = get_string_opt value "goal";
-                run_id = get_string_opt value "run_id";
-                status;
-                history_event =
-                  (match U.member "history_event" value with
-                  | `Null -> None
-                  | `Assoc _ as json -> Some json
-                  | _ -> None);
-                mermaid = get_string_opt value "mermaid";
-                preview_run =
-                  (match U.member "preview_run" value with
-                  | `Null -> None
-                  | `Assoc _ as json -> Some json
-                  | _ -> None);
-                viewer_path = get_string_opt value "viewer_path";
-                last_sync_at = get_string_opt value "last_sync_at";
-              }
-        | _ -> None)
-    | _ -> None
-  in
   match Option.bind (get_string_opt json "status") operation_status_of_string with
   | None -> None
   | Some status ->
@@ -506,16 +466,14 @@ let operation_of_json json =
             search_strategy = get_string_default json "search_strategy" "best_first_v1";
             detachment_session_id = get_string_opt json "detachment_session_id";
             trace_id;
-            checkpoint_ref = get_string_opt json "checkpoint_ref";
+            checkpoint_ref =
+              option_or_else (get_string_opt json "checkpoint_ref") (fun () ->
+                  legacy_chain_run_id json);
             active_goal_ids = get_string_list json "active_goal_ids";
             note = get_string_opt json "note";
             created_by;
             source = get_string_default json "source" "managed";
             status;
-            chain =
-              (match U.member "chain" json with
-              | `Assoc _ as value -> chain_of_json value
-              | _ -> None);
             created_at = get_string_default json "created_at" (Types.now_iso ());
             updated_at = get_string_default json "updated_at" (Types.now_iso ());
           }

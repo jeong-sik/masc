@@ -104,51 +104,32 @@ module Orchestrator = struct
     get_bool ~default:false "MASC_ORCHESTRATOR_ENABLED"
 end
 
-(** {1 Team Session Configuration} *)
+(** {1 Relay Configuration} *)
 
-module TeamSession = struct
-  let model_35b_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_35B" |> trim_opt
-
-  let model_27b_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_27B" |> trim_opt
-
-  let model_9b_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_9B" |> trim_opt
-
-  let router_judge_enabled =
-    get_bool ~default:true "MASC_TEAM_SESSION_ROUTER_JUDGE"
-
-  let router_judge_timeout_sec =
-    max 5 (get_int ~default:15 "MASC_TEAM_SESSION_ROUTER_JUDGE_TIMEOUT_SEC")
-
-  let router_judge_confidence_threshold =
-    let v = get_float ~default:0.72 "MASC_TEAM_SESSION_ROUTER_CONFIDENCE_THRESHOLD" in
-    Float.max 0.0 (Float.min 1.0 v)
-
-  let router_judge_model_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_ROUTER_JUDGE_MODEL" |> trim_opt
+module Relay = struct
+  let target_agent =
+    get_string ~default:"auto" "MASC_RELAY_TARGET_AGENT"
 end
 
-(** {1 Mitosis (Cell Division) Configuration} *)
+(** {1 MDAL Configuration} *)
 
-module Mitosis = struct
-  (** Time-based trigger interval (seconds) *)
-  let trigger_interval_seconds =
-    get_float ~default:300.0 "MASC_MITOSIS_INTERVAL_SEC"
+module Mdal = struct
+  let default_agent =
+    get_string ~default:"auto" "MASC_MDAL_AGENT"
+end
 
-  (** Cooldown between consecutive handoffs (seconds).
-      Prevents rapid repeated handoffs when context_ratio fluctuates near threshold. *)
-  let handoff_cooldown_seconds =
-    get_float ~default:60.0 "MASC_MITOSIS_HANDOFF_COOLDOWN_SEC"
+(** {1 CLI Configuration} *)
 
+module Cli = struct
+  let default_agent =
+    get_string ~default:"auto" "MASC_CLI_AGENT"
 end
 
 (** {1 Spawn Configuration} *)
 
 module Spawn = struct
   (** Default spawn timeout for agent processes (seconds).
-      Used by spawn.ml, spawn_eio.ml, mitosis/mitosis_spawn.ml, and tool_relay.ml.
+      Used by spawn.ml, spawn_eio.ml, and tool_relay.ml.
       Higher value (600s) allows for slow network/API conditions while preventing indefinite hangs. *)
   let timeout_seconds =
     int_of_float (get_float ~default:600.0 "MASC_SPAWN_TIMEOUT_SEC")
@@ -179,6 +160,17 @@ module Local_runtime = struct
       Callers may request less, but never more than this cap. *)
   let max_tokens =
     get_int ~default:32768 "MASC_LLAMA_MAX_TOKENS"
+
+  (** Llama swarm model override (formerly in Chain module). *)
+  let llama_swarm_model_opt () =
+    Sys.getenv_opt "LLAMA_SWARM_MODEL" |> trim_opt
+
+  (** MASC MCP endpoint URL (formerly in Chain module).
+      Defaults to {base_url}/mcp. *)
+  let mcp_url () =
+    match Sys.getenv_opt "MASC_MCP_URL" |> trim_opt with
+    | Some url -> url
+    | None -> Env_config_core.masc_http_base_url () ^ "/mcp"
 end
 
 (** Backward-compatible alias so existing [Env_config.Llama] references
@@ -193,29 +185,6 @@ module Cancellation = struct
     get_float ~default:3600.0 "MASC_CANCELLATION_TOKEN_MAX_AGE_SEC"
 end
 
-(** {1 Neo4j Configuration} *)
-
-module Neo4j = struct
-  (** Bolt connection URI *)
-  let uri =
-    get_string ~default:"bolt://turntable.proxy.rlwy.net:11490" "NEO4J_URI"
-
-  (** HTTP API URI (overrides bolt-to-HTTP conversion when set) *)
-  let http_uri =
-    get_string ~default:"" "NEO4J_HTTP_URI"
-
-  (** Database user *)
-  let user =
-    get_string ~default:"neo4j" "NEO4J_USER"
-
-  (** Require NEO4J_PASSWORD from environment. Returns Error if unset or empty. *)
-  let password_result () : (string, string) result =
-    match Sys.getenv_opt "NEO4J_PASSWORD" with
-    | Some pw when String.trim pw <> "" -> Ok pw
-    | Some _ -> Error "NEO4J_PASSWORD is set but empty"
-    | None -> Error "NEO4J_PASSWORD not set"
-end
-
 (** {1 Voice Bridge Configuration} *)
 
 module Voice = struct
@@ -228,55 +197,12 @@ module Voice = struct
     get_int ~default:8936 "VOICE_MCP_PORT"
 end
 
-(** {1 Network Utilities} *)
-
-module Network = struct
-  (** Check if a host string refers to the local machine.
-      Covers localhost, 127.0.0.0/8 (any 127.x address), and ::1. *)
-  let is_localhost host =
-    host = "localhost"
-    || host = "::1"
-    || String.length host >= 4 && String.sub host 0 4 = "127."
-end
-
 (** {1 Timeout Defaults} *)
 
 module Timeout = struct
   (** gcloud auth token fetch (used by a2a_tools, model_client, keeper_alerting) *)
   let gcloud_auth_sec =
     get_float ~default:15.0 "MASC_TIMEOUT_GCLOUD_AUTH_SEC"
-
-  (** Anthropic / Claude API request timeout *)
-  let anthropic_api_sec =
-    get_int ~default:120 "MASC_TIMEOUT_ANTHROPIC_SEC"
-
-  (** OpenAI-compatible API request timeout *)
-  let openai_compat_api_sec =
-    get_int ~default:60 "MASC_TIMEOUT_OPENAI_COMPAT_SEC"
-
-  (** Grace period added on top of MODEL timeouts for curl/network overhead *)
-  let model_grace_sec =
-    get_float ~default:5.0 "MASC_TIMEOUT_MODEL_GRACE_SEC"
-
-  (** Keeper status check timeout *)
-  let keeper_status_sec =
-    get_float ~default:5.0 "MASC_TIMEOUT_KEEPER_STATUS_SEC"
-end
-
-(** {1 MODEL Generation Defaults} *)
-
-module Inference_defaults = struct
-  (** Default max_tokens for MODEL generation (used by spawn, chain, keeper, etc.) *)
-  let default_max_tokens =
-    get_int ~default:4096 "MASC_INFERENCE_DEFAULT_MAX_TOKENS"
-
-  (** SSE retry interval in milliseconds (client reconnection hint) *)
-  let sse_retry_ms =
-    get_int ~default:3000 "MASC_SSE_RETRY_MS"
-
-  (** Log output truncation length *)
-  let log_truncation_len =
-    get_int ~default:1500 "MASC_LOG_TRUNCATION_LEN"
 end
 
 (** {1 Control Plane Cleanup Configuration} *)
@@ -294,81 +220,6 @@ module Message = struct
       Oldest messages (by filename sort) are deleted when count exceeds this. *)
   let max_count =
     get_int ~default:200 "MASC_MESSAGE_MAX_COUNT"
-end
-
-(** {1 Chain Executor Configuration} *)
-
-module Chain = struct
-  (** Model used for evaluator/judge calls in chain execution. *)
-  let judge_model =
-    get_string ~default:"gemini" "MASC_CHAIN_JUDGE_MODEL"
-
-  (** Security limits for chain execution. *)
-  let max_depth = max 1 (get_int ~default:20 "MASC_CHAIN_MAX_DEPTH")
-  let max_concurrency = max 1 (get_int ~default:10 "MASC_CHAIN_MAX_CONCURRENCY")
-  let max_nodes = max 1 (get_int ~default:100 "MASC_CHAIN_MAX_NODES")
-  let max_fanout = max 1 (get_int ~default:20 "MASC_CHAIN_MAX_FANOUT")
-
-  (** Chain log level (e.g. "debug", "info"). *)
-  let log_level_opt () =
-    Sys.getenv_opt "MASC_CHAIN_LOG_LEVEL" |> trim_opt
-
-  (** Chain log format: "text" or "json". Default: "text". *)
-  let log_format () =
-    match Sys.getenv_opt "MASC_CHAIN_LOG_FORMAT" |> trim_opt with
-    | Some "json" -> "json"
-    | _ -> "text"
-
-  (** Source base path for chain file resolution. *)
-  let source_base_path_opt () =
-    Sys.getenv_opt "MASC_CHAIN_SOURCE_BASE_PATH" |> trim_opt
-
-  (** Orchestrator model for chain design. Default: "gemini:pro". *)
-  let orchestrator_model () =
-    Sys.getenv_opt "MASC_CHAIN_ORCHESTRATOR_MODEL" |> trim_opt
-    |> Option.value ~default:"gemini:pro"
-
-  (** History file path. Canonical env var; CHAIN_HISTORY_FILE as fallback. *)
-  let history_file_opt () =
-    match Sys.getenv_opt "MASC_CHAIN_HISTORY_FILE" |> trim_opt with
-    | Some _ as v -> v
-    | None -> Sys.getenv_opt "CHAIN_HISTORY_FILE" |> trim_opt
-
-  (** Run store path for chain execution logs. *)
-  let run_store_path_opt () =
-    Sys.getenv_opt "MASC_CHAIN_RUN_STORE_PATH" |> trim_opt
-
-  (** Whether chain run logging is enabled. Default: true. *)
-  let run_log_enabled () =
-    match Sys.getenv_opt "MASC_CHAIN_RUN_LOG" |> trim_opt with
-    | Some "0" | Some "false" | Some "no" -> false
-    | _ -> true
-
-  (** Whether chain run log streaming is enabled. Default: false. *)
-  let run_log_stream () =
-    get_bool ~default:false "MASC_CHAIN_RUN_LOG_STREAM"
-
-  (** Chain run log file path override. *)
-  let run_log_path_opt () =
-    Sys.getenv_opt "MASC_CHAIN_RUN_LOG_PATH" |> trim_opt
-
-  (** Checkpoint directory for chain execution. *)
-  let checkpoint_dir_opt () =
-    Sys.getenv_opt "MASC_CHAIN_CHECKPOINT_DIR" |> trim_opt
-
-  (** MASC MCP endpoint URL. Defaults to {base_url}/mcp. *)
-  let mcp_url () =
-    match Sys.getenv_opt "MASC_MCP_URL" |> trim_opt with
-    | Some url -> url
-    | None -> Env_config_core.masc_http_base_url () ^ "/mcp"
-
-  (** Agent name for chain execution. Default: "local-worker". *)
-  let agent_name =
-    get_string ~default:"local-worker" "MASC_AGENT_NAME"
-
-  (** Llama swarm model override. *)
-  let llama_swarm_model_opt () =
-    Sys.getenv_opt "LLAMA_SWARM_MODEL" |> trim_opt
 end
 
 (** {1 Transport Configuration} *)
@@ -414,11 +265,61 @@ module Transport = struct
   (** Whether OpenAI-compatible endpoint is enabled. Default: false. *)
   let openai_compat_enabled = get_bool ~default:false "MASC_OPENAI_COMPAT"
 
+  let _http_auth_strict_registry =
+    get_bool ~default:false "MASC_HTTP_AUTH_STRICT"
+
+  (** Force strict auth for all HTTP endpoints. Default: false. *)
+  let http_auth_strict_env_enabled () =
+    match Sys.getenv_opt "MASC_HTTP_AUTH_STRICT" |> trim_opt with
+    | Some ("1" | "true" | "yes" | "y" | "on") -> true
+    | _ -> false
+
   (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
       Runtime-readable (tests change this via putenv). *)
   let startup_watchdog_sec () =
     let v = get_float ~default:240.0 "MASC_STARTUP_WATCHDOG_SEC" in
     Float.max 30.0 (Float.min 600.0 v)
+end
+
+module TeamSession = struct
+  let model_35b_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_35B" |> trim_opt
+
+  let model_27b_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_27B" |> trim_opt
+
+  let model_9b_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_9B" |> trim_opt
+
+  (** Enable routing judge in team session dispatch. Default: true. *)
+  let router_judge_enabled () =
+    get_bool ~default:true "MASC_TEAM_SESSION_ROUTER_JUDGE"
+
+  let router_judge_timeout_sec () =
+    max 5 (get_int ~default:15 "MASC_TEAM_SESSION_ROUTER_JUDGE_TIMEOUT_SEC")
+
+  let router_judge_confidence_threshold () =
+    let value =
+      get_float ~default:0.72 "MASC_TEAM_SESSION_ROUTER_CONFIDENCE_THRESHOLD"
+    in
+    Float.max 0.0 (Float.min 1.0 value)
+
+  let router_judge_model_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_ROUTER_JUDGE_MODEL" |> trim_opt
+end
+
+module Cdal = struct
+  (** Enable contract-driven proof capture. Default: true. *)
+  let enabled () =
+    get_bool ~default:true "MASC_CDAL_ENABLED"
+
+  (** Enforce contract risk violations. Default: false. *)
+  let risk_enforcement_enabled () =
+    get_bool ~default:false "MASC_CDAL_RISK_ENFORCEMENT"
+
+  (** Aggregate proof bundles across turns. Default: false. *)
+  let proof_aggregation_enabled () =
+    get_bool ~default:false "MASC_CDAL_PROOF_AGGREGATION"
 end
 
 (** {1 Board Configuration} *)
@@ -449,16 +350,6 @@ end
 module Pulse_config = struct
   (** Max consecutive consumer failures before recovery. Default: 3. *)
   let max_consumer_failures = max 1 (get_int ~default:3 "MASC_PULSE_MAX_CONSUMER_FAILURES")
-end
-
-(** {1 Circuit Breaker Configuration} *)
-
-module Circuit = struct
-  (** Failure count threshold before opening circuit. Default: 5. *)
-  let failure_threshold = get_int ~default:5 "MASC_CIRCUIT_THRESHOLD"
-
-  (** Cooldown period after circuit opens (seconds). Default: 300. *)
-  let cooldown_sec = get_float ~default:300.0 "MASC_CIRCUIT_COOLDOWN"
 end
 
 (** {1 Tool Surface Configuration} *)

@@ -177,6 +177,40 @@ let write_manual_proof config session_id verdict =
     ("# proof\n\nverdict: " ^ verdict)
 
 let seed_worker_run_meta config session_id =
+  Lib.Team_session_store.save_worker_run_proof_json config session_id
+    "wr-proof-raw"
+    (`Assoc
+      [
+        ("schema_version", `Int 1);
+        ("run_id", `String "wr-proof-raw");
+        ("contract_id", `String "contract-proof-raw");
+        ("requested_execution_mode", `String "execute");
+        ("effective_execution_mode", `String "draft");
+        ("mode_decision_source", `String "downgraded");
+        ("risk_class", `String "high");
+        ( "provider_snapshot",
+          `Assoc
+            [
+              ("provider_name", `String "openai_compat");
+              ("model_id", `String "qwen3.5-35b-a3b-ud-q8-xl");
+              ("api_version", `Null);
+            ] );
+        ( "capability_snapshot",
+          `Assoc
+            [
+              ("tools", `List [ `String "file_write"; `String "shell_exec" ]);
+              ("mcp_servers", `List []);
+              ("max_turns", `Int 12);
+              ("max_tokens", `Int 4096);
+              ("thinking_enabled", `Bool false);
+            ] );
+        ("tool_trace_refs", `List [ `String "proof-store://wr-proof-raw/tool_traces/trace-1.jsonl" ]);
+        ("raw_evidence_refs", `List [ `String "proof-store://wr-proof-raw/evidence/mode_violations.json" ]);
+        ("checkpoint_ref", `String "proof-store://wr-proof-raw/checkpoint.json");
+        ("result_status", `String "completed");
+        ("started_at", `Float 1.0);
+        ("ended_at", `Float 2.0);
+      ]);
   Lib.Team_session_store.save_worker_run_meta_json config session_id
     "wr-proof-raw"
     (`Assoc
@@ -188,16 +222,32 @@ let seed_worker_run_meta config session_id =
         ("wait_mode", `String "background");
         ("trace_capability", `String "raw");
         ("success", `Bool true);
+        ("cdal_run_id", `String "wr-proof-raw");
+        ("contract_id", `String "contract-proof-raw");
+        ("result_status", `String "completed");
         ("execution_scope", `String "limited_code_change");
         ("requested_worker_class", `String "executor");
         ("requested_worker_size", `String "lg");
         ("resolved_runtime", `String "llama-8085");
         ("resolved_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
         ("routing_reason", `String "explicit_task_profile");
+        ("proof_run_id", `String "proof-run-123");
+        ("proof_status", `String "completed");
+        ("proof_risk_class", `String "medium");
+        ("proof_execution_mode", `String "execute");
+        ("proof_evidence_count", `Int 2);
         ("tool_names", `List [ `String "file_write"; `String "shell_exec" ]);
         ("tool_call_count", `Int 2);
         ("output_preview", `String "Patched calc.py and verification passed.");
         ("validated", `Bool true);
+        ( "proof_path",
+          `String
+            (Lib.Team_session_store.worker_run_proof_path config session_id
+               "wr-proof-raw") );
+        ("proof_present", `Bool true);
+        ("tool_trace_refs", `List [ `String "proof-store://wr-proof-raw/tool_traces/trace-1.jsonl" ]);
+        ("raw_evidence_refs", `List [ `String "proof-store://wr-proof-raw/evidence/mode_violations.json" ]);
+        ("checkpoint_ref", `String "proof-store://wr-proof-raw/checkpoint.json");
         ("final_text", `String "Patched calc.py and verification passed.");
         ("failure_reason", `Null);
         ( "session_conformance",
@@ -288,6 +338,15 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
         (json |> U.member "summary" |> U.member "raw_trace_run_count" |> U.to_int);
       check int "validated worker run count" 1
         (json |> U.member "summary" |> U.member "validated_worker_run_count" |> U.to_int);
+      let worker_proofs = json |> U.member "worker_proof_evidence" |> U.to_list in
+      check int "worker proof evidence count" 1 (List.length worker_proofs);
+      let worker_proof = List.hd worker_proofs in
+      check string "worker proof run id" "wr-proof-raw"
+        (worker_proof |> U.member "cdal_run_id" |> U.to_string);
+      check string "worker proof contract id" "contract-proof-raw"
+        (worker_proof |> U.member "contract_id" |> U.to_string);
+      check bool "worker proof present" true
+        (worker_proof |> U.member "proof_present" |> U.to_bool);
       let worker_runs = json |> U.member "worker_run_evidence" |> U.to_list in
       check int "worker run evidence count" 1 (List.length worker_runs);
       let worker = List.hd worker_runs in
@@ -299,8 +358,44 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
         (worker |> U.member "resolved_runtime" |> U.to_string);
       check string "worker resolved model" "qwen3.5-35b-a3b-ud-q8-xl"
         (worker |> U.member "resolved_model" |> U.to_string);
+      check string "worker result_status" "completed"
+        (worker |> U.member "result_status" |> U.to_string);
+      check string "worker proof run id" "proof-run-123"
+        (worker |> U.member "proof_run_id" |> U.to_string);
+      check string "worker proof status" "completed"
+        (worker |> U.member "proof_status" |> U.to_string);
+      check string "worker proof risk class" "medium"
+        (worker |> U.member "proof_risk_class" |> U.to_string);
+      check string "worker proof execution mode" "execute"
+        (worker |> U.member "proof_execution_mode" |> U.to_string);
+      check int "worker proof evidence count" 2
+        (worker |> U.member "proof_evidence_count" |> U.to_int);
       check string "worker final text" "Patched calc.py and verification passed."
         (worker |> U.member "final_text" |> U.to_string))
+
+let test_team_session_proof_projects_worker_proof_metadata () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      let session_id = "ts-proof-worker-projection" in
+      let session = sample_session (Unix.gettimeofday ()) session_id in
+      seed_session_artifacts ~session:(Some session) config session_id;
+      seed_worker_run_meta config session_id;
+      match Lib.Team_session_report.generate_proof config session with
+      | Error msg -> fail msg
+      | Ok (proof_json, _) ->
+          let integration =
+            proof_json |> U.member "oas_cdal_integration"
+          in
+          check int "worker_proof_count" 1
+            (integration |> U.member "worker_proof_count" |> U.to_int);
+          check bool "proof_projected" true
+            (integration |> U.member "proof_projected" |> U.to_bool))
 
 let test_timeline_json_orders_command_plane_events_by_timestamp () =
   let dir = test_dir () in
@@ -523,6 +618,8 @@ let () =
           test_case "builds collaboration proof projection" `Quick test_dashboard_proof_projection;
           test_case "exposes validated worker run evidence" `Quick
             test_dashboard_proof_exposes_validated_worker_run_evidence;
+          test_case "projects worker proof metadata into session proof" `Quick
+            test_team_session_proof_projects_worker_proof_metadata;
           test_case "orders merged timeline chronologically" `Quick
             test_timeline_json_orders_command_plane_events_by_timestamp;
           test_case "prefers actual activity over stronger persisted proof" `Quick

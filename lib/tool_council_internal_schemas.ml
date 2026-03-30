@@ -151,7 +151,7 @@ let schemas : Types.tool_schema list = [
   };
   {
     name = "masc_route";
-    description = "Route a query to the best-fit agents using MoE-style selection, returning selected agents and estimated cost. \
+    description = "Route a query to the best-fit agents using deterministic heuristic classification and sparse tier selection, returning selected agents and estimated cost. \
 Use when you have a task and need to identify which agents should handle it. \
 Pair with masc_dispatch_assign to actually assign work to the selected agents.";
     input_schema = `Assoc [

@@ -259,8 +259,11 @@ let handle_set_param ctx args =
 (* ================================================================ *)
 
 let handle_route _ctx args =
-  let input = get_string args "input" "" in
-  let decision = Council.Router.route input in
+  let query =
+    let by_schema = get_string args "query" "" in
+    if by_schema <> "" then by_schema else get_string args "input" ""
+  in
+  let decision = Council.Router.route query in
   json_ok (`Assoc [
     ("reason", `String decision.reason);
     ("estimated_cost", `Float decision.estimated_cost);
@@ -273,58 +276,81 @@ let handle_route _ctx args =
       ]) decision.agents));
   ])
 
-let handle_execute ctx args =
-  let topic = get_string args "topic" "" in
-  if topic = "" then json_err "topic is required"
-  else
-    let system_prompt = Prompt_registry.get_prompt "governance.deliberation" in
-    let agent_name = "council-deliberation" in
-    let memory =
-      Memory_oas_bridge.create_memory_full
-        ~agent_name
-        ~config:(room_config_of_ctx ctx)
-        ()
-    in
-    match Oas_worker.run_named
-      ~cascade_name:"governance_judge" ~goal:topic ~system_prompt ~memory ()
-    with
-    | Ok result ->
-      let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
-      json_ok (`Assoc [
-        ("topic", `String topic);
-        ("deliberation", `String (Oas_response.text_of_response result.response));
-        ("turns", `Int result.turns);
-        ("session_id", `String result.session_id);
-        ("runtime", `String "oas");
-      ])
-    | Error e -> json_err (Printf.sprintf "Deliberation failed: %s" e)
+let voting_result_of_args args =
+  let raw =
+    get_string args "result" "majority" |> String.trim |> String.lowercase_ascii
+  in
+  match raw with
+  | "" | "majority" -> Ok (Council.Consensus.Majority 3)
+  | "unanimous" ->
+      Ok (Council.Consensus.Unanimous Council.Consensus.Approve)
+  | "deadlock" -> Ok Council.Consensus.Deadlock
+  | "escalate" -> Ok Council.Consensus.Escalate
+  | value ->
+      Error
+        (Printf.sprintf
+           "invalid result %S (expected unanimous, majority, deadlock, or escalate)"
+           value)
 
-let handle_execute_dry_run ctx args =
+let handle_execute _ctx args =
   let topic = get_string args "topic" "" in
   if topic = "" then json_err "topic is required"
   else
-    let system_prompt = Prompt_registry.get_prompt "governance.dry_run" in
-    let agent_name = "council-dry-run" in
-    let memory =
-      Memory_oas_bridge.create_memory_full
-        ~agent_name
-        ~config:(room_config_of_ctx ctx)
-        ()
-    in
-    match Oas_worker.run_named
-      ~cascade_name:"governance_judge" ~goal:topic ~system_prompt ~memory ()
-    with
+    match voting_result_of_args args with
+    | Error msg -> json_err msg
     | Ok result ->
-      let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
-      json_ok (`Assoc [
-        ("topic", `String topic);
-        ("analysis", `String (Oas_response.text_of_response result.response));
-        ("turns", `Int result.turns);
-        ("session_id", `String result.session_id);
-        ("dry_run", `Bool true);
-        ("runtime", `String "oas");
-      ])
-    | Error e -> json_err (Printf.sprintf "Dry-run analysis failed: %s" e)
+        let preview = Council.ExecutorApi.dry_run ~topic ~result in
+        let outcome = Council.ExecutorApi.execute ~topic ~result in
+        let matched = Option.is_some outcome in
+        let executed =
+          match outcome with
+          | Some exec -> exec.success
+          | None -> false
+        in
+        let output =
+          match outcome with
+          | Some exec when String.trim exec.output <> "" -> exec.output
+          | _ -> preview
+        in
+        let stdout =
+          match outcome with
+          | Some exec when String.trim exec.stdout <> "" -> `String exec.stdout
+          | _ -> `Null
+        in
+        let stderr =
+          match outcome with
+          | Some exec when String.trim exec.stderr <> "" -> `String exec.stderr
+          | _ -> `Null
+        in
+        json_ok
+          (`Assoc
+            [
+              ("topic", `String topic);
+              ("matched", `Bool matched);
+              ("executed", `Bool executed);
+              ("preview", `String preview);
+              ("output", `String output);
+              ("stdout", stdout);
+              ("stderr", stderr);
+              ("runtime", `String "executor");
+            ])
+
+let handle_execute_dry_run _ctx args =
+  let topic = get_string args "topic" "" in
+  if topic = "" then json_err "topic is required"
+  else
+    match voting_result_of_args args with
+    | Error msg -> json_err msg
+    | Ok result ->
+        let analysis = Council.ExecutorApi.dry_run ~topic ~result in
+        json_ok
+          (`Assoc
+            [
+              ("topic", `String topic);
+              ("analysis", `String analysis);
+              ("dry_run", `Bool true);
+              ("runtime", `String "executor");
+            ])
 
 (* ================================================================ *)
 (* Schemas — reuse from legacy Tool_council                          *)

@@ -87,6 +87,24 @@ These matter after the repo-coordination front door is clean.
 - bounded keeper continuity contract plus checkpoint/readiness evidence
 - richer config and runtime visibility for operators
 
+## Security Posture
+
+Historical security audit (SECURITY-AUDIT.md, 2025-02-02, verified 2026-02-17) identified:
+- 2 Critical severity issues: **RESOLVED** (cryptographically unsafe token generation, command injection)
+- 4 High severity issues (fail-open authorization, disabled auth defaults, shell command injection)
+- Multiple Medium/Low severity issues
+
+Current security-sensitive areas requiring attention:
+- Auth defaults for non-loopback binds
+- Token generation for bearer auth
+- Room token validation
+- Shell command construction in worktree operations
+- Path traversal prevention in static asset serving
+
+Security posture remains appropriate for trusted-network, repo-local use. Remote exposure requires explicit auth configuration and hardening.
+
+See `docs/REMOTE-MCP-OPERATOR.md` for remote-safe configuration guidance.
+
 ## Judgment
 
 - **Repo-local multi-agent coordination**: ready to describe and use

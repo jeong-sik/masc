@@ -2,8 +2,8 @@
 
     통합 인터페이스:
     - Debate: 구조화된 토론 (파일 기반)
-    - Consensus: 투표/합의 (메모리 기반)
-    - Router: MoE 스타일 에이전트 라우팅
+    - Consensus: 투표/합의 (파일 영속성 + 메모리 캐시)
+    - Router: 휴리스틱 에이전트 라우팅
     - Balance: 공정성 정책
     - Conversation: 영속적 대화 (파일 + Neo4j)
 
@@ -113,11 +113,11 @@ module RouterApi = struct
   let route ?(max_agents=3) ?(input_tokens=1000) ?(output_tokens=500) query =
     Router.route ~max_agents ~input_tokens ~output_tokens query
 
-  (** Classify a query into categories with confidence *)
+  (** Classify a query into heuristic categories with confidence *)
   let classify query =
     Router.classify_query query
 
-  (** Calculate query complexity score *)
+  (** Calculate heuristic query complexity score *)
   let complexity query =
     Router.calculate_complexity query
 
@@ -245,6 +245,7 @@ let run_cycle ~config ~topic ~initiator ~quorum ~threshold ~notify_fn =
         | Consensus.Quorum_not_met { required; current } -> 
           Printf.sprintf "Quorum not met: %d/%d" current required
         | Consensus.Invalid_threshold t -> Printf.sprintf "Invalid threshold: %f" t
+        | Consensus.Persistence_failed msg -> Printf.sprintf "Persistence failed: %s" msg
       in
       Error (Printf.sprintf "Failed to start vote: %s" msg)
     | Ok session ->

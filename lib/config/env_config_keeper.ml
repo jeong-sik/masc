@@ -1,42 +1,5 @@
 open Env_config_core
 
-module Endpoints = struct
-  let masc_host_result () =
-    match Uri.host (Uri.of_string (masc_http_base_url ())) with
-    | Some host -> Ok host
-    | None -> Error "MASC_HTTP_BASE_URL must include a host"
-
-  (** MASC server host *)
-  let masc_host () =
-    match masc_host_result () with
-    | Ok host -> host
-    | Error msg -> failwith msg
-
-  let masc_port_result () =
-    match Uri.port (Uri.of_string (masc_http_base_url ())) with
-    | Some port -> Ok port
-    | None -> (
-        match Uri.scheme (Uri.of_string (masc_http_base_url ())) with
-        | Some "https" -> Ok 443
-        | Some "http" -> Ok 80
-        | _ -> Error "MASC_HTTP_BASE_URL must include a port or scheme")
-
-  (** MASC server port *)
-  let masc_port () =
-    match masc_port_result () with
-    | Ok port -> port
-    | Error msg -> failwith msg
-
-  let masc_sse_url_result () =
-    Result.map (fun base -> Printf.sprintf "%s/sse" base) (masc_http_base_url_result ())
-
-  (** MASC SSE URL (derived) *)
-  let masc_sse_url () =
-    match masc_sse_url_result () with
-    | Ok url -> url
-    | Error msg -> failwith msg
-end
-
 (** {1 Keeper Bootstrap Configuration} *)
 
 module KeeperBootstrap = struct
@@ -164,6 +127,11 @@ module KeeperSupervisor = struct
   (** Dead tombstone TTL: seconds before Dead entries are cleaned up *)
   let dead_ttl_sec =
     Float.max 60.0 (get_float ~default:3600.0 "MASC_KEEPER_DEAD_TTL_SEC")
+
+  (** Paused keeper file TTL: seconds before stale paused keeper meta files
+      are removed from disk. Default: 86400 (24 hours). *)
+  let paused_cleanup_ttl_sec =
+    Float.max 300.0 (get_float ~default:86400.0 "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
 end
 
 (** {1 Keeper Runtime Configuration} *)

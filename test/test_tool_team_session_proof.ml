@@ -419,6 +419,129 @@ let test_report_and_proof_expose_delivery_contract_and_verdict () =
      with Not_found -> false);
   cleanup_dir base_dir
 
+let test_proof_aggregates_worker_proof_refs () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"aggregate worker proof refs" |> get_session_id
+  in
+  ignore
+    (Team_session_store.update_session config session_id (fun session ->
+         {
+           session with
+           delivery_contract =
+             Some
+               {
+                 Team_session_types.contract_id = "contract-proof-aggregate";
+                 summary = "Aggregate worker proof refs";
+                 acceptance_checks = [ "session proof lists worker proof refs" ];
+                 required_artifacts = [ "proof.json" ];
+                 repair_budget = 1;
+                 generator_roles = [ "implementer" ];
+                 evaluator_role = Some "reviewer";
+                 evaluator_cascade = "cross_verifier";
+                 evidence_refs = [];
+                 updated_by = "tester";
+                 updated_at_iso = Types.now_iso ();
+               };
+           updated_at_iso = Types.now_iso ();
+         }));
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("reason", `String "aggregate-worker-proof-done");
+             ("generate_report", `Bool true);
+           ]));
+  ignore (wait_until_terminal ctx session_id);
+  Team_session_store.save_worker_run_proof_json config session_id "wr-proof-aggregate"
+    (`Assoc
+      [
+        ("schema_version", `Int 1);
+        ("run_id", `String "wr-proof-aggregate");
+        ("contract_id", `String "contract-proof-aggregate");
+        ("requested_execution_mode", `String "execute");
+        ("effective_execution_mode", `String "draft");
+        ("mode_decision_source", `String "downgraded");
+        ("risk_class", `String "high");
+        ( "provider_snapshot",
+          `Assoc
+            [
+              ("provider_name", `String "openai_compat");
+              ("model_id", `String "qwen3.5-35b-a3b-ud-q8-xl");
+              ("api_version", `Null);
+            ] );
+        ( "capability_snapshot",
+          `Assoc
+            [
+              ("tools", `List [ `String "file_write" ]);
+              ("mcp_servers", `List []);
+              ("max_turns", `Int 8);
+              ("max_tokens", `Int 4096);
+              ("thinking_enabled", `Bool false);
+            ] );
+        ("tool_trace_refs", `List [ `String "proof-store://wr-proof-aggregate/tool_traces/trace-1.jsonl" ]);
+        ("raw_evidence_refs", `List [ `String "proof-store://wr-proof-aggregate/evidence/mode_violations.json" ]);
+        ("checkpoint_ref", `String "proof-store://wr-proof-aggregate/checkpoint.json");
+        ("result_status", `String "completed");
+        ("started_at", `Float 1.0);
+        ("ended_at", `Float 2.0);
+      ]);
+  Team_session_store.save_worker_run_meta_json config session_id "wr-proof-aggregate"
+    (`Assoc
+      [
+        ("worker_run_id", `String "wr-proof-aggregate");
+        ("worker_name", `String "worker-proof");
+        ("status", `String "completed");
+        ("mode", `String "swarm");
+        ("wait_mode", `String "background");
+        ("proof_present", `Bool true);
+        ("proof_path", `String (Team_session_store.worker_run_proof_path config session_id "wr-proof-aggregate"));
+        ("cdal_run_id", `String "wr-proof-aggregate");
+        ("contract_id", `String "contract-proof-aggregate");
+        ("result_status", `String "completed");
+        ("tool_trace_refs", `List [ `String "proof-store://wr-proof-aggregate/tool_traces/trace-1.jsonl" ]);
+        ("raw_evidence_refs", `List [ `String "proof-store://wr-proof-aggregate/evidence/mode_violations.json" ]);
+        ("checkpoint_ref", `String "proof-store://wr-proof-aggregate/checkpoint.json");
+        ("ts_iso", `String (Types.now_iso ()));
+      ]);
+  let prove_ok, prove_body =
+    dispatch_exn ctx ~name:"masc_team_session_prove"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("generate_report_if_missing", `Bool true);
+          ])
+  in
+  Alcotest.(check bool) "prove ok" true prove_ok;
+  let proof_json =
+    parse_json_exn prove_body |> result_field |> Yojson.Safe.Util.member "proof"
+  in
+  let worker_proofs =
+    proof_json |> Yojson.Safe.Util.member "worker_proofs"
+    |> Yojson.Safe.Util.to_list
+  in
+  Alcotest.(check int) "worker proof refs count" 1 (List.length worker_proofs);
+  let worker_proof = List.hd worker_proofs in
+  Alcotest.(check string) "worker proof run id" "wr-proof-aggregate"
+    Yojson.Safe.Util.(worker_proof |> member "cdal_run_id" |> to_string);
+  Alcotest.(check string) "worker proof contract id" "contract-proof-aggregate"
+    Yojson.Safe.Util.(worker_proof |> member "contract_id" |> to_string);
+  Alcotest.(check string) "worker proof manifest ref"
+    "proof-store://wr-proof-aggregate/manifest.json"
+    Yojson.Safe.Util.(worker_proof |> member "manifest_ref" |> to_string);
+  cleanup_dir base_dir
+
 let test_bootstrap_grace_suppresses_min_agents_violation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

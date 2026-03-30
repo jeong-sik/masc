@@ -117,11 +117,16 @@ let () =
   register_module_tag ~schemas:Tool_portal.schemas ~tag:Mod_portal;
   register_module_tag ~schemas:Tool_worktree.schemas ~tag:Mod_worktree;
   register_module_tag ~schemas:Tool_auth.schemas ~tag:Mod_auth;
+  register_module_tag ~schemas:Tool_audit.schemas ~tag:Mod_audit;
+  register_module_tag ~schemas:Tool_cost.schemas ~tag:Mod_cost;
+  register_module_tag ~schemas:Tool_encryption.schemas ~tag:Mod_encryption;
+  register_module_tag ~schemas:Tool_schemas_fire_task.schemas ~tag:Mod_fire_task;
   register_module_tag ~schemas:Tool_agent.schemas ~tag:Mod_agent;
   register_module_tag ~schemas:Tool_room.schemas ~tag:Mod_room;
   register_module_tag ~schemas:Tool_agent_timeline.schemas ~tag:Mod_agent_timeline;
   register_module_tag ~schemas:Tool_keeper.schemas ~tag:Mod_keeper;
   register_module_tag ~schemas:Tool_mdal.schemas ~tag:Mod_mdal;
+  register_module_tag ~schemas:Tool_repair_loop.schemas ~tag:Mod_repair_loop;
   register_module_tag ~schemas:Tool_improve_loop.schemas ~tag:Mod_improve_loop;
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
   register_module_tag ~schemas:Tool_research.schemas ~tag:Mod_research;
@@ -134,6 +139,10 @@ let () =
   register_module_tag ~schemas:Tool_handover.schemas ~tag:Mod_handover;
   register_module_tag ~schemas:Tool_hat.schemas ~tag:Mod_hat;
   register_module_tag ~schemas:Tool_cache.schemas ~tag:Mod_cache;
+  register_module_tag ~schemas:Tool_model_catalog.schemas ~tag:Mod_model_catalog;
+  register_module_tag ~schemas:Tool_rate_limit.schemas ~tag:Mod_rate_limit;
+  register_module_tag ~schemas:Tool_run.schemas ~tag:Mod_run;
+  register_module_tag ~schemas:Tool_tempo.schemas ~tag:Mod_tempo;
   register_module_tag ~schemas:Tool_goals.schemas ~tag:Mod_goals;
   register_module_tag ~schemas:Tool_compact.schemas ~tag:Mod_compact;
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
@@ -150,9 +159,16 @@ let () =
      registrations so it fills gaps without overwriting correct mappings. *)
   Tool_tag_init.register_all ();
   mark_tag_registry_initialized ();
-  (* Inject masc_* schemas into keeper bridge for profile-based filtering.
-     Must happen after all schemas are assembled. *)
-  Keeper_exec_tools.inject_masc_schemas Tools.all_schemas_extended;
+  (* Inject masc_* schemas into keeper bridge for tier-based filtering.
+     Uses Config.raw_all_tool_schemas which includes Board/MDAL schemas
+     not present in Tools.all_schemas_extended. *)
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  (* Wire keeper-internal tool call recording to break Config dependency cycle.
+     keeper_exec_tools cannot reference Tool_registry directly. *)
+  Keeper_exec_tools.on_keeper_tool_call :=
+    (fun ~tool_name ~success ~duration_ms ->
+       Tool_registry.record_call_if_known ~source:Keeper_internal
+         ~tool_name ~success ~duration_ms ());
   Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ());
   (* C-4: Register input schema validation pre-hook.
      Validates tool arguments against their declared input_schema
@@ -162,8 +178,6 @@ let () =
 (** {1 execute_tool_eio -- included from Mcp_server_eio_execute} *)
 
 include Mcp_server_eio_execute
-
-let () = Chain_native_eio.set_tool_executor execute_tool_eio
 
 (** {1 Resource Subscription Re-exports} *)
 

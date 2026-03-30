@@ -1,4 +1,4 @@
-//! Lodge Social Board — HTTP fetch + DOM rendering + vote/comment interaction.
+//! Social Board — HTTP fetch + DOM rendering + vote/comment interaction.
 //!
 //! Architecture:
 //! - `OnEnter(Social)`: fires async fetch to `/api/v1/board`
@@ -195,7 +195,7 @@ fn fire_board_fetch(shared: Arc<Mutex<Option<BoardFetchResult>>>) {
     {
         if let Ok(mut buf) = shared.lock() {
             *buf = Some(BoardFetchResult::Error(
-                "Lodge board fetch is only available in wasm viewer mode.".to_string(),
+                "Board fetch is only available in wasm viewer mode.".to_string(),
             ));
         }
     }
@@ -349,7 +349,7 @@ fn render_posts_to_dom(_posts: &[BoardPost], _shared: &Arc<Mutex<Option<BoardFet
 
         if _posts.is_empty() {
             feed.set_inner_html(
-                "<div class=\"social-empty\">No posts yet. Lodge agents will share their thoughts here.</div>"
+                "<div class=\"social-empty\">No posts yet. Agents will share updates here.</div>"
             );
             return;
         }
@@ -431,7 +431,7 @@ fn render_board_error_to_dom(_detail: &str) {
         };
 
         feed.set_inner_html(&format!(
-            "<div class=\"social-error\">Lodge feed unavailable.<br><span class=\"social-error-detail\">{}</span></div>",
+            "<div class=\"social-error\">Board feed unavailable.<br><span class=\"social-error-detail\">{}</span></div>",
             html_escape(_detail)
         ));
     }

@@ -87,11 +87,21 @@ build_dashboard_spa() {
     fi
     dashboard_pm_label="${dashboard_pm[*]}"
 
-    log_file="$(mktemp /tmp/masc-dashboard-build.XXXXXX.log)"
+    local temp_root="${TMPDIR:-/tmp}"
+    temp_root="${temp_root%/}"
+    if [ ! -d "$temp_root" ] || [ ! -w "$temp_root" ]; then
+        temp_root="/tmp"
+    fi
+    if ! log_file="$(TMPDIR="$temp_root" mktemp "$temp_root/masc-dashboard-build.XXXXXX" 2>/dev/null)"; then
+        echo "[dashboard] Unable to create temp log file; falling back to stderr-less logging." >&2
+        log_file="/dev/null"
+    fi
     if [ -d "$dashboard_dir/node_modules" ]; then
         if (cd "$dashboard_dir" && "${dashboard_pm[@]}" run build >"$log_file" 2>&1); then
             tail -n 3 "$log_file" >&2 || true
-            rm -f "$log_file"
+            if [ "$log_file" != "/dev/null" ]; then
+                rm -f "$log_file"
+            fi
             return 0
         fi
         echo "[dashboard] Existing deps build failed, retrying after ${dashboard_pm_label} install..." >&2
@@ -99,12 +109,16 @@ build_dashboard_spa() {
 
     if (cd "$dashboard_dir" && "${dashboard_pm[@]}" install --frozen-lockfile --prefer-offline >"$log_file" 2>&1 && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
         tail -n 6 "$log_file" >&2 || true
-        rm -f "$log_file"
+        if [ "$log_file" != "/dev/null" ]; then
+            rm -f "$log_file"
+        fi
         return 0
     fi
 
     tail -n 20 "$log_file" >&2 || true
-    rm -f "$log_file"
+    if [ "$log_file" != "/dev/null" ]; then
+        rm -f "$log_file"
+    fi
     echo "[dashboard] Build failed (non-fatal, server will show fallback page)." >&2
 }
 
@@ -215,7 +229,7 @@ done
 # Load secrets from the user profile; tracked plist files must not embed them.
 # NOTE: This intentionally sources ~/.zshenv which may set PATH and other vars.
 # For isolated production deploys, use scripts/deploy.sh which loads only
-# repo-local env files (config/lodge.env, .env) to avoid contamination.
+# repo-local env files (config/*.env, .env) to avoid contamination.
 load_env_file "$HOME/.zshenv"
 
 # Load repo-local env for development overrides and secrets kept out of user shell.

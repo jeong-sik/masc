@@ -654,7 +654,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
   let agent_briefs =
     Dashboard_mission_assembly.build_agent_briefs config sessions attention_queue room_json keeper_items
   in
-  let keeper_briefs = Dashboard_mission_assembly.build_keeper_briefs keeper_items in
+  let keeper_briefs = Dashboard_mission_assembly.build_keeper_briefs config keeper_items in
   let internal_signals = Dashboard_mission_assembly.build_internal_signals incidents recommended_actions in
   {
     generated_at = Types.now_iso ();

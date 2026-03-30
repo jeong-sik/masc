@@ -6,6 +6,14 @@ export type FlowState = 'unknown' | 'running' | 'paused'
 export const flowState = signal<FlowState>('unknown')
 export const flowLoading = signal(false)
 
+// Room strategy state
+export const roomStrategy = signal<Record<string, unknown> | null>(null)
+export const roomStrategyLoading = signal(false)
+
+// Maintenance state
+export const maintenanceResult = signal<string | null>(null)
+export const maintenanceLoading = signal(false)
+
 export async function fetchPauseStatus(): Promise<void> {
   try {
     const raw = await callMcpTool('masc_pause_status', {})
@@ -39,4 +47,52 @@ export async function interruptRoom(reason?: string): Promise<void> {
   } catch (err) {
     showToast(`인터럽트 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
   } finally { flowLoading.value = false }
+}
+
+// ── Room Strategy ───────────────────────────────
+
+export async function fetchRoomStrategy(): Promise<void> {
+  roomStrategyLoading.value = true
+  try {
+    const raw = await callMcpTool('masc_room_strategy_get', {})
+    roomStrategy.value = JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    roomStrategy.value = null
+    showToast('룸 전략 조회 실패', 'error')
+  } finally { roomStrategyLoading.value = false }
+}
+
+export async function setRoomStrategy(updates: Record<string, unknown>): Promise<void> {
+  roomStrategyLoading.value = true
+  try {
+    await callMcpTool('masc_room_strategy_set', updates)
+    showToast('룸 전략 업데이트 완료', 'success')
+    await fetchRoomStrategy()
+  } catch (err) {
+    showToast(`룸 전략 저장 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+  } finally { roomStrategyLoading.value = false }
+}
+
+// ── Maintenance ─────────────────────────────────
+
+export async function runGarbageCollection(): Promise<void> {
+  maintenanceLoading.value = true
+  try {
+    const raw = await callMcpTool('masc_gc', {})
+    maintenanceResult.value = raw
+    showToast('GC 완료', 'success')
+  } catch (err) {
+    showToast(`GC 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+  } finally { maintenanceLoading.value = false }
+}
+
+export async function cleanupZombies(): Promise<void> {
+  maintenanceLoading.value = true
+  try {
+    const raw = await callMcpTool('masc_cleanup_zombies', {})
+    maintenanceResult.value = raw
+    showToast('좀비 정리 완료', 'success')
+  } catch (err) {
+    showToast(`좀비 정리 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+  } finally { maintenanceLoading.value = false }
 }

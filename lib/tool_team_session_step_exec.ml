@@ -33,6 +33,47 @@ let latest_delivery_verdict_json_for_session config session_id =
   Option.map Team_session_types.delivery_verdict_to_yojson
     (latest_delivery_verdict_for_session config session_id)
 
+let proof_result_status_to_string = function
+  | Oas.Cdal_proof.Completed -> "completed"
+  | Oas.Cdal_proof.Errored -> "errored"
+  | Oas.Cdal_proof.Timed_out -> "timed_out"
+  | Oas.Cdal_proof.Cancelled -> "cancelled"
+
+let proof_summary_fields ~(worker_run_id : string)
+    ?(proof : Oas.Cdal_proof.t option) () =
+  let null_fields =
+    [
+      ("proof_run_id", `Null);
+      ("proof_status", `Null);
+      ("proof_risk_class", `Null);
+      ("proof_execution_mode", `Null);
+      ("proof_evidence_count", `Null);
+    ]
+  in
+  match proof with
+  | None -> null_fields
+  | Some proof -> (
+      match Repo_synthesis_benchmark.validate_run_id proof.run_id with
+      | Ok run_id ->
+          [
+            ("proof_run_id", `String run_id);
+            ( "proof_status",
+              `String (proof_result_status_to_string proof.result_status) );
+            ( "proof_risk_class",
+              `String (Oas.Risk_class.to_string proof.risk_class) );
+            ( "proof_execution_mode",
+              `String
+                (Oas.Execution_mode.to_string
+                   proof.effective_execution_mode) );
+            ( "proof_evidence_count",
+              `Int (List.length proof.raw_evidence_refs) );
+          ]
+      | Error msg ->
+          Log.Misc.warn
+            "team_session_step: dropping invalid proof_run_id for worker_run=%s: %s"
+            worker_run_id msg;
+          null_fields)
+
 let delivery_verdict_of_verification ~session_id ~worker_run_id
     ~(contract : Team_session_types.delivery_contract)
     (outcome : Worker_verification.verification_outcome) :
@@ -330,6 +371,7 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
     ~status
     ~success ?output_preview ?error ?trace_capability ?trace_ref
     ?trace_summary ?trace_validation ?evidence_session_id
+    ?proof
     () =
   let checkpoint_path =
     Team_session_store.worker_container_checkpoint_path env.ctx.config
@@ -415,6 +457,9 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
         | _ -> output_preview)
     | None -> output_preview
   in
+  let proof_fields =
+    proof_summary_fields ~worker_run_id ?proof ()
+  in
   if Room_utils.path_exists env.ctx.config checkpoint_path then
     Team_session_store.save_worker_run_checkpoint_text env.ctx.config
       env.session_id worker_run_id
@@ -422,7 +467,7 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
   Team_session_store.save_worker_run_meta_json env.ctx.config env.session_id
     worker_run_id
     (`Assoc
-      [
+      ([
         ("worker_run_id", `String worker_run_id);
         ("worker_name", `String worker_name);
         ("mode", `String mode);
@@ -451,7 +496,7 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
         ("stop_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.stop_reason) oas_worker);
         ("failure_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.failure_reason) oas_worker);
         ("ts_iso", `String (Types.now_iso ()));
-      ])
+      ] @ proof_fields))
 
 let release_prepared_runtime (prepared : prepared_spawn) ~success
     ?error ?latency_ms () =

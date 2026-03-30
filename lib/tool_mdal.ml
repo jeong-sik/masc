@@ -20,7 +20,7 @@ let handle_start (ctx : context) args =
             goal;
             target = Safe_ops.json_string ~default:gs "target" args;
             reference = Safe_ops.json_string_opt "reference" args;
-            agent = Safe_ops.json_string ~default:"claude" "agent" args;
+            agent = Safe_ops.json_string ~default:Mdal.default_mdal_agent "agent" args;
             max_iterations = Safe_ops.json_int ~default:20 "max_iterations" args;
             max_time_seconds = Safe_ops.json_float_opt "max_time_seconds" args;
             stagnation_threshold = 0.005;

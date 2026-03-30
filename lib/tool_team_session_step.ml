@@ -149,6 +149,7 @@ let execute_delegate_pipeline
                       ?trace_ref:run_result.raw_trace_run
                       ?trace_summary:trace_summary_json
                       ?trace_validation:trace_validation_json
+                      ?proof:None
                       ~trace_capability:
                         (if Option.is_some run_result.raw_trace_run
                          then "raw"
@@ -222,6 +223,7 @@ let execute_delegate_pipeline
                         (Worker_runtime
                          .oas_worker_evidence_session_id
                            ~worker_run_id)
+                      ?proof:None
                       ~trace_capability:"summary_only" ();
                     append_delegate_event ~worker_run_id
                       ~worker_name ~delegate_prompt

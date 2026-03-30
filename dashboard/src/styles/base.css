@@ -1,0 +1,40 @@
+/* MASC Dashboard — Base HTML Element Styles */
+
+/* box-sizing/margin/padding reset removed — Tailwind v4 preflight handles this.
+   Unlayered CSS overrides @layer utilities, breaking p-*, m-*, gap-* etc. */
+
+html,
+body {
+  min-height: 100%;
+}
+
+html {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+
+body {
+  font-family: "IBM Plex Sans KR", "IBM Plex Sans", "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  color: var(--text-body);
+  line-height: 1.5;
+  background:
+    radial-gradient(circle at 88% 14%, rgba(74, 222, 128, 0.10), transparent 20%),
+    linear-gradient(180deg, #06101d 0%, #0b1220 48%, #070d18 100%);
+  background-attachment: fixed;
+  position: relative;
+}
+
+#app {
+  position: relative;
+  min-height: 100vh;
+  z-index: 1;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}

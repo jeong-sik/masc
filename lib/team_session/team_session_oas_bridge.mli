@@ -46,6 +46,18 @@ val dispatch_supported_tool :
   args:Yojson.Safe.t ->
   bool * string
 
+val run_repair_loop_until_terminal_with :
+  dispatch_tool:(name:string -> args:Yojson.Safe.t -> bool * string) ->
+  Yojson.Safe.t ->
+  bool * string
+
+val run_repair_loop_until_terminal :
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  config:Room.config ->
+  Yojson.Safe.t ->
+  bool * string
+
 val role_of_worker_class :
   Team_session_types.worker_class option -> Swarm.Swarm_types.agent_role
 

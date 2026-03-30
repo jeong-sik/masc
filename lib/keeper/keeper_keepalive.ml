@@ -9,7 +9,8 @@ open Keeper_types
 open Keeper_memory
 open Keeper_execution
 
-let keepalive_interval_sec = Env_config.KeeperKeepalive.interval_sec
+let keepalive_interval_sec () =
+  Runtime_params.get Governance_registry.keeper_keepalive_interval_sec
 
 (* ── Board-reactive policy constants ── *)
 
@@ -106,11 +107,11 @@ let wakeup_relevant_keeper_for_board_signal
       |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
   | [] -> ()
 
-let max_consecutive_heartbeat_failures =
-  Env_config.KeeperKeepalive.max_consecutive_failures
+let max_consecutive_heartbeat_failures () =
+  Runtime_params.get Governance_registry.keeper_max_hb_failures
 
-let max_consecutive_turn_failures =
-  Env_config.KeeperKeepalive.max_consecutive_turn_failures
+let max_consecutive_turn_failures () =
+  Runtime_params.get Governance_registry.keeper_max_turn_failures
 
 (* Per-stage timing accumulator for Phase 0 profiling.
    In-memory ring of last 100 cycles. Flushed as aggregate at snapshot cadence.
@@ -239,7 +240,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                   if synced.joined_room_ids = [] then (
                     incr consecutive_failures;
                     Log.Keeper.warn "room presence returned empty rooms (%d/%d)"
-                      !consecutive_failures max_consecutive_heartbeat_failures)
+                      !consecutive_failures (max_consecutive_heartbeat_failures ()))
                   else (
                     consecutive_failures := 0;
                     last_successful_heartbeat_ts := Time_compat.now ());
@@ -253,12 +254,12 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                 | exn ->
                   incr consecutive_failures;
                   Log.Keeper.error "room heartbeat failed (%d/%d): %s"
-                    !consecutive_failures max_consecutive_heartbeat_failures
+                    !consecutive_failures (max_consecutive_heartbeat_failures ())
                     (Printexc.to_string exn);
                   meta_current
             in
             (* Phase 2: structured exception instead of silent stop *)
-            if !consecutive_failures >= max_consecutive_heartbeat_failures then
+            if !consecutive_failures >= max_consecutive_heartbeat_failures () then
               raise (Keeper_registry.Keeper_heartbeat_failure {
                 reason = Keeper_registry.Heartbeat_consecutive_failures !consecutive_failures;
                 keeper_name = m.name;
@@ -278,10 +279,10 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                  in
                  let base_dir = session_base_dir ctx.config in
                  (* Ensure session directory tree for filesystem fallback (issue #3019) *)
-                 ignore (Keeper_fs.ensure_dir (Filename.concat base_dir meta_current.trace_id));
+                 ignore (Keeper_fs.ensure_dir (Filename.concat base_dir meta_current.runtime.trace_id));
                  let _session, ctx_opt =
                    load_context_from_checkpoint
-                     ~trace_id:meta_current.trace_id
+                     ~trace_id:meta_current.runtime.trace_id
                      ~primary_model_max_tokens:primary_max_context
                      ~base_dir
                  in
@@ -341,9 +342,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                            ("channel", `String "heartbeat");
                            ("name", `String meta_current.name);
                            ("agent_name", `String meta_current.agent_name);
-                           ("trace_id", `String meta_current.trace_id);
-                           ("generation", `Int meta_current.generation);
-                           ("model_used", `String meta_current.usage.last_model_used);
+                           ("trace_id", `String meta_current.runtime.trace_id);
+                           ("generation", `Int meta_current.runtime.generation);
+                           ("model_used", `String meta_current.runtime.usage.last_model_used);
                            ( "usage",
                              `Assoc
                                [
@@ -401,7 +402,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                             [
                               ("type", `String "keeper_heartbeat");
                               ("name", `String meta_current.name);
-                              ("generation", `Int meta_current.generation);
+                              ("generation", `Int meta_current.runtime.generation);
                               ( "context_ratio",
                                 `Float (Keeper_exec_context.context_ratio c) );
                               ("ts_unix", `Float now_ts);
@@ -416,7 +417,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                       | Some bus ->
                           Oas_events.publish_keeper_snapshot bus
                             ~keeper_name:meta_current.name
-                            ~generation:meta_current.generation
+                            ~generation:meta_current.runtime.generation
                             ~context_ratio:(Keeper_exec_context.context_ratio c)
                             ~message_count:(List.length c.messages)
                       | None -> ());
@@ -477,7 +478,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                        Keeper_unified_turn.run_unified_turn
                          ~config:ctx.config ~meta:meta_after_triage
                          ~observation:obs
-                         ~generation:meta_after_triage.generation
+                         ~generation:meta_after_triage.runtime.generation
                      with
                      | Error e ->
                          Log.Keeper.error "unified turn failed: %s" e;
@@ -500,7 +501,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             let turn_fail_count =
               Keeper_registry.get_turn_failures
                 ~base_path:ctx.config.base_path m.name in
-            if turn_fail_count >= max_consecutive_turn_failures then
+            if turn_fail_count >= max_consecutive_turn_failures () then
               raise (Keeper_registry.Keeper_heartbeat_failure {
                 reason = Keeper_registry.Turn_consecutive_failures turn_fail_count;
                 keeper_name = m.name;
@@ -563,7 +564,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                   ~config:smart_hb_config
                   ~last_activity:!last_successful_heartbeat_ts
               else
-                float_of_int keepalive_interval_sec
+                float_of_int (keepalive_interval_sec ())
             in
             (try
                Tool_improve_loop.maybe_tick_from_keepalive ~config:ctx.config
@@ -749,7 +750,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
       match Masc_grpc_transport.from_env (), !grpc_client_ref with
       | Masc_grpc_transport.Grpc, Some client ->
         Log.Keeper.info "keeper %s: starting gRPC heartbeat fiber" m.name;
-        let interval = float_of_int keepalive_interval_sec in
+        let interval = float_of_int (keepalive_interval_sec ()) in
         let session_id =
           Printf.sprintf "keeper-%s-%Ld" m.name
             (Int64.of_float (Time_compat.now () *. 1000.0))

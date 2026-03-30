@@ -196,7 +196,13 @@ let test_scheduled_turn_uses_cooldown_only () =
         { minimal_meta.proactive with
           enabled = true;
           cooldown_sec = 60;
-          last_ts = Time_compat.now () -. 120.0;
+        };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 120.0;
+            };
         };
     }
   in
@@ -211,7 +217,13 @@ let test_scheduled_turn_respects_cooldown () =
         { minimal_meta.proactive with
           enabled = true;
           cooldown_sec = 300;
-          last_ts = Time_compat.now () -. 30.0;
+        };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 30.0;
+            };
         };
     }
   in
@@ -425,13 +437,13 @@ let test_metrics_text_response () =
     UT.update_metrics_from_result minimal_meta ~latency_ms:200
       ~observation:base_observation result
   in
-  check int "total_turns +1" (minimal_meta.usage.total_turns + 1) updated.usage.total_turns;
+  check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns;
   check int "proactive_count +1"
-    (minimal_meta.proactive.count_total + 1) updated.proactive.count_total;
-  check int "no autonomous action" minimal_meta.autonomous_action_count
-    updated.autonomous_action_count;
-  check int "input tokens" (minimal_meta.usage.total_input_tokens + 100) updated.usage.total_input_tokens;
-  check int "output tokens" (minimal_meta.usage.total_output_tokens + 50) updated.usage.total_output_tokens
+    (minimal_meta.runtime.proactive_rt.count_total + 1) updated.runtime.proactive_rt.count_total;
+  check int "no autonomous action" minimal_meta.runtime.autonomous_action_count
+    updated.runtime.autonomous_action_count;
+  check int "input tokens" (minimal_meta.runtime.usage.total_input_tokens + 100) updated.runtime.usage.total_input_tokens;
+  check int "output tokens" (minimal_meta.runtime.usage.total_output_tokens + 50) updated.runtime.usage.total_output_tokens
 
 let test_metrics_tool_response () =
   let result =
@@ -442,11 +454,11 @@ let test_metrics_tool_response () =
     UT.update_metrics_from_result minimal_meta ~latency_ms:500
       ~observation:base_observation result
   in
-  check int "proactive_count +1" (minimal_meta.proactive.count_total + 1)
-    updated.proactive.count_total;
-  check int "autonomous_action +2" (minimal_meta.autonomous_action_count + 2)
-    updated.autonomous_action_count;
-  check int "latency_ms" 500 updated.usage.last_latency_ms
+  check int "proactive_count +1" (minimal_meta.runtime.proactive_rt.count_total + 1)
+    updated.runtime.proactive_rt.count_total;
+  check int "autonomous_action +2" (minimal_meta.runtime.autonomous_action_count + 2)
+    updated.runtime.autonomous_action_count;
+  check int "latency_ms" 500 updated.runtime.usage.last_latency_ms
 
 let test_metrics_noop_response () =
   let result =
@@ -457,29 +469,29 @@ let test_metrics_noop_response () =
     UT.update_metrics_from_result minimal_meta ~latency_ms:100
       ~observation:base_observation result
   in
-  check int "proactive_count unchanged" minimal_meta.proactive.count_total
-    updated.proactive.count_total;
-  check int "autonomous unchanged" minimal_meta.autonomous_action_count
-    updated.autonomous_action_count;
-  check int "total_turns +1" (minimal_meta.usage.total_turns + 1) updated.usage.total_turns
+  check int "proactive_count unchanged" minimal_meta.runtime.proactive_rt.count_total
+    updated.runtime.proactive_rt.count_total;
+  check int "autonomous unchanged" minimal_meta.runtime.autonomous_action_count
+    updated.runtime.autonomous_action_count;
+  check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns
 
 let test_metrics_failure_response () =
   let reason = "Agent run failed: Max turns exceeded (turn 10, limit 10)" in
   let updated =
     UT.update_metrics_from_failure minimal_meta ~latency_ms:250 ~reason
   in
-  check int "total_turns +1" (minimal_meta.usage.total_turns + 1) updated.usage.total_turns;
-  check int "latency recorded" 250 updated.usage.last_latency_ms;
-  check bool "last_turn_ts updated" true (updated.usage.last_turn_ts > 0.0);
-  check int "proactive count unchanged" minimal_meta.proactive.count_total
-    updated.proactive.count_total;
+  check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns;
+  check int "latency recorded" 250 updated.runtime.usage.last_latency_ms;
+  check bool "last_turn_ts updated" true (updated.runtime.usage.last_turn_ts > 0.0);
+  check int "proactive count unchanged" minimal_meta.runtime.proactive_rt.count_total
+    updated.runtime.proactive_rt.count_total;
   check bool "failure reason tagged" true
     (let found =
        try
          ignore
            (Str.search_forward
               (Str.regexp_string "unified:error:")
-              updated.proactive.last_reason 0);
+              updated.runtime.proactive_rt.last_reason 0);
          true
        with Not_found -> false
      in
@@ -490,7 +502,7 @@ let test_metrics_failure_response () =
          ignore
            (Str.search_forward
               (Str.regexp_string "Max turns exceeded")
-              updated.proactive.last_preview 0);
+              updated.runtime.proactive_rt.last_preview 0);
          true
        with Not_found -> false
      in
@@ -523,13 +535,13 @@ let test_metrics_mixed_response () =
     UT.update_metrics_from_result minimal_meta ~latency_ms:300
       ~observation:base_observation result
   in
-  check int "proactive +1" (minimal_meta.proactive.count_total + 1)
-    updated.proactive.count_total;
-  check int "autonomous +1" (minimal_meta.autonomous_action_count + 1)
-    updated.autonomous_action_count;
+  check int "proactive +1" (minimal_meta.runtime.proactive_rt.count_total + 1)
+    updated.runtime.proactive_rt.count_total;
+  check int "autonomous +1" (minimal_meta.runtime.autonomous_action_count + 1)
+    updated.runtime.autonomous_action_count;
   check bool "proactive reason has unified" true
     (let found =
-       try ignore (Str.search_forward (Str.regexp_string "unified:tools=") updated.proactive.last_reason 0); true
+       try ignore (Str.search_forward (Str.regexp_string "unified:tools=") updated.runtime.proactive_rt.last_reason 0); true
        with Not_found -> false
      in found)
 

@@ -1,7 +1,8 @@
-(** MoE-style MODEL Router
+(** Heuristic query router with sparse tier selection.
 
-    Sparse activation: 2-3 agents per query
-    Target: 90% small models, 10% large models *)
+    This module uses deterministic keyword/length heuristics to classify a
+    query and then picks 2-3 agents from a static pool. It is not an
+    LLM-routed MoE system. *)
 
 (** Query classification categories *)
 type query_class =
@@ -15,11 +16,11 @@ type query_class =
 
 (** Model tier for cost management *)
 type model_tier =
-  | Tiny   (** ~$0.10/1M tokens - qwen2.5:0.5b, phi3-mini *)
-  | Small  (** ~$0.25/1M tokens - qwen2.5:7b, llama3.1:8b *)
-  | Medium (** ~$1.00/1M tokens - claude-sonnet, gpt-4o-mini *)
-  | Large  (** ~$5.00/1M tokens - claude-opus, gpt-4o *)
-  | Giant  (** ~$15.00/1M tokens - o1, claude-opus-thinking *)
+  | Tiny   (** Lowest-cost tier *)
+  | Small  (** Low-cost tier *)
+  | Medium (** Mid-cost tier *)
+  | Large  (** High-cost tier *)
+  | Giant  (** Highest-cost tier *)
 [@@deriving show, eq]
 
 (** Agent specification *)
@@ -37,7 +38,7 @@ type route_decision = {
   agents : agent_spec list;
   reason : string;
   estimated_cost : float;
-  complexity_score : float;  (** 0.0-1.0, higher = more complex *)
+  complexity_score : float;  (** Heuristic 0.0-1.0 score *)
 }
 [@@deriving show]
 
@@ -135,7 +136,7 @@ module Features = struct
     ) 0 words
 end
 
-(** Classify a query into categories with confidence scores *)
+(** Classify a query into heuristic categories with confidence scores. *)
 let classify_query (query : string) : (query_class * float) list =
   let len = String.length query in
   let scores = [
@@ -156,7 +157,7 @@ let classify_query (query : string) : (query_class * float) list =
   in
   List.sort (fun (_, a) (_, b) -> compare b a) normalized
 
-(** Calculate complexity score (0.0-1.0) *)
+(** Calculate a heuristic complexity score (0.0-1.0). *)
 let calculate_complexity (query : string) : float =
   let len = String.length query in
   let has_complex = Features.contains_any Features.complex_indicators query in
@@ -172,11 +173,11 @@ let calculate_complexity (query : string) : float =
   let question_bonus = Float.min 0.2 (float_of_int question_count *. 0.1) in
   Float.min 1.0 (base +. complexity_bonus +. question_bonus)
 
-(** Select agents using sparse activation (MoE style)
-    
+(** Select agents using deterministic sparse tier selection.
+
     Strategy:
-    - 90% of queries: 2 small/medium agents
-    - 10% of queries: 1 small + 1 large agent *)
+    - Default to 2 agents
+    - Expand to 3 agents for higher heuristic complexity *)
 let select_agents 
     ?(agents = default_agents) 
     ?(max_agents = 3) 
@@ -233,7 +234,7 @@ let estimate_cost
     acc +. (agent.cost_per_1k *. float_of_int total_tokens /. 1000.0)
   ) 0.0 agents
 
-(** Generate routing reason *)
+(** Generate a user-facing explanation of the heuristic routing result. *)
 let generate_reason (query : string) (agents : agent_spec list) : string =
   let classifications = classify_query query in
   let top_class = match classifications with
@@ -247,7 +248,7 @@ let generate_reason (query : string) (agents : agent_spec list) : string =
     |> List.sort_uniq String.compare
     |> String.concat "/"
   in
-  Printf.sprintf "Query type: %s | Agents: [%s] | Tiers: %s" 
+  Printf.sprintf "Heuristic query class: %s | Agents: [%s] | Tiers: %s"
     top_class agent_names tiers
 
 (** Main routing function *)
@@ -263,7 +264,7 @@ let route
   let reason = generate_reason query selected in
   { agents = selected; reason; estimated_cost = cost; complexity_score = complexity }
 
-(** Statistics: check if we're hitting the 90/10 target *)
+(** Statistics: track the observed routing tier mix. *)
 module Stats = struct
   type routing_stats = {
     mutable total_queries : int;

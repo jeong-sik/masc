@@ -475,10 +475,26 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_heartbeat.dispatch { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args:arguments
     | Mod_auth ->
         Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args:arguments
+    | Mod_audit ->
+        Tool_audit.dispatch { Tool_audit.config } ~name ~args:arguments
+    | Mod_cost ->
+        Tool_cost.dispatch { Tool_cost.agent_name = agent_name } ~name ~args:arguments
+    | Mod_encryption ->
+        Tool_encryption.dispatch { Tool_encryption.state } ~name ~args:arguments
+    | Mod_fire_task ->
+        Tool_fire_task.dispatch { Tool_fire_task.config; agent_name; sw } ~name ~args:arguments
     | Mod_cache ->
         Tool_cache.dispatch { Tool_cache.config } ~name ~args:arguments
     | Mod_hat ->
         Tool_hat.dispatch { Tool_hat.config; agent_name } ~name ~args:arguments
+    | Mod_model_catalog ->
+        Tool_model_catalog.dispatch () ~name ~args:arguments
+    | Mod_rate_limit ->
+        Tool_rate_limit.dispatch { Tool_rate_limit.config; agent_name; registry } ~name ~args:arguments
+    | Mod_run ->
+        Tool_run.dispatch { Tool_run.config } ~name ~args:arguments
+    | Mod_tempo ->
+        Tool_tempo.dispatch { Tool_tempo.config; agent_name } ~name ~args:arguments
     | Mod_goals ->
         Tool_goals.dispatch { Tool_goals.config; agent_name; call_keeper_msg = None } ~name ~args:arguments
     | Mod_compact ->
@@ -517,6 +533,17 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           sw = Some sw; proc_mgr = state.Mcp_server.proc_mgr;
           worker_runner = None; clock = Some clock } in
         Tool_mdal.dispatch ctx ~name ~args:arguments
+    | Mod_repair_loop ->
+        let ctx : _ Tool_repair_loop_types.context =
+          {
+            config;
+            agent_name;
+            sw = Some sw;
+            clock = Some clock;
+            proc_mgr = state.Mcp_server.proc_mgr;
+          }
+        in
+        Tool_repair_loop.dispatch ctx ~name ~args:arguments
     | Mod_autoresearch ->
         let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_
             ~program_note:_ =

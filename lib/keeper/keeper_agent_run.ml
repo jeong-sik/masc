@@ -10,6 +10,17 @@
 
     @since Phase 5 — Keeper Agent.run encapsulation *)
 
+(** Structured prompt result from [build_turn_prompt] callback.
+    [system_prompt] contains hard constraints (identity, policy guards,
+    tool guidance, direct-reply mode) that must stay in the system prompt.
+    [dynamic_context] contains soft context (continuity, skill route,
+    worktree changes, turn instructions) injected via OAS
+    [extra_system_context] — prepended as a User message after reduction. *)
+type turn_prompt = {
+  system_prompt : string;
+  dynamic_context : string;
+}
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result = {
   response_text : string;
@@ -67,7 +78,7 @@ let run_turn
     ~(build_turn_prompt :
         base_system_prompt:string ->
         messages:Agent_sdk.Types.message list ->
-        string)
+        turn_prompt)
     ~(user_message : string)
     ~(cascade_name : string)
     ~(generation : int)
@@ -80,6 +91,7 @@ let run_turn
     ?max_cost_usd
     ?on_event
     ?(trajectory_acc : Trajectory.accumulator option)
+    ?priority
     ()
   : (run_result, string) result =
   (* 0. Resolve inference parameters via Cascade_inference *)
@@ -103,12 +115,12 @@ let run_turn
      exist before any file I/O (checkpoint load, history persist).
      In filesystem fallback mode (PG unavailable), these directories may
      not have been created by keeper_up if it only registered in-memory. *)
-  let session_dir = Filename.concat base_dir meta.trace_id in
+  let session_dir = Filename.concat base_dir meta.runtime.trace_id in
   Keeper_types.mkdir_p session_dir;
   (* 2. Load checkpoint *)
   let (session, ctx_opt) =
     Keeper_exec_context.load_context_from_checkpoint
-      ~trace_id:meta.trace_id
+      ~trace_id:meta.runtime.trace_id
       ~primary_model_max_tokens:max_context
       ~base_dir
   in
@@ -144,8 +156,10 @@ let run_turn
     Keeper_exec_context.set_system_prompt base_ctx
       ~system_prompt:base_system_prompt
   in
-  (* 5. Build final turn system prompt via caller callback *)
-  let turn_system_prompt =
+  (* 5. Build final turn system prompt via caller callback.
+     Hard constraints stay in system_prompt; soft context is injected
+     via OAS extra_system_context (prepended as User message after reduction). *)
+  let { system_prompt = turn_system_prompt; dynamic_context } =
     build_turn_prompt
       ~base_system_prompt
       ~messages:ctx_work.messages
@@ -169,16 +183,38 @@ let run_turn
   let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
-  let hooks = Keeper_hooks_oas.make_hooks
+  let base_hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
     ?trajectory_acc
     () in
+  (* Compose dynamic_context injection via extra_system_context.
+     The before_turn_params hook fires each turn and sets
+     extra_system_context, which OAS prepends as a User message
+     after context reduction (agent_turn.ml:66-75). *)
+  let hooks =
+    if String.trim dynamic_context = "" then base_hooks
+    else
+      let inject_ctx : Agent_sdk.Hooks.hooks = {
+        Agent_sdk.Hooks.empty with
+        before_turn_params = Some (fun event ->
+          match event with
+          | Agent_sdk.Hooks.BeforeTurnParams { current_params; _ } ->
+            let ctx = match current_params.extra_system_context with
+              | None -> dynamic_context
+              | Some existing -> existing ^ "\n\n" ^ dynamic_context
+            in
+            Agent_sdk.Hooks.AdjustParams
+              { current_params with extra_system_context = Some ctx }
+          | _ -> Agent_sdk.Hooks.Continue)
+      } in
+      Agent_sdk.Hooks.compose ~outer:inject_ctx ~inner:base_hooks
+  in
   let base_dir = Filename.concat config.base_path ".masc" in
   let memory =
     Memory_oas_bridge.create_memory_full
       ~agent_name
       ~base_dir
-      ~session_id:meta.trace_id
+      ~session_id:meta.runtime.trace_id
       ~config
       ~episode_limit:30
       ~procedure_limit:10
@@ -193,7 +229,7 @@ let run_turn
   ] in
   (* 8. Run Agent *)
   let contract =
-    if Env_config_core.get_bool ~default:true "MASC_CDAL_ENABLED"
+    if Env_config.Cdal.enabled ()
     then Keeper_cdal_contract.of_keeper_meta meta
     else None
   in
@@ -201,7 +237,7 @@ let run_turn
     Oas_worker.run_named
       ~cascade_name
       ~goal:user_message
-      ~session_id:meta.trace_id
+      ~session_id:meta.runtime.trace_id
       ~system_prompt:turn_system_prompt
       ~tools
       ~initial_messages:history_messages
@@ -216,8 +252,10 @@ let run_turn
       ?on_event
       ~agent_ref
       ?contract
-      ~allowed_paths:meta.allowed_paths
+      ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
       ~working_context:checkpoint_sidecar
+      ~priority:(Option.value priority ~default:Llm_provider.Request_priority.Interactive)
+      ~cache_system_prompt:true
       ()
   with
   | Error e -> Error e
@@ -229,7 +267,7 @@ let run_turn
               checkpoint on the next turn. oas_worker generates a per-turn
               session_id that differs from trace_id, causing a load miss. *)
            let checkpoint =
-             { checkpoint with Agent_sdk.Checkpoint.session_id = meta.trace_id }
+             { checkpoint with Agent_sdk.Checkpoint.session_id = meta.runtime.trace_id }
            in
            Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir
              checkpoint

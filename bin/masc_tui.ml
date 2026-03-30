@@ -247,19 +247,17 @@ let fit_width s width =
   if len >= width then String.sub s 0 (max 0 (width - 1)) ^ (if len > width then "~" else "")
   else s ^ String.make (width - len) ' '
 
-(** Agent icon based on type *)
+(** Agent icon — deterministic by name hash, vendor-agnostic *)
 let agent_icon name =
-  if String.length name >= 6 && String.sub name 0 6 = "claude" then "\xf0\x9f\x9f\xa3"  (* purple circle *)
-  else if String.length name >= 6 && String.sub name 0 6 = "gemini" then "\xf0\x9f\x94\xb5"  (* blue circle *)
-  else if String.length name >= 5 && String.sub name 0 5 = "codex" then "\xf0\x9f\x9f\xa2"  (* green circle *)
-  else "\xf0\x9f\xa4\x96"  (* robot *)
+  let icons = [| "\xf0\x9f\x9f\xa3"; "\xf0\x9f\x94\xb5"; "\xf0\x9f\x9f\xa2"; "\xf0\x9f\x9f\xa1"; "\xf0\x9f\x94\xb4" |] in
+  if String.length name >= 7 && String.sub name 0 7 = "keeper-" then "\xf0\x9f\x9b\xa1"  (* shield for keepers *)
+  else icons.(Hashtbl.hash name mod Array.length icons)
 
-(** Agent color based on type *)
+(** Agent color — deterministic by name hash, vendor-agnostic *)
 let agent_color name =
-  if String.length name >= 6 && String.sub name 0 6 = "claude" then Ansi.magenta
-  else if String.length name >= 6 && String.sub name 0 6 = "gemini" then Ansi.blue
-  else if String.length name >= 5 && String.sub name 0 5 = "codex" then Ansi.green
-  else Ansi.white
+  let colors = [| Ansi.magenta; Ansi.blue; Ansi.green; Ansi.yellow; Ansi.cyan |] in
+  if String.length name >= 7 && String.sub name 0 7 = "keeper-" then Ansi.white
+  else colors.(Hashtbl.hash name mod Array.length colors)
 
 (** Status color *)
 let status_color status =

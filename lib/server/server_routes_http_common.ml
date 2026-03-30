@@ -192,25 +192,6 @@ let command_plane_operation_start_http_json ~state request ~args =
   Server_command_plane_http.command_plane_operation_start_http_json
     ~deps:(command_plane_http_deps ~state ()) ~state request ~args
 
-let command_plane_chain_summary_http_json ~state request =
-  Server_command_plane_http.command_plane_chain_summary_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request
-
-let command_plane_chain_run_http_json ~state request run_id =
-  Server_command_plane_http.command_plane_chain_run_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request run_id
-
-let chain_http_error_status message =
-  Server_command_plane_http.chain_http_error_status message
-
-let command_plane_chain_events_http ~request reqd =
-  Server_command_plane_http.command_plane_chain_events_http
-    ~deps:(command_plane_http_deps ()) ~request reqd
-
-let command_plane_chain_events_h2 ~request h2_reqd =
-  Server_command_plane_http.command_plane_chain_events_h2
-    ~deps:(command_plane_http_deps ()) ~request h2_reqd
-
 let command_plane_operation_checkpoint_http_json ~state request ~args =
   Server_command_plane_http.command_plane_operation_checkpoint_http_json
     ~deps:(command_plane_http_deps ~state ()) ~state request ~args

@@ -138,11 +138,18 @@ let test_keeper_direct_reply_contracts () =
   check bool "operator keeper_message forwards direct reply flag" true
     (file_contains_pattern "lib/operator/operator_control.ml"
        {|("direct_reply", `Bool true)|});
-  (* auto_team_session interception removed in #2908; direct_reply
-     is parsed but unused until a replacement path is wired. *)
   check bool "keeper turn parses direct reply flag" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
-       "get_bool args \"direct_reply\"")
+       "get_bool args \"direct_reply\"");
+  check bool "keeper turn promotes direct replies to reply cascade" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       {|let turn_cascade_name = if direct_reply then "keeper_reply" else "keeper_turn"|});
+  check bool "keeper turn suppresses skill route headers for direct reply" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       "let effective_no_skill_route = no_skill_route || direct_reply");
+  check bool "keeper turn applies direct reply persona prompt" true
+    (file_contains_pattern "lib/keeper/keeper_turn.ml"
+       "Keeper_prompt.append_direct_reply_mode_prompt")
 
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true
@@ -474,12 +481,9 @@ let test_oas_worker_capability_threading_contracts () =
   check bool "oas worker model-by-label accepts threaded net capability" true
     (file_contains_pattern "lib/oas_worker.mli"
        "?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->");
-  check bool "chain native threads runtime net into oas worker" true
-    (file_contains_pattern "lib/chain/chain_native_eio.ml"
-       "?net:runtime.mcp_state.Mcp_server.net");
   check bool "team session bridge threads switch into oas worker" true
     (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
-       "?raw_trace ?contract ~sw ()")
+       "?raw_trace ~proof_ref ?contract ~sw")
 
 let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true
@@ -538,6 +542,23 @@ let test_http_client_fd_safety_contracts () =
     (file_contains_pattern "lib/council/thread_persist.ml"
        "Masc_http_client.make_closing_client")
 
+let test_router_contract_alignment () =
+  check bool "router schema describes heuristic routing" true
+    (file_contains_pattern "lib/tool_council_internal_schemas.ml"
+       "deterministic heuristic classification and sparse tier selection");
+  check bool "router schema no longer claims MoE" true
+    (file_not_contains_pattern "lib/tool_council_internal_schemas.ml"
+       "MoE-style selection");
+  check bool "router handler accepts schema query field" true
+    (file_contains_pattern "lib/tool_council_oas.ml"
+       {|let by_schema = get_string args "query" ""|});
+  check bool "router handler keeps legacy input fallback" true
+    (file_contains_pattern "lib/tool_council_oas.ml"
+       {|else get_string args "input" ""|});
+  check bool "router module declares heuristic implementation" true
+    (file_contains_pattern "lib/council/router.ml"
+       "LLM-routed MoE system.")
+
 let () =
   run "ci_hardening_source"
     [
@@ -578,5 +599,7 @@ let () =
              test_http_client_fd_safety_contracts;
            test_case "room-truth adaptive timeout contracts" `Quick
              test_room_truth_adaptive_timeout_contracts;
+           test_case "router contract alignment" `Quick
+             test_router_contract_alignment;
          ]);
     ]

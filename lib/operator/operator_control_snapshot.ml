@@ -3,7 +3,7 @@ include Operator_pending_confirm
 include Operator_digest
 
 let compute_context_ratio (meta : Keeper_types.keeper_meta) : float option =
-  let input_tokens = meta.usage.last_input_tokens in
+  let input_tokens = meta.runtime.usage.last_input_tokens in
   if input_tokens = 0 then None
   else
     let active_model = Keeper_exec_status.active_model_of_meta meta in
@@ -105,46 +105,40 @@ let recent_messages_json config =
   |> List.map Types.message_to_yojson
   |> fun rows -> `List rows
 
-let latest_keeper_tools_from_metrics config keeper_name =
-  let store = Keeper_types.keeper_metrics_store config keeper_name in
-  let lines =
-    let dated = Dated_jsonl.read_recent_lines store 8 in
-    if dated <> [] then dated
-    else
-      let metrics_path = Keeper_types.keeper_metrics_path config keeper_name in
-      Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:40000 ~max_lines:8
-  in
-  lines
-  |> List.rev
-  |> List.find_map (fun line ->
-         try
-           let json = Yojson.Safe.from_string line in
-           let tools =
-             match Yojson.Safe.Util.member "tools_used" json with
-             | `List items ->
-                 items
-                 |> List.filter_map (function
-                        | `String tool ->
-                            let trimmed = String.trim tool in
-                            if trimmed = "" then None else Some trimmed
-                        | _ -> None)
-             | _ -> []
-           in
-           if tools = [] then None else Some (List.sort_uniq String.compare tools)
-         with Yojson.Json_error _ -> None)
-  |> Option.value ~default:[]
-
 let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
   let fallback_allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let fallback_latest = latest_keeper_tools_from_metrics config meta.name in
-  let fallback_count = None in
-  let fallback_source =
-    if fallback_latest <> [] then Some "keeper_metrics" else None
-  in
-  let fallback_at =
-    let last_autonomous = String.trim meta.last_autonomous_action_at in
-    if last_autonomous <> "" then Some last_autonomous
-    else Some meta.updated_at
+  let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
+  let fallback_snapshot =
+    match
+      Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files config
+        ~keeper_name:meta.name
+    with
+    | Some snapshot ->
+        {
+          snapshot with
+          tool_audit_at =
+            (match snapshot.tool_audit_source, snapshot.tool_audit_at with
+             | Some _, None when last_autonomous <> "" -> Some last_autonomous
+             | Some _, None -> Some meta.updated_at
+             | _ -> snapshot.tool_audit_at);
+        }
+    | None ->
+        let has_runtime_activity =
+          last_autonomous <> ""
+          || meta.runtime.autonomous_turn_count > 0
+          || meta.runtime.autonomous_action_count > 0
+        in
+        {
+          Keeper_exec_status_metrics.empty_tool_audit_snapshot with
+          latest_tool_call_count =
+            (if has_runtime_activity then Some 0 else None);
+          tool_audit_source =
+            (if has_runtime_activity then Some "keeper_runtime_meta" else None);
+          tool_audit_at =
+            (if last_autonomous <> "" then Some last_autonomous
+             else if has_runtime_activity then Some meta.updated_at
+             else None);
+        }
   in
   match A2a_tools.latest_heartbeat_task meta.agent_name,
         A2a_tools.latest_heartbeat_result meta.agent_name with
@@ -170,7 +164,11 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
         Some "heartbeat_result",
         Some result.updated_at )
   | None, None ->
-      (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at)
+      ( fallback_allowed,
+        fallback_snapshot.latest_tool_names,
+        fallback_snapshot.latest_tool_call_count,
+        fallback_snapshot.tool_audit_source,
+        fallback_snapshot.tool_audit_at )
 
 let keepers_json ?keeper_names ?(include_recent_activity = true)
     ?(lightweight = false) config =
@@ -195,7 +193,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = true)
                   ("paused", `Bool true);
                   ("goal", `String meta.goal);
                   ("short_goal", `String meta.short_goal);
-                  ("turn_count", `Int meta.usage.total_turns);
+                  ("turn_count", `Int meta.runtime.usage.total_turns);
                   ("updated_at", `String meta.updated_at);
                   ("created_at", `String meta.created_at);
                 ])
@@ -241,21 +239,21 @@ let keepers_json ?keeper_names ?(include_recent_activity = true)
                   ("pipeline_stage", `String pipeline_stage);
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
-                  ("trace_id", `String meta.trace_id);
+                  ("trace_id", `String meta.runtime.trace_id);
                   ("goal", `String meta.goal);
                   ("short_goal", `String meta.short_goal);
                   ("mid_goal", `String meta.mid_goal);
                   ("long_goal", `String meta.long_goal);
                   ("status", `String agent_status);
                   ("agent", agent_json);
-                  ("generation", `Int meta.generation);
-                  ("turn_count", `Int meta.usage.total_turns);
+                  ("generation", `Int meta.runtime.generation);
+                  ("turn_count", `Int meta.runtime.usage.total_turns);
                   ("context_ratio",
                     (match compute_context_ratio meta with
                      | Some r -> `Float r
                      | None -> `Null));
-                  ("context_tokens", `Int meta.usage.last_total_tokens);
-                  ("last_model_used", `String meta.usage.last_model_used);
+                  ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
+                  ("last_model_used", `String meta.runtime.usage.last_model_used);
                   ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
                   ("keepalive_running", `Bool keepalive_running);
                   ( "next_model_hint",
@@ -265,9 +263,9 @@ let keepers_json ?keeper_names ?(include_recent_activity = true)
                     `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
                   );
                   ( "last_autonomous_action_at",
-                    if String.trim meta.last_autonomous_action_at = "" then `Null
-                    else `String meta.last_autonomous_action_at );
-                  ("autonomous_action_count", `Int meta.autonomous_action_count);
+                    if String.trim meta.runtime.last_autonomous_action_at = "" then `Null
+                    else `String meta.runtime.last_autonomous_action_at );
+                  ("autonomous_action_count", `Int meta.runtime.autonomous_action_count);
                   ("allowed_tool_names", `List (List.map (fun value -> `String value) allowed_tool_names));
                   ("latest_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
                   ("recent_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
@@ -320,26 +318,26 @@ let persistent_agents_json ?keeper_names config =
                   ("runtime_class", `String "keeper");
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
-                  ("trace_id", `String meta.trace_id);
+                  ("trace_id", `String meta.runtime.trace_id);
                   ("goal", `String meta.goal);
                   ("short_goal", `String meta.short_goal);
                   ("mid_goal", `String meta.mid_goal);
                   ("long_goal", `String meta.long_goal);
                   ("status", `String agent_status);
-                  ("generation", `Int meta.generation);
-                  ("turn_count", `Int meta.usage.total_turns);
+                  ("generation", `Int meta.runtime.generation);
+                  ("turn_count", `Int meta.runtime.usage.total_turns);
                   ("context_ratio",
                     (match compute_context_ratio meta with
                      | Some r -> `Float r
                      | None -> `Null));
-                  ("context_tokens", `Int meta.usage.last_total_tokens);
-                  ("last_model_used", `String meta.usage.last_model_used);
+                  ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
+                  ("last_model_used", `String meta.runtime.usage.last_model_used);
                   ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
                   ("next_model_hint", string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta));
                   ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
                   ("last_autonomous_action_at",
-                    if String.trim meta.last_autonomous_action_at = "" then `Null else `String meta.last_autonomous_action_at);
-                  ("autonomous_action_count", `Int meta.autonomous_action_count);
+                    if String.trim meta.runtime.last_autonomous_action_at = "" then `Null else `String meta.runtime.last_autonomous_action_at);
+                  ("autonomous_action_count", `Int meta.runtime.autonomous_action_count);
                   ("updated_at", `String meta.updated_at);
                   ("created_at", `String meta.created_at);
                 ]))

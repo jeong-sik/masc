@@ -506,7 +506,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
                     if not !(info.stop) then drain ()
                   in
                   try drain ()
-                  with Eio.Cancel.Cancelled _ -> ()
+                  with Eio.Cancel.Cancelled _ as e -> raise e
                      | exn ->
                        Log.Server.error "drain loop error: %s"
                          (Printexc.to_string exn));

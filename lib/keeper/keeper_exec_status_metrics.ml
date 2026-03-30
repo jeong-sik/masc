@@ -39,6 +39,13 @@ type metrics_summary = {
   last_compaction : Yojson.Safe.t option;
 }
 
+type tool_audit_snapshot = {
+  latest_tool_names : string list;
+  latest_tool_call_count : int option;
+  tool_audit_source : string option;
+  tool_audit_at : string option;
+}
+
 let empty_metrics_summary =
   {
     sample_points = 0;
@@ -76,6 +83,14 @@ let empty_metrics_summary =
     goal_drift_points = 0;
     last_handoff = None;
     last_compaction = None;
+  }
+
+let empty_tool_audit_snapshot =
+  {
+    latest_tool_names = [];
+    latest_tool_call_count = None;
+    tool_audit_source = None;
+    tool_audit_at = None;
   }
 
 let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
@@ -422,3 +437,109 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
         }
       with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> acc)
     empty_metrics_summary lines
+
+let json_string_list_member key json =
+  match Yojson.Safe.Util.member key json with
+  | `List items ->
+      items
+      |> List.filter_map (function
+             | `String value ->
+                 let trimmed = String.trim value in
+                 if trimmed = "" then None else Some trimmed
+             | _ -> None)
+  | _ -> []
+
+let json_int_opt_member key json =
+  match Yojson.Safe.Util.member key json with
+  | `Int value -> Some value
+  | `Intlit raw -> (try Some (int_of_string raw) with Failure _ -> None)
+  | `Float value -> Some (int_of_float value)
+  | _ -> None
+
+let json_iso_opt json =
+  match Safe_ops.json_string_opt "ts" json with
+  | Some text when String.trim text <> "" -> Some (String.trim text)
+  | _ ->
+      let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" json in
+      if ts_unix > 0.0 then Some (Dashboard_utils.iso_of_unix ts_unix) else None
+
+let read_recent_metrics_lines config keeper_name =
+  let store = Keeper_types.keeper_metrics_store config keeper_name in
+  let dated = Dated_jsonl.read_recent_lines store 8 in
+  if dated <> [] then dated
+  else
+    let metrics_path = Keeper_types.keeper_metrics_path config keeper_name in
+    Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:40000 ~max_lines:8
+
+let latest_tool_audit_snapshot_from_decisions config keeper_name =
+  let path = Keeper_types.keeper_decision_log_path config keeper_name in
+  if not (Sys.file_exists path) then None
+  else
+    Keeper_memory.read_file_tail_lines path ~max_bytes:40000 ~max_lines:12
+    |> List.rev
+    |> List.find_map (fun line ->
+           try
+             let json = Yojson.Safe.from_string line in
+             let tools = json_string_list_member "tools_used" json in
+             let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
+             let tool_call_count =
+               match raw_tool_call_count with
+               | Some _ as value -> value
+               | None -> Some (List.length tools)
+             in
+             let has_decision_shape =
+               Option.is_some (json_iso_opt json)
+               || Option.is_some (Safe_ops.json_string_opt "selected_mode" json)
+               || Option.is_some (Safe_ops.json_string_opt "outcome" json)
+               || tools <> []
+               || Option.is_some raw_tool_call_count
+             in
+             if not has_decision_shape then None
+             else
+               Some
+                 {
+                   latest_tool_names = List.sort_uniq String.compare tools;
+                   latest_tool_call_count = tool_call_count;
+                   tool_audit_source = Some "keeper_decision_log";
+                   tool_audit_at = json_iso_opt json;
+                 }
+           with Yojson.Json_error _ -> None)
+
+let latest_tool_audit_snapshot_from_metrics config keeper_name =
+  read_recent_metrics_lines config keeper_name
+  |> List.rev
+  |> List.find_map (fun line ->
+         try
+           let json = Yojson.Safe.from_string line in
+           let tools =
+             json_string_list_member "tools_used" json
+             |> List.sort_uniq String.compare
+           in
+           let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
+           let tool_call_count =
+             match raw_tool_call_count with
+             | Some _ as value -> value
+             | None -> Some (List.length tools)
+           in
+           let has_metric_shape =
+             Option.is_some (json_iso_opt json)
+             || Option.is_some (Safe_ops.json_string_opt "channel" json)
+             || Option.is_some (Safe_ops.json_string_opt "work_kind" json)
+             || tools <> []
+             || Option.is_some raw_tool_call_count
+           in
+           if not has_metric_shape then None
+           else
+             Some
+               {
+                 latest_tool_names = tools;
+                 latest_tool_call_count = tool_call_count;
+                 tool_audit_source = Some "keeper_metrics";
+                 tool_audit_at = json_iso_opt json;
+               }
+         with Yojson.Json_error _ -> None)
+
+let latest_tool_audit_snapshot_from_files config ~keeper_name =
+  match latest_tool_audit_snapshot_from_decisions config keeper_name with
+  | Some _ as snapshot -> snapshot
+  | None -> latest_tool_audit_snapshot_from_metrics config keeper_name

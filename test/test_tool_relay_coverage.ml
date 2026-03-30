@@ -61,12 +61,20 @@ let run ~sw ~proc_mgr =
     assert (String.contains result '{')
   );
 
-  (* Test handle_relay_status with defaults *)
+  (* Test handle_relay_status with required params *)
   test "handle_relay_status_defaults" (fun () ->
+    let ctx = make_test_ctx ~sw ~proc_mgr () in
+    let args = `Assoc [("messages", `Int 10); ("tool_calls", `Int 5)] in
+    let (success, _result) = Tool_relay.handle_relay_status ctx args in
+    assert success
+  );
+
+  (* Test handle_relay_status rejects missing required params *)
+  test "handle_relay_status_rejects_missing_params" (fun () ->
     let ctx = make_test_ctx ~sw ~proc_mgr () in
     let args = `Assoc [] in
     let (success, _result) = Tool_relay.handle_relay_status ctx args in
-    assert success
+    assert (not success)
   );
 
   (* Test relay_checkpoint dispatch *)
@@ -74,6 +82,8 @@ let run ~sw ~proc_mgr =
     let ctx = make_test_ctx ~sw ~proc_mgr () in
     let args = `Assoc [
       ("summary", `String "Test summary");
+      ("messages", `Int 15);
+      ("tool_calls", `Int 7);
     ] in
     match Tool_relay.dispatch ctx ~name:"masc_relay_checkpoint" ~args with
     | Some (success, _result) -> assert success
@@ -85,6 +95,8 @@ let run ~sw ~proc_mgr =
     let ctx = make_test_ctx ~sw ~proc_mgr () in
     let args = `Assoc [
       ("summary", `String "Completed phase 1");
+      ("messages", `Int 20);
+      ("tool_calls", `Int 10);
       ("current_task", `String "Implementing feature X");
       ("todos", `List [`String "item1"; `String "item2"]);
       ("pdca_state", `String "do");

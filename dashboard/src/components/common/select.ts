@@ -15,9 +15,10 @@ interface SelectProps {
 
 export function Select({ value, options, placeholder, disabled, class: cx, onInput }: SelectProps) {
   const handleChange = (e: Event) => { onInput?.((e.target as HTMLSelectElement).value) }
+  const currentValue = value ?? ''
   return html`
-    <select class="${SELECT_BASE} px-3 py-2 text-[13px] ${cx ?? ''}" value=${value} disabled=${disabled} onChange=${handleChange}>
-      ${placeholder ? html`<option value="" disabled selected>${placeholder}</option>` : null}
+    <select class="${SELECT_BASE} px-3 py-2 text-[13px] ${cx ?? ''}" value=${currentValue} disabled=${disabled} onChange=${handleChange}>
+      ${placeholder ? html`<option value="" disabled hidden>${placeholder}</option>` : null}
       ${options.map(opt => {
         const v = typeof opt === 'string' ? opt : opt.value
         const label = typeof opt === 'string' ? opt : opt.label

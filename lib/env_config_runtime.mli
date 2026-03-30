@@ -1,9 +1,9 @@
 (** MASC Runtime Environment Configuration
 
     Runtime-specific settings: zombies, locks, sessions, tempo, decisions,
-    cache, orchestrator, mitosis, spawn, local runtime, federation,
+    cache, orchestrator, spawn, local runtime, federation,
     cancellation, neo4j, voice, custom model, network, timeouts,
-    inference defaults, control plane cleanup, message GC, chain. *)
+    inference defaults, control plane cleanup, message GC. *)
 
 module Zombie : sig
   val threshold_seconds : float
@@ -52,15 +52,10 @@ module TeamSession : sig
   val model_35b_opt : unit -> string option
   val model_27b_opt : unit -> string option
   val model_9b_opt : unit -> string option
-  val router_judge_enabled : bool
-  val router_judge_timeout_sec : int
-  val router_judge_confidence_threshold : float
+  val router_judge_enabled : unit -> bool
+  val router_judge_timeout_sec : unit -> int
+  val router_judge_confidence_threshold : unit -> float
   val router_judge_model_opt : unit -> string option
-end
-
-module Mitosis : sig
-  val trigger_interval_seconds : float
-  val handoff_cooldown_seconds : float
 end
 
 module Spawn : sig
@@ -73,12 +68,16 @@ module Local_runtime : sig
   val server_url : string
   val default_model : string
   val max_tokens : int
+  val llama_swarm_model_opt : unit -> string option
+  val mcp_url : unit -> string
 end
 
 module Llama : sig
   val server_url : string
   val default_model : string
   val max_tokens : int
+  val llama_swarm_model_opt : unit -> string option
+  val mcp_url : unit -> string
 end
 
 module Cancellation : sig
@@ -123,27 +122,6 @@ module Message : sig
   val max_count : int
 end
 
-module Chain : sig
-  val judge_model : string
-  val max_depth : int
-  val max_concurrency : int
-  val max_nodes : int
-  val max_fanout : int
-  val log_level_opt : unit -> string option
-  val log_format : unit -> string
-  val source_base_path_opt : unit -> string option
-  val orchestrator_model : unit -> string
-  val history_file_opt : unit -> string option
-  val run_store_path_opt : unit -> string option
-  val run_log_enabled : unit -> bool
-  val run_log_stream : unit -> bool
-  val run_log_path_opt : unit -> string option
-  val checkpoint_dir_opt : unit -> string option
-  val mcp_url : unit -> string
-  val agent_name : string
-  val llama_swarm_model_opt : unit -> string option
-end
-
 module Transport : sig
   val grpc_port : int
   val grpc_enabled : unit -> bool
@@ -154,7 +132,14 @@ module Transport : sig
   val use_h2 : unit -> string
   val agent_transport_opt : unit -> string option
   val openai_compat_enabled : bool
+  val http_auth_strict_env_enabled : unit -> bool
   val startup_watchdog_sec : unit -> float
+end
+
+module Cdal : sig
+  val enabled : unit -> bool
+  val risk_enforcement_enabled : unit -> bool
+  val proof_aggregation_enabled : unit -> bool
 end
 
 module Board : sig

@@ -49,21 +49,21 @@ let default_mappings : action_mapping list = [
   (* PR merge pattern - PCRE syntax *)
   {
     pattern = "merge pr #?([0-9]+)";
-    action = GitHubAction (MergePR 0);  (* 0 = placeholder, extracted from match *)
+    action = GitHubAction (MergePR 0);  (* placeholder: actual PR# extracted at execution time *)
     requires_unanimous = false;
     min_threshold = 0.6;
   };
   (* PR close pattern *)
   {
     pattern = "close pr #?([0-9]+)";
-    action = GitHubAction (ClosePR 0);
+    action = GitHubAction (ClosePR 0);  (* placeholder: actual PR# extracted at execution time *)
     requires_unanimous = false;
     min_threshold = 0.5;
   };
   (* Deploy pattern *)
   {
     pattern = "deploy (v?[0-9.]+)";
-    action = ExecCommand ["echo"; "Deploy placeholder"];
+    action = ExecCommand ["echo"; "Deploy placeholder"];  (* stub: blocked at execution time *)
     requires_unanimous = true;
     min_threshold = 1.0;
   };
@@ -115,36 +115,40 @@ let combine_output ~stdout ~stderr =
 
 let execute_argv argv =
   let timestamp () = Time_compat.now () in
-  match argv with
-  | [] ->
-      { success = false;
-        stdout = "";
-        stderr = "Empty argv";
-        output = "Empty argv";
-        timestamp = timestamp () }
-  | prog :: _ ->
-      try
-        let stdout_ic, stdin_oc, stderr_ic =
-          Unix.open_process_args_full prog (Array.of_list argv) (Unix.environment ())
-        in
-        (* NOTE: We intentionally never write to stdin. Most commands we execute
-           (e.g. gh) do not read stdin; leaving it open avoids double-closing
-           issues with [close_process_full]. *)
-        let stdout = (try read_all_from_ic stdout_ic with Sys_error _ -> "") in
-        let stderr = (try read_all_from_ic stderr_ic with Sys_error _ -> "") in
-        let status = Unix.close_process_full (stdout_ic, stdin_oc, stderr_ic) in
-        let success = match status with Unix.WEXITED 0 -> true | _ -> false in
-        let output = combine_output ~stdout ~stderr in
-        { success; stdout; stderr; output; timestamp = timestamp () }
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e ->
-        let err = Printexc.to_string e in
+  let do_exec () =
+    match argv with
+    | [] ->
         { success = false;
           stdout = "";
-          stderr = err;
-          output = err;
+          stderr = "Empty argv";
+          output = "Empty argv";
           timestamp = timestamp () }
+    | prog :: _ ->
+        try
+          let stdout_ic, stdin_oc, stderr_ic =
+            Unix.open_process_args_full prog (Array.of_list argv) (Unix.environment ())
+          in
+          (* NOTE: We intentionally never write to stdin. Most commands we execute
+             (e.g. gh) do not read stdin; leaving it open avoids double-closing
+             issues with [close_process_full]. *)
+          let stdout = (try read_all_from_ic stdout_ic with Sys_error _ -> "") in
+          let stderr = (try read_all_from_ic stderr_ic with Sys_error _ -> "") in
+          let status = Unix.close_process_full (stdout_ic, stdin_oc, stderr_ic) in
+          let success = match status with Unix.WEXITED 0 -> true | _ -> false in
+          let output = combine_output ~stdout ~stderr in
+          { success; stdout; stderr; output; timestamp = timestamp () }
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | e ->
+          let err = Printexc.to_string e in
+          { success = false;
+            stdout = "";
+            stderr = err;
+            output = err;
+            timestamp = timestamp () }
+  in
+  (* Offload blocking I/O to system thread to avoid blocking Eio scheduler *)
+  Eio_guard.run_in_systhread do_exec
 
 let github_argv action =
   match action with
@@ -264,15 +268,33 @@ let execute_decision ~topic ~result : exec_result option =
       let action = match mapping.action with
         | GitHubAction (MergePR _) ->
           (match extract_number topic with
-           | Some n -> GitHubAction (MergePR n)
-           | None -> mapping.action)
+           | Some n -> Ok (GitHubAction (MergePR n))
+           | None ->
+             Error (Printf.sprintf
+               "Council: cannot extract PR number from topic %S — \
+                MergePR requires a valid PR number" topic))
         | GitHubAction (ClosePR _) ->
           (match extract_number topic with
-           | Some n -> GitHubAction (ClosePR n)
-           | None -> mapping.action)
-        | other -> other
+           | Some n -> Ok (GitHubAction (ClosePR n))
+           | None ->
+             Error (Printf.sprintf
+               "Council: cannot extract PR number from topic %S — \
+                ClosePR requires a valid PR number" topic))
+        | ExecCommand ["echo"; "Deploy placeholder"] ->
+          Error (Printf.sprintf
+            "Council: deploy action not implemented for topic %S — \
+             requires deployment pipeline integration" topic)
+        | other -> Ok other
       in
-      Some (execute_action action)
+      (match action with
+       | Ok a -> Some (execute_action a)
+       | Error msg ->
+         Log.Misc.error "Executor: %s" msg;
+         Some { success = false;
+                stdout = "";
+                stderr = msg;
+                output = msg;
+                timestamp = Time_compat.now () })
     end else begin
       Log.Misc.info "Executor: threshold not met for: %s" topic;
       None

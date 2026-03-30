@@ -15,23 +15,6 @@ let sdk_owned_methods =
 let handles_method method_ =
   List.mem method_ sdk_owned_methods
 
-let strip_logging_capability = function
-  | `Assoc fields as json -> (
-      match List.assoc_opt "result" fields with
-      | Some (`Assoc result_fields) -> (
-          match List.assoc_opt "capabilities" result_fields with
-          | Some (`Assoc caps) ->
-              let caps = List.remove_assoc "logging" caps in
-              let result_fields =
-                ("capabilities", `Assoc caps)
-                :: List.remove_assoc "capabilities" result_fields
-              in
-              `Assoc
-                (("result", `Assoc result_fields) :: List.remove_assoc "result" fields)
-          | _ -> json)
-      | _ -> json)
-  | json -> json
-
 let instructions_for_profile = function
   | Full -> TP.default_instructions
   | Managed_agent -> TP.managed_agent_instructions
@@ -59,7 +42,15 @@ let make_context ?mcp_session_id () : Handler.context =
     | None -> ());
     Ok ()
   in
-  let send_log _level _message = Ok () in
+  let send_log (level : MP.Logging.log_level) message =
+    let params =
+      `Assoc [
+        ("level", `String (MP.Logging.log_level_to_string level));
+        ("data", `String message);
+      ]
+    in
+    send_notification ~method_:"notifications/message" ~params:(Some params)
+  in
   let send_progress ~token ~progress ~message ~total =
     let params =
       MP.Mcp_result.progress_to_yojson

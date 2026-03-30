@@ -103,10 +103,12 @@ let update_entry ~base_path name f =
 let max_crash_log_entries = 5
 
 let register ~base_path name meta =
+  Log.Keeper.info "registry: registering keeper name=%s base_path=%s" name base_path;
   let done_p, done_r = Eio.Promise.create () in
   let key = registry_key ~base_path name in
   (match StringMap.find_opt key !registry with
    | Some entry when entry.state = Running ->
+       Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
        Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
    | _ -> ());
   let entry = {
@@ -134,18 +136,31 @@ let register ~base_path name meta =
   } in
   put_entry key entry;
   Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1);
+  Log.Keeper.debug "registry: keeper registered name=%s running_count=%d"
+    name (Atomic.get running_count_atomic);
   entry
 
 let unregister ~base_path name =
+  Log.Keeper.info "registry: unregistering keeper name=%s base_path=%s" name base_path;
   let key = registry_key ~base_path name in
   (match StringMap.find_opt key !registry with
    | Some entry when entry.state = Running ->
-       Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
-   | _ -> ());
+       Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1));
+       Log.Keeper.debug "registry: unregistered running keeper name=%s running_count=%d"
+         name (Atomic.get running_count_atomic)
+   | Some entry ->
+       Log.Keeper.debug "registry: unregistered non-running keeper name=%s state=%s"
+         name (state_to_string entry.state)
+   | None ->
+       Log.Keeper.warn "registry: attempted to unregister non-existent keeper name=%s" name);
   registry := StringMap.remove key !registry
 
 let get ~base_path name =
-  StringMap.find_opt (registry_key ~base_path name) !registry
+  let result = StringMap.find_opt (registry_key ~base_path name) !registry in
+  (match result with
+   | None -> Log.Keeper.debug "registry: lookup miss name=%s base_path=%s" name base_path
+   | Some _ -> ());
+  result
 
 let get_exn ~base_path name =
   match get ~base_path name with
@@ -172,8 +187,12 @@ let set_state ~base_path name state =
   match StringMap.find_opt key !registry with
   | Some entry ->
       (* Dead is terminal — only unregister can remove a Dead entry *)
-      if entry.state = Dead && state <> Dead then ()
+      if entry.state = Dead && state <> Dead then
+        Log.Keeper.warn "registry: attempted state change on Dead keeper name=%s new_state=%s"
+          name (state_to_string state)
       else if entry.state <> state then begin
+        Log.Keeper.info "registry: state transition name=%s old=%s new=%s"
+          name (state_to_string entry.state) (state_to_string state);
         (match (entry.state, state) with
          | Running, (Paused | Stopped | Crashed | Dead) ->
              Atomic.set running_count_atomic
@@ -190,9 +209,11 @@ let set_state ~base_path name state =
         in
         put_entry key { entry with state; dead_since_ts }
       end
-  | None -> ()
+  | None ->
+      Log.Keeper.warn "registry: set_state on non-existent keeper name=%s" name
 
 let mark_dead ~base_path name ~at =
+  Log.Keeper.error "registry: marking keeper dead name=%s at=%.0f" name at;
   update_entry ~base_path name (fun entry ->
     if entry.state <> Dead then begin
       (match entry.state with
@@ -205,11 +226,13 @@ let mark_dead ~base_path name ~at =
       { entry with dead_since_ts = Some (Option.value ~default:at entry.dead_since_ts) })
 
 let record_restart ~base_path name =
+  Log.Keeper.warn "registry: recording restart name=%s" name;
   update_entry ~base_path name (fun e ->
     { e with restart_count = e.restart_count + 1;
              last_restart_ts = Time_compat.now () })
 
 let record_error ~base_path name err =
+  Log.Keeper.error "registry: recording error name=%s error=%s" name err;
   update_entry ~base_path name (fun e -> { e with last_error = Some err })
 
 let set_failure_reason ~base_path name reason =
@@ -249,6 +272,7 @@ let count_running ?base_path () =
         !registry 0
 
 let record_crash ~base_path name ts msg =
+  Log.Keeper.error "registry: recording crash name=%s msg=%s" name msg;
   update_entry ~base_path name (fun e ->
     { e with crash_log =
         List.filteri (fun i _ -> i < max_crash_log_entries)
@@ -291,7 +315,7 @@ let fiber_health_of ~base_path name =
         | None -> Fiber_alive
         | Some `Stopped -> Fiber_unknown
         | Some (`Crashed _) ->
-            let max_restarts = Env_config.KeeperSupervisor.max_restarts in
+            let max_restarts = Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
             if entry.restart_count >= max_restarts
             then Fiber_dead
             else Fiber_zombie
@@ -465,27 +489,23 @@ let restore_tool_usage ~base_path name =
            | _ -> []
          in
          List.iter (fun item ->
-           try
-             match item with
-             | `Assoc fields ->
-               let str key = match List.assoc_opt key fields with
-                 | Some (`String s) -> s | _ -> raise Exit in
-               let int key = match List.assoc_opt key fields with
-                 | Some (`Int n) -> n | _ -> raise Exit in
-               let float key = match List.assoc_opt key fields with
-                 | Some (`Float f) -> f
-                 | Some (`Int n) -> Float.of_int n
-                 | _ -> raise Exit in
-               let tool_name = str "tool" in
-               let e = {
-                 count = int "count";
-                 successes = int "successes";
-                 failures = int "failures";
-                 last_used_at = float "last_used_at";
-               } in
-               Hashtbl.replace entry.tool_usage tool_name e
-             | _ -> ()
-           with Exit -> ()
+           match
+             ( Safe_ops.json_string_opt "tool" item,
+               Safe_ops.json_int_opt "count" item,
+               Safe_ops.json_int_opt "successes" item,
+               Safe_ops.json_int_opt "failures" item,
+               Safe_ops.json_float_opt "last_used_at" item )
+           with
+           | Some tool_name, Some count, Some successes, Some failures, Some last_used_at
+             when tool_name <> "" ->
+             let e = {
+               count;
+               successes;
+               failures;
+               last_used_at;
+             } in
+             Hashtbl.replace entry.tool_usage tool_name e
+           | _ -> ()
          ) tools
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

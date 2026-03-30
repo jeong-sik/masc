@@ -11,8 +11,11 @@ import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { keeperIdentityHint } from './common/keeper-identity'
 import { AgentJournalStream } from './agent-detail-journal'
+import { AgentSessionReport } from './agent-detail-session-report'
 import { AgentTimelineSection } from './agent-detail-timeline'
 import { AgentWorkerBrief } from './agent-detail-worker'
+import { CollapsibleSection } from './common/collapsible'
+import { SessionTraceView } from './session-trace/session-trace-view'
 import {
   selectedAgentName,
   loading,
@@ -30,6 +33,7 @@ import {
   refreshAgentDetail,
   submitMention,
   setKeeperRedirect,
+  agentFitness,
   type TaskHistoryRow,
 } from './agent-detail-state'
 import { openKeeperDetail } from './keeper-detail'
@@ -186,6 +190,12 @@ export function AgentDetailOverlay() {
 
         ${detailError.value ? html`<div class="p-4 mb-4 text-bad border border-bad/30 rounded-xl bg-bad/10 shadow-sm font-medium text-sm">${detailError.value}</div>` : null}
 
+        <${AgentSessionReport} agentName=${agentName} />
+
+        <${CollapsibleSection} title="활동 추적" class="mb-5" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">GitHub Agents 스타일</span>`}>
+          <${SessionTraceView} agentName=${agentName} isKeeper=${!!keeper} />
+        <//>
+
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
           <${Card} title="할당된 작업">
             ${ownedTasks.length === 0
@@ -204,6 +214,24 @@ export function AgentDetailOverlay() {
           <${AgentJournalStream} agentName=${agentName} />
           <${AgentTimelineSection} />
           <${AgentWorkerBrief} agentName=${agentName} />
+          ${agentFitness.value ? html`
+            <${Card} title="적합도 (7일)">
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                ${[
+                  ['완료율', agentFitness.value.completion_rate],
+                  ['신뢰도', agentFitness.value.reliability_score],
+                  ['속도', agentFitness.value.speed_score],
+                  ['종합', agentFitness.value.overall_fitness],
+                ].map(([label, val]) => html`
+                  <div class="rounded-xl border border-card-border/50 bg-card/30 p-3 text-center">
+                    <div class="text-[10px] font-semibold uppercase tracking-wider text-text-muted mb-1">${label}</div>
+                    <div class="text-lg font-bold ${(val as number) >= 0.7 ? 'text-ok' : (val as number) >= 0.4 ? 'text-[#fbbf24]' : 'text-bad'}">${val != null ? ((val as number) * 100).toFixed(0) + '%' : '-'}</div>
+                  </div>
+                `)}
+              </div>
+            <//>
+          ` : null}
+
           <${Card} title="작업 이력">
             ${taskHistories.value.length === 0
               ? html`<${EmptyState} message="작업 이력이 없습니다" compact />`

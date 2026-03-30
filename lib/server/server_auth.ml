@@ -8,13 +8,6 @@ let trim_opt = function
       let value = String.trim raw in
       if value = "" then None else Some value
 
-let env_flag_enabled name =
-  match Sys.getenv_opt name with
-  | None -> false
-  | Some raw ->
-      let v = String.trim raw |> String.lowercase_ascii in
-      v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
-
 let configured_bind_host () =
   Env_config_core.masc_host ()
 
@@ -52,7 +45,7 @@ let base_url_has_non_loopback_host () =
       | Some host -> not (is_loopback_host host))
 
 let http_auth_strict_enabled () =
-  env_flag_enabled "MASC_HTTP_AUTH_STRICT"
+  Env_config.Transport.http_auth_strict_env_enabled ()
   || not (is_loopback_host (configured_bind_host ()))
   || base_url_has_non_loopback_host ()
 

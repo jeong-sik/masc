@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useRef } from 'preact/hooks'
 import { currentDashboardActor, runOperatorAction } from '../api'
+import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
@@ -33,6 +34,8 @@ import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
 import { KeeperTrajectoryTimeline } from './keeper-trajectory-timeline'
 import { DialogOverlay } from './common/dialog'
+import { CollapsibleSection } from './common/collapsible'
+import { SessionTraceView } from './session-trace/session-trace-view'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -146,6 +149,72 @@ function SectionCard({ title, children }: { title: string; children: preact.Comp
   `
 }
 
+// ── Supervisor Diagnostics Panel ────────────────────────
+
+function registryStateBadge(state: string | null) {
+  if (!state) return null
+  const colors: Record<string, { bg: string; text: string }> = {
+    Running: { bg: 'bg-[rgba(34,197,94,0.12)]', text: 'text-[#4ade80]' },
+    Crashed: { bg: 'bg-[rgba(239,68,68,0.15)]', text: 'text-[#ef4444]' },
+    Dead: { bg: 'bg-[rgba(100,116,139,0.15)]', text: 'text-[#94a3b8]' },
+    Stopped: { bg: 'bg-[rgba(234,179,8,0.12)]', text: 'text-[#facc15]' },
+    Paused: { bg: 'bg-[rgba(168,85,247,0.12)]', text: 'text-[#c084fc]' },
+  }
+  const c = colors[state] ?? { bg: 'bg-[rgba(138,163,211,0.1)]', text: 'text-[#86a0cf]' }
+  return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold ${c.bg} ${c.text}">${state}</span>`
+}
+
+function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
+  const diag = (keeper as any).supervisor_diagnostics
+  if (!diag) return null
+  const { restart_count, max_restarts, crash_log, last_failure_reason, dead_since } = diag
+  const budgetPct = max_restarts > 0 ? Math.min(100, (restart_count / max_restarts) * 100) : 0
+  const budgetColor = budgetPct >= 80 ? '#ef4444' : budgetPct >= 50 ? '#f59e0b' : '#4ade80'
+  return html`
+    <${SectionCard} title="Supervisor 진단">
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-[var(--text-muted)]">Fiber 상태</span>
+          ${registryStateBadge((keeper as any).registry_state)}
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-[var(--text-muted)]">재시작 예산</span>
+            <span class="text-xs font-mono text-[var(--text-body)]">${restart_count}/${max_restarts}</span>
+          </div>
+          <div class="w-full h-1.5 rounded-full bg-[var(--white-5)] overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-300" style="width: ${budgetPct}%; background: ${budgetColor}"></div>
+          </div>
+        </div>
+        ${last_failure_reason ? html`
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-[var(--text-muted)]">마지막 실패 원인</span>
+            <span class="text-[11px] font-mono text-[#fb7185]">${last_failure_reason}</span>
+          </div>
+        ` : null}
+        ${dead_since ? html`
+          <div class="py-2 px-3 rounded-lg bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.15)] text-xs text-[#fb7185]">
+            Dead since ${new Date(dead_since * 1000).toLocaleString()}. Reboot 필요.
+          </div>
+        ` : null}
+        ${crash_log && crash_log.length > 0 ? html`
+          <div>
+            <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">Crash 이력</div>
+            <div class="space-y-1 max-h-32 overflow-y-auto">
+              ${crash_log.slice(0, 10).map((e: any) => html`
+                <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[var(--white-3)]">
+                  <span class="font-mono text-[var(--text-muted)]">${new Date((e.ts ?? 0) * 1000).toLocaleTimeString()}</span>
+                  <span class="text-[#fb7185]">${e.reason ?? 'unknown'}</span>
+                </div>
+              `)}
+            </div>
+          </div>
+        ` : null}
+      </div>
+    <//>
+  `
+}
+
 // ── Main Detail Overlay ─────────────────────────────────
 
 export function KeeperDetailOverlay() {
@@ -185,15 +254,46 @@ export function KeeperDetailOverlay() {
               ${keeper.koreanName ? html`<span class="text-xs text-[var(--text-muted)]">${keeper.koreanName}</span>` : null}
             </div>
           </div>
-          <button
-            ref=${closeButtonRef}
-            type="button"
-            onClick=${() => closeKeeperDetail()}
-            class="flex items-center justify-center size-8 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
-            aria-label="키퍼 상세 닫기"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
-          </button>
+          <div class="flex items-center gap-2">
+            ${(() => {
+              const isOffline = ['offline', 'inactive', 'dead', 'crashed'].includes(keeper.status)
+              const isRunning = ['active', 'running', 'idle', 'busy', 'listening', 'working'].includes(keeper.status)
+              if (isOffline) return html`
+                <button type="button"
+                  class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[#4ade80] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
+                  onClick=${() => {
+                    void bootKeeper(keeper.name).then(res => {
+                      if (res.ok) {
+                        showToast(keeper.name + ' booted', 'success')
+                        void refreshDashboard({ force: true })
+                      } else showToast(res.error ?? 'Boot 실패', 'error')
+                    }).catch(() => showToast('Boot 실패', 'error'))
+                  }}
+                >Boot</button>`
+              if (isRunning) return html`
+                <button type="button"
+                  class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
+                  onClick=${() => {
+                    if (confirm(keeper.name + ' 키퍼를 종료합니까?')) {
+                      void shutdownKeeper(keeper.name).then(() => {
+                        showToast(keeper.name + ' 종료됨', 'success')
+                        void refreshDashboard({ force: true })
+                      }).catch(() => showToast('종료 실패', 'error'))
+                    }
+                  }}
+                >Shutdown</button>`
+              return null
+            })()}
+            <button
+              ref=${closeButtonRef}
+              type="button"
+              onClick=${() => closeKeeperDetail()}
+              class="flex items-center justify-center size-8 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
+              aria-label="키퍼 상세 닫기"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
+            </button>
+          </div>
         </div>
 
         ${'' /* ── Body ── */}
@@ -207,6 +307,9 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Context chart ── */}
         <${ContextChart} keeper=${keeper} />
+
+        ${'' /* ── Supervisor diagnostics ── */}
+        <${SupervisorDiagnosticsPanel} keeper=${keeper} />
 
         ${'' /* ── Latency / Cost / Model charts ── */}
         <${MetricsCharts} keeper=${keeper} />
@@ -269,6 +372,12 @@ export function KeeperDetailOverlay() {
           <div class="md:col-span-2">
             <${SectionCard} title="도구 호출 궤적">
               <${KeeperTrajectoryTimeline} keeperName=${keeper.name} />
+            <//>
+          </div>
+
+          <div class="md:col-span-2">
+            <${CollapsibleSection} title="통합 활동 추적" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">브로드캐스트 + 태스크 + 도구 호출</span>`}>
+              <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} />
             <//>
           </div>
 

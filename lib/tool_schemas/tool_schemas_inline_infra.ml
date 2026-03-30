@@ -194,39 +194,4 @@ For llama, provide model explicitly. Pair with masc_add_task to create the task 
       ("required", `List [`String "agent_name"; `String "prompt"]);
     ];
   };
-
-  (* masc_memento_mori *)
-  {
-    name = "masc_memento_mori";
-    description = "All-in-one OAS lifecycle check for context pressure and successor rollover. \
-Use when you want a simple periodic lifecycle check without manual handoff bookkeeping. \
-Below threshold: continue, mid pressure: prepare context capsule, high pressure: roll work forward to a successor path. \
-Pair with masc_self_introspect for local lifecycle state, or masc_handover_* when you need an explicit successor record.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("context_ratio", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Current context usage ratio (0.0-1.0). Estimate based on messages/tool calls.");
-        ]);
-        ("full_context", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Current conversation context for DNA extraction (required if context_ratio > 0.5)");
-        ]);
-        ("summary", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Brief summary of current work for handoff (optional, defaults to auto-generated)");
-        ]);
-        ("current_task", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Task ID being worked on (optional)");
-        ]);
-        ("target_agent", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Agent to spawn as successor (default: claude)");
-        ]);
-      ]);
-      ("required", `List [`String "context_ratio"]);
-    ];
-  };
 ]

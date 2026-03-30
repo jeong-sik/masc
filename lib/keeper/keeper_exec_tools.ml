@@ -4,6 +4,13 @@ open Keeper_types
 open Keeper_memory
 open Keeper_alerting
 
+(** Callback for recording keeper-internal tool calls.
+    Set at server initialization to avoid Config dependency cycle.
+    Default: no-op. Set to Tool_registry.record_call_if_known in mcp_server_eio.ml. *)
+let on_keeper_tool_call :
+  (tool_name:string -> success:bool -> duration_ms:int -> unit) ref =
+  ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
+
 let ensure_keeper_board_post_args ~author ~source = function
   | `Assoc fields ->
       let fields =
@@ -74,9 +81,11 @@ let keeper_voice_tool_schemas =
 
 (** Curated masc_* bridge for keepers.
     Schema list is injected at server init to avoid cyclic dependency on Tools.
-    Keep raw masc_* passthrough minimal and move keeper-visible workflows into
-    dedicated shards whenever possible. *)
+    Keeper tool access is controlled per-keeper via tool_tier (essential/standard/full)
+    in persona config, using Tool_catalog tier definitions. *)
 
+(** @deprecated Legacy hardcoded list. Tier-based filtering via Tool_catalog
+    replaces this. Kept for test backward-compatibility reference. *)
 let keeper_passthrough_masc_tool_names =
   [
     "masc_status";
@@ -92,16 +101,30 @@ let masc_schemas_ref : Types.tool_schema list ref = ref []
 let inject_masc_schemas (schemas : Types.tool_schema list) =
   masc_schemas_ref :=
     List.filter (fun (s : Types.tool_schema) ->
-      String.starts_with ~prefix:"masc_" s.name
-      && List.mem s.name keeper_passthrough_masc_tool_names)
+      String.starts_with ~prefix:"masc_" s.name)
       schemas
 
-let keeper_masc_tool_names (_meta : keeper_meta) : string list =
+let keeper_masc_tool_names (meta : keeper_meta) : string list =
+  let tier =
+    Tool_catalog.tier_of_string meta.tool_tier
+    |> Option.value ~default:Tool_catalog.Essential
+  in
   !masc_schemas_ref
-  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> List.filter_map (fun (schema : Types.tool_schema) ->
+    if Tool_catalog.is_in_tier tier schema.name
+       || List.mem schema.name meta.extra_masc_tools
+    then Some schema.name
+    else None)
 
-let keeper_masc_tool_schemas (_meta : keeper_meta) : Types.tool_schema list =
+let keeper_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
+  let tier =
+    Tool_catalog.tier_of_string meta.tool_tier
+    |> Option.value ~default:Tool_catalog.Essential
+  in
   !masc_schemas_ref
+  |> List.filter (fun (schema : Types.tool_schema) ->
+    Tool_catalog.is_in_tier tier schema.name
+    || List.mem schema.name meta.extra_masc_tools)
 
 let dedupe_tool_names names =
   dedupe_keep_order (List.filter (fun name -> String.trim name <> "") names)
@@ -153,8 +176,17 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
       @ Tool_code_write.schemas
       @ (keeper_masc_tool_schemas meta)
     in
-    all_schemas
-    |> List.filter (fun tool -> List.mem tool.Types.name allowed)
+    let result =
+      all_schemas
+      |> List.filter (fun tool -> List.mem tool.Types.name allowed)
+    in
+    let count = List.length result in
+    if count > 100 then
+      Log.Keeper.warn
+        "tool budget exceeded: %d schemas in LLM context (~%dKB estimated). \
+         Consider restricting tool tier."
+        count (count * 470 / 1024);
+    result
 
 let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
   let voice = Voice_bridge.get_voice_for_agent agent_id in
@@ -205,13 +237,13 @@ let execute_keeper_tool_call
         (`Assoc
           [
             ("name", `String meta.name);
-            ("trace_id", `String meta.trace_id);
-            ("generation", `Int meta.generation);
+            ("trace_id", `String meta.runtime.trace_id);
+            ("generation", `Int meta.runtime.generation);
             ("context_ratio", `Float (Keeper_working_context.context_ratio ctx_work));
             ("context_tokens", `Int ctx_work.token_count);
             ("context_max", `Int ctx_work.max_tokens);
             ("message_count", `Int (List.length ctx_work.messages));
-            ("last_model_used", `String meta.usage.last_model_used);
+            ("last_model_used", `String meta.runtime.usage.last_model_used);
             ( "continuity_state",
               match continuity with
               | None -> `Null
@@ -310,7 +342,7 @@ let execute_keeper_tool_call
         Safe_ops.json_int ~default:20000 "max_bytes" args
         |> fun n -> max 512 (min 200000 n)
       in
-      (match resolve_keeper_target_path ~config ~allowed_paths:meta.allowed_paths ~raw_path:path with
+      (match resolve_keeper_target_path ~config ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta) ~raw_path:path with
       | Error e -> Yojson.Safe.to_string (`Assoc [ ("error", `String e) ])
       | Ok target -> (
           match Safe_ops.read_file_safe target with
@@ -339,7 +371,7 @@ let execute_keeper_tool_call
         Safe_ops.json_string ~default:"overwrite" "mode" args
         |> String.lowercase_ascii
       in
-      (match resolve_keeper_target_path ~config ~allowed_paths:meta.allowed_paths ~raw_path:path with
+      (match resolve_keeper_target_path ~config ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta) ~raw_path:path with
       | Error e -> Yojson.Safe.to_string (`Assoc [ ("error", `String e) ])
       | Ok target ->
           (try
@@ -432,7 +464,7 @@ let execute_keeper_tool_call
       let root = project_root_of_config config in
       let read_target () =
         let raw_path = Safe_ops.json_string ~default:"." "path" args in
-        resolve_keeper_target_path ~config ~allowed_paths:meta.allowed_paths ~raw_path
+        resolve_keeper_target_path ~config ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta) ~raw_path
       in
       let render_process_result ~cmd argv =
         let st, out =
@@ -783,17 +815,54 @@ let execute_keeper_tool_call
             (`Assoc [ ("error", `String "unknown_autoresearch_tool");
                       ("tool", `String name) ]))
   | name when String.starts_with ~prefix:"masc_" name ->
-      (* Bridge to main MCP tool dispatch registry.
-         Handlers are closures that already capture their runtime context
-         (sw, clock, net, etc.) from server initialization. *)
-      (match Tool_dispatch.dispatch ~name ~args with
-       | Some (true, msg) -> msg
-       | Some (false, msg) ->
-           Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
-       | None ->
-           Yojson.Safe.to_string
-             (`Assoc [ ("error", `String "unregistered_masc_tool");
-                        ("tool", `String name) ]))
+      (* Pre-dispatch path guard: if the tool args contain a path/file_path
+         key, validate it against effective_allowed_paths before dispatching. *)
+      let effective_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
+      let path_blocked =
+        if effective_paths = [] && meta.execution_scope <> "observe_only" then None
+        else if meta.execution_scope = "observe_only" && effective_paths = [] then
+          (* observe_only with no explicit paths: block write-capable tool args *)
+          let has_path_arg =
+            List.exists (fun key ->
+              match Yojson.Safe.Util.member key args with
+              | `String p when String.trim p <> "" -> true
+              | _ -> false) ["path"; "file_path"; "target_path"]
+          in
+          if has_path_arg then Some "observe_only_scope: write paths blocked"
+          else None
+        else
+          let candidates =
+            List.filter_map (fun key ->
+              match Yojson.Safe.Util.member key args with
+              | `String p when String.trim p <> "" -> Some p
+              | _ -> None)
+              ["path"; "file_path"; "target_path"]
+          in
+          List.find_map (fun raw ->
+            match resolve_keeper_target_path ~config
+                    ~allowed_paths:effective_paths ~raw_path:raw with
+            | Error e -> Some e
+            | Ok _ -> None) candidates
+      in
+      (match path_blocked with
+      | Some err ->
+          Yojson.Safe.to_string (`Assoc [ ("error", `String err) ])
+      | None ->
+      let t0 = Time_compat.now () in
+      let result = Tool_dispatch.dispatch ~name ~args in
+      let duration_ms =
+        int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+      let success, msg = match result with
+        | Some (true, msg) -> true, msg
+        | Some (false, msg) ->
+            false, Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+        | None ->
+            false, Yojson.Safe.to_string
+              (`Assoc [ ("error", `String "unregistered_masc_tool");
+                        ("tool", `String name) ])
+      in
+      !on_keeper_tool_call ~tool_name:name ~success ~duration_ms;
+      msg)
   | other ->
       Yojson.Safe.to_string
         (`Assoc [ ("error", `String "unknown_tool"); ("tool", `String other) ])

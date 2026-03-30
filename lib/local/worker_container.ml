@@ -396,7 +396,7 @@ let resolve_execution_scope ~base_path ~(team_session_id : string option)
           | None -> Team_session_types.Limited_code_change)
       | None -> Team_session_types.Limited_code_change)
 
-let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt
+let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt:_
     ~allowed_tools =
   let allowed_names =
     match allowed_tools |> List.map strip_mcp_prefix |> unique_preserve_order with
@@ -417,7 +417,6 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt
                  input
                  |> inject_default_agent_name ~worker_name
                       ~schema:(Some schema)
-                 |> inject_prompt_full_context ~prompt ~tool_name:schema.name
                in
                match
                  call_masc_tool ~sw ~auth_token ~session_id ~tool_name:schema.name
@@ -476,7 +475,7 @@ let oas_provider_of_label (label : string) : Oas.Provider.config =
       (Llm_provider.Provider_config.make
          ~kind:Llm_provider.Provider_config.Glm
          ~model_id:label
-         ~base_url:"https://open.bigmodel.cn/api/paas/v4"
+         ~base_url:"https://api.z.ai/api/coding/paas/v4"
          ~request_path:"/chat/completions" ())
 
 (** Resolve provider from a model label string.

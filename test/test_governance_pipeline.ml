@@ -205,6 +205,51 @@ let test_risk_precedence_critical_over_high () =
   Alcotest.(check string) "force_create is critical (force wins)"
     "critical" (Gp.risk_level_to_string risk)
 
+let test_risk_metadata_destructive_override () =
+  let risk = Gp.assess_risk ~tool_name:"masc_operation_stop" ~input:no_args in
+  Alcotest.(check string) "operation_stop metadata marks destructive"
+    "critical" (Gp.risk_level_to_string risk)
+
+let test_risk_payload_empty_overwrite () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_code_write"
+      ~input:
+        (`Assoc
+          [
+            ("path", `String ".worktrees/agent-task/demo.txt");
+            ("content", `String "");
+          ])
+  in
+  Alcotest.(check string) "empty overwrite payload is critical"
+    "critical" (Gp.risk_level_to_string risk)
+
+let test_risk_payload_destructive_content () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_code_edit"
+      ~input:
+        (`Assoc
+          [
+            ("path", `String ".worktrees/agent-task/demo.sql");
+            ("old_string", `String "SELECT 1;");
+            ("new_string", `String "DROP TABLE production_users");
+          ])
+  in
+  Alcotest.(check string) "destructive payload content is critical"
+    "critical" (Gp.risk_level_to_string risk)
+
+let test_risk_payload_safe_write_remains_high () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_code_write"
+      ~input:
+        (`Assoc
+          [
+            ("path", `String ".worktrees/agent-task/demo.ml");
+            ("content", `String "let answer = 42\n");
+          ])
+  in
+  Alcotest.(check string) "safe write payload remains high"
+    "high" (Gp.risk_level_to_string risk)
+
 (* ── Governance Level Decision Tests ────────────────────────── *)
 
 let test_development_allows_all () =
@@ -519,6 +564,14 @@ let () =
       Alcotest.test_case "low: unknown" `Quick test_risk_low_unknown;
       Alcotest.test_case "precedence: critical > high" `Quick
         test_risk_precedence_critical_over_high;
+      Alcotest.test_case "metadata: destructive override" `Quick
+        test_risk_metadata_destructive_override;
+      Alcotest.test_case "payload: empty overwrite" `Quick
+        test_risk_payload_empty_overwrite;
+      Alcotest.test_case "payload: destructive content" `Quick
+        test_risk_payload_destructive_content;
+      Alcotest.test_case "payload: safe write remains high" `Quick
+        test_risk_payload_safe_write_remains_high;
       Alcotest.test_case "case insensitive" `Quick test_case_insensitive_matching;
     ];
     "governance_levels", [

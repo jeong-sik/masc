@@ -403,7 +403,7 @@ let voice_http_request_for_tts (endpoint : Voice_config.endpoint) ~api_key
           body_json;
         }
 
-let default_cli_agent_name () = "claude"
+let default_cli_agent_name () = Env_config_runtime.Cli.default_agent
 
 let split_csv_nonempty raw =
   raw

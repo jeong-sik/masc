@@ -83,7 +83,7 @@ let context_of_legacy_checkpoint
 
 let checkpoint_model_of_meta (meta : keeper_meta) =
   let candidates =
-    meta.usage.last_model_used
+    meta.runtime.usage.last_model_used
     :: Oas_model_resolve.models_of_cascade_name meta.cascade_name
   in
   List.find_opt (fun value -> String.trim value <> "") candidates
@@ -160,16 +160,16 @@ let maybe_rollover_oas_handoff
   | Some cp ->
       let ctx = context_of_oas_checkpoint cp ~primary_model_max_tokens in
       let current_generation =
-        sidecar_generation cp ~fallback:meta.generation
+        sidecar_generation cp ~fallback:meta.runtime.generation
       in
       let base_meta =
-        if current_generation = meta.generation then meta
-        else { meta with generation = current_generation }
+        if current_generation = meta.runtime.generation then meta
+        else map_runtime (fun rt -> { rt with generation = current_generation }) meta
       in
       let ratio = context_ratio ctx in
       let cooldown_elapsed =
-        base_meta.last_handoff_ts <= 0.0
-        || Time_compat.now () -. base_meta.last_handoff_ts
+        base_meta.runtime.last_handoff_ts <= 0.0
+        || Time_compat.now () -. base_meta.runtime.last_handoff_ts
            >= float_of_int base_meta.handoff_cooldown_sec
       in
       let rollover_base =
@@ -190,7 +190,7 @@ let maybe_rollover_oas_handoff
         rollover_base
       else
         let now_ts = Time_compat.now () in
-        let prev_trace_id = base_meta.trace_id in
+        let prev_trace_id = base_meta.runtime.trace_id in
         let new_trace_id = Keeper_identity.generate_trace_id () in
         let next_generation = current_generation + 1 in
         let new_session =
@@ -204,12 +204,14 @@ let maybe_rollover_oas_handoff
           let updated_meta =
             {
               base_meta with
-              trace_id = new_trace_id;
-              trace_history =
-                dedupe_keep_order (prev_trace_id :: base_meta.trace_history);
-              generation = next_generation;
-              last_handoff_ts = now_ts;
               updated_at = now_iso ();
+              runtime = { base_meta.runtime with
+                trace_id = new_trace_id;
+                trace_history =
+                  dedupe_keep_order (prev_trace_id :: base_meta.runtime.trace_history);
+                generation = next_generation;
+                last_handoff_ts = now_ts;
+              };
             }
           in
           let handoff_json =
@@ -292,7 +294,7 @@ let compact_if_needed
   let token_count = ctx.token_count in
   let ratio_gate, message_gate, token_gate = compaction_policy_of_keeper meta in
   let cooldown = Float.of_int meta.compaction.cooldown_sec in
-  let last_reflection_ts = max meta.last_continuity_update_ts meta.proactive.last_ts in
+  let last_reflection_ts = max meta.runtime.last_continuity_update_ts meta.runtime.proactive_rt.last_ts in
   let reflection_ready =
     last_reflection_ts > 0.0 && now_ts -. last_reflection_ts >= cooldown
   in
@@ -524,7 +526,7 @@ let run_proactive_generation
     proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
   in
   let max_attempts = Env_config.KeeperProactive.max_attempts in
-  let previous_preview = String.trim meta.proactive.last_preview in
+  let previous_preview = String.trim meta.runtime.proactive_rt.last_preview in
   let similarity_threshold = Keeper_config.keeper_proactive_similarity_threshold () in
   let fallback_skill_route =
     route_keeper_skill ~soul_profile:meta.soul_profile ~message:"proactive idle automation checkin"
@@ -571,7 +573,9 @@ let run_proactive_generation
             ~goal:prompt ~system_prompt:turn_system_prompt
             ~tools ~initial_messages:ctx_work.messages
             ~max_turns:(Keeper_config.keeper_unified_max_turns ())
-            ~temperature ~max_tokens ()) in
+            ~temperature ~max_tokens
+            ~priority:Llm_provider.Request_priority.Background
+            ()) in
       match agent_result with
       | Error e ->
           Log.Keeper.warn "keeper turn OAS worker failed: %s" e;

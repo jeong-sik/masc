@@ -23,7 +23,7 @@
  (names test_room test_room_state_recovery test_types test_auth test_http_negotiation
         test_sse test_encryption test_cancellation test_graphql_api
         test_graphql_endpoint
-        test_subscriptions test_session test_progress test_mitosis test_spawn
+        test_subscriptions test_session test_progress test_spawn
         test_validation test_response
         test_dashboard
         test_dashboard_tool_host_events
@@ -35,6 +35,7 @@
         test_keeper_deliberation
         test_keeper_registry
         test_keeper_supervisor
+        test_keeper_allowed_paths
         test_metrics_rotation
         test_tool_tier
         test_tool_budget
@@ -46,6 +47,7 @@
         test_keeper_bash_safety
         test_worktree_live_context
         test_tool_input_validation
+        test_autoresearch_codegen
         test_autoresearch_oas_primitives
         test_contract_risk
         test_contract_composer
@@ -58,11 +60,15 @@
         test_adversarial_eval
         test_labeling
         test_tool_deep_review
+        test_typed_state
+        test_keeper_turn_prompt
+        test_keeper_prompt_metrics
+        test_cache_metrics_wiring
 )
  (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
           test_sse test_encryption test_cancellation test_graphql_api
           test_graphql_endpoint
-          test_subscriptions test_session test_progress test_mitosis test_spawn
+          test_subscriptions test_session test_progress test_spawn
           test_validation test_response
           test_dashboard
           test_dashboard_tool_host_events
@@ -74,6 +80,7 @@
           test_keeper_deliberation
           test_keeper_registry
           test_keeper_supervisor
+          test_keeper_allowed_paths
           test_metrics_rotation
           test_tool_tier
           test_tool_budget
@@ -85,6 +92,7 @@
           test_keeper_bash_safety
           test_worktree_live_context
           test_tool_input_validation
+          test_autoresearch_codegen
           test_autoresearch_oas_primitives
           test_contract_risk
           test_contract_composer
@@ -97,6 +105,10 @@
           test_adversarial_eval
           test_labeling
           test_tool_deep_review
+          test_typed_state
+          test_keeper_turn_prompt
+          test_keeper_prompt_metrics
+          test_cache_metrics_wiring
   )
  (libraries masc_mcp masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.response agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt caqti-eio httpun cohttp-eio masc_mcp.mcp_transport_protocol agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
@@ -159,6 +171,11 @@
 (test
  (name test_dashboard_proof)
  (modules test_dashboard_proof)
+ (libraries masc_mcp masc_mcp.team_session_types alcotest eio eio_main yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
+
+(test
+ (name test_persist_worker_run_snapshot)
+ (modules test_persist_worker_run_snapshot)
  (libraries masc_mcp masc_mcp.team_session_types alcotest eio eio_main yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
 ; Dashboard cache deadlock regression + stampede tests (requires Eio)
@@ -250,11 +267,6 @@
  (libraries alcotest unix yojson))
 
 (test
- (name test_chain_presets)
- (modules test_chain_presets)
- (libraries masc_mcp alcotest yojson str masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-(test
  (name test_ci_run_tests_script)
  (modules test_ci_run_tests_script)
  (libraries alcotest unix))
@@ -343,7 +355,7 @@
  (modules test_oas_adapters)
  (libraries masc_mcp agent_sdk alcotest yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt str eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
-; OAS Worker tests (streaming bridge, cascade config, mitosis, council)
+; OAS Worker tests (streaming bridge, cascade config, council)
 (test
  (name test_oas_worker)
  (modules test_oas_worker)
@@ -384,11 +396,6 @@
  (name test_cache_eio)
  (modules test_cache_eio)
  (libraries masc_mcp alcotest str yojson eio eio_main masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-(test
- (name test_race_cancel)
- (modules test_race_cancel)
- (libraries masc_mcp alcotest eio eio_main str unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt yojson mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
 (test
  (name test_metrics_store_eio)
@@ -519,11 +526,6 @@
  (libraries masc_mcp yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
 (test
- (name test_chain_orchestrator_eio)
- (modules test_chain_orchestrator_eio)
- (libraries masc_mcp alcotest str yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-(test
  (name test_swarm_persistence)
  (modules test_swarm_persistence)
  (libraries masc_mcp alcotest yojson unix eio eio_main masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
@@ -583,12 +585,6 @@
  (name test_autoresearch_knowledge)
  (modules test_autoresearch_knowledge)
  (libraries masc_mcp alcotest yojson unix mirage-crypto-rng.unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str eio_main eio caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-; Dispatch chain evidence test
-(test
- (name test_dispatch_chain_evidence)
- (modules test_dispatch_chain_evidence)
- (libraries masc_mcp alcotest eio eio_main yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt str mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
 ; Mention module monkey/fuzz test
 (executable
  (name test_mention_monkey)
@@ -770,8 +766,8 @@
 ; Coverage tests (generated by Agent Autonomy)
 ; ============================================================
 (tests
- (names test_backend_coverage test_tools_coverage test_types_utils_coverage test_agent_card_coverage test_misc_coverage test_relay_coverage test_tempo_coverage test_mitosis_coverage test_transport_coverage test_validation_coverage test_encryption_coverage test_dashboard_resilience_coverage test_nickname_coverage test_level2_config_coverage test_compression_dict_coverage test_config_coverage test_env_config_coverage test_progress_coverage test_mcp_protocol_coverage test_notify_coverage test_mcp_session_coverage test_sse_coverage test_credits_dashboard_coverage test_room_utils_coverage test_orchestrator_coverage test_cancellation_coverage test_web_dashboard_coverage test_auth_coverage test_a2a_tools_coverage test_graphql_api_coverage test_mention_coverage test_resilience_coverage test_level4_config_coverage test_error_coverage test_hat_coverage test_types_coverage test_spawn_coverage test_dashboard_coverage test_rate_limit_coverage test_bounded_coverage test_session_coverage test_cache_eio_coverage test_run_eio_coverage test_handover_eio_coverage test_mcp_server_eio_coverage test_http_server_eio_coverage test_telemetry_eio_coverage test_room_git_coverage test_prometheus_coverage test_auto_responder_coverage test_tool_plan_coverage test_tool_run_coverage test_tool_tempo_coverage test_tool_portal_coverage test_tool_worktree_coverage test_tool_a2a_coverage test_tool_handover_coverage test_tool_relay_coverage test_tool_heartbeat_coverage test_tool_encryption_coverage test_tool_auth_coverage test_tool_audit_coverage test_tool_rate_limit_coverage test_tool_cost_coverage test_tool_agent_coverage test_tool_task_coverage test_tool_room_coverage test_tool_control_coverage test_tool_misc_coverage test_ag_ui_coverage test_tool_verification_coverage test_tool_suspend_coverage test_tool_code_coverage test_tool_library_coverage test_tool_notifications_coverage test_tool_shard_coverage test_context_compact_oas_coverage test_keeper_masc_bridge test_anti_rationalization_coverage test_keeper_deny_list_coverage test_eval_calibration)
- (modules test_backend_coverage test_tools_coverage test_types_utils_coverage test_agent_card_coverage test_misc_coverage test_relay_coverage test_tempo_coverage test_mitosis_coverage test_transport_coverage test_validation_coverage test_encryption_coverage test_dashboard_resilience_coverage test_nickname_coverage test_level2_config_coverage test_compression_dict_coverage test_config_coverage test_env_config_coverage test_progress_coverage test_mcp_protocol_coverage test_notify_coverage test_mcp_session_coverage test_sse_coverage test_credits_dashboard_coverage test_room_utils_coverage test_orchestrator_coverage test_cancellation_coverage test_web_dashboard_coverage test_auth_coverage test_a2a_tools_coverage test_graphql_api_coverage test_mention_coverage test_resilience_coverage test_level4_config_coverage test_error_coverage test_hat_coverage test_types_coverage test_spawn_coverage test_dashboard_coverage test_rate_limit_coverage test_bounded_coverage test_session_coverage test_cache_eio_coverage test_run_eio_coverage test_handover_eio_coverage test_mcp_server_eio_coverage test_http_server_eio_coverage test_telemetry_eio_coverage test_room_git_coverage test_prometheus_coverage test_auto_responder_coverage test_tool_plan_coverage test_tool_run_coverage test_tool_tempo_coverage test_tool_portal_coverage test_tool_worktree_coverage test_tool_a2a_coverage test_tool_handover_coverage test_tool_relay_coverage test_tool_heartbeat_coverage test_tool_encryption_coverage test_tool_auth_coverage test_tool_audit_coverage test_tool_rate_limit_coverage test_tool_cost_coverage test_tool_agent_coverage test_tool_task_coverage test_tool_room_coverage test_tool_control_coverage test_tool_misc_coverage test_ag_ui_coverage test_tool_verification_coverage test_tool_suspend_coverage test_tool_code_coverage test_tool_library_coverage test_tool_notifications_coverage test_tool_shard_coverage test_context_compact_oas_coverage test_keeper_masc_bridge test_anti_rationalization_coverage test_keeper_deny_list_coverage test_eval_calibration)
+ (names test_backend_coverage test_tools_coverage test_types_utils_coverage test_agent_card_coverage test_misc_coverage test_relay_coverage test_tempo_coverage test_transport_coverage test_validation_coverage test_encryption_coverage test_dashboard_resilience_coverage test_nickname_coverage test_level2_config_coverage test_compression_dict_coverage test_config_coverage test_env_config_coverage test_progress_coverage test_mcp_protocol_coverage test_notify_coverage test_mcp_session_coverage test_sse_coverage test_credits_dashboard_coverage test_room_utils_coverage test_orchestrator_coverage test_cancellation_coverage test_web_dashboard_coverage test_auth_coverage test_a2a_tools_coverage test_graphql_api_coverage test_mention_coverage test_resilience_coverage test_level4_config_coverage test_error_coverage test_hat_coverage test_types_coverage test_spawn_coverage test_dashboard_coverage test_rate_limit_coverage test_bounded_coverage test_session_coverage test_cache_eio_coverage test_run_eio_coverage test_handover_eio_coverage test_mcp_server_eio_coverage test_http_server_eio_coverage test_telemetry_eio_coverage test_room_git_coverage test_prometheus_coverage test_auto_responder_coverage test_tool_plan_coverage test_tool_portal_coverage test_tool_worktree_coverage test_tool_a2a_coverage test_tool_handover_coverage test_tool_relay_coverage test_tool_heartbeat_coverage test_tool_auth_coverage test_tool_agent_coverage test_tool_task_coverage test_tool_room_coverage test_tool_control_coverage test_tool_misc_coverage test_ag_ui_coverage test_tool_verification_coverage test_tool_suspend_coverage test_tool_code_coverage test_tool_library_coverage test_tool_shard_coverage test_context_compact_oas_coverage test_keeper_masc_bridge test_anti_rationalization_coverage test_keeper_deny_list_coverage)
+ (modules test_backend_coverage test_tools_coverage test_types_utils_coverage test_agent_card_coverage test_misc_coverage test_relay_coverage test_tempo_coverage test_transport_coverage test_validation_coverage test_encryption_coverage test_dashboard_resilience_coverage test_nickname_coverage test_level2_config_coverage test_compression_dict_coverage test_config_coverage test_env_config_coverage test_progress_coverage test_mcp_protocol_coverage test_notify_coverage test_mcp_session_coverage test_sse_coverage test_credits_dashboard_coverage test_room_utils_coverage test_orchestrator_coverage test_cancellation_coverage test_web_dashboard_coverage test_auth_coverage test_a2a_tools_coverage test_graphql_api_coverage test_mention_coverage test_resilience_coverage test_level4_config_coverage test_error_coverage test_hat_coverage test_types_coverage test_spawn_coverage test_dashboard_coverage test_rate_limit_coverage test_bounded_coverage test_session_coverage test_cache_eio_coverage test_run_eio_coverage test_handover_eio_coverage test_mcp_server_eio_coverage test_http_server_eio_coverage test_telemetry_eio_coverage test_room_git_coverage test_prometheus_coverage test_auto_responder_coverage test_tool_plan_coverage test_tool_portal_coverage test_tool_worktree_coverage test_tool_a2a_coverage test_tool_handover_coverage test_tool_relay_coverage test_tool_heartbeat_coverage test_tool_auth_coverage test_tool_agent_coverage test_tool_task_coverage test_tool_room_coverage test_tool_control_coverage test_tool_misc_coverage test_ag_ui_coverage test_tool_verification_coverage test_tool_suspend_coverage test_tool_code_coverage test_tool_library_coverage test_tool_shard_coverage test_context_compact_oas_coverage test_keeper_masc_bridge test_anti_rationalization_coverage test_keeper_deny_list_coverage)
  (libraries masc_mcp masc_mcp.config masc_mcp.ag_ui masc_mcp.mcp_session masc_mcp.mcp_transport_protocol agent_sdk alcotest eio eio_main str yojson zstd mirage-crypto-rng.unix cstruct ocaml-protoc-plugin dated_jsonl masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc grpc-direct masc_compression))
 
 ; Fire-and-forget task tool tests
@@ -791,6 +787,11 @@
  (name test_governance_yojson_roundtrip)
  (modules test_governance_yojson_roundtrip)
  (libraries masc_mcp alcotest yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt str eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
+
+(test
+ (name test_governance_v2)
+ (modules test_governance_v2)
+ (libraries council alcotest unix))
 
 ; Error logging coverage tests (PR #466 silent failure fixes)
 (test
@@ -898,12 +899,6 @@
  (name test_adaptive_cache_ttl)
  (modules test_adaptive_cache_ttl)
  (libraries masc_mcp alcotest str yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-; Adaptive Thresholds — P2-1 EMA-based threshold learning
-(test
- (name test_adaptive_thresholds)
- (modules test_adaptive_thresholds)
- (libraries masc_mcp alcotest str yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
 ; Tool_compact + Fs_compat backend types — Issue #1441, #1442
 (test
@@ -1070,34 +1065,10 @@
  (modules test_lifecycle)
  (libraries masc_mcp eio eio_main yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
-; Chain mermaid parse coverage tests (strip_quotes, infer_type_from_id, parse_meta_comment, etc.)
-(test
- (name test_chain_mermaid_parse_coverage)
- (modules test_chain_mermaid_parse_coverage)
- (libraries masc_mcp alcotest str yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-; Chain coverage tests (node_content, mermaid_parser, parser_serialize)
-(test
- (name test_chain_coverage)
- (modules test_chain_coverage)
- (libraries masc_mcp alcotest str yojson eio eio_main masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-; Chain category/error/types coverage tests
-(test
- (name test_chain_category_coverage)
- (modules test_chain_category_coverage)
- (libraries masc_mcp alcotest str yojson eio eio_main masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
 ; Auto_recall + Activity_feed coverage tests
 (test
  (name test_auto_recall_activity_coverage)
  (modules test_auto_recall_activity_coverage)
- (libraries masc_mcp alcotest str yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-; Chain utils/iteration/trace_types/conversation coverage tests
-(test
- (name test_chain_utils_coverage)
- (modules test_chain_utils_coverage)
  (libraries masc_mcp alcotest str yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
 ; gRPC coordination service types and config tests

@@ -52,9 +52,6 @@ let all_known_tool_names =
     "masc_agents";
     "masc_approve";
     "masc_archive_view";
-    "masc_audit_query";
-    "masc_audit_stats";
-    "masc_audit_trail";
     "masc_auth_create_token";
     "masc_auth_disable";
     "masc_auth_enable";
@@ -96,8 +93,6 @@ let all_known_tool_names =
     "masc_case_brief_submit";
     "masc_case_status";
     "masc_cases";
-    "masc_chain_run_get";
-    "masc_chain_snapshot";
     "masc_check";
     "masc_circuit_status";
     "masc_claim_next";
@@ -120,8 +115,6 @@ let all_known_tool_names =
     "masc_convo_list";
     "masc_convo_reply";
     "masc_convo_start";
-    "masc_cost_log";
-    "masc_cost_report";
     "masc_dashboard";
     "masc_deliver";
     "masc_detachment_list";
@@ -132,9 +125,6 @@ let all_known_tool_names =
     "masc_dispatch_rebalance";
     "masc_dispatch_recall";
     "masc_dispatch_tick";
-    "masc_encryption_disable";
-    "masc_encryption_enable";
-    "masc_encryption_status";
     "masc_episode_flush";
     "masc_episode_list";
     "masc_error_add";
@@ -144,9 +134,7 @@ let all_known_tool_names =
     "masc_execution_orders";
     "masc_feature_flags";
     "masc_find_by_capability";
-    "masc_fire_task";
     "masc_gc";
-    "masc_generate_key";
     "masc_get_metrics";
     "masc_goal_dispatch";
     "masc_goal_list";
@@ -155,7 +143,6 @@ let all_known_tool_names =
     "masc_goal_snapshot";
     "masc_goal_upsert";
     "masc_governance_feed";
-    "masc_governance_report";
     "masc_governance_set";
     "masc_governance_status";
     "masc_handover_claim";
@@ -197,6 +184,7 @@ let all_known_tool_names =
     "masc_keeper_tool_catalog";
     "masc_keeper_trajectory";
     "masc_keeper_up";
+    "masc_keeper_repair";
     "masc_leave";
     "masc_library_add";
     "masc_library_list";
@@ -214,9 +202,7 @@ let all_known_tool_names =
     "masc_mdal_status";
     "masc_mdal_stop";
     "masc_mdal_swarm_start";
-    "masc_memento_mori";
     "masc_messages";
-    "masc_model_catalog";
     "masc_note_add";
     "masc_observe_alerts";
     "masc_observe_capacity";
@@ -247,6 +233,7 @@ let all_known_tool_names =
     "masc_persistent_agent_list";
     "masc_persistent_agent_list_loops";
     "masc_persistent_agent_msg";
+    "masc_persistent_agent_repair";
     "masc_persistent_agent_remove_loop";
     "masc_persistent_agent_status";
     "masc_persistent_agent_trajectory";
@@ -271,8 +258,6 @@ let all_known_tool_names =
     "masc_portal_send";
     "masc_portal_status";
     "masc_progress";
-    "masc_rate_limit_config";
-    "masc_rate_limit_status";
     "masc_recall_search";
     "masc_register_capabilities";
     "masc_reject";
@@ -296,7 +281,6 @@ let all_known_tool_names =
     "masc_runtime_params";
     "masc_runtime_verify";
     "masc_select_agent";
-    "masc_self_introspect";
     "masc_set_param";
     "masc_set_room";
     "masc_spawn";
@@ -318,11 +302,6 @@ let all_known_tool_names =
     "masc_team_session_step";
     "masc_team_session_stop";
     "masc_team_session_verify_trace";
-    "masc_tempo";
-    "masc_tempo_adjust";
-    "masc_tempo_get";
-    "masc_tempo_reset";
-    "masc_tempo_set";
     "masc_tool_admin_snapshot";
     "masc_tool_admin_update";
     "masc_tool_help";
@@ -888,6 +867,9 @@ let field_value fixture ~tool_name field_name schema =
       `String fixture.base_path
   | "path" when List.mem tool_name [ "masc_code_write"; "masc_code_edit"; "masc_code_delete"; "masc_code_read"; "masc_code_symbols" ] ->
       `String (ensure_code_file fixture)
+  | "working_dir"
+    when List.mem tool_name [ "masc_keeper_repair"; "masc_persistent_agent_repair" ] ->
+      `String fixture.worktree_dir
   | "cwd" -> `String fixture.worktree_dir
   | "command" -> `String "git status"
   | "content" when tool_name = "masc_code_write" -> `String "after\n"
@@ -931,9 +913,19 @@ let field_value fixture ~tool_name field_name schema =
       List.mem tool_name
         [
           "masc_keeper_up";
+          "masc_keeper_repair";
+          "masc_persistent_agent_repair";
           "masc_persistent_agent_up";
         ] ->
       `String "bad keeper!"
+  | "task_spec" when tool_name = "masc_keeper_repair" ->
+      `String "Write only OCaml code for inc : int -> int."
+  | "source_text" when tool_name = "masc_keeper_repair" ->
+      `String "let inc n = n + 1\n"
+  | "task_spec" when tool_name = "masc_persistent_agent_repair" ->
+      `String "Write only OCaml code for inc : int -> int."
+  | "source_text" when tool_name = "masc_persistent_agent_repair" ->
+      `String "let inc n = n + 1\n"
   | "name" when List.mem tool_name [ "masc_keeper_msg"; "masc_persistent_agent_msg" ] ->
       `String "bad keeper!"
   | "name" -> `String "tool-matrix"
@@ -1035,6 +1027,8 @@ let tool_arguments fixture (schema : Types.tool_schema) =
       | "masc_heartbeat_start" -> [ "interval" ]
       | "masc_listen" -> [ "timeout" ]
       | "masc_verify_request" -> [ "verifier" ]
+      | "masc_keeper_repair" | "masc_persistent_agent_repair" ->
+          [ "source_text"; "max_attempts"; "working_dir" ]
       | "masc_keeper_msg" | "masc_persistent_agent_msg" ->
           [ "timeout_sec" ]
       | "masc_relay_now" -> [ "target_agent" ]

@@ -6,18 +6,38 @@
 include Keeper_types_profile
 
 
-type compaction_state = {
+(* -- Policy types (remain in keeper_meta top-level) -- *)
+
+type compaction_policy = {
   profile: string;
   ratio_gate: float;
   message_gate: int;
   token_gate: int;
   cooldown_sec: int;
+}
+
+type proactive_policy = {
+  enabled: bool;
+  idle_sec: int;
+  cooldown_sec: int;
+}
+
+(* -- Runtime types (moved into agent_runtime_state) -- *)
+
+type compaction_runtime = {
   count: int;
   last_ts: float;
   last_before_tokens: int;
   last_after_tokens: int;
   last_check_ts: float;
   last_decision: string;
+}
+
+type proactive_runtime = {
+  count_total: int;
+  last_ts: float;
+  last_reason: string;
+  last_preview: string;
 }
 
 type usage_metrics = {
@@ -34,21 +54,29 @@ type usage_metrics = {
   last_latency_ms: int;
 }
 
-type proactive_config = {
-  enabled: bool;
-  idle_sec: int;
-  cooldown_sec: int;
-  count_total: int;
-  last_ts: float;
-  last_reason: string;
-  last_preview: string;
+type agent_runtime_state = {
+  usage: usage_metrics;
+  compaction_rt: compaction_runtime;
+  proactive_rt: proactive_runtime;
+  generation: int;
+  trace_id: string;
+  trace_history: string list;
+  last_handoff_ts: float;
+  last_continuity_update_ts: float;
+  last_autonomous_action_at: string;
+  autonomous_action_count: int;
+  autonomous_turn_count: int;
+  autonomous_text_turn_count: int;
+  autonomous_tool_turn_count: int;
+  board_reactive_turn_count: int;
+  mention_reactive_turn_count: int;
+  noop_turn_count: int;
 }
 
 type keeper_meta = {
+  (* -- Identity & profile -- *)
   name: string;
   agent_name: string;
-  trace_id: string;
-  trace_history: string list;
   goal: string;
   short_goal: string;
   mid_goal: string;
@@ -59,49 +87,57 @@ type keeper_meta = {
   needs: string;
   desires: string;
   instructions: string;
+  (* -- Policy -- *)
   policy_voice_enabled: bool;
   execution_scope: string;
   allowed_paths: string list;
   scope_kind: string;
+  tool_tier: string;
+  extra_masc_tools: string list;
   room_scope: string;
   mention_targets: string list;
   joined_room_ids: string list;
   last_seen_seq_by_room: (string * int) list;
-  generation: int;
-  proactive: proactive_config;
-  compaction: compaction_state;
+  proactive: proactive_policy;
+  compaction: compaction_policy;
   auto_handoff: bool;
   handoff_threshold: float;
   handoff_cooldown_sec: int;
+  (* -- Voice -- *)
   voice_enabled: bool;
   voice_channel: string;
   voice_agent_id: string;
-  last_handoff_ts: float;
+  (* -- Lifecycle -- *)
   created_at: string;
   updated_at: string;
-  usage: usage_metrics;
-
-  last_continuity_update_ts: float;
+  (* -- Operational control (top-level, not runtime) -- *)
   continuity_summary: string;
   active_goal_ids: string list;
   active_team_session_id: string option;
   last_team_session_started_at: string;
   team_session_start_count_total: int;
-  last_autonomous_action_at: string;
-  autonomous_action_count: int;
-  autonomous_turn_count: int;
-  autonomous_text_turn_count: int;
-  autonomous_tool_turn_count: int;
-  board_reactive_turn_count: int;
-  mention_reactive_turn_count: int;
-  noop_turn_count: int;
-  last_triage_triggers: string;
   paused: bool;
   current_task_id: string option;
   (** Currently claimed task ID for cost attribution.
       Set when keeper claims a task; cleared on masc_done.
       Propagated to trajectory accumulator for per-task cost tracking. *)
+  (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
+  runtime: agent_runtime_state;
 }
+
+(* -- Updater helpers for nested record updates -- *)
+
+let map_runtime (f : agent_runtime_state -> agent_runtime_state) (m : keeper_meta) : keeper_meta =
+  { m with runtime = f m.runtime }
+
+let map_usage (f : usage_metrics -> usage_metrics) (m : keeper_meta) : keeper_meta =
+  { m with runtime = { m.runtime with usage = f m.runtime.usage } }
+
+let map_compaction_rt (f : compaction_runtime -> compaction_runtime) (m : keeper_meta) : keeper_meta =
+  { m with runtime = { m.runtime with compaction_rt = f m.runtime.compaction_rt } }
+
+let map_proactive_rt (f : proactive_runtime -> proactive_runtime) (m : keeper_meta) : keeper_meta =
+  { m with runtime = { m.runtime with proactive_rt = f m.runtime.proactive_rt } }
 
 let now_iso () = Types.now_iso ()
 
@@ -192,12 +228,13 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) :
   | _ -> (json, false)
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
+  let rt = m.runtime in
   `Assoc
     [
       ("name", `String m.name);
       ("agent_name", `String m.agent_name);
-      ("trace_id", `String m.trace_id);
-      ("trace_history", `List (List.map (fun s -> `String s) m.trace_history));
+      ("trace_id", `String rt.trace_id);
+      ("trace_history", `List (List.map (fun s -> `String s) rt.trace_history));
       ("goal", `String m.goal);
       ("short_goal", `String m.short_goal);
       ("mid_goal", `String m.mid_goal);
@@ -212,11 +249,13 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("execution_scope", `String m.execution_scope);
       ("allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths));
       ("scope_kind", `String m.scope_kind);
+      ("tool_tier", `String m.tool_tier);
+      ("extra_masc_tools", `List (List.map (fun s -> `String s) m.extra_masc_tools));
       ("room_scope", `String m.room_scope);
       ("mention_targets", `List (List.map (fun s -> `String s) m.mention_targets));
       ("joined_room_ids", `List (List.map (fun s -> `String s) m.joined_room_ids));
       ("last_seen_seq_by_room", room_seq_map_to_json m.last_seen_seq_by_room);
-      ("generation", `Int m.generation);
+      ("generation", `Int rt.generation);
       ("proactive_enabled", `Bool m.proactive.enabled);
       ("proactive_idle_sec", `Int m.proactive.idle_sec);
       ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
@@ -231,31 +270,31 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("voice_enabled", `Bool m.voice_enabled);
       ("voice_channel", `String m.voice_channel);
       ("voice_agent_id", `String m.voice_agent_id);
-      ("last_handoff_ts", `Float m.last_handoff_ts);
+      ("last_handoff_ts", `Float rt.last_handoff_ts);
       ("created_at", `String m.created_at);
       ("updated_at", `String m.updated_at);
-      ("total_turns", `Int m.usage.total_turns);
-      ("total_input_tokens", `Int m.usage.total_input_tokens);
-      ("total_output_tokens", `Int m.usage.total_output_tokens);
-      ("total_tokens", `Int m.usage.total_tokens);
-      ("total_cost_usd", `Float m.usage.total_cost_usd);
-      ("last_turn_ts", `Float m.usage.last_turn_ts);
-      ("last_model_used", `String m.usage.last_model_used);
-      ("last_input_tokens", `Int m.usage.last_input_tokens);
-      ("last_output_tokens", `Int m.usage.last_output_tokens);
-      ("last_total_tokens", `Int m.usage.last_total_tokens);
-      ("last_latency_ms", `Int m.usage.last_latency_ms);
-      ("compaction_count", `Int m.compaction.count);
-      ("last_compaction_ts", `Float m.compaction.last_ts);
-      ("last_compaction_before_tokens", `Int m.compaction.last_before_tokens);
-      ("last_compaction_after_tokens", `Int m.compaction.last_after_tokens);
-      ("proactive_count_total", `Int m.proactive.count_total);
-      ("last_proactive_ts", `Float m.proactive.last_ts);
-      ("last_proactive_reason", `String m.proactive.last_reason);
-      ("last_proactive_preview", `String m.proactive.last_preview);
-      ("last_compaction_check_ts", `Float m.compaction.last_check_ts);
-      ("last_compaction_decision", `String m.compaction.last_decision);
-      ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
+      ("total_turns", `Int rt.usage.total_turns);
+      ("total_input_tokens", `Int rt.usage.total_input_tokens);
+      ("total_output_tokens", `Int rt.usage.total_output_tokens);
+      ("total_tokens", `Int rt.usage.total_tokens);
+      ("total_cost_usd", `Float rt.usage.total_cost_usd);
+      ("last_turn_ts", `Float rt.usage.last_turn_ts);
+      ("last_model_used", `String rt.usage.last_model_used);
+      ("last_input_tokens", `Int rt.usage.last_input_tokens);
+      ("last_output_tokens", `Int rt.usage.last_output_tokens);
+      ("last_total_tokens", `Int rt.usage.last_total_tokens);
+      ("last_latency_ms", `Int rt.usage.last_latency_ms);
+      ("compaction_count", `Int rt.compaction_rt.count);
+      ("last_compaction_ts", `Float rt.compaction_rt.last_ts);
+      ("last_compaction_before_tokens", `Int rt.compaction_rt.last_before_tokens);
+      ("last_compaction_after_tokens", `Int rt.compaction_rt.last_after_tokens);
+      ("proactive_count_total", `Int rt.proactive_rt.count_total);
+      ("last_proactive_ts", `Float rt.proactive_rt.last_ts);
+      ("last_proactive_reason", `String rt.proactive_rt.last_reason);
+      ("last_proactive_preview", `String rt.proactive_rt.last_preview);
+      ("last_compaction_check_ts", `Float rt.compaction_rt.last_check_ts);
+      ("last_compaction_decision", `String rt.compaction_rt.last_decision);
+      ("last_continuity_update_ts", `Float rt.last_continuity_update_ts);
       ("continuity_summary", `String m.continuity_summary);
       ("active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids));
       ( "active_team_session_id",
@@ -264,15 +303,14 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
         | None -> `Null );
       ("last_team_session_started_at", `String m.last_team_session_started_at);
       ("team_session_start_count_total", `Int m.team_session_start_count_total);
-      ("last_autonomous_action_at", `String m.last_autonomous_action_at);
-      ("autonomous_action_count", `Int m.autonomous_action_count);
-      ("autonomous_turn_count", `Int m.autonomous_turn_count);
-      ("autonomous_text_turn_count", `Int m.autonomous_text_turn_count);
-      ("autonomous_tool_turn_count", `Int m.autonomous_tool_turn_count);
-      ("board_reactive_turn_count", `Int m.board_reactive_turn_count);
-      ("mention_reactive_turn_count", `Int m.mention_reactive_turn_count);
-      ("noop_turn_count", `Int m.noop_turn_count);
-      ("last_triage_triggers", `String m.last_triage_triggers);
+      ("last_autonomous_action_at", `String rt.last_autonomous_action_at);
+      ("autonomous_action_count", `Int rt.autonomous_action_count);
+      ("autonomous_turn_count", `Int rt.autonomous_turn_count);
+      ("autonomous_text_turn_count", `Int rt.autonomous_text_turn_count);
+      ("autonomous_tool_turn_count", `Int rt.autonomous_tool_turn_count);
+      ("board_reactive_turn_count", `Int rt.board_reactive_turn_count);
+      ("mention_reactive_turn_count", `Int rt.mention_reactive_turn_count);
+      ("noop_turn_count", `Int rt.noop_turn_count);
       ("paused", `Bool m.paused);
       ("current_task_id",
         (match m.current_task_id with None -> `Null | Some s -> `String s));
@@ -339,6 +377,12 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     in
     let scope_kind =
       Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
+    in
+    let tool_tier =
+      Safe_ops.json_string ~default:"essential" "tool_tier" json
+    in
+    let extra_masc_tools =
+      Safe_ops.json_string_list "extra_masc_tools" json
     in
     let room_scope =
       Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope
@@ -472,9 +516,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let noop_turn_count =
       Safe_ops.json_int ~default:0 "noop_turn_count" json
     in
-    let last_triage_triggers =
-      Safe_ops.json_string ~default:"" "last_triage_triggers" json
-    in
     let paused =
       Safe_ops.json_bool ~default:false "paused" json
     in
@@ -488,8 +529,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         {
           name;
           agent_name = if agent_name = "" then keeper_agent_name name else agent_name;
-          trace_id;
-          trace_history;
           goal;
           short_goal;
           mid_goal;
@@ -504,19 +543,16 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           execution_scope;
           allowed_paths;
           scope_kind;
+          tool_tier;
+          extra_masc_tools;
           room_scope;
           mention_targets;
           joined_room_ids;
           last_seen_seq_by_room;
-          generation;
           proactive = {
             enabled = proactive_enabled;
             idle_sec = proactive_idle_sec;
             cooldown_sec = proactive_cooldown_sec;
-            count_total = proactive_count_total;
-            last_ts = last_proactive_ts;
-            last_reason = last_proactive_reason;
-            last_preview = last_proactive_preview;
           };
           compaction = {
             profile = compaction_profile;
@@ -524,12 +560,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
             message_gate = compaction_message_gate;
             token_gate = compaction_token_gate;
             cooldown_sec = continuity_compaction_cooldown_sec;
-            count = compaction_count;
-            last_ts = last_compaction_ts;
-            last_before_tokens = last_compaction_before_tokens;
-            last_after_tokens = last_compaction_after_tokens;
-            last_check_ts = last_compaction_check_ts;
-            last_decision = last_compaction_decision;
           };
           auto_handoff;
           handoff_threshold;
@@ -537,39 +567,57 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           voice_enabled;
           voice_channel;
           voice_agent_id;
-          last_handoff_ts;
           created_at = if created_at = "" then now_iso () else created_at;
           updated_at = if updated_at = "" then now_iso () else updated_at;
-          usage = {
-            total_turns;
-            total_input_tokens;
-            total_output_tokens;
-            total_tokens;
-            total_cost_usd;
-            last_turn_ts;
-            last_model_used;
-            last_input_tokens;
-            last_output_tokens;
-            last_total_tokens;
-            last_latency_ms;
-          };
-          last_continuity_update_ts;
           continuity_summary;
           active_goal_ids;
           active_team_session_id;
           last_team_session_started_at;
           team_session_start_count_total;
-          last_autonomous_action_at;
-          autonomous_action_count;
-          autonomous_turn_count;
-          autonomous_text_turn_count;
-          autonomous_tool_turn_count;
-          board_reactive_turn_count;
-          mention_reactive_turn_count;
-          noop_turn_count;
-          last_triage_triggers;
           paused;
           current_task_id;
+          runtime = {
+            usage = {
+              total_turns;
+              total_input_tokens;
+              total_output_tokens;
+              total_tokens;
+              total_cost_usd;
+              last_turn_ts;
+              last_model_used;
+              last_input_tokens;
+              last_output_tokens;
+              last_total_tokens;
+              last_latency_ms;
+            };
+            compaction_rt = {
+              count = compaction_count;
+              last_ts = last_compaction_ts;
+              last_before_tokens = last_compaction_before_tokens;
+              last_after_tokens = last_compaction_after_tokens;
+              last_check_ts = last_compaction_check_ts;
+              last_decision = last_compaction_decision;
+            };
+            proactive_rt = {
+              count_total = proactive_count_total;
+              last_ts = last_proactive_ts;
+              last_reason = last_proactive_reason;
+              last_preview = last_proactive_preview;
+            };
+            generation;
+            trace_id;
+            trace_history;
+            last_handoff_ts;
+            last_continuity_update_ts;
+            last_autonomous_action_at;
+            autonomous_action_count;
+            autonomous_turn_count;
+            autonomous_text_turn_count;
+            autonomous_tool_turn_count;
+            board_reactive_turn_count;
+            mention_reactive_turn_count;
+            noop_turn_count;
+          };
         }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))

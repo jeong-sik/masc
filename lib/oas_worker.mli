@@ -52,14 +52,17 @@ val run_named :
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
+  ?priority:Llm_provider.Request_priority.t ->
   ?memory:Oas.Memory.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?agent_ref:Oas.Agent.t option ref ->
+  ?proof_ref:Oas.Cdal_proof.t option ref ->
   ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?allowed_paths:string list ->
   ?working_context:Yojson.Safe.t ->
+  ?cache_system_prompt:bool ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
@@ -81,8 +84,11 @@ val run_model_by_label :
   ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
+  ?enable_thinking:bool ->
+  ?contract:Oas.Risk_contract.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
+  ?priority:Llm_provider.Request_priority.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
@@ -102,8 +108,10 @@ val run_named_with_masc_tools :
   ?memory:Oas.Memory.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?proof_ref:Oas.Cdal_proof.t option ref ->
   ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
+  ?priority:Llm_provider.Request_priority.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
@@ -121,9 +129,11 @@ val run_model_with_masc_tools :
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
+  ?enable_thinking:bool ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
+  ?priority:Llm_provider.Request_priority.t ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->

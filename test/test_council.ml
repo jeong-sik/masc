@@ -261,6 +261,11 @@ let test_router_agent_selection () =
   check bool "agents selected" (List.length decision.Router.agents <= 2) true;
   check bool "has reason" (String.length decision.reason > 0) true
 
+let test_router_reason_mentions_heuristic () =
+  let decision = Router.route "implement a function in OCaml" in
+  check bool "heuristic reason prefix"
+    (String.starts_with ~prefix:"Heuristic query class:" decision.reason) true
+
 (* ============================================================
    Balance Tests
    ============================================================ *)
@@ -303,6 +308,8 @@ let debate_tests = [
 ]
 
 let consensus_persist_path = "/tmp/masc-test-consensus-persist"
+let consensus_storage_dir () =
+  Filename.concat (Filename.concat consensus_persist_path ".masc") "consensus"
 
 let consensus_persist_setup () =
   (try rm_rf consensus_persist_path with _ -> ());
@@ -359,6 +366,56 @@ let test_consensus_persist_closed () =
        check bool "has closed_at" (restored.Consensus.closed_at <> None) true);
     consensus_persist_teardown ()
 
+let test_consensus_persist_start_failure_is_atomic () =
+  consensus_persist_setup ();
+  let dir = consensus_storage_dir () in
+  mkdir_p dir;
+  Unix.chmod dir 0o555;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chmod dir 0o755;
+      consensus_persist_teardown ())
+    (fun () ->
+      match Consensus.start_voting
+              ~topic:"Persist fail start"
+              ~initiator:"alice"
+              ~quorum:2
+              ~threshold:0.5
+              ()
+      with
+      | Ok _ -> fail "start should fail when persistence is unavailable"
+      | Error (Consensus.Persistence_failed _) ->
+        check int "no in-memory sessions" (List.length (Consensus.list_all_sessions ())) 0
+      | Error _ -> fail "expected persistence failure")
+
+let test_consensus_persist_vote_failure_is_atomic () =
+  consensus_persist_setup ();
+  match Consensus.start_voting ~topic:"Persist fail vote" ~initiator:"alice" ~quorum:2 ~threshold:0.5 () with
+  | Error _ -> consensus_persist_teardown (); fail "start failed"
+  | Ok session ->
+    let sid = session.Consensus.id in
+    let dir = consensus_storage_dir () in
+    Unix.chmod dir 0o555;
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.chmod dir 0o755;
+        consensus_persist_teardown ())
+      (fun () ->
+        match Consensus.cast_vote ~session_id:sid ~agent:"bob" ~decision:Consensus.Approve ~reason:"looks good" () with
+        | Ok _ -> fail "vote should fail when persistence is unavailable"
+        | Error (Consensus.Persistence_failed _) ->
+          (match Consensus.get_session ~session_id:sid with
+           | None -> fail "session should remain available in memory"
+           | Some current ->
+             check int "vote count unchanged in memory" (List.length current.Consensus.votes) 0);
+          Consensus.clear_sessions ();
+          Consensus.init ~base_path:consensus_persist_path;
+          (match Consensus.get_session ~session_id:sid with
+           | None -> fail "session should reload from disk"
+           | Some restored ->
+             check int "vote count unchanged on disk" (List.length restored.Consensus.votes) 0)
+        | Error _ -> fail "expected persistence failure")
+
 let consensus_tests = [
   "start voting", `Quick, test_consensus_start;
   "cast vote", `Quick, test_consensus_vote;
@@ -368,6 +425,10 @@ let consensus_tests = [
   "deadlock result", `Quick, test_consensus_deadlock;
   "persistence roundtrip", `Quick, test_consensus_persist_roundtrip;
   "persistence closed session", `Quick, test_consensus_persist_closed;
+  "persistence start failure is atomic", `Quick,
+  test_consensus_persist_start_failure_is_atomic;
+  "persistence vote failure is atomic", `Quick,
+  test_consensus_persist_vote_failure_is_atomic;
 ]
 
 let router_tests = [
@@ -376,6 +437,7 @@ let router_tests = [
   "complexity simple", `Quick, test_router_complexity_simple;
   "complexity complex", `Quick, test_router_complexity_complex;
   "agent selection", `Quick, test_router_agent_selection;
+  "reason mentions heuristic", `Quick, test_router_reason_mentions_heuristic;
 ]
 
 let balance_tests = [
@@ -422,12 +484,61 @@ let test_executor_github_argv_create_issue () =
     argv
     ["gh"; "issue"; "create"; "--title"; title; "--body"; body]
 
+let contains_substring s sub =
+  let slen = String.length s and sublen = String.length sub in
+  if sublen > slen then false
+  else
+    let rec loop i =
+      if i > slen - sublen then false
+      else if String.sub s i sublen = sub then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let test_executor_merge_with_valid_pr () =
+  (* Topic with valid PR number should match and extract the number *)
+  match Executor.find_action "Merge PR #42" with
+  | None -> fail "should match merge PR pattern"
+  | Some mapping ->
+    (* The template uses MergePR 0 as placeholder *)
+    (match mapping.Executor.action with
+     | Executor.GitHubAction (Executor.MergePR 0) -> ()
+     | _ -> fail "expected MergePR 0 placeholder in template");
+    (* extract_number should find 42 from the topic *)
+    (match Executor.extract_number "Merge PR #42" with
+     | Some 42 -> ()
+     | Some n -> fail (Printf.sprintf "expected 42, got %d" n)
+     | None -> fail "should extract 42")
+
+let test_executor_deploy_errors () =
+  (* Deploy stub should error, not pretend to succeed *)
+  let result = Consensus.Unanimous Consensus.Approve in
+  match Executor.execute_decision ~topic:"deploy v2.0" ~result with
+  | None -> fail "should return Some (error result), not None"
+  | Some r ->
+    check bool "not successful" (not r.Executor.success) true;
+    check bool "mentions deploy"
+      (contains_substring r.output "deploy") true
+
+let test_executor_deploy_not_silent () =
+  (* Verify the deploy mapping still exists but is explicitly blocked *)
+  match Executor.find_action "deploy v1.0" with
+  | None -> fail "deploy pattern should still match"
+  | Some mapping ->
+    (* The template has the echo placeholder *)
+    (match mapping.Executor.action with
+     | Executor.ExecCommand ["echo"; "Deploy placeholder"] -> ()
+     | _ -> fail "expected deploy echo placeholder in template")
+
 let executor_tests = [
   "find action PR", `Quick, test_executor_find_action_pr;
   "no action for random", `Quick, test_executor_find_action_none;
   "dry run approve", `Quick, test_executor_dry_run_approve;
   "dry run reject", `Quick, test_executor_dry_run_reject;
   "github argv create issue", `Quick, test_executor_github_argv_create_issue;
+  "merge with valid PR extracts number", `Quick, test_executor_merge_with_valid_pr;
+  "deploy stub errors", `Quick, test_executor_deploy_errors;
+  "deploy pattern exists but blocked", `Quick, test_executor_deploy_not_silent;
 ]
 
 (* ============================================================

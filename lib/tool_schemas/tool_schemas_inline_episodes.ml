@@ -5,7 +5,7 @@ let schemas : tool_schema list = [
   {
     name = "masc_episode_flush";
     description = "Flush locally queued episodes to Neo4j (graph) and PostgreSQL (relational) persistent storage. \
-Use when episodes have been queued during mitosis handoff and need to be persisted. \
+Use when episodes have been queued during agent handoff and need to be persisted. \
 Returns flushed/failed/pending counts. Pair with masc_episode_list to verify stored episodes.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -44,18 +44,6 @@ Pair with masc_episode_flush to ensure episodes are persisted before querying.";
           ("description", `String "Max results (default: 20)");
         ]);
       ]);
-    ];
-  };
-
-  (* masc_self_introspect *)
-  {
-    name = "masc_self_introspect";
-    description = "Agent self-awareness introspection: generation, context usage, siblings, parent episode, estimated lifespan. \
-Use when you need to understand your place in the agent lifecycle or check remaining capacity. \
-Pair with masc_memento_mori for lifecycle automation, or masc_recall_search for memory queries.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
     ];
   };
 

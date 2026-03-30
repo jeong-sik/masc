@@ -140,7 +140,7 @@ let test_recursive_prefix_get_all () =
       ("team-sessions:ts-1:session.json", "s1");
       ("team-sessions:ts-1:events.jsonl", "e1");
       ("team-sessions:ts-2:session.json", "s2");
-      ("mitosis:node-1", "m1");
+      ("relay:node-1", "m1");
     ]
   in
   List.iter

@@ -10,6 +10,187 @@ open Keeper_types
 open Keeper_memory [@@warning "-33"]
 open Keeper_exec_context [@@warning "-33"]
 
+let string_contains_substring ~(needle : string) (haystack : string) : bool =
+  let needle_len = String.length needle in
+  let hay_len = String.length haystack in
+  if needle_len = 0 then true
+  else if needle_len > hay_len then false
+  else
+    let rec loop i =
+      if i + needle_len > hay_len then false
+      else if String.sub haystack i needle_len = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
+  string_contains_substring
+    ~needle:(String.lowercase_ascii needle)
+    (String.lowercase_ascii haystack)
+
+let decision_channel_of_observation
+    (observation : Keeper_world_observation.world_observation) : string =
+  if observation.pending_mentions <> [] || observation.pending_board_events <> [] then
+    "turn"
+  else
+    "proactive"
+
+let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
+  let text = String.trim result.response_text in
+  if result.tools_used <> [] then "tool_use"
+  else if text = "" then "noop"
+  else if String.starts_with ~prefix:"SKIP:" text then "skip_text"
+  else "text_response"
+
+let observed_triggers_of_observation
+    (observation : Keeper_world_observation.world_observation) : string list =
+  let triggers = ref [] in
+  let add trigger = triggers := trigger :: !triggers in
+  if observation.pending_mentions <> [] then add "direct_mention";
+  if observation.pending_board_events <> [] then add "board_activity";
+  if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
+  if observation.failed_task_count > 0 then add "failed_task";
+  if observation.active_goals <> [] && observation.idle_seconds > 0 then
+    add "idle_timeout_candidate";
+  if Option.is_some observation.worktree_change_summary then add "worktree_change";
+  List.rev !triggers
+
+let observed_affordances_of_observation
+    (observation : Keeper_world_observation.world_observation) : string list =
+  let affordances = ref [] in
+  let add affordance = affordances := affordance :: !affordances in
+  if observation.pending_mentions <> [] then add "reply_in_room";
+  if observation.pending_board_events <> [] then add "board_post_or_comment";
+  if observation.unclaimed_task_count > 0 then add "task_claim";
+  if observation.failed_task_count > 0 then add "task_audit";
+  if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
+  List.rev !affordances
+
+let response_requests_confirmation (text : string) : bool =
+  let trimmed = String.trim text in
+  trimmed <> ""
+  && (String.contains trimmed '?'
+      || string_contains_substring_ci ~needle:"would you like" trimmed
+      || string_contains_substring_ci ~needle:"do you want" trimmed
+      || string_contains_substring_ci ~needle:"let me know" trimmed
+      || string_contains_substring_ci ~needle:"어떻게 할까" trimmed
+      || string_contains_substring_ci ~needle:"할까" trimmed)
+
+let decision_id ~(meta : keeper_meta) ~(ts : float) ~(suffix_seed : string) : string =
+  let digest =
+    Digest.to_hex
+      (Digest.string
+         (Printf.sprintf "%s|%s|%.6f|%s"
+            meta.name meta.runtime.trace_id ts suffix_seed))
+  in
+  Printf.sprintf "dec-%Ld-%s"
+    (Int64.of_float (ts *. 1000.0))
+    (String.sub digest 0 8)
+
+let append_decision_record
+    ~(config : Room.config)
+    ~(meta : keeper_meta)
+    ~(observation : Keeper_world_observation.world_observation)
+    ~(latency_ms : int)
+    ~(outcome : string)
+    ~(selected_mode : string)
+    ?(result : Keeper_agent_run.run_result option = None)
+    ?error
+    () : unit =
+  let now_ts = Time_compat.now () in
+  let trigger_signals = observed_triggers_of_observation observation in
+  let affordances = observed_affordances_of_observation observation in
+  let tools_used =
+    match result with
+    | Some r -> r.tools_used
+    | None -> []
+  in
+  let response_preview =
+    match result with
+    | Some r when String.trim r.response_text <> "" ->
+        Some (short_preview r.response_text)
+    | _ -> None
+  in
+  let tool_call_count =
+    match result with
+    | Some r -> r.tool_calls_made
+    | None -> 0
+  in
+  let claim_executed = List.mem "keeper_task_claim" tools_used in
+  let suffix_seed =
+    match response_preview, error with
+    | Some preview, _ -> preview
+    | None, Some err -> err
+    | None, None -> selected_mode
+  in
+  let json =
+    `Assoc
+      [
+        ("id", `String (decision_id ~meta ~ts:now_ts ~suffix_seed));
+        ("ts", `String (now_iso ()));
+        ("ts_unix", `Float now_ts);
+        ("audience", `String "internal_human_only");
+        ("trace_id", `String meta.runtime.trace_id);
+        ("generation", `Int meta.runtime.generation);
+        ("keeper_name", `String meta.name);
+        ("agent_name", `String meta.agent_name);
+        ("channel", `String (decision_channel_of_observation observation));
+        ("outcome", `String outcome);
+        ("selected_mode", `String selected_mode);
+        ("selected_mode_source", `String "observed_result");
+        ("latency_ms", `Int latency_ms);
+        ("trigger_signals", `List (List.map (fun s -> `String s) trigger_signals));
+        ("observed_affordances", `List (List.map (fun s -> `String s) affordances));
+        ( "observation",
+          `Assoc
+            [
+              ("pending_mentions", `Int (List.length observation.pending_mentions));
+              ("pending_board_events", `Int (List.length observation.pending_board_events));
+              ("active_goals", `Int (List.length observation.active_goals));
+              ("idle_seconds", `Int observation.idle_seconds);
+              ("context_ratio", `Float observation.context_ratio);
+              ("unclaimed_task_count", `Int observation.unclaimed_task_count);
+              ("failed_task_count", `Int observation.failed_task_count);
+              ("active_agent_count", `Int observation.active_agent_count);
+              ("worktree_change_detected", `Bool (Option.is_some observation.worktree_change_summary));
+            ] );
+        ("tool_call_count", `Int tool_call_count);
+        ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+        ("claim_was_available", `Bool (observation.unclaimed_task_count > 0));
+        ("claim_executed", `Bool claim_executed);
+        ( "response_preview",
+          match response_preview with
+          | Some preview -> `String preview
+          | None -> `Null );
+        ( "response_requests_confirmation",
+          `Bool
+            (match result with
+             | Some r -> response_requests_confirmation r.response_text
+             | None -> false) );
+        ( "error",
+          match error with
+          | Some reason -> `String reason
+          | None -> `Null );
+        ( "cdal_proof",
+          match result with
+          | Some { proof = Some p; _ } ->
+              `Assoc
+                [
+                  ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
+                  ( "result_status",
+                    Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status );
+                  ("tool_trace_count", `Int (List.length p.tool_trace_refs));
+                ]
+          | _ -> `Null );
+      ]
+  in
+  try append_jsonl_line (keeper_decision_log_path config meta.name) json
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Keeper.warn "append decision record failed for %s: %s"
+        meta.name (Printexc.to_string exn)
+
 (** Observe tool call history from run_result to update keeper metrics.
     No action_taken type — we observe what the agent did, not classify it. *)
 let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
@@ -43,61 +224,64 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let is_autonomous_turn = true in
   let is_board_reactive = observation.pending_board_events <> [] in
   let is_mention_reactive = observation.pending_mentions <> [] in
+  let rt = meta.runtime in
   {
     meta with
     updated_at = now_iso ();
-    usage = {
-      total_turns = meta.usage.total_turns + 1;
-      total_input_tokens = meta.usage.total_input_tokens + result.usage.input_tokens;
-      total_output_tokens = meta.usage.total_output_tokens + result.usage.output_tokens;
-      total_tokens =
-        meta.usage.total_tokens + Keeper_exec_context.total_tokens result.usage;
-      total_cost_usd = meta.usage.total_cost_usd +. turn_cost;
-      last_turn_ts = now_ts;
-      last_model_used = result.model_used;
-      last_input_tokens = result.usage.input_tokens;
-      last_output_tokens = result.usage.output_tokens;
-      last_total_tokens = Keeper_exec_context.total_tokens result.usage;
-      last_latency_ms = latency_ms;
+    runtime = { rt with
+      usage = {
+        total_turns = rt.usage.total_turns + 1;
+        total_input_tokens = rt.usage.total_input_tokens + result.usage.input_tokens;
+        total_output_tokens = rt.usage.total_output_tokens + result.usage.output_tokens;
+        total_tokens =
+          rt.usage.total_tokens + Keeper_exec_context.total_tokens result.usage;
+        total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
+        last_turn_ts = now_ts;
+        last_model_used = result.model_used;
+        last_input_tokens = result.usage.input_tokens;
+        last_output_tokens = result.usage.output_tokens;
+        last_total_tokens = Keeper_exec_context.total_tokens result.usage;
+        last_latency_ms = latency_ms;
+      };
+      (* Proactive count: any turn that produced text or tools *)
+      proactive_rt = {
+        count_total =
+          rt.proactive_rt.count_total + (if has_text || has_tool_calls then 1 else 0);
+        last_ts =
+          (if has_text || has_tool_calls then now_ts else rt.proactive_rt.last_ts);
+        last_reason =
+          (if has_tool_calls then
+             Printf.sprintf "unified:tools=[%s]"
+               (String.concat "," result.tools_used)
+           else if has_text then "unified:text_response"
+           else rt.proactive_rt.last_reason);
+        last_preview =
+          (if has_text then short_preview result.response_text
+           else if has_tool_calls then
+             Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
+           else rt.proactive_rt.last_preview);
+      };
+      (* Autonomous action tracking from tool calls *)
+      autonomous_action_count =
+        rt.autonomous_action_count + List.length result.tools_used;
+      autonomous_turn_count =
+        rt.autonomous_turn_count + (if is_autonomous_turn then 1 else 0);
+      autonomous_text_turn_count =
+        rt.autonomous_text_turn_count
+        + (if is_autonomous_turn && has_text && not has_tool_calls then 1 else 0);
+      autonomous_tool_turn_count =
+        rt.autonomous_tool_turn_count
+        + (if is_autonomous_turn && has_tool_calls then 1 else 0);
+      board_reactive_turn_count =
+        rt.board_reactive_turn_count + (if is_board_reactive then 1 else 0);
+      mention_reactive_turn_count =
+        rt.mention_reactive_turn_count + (if is_mention_reactive then 1 else 0);
+      noop_turn_count =
+        rt.noop_turn_count
+        + (if is_autonomous_turn && not has_text && not has_tool_calls then 1 else 0);
+      last_autonomous_action_at =
+        (if has_tool_calls then now_iso () else rt.last_autonomous_action_at);
     };
-    (* Proactive count: any turn that produced text or tools *)
-    proactive = { meta.proactive with
-      count_total =
-        meta.proactive.count_total + (if has_text || has_tool_calls then 1 else 0);
-      last_ts =
-        (if has_text || has_tool_calls then now_ts else meta.proactive.last_ts);
-      last_reason =
-        (if has_tool_calls then
-           Printf.sprintf "unified:tools=[%s]"
-             (String.concat "," result.tools_used)
-         else if has_text then "unified:text_response"
-         else meta.proactive.last_reason);
-      last_preview =
-        (if has_text then short_preview result.response_text
-         else if has_tool_calls then
-           Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
-         else meta.proactive.last_preview);
-    };
-    (* Autonomous action tracking from tool calls *)
-    autonomous_action_count =
-      meta.autonomous_action_count + List.length result.tools_used;
-    autonomous_turn_count =
-      meta.autonomous_turn_count + (if is_autonomous_turn then 1 else 0);
-    autonomous_text_turn_count =
-      meta.autonomous_text_turn_count
-      + (if is_autonomous_turn && has_text && not has_tool_calls then 1 else 0);
-    autonomous_tool_turn_count =
-      meta.autonomous_tool_turn_count
-      + (if is_autonomous_turn && has_tool_calls then 1 else 0);
-    board_reactive_turn_count =
-      meta.board_reactive_turn_count + (if is_board_reactive then 1 else 0);
-    mention_reactive_turn_count =
-      meta.mention_reactive_turn_count + (if is_mention_reactive then 1 else 0);
-    noop_turn_count =
-      meta.noop_turn_count
-      + (if is_autonomous_turn && not has_text && not has_tool_calls then 1 else 0);
-    last_autonomous_action_at =
-      (if has_tool_calls then now_iso () else meta.last_autonomous_action_at);
   }
 
 let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
@@ -129,8 +313,8 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("channel", `String channel);
         ("name", `String meta.name);
         ("agent_name", `String meta.agent_name);
-        ("trace_id", `String meta.trace_id);
-        ("generation", `Int meta.generation);
+        ("trace_id", `String meta.runtime.trace_id);
+        ("generation", `Int meta.runtime.generation);
         ("model_used", `String result.model_used);
         ( "usage",
           `Assoc
@@ -191,14 +375,16 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   {
     meta with
     updated_at = now_iso ();
-    usage = { meta.usage with
-      total_turns = meta.usage.total_turns + 1;
-      last_turn_ts = now_ts;
-      last_latency_ms = latency_ms;
-    };
-    proactive = { meta.proactive with
-      last_reason = "unified:error:" ^ String.trim reason;
-      last_preview = preview;
+    runtime = { meta.runtime with
+      usage = { meta.runtime.usage with
+        total_turns = meta.runtime.usage.total_turns + 1;
+        last_turn_ts = now_ts;
+        last_latency_ms = latency_ms;
+      };
+      proactive_rt = { meta.runtime.proactive_rt with
+        last_reason = "unified:error:" ^ String.trim reason;
+        last_preview = preview;
+      };
     };
   }
 
@@ -219,7 +405,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       in
       let base_dir = session_base_dir config in
       (* Ensure session dir tree for filesystem fallback (issue #3019) *)
-      Keeper_types.mkdir_p (Filename.concat base_dir meta.trace_id);
+      Keeper_types.mkdir_p (Filename.concat base_dir meta.runtime.trace_id);
       (* 3. Derive parameters: cascade.json -> keeper env-var fallback *)
       let temperature =
         Cascade_inference.resolve_temperature
@@ -234,8 +420,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       let max_turns = Keeper_config.keeper_unified_max_turns () in
       let max_cost_usd = Keeper_config.keeper_tool_cost_max_usd () in
       (* 4. Build turn prompt callback: use our unified system prompt *)
-      let build_turn_prompt ~base_system_prompt:_ ~messages:_ =
-        system_prompt
+      let build_turn_prompt ~base_system_prompt:_ ~messages:_
+          : Keeper_agent_run.turn_prompt =
+        (* Unified path already places soft context (continuity, worktree)
+           in the user_message via Keeper_unified_prompt.build_prompt.
+           No dynamic_context needed here. *)
+        { system_prompt; dynamic_context = "" }
       in
       (* 5. Run via OAS Agent.run() *)
       let run_result, latency_ms =
@@ -248,6 +438,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
               ~max_cost_usd
+              ~priority:Llm_provider.Request_priority.Background
               ())
       in
       match run_result with
@@ -255,6 +446,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let updated_meta =
             update_metrics_from_failure meta ~latency_ms ~reason:e
           in
+          append_decision_record ~config ~meta:updated_meta ~observation
+            ~latency_ms ~outcome:"error" ~selected_mode:"error"
+            ~error:e ();
           (match write_meta config updated_meta with
            | Ok () -> ()
            | Error msg ->
@@ -264,7 +458,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           Keeper_registry.increment_turn_failures ~base_path meta.name;
           let count = Keeper_registry.get_turn_failures ~base_path meta.name in
           let threshold =
-            Env_config.KeeperKeepalive.max_consecutive_turn_failures
+            Runtime_params.get Governance_registry.keeper_max_turn_failures
           in
           if count >= threshold then begin
             Log.Keeper.error
@@ -343,6 +537,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                Log.Keeper.error
                  "write metrics snapshot failed after unified turn: %s"
                  (Printexc.to_string exn));
+          append_decision_record ~config ~meta:updated_meta ~observation
+            ~latency_ms ~outcome:"success"
+            ~selected_mode:(selected_mode_of_result result)
+            ~result:(Some result) ();
           (* 7. Persist updated meta *)
           (match write_meta config updated_meta with
            | Ok () -> ()

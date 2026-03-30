@@ -76,7 +76,7 @@ function KpiCard({ label, value, hint, tone = 'default', progress }: {
       <div class="text-2xl font-bold ${KPI_VALUE_TONE[tone]} tabular-nums leading-none">${value}</div>
       ${progress != null ? html`
         <div class="w-full h-1 bg-[var(--white-6)] rounded-full overflow-hidden mt-0.5">
-          <div class="h-full rounded-full transition-all duration-500" style="width:${Math.min(progress, 100)}%;background:${progress > CTX_CRITICAL_PCT ? CTX_COLOR_CRITICAL : progress > CTX_WARN_PCT ? '#fbbf24' : '#4ade80'}"></div>
+          <div class="h-full rounded-full transition-all duration-500" style="width:${Math.min(progress, 100)}%;background:${ctxColor(progress)}"></div>
         </div>
       ` : null}
       ${hint ? html`<div class="text-[10px] text-[var(--text-dim)] leading-snug">${hint}</div>` : null}
@@ -172,8 +172,49 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
           ? html`<${KpiCard} label="Cost (USD)" value=${latestCost} />`
           : null}
       </div>
+      ${'' /* Autonomy KPIs — activity breakdown */}
+      ${(keeper.autonomous_action_count ?? 0) > 0 || (keeper.board_reactive_turn_count ?? 0) > 0 ? html`
+        <div class="grid grid-cols-4 gap-2">
+          <${KpiCard}
+            label="Auto Actions"
+            value=${keeper.autonomous_action_count ?? '-'}
+            hint="자율 행동 횟수"
+          />
+          <${KpiCard}
+            label="Auto Turns"
+            value=${keeper.autonomous_turn_count ?? '-'}
+            hint=${keeper.autonomous_text_turn_count != null ? `텍스트 ${keeper.autonomous_text_turn_count} / 도구 ${keeper.autonomous_tool_turn_count ?? 0}` : undefined}
+          />
+          <${KpiCard}
+            label="Board React"
+            value=${keeper.board_reactive_turn_count ?? '-'}
+            hint="게시판 반응"
+          />
+          <${KpiCard}
+            label="Noop"
+            value=${keeper.noop_turn_count ?? '-'}
+            hint="비활동 턴"
+          />
+        </div>
+      ` : null}
+      ${'' /* Proactive activity callout */}
+      ${keeper.last_proactive_ago_s != null ? html`
+        <div class="rounded-xl border border-purple-400/20 bg-purple-500/5 p-3 text-[11px]">
+          <span class="font-semibold text-purple-300">Proactive</span>
+          <span class="text-text-muted ml-2">${formatDuration(keeper.last_proactive_ago_s)} 전</span>
+          ${keeper.last_proactive_reason ? html`
+            <span class="text-text-dim ml-2">| ${keeper.last_proactive_reason}</span>
+          ` : null}
+        </div>
+      ` : null}
     </div>
   `
+}
+
+function formatDuration(sec: number): string {
+  if (sec < 60) return `${sec}초`
+  if (sec < 3600) return `${Math.floor(sec / 60)}분`
+  return `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분`
 }
 
 // ── Context Chart ────────────────────────────────────────
@@ -254,7 +295,6 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
   const lastLatency = latencies[latencies.length - 1] ?? 0
   const totalCost = costs.reduce((a: number, b: number) => a + b, 0)
 
-  // Model switches: detect when model_used changes
   const modelSwitches: { index: number; model: string }[] = []
   for (let i = 1; i < series.length; i++) {
     if ((series[i] as KeeperMetricPoint).model_used !== (series[i - 1] as KeeperMetricPoint).model_used) {

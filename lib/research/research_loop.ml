@@ -211,6 +211,7 @@ let generate_hypothesis ~sw ~net ~clock ~(config : Research_config.t)
       ~temperature:config.temperature
       ~max_tokens:config.max_tokens
       ~timeout_sec:config.timeout_sec
+      ~priority:Llm_provider.Request_priority.Background
       ()
   with
   | Ok resp ->
@@ -319,22 +320,24 @@ let log_result ~(results_file : string) ~(entry : experiment_entry) : unit =
     try
       let pos = LargeFile.pos_out oc in
       pos = Int64.zero
-      with exn ->
-        log_best_effort_failure "results header check" exn;
-        false
+    with exn ->
+      log_best_effort_failure "results header check" exn;
+      false
   in
   (try
-    if needs_header then output_string oc header;
-    Printf.fprintf oc "%s\t%d\t%.4f\t%d\t%d\t%s\t%s\n"
-      entry.id
-      (if entry.metric.build_ok then 1 else 0)
-      entry.metric.test_pass_rate
-      entry.metric.loc_delta
-      entry.metric.files_changed
-      (Research_metric.status_to_string entry.metric.status)
-      entry.hypothesis.description;
-    close_out oc
-  with exn -> close_out_noerr oc; raise exn)
+     if needs_header then output_string oc header;
+     Printf.fprintf oc "%s\t%d\t%.4f\t%d\t%d\t%s\t%s\n"
+       entry.id
+       (if entry.metric.build_ok then 1 else 0)
+       entry.metric.test_pass_rate
+       entry.metric.loc_delta
+       entry.metric.files_changed
+       (Research_metric.status_to_string entry.metric.status)
+       entry.hypothesis.description;
+     close_out oc
+   with exn ->
+     close_out_noerr oc;
+     raise exn)
 
 (** Run a single experiment iteration. *)
 let run_experiment ~sw ~net ~clock ~(config : Research_config.t)

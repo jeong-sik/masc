@@ -127,7 +127,7 @@ let fallback_reply_from_keeper_json keeper_json =
     if starts_with lowered "trpg-" then false
     else
       starts_with lowered "masc-"
-      || starts_with lowered "lodge-"
+      || starts_with lowered "keeper-"
       || starts_with lowered "heartbeat"
       || contains_substring lowered "keeper"
       || contains_substring lowered "autonomy"

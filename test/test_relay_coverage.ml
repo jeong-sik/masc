@@ -22,7 +22,7 @@ let test_default_config_threshold () =
 
 let test_default_config_target_agent () =
   let c = Relay.default_config in
-  check string "target_agent" "claude" c.target_agent
+  check string "target_agent" "auto" c.target_agent
 
 let test_default_config_compress_ratio () =
   let c = Relay.default_config in
@@ -68,12 +68,15 @@ let test_estimate_context_gemini () =
   check int "max tokens gemini" 1000000 m.max_tokens
 
 let test_estimate_context_codex () =
+  (* "codex" not in OAS Provider_registry; conservative fallback.
+     TODO: register "openai" provider in OAS to cover codex/gpt. *)
   let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"codex" in
-  check int "max tokens codex" 128000 m.max_tokens
+  check int "max tokens codex" 100000 m.max_tokens
 
 let test_estimate_context_gpt () =
+  (* "gpt" not in OAS Provider_registry; same as codex. *)
   let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"gpt" in
-  check int "max tokens gpt" 128000 m.max_tokens
+  check int "max tokens gpt" 100000 m.max_tokens
 
 let test_estimate_context_claude_opus () =
   let m = Relay.estimate_context ~messages:10 ~tool_calls:5 ~model:"claude-opus" in

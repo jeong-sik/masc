@@ -178,41 +178,57 @@ let test_write_tools_are_not_readonly () =
 
 let test_parse_verdict_pass () =
   Alcotest.(check bool) "PASS" true
-    (Verifier_oas.parse_verdict "PASS" = Pass)
+    (Verifier_oas.parse_verdict "PASS" = Ok Pass)
 
 let test_parse_verdict_pass_with_trailing () =
   Alcotest.(check bool) "PASS with trailing" true
-    (Verifier_oas.parse_verdict "PASS - looks good" = Pass)
+    (Verifier_oas.parse_verdict "PASS - looks good" = Ok Pass)
 
 let test_parse_verdict_warn () =
   match Verifier_oas.parse_verdict "WARN: minor issue" with
-  | Warn reason ->
+  | Ok (Warn reason) ->
     Alcotest.(check bool) "reason preserved" true
       (String.length reason > 0)
-  | _ -> Alcotest.fail "expected Warn"
+  | _ -> Alcotest.fail "expected Ok (Warn _)"
 
 let test_parse_verdict_fail () =
   match Verifier_oas.parse_verdict "FAIL: critical error" with
-  | Fail reason ->
+  | Ok (Fail reason) ->
     Alcotest.(check bool) "reason preserved" true
       (String.length reason > 0)
-  | _ -> Alcotest.fail "expected Fail"
+  | _ -> Alcotest.fail "expected Ok (Fail _)"
 
 let test_parse_verdict_case_insensitive () =
   Alcotest.(check bool) "pass lowercase" true
-    (Verifier_oas.parse_verdict "pass" = Pass)
+    (Verifier_oas.parse_verdict "pass" = Ok Pass)
 
-let test_parse_verdict_unknown_defaults_to_warn () =
+let test_parse_verdict_unknown_returns_error () =
   match Verifier_oas.parse_verdict "something unexpected" with
-  | Warn _ -> ()
-  | _ -> Alcotest.fail "unknown text should default to Warn"
+  | Error msg ->
+    Alcotest.(check bool) "error mentions format" true
+      (String.length msg > 0)
+  | Ok _ -> Alcotest.fail "unknown text should return Error"
 
-let test_parse_verdict_empty_defaults_to_warn () =
+let test_parse_verdict_empty_returns_error () =
   match Verifier_oas.parse_verdict "" with
-  | Warn reason ->
-    Alcotest.(check string) "empty output reason"
-      "empty verifier output" reason
-  | _ -> Alcotest.fail "empty text should default to Warn"
+  | Error msg ->
+    Alcotest.(check string) "empty output error"
+      "empty verifier output" msg
+  | Ok _ -> Alcotest.fail "empty text should return Error"
+
+let test_parse_verdict_rejects_passing_prefix () =
+  match Verifier_oas.parse_verdict "PASSING all checks" with
+  | Error msg ->
+    Alcotest.(check bool) "PASSING rejected" true
+      (String.length msg > 0)
+  | Ok _ -> Alcotest.fail "PASSING should be rejected as invalid verdict"
+
+let test_parse_verdict_rejects_warning_prefix () =
+  match Verifier_oas.parse_verdict "WARNING: system alert" with
+  | Error msg ->
+    Alcotest.(check bool) "WARNING rejected" true
+      (String.length msg > 0)
+  | Ok _ -> Alcotest.fail "WARNING should be rejected as invalid verdict"
 
 (* ================================================================ *)
 (* should_skip (verify fast path)                                    *)
@@ -335,10 +351,14 @@ let () =
       Alcotest.test_case "FAIL" `Quick test_parse_verdict_fail;
       Alcotest.test_case "case insensitive" `Quick
         test_parse_verdict_case_insensitive;
-      Alcotest.test_case "unknown -> Warn" `Quick
-        test_parse_verdict_unknown_defaults_to_warn;
-      Alcotest.test_case "empty -> Warn" `Quick
-        test_parse_verdict_empty_defaults_to_warn;
+      Alcotest.test_case "unknown -> Error" `Quick
+        test_parse_verdict_unknown_returns_error;
+      Alcotest.test_case "empty -> Error" `Quick
+        test_parse_verdict_empty_returns_error;
+      Alcotest.test_case "PASSING prefix rejected" `Quick
+        test_parse_verdict_rejects_passing_prefix;
+      Alcotest.test_case "WARNING prefix rejected" `Quick
+        test_parse_verdict_rejects_warning_prefix;
     ]);
     ("verify_skip", [
       Alcotest.test_case "read-only skips" `Quick test_verify_skips_readonly;

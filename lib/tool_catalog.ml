@@ -136,10 +136,6 @@ let explicit_metadata : (string * metadata) list =
       { default_metadata with destructive = Some true } );
     ( "masc_operation_pause",
       { default_metadata with destructive = Some false } );
-    ( "masc_chain_snapshot",
-      { default_metadata with readonly = Some true; idempotent = Some true } );
-    ( "masc_chain_run_get",
-      { default_metadata with readonly = Some true; idempotent = Some true } );
   ]
 
 (** {1 Public MCP Surface}
@@ -166,7 +162,7 @@ let public_mcp_tools =
     "masc_heartbeat";
     (* Keeper interaction *)
     "masc_keeper_msg"; "masc_keeper_list"; "masc_keeper_status";
-    "masc_keeper_up"; "masc_keeper_down";
+    "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
     (* Board — async agent communication *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote";

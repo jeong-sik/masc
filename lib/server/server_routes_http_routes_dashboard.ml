@@ -209,10 +209,13 @@ let add_routes ~sw ~clock router =
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/harness-health" (fun _request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_public_read (fun state req reqd ->
          let since = Server_utils.query_param req "since" in
          let until = Server_utils.query_param req "until" in
-         let json = Dashboard_harness_health.json ?since ?until () in
+         let json =
+           Dashboard_harness_health.json ~config:state.Mcp_server.room_config
+             ?since ?until ()
+         in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) _request reqd)
@@ -377,7 +380,7 @@ let add_routes ~sw ~clock router =
                 let masc_root = Filename.concat config.base_path ".masc" in
                 let entries =
                   Trajectory.read_entries ~masc_root ~keeper_name:m.name
-                    ~trace_id:m.trace_id
+                    ~trace_id:m.runtime.trace_id
                 in
                 let total = List.length entries in
                 let recent =
@@ -388,8 +391,8 @@ let add_routes ~sw ~clock router =
                 in
                 let json = `Assoc [
                   ("keeper", `String name);
-                  ("trace_id", `String m.trace_id);
-                  ("generation", `Int m.generation);
+                  ("trace_id", `String m.runtime.trace_id);
+                  ("generation", `Int m.runtime.generation);
                   ("total_entries", `Int total);
                   ("showing", `Int (List.length recent));
                   ("entries", `List (List.map (Trajectory.entry_to_json ~result_max_len:2000) recent));

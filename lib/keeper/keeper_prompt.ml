@@ -131,6 +131,22 @@ let build_keeper_system_prompt
        </continuity>";
     ]
 
+let append_direct_reply_mode_prompt ~(base_prompt : string) : string =
+  String.concat "\n"
+    [
+      base_prompt;
+      "";
+      "<direct_reply_mode>";
+      "This turn is a direct chat with the user.";
+      "Prioritize the keeper's authored persona, tone, relationship style, and examples over generic autonomous narration.";
+      "Reply as the keeper, not as a neutral assistant, control-plane operator, or world-state summarizer.";
+      "Do not expose hidden world state, board scans, metrics, token budgets, or internal workflow unless the user explicitly asks for them.";
+      "Keep the reply in the user's language and preserve the keeper's natural speech patterns.";
+      "Do not emit SKILL:, SKILL_REASON:, [STATE], or generic world-state summaries.";
+      "If a tool is needed, use it first, then answer in-character with the result.";
+      "</direct_reply_mode>";
+    ]
+
 let append_trait_clause ~(base : string) ~(clause : string) : string =
   let b = String.trim base in
   let c = String.trim clause in
@@ -157,8 +173,8 @@ let proactive_prompt_for_keeper
     |> Option.value ~default:default_soul_profile
   in
   let last_preview =
-    if String.trim meta.proactive.last_preview = "" then "none"
-    else meta.proactive.last_preview
+    if String.trim meta.runtime.proactive_rt.last_preview = "" then "none"
+    else meta.runtime.proactive_rt.last_preview
   in
   let continuity_snapshot =
     match snapshot with

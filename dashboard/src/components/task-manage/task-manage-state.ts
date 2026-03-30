@@ -1,11 +1,12 @@
 import { signal } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
+import { refreshExecution } from '../../store'
 
 export const showTaskCreate = signal(false)
 export const taskCreating = signal(false)
 
-export interface TaskCreateInput { title: string; description: string; priority?: string }
+export interface TaskCreateInput { title: string; description: string; priority?: number }
 
 export async function createTask(input: TaskCreateInput): Promise<boolean> {
   if (!input.title.trim()) { showToast('제목을 입력하세요', 'error'); return false }
@@ -16,6 +17,7 @@ export async function createTask(input: TaskCreateInput): Promise<boolean> {
     await callMcpTool('masc_add_task', args)
     showToast('태스크 생성 완료', 'success')
     showTaskCreate.value = false
+    await refreshExecution({ force: true })
     return true
   } catch (err) {
     showToast(`태스크 생성 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
@@ -32,6 +34,7 @@ export async function claimTask(taskId: string): Promise<void> {
   try {
     await callMcpTool('masc_claim_next', { task_id: taskId })
     showToast(`태스크 ${taskId} 클레임 완료`, 'success')
+    await refreshExecution({ force: true })
   } catch (err) {
     showToast(`클레임 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
   } finally {
@@ -41,10 +44,11 @@ export async function claimTask(taskId: string): Promise<void> {
   }
 }
 
-export async function updateTaskPriority(taskId: string, priority: string): Promise<void> {
+export async function updateTaskPriority(taskId: string, priority: number): Promise<void> {
   try {
     await callMcpTool('masc_update_priority', { task_id: taskId, priority })
     showToast(`우선순위 변경: ${priority}`, 'success')
+    await refreshExecution({ force: true })
   } catch (err) {
     showToast(`우선순위 변경 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
   }

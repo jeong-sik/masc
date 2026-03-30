@@ -6,12 +6,12 @@
     - Tool_inline_dispatch_comm: masc_bounded_run, masc_broadcast,
       masc_messages, masc_listen, masc_who
     - Tool_inline_dispatch_episode: masc_episode_flush, masc_episode_list
-    - Tool_inline_dispatch_extra: remaining tools (introspect, recall,
+    - Tool_inline_dispatch_extra: remaining tools (recall,
       board, conversation, keeper, etc.)
 
     Keeps inline: verify, mcp_session, cancellation, subscription,
     progress, interrupt, approve, reject, pending_interrupts, branch,
-    governance_set, spawn, memento_mori, discover_tools.
+    governance_set, spawn, discover_tools.
 *)
 
 (** Re-export shared types so callers can use
@@ -60,9 +60,6 @@ let dispatch (ctx : context) ~(name : string) : result option =
   in
   let arg_get_int key default =
     Safe_ops.json_int ~default key arguments
-  in
-  let arg_get_float key default =
-    Safe_ops.json_float ~default key arguments
   in
   let arg_get_bool key default =
     Safe_ops.json_bool ~default key arguments
@@ -293,110 +290,6 @@ let dispatch (ctx : context) ~(name : string) : result option =
                ~prompt ~timeout_seconds ?working_dir ()
            in
            Some (result.Spawn.success, Spawn.result_to_string result))
-
-  | "masc_memento_mori" ->
-      let context_ratio = arg_get_float "context_ratio" 0.0 in
-      let full_context = arg_get_string "full_context" "" in
-      let summary = arg_get_string "summary" "" in
-      let current_task = arg_get_string "current_task" "" in
-      let target_agent = arg_get_string "target_agent" "claude" in
-      let cell = Mcp_server.get_cell () in
-      let mitosis_config = Mitosis.default_config in
-
-      let should_prepare_now = Mitosis.should_prepare ~config:mitosis_config ~cell ~context_ratio in
-      let should_handoff_now = Mitosis.should_handoff ~config:mitosis_config ~cell ~context_ratio in
-
-      if not should_prepare_now && not should_handoff_now then begin
-        let warning = if context_ratio = 0.0 then
-          [("warning", `String "context_ratio is 0.0 - did you forget to provide it?")]
-        else [] in
-        let status, message =
-          if context_ratio >= mitosis_config.prepare_threshold then
-            "warning", Printf.sprintf "Context at %.0f%% (above prepare threshold %.0f%%). Consider preparing." (context_ratio *. 100.0) (mitosis_config.prepare_threshold *. 100.0)
-          else
-            "continue", Printf.sprintf "Context healthy (%.0f%%). Continue working." (context_ratio *. 100.0)
-        in
-        let response = `Assoc ([
-          ("status", `String status);
-          ("context_ratio", `Float context_ratio);
-          ("threshold_prepare", `Float mitosis_config.prepare_threshold);
-          ("threshold_handoff", `Float mitosis_config.handoff_threshold);
-          ("message", `String message);
-        ] @ warning) in
-        Some (true, Yojson.Safe.pretty_to_string response)
-      end
-      else if should_prepare_now && not should_handoff_now then begin
-        if full_context = "" then
-          Some (false, "full_context required when context_ratio > 50%")
-        else begin
-          let prepared_cell = Mitosis.prepare_for_division ~config:mitosis_config ~cell ~full_context in
-          Mcp_server.set_cell prepared_cell;
-          let response = `Assoc [
-            ("status", `String "prepared");
-            ("context_ratio", `Float context_ratio);
-            ("phase", `String (Mitosis.phase_to_string prepared_cell.phase));
-            ("dna_extracted", `Bool (prepared_cell.prepared_dna <> None));
-            ("message", `String (Printf.sprintf "Context at %.0f%%. DNA prepared. Handoff at 80%%." (context_ratio *. 100.0)));
-          ] in
-          Some (true, Yojson.Safe.pretty_to_string response)
-        end
-      end
-      else begin
-        if full_context = "" then
-          Some (false, "full_context required for handoff")
-        else begin
-          let last_words = Printf.sprintf
-            "LAST WORDS from Generation %d\n\n\
-             I am %s, about to divide.\n\
-             %s\n\n\
-             Tasks completed: %d | Tool calls: %d\n\
-             Age: %.1f minutes\n\n\
-             My context is full (%.0f%%), but my work continues through Generation %d.\n\
-             Carry on, successors."
-            cell.Mitosis.generation
-            cell.Mitosis.id
-            (if summary = "" then "My time has come." else summary)
-            cell.Mitosis.task_count
-            cell.Mitosis.tool_call_count
-            ((Time_compat.now () -. cell.Mitosis.born_at) /. 60.0)
-            (context_ratio *. 100.0)
-            (cell.Mitosis.generation + 1)
-          in
-          let _ = Room.broadcast config ~from_agent:agent_name ~content:last_words in
-
-          ignore (state, sw);
-          let spawn_fn ~prompt =
-            Spawn.spawn ~agent_name:target_agent
-              ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
-          in
-
-          let pool = Mcp_server.get_pool () in
-          let (spawn_result, new_cell, new_pool, _handoff_dna) =
-            Mitosis.execute_mitosis
-              ~config:mitosis_config
-              ~pool
-              ~parent:cell
-              ~full_context:(Printf.sprintf "Summary: %s\n\nCurrent Task: %s\n\nContext:\n%s"
-                  (if summary = "" then "Memento mori - context limit reached" else summary)
-                  current_task full_context)
-              ~spawn_fn
-          in
-              Mcp_server.set_cell new_cell;
-              Mcp_server.set_pool new_pool;
-
-              let response = `Assoc [
-                ("status", `String "divided");
-                ("context_ratio", `Float context_ratio);
-                ("previous_generation", `Int cell.generation);
-                ("new_generation", `Int new_cell.generation);
-                ("successor_spawned", `Bool spawn_result.Spawn.success);
-                ("successor_agent", `String target_agent);
-                ("successor_output", `String (String.sub spawn_result.Spawn.output 0 (min 500 (String.length spawn_result.Spawn.output))));
-                ("message", `String (Printf.sprintf "Context critical (%.0f%%). Cell divided. %s successor spawned." (context_ratio *. 100.0) target_agent));
-              ] in
-              Some (true, Yojson.Safe.pretty_to_string response)
-        end
-      end
 
   (* ── Episodes (delegated) ───────────────────────────────────── *)
   | "masc_episode_flush" ->

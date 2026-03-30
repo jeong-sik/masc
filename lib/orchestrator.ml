@@ -5,7 +5,7 @@ type config = {
   check_interval_s: float;      (* How often to check (default: 300s = 5min) *)
   min_priority: int;            (* Minimum task priority to trigger (default: 1) *)
   agent_timeout_s: int;         (* Timeout for spawned orchestrator (default: 300) *)
-  orchestrator_agent: string;   (* Which agent to spawn as orchestrator (default: claude) *)
+  orchestrator_agent: string;   (* Which agent to spawn as orchestrator (env: MASC_ORCHESTRATOR_AGENT) *)
   enabled: bool;                (* Is auto-orchestration enabled *)
   port: int;                    (* MASC HTTP port for API calls *)
 }
@@ -14,9 +14,9 @@ let default_config = {
   check_interval_s = 300.0;
   min_priority = 2;
   agent_timeout_s = 300;
-  orchestrator_agent = "claude";
-  enabled = false;  (* Disabled by default - opt-in *)
-  port = 8935;      (* Default MASC HTTP port *)
+  orchestrator_agent = Env_config_runtime.Orchestrator.agent_name;
+  enabled = false;
+  port = Env_config_core.masc_http_port_int ();
 }
 
 (** Load config from environment or use defaults *)

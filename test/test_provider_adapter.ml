@@ -53,7 +53,7 @@ let test_vertex_base_url () =
     (Adapter.gemini_vertex_openai_base_url ~project:"demo" ~location:"global")
 
 let test_default_cli_agent_name () =
-  check string "default cli agent" "claude"
+  check string "default cli agent" "auto"
     (Adapter.default_cli_agent_name ())
 
 let test_default_local_model_label () =

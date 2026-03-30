@@ -14,6 +14,15 @@
 module Oas = Agent_sdk
 
 (* ================================================================ *)
+(* Inference defaults — single definition point (ADR D2).            *)
+(* Callers override via optional params.                             *)
+(* Cascade config auto-resolution tracked in jeong-sik/me#915.      *)
+(* ================================================================ *)
+
+let default_temperature = 0.7
+let default_max_tokens = 4096
+
+(* ================================================================ *)
 (* Cascade metrics                                                   *)
 (* ================================================================ *)
 
@@ -88,17 +97,20 @@ type config = {
   named_cascade : Oas.Api.named_cascade option;
   initial_messages : Oas.Types.message list;
   raw_trace : Oas.Raw_trace.t option;
+  enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
   working_context : Yojson.Safe.t option;
+  priority : Llm_provider.Request_priority.t option;
+  cache_system_prompt : bool;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
   { name; provider; model_id; system_prompt; tools;
     max_turns = 20;
     max_idle_turns = 3;
-    max_tokens = 4096;
-    temperature = 0.7;
+    max_tokens = default_max_tokens;
+    temperature = default_temperature;
     hooks = None;
     context_reducer = None;
     guardrails = None;
@@ -110,9 +122,12 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     named_cascade = None;
     initial_messages = [];
     raw_trace = None;
+    enable_thinking = None;
     transport = Masc_grpc_transport.from_env ();
     allowed_paths = [];
     working_context = None;
+    priority = None;
+    cache_system_prompt = false;
   }
 
 (* ================================================================ *)
@@ -240,6 +255,10 @@ let build
     | Some nc -> Oas.Builder.with_named_cascade nc builder
     | None -> builder
   in
+  let builder = match config.enable_thinking with
+    | Some enabled -> Oas.Builder.with_enable_thinking enabled builder
+    | None -> builder
+  in
   let builder =
     if config.initial_messages <> [] then
       Oas.Builder.with_initial_messages config.initial_messages builder
@@ -248,6 +267,15 @@ let build
   let builder =
     if config.allowed_paths <> [] then
       Oas.Builder.with_allowed_paths config.allowed_paths builder
+    else builder
+  in
+  let builder = match config.priority with
+    | Some p -> Oas.Builder.with_priority p builder
+    | None -> builder
+  in
+  let builder =
+    if config.cache_system_prompt then
+      Oas.Builder.with_cache_system_prompt true builder
     else builder
   in
   Oas.Builder.build_safe builder
@@ -263,6 +291,7 @@ let run
     ~(config : config)
     ?(on_event : (Oas.Types.sse_event -> unit) option)
     ?(agent_ref : Oas.Agent.t option ref option)
+    ?(proof_ref : Oas.Cdal_proof.t option ref option)
     ?(contract : Oas.Risk_contract.t option)
     (goal : string)
   : (run_result, string) result =
@@ -306,6 +335,7 @@ let run
         in
         (r, None)
     in
+    (match proof_ref with Some ref_ -> ref_ := proof | None -> ());
     let checkpoint = match config.checkpoint_dir with
       | Some dir ->
         let ckpt = build_checkpoint ~session_id ?working_context:config.working_context agent in
@@ -427,6 +457,7 @@ let config_for_label
     ?hooks
     ?context_reducer
     ?memory
+    ?enable_thinking
     ~(description : string option)
     () : config =
   let provider = resolve_provider_of_label model_label in
@@ -450,6 +481,7 @@ let config_for_label
     hooks;
     context_reducer;
     memory;
+    enable_thinking;
     description;
   }
 
@@ -474,20 +506,23 @@ let run_named
     ?(initial_messages = [])
     ?(max_turns = 20)
     ?(max_idle_turns = 3)
-    ?(temperature = 0.7)
-    ?(max_tokens = 4096)
+    ?(temperature = default_temperature)
+    ?(max_tokens = default_max_tokens)
     ?(accept = fun (_ : Oas_response.api_response) -> true)
     ?guardrails
     ?hooks
     ?context_reducer
+    ?priority
     ?memory
     ?raw_trace
     ?on_event
     ?agent_ref
+    ?proof_ref
     ?contract
     ?transport
     ?(allowed_paths = [])
     ?working_context
+    ?(cache_system_prompt = false)
     ?sw
     ?net
     ()
@@ -509,7 +544,7 @@ let run_named
       Llm_provider.Provider_config.make
         ~kind:Llm_provider.Provider_config.Glm
         ~model_id:"auto"
-        ~base_url:"https://open.bigmodel.cn/api/paas/v4"
+        ~base_url:"https://api.z.ai/api/coding/paas/v4"
         ~request_path:"/chat/completions"
         ()
   in
@@ -531,10 +566,12 @@ let run_named
       allowed_paths;
       working_context;
       session_id;
+      priority;
+      cache_system_prompt;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in
-  match run ~sw ~net ~config ?on_event ?agent_ref ?contract goal with
+  match run ~sw ~net ~config ?on_event ?agent_ref ?proof_ref ?contract goal with
   | Ok result when accept result.response ->
     record_cascade ~cascade_name ~outcome:`Success;
     Ok result
@@ -554,15 +591,18 @@ let run_model_by_label
     ?(tools = [])
     ?(max_turns = 20)
     ?(max_idle_turns = 3)
-    ?(temperature = 0.7)
-    ?(max_tokens = 4096)
+    ?(temperature = default_temperature)
+    ?(max_tokens = default_max_tokens)
     ?(accept = fun (_ : Oas_response.api_response) -> true)
     ?guardrails
     ?hooks
     ?context_reducer
     ?memory
+    ?enable_thinking
+    ?contract
     ?on_event
     ?transport
+    ?priority
     ?sw
     ?net
     ()
@@ -582,12 +622,12 @@ let run_model_by_label
         let config =
           config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
             ~tools ~max_turns ~max_tokens ~temperature ~max_idle_turns ?guardrails ?hooks
-            ?context_reducer ?memory
+            ?context_reducer ?memory ?enable_thinking
             ~description:(Some (Printf.sprintf "model_label:%s" model_label))
             ()
         in
-        let config = { config with transport = transport_resolved } in
-        (match run ~sw ~net ~config ?on_event goal with
+        let config = { config with transport = transport_resolved; priority } in
+        (match run ~sw ~net ~config ?on_event ?contract goal with
         | Ok result when accept result.response -> Ok result
         | Ok _ ->
             Error
@@ -601,15 +641,17 @@ let run_named_with_masc_tools
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(max_turns = 20)
-    ?(temperature = 0.7)
-    ?(max_tokens = 4096)
+    ?(temperature = default_temperature)
+    ?(max_tokens = default_max_tokens)
     ?guardrails
     ?hooks
     ?memory
     ?raw_trace
     ?on_event
+    ?proof_ref
     ?contract
     ?transport
+    ?priority
     ?sw
     ?net
     ()
@@ -624,7 +666,7 @@ let run_named_with_masc_tools
   ) masc_tools in
   run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
-    ?raw_trace ?on_event ?contract ?transport ?sw ?net ()
+    ?raw_trace ?on_event ?proof_ref ?contract ?transport ?priority ?sw ?net ()
 
 let run_model_with_masc_tools
     ~(model_label : string)
@@ -633,14 +675,16 @@ let run_model_with_masc_tools
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(max_turns = 20)
-    ?(temperature = 0.7)
-    ?(max_tokens = 4096)
+    ?(temperature = default_temperature)
+    ?(max_tokens = default_max_tokens)
     ?guardrails
     ?hooks
     ?memory
+    ?enable_thinking
     ?raw_trace
     ?on_event
     ?transport
+    ?priority
     ?sw
     ?net
     ()
@@ -655,10 +699,10 @@ let run_model_with_masc_tools
       let config =
         config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
           ~tools:[] ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
-          ?memory
+          ?memory ?enable_thinking
           ~description:(Some (Printf.sprintf "model_label:%s" model_label))
           ()
       in
-      let config = { config with raw_trace; transport = transport_resolved } in
+      let config = { config with raw_trace; transport = transport_resolved; priority } in
       run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event
         goal

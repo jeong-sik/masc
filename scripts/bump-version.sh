@@ -72,6 +72,27 @@ else
   echo "  CHANGELOG already has $NEW_VERSION entry"
 fi
 
+# 5) ROADMAP.md — current package version + latest release
+sedi -E "s/^> Current package version: v[^ ]*/> Current package version: v$NEW_VERSION/" \
+  "$ROOT_DIR/ROADMAP.md"
+sedi -E "s/^> Latest release: v[^ ]*/> Latest release: v$NEW_VERSION/" \
+  "$ROOT_DIR/ROADMAP.md"
+echo "  ROADMAP.md updated"
+
+# 6) docs/PRODUCT-OPERATING-PLAN.md — current package version + latest release
+sedi -E "s/^> Current package version: v[^ ]*/> Current package version: v$NEW_VERSION/" \
+  "$ROOT_DIR/docs/PRODUCT-OPERATING-PLAN.md"
+sedi -E "s/^> Latest release: v[^ ]*/> Latest release: v$NEW_VERSION/" \
+  "$ROOT_DIR/docs/PRODUCT-OPERATING-PLAN.md"
+echo "  PRODUCT-OPERATING-PLAN.md updated"
+
+# 7) docs/spec/SPEC-INDEX.md — snapshot baseline + release baseline table
+sedi -E "s/version \`[0-9]+\.[0-9]+\.[0-9]+\`/version \`$NEW_VERSION\`/" \
+  "$ROOT_DIR/docs/spec/SPEC-INDEX.md"
+sedi -E "s/Release baseline \| [0-9]+\.[0-9]+\.[0-9]+/Release baseline | $NEW_VERSION/" \
+  "$ROOT_DIR/docs/spec/SPEC-INDEX.md"
+echo "  SPEC-INDEX.md updated"
+
 echo ""
 echo "Release version layers:"
 echo "  1) release SemVer: $NEW_VERSION"
@@ -80,5 +101,5 @@ echo "  3) artifact schema: report/proof JSON schema_version"
 echo ""
 echo "Next:"
 echo "  dune build --root ."
-echo "  git add dune-project README.md CHANGELOG.md masc_mcp.opam"
+echo "  git add dune-project README.md CHANGELOG.md masc_mcp.opam ROADMAP.md docs/PRODUCT-OPERATING-PLAN.md docs/spec/SPEC-INDEX.md"
 echo "  git commit -m \"chore(release): bump version to $NEW_VERSION\""

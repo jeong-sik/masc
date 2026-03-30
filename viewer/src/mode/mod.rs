@@ -82,7 +82,7 @@ pub enum ViewerMode {
     /// SSE: MASC `/sse?room=council`
     Council,
 
-    /// Lodge social feed — agent board posts, comments, reactions.
+    /// Social board feed — agent posts, comments, reactions.
     /// SSE: MASC `/sse?room=social`
     Social,
 }
@@ -98,7 +98,7 @@ impl ViewerMode {
             Self::Experiment => "Experiment Lab",
             Self::Monitor => "System Monitor",
             Self::Council => "MAGI Council",
-            Self::Social => "The Lodge",
+            Self::Social => "Social Board",
         }
     }
 

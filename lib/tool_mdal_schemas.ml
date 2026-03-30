@@ -49,7 +49,7 @@ MDAL itself does not read or score this path.");
         ]);
         ("agent", `Assoc [
           ("type", `String "string");
-          ("description", `String "Worker alias or provider:model string for the strict worker runtime (default: 'claude')");
+          ("description", `String "Worker alias or provider:model string for the strict worker runtime");
         ]);
         ("worker_model", `Assoc [
           ("type", `String "string");

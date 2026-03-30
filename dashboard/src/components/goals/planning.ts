@@ -80,10 +80,11 @@ export function Planning() {
       <!-- Goals in collapsible details -->
       <details class="overview-section-collapsible group overflow-hidden rounded-xl border border-card-border/50 bg-card/18" open=${hasGoals}>
         <summary class="flex items-center border-b border-transparent bg-card/28 px-4 py-3.5 cursor-pointer text-[14px] font-bold text-text-strong transition-colors hover:bg-card/44 group-open:border-card-border/40">
-          목표 파이프라인
+          장기 목표 파이프라인
           <span class="inline-flex items-center rounded-lg px-2.5 py-1 text-[10px] uppercase tracking-wider ml-auto bg-accent/10 text-accent border border-accent/20 shadow-sm font-semibold">${goals.value.length}</span>
         </summary>
         <div class="p-4">
+          <div class="text-[11px] text-text-muted mb-3 leading-relaxed">단기/중기/장기 목표를 메트릭 기반으로 추적합니다. <code class="text-[10px] bg-white/5 px-1 py-0.5 rounded">masc_goal_upsert</code>로 등록한 목표가 여기에 표시됩니다.</div>
           ${hasGoals ? html`
             <${GoalsSummary} />
             <${FilterBar} />
@@ -117,6 +118,7 @@ export function Planning() {
           </span>
         </summary>
         <div class="p-4">
+          <div class="text-[11px] text-text-muted mb-3 leading-relaxed">Metric-Driven Agent Loop. 숫자 메트릭(coverage, SSIM 등)을 반복 측정하며 목표 도달까지 에이전트가 루프를 돕니다.</div>
           ${mdalLoading.value && loops.length === 0
             ? html`<${LoadingState}>MDAL 루프 불러오는 중...<//>`
             : loops.length === 0 && (mdalState === 'error' || lastMdalError.value)

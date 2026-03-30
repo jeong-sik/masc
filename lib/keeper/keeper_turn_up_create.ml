@@ -10,6 +10,7 @@ open Keeper_execution
 open Keeper_turn_up_args
 
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
+  Log.Keeper.info "create_keeper: starting for name=%s" p.name;
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
   let tracker = Progress.start_tracking ~task_id ~total_steps:6 () in
   Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
@@ -59,16 +60,21 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~fallback_targets:p.profile_defaults.mention_targets
       ~name:p.name
   in
-  if goal = "" then
+  if goal = "" then begin
+    Log.Keeper.warn "create_keeper failed: goal is required (name=%s)" p.name;
     (false, "goal is required when creating a keeper")
+  end
   else
     let max_active_keepers = Env_config.KeeperBootstrap.max_active_keepers in
     let active_keepers = Keeper_registry.count_running () in
-    if max_active_keepers > 0 && active_keepers >= max_active_keepers then
+    if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
+      Log.Keeper.warn "create_keeper failed: max active keepers reached (%d/%d) for name=%s"
+        active_keepers max_active_keepers p.name;
       (false,
         Printf.sprintf
           "keeper max active reached (%d/%d). Stop/remove a keeper or set MASC_KEEPER_MAX_ACTIVE_KEEPERS."
           active_keepers max_active_keepers)
+    end
     else
     let proactive_enabled =
       Option.value
@@ -83,6 +89,16 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     let proactive_cooldown_sec =
       Option.value ~default:default_proactive_cooldown_sec p.proactive_cooldown_sec_opt
       |> normalize_proactive_cooldown_sec
+    in
+    let tool_tier =
+      p.tool_tier_opt
+      |> first_some p.profile_defaults.tool_tier
+      |> Option.value ~default:"essential"
+    in
+    let extra_masc_tools =
+      match p.extra_masc_tools_in with
+      | _ :: _ as xs -> xs
+      | [] -> Option.value ~default:[] p.profile_defaults.extra_masc_tools
     in
     let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
     let handoff_threshold = Option.value ~default:0.85 p.handoff_threshold_opt in
@@ -139,9 +155,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     let cascade_models = Oas_model_resolve.models_of_cascade_name "keeper_unified" in
     (match ensure_api_keys_for_labels cascade_models with
      | Error e ->
+       Log.Keeper.error "create_keeper failed: API key validation error for name=%s: %s" p.name e;
        Progress.stop_tracking task_id;
        (false, e)
      | Ok () ->
+       Log.Keeper.debug "create_keeper: API keys validated for name=%s cascade=%s"
+         p.name "keeper_unified";
        Progress.Tracker.step tracker ~message:"Initializing session directory" ();
        let primary_max_context = Oas_model_resolve.resolve_primary_max_context cascade_models in
        let trace_id = generate_trace_id () in
@@ -171,8 +190,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          let meta = {
            name = p.name;
            agent_name = keeper_agent_name p.name;
-           trace_id;
-           trace_history = [];
            goal;
            short_goal;
            mid_goal;
@@ -187,6 +204,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            execution_scope = default_execution_scope;
            allowed_paths;
            scope_kind;
+           tool_tier;
+           extra_masc_tools;
            room_scope;
            voice_enabled;
            voice_channel;
@@ -194,15 +213,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            mention_targets;
            joined_room_ids = [];
            last_seen_seq_by_room = [];
-           generation = 0;
            proactive = {
              enabled = proactive_enabled;
              idle_sec = proactive_idle_sec;
              cooldown_sec = proactive_cooldown_sec;
-             count_total = 0;
-             last_ts = 0.0;
-             last_reason = "";
-             last_preview = "";
            };
            compaction = {
              profile = compaction_profile;
@@ -210,49 +224,61 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              message_gate = compaction_message_gate;
              token_gate = compaction_token_gate;
              cooldown_sec = continuity_compaction_cooldown_sec;
-             count = 0;
-             last_ts = 0.0;
-             last_before_tokens = 0;
-             last_after_tokens = 0;
-             last_check_ts = now_ts;
-             last_decision = "initialized";
            };
            auto_handoff;
            handoff_threshold;
            handoff_cooldown_sec;
-           last_handoff_ts = 0.0;
            created_at = now_iso ();
            updated_at = now_iso ();
-           usage = {
-             total_turns = 0;
-             total_input_tokens = 0;
-             total_output_tokens = 0;
-             total_tokens = 0;
-             total_cost_usd = 0.0;
-             last_turn_ts = 0.0;
-             last_model_used = "";
-             last_input_tokens = 0;
-             last_output_tokens = 0;
-             last_total_tokens = 0;
-             last_latency_ms = 0;
+           continuity_summary = "";
+           active_goal_ids = [];
+           active_team_session_id = None;
+           last_team_session_started_at = "";
+           team_session_start_count_total = 0;
+           paused = false;
+           current_task_id = None;
+           runtime = {
+             usage = {
+               total_turns = 0;
+               total_input_tokens = 0;
+               total_output_tokens = 0;
+               total_tokens = 0;
+               total_cost_usd = 0.0;
+               last_turn_ts = 0.0;
+               last_model_used = "";
+               last_input_tokens = 0;
+               last_output_tokens = 0;
+               last_total_tokens = 0;
+               last_latency_ms = 0;
+             };
+             compaction_rt = {
+               count = 0;
+               last_ts = 0.0;
+               last_before_tokens = 0;
+               last_after_tokens = 0;
+               last_check_ts = now_ts;
+               last_decision = "initialized";
+             };
+             proactive_rt = {
+               count_total = 0;
+               last_ts = 0.0;
+               last_reason = "";
+               last_preview = "";
+             };
+             generation = 0;
+             trace_id;
+             trace_history = [];
+             last_handoff_ts = 0.0;
+             last_continuity_update_ts = now_ts;
+             last_autonomous_action_at = "";
+             autonomous_action_count = 0;
+             autonomous_turn_count = 0;
+             autonomous_text_turn_count = 0;
+             autonomous_tool_turn_count = 0;
+             board_reactive_turn_count = 0;
+             mention_reactive_turn_count = 0;
+             noop_turn_count = 0;
            };
-            last_continuity_update_ts = now_ts;
-            continuity_summary = "";
-            active_goal_ids = [];
-            last_autonomous_action_at = "";
-            autonomous_action_count = 0;
-            autonomous_turn_count = 0;
-            autonomous_text_turn_count = 0;
-            autonomous_tool_turn_count = 0;
-            board_reactive_turn_count = 0;
-            mention_reactive_turn_count = 0;
-            noop_turn_count = 0;
-            last_triage_triggers = "";
-            active_team_session_id = None;
-            last_team_session_started_at = "";
-            team_session_start_count_total = 0;
-            paused = false;
-            current_task_id = None;
          } in
          Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
          (try
@@ -270,22 +296,29 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
          match write_meta ctx.config meta with
          | Error e ->
+           Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
            Progress.stop_tracking task_id;
            (false, e)
          | Ok () ->
+           Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
+             p.name meta.runtime.trace_id;
            Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
+           Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
            start_keepalive ctx meta;
            (* Apply per-persona shard configuration if present *)
            (match p.profile_defaults.shards with
             | Some (_ :: _ as shard_names) ->
+                Log.Keeper.debug "create_keeper: applying shard config for name=%s shards=%d"
+                  p.name (List.length shard_names);
                 Tool_shard.set_agent_shards p.name shard_names
             | Some [] | None -> ());
            Progress.Tracker.complete tracker ~message:"Keeper created" ();
+           Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name meta.runtime.trace_id;
            let json = `Assoc [
              ("name", `String meta.name);
              ("agent_name", `String meta.agent_name);
-             ("trace_id", `String meta.trace_id);
-             ("generation", `Int meta.generation);
+             ("trace_id", `String meta.runtime.trace_id);
+             ("generation", `Int meta.runtime.generation);
              ("goal", `String meta.goal);
              ("short_goal", `String meta.short_goal);
              ("mid_goal", `String meta.mid_goal);

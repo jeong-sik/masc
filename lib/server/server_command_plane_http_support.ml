@@ -230,23 +230,3 @@ let command_plane_operation_start_http_json ~deps ~state request ~args =
   tool_command_plane_http_json ~deps ~state request ~name:"masc_operation_start"
     ~args
 
-let command_plane_chain_summary_http_json ~deps ~state request =
-  tool_command_plane_http_json ~deps ~state request ~name:"masc_chain_snapshot"
-    ~args:(`Assoc [])
-
-let command_plane_chain_run_http_json ~deps ~state request run_id =
-  tool_command_plane_http_json ~deps ~state request ~name:"masc_chain_run_get"
-    ~args:(`Assoc [ ("run_id", `String run_id) ])
-
-let chain_http_error_status message =
-  let starts_with ~prefix value =
-    let prefix_len = String.length prefix in
-    String.length value >= prefix_len
-    && String.equal (String.sub value 0 prefix_len) prefix
-  in
-  if starts_with ~prefix:"invalid chain run_id:" message then
-    `Bad_request
-  else if starts_with ~prefix:"chain run not found:" message then
-    `Not_found
-  else
-    `Bad_gateway

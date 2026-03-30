@@ -9,10 +9,15 @@ let rec rm_rf path =
     end else
       Unix.unlink path
 
-let temp_dir () =
+let temp_dir ?parent () =
+  let root =
+    match parent with
+    | Some path -> path
+    | None -> Filename.get_temp_dir_name ()
+  in
   let rec pick attempt =
     let dir =
-      Filename.concat (Filename.get_temp_dir_name ())
+      Filename.concat root
         (Printf.sprintf "keeper-tool-test-%d-%d-%d" (Unix.getpid ())
            (int_of_float (Unix.gettimeofday () *. 1000.)) attempt)
     in
@@ -157,6 +162,19 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "selection mode" "agent" resolved.selection_mode;
   check string "provenance" "fallback" resolved.provenance;
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
+
+let test_direct_reply_mode_prompt_prioritizes_persona () =
+  let prompt =
+    Masc_mcp.Keeper_prompt.append_direct_reply_mode_prompt
+      ~base_prompt:"base prompt"
+  in
+  check bool "keeps base prompt" true (contains_substring prompt "base prompt");
+  check bool "mentions direct chat" true
+    (contains_substring prompt "direct chat with the user");
+  check bool "mentions persona priority" true
+    (contains_substring prompt "Prioritize the keeper's authored persona");
+  check bool "forbids skill headers" true
+    (contains_substring prompt "Do not emit SKILL:")
 
 let keeper_usage ?cost_usd ~input_tokens ~output_tokens () : Agent_sdk.Types.api_usage =
   {
@@ -1185,8 +1203,9 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         | Error e -> fail e
       in
       let metrics_store = Masc_mcp.Keeper_types.keeper_metrics_store config meta.name in
-      let history_path = Masc_mcp.Keeper_types.keeper_history_path config meta.trace_id in
+      let history_path = Masc_mcp.Keeper_types.keeper_history_path config meta.runtime.trace_id in
       let memory_bank_path = Masc_mcp.Keeper_types.keeper_memory_bank_path config meta.name in
+      let decision_log_path = Masc_mcp.Keeper_types.keeper_decision_log_path config meta.name in
       let turn_json = Yojson.Safe.from_string
           {|{"channel":"turn","generation":0,"trace_id":"trace-1","context_ratio":0.41,"context_tokens":120,"context_max":1024,"message_count":4,"memory_check":{"performed":true,"passed":true,"final_score":0.9},"skill_primary":"masc-heartbeat","skill_secondary":["masc-keeper-autonomy"],"skill_reason":"stateful routing","skill_selection_mode":"agent","skill_provenance":"judgment"}|}
       in
@@ -1241,6 +1260,27 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         Yojson.Safe.Util.(json |> member "metrics_overview" |> member "compaction_events" |> to_int);
       check string "skill route primary" "masc-heartbeat"
         Yojson.Safe.Util.(json |> member "skill_route" |> member "primary" |> to_string);
+      check string "decision log path exposed" decision_log_path
+        Yojson.Safe.Util.(json |> member "storage_paths" |> member "decisions" |> to_string);
+      check string "tool audit source from metrics fallback" "keeper_metrics"
+        Yojson.Safe.Util.(json |> member "tool_audit_source" |> to_string);
+      check int "tool audit count falls back to zero" 0
+        Yojson.Safe.Util.(json |> member "latest_tool_call_count" |> to_int);
+      check bool "tool audit names remain empty without tool use" true
+        (Yojson.Safe.Util.(json |> member "latest_tool_names" |> to_list) = []);
+      let allowed_tool_names =
+        Yojson.Safe.Util.(
+          json |> member "allowed_tool_names" |> to_list |> List.map to_string)
+      in
+      check int "allowed tool count mirrors allowed names"
+        (List.length allowed_tool_names)
+        Yojson.Safe.Util.(json |> member "allowed_tool_count" |> to_int);
+      check (list string) "allowed tool preview uses first 10 names"
+        (allowed_tool_names |> List.filteri (fun idx _ -> idx < 10))
+        Yojson.Safe.Util.(
+          json |> member "allowed_tool_preview" |> to_list |> List.map to_string);
+      check bool "tool audit timestamp exposed" true
+        Yojson.Safe.Util.(json |> member "tool_audit_at" <> `Null);
       let ok, list_body =
         dispatch "masc_keeper_list"
           (`Assoc [ ("detailed", `Bool true); ("limit", `Int 10) ])
@@ -1804,7 +1844,7 @@ let test_keeper_bootstrap_marks_stale_explicit_keeper () =
         {
           meta with
           proactive = { meta.proactive with enabled = false };
-          usage = { meta.usage with last_turn_ts = 0.0 };
+          runtime = { meta.runtime with usage = { meta.runtime.usage with last_turn_ts = 0.0 } };
         }
       in
       (match Masc_mcp.Keeper_types.write_meta config stale_meta with
@@ -2004,6 +2044,61 @@ let test_keeper_up_recreates_cached_keeper_dir_after_base_reset () =
       check bool "keeper meta recreated" true
         (Sys.file_exists (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)))
 
+let test_keeper_repair_passes_with_provided_source_text () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let working_dir = temp_dir ~parent:(Sys.getcwd ()) () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-repair-demo";
+      rm_rf working_dir;
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        {
+          config;
+          agent_name = "tester";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+        }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, up_body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "keeper-repair-demo");
+              ("goal", `String "Repair OCaml snippets");
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      if not ok then fail up_body;
+      let ok, body =
+        dispatch "masc_keeper_repair"
+          (`Assoc
+            [
+              ("name", `String "keeper-repair-demo");
+              ("task_spec", `String "Write only OCaml code for inc : int -> int.");
+              ("source_text", `String "let inc n = n + 1\n");
+              ("max_attempts", `Int 1);
+              ("working_dir", `String working_dir);
+            ])
+      in
+      check bool "keeper repair ok" true ok;
+      let json = parse_json_exn body in
+      check string "keeper repair status passed" "passed"
+        Yojson.Safe.Util.(json |> member "status" |> to_string);
+      check string "keeper name annotated" "keeper-repair-demo"
+        Yojson.Safe.Util.(json |> member "keeper_name" |> to_string))
+
 let () =
   run "Tool_keeper" [
     ("read_file_tail_lines", [
@@ -2017,6 +2112,8 @@ let () =
            test_resolved_keeper_skill_route_marks_agent_judgment;
          test_case "resolved skill route falls back when parse missing" `Quick
            test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing;
+         test_case "direct reply prompt prioritizes persona" `Quick
+           test_direct_reply_mode_prompt_prioritizes_persona;
          test_case "keeper merge usage preserves present cost" `Quick
            test_keeper_merge_usage_preserves_present_cost;
          test_case "keeper merge usage sums costs" `Quick
@@ -2083,6 +2180,8 @@ let () =
            test_keeper_supervisor_recovers_missing_desired_keeper;
          test_case "legacy presence_keepalive false migrates to paused" `Quick
            test_legacy_presence_keepalive_false_migrates_to_paused;
+         test_case "keeper repair passes with provided source_text" `Quick
+           test_keeper_repair_passes_with_provided_source_text;
          test_case "keeper up recreates cached keeper dir after base reset (issue #3710)" `Quick
            test_keeper_up_recreates_cached_keeper_dir_after_base_reset;
          test_case "session dir mkdir_p creates full tree from scratch (issue #3019)" `Quick

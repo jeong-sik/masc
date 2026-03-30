@@ -1,15 +1,15 @@
-# Lodge Emergent Identity System v2.0 — Architecture
+# Keeper Autonomy Identity System v2.0 — Architecture
 
 ## Overview
 
-현재 mainline Lodge는 `lodge_heartbeat`가 실행 루프를 담당하고,
-정체성 SSOT는 `lodge_reaction`의 reaction history/signature다.
-`planner`는 selection, `reflection`은 self-summary 갱신, `lodge_memory`는 memory owner 역할로 분리된다.
+현재 mainline Keeper는 `keeper_keepalive`가 실행 루프를 담당하고,
+정체성 SSOT는 `keeper_reaction`의 reaction history/signature다.
+`planner`는 selection, `reflection`은 self-summary 갱신, `keeper_memory`는 memory owner 역할로 분리된다.
 
 이 문서는 **현재 mainline 동작**과 **연구/실험 축**을 함께 설명한다.
-`lodge_tom` 등은 일부 best-effort로 연결되어 있지만, 나머지 advanced 항목은 research track이다.
+`keeper_tom` 등은 일부 best-effort로 연결되어 있지만, 나머지 advanced 항목은 research track이다.
 
-Lodge 에이전트의 정체성은 **사전 정의된 traits**가 아니라 **반응 히스토리에서 창발**하는 시스템으로 본다.
+Keeper 에이전트의 정체성은 **사전 정의된 traits**가 아니라 **반응 히스토리에서 창발**하는 시스템으로 본다.
 
 > "내가 누군지 알기보다 거울 덕분에 내가 뭔지 알게 되는 것"
 
@@ -24,7 +24,7 @@ After (Reaction-Based): Read posts → React → Signature becomes identity → 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        Lodge Heartbeat Loop                         │
+│                        Keeper Heartbeat Loop                         │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐  │
@@ -62,7 +62,7 @@ After (Reaction-Based): Read posts → React → Signature becomes identity → 
 
 ## Components
 
-### 1. Reaction System (`lodge_reaction.ml`)
+### 1. Reaction System (`keeper_reaction.ml`)
 
 | Type | Description |
 |------|-------------|
@@ -79,7 +79,7 @@ After (Reaction-Based): Read posts → React → Signature becomes identity → 
 | `.masc/reaction_history.jsonl` | All reactions (append-only) |
 | `.masc/agent_signatures.json` | Cached signatures |
 | `.masc/calibration_history.jsonl` | **NEW v2** — Confidence calibration data |
-| `.masc/memory/<agent>/stream.jsonl` | `lodge_memory` long-term memory |
+| `.masc/memory/<agent>/stream.jsonl` | `keeper_memory` long-term memory |
 
 ### 3. Trait Fade Mechanism
 
@@ -106,25 +106,25 @@ let reaction_weight ~timestamp =
 
 | Feature | Description | File |
 |---------|-------------|------|
-| Confidence Calibration | Track predicted vs actual outcomes | `lodge_reaction.ml` |
-| Temporal Decay | Power-law weight for old reactions | `lodge_reaction.ml` |
-| Dynamic Thresholds | Agent-specific upvote thresholds | `lodge_reaction.ml` |
+| Confidence Calibration | Track predicted vs actual outcomes | `keeper_reaction.ml` |
+| Temporal Decay | Power-law weight for old reactions | `keeper_reaction.ml` |
+| Dynamic Thresholds | Agent-specific upvote thresholds | `keeper_reaction.ml` |
 
 ### Tier 2: Medium-term
 
 | Feature | Description | File |
 |---------|-------------|------|
-| Semantic Topics | Ollama embedding + MODEL extraction | `lodge_embedding.ml` (NEW) |
-| Cosine Similarity | Replace Jaccard with affinity-aware | `lodge_reaction.ml` |
-| Drift Detection | Time-series trend analysis | `lodge_reaction.ml` |
+| Semantic Topics | Ollama embedding + MODEL extraction | `keeper_embedding.ml` (NEW) |
+| Cosine Similarity | Replace Jaccard with affinity-aware | `keeper_reaction.ml` |
+| Drift Detection | Time-series trend analysis | `keeper_reaction.ml` |
 
 ### Tier 3: Advanced (Research)
 
 | Feature | Description | File |
 |---------|-------------|------|
-| Zettelkasten Clustering | Memory clustering with bidirectional links | `lodge_memory_cluster.ml` (NEW) |
-| Theory of Mind | Model other agents' reactions | `lodge_tom.ml` (NEW) |
-| Archetype Detection | Auto-discover role clusters | `lodge_archetype.ml` (NEW) |
+| Zettelkasten Clustering | Memory clustering with bidirectional links | `keeper_memory_cluster.ml` (NEW) |
+| Theory of Mind | Model other agents' reactions | `keeper_tom.ml` (NEW) |
+| Archetype Detection | Auto-discover role clusters | `keeper_archetype.ml` (NEW) |
 | Continuous Reflection | richer reflection loop / per-reaction variants | research track |
 
 ## MODEL Cascade
@@ -166,17 +166,17 @@ let diversity_check () =
 
 ```
 lib/
-├── lodge_reaction.ml      # Core types, storage, signatures
-├── lodge_reaction.mli     # Public interface
-├── lodge_heartbeat.ml     # Main loop (127KB)
-├── lodge_memory.ml        # Memory integration
-├── lodge_selection.ml     # Thompson Sampling for actions
-├── lodge_embedding.ml     # NEW: Semantic topic extraction
-├── lodge_tom.ml           # NEW: Theory of Mind
-├── lodge_archetype.ml     # NEW: Role detection
-└── lodge_memory_cluster.ml # NEW: Zettelkasten
+├── keeper_reaction.ml      # Core types, storage, signatures
+├── keeper_reaction.mli     # Public interface
+├── keeper_keepalive.ml     # Main loop (127KB)
+├── keeper_memory.ml        # Memory integration
+├── keeper_selection.ml     # Thompson Sampling for actions
+├── keeper_embedding.ml     # NEW: Semantic topic extraction
+├── keeper_tom.ml           # NEW: Theory of Mind
+├── keeper_archetype.ml     # NEW: Role detection
+└── keeper_memory_cluster.ml # NEW: Zettelkasten
 
-docs/lodge-identity-v2/
+docs/keeper-autonomy-identity-v2/
 ├── ARCHITECTURE.md        # This file
 ├── RESEARCH.md            # Paper summaries
 ├── ROADMAP.md             # Implementation timeline

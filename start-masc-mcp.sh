@@ -87,7 +87,9 @@ build_dashboard_spa() {
     fi
     dashboard_pm_label="${dashboard_pm[*]}"
 
-    log_file="$(mktemp /tmp/masc-dashboard-build.XXXXXX.log)"
+    # macOS mktemp requires the template to end with Xs; a ".log" suffix
+    # makes it treat the literal path as fixed and fail with EEXIST.
+    log_file="$(mktemp "${TMPDIR:-/tmp}/masc-dashboard-build.XXXXXX")"
     if [ -d "$dashboard_dir/node_modules" ]; then
         if (cd "$dashboard_dir" && "${dashboard_pm[@]}" run build >"$log_file" 2>&1); then
             tail -n 3 "$log_file" >&2 || true
@@ -215,7 +217,7 @@ done
 # Load secrets from the user profile; tracked plist files must not embed them.
 # NOTE: This intentionally sources ~/.zshenv which may set PATH and other vars.
 # For isolated production deploys, use scripts/deploy.sh which loads only
-# repo-local env files (config/lodge.env, .env) to avoid contamination.
+# repo-local env files (config/*.env, .env) to avoid contamination.
 load_env_file "$HOME/.zshenv"
 
 # Load repo-local env for development overrides and secrets kept out of user shell.

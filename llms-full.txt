@@ -98,7 +98,7 @@ Do not mix operator explanations with benchmark explanations in the same respons
 
 Treat these as secondary unless the task explicitly calls for them:
 
-- `Lodge`
+- `Social Board`
 - `TRPG`
 - `RISC`
 - concept/vision documents

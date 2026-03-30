@@ -143,7 +143,7 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc
 | `MASC_AUTONOMY_QUIET_START` | int | 3 | 조용한 시간대 시작 (KST) |
 | `MASC_AUTONOMY_QUIET_END` | int | 7 | 조용한 시간대 종료 (KST) |
 
-> 이전에 존재하던 `MASC_AUTONOMY_TICK_INTERVAL_SEC`, `MASC_AUTONOMY_AGENTS_PER_TICK` 등 13개 Autonomy 변수는 v2.161.0에서 소비자 0 확인 후 제거됨. `MASC_LODGE_*`도 지원 중단.
+> 이전에 존재하던 `MASC_AUTONOMY_TICK_INTERVAL_SEC`, `MASC_AUTONOMY_AGENTS_PER_TICK` 등 13개 Autonomy 변수는 v2.161.0에서 소비자 0 확인 후 제거됨. legacy pre-keeper 접두 env도 지원 중단.
 
 **Thompson Sampling** (`MASC_AUTONOMY_*` prefix):
 

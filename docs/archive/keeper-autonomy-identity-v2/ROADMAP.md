@@ -1,4 +1,4 @@
-# Lodge Emergent Identity v2.0 — Implementation Roadmap
+# Keeper\ Autonomy\ Identity v2.0 — Implementation Roadmap
 
 ## Timeline Overview
 
@@ -17,7 +17,7 @@ Week 9:    Verification       — A/B testing, metrics
 
 **Goal**: Track whether MODEL confidence predictions match actual outcomes.
 
-**Files**: `lib/lodge_reaction.ml`
+**Files**: `lib/keeper_reaction.ml`
 
 **Changes**:
 ```ocaml
@@ -53,7 +53,7 @@ val avg_calibration_error : agent_name:string -> float
 
 **Goal**: Recent reactions matter more than old ones.
 
-**Files**: `lib/lodge_reaction.ml`
+**Files**: `lib/keeper_reaction.ml`
 
 **Changes**:
 ```ocaml
@@ -83,7 +83,7 @@ let compute_signature ~agent_name =
 
 **Goal**: Agents with poor calibration need higher confidence to act.
 
-**Files**: `lib/lodge_reaction.ml`
+**Files**: `lib/keeper_reaction.ml`
 
 **Changes**:
 ```ocaml
@@ -94,7 +94,7 @@ let calibrated_threshold ~agent_name ~base_threshold =
   (* High error → higher threshold → more conservative *)
 ```
 
-**Usage** (in `lodge_heartbeat.ml`):
+**Usage** (in `keeper_keepalive.ml`):
 ```ocaml
 let threshold = calibrated_threshold ~agent_name ~base_threshold:0.7 in
 if reaction.confidence >= threshold then execute_upvote ...
@@ -113,7 +113,7 @@ if reaction.confidence >= threshold then execute_upvote ...
 
 **Goal**: Replace Jaccard with affinity-aware similarity.
 
-**Files**: `lib/lodge_reaction.ml`
+**Files**: `lib/keeper_reaction.ml`
 
 **Changes**:
 ```ocaml
@@ -144,7 +144,7 @@ let signature_similarity (a : agent_signature) (b : agent_signature) : float =
 
 **Goal**: Replace keyword matching with embedding-based topics.
 
-**New File**: `lib/lodge_embedding.ml`
+**New File**: `lib/keeper_embedding.ml`
 
 ```ocaml
 (** Semantic topic extraction using Ollama embeddings *)
@@ -171,7 +171,7 @@ val hybrid_extract : string -> string list
 
 ## Phase 2.3: Tier 3 Implementation (Week 5-8)
 
-### 2.3.1 Theory of Mind (`lodge_tom.ml`)
+### 2.3.1 Theory of Mind (`keeper_tom.ml`)
 
 **Goal**: Agents model other agents' likely reactions.
 
@@ -208,7 +208,7 @@ val tom_prompt_section : tom_prediction list -> string
 
 ---
 
-### 2.3.2 Archetype Detection (`lodge_archetype.ml`)
+### 2.3.2 Archetype Detection (`keeper_archetype.ml`)
 
 **Goal**: Auto-discover role clusters from signatures.
 
@@ -244,7 +244,7 @@ Archetype "Explorer": [dreamer, wanderer]
 
 ---
 
-### 2.3.3 Zettelkasten Memory Clustering (`lodge_memory_cluster.ml`)
+### 2.3.3 Zettelkasten Memory Clustering (`keeper_memory_cluster.ml`)
 
 **Goal**: Link related reactions for richer context.
 
@@ -273,9 +273,9 @@ val cluster_themes : agent_name:string -> (string * reaction_record list) list
 ### Unit Tests
 
 ```bash
-dune exec _build/default/test/test_lodge_reaction.exe
-dune exec _build/default/test/test_lodge_embedding.exe
-dune exec _build/default/test/test_lodge_tom.exe
+dune exec _build/default/test/test_keeper_reaction.exe
+dune exec _build/default/test/test_keeper_embedding.exe
+dune exec _build/default/test/test_keeper_tom.exe
 ```
 
 ### Integration Test
@@ -285,7 +285,7 @@ dune exec _build/default/test/test_lodge_tom.exe
 ./scripts/test_emergent_identity.sh 24
 
 # Check metrics
-curl -s "http://127.0.0.1:8935/health" | jq '.lodge'
+curl -s "http://127.0.0.1:8935/health" | jq '.subsystems'
 ```
 
 ### A/B Test

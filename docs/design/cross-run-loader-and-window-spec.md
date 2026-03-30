@@ -1,7 +1,7 @@
 # Cross-Run Loader and Window Spec
 
-**Status**: Draft, post-pre-production scope
-**Date**: 2026-03-28
+**Status**: Draft (v2 — late-arrival, schema compat, API signatures added)
+**Date**: 2026-03-30 (v2), 2026-03-28 (v1)
 **Scope**: Cross-run `friction_projection` enumeration, window semantics, and loader requirements
 **One sentence**: Define the infrastructure and selection rules required before `Last_n_runs`, `Session`, or `Rolling_seconds` become valid CDAL surfaces.
 
@@ -125,12 +125,84 @@ If a bound is exceeded:
 - emit an explicit aggregation error
 - do not silently shrink the window
 
-## 9. Exit Criteria
+## 9. Late-Arrival Policy
+
+A run may complete after the window query has already been issued. This happens when:
+
+- a keeper or swarm agent is still writing its proof bundle while another agent queries cross-run data
+- clock skew causes `ended_at` to appear out of order
+- a run's manifest is written before all evidence artifacts are flushed
+
+Rules:
+
+- a window query is a snapshot: it captures runs visible at query time and does not retroactively include late arrivals
+- `basis_hash` (section 6) makes the snapshot deterministic: the same selected run IDs produce the same hash regardless of what arrives later
+- callers that need consistency across retries must compare `basis_hash` values; a hash change means the underlying run set changed
+- late-arriving runs are picked up by the next window query, not patched into the previous result
+- timestamp proximity (e.g., "runs within 5 seconds of now") must not be used as an ordering key. Use `manifest_creation_time` written atomically at the end of proof capture
+
+This avoids the complexity of retroactive window mutation and keeps aggregation results reproducible.
+
+## 10. Schema Version Compatibility
+
+Runs may use different proof manifest schema versions. The loader must handle version heterogeneity:
+
+| Scenario | Behavior |
+| --- | --- |
+| All runs same schema version | normal aggregation |
+| Mixed versions, all loadable | normalize to latest schema, note version in metadata |
+| Unknown schema version | treat as corruption, apply partial-failure policy (section 5) |
+| Schema version too old to normalize | same as unknown |
+
+The normalization step must be explicit: a `normalize_manifest : Cdal_proof.t -> (Cdal_proof.t, string) result` function that handles version-specific field defaults and renames.
+
+No implicit field inference. If a v1 manifest lacks a field that v2 requires, the normalizer must either fill a documented default or return an error.
+
+## 11. Proof_store Read-Side API (OAS)
+
+The current `Proof_store.list_runs` returns `string list` (unordered directory listing). Cross-run windows require a richer API.
+
+Proposed additions to `proof_store.mli`:
+
+```ocaml
+(** Run metadata for ordering and filtering. *)
+type run_info = {
+  run_id: string;
+  created_at: float;       (** manifest creation timestamp *)
+  schema_version: int;     (** proof manifest schema version *)
+  scope: string option;    (** declared scope (keeper/task/room/etc.) *)
+}
+
+(** List runs with metadata, ordered by [created_at] ascending.
+    Corrupted manifests (unreadable JSON, missing timestamp) are excluded
+    from the result and reported in the [errors] list. *)
+val list_runs_ordered :
+  config ->
+  ?scope:string ->
+  (run_info list * string list, string) result
+  (* Ok (runs, corruption_errors) | Error fatal *)
+
+(** Load manifests for a window of runs.
+    Applies partial-failure policy: readable runs are returned,
+    unreadable runs are reported as errors. *)
+val load_window :
+  config ->
+  run_ids:string list ->
+  ((Cdal_proof.t * Yojson.Safe.t) list * string list, string) result
+  (* Ok (loaded_manifests, per_run_errors) | Error fatal *)
+```
+
+These signatures keep the existing `list_runs` unchanged (backward compatible) and add structured alternatives. Implementation is tracked in OAS.
+
+## 12. Exit Criteria
 
 Cross-run windows may ship when:
 
-- run enumeration is implemented
+- `list_runs_ordered` is implemented with stable ordering
 - scope and ordering rules are explicit
-- retention is documented
+- late-arrival policy is enforced (snapshot semantics, no retroactive mutation)
+- retention is documented and enforced
+- schema version normalization handles all known versions
 - aggregation errors have a documented policy
 - basis-hash composition is frozen
+- resource bounds are configured and enforced

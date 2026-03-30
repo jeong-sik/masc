@@ -22,7 +22,7 @@ let test_default_config_threshold () =
 
 let test_default_config_target_agent () =
   let c = Relay.default_config in
-  check string "target_agent" "claude" c.target_agent
+  check string "target_agent" "auto" c.target_agent
 
 let test_default_config_compress_ratio () =
   let c = Relay.default_config in

@@ -1,10 +1,9 @@
 open Tool_command_plane_support
 
-(** Non-chain command plane operations.
-    Extracted from tool_command_plane_chain_query.ml and
-    tool_command_plane_chain_launch.ml during chain vendor decoupling. *)
+(** Command plane operations.
+    Originally extracted during chain vendor decoupling. *)
 
-(* --- Helper utilities (extracted from chain_query.ml) --- *)
+(* --- Helper utilities --- *)
 
 let int_member_opt json key =
   match U.member key json with

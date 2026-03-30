@@ -13,7 +13,7 @@ Pass category to filter results to a single section.";
       ("properties", `Assoc [
         ("category", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional category filter: server, auth, transport, storage, runtime, rate_limiting, chain, inference, keeper, dashboard");
+          ("description", `String "Optional category filter: server, auth, transport, storage, runtime, rate_limiting, inference, keeper, dashboard");
         ]);
       ]);
     ];
@@ -272,7 +272,7 @@ After masc_tool_admin_snapshot to review current state before making changes.";
   {
     name = "masc_config_snapshot";
     description = "Return a read-only snapshot of the current runtime configuration. \
-Env vars are categorized (server, storage, transport, chain, inference, keeper, dashboard) \
+Env vars are categorized (server, storage, transport, inference, keeper, dashboard) \
 with source (env or default) and sensitivity flags. Sensitive values are masked.";
     input_schema = `Assoc [
       ("type", `String "object");

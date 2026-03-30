@@ -148,7 +148,7 @@ let all_flags : flag list = [
     default = true; category = "dashboard";
     lifecycle = Active; since = "2.140.0" };
 
-  (* ── Inference & Chain ────────────────────────────────────── *)
+  (* ── Inference ────────────────────────────────────────────── *)
   { env_name = "MASC_INFERENCE_CACHE_ENABLED";
     description = "L1+L2 inference response caching";
     default = true; category = "inference";
@@ -158,11 +158,6 @@ let all_flags : flag list = [
     description = "Relay token calibration mechanism";
     default = true; category = "inference";
     lifecycle = Active; since = "2.120.0" };
-
-  { env_name = "MASC_CHAIN_RUN_LOG_STREAM";
-    description = "Stream chain execution logs to disk";
-    default = false; category = "inference";
-    lifecycle = Active; since = "2.130.0" };
 
   (* ── Runtime ──────────────────────────────────────────────── *)
   { env_name = "MASC_ORCHESTRATOR_ENABLED";

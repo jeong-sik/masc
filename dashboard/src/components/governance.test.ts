@@ -206,6 +206,8 @@ describe('Governance surface', () => {
     expect(container.textContent).toContain('85%')
     expect(container.textContent).toContain('recover')
     expect(container.textContent).toContain('masc_operator_confirm')
+    expect(container.textContent).toContain('승인 필요')
+    expect(container.textContent).toContain('zombie agent detected')
 
     const judgeStatus = container.querySelector('[data-testid="judge-status"]')
     expect(judgeStatus).toBeTruthy()

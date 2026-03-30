@@ -90,8 +90,18 @@ function JudgeStatusBar() {
         <span class="font-medium text-text-muted">Judge ${label}</span>
       </span>
       ${judge.model_used ? html`<span class="text-text-dim">${judge.model_used}</span>` : null}
-      ${judge.generated_at ? html`<span class="text-text-dim ml-auto"><${TimeAgo} timestamp=${judge.generated_at} /></span>` : null}
-      ${judge.last_error ? html`<span class="text-bad/80 ml-auto truncate max-w-[300px]">${judge.last_error}</span>` : null}
+      ${judge.generated_at || judge.last_error
+        ? html`
+            <span class="ml-auto flex items-center gap-3 min-w-0">
+              ${judge.generated_at
+                ? html`<span class="text-text-dim"><${TimeAgo} timestamp=${judge.generated_at} /></span>`
+                : null}
+              ${judge.last_error
+                ? html`<span class="text-bad/80 truncate max-w-[300px]">${judge.last_error}</span>`
+                : null}
+            </span>
+          `
+        : null}
     </div>
   `
 }

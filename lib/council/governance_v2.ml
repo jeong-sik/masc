@@ -210,23 +210,43 @@ let load_execution_order base_path case_id =
   | None -> None
   | Some json -> Result.to_option (execution_order_of_yojson json)
 
-let write_petition base_path (petition : petition) =
-  ensure_dirs base_path;
-  write_json (petition_path base_path petition.id) (petition_to_yojson petition)
+let write_petition base_path (petition : petition) : (unit, string) result =
+  try
+    ensure_dirs base_path;
+    write_json (petition_path base_path petition.id) (petition_to_yojson petition);
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printf.sprintf "write_petition %s: %s" petition.id (Printexc.to_string e))
 
-let write_case base_path (case_ : case_record) =
-  ensure_dirs base_path;
-  write_json (case_path base_path case_.id) (case_to_yojson case_)
+let write_case base_path (case_ : case_record) : (unit, string) result =
+  try
+    ensure_dirs base_path;
+    write_json (case_path base_path case_.id) (case_to_yojson case_);
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printf.sprintf "write_case %s: %s" case_.id (Printexc.to_string e))
 
-let write_ruling base_path (ruling : ruling) =
-  ensure_dirs base_path;
-  write_json (ruling_path base_path ruling.case_id) (ruling_to_yojson ruling)
+let write_ruling base_path (ruling : ruling) : (unit, string) result =
+  try
+    ensure_dirs base_path;
+    write_json (ruling_path base_path ruling.case_id) (ruling_to_yojson ruling);
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printf.sprintf "write_ruling %s: %s" ruling.case_id (Printexc.to_string e))
 
-let write_execution_order base_path (order : execution_order) =
-  ensure_dirs base_path;
-  write_json
-    (execution_order_path base_path order.case_id)
-    (execution_order_to_yojson order)
+let write_execution_order base_path (order : execution_order) : (unit, string) result =
+  try
+    ensure_dirs base_path;
+    write_json
+      (execution_order_path base_path order.case_id)
+      (execution_order_to_yojson order);
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printf.sprintf "write_execution_order %s: %s" order.case_id (Printexc.to_string e))
 
 let is_test_origin origin =
   match String.lowercase_ascii (String.trim origin) with
@@ -485,8 +505,8 @@ let submit_petition base_path ~title ~origin ~subject_type ~risk_class
         origin = if merged then case_.origin else origin;
       }
     in
-    write_petition base_path petition;
-    write_case base_path updated_case;
+    let* () = write_petition base_path petition in
+    let* () = write_case base_path updated_case in
     Ok { petition; case_ = updated_case; merged }
   )
 
@@ -509,7 +529,7 @@ let submit_brief base_path ~case_id ~author ~stance ~summary ~evidence_refs =
       updated_at = now_unix ();
     }
   in
-  write_case base_path updated_case;
+  let* () = write_case base_path updated_case in
   Ok updated_case
 
 let save_ruling base_path (ruling : ruling) =
@@ -523,26 +543,29 @@ let save_ruling base_path (ruling : ruling) =
     | _ -> Pending_ruling
   in
   let updated_case = { case_ with status = next_status; updated_at = now_unix () } in
-  write_case base_path updated_case;
-  write_ruling base_path ruling;
-  (if next_status = Ready_auto_execute then
-     match load_execution_order base_path ruling.case_id with
-     | Some _ -> ()
-     | None ->
-         let now = now_unix () in
-         let order : execution_order = {
-           id = generate_id "order";
-           case_id = ruling.case_id;
-           status = Queued_auto;
-           risk_class = ruling.risk_class;
-           action_request = ruling.recommended_action;
-           created_at = now;
-           updated_at = now;
-           execution_ref = None;
-           result_summary = None;
-           actor = Some ruling.keeper_name;
-         } in
-         write_execution_order base_path order);
+  let* () = write_case base_path updated_case in
+  let* () = write_ruling base_path ruling in
+  let* () =
+    if next_status = Ready_auto_execute then
+      match load_execution_order base_path ruling.case_id with
+      | Some _ -> Ok ()
+      | None ->
+          let now = now_unix () in
+          let order : execution_order = {
+            id = generate_id "order";
+            case_id = ruling.case_id;
+            status = Queued_auto;
+            risk_class = ruling.risk_class;
+            action_request = ruling.recommended_action;
+            created_at = now;
+            updated_at = now;
+            execution_ref = None;
+            result_summary = None;
+            actor = Some ruling.keeper_name;
+          } in
+          write_execution_order base_path order
+    else Ok ()
+  in
   Ok updated_case
 
 let save_execution_order base_path (order : execution_order) =
@@ -555,8 +578,8 @@ let save_execution_order base_path (order : execution_order) =
     | Denied | Blocked_order -> Blocked
   in
   let updated_case = { case_ with status = next_status; updated_at = now_unix () } in
-  write_case base_path updated_case;
-  write_execution_order base_path order;
+  let* () = write_case base_path updated_case in
+  let* () = write_execution_order base_path order in
   Ok updated_case
 
 let update_execution_order base_path (order : execution_order) =
@@ -565,7 +588,7 @@ let update_execution_order base_path (order : execution_order) =
 let set_case_status base_path ~case_id ~status =
   let* case_ = get_case base_path case_id in
   let updated_case = { case_ with status; updated_at = now_unix () } in
-  write_case base_path updated_case;
+  let* () = write_case base_path updated_case in
   Ok updated_case
 
 let latest_generated_at base_path =

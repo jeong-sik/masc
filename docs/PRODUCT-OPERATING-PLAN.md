@@ -1,6 +1,6 @@
 # Product Operating Plan
 
-> Current package version: v2.174.0
+> Current package version: v2.175.0
 > Latest release: v2.174.0 (2026-03-30)
 > Updated: 2026-03-30
 

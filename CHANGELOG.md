@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [2.185.0] - 2026-03-31
+
+### Fixed
+- **Dashboard keeper auth** — localhost-friendly keeper tools API auth (#4079).
+- **Context compact coverage** — fix summarize_old pairing test (#4093).
+- **Keeper denied tools** — sync denied tools with LLM visibility, progressive disclosure (#4076).
+
 ## [2.184.0] - 2026-03-31
 
 ### Added

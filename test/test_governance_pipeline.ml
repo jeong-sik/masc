@@ -210,6 +210,16 @@ let test_risk_metadata_destructive_override () =
   Alcotest.(check string) "operation_stop metadata marks destructive"
     "critical" (Gp.risk_level_to_string risk)
 
+let test_risk_metadata_admin_cleanup_override () =
+  let risk = Gp.assess_risk ~tool_name:"masc_admin_cleanup" ~input:no_args in
+  Alcotest.(check string) "admin_cleanup metadata marks destructive"
+    "critical" (Gp.risk_level_to_string risk)
+
+let test_risk_metadata_pg_query_override () =
+  let risk = Gp.assess_risk ~tool_name:"masc_pg_query" ~input:no_args in
+  Alcotest.(check string) "pg_query metadata marks destructive"
+    "critical" (Gp.risk_level_to_string risk)
+
 let test_risk_payload_empty_overwrite () =
   let risk =
     Gp.assess_risk ~tool_name:"masc_code_write"
@@ -237,6 +247,22 @@ let test_risk_payload_destructive_content () =
   Alcotest.(check string) "destructive payload content is critical"
     "critical" (Gp.risk_level_to_string risk)
 
+let test_risk_payload_destructive_nested_string () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_status"
+      ~input:
+        (`Assoc
+          [
+            ( "payload",
+              `Assoc
+                [
+                  ("note", `String "DROP TABLE production_users");
+                ] );
+          ])
+  in
+  Alcotest.(check string) "nested destructive payload is critical"
+    "critical" (Gp.risk_level_to_string risk)
+
 let test_risk_payload_safe_write_remains_high () =
   let risk =
     Gp.assess_risk ~tool_name:"masc_code_write"
@@ -249,6 +275,34 @@ let test_risk_payload_safe_write_remains_high () =
   in
   Alcotest.(check string) "safe write payload remains high"
     "high" (Gp.risk_level_to_string risk)
+
+let test_risk_contract_risk_from_delivery_contract () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_team_session_step"
+      ~input:
+        (`Assoc
+          [
+            ( "delivery_contract",
+              `Assoc
+                [
+                  ("contract_id", `String "contract-risk-001");
+                  ("summary", `String "high risk execution");
+                  ( "required_artifacts",
+                    `List
+                      [
+                        `String "a";
+                        `String "b";
+                        `String "c";
+                        `String "d";
+                        `String "e";
+                      ] );
+                  ("repair_budget", `Int 0);
+                ] );
+            ("tool_names", `List [ `String "keeper_bash"; `String "keeper_github" ]);
+          ])
+  in
+  Alcotest.(check string) "delivery contract drives critical risk"
+    "critical" (Gp.risk_level_to_string risk)
 
 (* ── Governance Level Decision Tests ────────────────────────── *)
 
@@ -566,12 +620,20 @@ let () =
         test_risk_precedence_critical_over_high;
       Alcotest.test_case "metadata: destructive override" `Quick
         test_risk_metadata_destructive_override;
+      Alcotest.test_case "metadata: admin cleanup override" `Quick
+        test_risk_metadata_admin_cleanup_override;
+      Alcotest.test_case "metadata: pg query override" `Quick
+        test_risk_metadata_pg_query_override;
       Alcotest.test_case "payload: empty overwrite" `Quick
         test_risk_payload_empty_overwrite;
       Alcotest.test_case "payload: destructive content" `Quick
         test_risk_payload_destructive_content;
+      Alcotest.test_case "payload: destructive nested string" `Quick
+        test_risk_payload_destructive_nested_string;
       Alcotest.test_case "payload: safe write remains high" `Quick
         test_risk_payload_safe_write_remains_high;
+      Alcotest.test_case "contract risk: delivery contract" `Quick
+        test_risk_contract_risk_from_delivery_contract;
       Alcotest.test_case "case insensitive" `Quick test_case_insensitive_matching;
     ];
     "governance_levels", [

@@ -33,6 +33,12 @@ let risk_level_to_int = function
   | High -> 2
   | Critical -> 3
 
+let risk_level_of_contract_risk = function
+  | Agent_sdk.Risk_class.Low -> Low
+  | Agent_sdk.Risk_class.Medium -> Medium
+  | Agent_sdk.Risk_class.High -> High
+  | Agent_sdk.Risk_class.Critical -> Critical
+
 (* ── Risk Assessment ────────────────────────────────────────── *)
 
 (** Pattern sets for risk classification.
@@ -72,7 +78,6 @@ let overwrite_sensitive_tools =
     "edit_text_file";
   ]
 
-let destructive_payload_keys = [ "command"; "cmd"; "content"; "new_string" ]
 let empty_overwrite_payload_keys = [ "content"; "new_string" ]
 
 let contains_pattern name patterns =
@@ -125,13 +130,66 @@ let rec collect_string_values ~keys json =
   | `List values -> List.concat_map (collect_string_values ~keys) values
   | _ -> []
 
+let rec collect_all_string_values json =
+  match json with
+  | `Assoc kvs ->
+      List.concat_map (fun (_, value) -> collect_all_string_values value) kvs
+  | `List values -> List.concat_map collect_all_string_values values
+  | `String text -> [ text ]
+  | _ -> []
+
+let rec collect_string_list_values ~keys json =
+  match json with
+  | `Assoc kvs ->
+      List.concat_map
+        (fun (key, value) ->
+          let normalized_key = String.lowercase_ascii (String.trim key) in
+          let direct =
+            if List.mem normalized_key keys then
+              match value with
+              | `List values ->
+                  values
+                  |> List.filter_map (function
+                         | `String text ->
+                             let trimmed = String.trim text in
+                             if trimmed = "" then None else Some trimmed
+                         | _ -> None)
+              | _ -> []
+            else
+              []
+          in
+          direct @ collect_string_list_values ~keys value)
+        kvs
+  | `List values -> List.concat_map (collect_string_list_values ~keys) values
+  | _ -> []
+
 let has_destructive_payload input =
-  collect_string_values ~keys:destructive_payload_keys input
+  collect_all_string_values input
   |> List.exists (fun text -> Eval_gate.detect_destructive text <> None)
 
 let has_empty_overwrite_payload input =
   collect_string_values ~keys:empty_overwrite_payload_keys input
   |> List.exists (fun text -> String.trim text = "")
+
+let tool_names_of_input ~tool_name input =
+  let tool_names =
+    collect_string_list_values ~keys:[ "tool_names" ] input
+    |> List.sort_uniq String.compare
+  in
+  if tool_names = [] then [ tool_name ] else tool_names
+
+let classify_with_contract_risk ~tool_name ~input =
+  match input with
+  | `Assoc _ -> (
+      match Team_session_types.delivery_contract_of_yojson
+              (Yojson.Safe.Util.member "delivery_contract" input) with
+      | Some delivery_contract ->
+          let tool_names = tool_names_of_input ~tool_name input in
+          Some
+            (risk_level_of_contract_risk
+               (Contract_risk.of_delivery_contract ~delivery_contract ~tool_names))
+      | None -> None)
+  | _ -> None
 
 let classify_with_metadata ~tool_name =
   let meta = Tool_catalog.metadata tool_name in
@@ -147,12 +205,15 @@ let classify_with_payload ~tool_name ~input =
   else None
 
 let assess_risk ~tool_name ~input =
-  match classify_with_metadata ~tool_name with
+  match classify_with_payload ~tool_name ~input with
   | Some level -> level
   | None -> (
-      match classify_with_payload ~tool_name ~input with
+      match classify_with_contract_risk ~tool_name ~input with
       | Some level -> level
-      | None ->
+      | None -> (
+          match classify_with_metadata ~tool_name with
+          | Some level -> level
+          | None ->
           (* Check explicit overrides after metadata/payload semantics. *)
           match List.assoc_opt tool_name risk_overrides with
           | Some level -> level
@@ -162,7 +223,7 @@ let assess_risk ~tool_name ~input =
                 | Some action -> classify_name action
                 | None -> Low
               else
-                classify_name tool_name)
+                classify_name tool_name))
 
 (* ── Trace ID generation ────────────────────────────────────── *)
 

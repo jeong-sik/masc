@@ -408,7 +408,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   (* Helper: create keeper context (shared by goals) *)
   let make_keeper_ctx () : _ Tool_keeper.context =
-    { config; agent_name; sw; clock; proc_mgr = state.Mcp_server.proc_mgr }
+    { config; agent_name; sw; clock; proc_mgr = state.Mcp_server.proc_mgr; net = state.Mcp_server.net }
   in
 
   (* Dispatch a single module by tag — creates only that module's context *)
@@ -420,7 +420,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_plan.dispatch { config } ~name ~args:arguments
     | Mod_operator ->
         let ctx = { Tool_operator.config; agent_name; sw; clock;
-                    proc_mgr = state.Mcp_server.proc_mgr; mcp_session_id } in
+                    proc_mgr = state.Mcp_server.proc_mgr;
+                    net = state.Mcp_server.net; mcp_session_id } in
         Tool_operator.dispatch ctx ~name ~args:arguments
     | Mod_command_plane ->
         let ctx : (_, _) Tool_command_plane.context =
@@ -432,7 +433,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name } ~name ~args:arguments
     | Mod_team_session ->
         let ctx = { Tool_team_session.config; agent_name; sw; clock;
-                    proc_mgr = state.Mcp_server.proc_mgr } in
+                    proc_mgr = state.Mcp_server.proc_mgr;
+                    net = state.Mcp_server.net } in
         Tool_team_session.dispatch ctx ~name ~args:arguments
     | Mod_voice ->
         Tool_voice.dispatch { agent_name; sw; clock; net = state.Mcp_server.net } ~name ~args:arguments
@@ -516,6 +518,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
             sw = Some sw;
             clock = Some clock;
             proc_mgr = state.Mcp_server.proc_mgr;
+            net = state.Mcp_server.net;
           }
           ~name ~args:arguments
     | Mod_agent_timeline ->
@@ -550,9 +553,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           match state.Mcp_server.proc_mgr with
           | None -> Error "process_mgr not available"
           | Some process_mgr ->
+              let net = match state.Mcp_server.net with
+                | Some n -> n
+                | None -> failwith "net not available for team session"
+              in
               let env = object
                 method clock = clock
                 method process_mgr = process_mgr
+                method net = net
               end in
               Team_session_engine_eio.start_session ~sw ~env ~config
                 ~created_by:agent_name ~goal ~duration_seconds:900

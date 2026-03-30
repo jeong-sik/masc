@@ -20,9 +20,10 @@ let run_swarm ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.Proce
         session_id
         (Team_session_types.status_to_string session.status))
     else
+      let net = env#net in
       let swarm_config =
         Team_session_oas_bridge.session_to_swarm_config
-          ~config ~masc_tools ~dispatch session
+          ~sw ~net ~config ~masc_tools ~dispatch session
       in
       if swarm_config.entries = [] then begin
         Team_session_store.append_event config session_id

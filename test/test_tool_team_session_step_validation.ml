@@ -8,7 +8,7 @@ let test_missing_required_args () =
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let ok1, _ = dispatch_exn ctx ~name:"masc_team_session_start" ~args:(`Assoc []) in
   let ok2, _ = dispatch_exn ctx ~name:"masc_team_session_status" ~args:(`Assoc []) in
@@ -73,7 +73,7 @@ let test_step_actor_must_match_caller () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id =
     start_session_exn ctx ~goal:"step-actor-must-match-caller" |> get_session_id
@@ -106,7 +106,7 @@ let test_step_updates_delivery_contract_and_status_exposes_it () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id =
     start_session_exn ctx ~goal:"contract-aware delivery loop"
@@ -181,7 +181,7 @@ let test_step_spawn_requires_proc_mgr () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"step-spawn-proc-manager-check" |> get_session_id in
   let step_ok, _ =
@@ -235,7 +235,7 @@ let test_step_spawn_default_local_allows_worker_size_without_spawn_model () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let selection_note =
     "[model-selection] leader selected qwen3.5-35b-a3b-ud-q8-xl from inventory"
@@ -351,7 +351,7 @@ let test_step_rejects_legacy_spawn_fields () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id =
     start_session_exn ctx ~goal:"step-rejects-legacy-spawn-fields"
@@ -382,7 +382,7 @@ let test_step_rejects_legacy_batch_spawn_fields () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id =
     start_session_exn ctx ~goal:"step-rejects-legacy-batch-fields"
@@ -420,7 +420,7 @@ let test_step_spawn_batch_defaults_execution_scope_by_worker_class () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id =
     start_session_exn ctx ~goal:"step-batch-default-execution-scope"
@@ -484,7 +484,7 @@ let test_step_delegate_requires_target_agent () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id =
     start_session_exn ctx ~goal:"step-delegate-requires-target-agent"
@@ -514,7 +514,7 @@ let test_step_delegate_unknown_worker_rejected () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id =
     start_session_exn ctx ~goal:"step-delegate-unknown-worker"

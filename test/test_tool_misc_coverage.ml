@@ -402,7 +402,7 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
       agent_name = "tester";
       sw;
       clock = Eio.Stdenv.clock env;
-      proc_mgr = Some (Eio.Stdenv.process_mgr env);
+      proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None;
     }
   in
   Fun.protect

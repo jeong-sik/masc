@@ -11,6 +11,7 @@ type 'a context = {
   sw : Eio.Switch.t option;
   clock : 'a Eio.Time.clock option;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
+  net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
 }
 
 type loop_status =

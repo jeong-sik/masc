@@ -109,6 +109,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
         }
       in
       let ok, _ =
@@ -205,6 +206,7 @@ proactive_enabled = true
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
         }
       in
       let keeper_name = "config-provenance" in
@@ -334,6 +336,7 @@ let test_snapshot_keeper_tool_audit_fallback () =
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
         }
       in
       let keeper_name = "audit-keeper" in
@@ -408,6 +411,7 @@ let test_snapshot_keeper_tool_audit_uses_decision_log () =
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
         }
       in
       let keeper_name = "audit-keeper-decision" in
@@ -496,6 +500,7 @@ let test_keeper_msg_auto_team_session_bridge () =
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
+          net = None;
         }
       in
       let keeper_name = "team-session-keeper" in
@@ -564,6 +569,7 @@ let test_keeper_msg_auto_team_session_bridge () =
             sw;
             clock = Eio.Stdenv.clock env;
             proc_mgr = None;
+            net = None;
           }
         in
         let team_status_ok, _ =

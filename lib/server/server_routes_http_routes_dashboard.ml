@@ -477,6 +477,7 @@ let add_routes ~sw ~clock router =
                                 sw;
                                 clock;
                                 proc_mgr = state.Mcp_server.proc_mgr;
+                                net = state.Mcp_server.net;
                               }
                             in
                             (match Keeper_turn_up_args.parse keeper_ctx args_with_name with
@@ -545,6 +546,7 @@ let add_routes ~sw ~clock router =
                    sw;
                    clock;
                    proc_mgr = state.Mcp_server.proc_mgr;
+                   net = state.Mcp_server.net;
                  }
                in
                let args = `Assoc [("name", `String name)] in
@@ -598,6 +600,7 @@ let add_routes ~sw ~clock router =
                    sw;
                    clock;
                    proc_mgr = state.Mcp_server.proc_mgr;
+                   net = state.Mcp_server.net;
                  }
                in
                let args = `Assoc [("name", `String name)] in

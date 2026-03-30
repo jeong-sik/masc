@@ -39,6 +39,7 @@ let handle_start ctx args : result =
       let env = object
         method clock = ctx.clock
         method process_mgr = match ctx.proc_mgr with Some pm -> pm | None -> failwith "process_mgr not available"
+        method net = match ctx.net with Some n -> n | None -> failwith "net not available"
       end in
       Team_session_engine_eio.start_session ~sw:ctx.sw ~env
         ~config:ctx.config ~created_by:ctx.agent_name ~goal ~duration_seconds

@@ -1291,6 +1291,7 @@ let operator_action_http_json ~state ~sw ~clock request ~args =
       sw;
       clock;
       proc_mgr = state.Mcp_server.proc_mgr;
+      net = state.Mcp_server.net;
       mcp_session_id = None;
     }
   in
@@ -1304,6 +1305,7 @@ let operator_confirm_http_json ~state ~sw ~clock request ~args =
       sw;
       clock;
       proc_mgr = state.Mcp_server.proc_mgr;
+      net = state.Mcp_server.net;
       mcp_session_id = None;
     }
   in

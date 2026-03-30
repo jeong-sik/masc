@@ -10,7 +10,7 @@ let test_start_status_report_stop () =
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
 
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
 
   let start_json =
@@ -168,7 +168,7 @@ let test_start_attached_operation_session () =
   in
   Command_plane_v2.write_operations config [ operation ];
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let start_json =
     start_session_custom_exn ctx ~goal:"Attach managed session" ~min_agents:1
@@ -305,7 +305,7 @@ let test_duration_reached_path () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let start_json =
     start_session_exn ctx ~goal:"exercise duration_reached branch"

@@ -107,6 +107,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           sw;
           clock;
           proc_mgr;
+          net = None;
           mcp_session_id = None;
         }
       in

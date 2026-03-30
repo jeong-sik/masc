@@ -9,7 +9,7 @@ let test_prove_strong_requires_additional_evidence () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"prove-strong-check" |> get_session_id in
   ignore
@@ -56,7 +56,7 @@ let test_dispatch_unknown () =
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   Alcotest.(check bool) "dispatch none" true
     (Tool_team_session.dispatch ctx ~name:"masc_team_session_unknown"
@@ -72,10 +72,10 @@ let test_unauthorized_session_access () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let owner_ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let intruder_ctx : _ Tool_team_session.context =
-    { config; agent_name = "intruder"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "intruder"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn owner_ctx ~goal:"authz-check" |> get_session_id in
 
@@ -167,7 +167,7 @@ let test_final_done_delta_snapshot_stable () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"snapshot-stability" |> get_session_id in
 
@@ -239,7 +239,7 @@ let test_verify_trace_uses_worker_run_raw_trace () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"verify-trace-raw" |> get_session_id in
   let worker_run_id = "run-trace-1" in
@@ -287,7 +287,7 @@ let test_verify_trace_reports_summary_only_without_checkpoint () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"verify-trace-summary-only" |> get_session_id in
   let worker_run_id = "run-trace-missing" in
@@ -325,7 +325,7 @@ let test_verify_trace_reports_summary_only_when_direct_evidence_missing () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"verify-trace-direct-missing" |> get_session_id in
   let worker_run_id = "run-direct-missing" in
@@ -364,7 +364,7 @@ let test_delegate_rejects_not_ready_worker_with_guidance () =
   ignore (Room.init config ~agent_name:(Some "owner"));
   ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"delegate-not-ready" |> get_session_id in
   ignore

@@ -183,6 +183,7 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
         sw;
         clock;
         proc_mgr = Some proc_mgr;
+        net = state.net;
         mcp_session_id = None;
       }
     in
@@ -220,6 +221,7 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
               sw;
               clock;
               proc_mgr = Some proc_mgr;
+              net = state.net;
             } in
             Keeper_keepalive.start_keepalive ~proactive_warmup_sec:60 ctx m;
             incr booted;

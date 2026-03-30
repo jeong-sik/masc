@@ -312,3 +312,136 @@ let test_team_worker_spawn_batch_requires_confirm_then_executes () =
       in
       Alcotest.(check string) "spawn actor falls back to owner" "owner"
         Yojson.Safe.Util.(spawn_event |> member "detail" |> member "actor" |> to_string))
+
+let review_item_from_room_digest ctx =
+  let digest =
+    match Operator_control.digest_json ~actor:"dashboard" ctx with
+    | Ok json -> json
+    | Error err -> Alcotest.fail err
+  in
+  match Yojson.Safe.Util.(digest |> member "review_queue" |> to_list) with
+  | item :: _ -> item
+  | [] -> Alcotest.fail "expected review_queue item"
+
+let test_review_resolve_hides_matching_item () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "dashboard"));
+      let ctx = operator_ctx env sw config "dashboard" in
+      (match
+         Operator_control.action_json ctx
+           (`Assoc
+             [
+               ("actor", `String "dashboard");
+               ("action_type", `String "room_pause");
+               ("target_type", `String "room");
+               ("payload", `Assoc [ ("reason", `String "queue test") ]);
+             ])
+       with
+      | Ok _ -> ()
+      | Error err -> Alcotest.fail err);
+      let item = review_item_from_room_digest ctx in
+      let action_json =
+        Operator_control.action_json ctx
+          (`Assoc
+            [
+              ("actor", `String "dashboard");
+              ("action_type", `String "review_resolve");
+              ("target_type", `String "review_item");
+              ("target_id", item |> Yojson.Safe.Util.member "id");
+              ( "payload",
+                `Assoc
+                  [
+                    ("item_id", item |> Yojson.Safe.Util.member "id");
+                    ("fingerprint", item |> Yojson.Safe.Util.member "fingerprint");
+                    ("item_target_type", item |> Yojson.Safe.Util.member "target_type");
+                    ("item_target_id", item |> Yojson.Safe.Util.member "target_id");
+                    ("recommended_action_type",
+                      item |> Yojson.Safe.Util.member "recommended_action"
+                      |> Yojson.Safe.Util.member "action_type");
+                    ("reason", `String "acknowledged by operator");
+                  ] );
+            ])
+      in
+      let action_json =
+        match action_json with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check string) "review decision" "resolved"
+        Yojson.Safe.Util.
+          (action_json |> member "result" |> member "result" |> member "decision"
+         |> to_string);
+      let digest_after =
+        match Operator_control.digest_json ~actor:"dashboard" ctx with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check int) "active review queue cleared" 0
+        Yojson.Safe.Util.(digest_after |> member "review_queue" |> to_list |> List.length);
+      Alcotest.(check int) "recent review recorded" 1
+        Yojson.Safe.Util.(digest_after |> member "recent_reviews" |> to_list |> List.length))
+
+let test_review_defer_moves_item_to_deferred_queue () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "dashboard"));
+      let ctx = operator_ctx env sw config "dashboard" in
+      (match
+         Operator_control.action_json ctx
+           (`Assoc
+             [
+               ("actor", `String "dashboard");
+               ("action_type", `String "room_pause");
+               ("target_type", `String "room");
+               ("payload", `Assoc [ ("reason", `String "queue defer test") ]);
+             ])
+       with
+      | Ok _ -> ()
+      | Error err -> Alcotest.fail err);
+      let item = review_item_from_room_digest ctx in
+      (match
+         Operator_control.action_json ctx
+           (`Assoc
+             [
+               ("actor", `String "dashboard");
+               ("action_type", `String "review_defer");
+               ("target_type", `String "review_item");
+               ("target_id", item |> Yojson.Safe.Util.member "id");
+               ( "payload",
+                 `Assoc
+                   [
+                     ("item_id", item |> Yojson.Safe.Util.member "id");
+                     ("fingerprint", item |> Yojson.Safe.Util.member "fingerprint");
+                     ("item_target_type", item |> Yojson.Safe.Util.member "target_type");
+                     ("item_target_id", item |> Yojson.Safe.Util.member "target_id");
+                     ("recommended_action_type",
+                       item |> Yojson.Safe.Util.member "recommended_action"
+                       |> Yojson.Safe.Util.member "action_type");
+                     ("reason", `String "defer until later");
+                   ] );
+             ])
+       with
+      | Ok _ -> ()
+      | Error err -> Alcotest.fail err);
+      let digest_after =
+        match Operator_control.digest_json ~actor:"dashboard" ctx with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      Alcotest.(check int) "active review queue empty" 0
+        Yojson.Safe.Util.(digest_after |> member "review_queue" |> to_list |> List.length);
+      Alcotest.(check int) "deferred review queue has item" 1
+        Yojson.Safe.Util.(digest_after |> member "deferred_queue" |> to_list |> List.length))

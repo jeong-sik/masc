@@ -6,7 +6,7 @@ import { useEffect } from 'preact/hooks'
 import { get } from '../api/core'
 import { lastEvent } from '../sse'
 import { navigate } from '../router'
-import { formatTimeAgo } from '../lib/format-time'
+import { formatTimeAgo, formatTimestampKo } from '../lib/format-time'
 import { Card, SurfaceCard } from './common/card'
 
 type RailStatus = 'healthy' | 'warning' | 'stale' | 'idle'
@@ -209,14 +209,7 @@ function statusCardClass(status: RailStatus): string {
   }
 }
 
-function formatTimestamp(ts: number): string {
-  return new Date(ts * 1000).toLocaleString('ko-KR', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+const formatTimestamp = formatTimestampKo
 
 function freshnessLabel(ts: number | null | undefined, fallback = '기록 없음'): string {
   if (ts == null) return fallback

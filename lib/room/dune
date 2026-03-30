@@ -28,8 +28,8 @@
   mention
   resilience
   heartbeat
-  heartbeat_smart
-  nickname)
+ heartbeat_smart
+ nickname)
  (libraries
   masc_types
   masc_core
@@ -42,7 +42,9 @@
   fs_compat
   yojson
   unix
+  re
   re.str
+  re.pcre
   eio
   eio.unix
   caqti

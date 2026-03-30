@@ -6,6 +6,7 @@ import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
 import { EmptyState } from './common/empty-state'
+import { TextInput, TextArea } from './common/input'
 import { stripStateBlocks } from '../keeper-message'
 import {
   boardPosts,
@@ -46,7 +47,8 @@ const newPostContent = signal('')
 const newPostSubmitting = signal(false)
 const PAGE_SIZE = 20
 const visibleLimit = signal(PAGE_SIZE)
-const opsVisibleLimit = signal(PAGE_SIZE)
+const automationVisibleLimit = signal(PAGE_SIZE)
+const systemVisibleLimit = signal(PAGE_SIZE)
 
 function defaultCommentAuthor(): string {
   const params = new URLSearchParams(window.location.search)
@@ -76,24 +78,97 @@ function boardPostKind(post: BoardPost): 'human' | 'automation' | 'system' {
   return post.post_kind ?? 'human'
 }
 
-function splitVisiblePosts(posts: BoardPost[]): { human: BoardPost[]; operations: BoardPost[]; hiddenAutomation: number } {
+type VisibleBoardGroups = {
+  human: BoardPost[]
+  automation: BoardPost[]
+  system: BoardPost[]
+  totalHuman: number
+  totalAutomation: number
+  totalSystem: number
+  hiddenAutomation: number
+  hiddenSystem: number
+}
+
+function splitVisiblePosts(posts: BoardPost[]): VisibleBoardGroups {
   const human: BoardPost[] = []
-  const operations: BoardPost[] = []
+  const automation: BoardPost[] = []
+  const system: BoardPost[] = []
+  let totalHuman = 0
+  let totalAutomation = 0
+  let totalSystem = 0
   let hiddenAutomation = 0
+  let hiddenSystem = 0
   posts.forEach(post => {
     const kind = boardPostKind(post)
-    if (kind === 'system' && boardExcludeSystem.value) return
-    if (kind === 'automation' && boardExcludeAutomation.value) {
-      hiddenAutomation += 1
-      return
-    }
     if (kind === 'human') {
+      totalHuman += 1
       human.push(post)
       return
     }
-    operations.push(post)
+    if (kind === 'automation') {
+      totalAutomation += 1
+      if (boardExcludeAutomation.value) {
+        hiddenAutomation += 1
+        return
+      }
+      automation.push(post)
+      return
+    }
+    totalSystem += 1
+    if (boardExcludeSystem.value) {
+      hiddenSystem += 1
+      return
+    }
+    system.push(post)
   })
-  return { human, operations, hiddenAutomation }
+  return {
+    human,
+    automation,
+    system,
+    totalHuman,
+    totalAutomation,
+    totalSystem,
+    hiddenAutomation,
+    hiddenSystem,
+  }
+}
+
+function filterHint(grouped: VisibleBoardGroups): string | null {
+  if (grouped.totalAutomation === 0 && grouped.totalSystem === 0 && grouped.totalHuman > 0) {
+    return '현재 목록은 사람 글만 있어서 자동화·시스템 필터를 눌러도 보이는 글 수가 그대로일 수 있습니다.'
+  }
+  if (boardExcludeAutomation.value && grouped.hiddenAutomation > 0) {
+    return `자동화 글 ${grouped.hiddenAutomation}건이 숨겨져 있습니다.`
+  }
+  if (boardExcludeSystem.value && grouped.hiddenSystem > 0) {
+    return `시스템 글 ${grouped.hiddenSystem}건이 숨겨져 있습니다.`
+  }
+  return null
+}
+
+function renderSection(
+  title: string,
+  posts: BoardPost[],
+  visible: typeof visibleLimit,
+) {
+  if (posts.length === 0) return null
+  return html`
+    <${Card} title=${`${title} (${posts.length})`} class="mb-4">
+      <div class="flex flex-col gap-2">
+        ${posts.slice(0, visible.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
+      </div>
+      ${posts.length > visible.value ? html`
+        <div class="text-center py-4">
+          <button type="button"
+            class="px-4 py-2 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
+            onClick=${() => { visible.value = visible.value + PAGE_SIZE }}
+          >
+            더 보기 (${posts.length - visible.value}개 남음)
+          </button>
+        </div>
+      ` : null}
+    <//>
+  `
 }
 
 function expiryChip(post: BoardPost) {
@@ -225,24 +300,19 @@ function NewPostForm() {
 
   return html`
     <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] grid gap-3">
-      <input
-        class="w-full px-3 py-2 rounded-lg bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-[14px] font-medium focus:border-[rgba(71,184,255,0.5)] outline-none placeholder:text-[var(--text-muted)]"
-        type="text"
+      <${TextInput}
         name="board_post_title"
-        aria-label="새 글 제목"
-        autocomplete="off"
+        ariaLabel="새 글 제목"
+        autoComplete="off"
         placeholder="제목"
         value=${newPostTitle.value}
         onInput=${(e: Event) => { newPostTitle.value = (e.target as HTMLInputElement).value }}
       />
-      <textarea
-        class="w-full px-3 py-2 rounded-lg bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] min-h-[80px] resize-y focus:border-[rgba(71,184,255,0.5)] outline-none placeholder:text-[var(--text-muted)]"
-        name="board_post_content"
-        aria-label="새 글 내용"
+      <${TextArea}
         placeholder="내용을 입력하세요..."
         value=${newPostContent.value}
         onInput=${(e: Event) => { newPostContent.value = (e.target as HTMLTextAreaElement).value }}
-      ></textarea>
+      />
       <div class="flex gap-2 justify-end">
         <button type="button"
           class="px-3 py-1.5 rounded-lg text-[13px] border border-[var(--card-border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]"
@@ -260,7 +330,9 @@ function NewPostForm() {
 
 function SortBar() {
   const current = boardSortMode.value
-  const hideLabel = boardExcludeAutomation.value ? '자동화 제외' : '자동화 포함'
+  const grouped = splitVisiblePosts(boardPosts.value)
+  const automationLabel = boardExcludeAutomation.value ? '자동화 제외' : '자동화 포함'
+  const systemLabel = boardExcludeSystem.value ? '시스템 제외' : '시스템 포함'
   return html`
     <div class="flex flex-col gap-3 mb-4 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
       <div class="flex items-center gap-1.5 flex-wrap">
@@ -274,7 +346,8 @@ function SortBar() {
             onClick=${() => {
               boardSortMode.value = mode.id
               visibleLimit.value = PAGE_SIZE
-              opsVisibleLimit.value = PAGE_SIZE
+              automationVisibleLimit.value = PAGE_SIZE
+              systemVisibleLimit.value = PAGE_SIZE
               refreshBoard()
             }}
           >
@@ -294,7 +367,7 @@ function SortBar() {
             refreshBoard()
           }}
         >
-          ${hideLabel}
+          ${automationLabel} (${grouped.totalAutomation})
         </button>
         <button type="button"
           class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer
@@ -307,7 +380,7 @@ function SortBar() {
             refreshBoard()
           }}
         >
-          ${boardExcludeSystem.value ? '시스템 제외' : '시스템 포함'}
+          ${systemLabel} (${grouped.totalSystem})
         </button>
         <div class="ml-auto">
           <button type="button"
@@ -326,7 +399,17 @@ function SortBar() {
 function MemorySummary() {
   const sortLabel = SORT_MODES.find(mode => mode.id === boardSortMode.value)?.label ?? boardSortMode.value
   const grouped = splitVisiblePosts(boardPosts.value)
-  const visibleCount = grouped.human.length + grouped.operations.length
+  const visibleCount = grouped.human.length + grouped.automation.length + grouped.system.length
+  const automationPolicy = grouped.totalAutomation === 0
+    ? '자동화 글 없음'
+    : boardExcludeAutomation.value
+      ? `자동화 ${grouped.hiddenAutomation}건 제외`
+      : `자동화 ${grouped.totalAutomation}건 표시`
+  const systemPolicy = grouped.totalSystem === 0
+    ? '시스템 글 없음'
+    : boardExcludeSystem.value
+      ? `시스템 ${grouped.hiddenSystem}건 제외`
+      : `시스템 ${grouped.totalSystem}건 표시`
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3 mb-4">
       <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
@@ -339,11 +422,11 @@ function MemorySummary() {
       </div>
       <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">잡음 필터</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${boardExcludeAutomation.value ? `자동화 ${grouped.hiddenAutomation}건 제외` : '모두 표시'}</strong>
+        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${automationPolicy}</strong>
       </div>
       <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">시스템 글 정책</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${boardExcludeSystem.value ? '시스템 제외' : '모두 표시'}</strong>
+        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${systemPolicy}</strong>
       </div>
       <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">최근 갱신</span>
@@ -504,9 +587,8 @@ function CommentThread({ comments }: { comments: BoardComment[] }) {
 function CommentForm({ postId }: { postId: string }) {
   return html`
     <div class="mt-4 flex gap-2">
-      <input
-        type="text"
-        class="flex-1 py-2 px-3 bg-[var(--white-5)] border border-[var(--border-slate-18)] rounded-lg text-[var(--text-body)] text-[13px] font-[inherit] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[rgba(71,184,255,0.55)] transition-colors"
+      <${TextInput}
+        class="flex-1"
         placeholder="댓글 추가..."
         value=${commentText.value}
         onInput=${(event: Event) => { commentText.value = (event.target as HTMLInputElement).value }}
@@ -619,7 +701,8 @@ function PostDetail({ post }: { post: BoardPost }) {
 
 export function Memory() {
   const grouped = splitVisiblePosts(boardPosts.value)
-  const posts = [...grouped.human, ...grouped.operations]
+  const posts = [...grouped.human, ...grouped.automation, ...grouped.system]
+  const hint = filterHint(grouped)
   const postId = route.value.params.post ?? null
   const post = postId
     ? posts.find(row => row.id === postId) ?? (detailPostId.value === postId ? detailPost.value : null)
@@ -653,6 +736,11 @@ export function Memory() {
     <div>
       <${MemorySummary} />
       <${SortBar} />
+      ${hint ? html`
+        <div class="mb-4 px-3 py-2 rounded-xl border border-[var(--border-slate-16)] bg-[var(--white-3)] text-[12px] text-[var(--text-muted)]">
+          ${hint}
+        </div>
+      ` : null}
       <div class="mb-4">
         <${NewPostForm} />
       </div>
@@ -661,40 +749,9 @@ export function Memory() {
         : posts.length === 0
           ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
           : html`
-              <${Card} title=${`사람이 쓴 글 (${grouped.human.length})`} class="mb-4">
-                <div class="flex flex-col gap-2">
-                  ${grouped.human.slice(0, visibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
-                </div>
-                ${grouped.human.length > visibleLimit.value ? html`
-                  <div class="text-center py-4">
-                    <button type="button"
-                      class="px-4 py-2 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
-                      onClick=${() => { visibleLimit.value = visibleLimit.value + PAGE_SIZE }}
-                    >
-                      더 보기 (${grouped.human.length - visibleLimit.value}개 남음)
-                    </button>
-                  </div>
-                ` : null}
-              <//>
-              ${grouped.operations.length > 0
-                ? html`
-                    <${Card} title=${`자동화 · 시스템 (${grouped.operations.length})`} class="mb-4">
-                      <div class="flex flex-col gap-2">
-                        ${grouped.operations.slice(0, opsVisibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
-                      </div>
-                      ${grouped.operations.length > opsVisibleLimit.value ? html`
-                        <div class="text-center py-4">
-                          <button type="button"
-                            class="px-4 py-2 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
-                            onClick=${() => { opsVisibleLimit.value = opsVisibleLimit.value + PAGE_SIZE }}
-                          >
-                            더 보기 (${grouped.operations.length - opsVisibleLimit.value}개 남음)
-                          </button>
-                        </div>
-                      ` : null}
-                    <//>
-                  `
-                : null}
+              ${renderSection('사람이 쓴 글', grouped.human, visibleLimit)}
+              ${renderSection('자율 글', grouped.automation, automationVisibleLimit)}
+              ${renderSection('시스템 글', grouped.system, systemVisibleLimit)}
             `}
     </div>
   `

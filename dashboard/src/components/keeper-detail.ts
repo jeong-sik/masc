@@ -5,7 +5,8 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useRef } from 'preact/hooks'
-import { runOperatorAction } from '../api'
+import { currentDashboardActor, runOperatorAction } from '../api'
+import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
@@ -20,6 +21,7 @@ import {
   ContextChart,
   EquipmentList,
   KpiGrid,
+  MetricsCharts,
   RawDataDebug,
   RelationshipList,
   TraitsList,
@@ -30,6 +32,7 @@ import {
 } from './keeper-detail-runtime'
 import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
+import { KeeperTrajectoryTimeline } from './keeper-trajectory-timeline'
 import { DialogOverlay } from './common/dialog'
 
 // ── Global overlay state ──────────────────────────────────
@@ -48,18 +51,11 @@ export function closeKeeperDetail() {
 
 // ── Helpers ───────────────────────────────────────────────
 
-function currentOperatorActor(): string {
-  const q = new URLSearchParams(window.location.search)
-  const queryActor = q.get('agent') ?? q.get('agent_name')
-  const storedActor = localStorage.getItem('masc_dashboard_agent_name')
-  const actor = (queryActor ?? storedActor ?? 'dashboard').trim()
-  return actor || 'dashboard'
-}
 
 async function runSocialSweep(): Promise<void> {
   try {
     await runOperatorAction({
-      actor: currentOperatorActor(),
+      actor: currentDashboardActor(),
       action_type: 'social_sweep',
       target_type: 'room',
       payload: {},
@@ -126,7 +122,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
           <div class="flex flex-col gap-3 px-4 pb-4 pt-2">
             <${KeeperDiagnosticSummary} keeper=${keeper} />
             <${KeeperRuntimeActions}
-              actor=${currentOperatorActor()}
+              actor=${currentDashboardActor()}
               keeper=${keeper}
               onSocialSweep=${() => { void runSocialSweep() }}
             />
@@ -190,15 +186,46 @@ export function KeeperDetailOverlay() {
               ${keeper.koreanName ? html`<span class="text-xs text-[var(--text-muted)]">${keeper.koreanName}</span>` : null}
             </div>
           </div>
-          <button
-            ref=${closeButtonRef}
-            type="button"
-            onClick=${() => closeKeeperDetail()}
-            class="flex items-center justify-center size-8 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
-            aria-label="키퍼 상세 닫기"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
-          </button>
+          <div class="flex items-center gap-2">
+            ${(() => {
+              const isOffline = ['offline', 'inactive', 'dead', 'crashed'].includes(keeper.status)
+              const isRunning = ['active', 'running', 'idle', 'busy', 'listening', 'working'].includes(keeper.status)
+              if (isOffline) return html`
+                <button type="button"
+                  class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[#4ade80] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
+                  onClick=${() => {
+                    void bootKeeper(keeper.name).then(res => {
+                      if (res.ok) {
+                        showToast(keeper.name + ' booted', 'success')
+                        void refreshDashboard({ force: true })
+                      } else showToast(res.error ?? 'Boot 실패', 'error')
+                    }).catch(() => showToast('Boot 실패', 'error'))
+                  }}
+                >Boot</button>`
+              if (isRunning) return html`
+                <button type="button"
+                  class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
+                  onClick=${() => {
+                    if (confirm(keeper.name + ' 키퍼를 종료합니까?')) {
+                      void shutdownKeeper(keeper.name).then(() => {
+                        showToast(keeper.name + ' 종료됨', 'success')
+                        void refreshDashboard({ force: true })
+                      }).catch(() => showToast('종료 실패', 'error'))
+                    }
+                  }}
+                >Shutdown</button>`
+              return null
+            })()}
+            <button
+              ref=${closeButtonRef}
+              type="button"
+              onClick=${() => closeKeeperDetail()}
+              class="flex items-center justify-center size-8 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1526]"
+              aria-label="키퍼 상세 닫기"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
+            </button>
+          </div>
         </div>
 
         ${'' /* ── Body ── */}
@@ -212,6 +239,9 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Context chart ── */}
         <${ContextChart} keeper=${keeper} />
+
+        ${'' /* ── Latency / Cost / Model charts ── */}
+        <${MetricsCharts} keeper=${keeper} />
 
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
@@ -267,6 +297,12 @@ export function KeeperDetailOverlay() {
               <//>
             `
             : null}
+
+          <div class="md:col-span-2">
+            <${SectionCard} title="도구 호출 궤적">
+              <${KeeperTrajectoryTimeline} keeperName=${keeper.name} />
+            <//>
+          </div>
 
           <${SectionCard} title="품질 시그널">
             <${RuntimeSignals} keeper=${keeper} />

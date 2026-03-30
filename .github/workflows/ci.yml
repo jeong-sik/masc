@@ -45,10 +45,17 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml + dependencies
-        uses: ./.github/actions/setup-ocaml-deps
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
         with:
           pin-flags: --with-bisect
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
           install-flags: --with-test
           os-packages: ripgrep bc
 
@@ -80,7 +87,7 @@ jobs:
           fi
 
       - name: Upload health snapshot
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: health-snapshot
           path: .health/health-snapshot.json
@@ -144,15 +151,22 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml + dependencies
-        uses: ./.github/actions/setup-ocaml-deps
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
         with:
           pin-flags: --with-bisect
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
           install-flags: --with-test
           os-packages: jq
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.22'
 
@@ -237,8 +251,14 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml + dependencies
-        uses: ./.github/actions/setup-ocaml-deps
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
 
       - name: Build server executable
         run: |
@@ -283,8 +303,14 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
-      - name: Setup OCaml + dependencies
-        uses: ./.github/actions/setup-ocaml-deps
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
         with:
           os-packages: ripgrep
 
@@ -320,21 +346,24 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
 
+      - name: Enable corepack and install pnpm
+        run: corepack enable && corepack prepare pnpm@10.31.0 --activate
+
       - name: Install dashboard dependencies
         working-directory: dashboard
-        run: npm install
+        run: pnpm install --frozen-lockfile
 
       - name: TypeScript typecheck
         working-directory: dashboard
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       - name: Run dashboard tests
         working-directory: dashboard
-        run: npm test
+        run: pnpm test
 
   docs:
     name: Documentation
@@ -346,8 +375,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup OCaml + dependencies
-        uses: ./.github/actions/setup-ocaml-deps
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin external OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
         with:
           install-flags: --with-doc
 

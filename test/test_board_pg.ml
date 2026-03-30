@@ -29,6 +29,28 @@ let cleanup_test_data pool =
   | Ok () -> ()
   | Error _ -> ()
 
+let insert_legacy_keeper_post t =
+  let open Caqti_request.Infix in
+  let post_id = Printf.sprintf "pg-test-legacy-%06x" (Random.bits ()) in
+  let now = Unix.gettimeofday () in
+  let insert_q =
+    (Caqti_type.(t3 string float float) ->. Caqti_type.unit)
+      "INSERT INTO masc_board_posts \
+       (id, author, content, title, body, created_at, updated_at, meta_json) \
+       VALUES (?, 'pg-test-keeper', 'keeper', 'Legacy keeper', 'keeper', ?, ?, \
+         '{\"source\":\"keeper_board_post\"}')"
+  in
+  match
+    Caqti_eio.Pool.use
+      (fun (module C : Caqti_eio.CONNECTION) ->
+        C.exec insert_q (post_id, now, now))
+      (Board_pg.get_pool t)
+  with
+  | Ok () -> post_id
+  | Error err ->
+      Alcotest.fail
+        (Printf.sprintf "legacy insert failed: %s" (Caqti_error.show err))
+
 (** {1 Helper: run test inside Eio with PG pool} *)
 
 let with_pg_backend f () =
@@ -56,7 +78,10 @@ let with_pg_backend f () =
 (** {1 Post CRUD} *)
 
 let test_create_and_get_post = with_pg_backend (fun t ->
-  match Board_pg.create_post t ~author:"pg-test-agent" ~content:"PG test post" () with
+  match
+    Board_pg.create_post t ~author:"pg-test-agent" ~content:"PG test post"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -69,14 +94,17 @@ let test_create_and_get_post = with_pg_backend (fun t ->
 )
 
 let test_list_posts = with_pg_backend (fun t ->
-  ignore (Board_pg.create_post t ~author:"pg-test-lister" ~content:"pg list 1" ());
-  ignore (Board_pg.create_post t ~author:"pg-test-lister" ~content:"pg list 2" ());
+  ignore (Board_pg.create_post t ~author:"pg-test-lister" ~content:"pg list 1"
+            ~post_kind:Board.Human_post ());
+  ignore (Board_pg.create_post t ~author:"pg-test-lister" ~content:"pg list 2"
+            ~post_kind:Board.Human_post ());
   let posts = Board_pg.list_posts t ~limit:10 () in
   Alcotest.(check bool) "at least 2 posts" true (List.length posts >= 2)
 )
 
 let test_list_posts_sort_orders = with_pg_backend (fun t ->
-  ignore (Board_pg.create_post t ~author:"pg-test-sorter" ~content:"sort test" ());
+  ignore (Board_pg.create_post t ~author:"pg-test-sorter" ~content:"sort test"
+            ~post_kind:Board.Human_post ());
   let _hot = Board_pg.list_posts t ~sort_by:Board_pg.Hot ~limit:5 () in
   let _recent = Board_pg.list_posts t ~sort_by:Board_pg.Recent ~limit:5 () in
   let _trending = Board_pg.list_posts t ~sort_by:Board_pg.Trending ~limit:5 () in
@@ -87,34 +115,30 @@ let test_list_posts_sort_orders = with_pg_backend (fun t ->
 )
 
 let test_reclassify_posts = with_pg_backend (fun t ->
-  let meta = `Assoc [ ("source", `String "keeper_board_post") ] in
-  match
-    Board_pg.create_post t ~author:"pg-test-keeper" ~content:"keeper"
-      ~post_kind:Board.Automation_post ~meta_json:meta ()
-  with
+  let pid = insert_legacy_keeper_post t in
+  let dry_run = Board_pg.reclassify_posts t ~dry_run:true () in
+  Alcotest.(check int) "dry run changed" 1 dry_run.changed;
+  (match Board_pg.get_post t ~post_id:pid with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok fetched ->
+       Alcotest.(check string) "legacy row resolves as automation" "automation"
+         (Board.post_kind_to_string fetched.post_kind));
+  let applied = Board_pg.reclassify_posts t ~dry_run:false () in
+  Alcotest.(check int) "apply changed" 1 applied.changed;
+  match Board_pg.get_post t ~post_id:pid with
   | Error e -> Alcotest.fail (Board.show_board_error e)
-  | Ok post ->
-      let pid = Board.Post_id.to_string post.id in
-      let dry_run = Board_pg.reclassify_posts t ~dry_run:true () in
-      Alcotest.(check int) "dry run changed" 1 dry_run.changed;
-      (match Board_pg.get_post t ~post_id:pid with
-       | Error e -> Alcotest.fail (Board.show_board_error e)
-       | Ok fetched ->
-           Alcotest.(check string) "still automation before apply" "automation"
-             (Board.post_kind_to_string fetched.post_kind));
-      let applied = Board_pg.reclassify_posts t ~dry_run:false () in
-      Alcotest.(check int) "apply changed" 1 applied.changed;
-      match Board_pg.get_post t ~post_id:pid with
-      | Error e -> Alcotest.fail (Board.show_board_error e)
-      | Ok fetched ->
-          Alcotest.(check string) "persisted as automation" "automation"
-            (Board.post_kind_to_string fetched.post_kind)
+  | Ok fetched ->
+      Alcotest.(check string) "persisted as automation" "automation"
+        (Board.post_kind_to_string fetched.post_kind)
 )
 
 (** {1 Comment Operations} *)
 
 let test_add_and_get_comments = with_pg_backend (fun t ->
-  match Board_pg.create_post t ~author:"pg-test-commenter" ~content:"post for pg comments" () with
+  match
+    Board_pg.create_post t ~author:"pg-test-commenter" ~content:"post for pg comments"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -130,7 +154,10 @@ let test_add_and_get_comments = with_pg_backend (fun t ->
 (** {1 Vote Operations} *)
 
 let test_vote_post = with_pg_backend (fun t ->
-  match Board_pg.create_post t ~author:"pg-test-voter" ~content:"pg vote me" () with
+  match
+    Board_pg.create_post t ~author:"pg-test-voter" ~content:"pg vote me"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -141,7 +168,10 @@ let test_vote_post = with_pg_backend (fun t ->
 )
 
 let test_vote_dedup = with_pg_backend (fun t ->
-  match Board_pg.create_post t ~author:"pg-test-dedup" ~content:"pg dedup vote" () with
+  match
+    Board_pg.create_post t ~author:"pg-test-dedup" ~content:"pg dedup vote"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -153,7 +183,10 @@ let test_vote_dedup = with_pg_backend (fun t ->
 )
 
 let test_vote_flip = with_pg_backend (fun t ->
-  match Board_pg.create_post t ~author:"pg-test-flipper" ~content:"pg flip vote" () with
+  match
+    Board_pg.create_post t ~author:"pg-test-flipper" ~content:"pg flip vote"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -170,7 +203,10 @@ let test_vote_flip = with_pg_backend (fun t ->
     Before the transaction fix, concurrent SELECT+INSERT+UPDATE could
     inflate counters when two votes raced on the same post. *)
 let test_vote_multiple_voters = with_pg_backend (fun t ->
-  match Board_pg.create_post t ~author:"pg-test-multi-voter" ~content:"pg multi vote" () with
+  match
+    Board_pg.create_post t ~author:"pg-test-multi-voter" ~content:"pg multi vote"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -193,7 +229,10 @@ let test_vote_multiple_voters = with_pg_backend (fun t ->
 )
 
 let test_vote_comment_atomic = with_pg_backend (fun t ->
-  match Board_pg.create_post t ~author:"pg-test-cv" ~content:"pg comment vote" () with
+  match
+    Board_pg.create_post t ~author:"pg-test-cv" ~content:"pg comment vote"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -226,20 +265,24 @@ let test_stats = with_pg_backend (fun t ->
 )
 
 let test_search = with_pg_backend (fun t ->
-  ignore (Board_pg.create_post t ~author:"pg-test-searcher" ~content:"pg_unique_xyz_search_term" ());
+  ignore (Board_pg.create_post t ~author:"pg-test-searcher"
+            ~content:"pg_unique_xyz_search_term" ~post_kind:Board.Human_post ());
   let results = Board_pg.search t ~query:"pg_unique_xyz_search_term" ~limit:10 in
   Alcotest.(check bool) "found search result" true (List.length results >= 1)
 )
 
 let test_hearths = with_pg_backend (fun t ->
   ignore (Board_pg.create_post t ~author:"pg-test-hearth" ~content:"pg fire topic"
-    ~hearth:"pg-test-hearth" ());
+    ~hearth:"pg-test-hearth" ~post_kind:Board.Human_post ());
   let hearths = Board_pg.list_hearths t in
   Alcotest.(check bool) "has hearths" true (List.length hearths >= 1)
 )
 
 let test_set_thread_id = with_pg_backend (fun t ->
-  match Board_pg.create_post t ~author:"pg-test-thread" ~content:"pg link me" () with
+  match
+    Board_pg.create_post t ~author:"pg-test-thread" ~content:"pg link me"
+      ~post_kind:Board.Human_post ()
+  with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
@@ -256,14 +299,20 @@ let test_set_thread_id = with_pg_backend (fun t ->
 (** {1 Validation} *)
 
 let test_empty_content = with_pg_backend (fun t ->
-  match Board_pg.create_post t ~author:"pg-test-validator" ~content:"" () with
+  match
+    Board_pg.create_post t ~author:"pg-test-validator" ~content:""
+      ~post_kind:Board.Human_post ()
+  with
   | Ok _ -> Alcotest.fail "Expected validation error for empty content"
   | Error (Board.Validation_error _) -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
 )
 
 let test_empty_author = with_pg_backend (fun t ->
-  match Board_pg.create_post t ~author:"" ~content:"valid content" () with
+  match
+    Board_pg.create_post t ~author:"" ~content:"valid content"
+      ~post_kind:Board.Human_post ()
+  with
   | Ok _ -> Alcotest.fail "Expected validation error for empty author"
   | Error _ -> ()
 )

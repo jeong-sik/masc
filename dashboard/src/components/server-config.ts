@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
+import { TextInput } from './common/input'
 import { fetchDashboardConfig } from '../api/dashboard'
 import type { DashboardConfigResponse, ConfigEntry } from '../api/dashboard'
 
@@ -160,10 +161,9 @@ export function ServerConfig() {
   return html`
     <${Card} title="서버 설정" class="section">
       <div class="mb-3 flex items-center gap-2">
-        <input
-          type="text"
+        <${TextInput}
+          class="flex-1"
           placeholder="환경변수 또는 설명으로 검색..."
-          class="flex-1 px-3 py-1.5 text-sm rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)]"
           value=${searchQuery.value}
           onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
         />

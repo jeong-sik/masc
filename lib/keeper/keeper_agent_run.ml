@@ -192,7 +192,11 @@ let run_turn
     { strategy = Agent_sdk.Context_reducer.Merge_contiguous };
   ] in
   (* 8. Run Agent *)
-  let contract = Keeper_cdal_contract.of_keeper_meta meta in
+  let contract =
+    if Env_config_core.get_bool ~default:true "MASC_CDAL_ENABLED"
+    then Keeper_cdal_contract.of_keeper_meta meta
+    else None
+  in
   match
     Oas_worker.run_named
       ~cascade_name

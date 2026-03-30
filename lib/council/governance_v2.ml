@@ -42,14 +42,7 @@ let ensure_dirs base_path =
   ensure_dir (rulings_dir base_path);
   ensure_dir (execution_orders_dir base_path)
 
-let contains_substring haystack needle =
-  let hay_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    idx + needle_len <= hay_len
-    && ((String.sub haystack idx needle_len = needle) || loop (idx + 1))
-  in
-  needle_len = 0 || loop 0
+let contains_substring = String_util.contains_substring
 
 let normalize_text raw =
   raw

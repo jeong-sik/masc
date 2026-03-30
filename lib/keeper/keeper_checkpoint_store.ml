@@ -79,7 +79,7 @@ let save
     ("context", context_json);
   ] in
   let content = Yojson.Safe.to_string json in
-  Fs_compat.save_file path content;
+  Keeper_fs.save_atomic path content;
   (* Auto-prune old checkpoints after each save *)
   ignore (prune ~session_dir ~keep:max_checkpoints_retained)
 
@@ -133,7 +133,7 @@ let save_oas_error (detail : string) =
 
 let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : unit =
   try
-    Fs_compat.mkdir_p session_dir;
+    ignore (Keeper_fs.ensure_dir session_dir);
     match Fs_compat.get_fs_opt () with
     | Some fs ->
         let dir = Eio.Path.(fs / session_dir) in
@@ -146,7 +146,7 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : unit =
          | Error err ->
              raise (save_oas_error (Agent_sdk.Error.to_string err)))
     | None ->
-        Fs_compat.save_file
+        Keeper_fs.save_atomic
           (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
           (Agent_sdk.Checkpoint.to_string ckpt)
   with

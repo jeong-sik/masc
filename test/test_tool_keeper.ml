@@ -154,9 +154,22 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
       ~fallback_route
       ~reply_raw:"No skill header here"
   in
-  check string "selection mode" "heuristic" resolved.selection_mode;
+  check string "selection mode" "agent" resolved.selection_mode;
   check string "provenance" "fallback" resolved.provenance;
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
+
+let test_direct_reply_mode_prompt_prioritizes_persona () =
+  let prompt =
+    Masc_mcp.Keeper_prompt.append_direct_reply_mode_prompt
+      ~base_prompt:"base prompt"
+  in
+  check bool "keeps base prompt" true (contains_substring prompt "base prompt");
+  check bool "mentions direct chat" true
+    (contains_substring prompt "direct chat with the user");
+  check bool "mentions persona priority" true
+    (contains_substring prompt "Prioritize the keeper's authored persona");
+  check bool "forbids skill headers" true
+    (contains_substring prompt "Do not emit SKILL:")
 
 let keeper_usage ?cost_usd ~input_tokens ~output_tokens () : Agent_sdk.Types.api_usage =
   {
@@ -1765,10 +1778,12 @@ let test_parse_agent_status_reads_compressed_filesystem_backend () =
 let test_keeper_bootstrap_marks_stale_explicit_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
+  Masc_mcp.Keeper_registry.clear ();
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
       Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      Masc_mcp.Keeper_registry.clear ();
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -1835,10 +1850,12 @@ let test_keeper_bootstrap_marks_stale_explicit_keeper () =
 let test_keeper_supervisor_recovers_missing_desired_keeper () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
+  Masc_mcp.Keeper_registry.clear ();
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
       Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
+      Masc_mcp.Keeper_registry.clear ();
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -1861,8 +1878,12 @@ let test_keeper_supervisor_recovers_missing_desired_keeper () =
             ])
       in
       check bool "keeper up ok" true ok;
+      (* Simulate an orphaned keeper: stop keepalive and remove registry
+         entry so reconcile sees a durable keeper on disk with no live
+         entry — the real-world scenario this test targets. *)
       Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu";
-      check bool "keepalive stopped before recovery" false
+      Masc_mcp.Keeper_registry.unregister ~base_path:config.base_path "sangsu";
+      check bool "keepalive stopped and unregistered before recovery" false
         (Masc_mcp.Keeper_registry.is_running ~base_path:config.base_path "sangsu");
       Masc_mcp.Keeper_supervisor.sweep_and_recover keeper_ctx;
       check bool "keepalive recovered by sweep" true
@@ -1947,6 +1968,55 @@ let test_legacy_presence_keepalive_false_migrates_to_paused () =
       check bool "paused persisted after scrub" true
         Yojson.Safe.Util.(scrubbed_json |> member "paused" = `Bool true))
 
+let test_keeper_up_recreates_cached_keeper_dir_after_base_reset () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  Masc_mcp.Keeper_registry.clear ();
+  let base_dir = temp_dir () in
+  let keeper_name = "public-sweep-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Fs_compat.clear_fs ();
+      Masc_mcp.Keeper_keepalive.stop_keepalive keeper_name;
+      Masc_mcp.Keeper_registry.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let keeper_up goal =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String keeper_name);
+              ("goal", `String goal);
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      let ok, first_body = keeper_up "Populate cached keeper directory path" in
+      if not ok then fail first_body;
+      check bool "first keeper up ok" true ok;
+      Masc_mcp.Keeper_keepalive.stop_keepalive keeper_name;
+      Masc_mcp.Keeper_registry.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      rm_rf base_dir;
+      Unix.mkdir base_dir 0o755;
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let ok, second_body = keeper_up "Recreate cached keeper directory after reset" in
+      if not ok then fail second_body;
+      check bool "second keeper up ok after base reset" true ok;
+      check bool "keeper meta recreated" true
+        (Sys.file_exists (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)))
+
 let () =
   run "Tool_keeper" [
     ("read_file_tail_lines", [
@@ -1960,6 +2030,8 @@ let () =
            test_resolved_keeper_skill_route_marks_agent_judgment;
          test_case "resolved skill route falls back when parse missing" `Quick
            test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing;
+         test_case "direct reply prompt prioritizes persona" `Quick
+           test_direct_reply_mode_prompt_prioritizes_persona;
          test_case "keeper merge usage preserves present cost" `Quick
            test_keeper_merge_usage_preserves_present_cost;
          test_case "keeper merge usage sums costs" `Quick
@@ -2026,6 +2098,8 @@ let () =
            test_keeper_supervisor_recovers_missing_desired_keeper;
          test_case "legacy presence_keepalive false migrates to paused" `Quick
            test_legacy_presence_keepalive_false_migrates_to_paused;
+         test_case "keeper up recreates cached keeper dir after base reset (issue #3710)" `Quick
+           test_keeper_up_recreates_cached_keeper_dir_after_base_reset;
          test_case "session dir mkdir_p creates full tree from scratch (issue #3019)" `Quick
            test_session_dir_mkdir_p_creates_full_tree;
        ]);

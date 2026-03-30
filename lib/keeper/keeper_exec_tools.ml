@@ -14,7 +14,7 @@ let ensure_keeper_board_post_args ~author ~source = function
       `Assoc
         ([
            ("author", `String author);
-           ("post_kind", `String "system");
+           ("post_kind", `String "automation");
            ("meta", `Assoc [ ("source", `String source) ]);
          ]
         @ fields)

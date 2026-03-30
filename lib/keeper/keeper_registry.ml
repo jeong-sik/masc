@@ -27,12 +27,15 @@ module StringMap = Map.Make (String)
     ADT matching replaces string prefix matching for crash_msg grouping. *)
 type failure_reason =
   | Heartbeat_consecutive_failures of int
+  | Turn_consecutive_failures of int
   | Fiber_unresolved
   | Exception of string
 
 let failure_reason_to_string = function
   | Heartbeat_consecutive_failures n ->
       Printf.sprintf "heartbeat_consecutive_failures(%d)" n
+  | Turn_consecutive_failures n ->
+      Printf.sprintf "turn_consecutive_failures(%d)" n
   | Fiber_unresolved -> "fiber_unresolved"
   | Exception s -> Printf.sprintf "exception(%s)" s
 
@@ -63,9 +66,11 @@ type registry_entry = {
   done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
   restart_count : int;
   last_restart_ts : float;
+  dead_since_ts : float option;
   crash_log : (float * string) list;
   last_error : string option;
   last_failure_reason : failure_reason option;
+  turn_consecutive_failures : int;
   last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
   board_cursor_ts : float;
@@ -117,9 +122,11 @@ let register ~base_path name meta =
     done_r;
     restart_count = 0;
     last_restart_ts = 0.0;
+    dead_since_ts = None;
     crash_log = [];
     last_error = None;
     last_failure_reason = None;
+    turn_consecutive_failures = 0;
     last_agent_count = 0;
     board_wakeups = Hashtbl.create 8;
     board_cursor_ts = 0.0;
@@ -174,9 +181,28 @@ let set_state ~base_path name state =
          | (Paused | Stopped | Crashed), Running ->
              Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
          | _ -> ());
-        put_entry key { entry with state }
+        let dead_since_ts =
+          match entry.state, state with
+          | _, Dead -> entry.dead_since_ts
+          | Dead, Running -> None
+          | Dead, _ -> entry.dead_since_ts
+          | _ -> None
+        in
+        put_entry key { entry with state; dead_since_ts }
       end
   | None -> ()
+
+let mark_dead ~base_path name ~at =
+  update_entry ~base_path name (fun entry ->
+    if entry.state <> Dead then begin
+      (match entry.state with
+       | Running ->
+           Atomic.set running_count_atomic
+             (max 0 (Atomic.get running_count_atomic - 1))
+       | _ -> ());
+      { entry with state = Dead; dead_since_ts = Some at }
+    end else
+      { entry with dead_since_ts = Some (Option.value ~default:at entry.dead_since_ts) })
 
 let record_restart ~base_path name =
   update_entry ~base_path name (fun e ->
@@ -188,6 +214,19 @@ let record_error ~base_path name err =
 
 let set_failure_reason ~base_path name reason =
   update_entry ~base_path name (fun e -> { e with last_failure_reason = reason })
+
+let increment_turn_failures ~base_path name =
+  update_entry ~base_path name (fun e ->
+    { e with turn_consecutive_failures = e.turn_consecutive_failures + 1 })
+
+let reset_turn_failures ~base_path name =
+  update_entry ~base_path name (fun e ->
+    { e with turn_consecutive_failures = 0 })
+
+let get_turn_failures ~base_path name =
+  match get ~base_path name with
+  | Some e -> e.turn_consecutive_failures
+  | None -> 0
 
 let is_running ~base_path name =
   match get ~base_path name with
@@ -228,7 +267,7 @@ let started_at ~base_path name =
 let spawn_slots_available () =
   let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
   max_keepers <= 0
-  || StringMap.cardinal !registry < max_keepers
+  || Atomic.get running_count_atomic < max_keepers
 
 let wakeup ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
@@ -246,14 +285,16 @@ let fiber_health_of ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
   | None -> Fiber_unknown
   | Some entry ->
-      match Eio.Promise.peek entry.done_p with
-      | None -> Fiber_alive
-      | Some `Stopped -> Fiber_unknown
-      | Some (`Crashed _) ->
-          let max_restarts = Env_config.KeeperSupervisor.max_restarts in
-          if entry.restart_count >= max_restarts
-          then Fiber_dead
-          else Fiber_zombie
+      if entry.state = Dead then Fiber_dead
+      else
+        match Eio.Promise.peek entry.done_p with
+        | None -> Fiber_alive
+        | Some `Stopped -> Fiber_unknown
+        | Some (`Crashed _) ->
+            let max_restarts = Env_config.KeeperSupervisor.max_restarts in
+            if entry.restart_count >= max_restarts
+            then Fiber_dead
+            else Fiber_zombie
 
 let crash_log_of ~base_path name =
   match get ~base_path name with
@@ -263,7 +304,14 @@ let crash_log_of ~base_path name =
 let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts
     ~crash_log =
   update_entry ~base_path name (fun e ->
-    { e with restart_count; last_restart_ts; crash_log })
+    {
+      e with
+      restart_count;
+      last_restart_ts;
+      dead_since_ts = None;
+      crash_log;
+      last_failure_reason = None;
+    })
 
 let get_last_agent_count ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
@@ -365,3 +413,77 @@ let tool_usage_of_by_name name =
   | Some entry ->
     Hashtbl.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
     |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
+
+(* -- Tool usage persistence ---------------------------------------- *)
+
+let tool_usage_path ~base_path name =
+  let dir = Filename.concat (Filename.concat base_path ".masc") "keepers/tool_usage" in
+  Filename.concat dir (name ^ ".json")
+
+let flush_tool_usage ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  | None -> ()
+  | Some entry ->
+    let items =
+      Hashtbl.fold (fun tool_name (e : tool_call_entry) acc ->
+        `Assoc [
+          ("tool", `String tool_name);
+          ("count", `Int e.count);
+          ("successes", `Int e.successes);
+          ("failures", `Int e.failures);
+          ("last_used_at", `Float e.last_used_at);
+        ] :: acc
+      ) entry.tool_usage []
+    in
+    let json = `Assoc [
+      ("keeper", `String name);
+      ("flushed_at", `Float (Time_compat.now ()));
+      ("tools", `List items);
+    ] in
+    let path = tool_usage_path ~base_path name in
+    (try
+       Fs_compat.mkdir_p (Filename.dirname path);
+       Fs_compat.save_file path (Yojson.Safe.to_string json ^ "\n")
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+       Log.Keeper.error "flush_tool_usage %s: %s" name (Printexc.to_string exn))
+
+let restore_tool_usage ~base_path name =
+  let path = tool_usage_path ~base_path name in
+  if not (Sys.file_exists path) then ()
+  else
+    match StringMap.find_opt (registry_key ~base_path name) !registry with
+    | None -> ()
+    | Some entry ->
+      (try
+         let content = Fs_compat.load_file path in
+         let json = Yojson.Safe.from_string content in
+         let tools = match json with
+           | `Assoc fields ->
+             (match List.assoc_opt "tools" fields with
+              | Some (`List items) -> items
+              | _ -> [])
+           | _ -> []
+         in
+         List.iter (fun item ->
+           match
+             ( Safe_ops.json_string_opt "tool" item,
+               Safe_ops.json_int_opt "count" item,
+               Safe_ops.json_int_opt "successes" item,
+               Safe_ops.json_int_opt "failures" item,
+               Safe_ops.json_float_opt "last_used_at" item )
+           with
+           | Some tool_name, Some count, Some successes, Some failures, Some last_used_at
+             when tool_name <> "" ->
+             let e = {
+               count;
+               successes;
+               failures;
+               last_used_at;
+             } in
+             Hashtbl.replace entry.tool_usage tool_name e
+           | _ -> ()
+         ) tools
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Keeper.warn "restore_tool_usage %s: %s" name (Printexc.to_string exn))

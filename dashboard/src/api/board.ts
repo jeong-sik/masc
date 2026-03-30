@@ -107,7 +107,7 @@ function normalizeGovernanceGuardrailState(raw: unknown): GovernanceGuardrailSta
   }
 }
 
-function normalizeGovernanceJudgment(raw: unknown): GovernanceJudgment | null {
+export function normalizeGovernanceJudgment(raw: unknown): GovernanceJudgment | null {
   if (!isRecord(raw)) return null
   const summary = asNullableString(raw.summary)
   const targetId = asNullableString(raw.target_id)
@@ -436,12 +436,11 @@ export function votePost(postId: string, direction: 'up' | 'down'): Promise<unkn
   })
 }
 
-export function createPost(title: string, content: string, author: string, kind = 'internal'): Promise<unknown> {
+export function createPost(title: string, content: string, author: string): Promise<unknown> {
   return post(`/api/v1/tools/masc_board_post`, {
     title,
     content,
     author,
-    kind,
   })
 }
 

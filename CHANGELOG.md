@@ -1,17 +1,157 @@
 # Changelog
 
 
-## [Unreleased]
+## [2.165.0] - 2026-03-30
 
 ### Added
-- **Feature flag registry** — `Feature_flag_registry` module with 25 boolean flags, lifecycle state, `masc_feature_flags` tool for runtime enumeration (#3646 H5).
-- **CI feature flag lint** — `check-feature-flag-consistency.sh` detects duplicate `get_bool` calls and registry drift.
-
-### Fixed
-- **WebRTC default mismatch** — `env_config_server.ml` had `MASC_WEBRTC_ENABLED` default=false, corrected to true (matches runtime module, docs, and start script).
+- **Governance judge wiring** — dashboard reads real judge status (online, model, errors) instead of hardcoded values; judgment items surfaced in governance tab (#3823).
+- **Dashboard runtime controls** — config PATCH keys and runtime control panel (#3809).
+- **CDAL canonical serializers** — replace manual violation parsing with OAS serializers (#3796).
+- **Feature flag management** — ADR and COMMON-PITFALLS documentation patterns (#3803).
 
 ### Changed
-- **`env_config_server.ml` marked unused** — zero callers since creation. Added deprecation notice.
+- **Dead code removal** — 1,332 lines of orphaned tool schemas, tests, and config modules removed (#3788).
+- **Tool matrix dispatch** — fix dispatch regression and timeout handling (#3815).
+- **Bump script extended** — now updates ROADMAP.md, PRODUCT-OPERATING-PLAN.md, SPEC-INDEX.md to prevent version drift (#3821).
+- **Dashboard typecheck** — unblocked after CDAL refactor (#3811).
+- **Dashboard observability** — simplified code structure (#3794).
+- **Keeper direct chat** — fix persona drift (#3774).
+- **Ghost tool schemas** — 7 schemas with no dispatch wiring removed (#3792).
+- **Version truth** — shutdownKeeper import restored, version synced to 2.164.0 (#3812).
+
+### Removed
+- 7 orphaned test modules and their dune references.
+- `env_config_server.ml` and `env_config_dashboard.ml` (0 consumers).
+
+## [2.164.0] - 2026-03-30
+
+### Added
+- **Dashboard control plane** — tool executor, keeper spawn, task management, flow control (#3745).
+- **Turn failure tracking** — count unified turn failures toward keeper crash threshold + keepalive loop wiring (#3767, #3783).
+- **.mli interfaces** — 6 new (server 4, room 2, dashboard 2) for Phase 2 capsulation (#3769, #3770, #3791).
+- **Operator control surface ADR** documentation (#3786).
+
+### Changed
+- **OCaml 5.4.1 pin** + **MCP SDK v1.3.0** bump (#3771).
+- **Dashboard** — Intl API, format consolidation, TextArea a11y, error resilience (#3781).
+- **Tool schemas** — remove duplicates, compress descriptions (-114 lines) (#3790).
+- **Config** — remove dead env_config_server/dashboard (-288 lines, 57 duplicate reads) (#3772).
+- **Keeper** — extract tool failure threshold to env_config (#3768).
+
+### Fixed
+- **Keeper** — deduplicate turn failure counter, registry SSOT (#3795).
+- **Keeper_fs** — add missing Log.Keeper.warn to operations (#3779).
+
+## [2.163.0] - 2026-03-30
+
+### Added
+- **Heartbeat_smart** — adaptive scheduling wired into keepalive loop with feature flag gate (#3744).
+- **Operator review queue workbench** — review decision CRUD + dashboard UI (#3737).
+- **Feature health monitoring** — dashboard panel for feature flag status (#3731).
+- **CDAL golden set** — calibration baseline and eval harness (#3752).
+- **CDAL protocol_version** — labeling output contract versioning (#3740).
+- **CDAL feature flags** — registry entries and keeper evaluation gate (#3742).
+- **Keeper/agent observability pipeline** — tool usage flush/restore, trajectory truncation (#3758).
+- **Dashboard autoresearch loop** — start from UI (#3734).
+
+### Changed
+- **CI Dashboard** — switched from npm to pnpm matching packageManager field (#3755).
+- **command_plane .mli** — 4 interfaces added (cp_types, cp_paths, cp_cleanup, cp_snapshot_section_cache) (#3749).
+- **String_util** — consolidated 10 duplicate `contains_substring` implementations (#3748).
+- **Keeper ensure_dir** — centralized into Keeper_fs with Eio.Mutex + atomic writes (#3736).
+- **Keeper keepalive constants** — extracted hardcoded values to env_config (#3746).
+- **Dashboard status labels** — consolidated, removed hardcoding (#3743).
+- **Dashboard actor reader** — deduplicated to SSOT currentDashboardActor (#3763).
+
+### Fixed
+- **Keeper supervisor** — hardened ownership, dead tombstone cleanup (#3678).
+- **Keeper metadata migration** — perpetual keeper meta with timestamp comparison (#3732).
+- **Keeper dir cache** — stale ensure_dir cache after base reset (#3714).
+- **Tool dispatch** — wired 3 missing modules (Cache, Goals, Compact) (#3716).
+- **Contract Harness** — mkdir_p keepers dir before writing meta (#3715).
+- **H2 JSON-RPC** — proper message escaping via json_rpc_error helper (#3760).
+- **Spawn** — handle partial write when piping stdin (#3765).
+- **Timing ring** — cursor overflow fix + RFC state machine diagram (#3735).
+- **Test boundaries** — clear keeper registry between tests (#3739).
+
+### Removed
+- 4 dead functions with zero callers (#3753).
+- Stale TODOs referencing closed issues + dead `stable_session_id` (#3762, #3764).
+- Stale removed-tool references (#3727).
+
+## [2.162.0] - 2026-03-29
+
+### Added
+- **H3 API contract** — sunset headers, tool deprecation notices, feature flag integration (#3698).
+- **Keeper lifecycle (Phase 0-2)** — config SSOT + per-stage keepalive profiling (#3659), work-as-heartbeat (#3671), self-preservation + structured crash + Dead tombstone (#3680).
+- **Keeper per-persona shard configuration** (#3682).
+- **Keeper memory write, config snapshot, transport health truth** (#3670).
+- **masc_config introspection tool** (#3669).
+- **Feature flag registry** — 25 boolean flags, lifecycle state, `masc_feature_flags` tool (#3646).
+- **CI feature flag lint** — `check-feature-flag-consistency.sh` detects duplicate calls and registry drift.
+- **CDAL Phase-1A evaluator kernel** — loader, judge, friction, integration (#3611).
+- **CDAL Phase-1B friction wiring** + path traversal fix (#3621).
+- **CDAL fresh-context adversarial evaluator** (#3617).
+- **CDAL golden set and baseline lock** for evaluator calibration (#3615).
+- **CDAL MASC artifact store backend** (#3614).
+- **CDAL risk_digest** — 4 structural risk signals in supervisor digest (#3613).
+- **CDAL Task_stage typed coding_task stage gates** (#3610).
+- **CDAL labeling protocol v0** — types + CLI + tests (#3623).
+- **Dashboard harness live surface** rebuild (#3579).
+
+### Changed
+- **Walph surface retired** — -1,172 lines removed (#3705).
+- **Perpetual dirs renamed** to `traces/keepers` with migration (#3702).
+- **24 unused tools removed** from MCP surface (#3640), 7 more in follow-up (#3662).
+- **Dead scripts removed** — masc-watch, test_grpc (-696 lines) (#3647).
+- **3 sub-libraries extracted** from monolith — config, dashboard_utils, team_session_types (#3620).
+- **Phase 0 evaluator removed** — Phase-1A is now primary (#3619).
+- **Memory V6 boundary consolidated** into `create_memory_full` (#3631).
+- **Legacy dashboard surfaces pruned**, navigation unified (#3607).
+- **Remote MCP auth defaults hardened** (#3658).
+- **Monolith decomposition** batch 1 and server_mcp prep (#3639).
+- **`env_config_server.ml` marked unused** — zero callers since creation.
+
+### Fixed
+- **Keeper ADT cohort detection** + missing test registrations (#3711).
+- **Keeper checkpoint session_id** unified to trace_id (#3679, #3688).
+- **Keeper duplicate user message** in checkpoint (#3686).
+- **GC zombie agents** reaped on set_room and join (#3689).
+- **Auth tunnel-through-loopback bypass** detected (#3667).
+- **Auth same-origin check** uses explicit port (#3629).
+- **Build: extensions field** restored in agent_entry record (#3672).
+- **Build: main repaired** after #3640 merge (#3661).
+- **CDAL adversarial red-line paths** enforced (#3634).
+- **CI: quoted Obj.magic** ignored in health ratchet (#3625).
+- **CI: manually-set labels** preserved in issue triage (#3622).
+- **WebRTC default mismatch** — env_config default corrected to true.
+- **Tests: dead masc_vote_create refs** replaced with live tool (#3707).
+
+### Performance
+- **Dashboard: skip heavy processing** for paused keepers + cp profiling (#3637).
+
+### Documentation
+- **Adaptive heartbeat RFC** — checklist 17/19 complete (#3697), scheduling RFC (#3636).
+- **Inventory Gap Analysis** — 17 gaps, deterministic boundary principle (#3646).
+- **Keeper Memory Resurrection** — 7-gap fix RFC (#3632).
+- **Keeper continuity product contract** (#3653).
+- **MCP tier guide** for ToolSearch (#3681).
+- **Bridge lossy projection field map** documented (#3609).
+- **Phase 0 dependency graph** — 586 modules, 115-module cycle (#3624).
+
+## [2.161.0] - 2026-03-28
+
+### Added
+- **CDAL PoC-1 complete** — contract risk, composer, bridge, proof, conformance (#3583).
+
+### Changed
+- **37 dead/duplicate env vars removed** from env_config (-289 lines) (#3606).
+- **HTTP transport negotiation** delegated to SDK, Accept: */* handling fixed (#3596).
+- **CDAL content-based eval** — read proof artifacts, derive recommendations (#3578).
+- **Keeper registry simplified** with update_entry helper (#3594).
+
+### Documentation
+- **CDAL contract kernel RFC** — verdict/friction/advice split with theoretical foundations (#3595).
 
 ## [2.160.0] - 2026-03-28
 

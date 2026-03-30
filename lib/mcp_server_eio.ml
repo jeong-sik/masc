@@ -74,9 +74,9 @@ let read_only_tools =
    "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
    "masc_transport_status"; "masc_websocket_discovery";
    "masc_worktree_list"; "masc_pending_interrupts";
-   "masc_cost_report"; "masc_portal_status";
+   "masc_portal_status";
    "masc_verify_handoff"; "masc_tool_help";
-   "masc_goal_list"; "masc_team_session_status"; "masc_team_session_report";
+   "masc_team_session_status"; "masc_team_session_report";
    "masc_team_session_list"; "masc_team_session_compare";
    "masc_team_session_events"; "masc_team_session_prove";
    "masc_operator_snapshot"; "masc_operator_digest";
@@ -94,7 +94,6 @@ let requires_join_tools = [
   "masc_operator_action"; "masc_operator_confirm";
   "masc_improve_loop_start"; "masc_improve_loop_pause";
   "masc_improve_loop_resume"; "masc_improve_loop_tick";
-  "masc_code_swarm_plan"; "masc_code_swarm_verify"; "masc_code_swarm_merge";
 ]
 
 let () = Tool_dispatch.init_read_only_set read_only_tools
@@ -118,6 +117,10 @@ let () =
   register_module_tag ~schemas:Tool_portal.schemas ~tag:Mod_portal;
   register_module_tag ~schemas:Tool_worktree.schemas ~tag:Mod_worktree;
   register_module_tag ~schemas:Tool_auth.schemas ~tag:Mod_auth;
+  register_module_tag ~schemas:Tool_audit.schemas ~tag:Mod_audit;
+  register_module_tag ~schemas:Tool_cost.schemas ~tag:Mod_cost;
+  register_module_tag ~schemas:Tool_encryption.schemas ~tag:Mod_encryption;
+  register_module_tag ~schemas:Tool_schemas_fire_task.schemas ~tag:Mod_fire_task;
   register_module_tag ~schemas:Tool_agent.schemas ~tag:Mod_agent;
   register_module_tag ~schemas:Tool_room.schemas ~tag:Mod_room;
   register_module_tag ~schemas:Tool_agent_timeline.schemas ~tag:Mod_agent_timeline;
@@ -135,6 +138,10 @@ let () =
   register_module_tag ~schemas:Tool_handover.schemas ~tag:Mod_handover;
   register_module_tag ~schemas:Tool_hat.schemas ~tag:Mod_hat;
   register_module_tag ~schemas:Tool_cache.schemas ~tag:Mod_cache;
+  register_module_tag ~schemas:Tool_model_catalog.schemas ~tag:Mod_model_catalog;
+  register_module_tag ~schemas:Tool_rate_limit.schemas ~tag:Mod_rate_limit;
+  register_module_tag ~schemas:Tool_run.schemas ~tag:Mod_run;
+  register_module_tag ~schemas:Tool_tempo.schemas ~tag:Mod_tempo;
   register_module_tag ~schemas:Tool_goals.schemas ~tag:Mod_goals;
   register_module_tag ~schemas:Tool_compact.schemas ~tag:Mod_compact;
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;

@@ -213,13 +213,17 @@ function handleKeeperLifecycle(event: { type: string; name?: string }): void {
   // All keeper lifecycle events trigger operator refresh
   scheduleRefresh('operator', () => _refreshOperatorFn?.(), SSE_KEEPER_OPERATOR_DEBOUNCE_MS)
 
-  // keeper_turn_complete: re-hydrate active keeper's conversation thread
+  // keeper_turn_complete: re-hydrate active keeper's conversation + trajectory
   if (event.type === 'keeper_turn_complete') {
     const keeperName = event.name ?? ''
     const viewing = activeKeeperName.value
     if (keeperName && keeperName === viewing) {
       scheduleRefresh(`keeper_thread_${keeperName}`, () => {
         void hydrateKeeperStatus(keeperName, true)
+      }, SSE_KEEPER_THREAD_DEBOUNCE_MS)
+      scheduleRefresh(`keeper_trajectory_${keeperName}`, async () => {
+        const { loadTrajectory } = await import('./components/keeper-trajectory-timeline')
+        void loadTrajectory(keeperName)
       }, SSE_KEEPER_THREAD_DEBOUNCE_MS)
     }
   }

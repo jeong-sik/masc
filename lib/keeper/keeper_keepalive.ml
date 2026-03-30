@@ -9,11 +9,11 @@ open Keeper_types
 open Keeper_memory
 open Keeper_execution
 
-let keepalive_interval_sec = 30
+let keepalive_interval_sec = Env_config.KeeperKeepalive.interval_sec
 
 (* ── Board-reactive policy constants ── *)
 
-let board_reactive_debounce_sec = 60.0
+let board_reactive_debounce_sec = Env_config.KeeperKeepalive.board_debounce_sec
 
 (* OAS Event_bus ref — set via bootstrap *)
 let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
@@ -30,14 +30,15 @@ let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
   grpc_env_ref := env
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
-    effect within ~2 s instead of waiting for the full 30-300 s interval. *)
+    effect within ~chunk_sec instead of waiting for the full interval. *)
 let interruptible_sleep ~clock ~stop ~wakeup duration =
+  let chunk_sec = Env_config.KeeperKeepalive.sleep_chunk_sec in
   let rec wait remaining =
     if Atomic.get stop then ()
     else if Atomic.compare_and_set wakeup true false then ()
     else if remaining <= 0.0 then ()
     else begin
-      let chunk = Float.min 2.0 remaining in
+      let chunk = Float.min chunk_sec remaining in
       Eio.Time.sleep clock chunk;
       wait (remaining -. chunk)
     end
@@ -105,7 +106,11 @@ let wakeup_relevant_keeper_for_board_signal
       |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
   | [] -> ()
 
-let max_consecutive_heartbeat_failures = 5
+let max_consecutive_heartbeat_failures =
+  Env_config.KeeperKeepalive.max_consecutive_failures
+
+let max_consecutive_turn_failures =
+  Env_config.KeeperKeepalive.max_consecutive_turn_failures
 
 (* Per-stage timing accumulator for Phase 0 profiling.
    In-memory ring of last 100 cycles. Flushed as aggregate at snapshot cadence.
@@ -119,7 +124,7 @@ type stage_timing = {
   improve_ms : float;
 }
 
-let stage_timing_ring_size = 100
+let stage_timing_ring_size = Env_config.KeeperProactive.stage_timing_ring_size
 
 let percentile arr p =
   let n = Array.length arr in
@@ -162,12 +167,17 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
   let timing_ring = Array.make stage_timing_ring_size
     { presence_ms = 0.0; snapshot_ms = 0.0; board_ms = 0.0;
       turn_ms = 0.0; recurring_ms = 0.0; improve_ms = 0.0 } in
-  let timing_count = ref 0 in
+  let timing_cursor = ref 0 in
+  let timing_filled = ref 0 in
   (* Phase 1: work-as-heartbeat freshness tracking.
      Updated ONLY on Room.heartbeat_in_room success after turn. *)
   let last_successful_heartbeat_ts = ref 0.0 in
   let work_as_hb = Env_config.WorkAsHeartbeat.enabled in
   let max_silence = Env_config.WorkAsHeartbeat.max_silence_sec in
+  (* Phase 2: smart heartbeat — adaptive scheduling via Heartbeat_smart *)
+  let smart_hb_enabled = Env_config.SmartHeartbeat.enabled in
+  let smart_hb_config = Heartbeat_smart.default_config in
+  let last_heartbeat_cycle_ts = ref 0.0 in
   let rec loop () =
     if Atomic.get stop then ()
     else (
@@ -178,6 +188,41 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               | Ok (Some latest) -> latest
               | _ -> m
             in
+            (* Phase 2: smart heartbeat — skip cycle when busy or deeply idle *)
+            let smart_hb_decision =
+              if smart_hb_enabled then
+                let agent_status =
+                  if meta_current.paused then Types.Inactive
+                  else match meta_current.current_task_id with
+                    | Some _ -> Types.Busy
+                    | None -> Types.Active
+                in
+                Heartbeat_smart.should_emit
+                  ~config:smart_hb_config
+                  ~agent_status
+                  ~last_activity:!last_successful_heartbeat_ts
+                  ~last_heartbeat:!last_heartbeat_cycle_ts
+              else
+                Heartbeat_smart.Emit
+            in
+            (match smart_hb_decision with
+             | Heartbeat_smart.Skip_busy ->
+               Log.Keeper.debug "smart heartbeat: skip (busy, task=%s)"
+                 (Option.value ~default:"?" meta_current.current_task_id);
+               let base = Heartbeat_smart.effective_interval
+                 ~config:smart_hb_config
+                 ~last_activity:!last_successful_heartbeat_ts in
+               let jitter = base *. 0.2 *. Random.float 1.0 in
+               interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
+               if Atomic.get stop then () else loop ()
+             | Heartbeat_smart.Skip_idle next_time ->
+               let wait = Float.max 1.0 (next_time -. Time_compat.now ()) in
+               Log.Keeper.debug "smart heartbeat: skip (idle, next in %.1fs)" wait;
+               let jitter = wait *. 0.1 *. Random.float 1.0 in
+               interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (wait +. jitter);
+               if Atomic.get stop then () else loop ()
+             | Heartbeat_smart.Emit ->
+               last_heartbeat_cycle_ts := Time_compat.now ());
             (* Phase 1: skip presence sync when recent room heartbeat proves freshness *)
             let presence_fresh =
               work_as_hb
@@ -233,7 +278,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                  in
                  let base_dir = session_base_dir ctx.config in
                  (* Ensure session directory tree for filesystem fallback (issue #3019) *)
-                 Fs_compat.mkdir_p (Filename.concat base_dir meta_current.trace_id);
+                 ignore (Keeper_fs.ensure_dir (Filename.concat base_dir meta_current.trace_id));
                  let _session, ctx_opt =
                    load_context_from_checkpoint
                      ~trace_id:meta_current.trace_id
@@ -346,7 +391,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                              | None -> `Null );
                            ("handoff", `Assoc [ ("performed", `Bool false) ]);
                            ("stage_timing",
-                             stage_timing_to_json ~ring:timing_ring ~count:!timing_count);
+                             stage_timing_to_json ~ring:timing_ring ~count:!timing_filled);
                          ]
                      in
                      Dated_jsonl.append metrics_store snapshot;
@@ -374,7 +419,13 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                             ~generation:meta_current.generation
                             ~context_ratio:(Keeper_exec_context.context_ratio c)
                             ~message_count:(List.length c.messages)
-                      | None -> ()))
+                      | None -> ());
+                     (* Flush tool usage stats to disk for persistence *)
+                     (try
+                        Keeper_registry.flush_tool_usage
+                          ~base_path:ctx.config.base_path
+                          meta_current.name
+                      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()))
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn ->
@@ -444,6 +495,16 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    meta_after_triage)
               else meta_after_triage
             in
+            (* Turn failure threshold: registry tracks count (via unified_turn),
+               keepalive raises to terminate the fiber for supervisor restart. *)
+            let turn_fail_count =
+              Keeper_registry.get_turn_failures
+                ~base_path:ctx.config.base_path m.name in
+            if turn_fail_count >= max_consecutive_turn_failures then
+              raise (Keeper_registry.Keeper_heartbeat_failure {
+                reason = Keeper_registry.Turn_consecutive_failures turn_fail_count;
+                keeper_name = m.name;
+              });
             (* Phase 1: work-as-heartbeat — renew point (b).
                After turn, call Room.heartbeat_in_room to prove room I/O health.
                On success: refresh freshness lease + reset consecutive_failures.
@@ -455,7 +516,12 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                      (Room.heartbeat_in_room ctx.config ~room_id
                         ~agent_name:meta_after_proactive.agent_name);
                    true
-                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> false
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                     Log.Keeper.debug "heartbeat_in_room failed for %s: %s"
+                       meta_after_proactive.name (Printexc.to_string exn);
+                     false
                ) meta_after_proactive.joined_room_ids in
                if hb_ok then (
                  last_successful_heartbeat_ts := Time_compat.now ();
@@ -492,8 +558,12 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             let t_recurring_end = Time_compat.now () in
             let t_improve_start = t_recurring_end in
             let base =
-              float_of_int
-                keepalive_interval_sec
+              if smart_hb_enabled then
+                Heartbeat_smart.effective_interval
+                  ~config:smart_hb_config
+                  ~last_activity:!last_successful_heartbeat_ts
+              else
+                float_of_int keepalive_interval_sec
             in
             (try
                Tool_improve_loop.maybe_tick_from_keepalive ~config:ctx.config
@@ -515,9 +585,10 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               recurring_ms = (t_recurring_end -. t_recurring_start) *. 1000.0;
               improve_ms = (t_improve_end -. t_improve_start) *. 1000.0;
             } in
-            timing_ring.(!timing_count mod stage_timing_ring_size) <- timing;
-            incr timing_count;
-            let jitter = base *. 0.2 *. Random.float 1.0 in  (* intentional: jitter *)
+            timing_ring.(!timing_cursor) <- timing;
+            timing_cursor := (!timing_cursor + 1) mod stage_timing_ring_size;
+            if !timing_filled < stage_timing_ring_size then incr timing_filled;
+            let jitter = base *. Env_config.KeeperKeepalive.jitter_factor *. Random.float 1.0 in
             interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
             if Atomic.get stop then ()
             else loop ())
@@ -572,8 +643,8 @@ let process_directive ~agent_name directive =
 
     Requires [grpc_client_ref] to be set (via [set_grpc_client])
     and Eio switch/env to be available in [Eio_context]. *)
-let max_reconnect_attempts = 5
-let reconnect_backoff_sec = 5.0
+let max_reconnect_attempts = Env_config.KeeperGrpc.max_reconnect_attempts
+let reconnect_backoff_sec = Env_config.KeeperGrpc.reconnect_backoff_sec
 
 let run_grpc_heartbeat_fiber ~sw ~stop
     ~(grpc_client : Masc_grpc_client.t)
@@ -669,6 +740,8 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
   else (
     (* Register in Keeper_registry first — single source of truth. *)
     let reg = Keeper_registry.register ~base_path:ctx.config.base_path m.name m in
+    (* Restore persisted tool usage stats from previous session *)
+    Keeper_registry.restore_tool_usage ~base_path:ctx.config.base_path m.name;
     let stop = reg.fiber_stop in
     let wakeup = reg.fiber_wakeup in
     (* Start optional gRPC heartbeat fiber *)

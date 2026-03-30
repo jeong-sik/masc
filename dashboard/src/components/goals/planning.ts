@@ -19,7 +19,7 @@ import {
   loopsList,
 } from './goal-helpers'
 import { GoalsSummary, FilterBar, HorizonGroup } from './goal-components'
-import { LoopRow } from './mdal-components'
+import { LoopRow, MdalStartFormButton, MdalStartFormDialog, showMdalStartForm } from './mdal-components'
 import { TaskBacklog } from './kanban-components'
 
 export function Planning() {
@@ -108,7 +108,13 @@ export function Planning() {
       <details class="overview-section-collapsible group overflow-hidden rounded-xl border border-card-border/50 bg-card/18" open=${hasLoops}>
         <summary class="flex items-center border-b border-transparent bg-card/28 px-4 py-3.5 cursor-pointer text-[14px] font-bold text-text-strong transition-colors hover:bg-card/44 group-open:border-card-border/40">
           MDAL 루프
-          <span class="inline-flex items-center rounded-lg px-2.5 py-1 text-[10px] uppercase tracking-wider ml-auto bg-accent/10 text-accent border border-accent/20 shadow-sm font-semibold">${loops.length}</span>
+          <span class="inline-flex items-center gap-2 ml-auto">
+            <button type="button"
+              class="px-2.5 py-1 rounded-lg text-[10px] text-accent border border-accent/40 hover:bg-accent/10 transition-colors"
+              onClick=${(e: Event) => { e.preventDefault(); showMdalStartForm.value = true }}
+            >새 루프</button>
+            <span class="inline-flex items-center rounded-lg px-2.5 py-1 text-[10px] uppercase tracking-wider bg-accent/10 text-accent border border-accent/20 shadow-sm font-semibold">${loops.length}</span>
+          </span>
         </summary>
         <div class="p-4">
           ${mdalLoading.value && loops.length === 0
@@ -116,12 +122,18 @@ export function Planning() {
             : loops.length === 0 && (mdalState === 'error' || lastMdalError.value)
               ? html`<div class="rounded-xl border border-bad/30 bg-bad/10 p-3.5 text-center text-[13px] font-medium text-bad shadow-sm">MDAL 스냅샷을 불러오지 못했습니다${lastMdalError.value ? `: ${lastMdalError.value}` : ''}. 백엔드 상태를 확인하세요.</div>`
               : loops.length === 0
-                ? html`<${EmptyState} message="가동 중인 루프가 없습니다. masc_mdal_start로 시작할 수 있습니다." />`
+                ? html`
+                    <${EmptyState}
+                      message="가동 중인 루프가 없습니다."
+                      action=${html`<${MdalStartFormButton} />`}
+                    />
+                  `
                 : html`
                   <div class="grid gap-3">
                     ${loops.map(loop => html`<${LoopRow} key=${loop.loop_id} loop=${loop} />`)}
                   </div>
                 `}
+          <${MdalStartFormDialog} />
         </div>
       </details>
     </div>

@@ -95,8 +95,13 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 else (
                   Keeper_supervisor.supervise_keepalive
                     ~proactive_warmup_sec ctx m;
-                  if max_keepers > 0 then remaining_slots := !remaining_slots - 1;
-                  true
+                  let started_now =
+                    Keeper_registry.is_running
+                      ~base_path:ctx.config.base_path m.name
+                  in
+                  if started_now && max_keepers > 0 then
+                    remaining_slots := !remaining_slots - 1;
+                  started_now
                 )
               in
               ( true,

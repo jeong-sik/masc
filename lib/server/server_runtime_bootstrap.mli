@@ -45,6 +45,7 @@ val bootstrap_chain_state : Mcp_server.server_state -> unit
 (** {1 Startup Tasks} *)
 
 val warm_tool_registry_from_telemetry : Mcp_server.server_state -> unit
+val migrate_legacy_dirs : Mcp_server.server_state -> unit
 val startup_prune_jsonl : Mcp_server.server_state -> unit
 val startup_prune_keeper_checkpoints : Mcp_server.server_state -> unit
 

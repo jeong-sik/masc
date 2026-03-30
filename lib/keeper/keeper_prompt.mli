@@ -20,6 +20,10 @@ val build_keeper_system_prompt :
   unit ->
   string
 
+val append_direct_reply_mode_prompt :
+  base_prompt:string ->
+  string
+
 val append_trait_clause : base:string -> clause:string -> string
 
 val apply_self_model_drift :

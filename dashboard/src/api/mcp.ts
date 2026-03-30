@@ -202,6 +202,68 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
   }
 }
 
+// --- MCP tools/list — fetch tool schemas with inputSchema ---
+
+interface McpToolsListResult {
+  tools: Array<{
+    name: string
+    description: string
+    inputSchema: Record<string, unknown>
+    annotations?: Record<string, unknown>
+  }>
+  nextCursor?: string
+}
+
+interface McpListResponse {
+  result?: McpToolsListResult
+  error?: { message?: string }
+}
+
+function extractFirstSseDataPayload(raw: string): string {
+  const line = raw.split('\n').find(l => l.startsWith('data: '))
+  return line ? line.slice(6).trim() : raw.trim()
+}
+
+function parseMcpListResponse(raw: string): McpListResponse {
+  const payload = extractFirstSseDataPayload(raw)
+  return parseMcpJsonText(payload) as McpListResponse
+}
+
+export async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
+  await ensureSession()
+  const text = await mcpPost({
+    jsonrpc: '2.0',
+    method: 'tools/list',
+    params: cursor ? { cursor } : {},
+    id: Date.now(),
+  })
+  const parsed = parseMcpListResponse(text)
+  if (parsed.error) {
+    const message = parsed.error.message || 'tools/list: server returned an error without a message'
+    throw new Error(message)
+  }
+  if (!parsed.result) {
+    throw new Error('tools/list: missing result in response')
+  }
+  return parsed.result
+}
+
+const MAX_TOOL_LIST_PAGES = 50
+
+export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
+  const all: McpToolsListResult['tools'] = []
+  let cursor: string | undefined
+  let pages = 0
+  do {
+    const page = await listMcpTools(cursor)
+    all.push(...page.tools)
+    cursor = page.nextCursor
+    pages++
+    if (pages >= MAX_TOOL_LIST_PAGES) break
+  } while (cursor)
+  return all
+}
+
 function parseMcpJsonText(text: string): Record<string, unknown> {
   const trimmed = text.trim()
   if (!trimmed) return {}

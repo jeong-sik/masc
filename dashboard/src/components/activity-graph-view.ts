@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { layoutGraph } from './activity-graph-layout'
+import { statusLabel } from '../lib/status-label'
 import type { ActivityGraphResponse, ActivityGraphNode, ActivityGraphEdge } from '../types'
 
 const hoveredNodeId = signal<string | null>(null)
@@ -62,23 +63,6 @@ function kindLabel(kind: string): string {
     case 'post': return '게시글'
     case 'room': return '룸'
     default: return kind
-  }
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case 'active': return '활성'
-    case 'offline': return '오프라인'
-    case 'retired': return '은퇴'
-    case 'spawned': return '생성됨'
-    case 'compacting': return '컴팩팅'
-    case 'handoff': return '핸드오프'
-    case 'todo': return '대기'
-    case 'claimed': return '점유됨'
-    case 'in_progress': return '진행 중'
-    case 'done': return '완료'
-    case 'cancelled': return '취소됨'
-    default: return status
   }
 }
 

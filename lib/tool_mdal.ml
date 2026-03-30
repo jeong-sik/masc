@@ -99,6 +99,8 @@ let handle_start (ctx : context) args =
                 ~author:ctx.agent_name
                 ~content:(Printf.sprintf "[MDAL_STATE] %s starting. Profile: %s, Baseline: %.4f, Target: %s"
                             loop_id profile.name baseline profile.target)
+                ~post_kind:Board.System_post
+                ~meta_json:(`Assoc [ ("source", `String "mdal_state_start") ])
                 ~visibility:Board.Internal
                 ~ttl_hours:24
                 ~hearth:(Mdal.state_hearth loop_id)
@@ -300,6 +302,8 @@ let handle_iterate (ctx : context) args =
                       ignore (Board_dispatch.create_post
                                 ~author:"mdal"
                                 ~content:(Mdal.format_iter_post record)
+                                ~post_kind:Board.System_post
+                                ~meta_json:(`Assoc [ ("source", `String "mdal_iteration") ])
                                 ~visibility:Board.Internal
                                 ~ttl_hours:24
                                 ~hearth:(Mdal.iter_hearth state.loop_id)

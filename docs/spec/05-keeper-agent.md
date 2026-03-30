@@ -508,7 +508,7 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 선택 모드:
 - `SkillSelectHeuristic`: soul_profile + 메시지 내용 기반 규칙 매칭
-- `SkillSelectAgent`: MODEL에 skill 선택 위임 (기본값, env `MASC_KEEPER_SKILL_SELECTION`으로 전환)
+- `SkillSelectAgent`: MODEL에 skill 선택을 위임하는 단일 모드
 
 ---
 

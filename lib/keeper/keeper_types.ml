@@ -625,10 +625,9 @@ let fresher_meta config (meta : keeper_meta) : keeper_meta =
 let write_meta config (m : keeper_meta) : (unit, string) result =
   let persisted = fresher_meta config m in
   let path = keeper_meta_path config persisted.name in
-  let content = Yojson.Safe.pretty_to_string (meta_to_json persisted) in
+  let json = meta_to_json persisted in
   try
-    Fs_compat.mkdir_p (Filename.dirname path);
-    Fs_compat.save_file path content;
+    Keeper_fs.save_json_atomic path json;
     (!runtime_meta_write_sync_hook) config persisted;
     Ok ()
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

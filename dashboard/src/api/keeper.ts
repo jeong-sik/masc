@@ -15,7 +15,9 @@ export interface KeeperToolReply {
   details: KeeperConversationDetails | null
 }
 
-const KEEPER_DIRECT_REPLY_TIMEOUT_SEC = 120
+// Server no longer enforces an external timeout for keeper_msg.
+// Keeper internal limits (max_turns, max_cost_usd, max_tokens) control duration.
+// Client-side abort via AbortSignal is the recommended cancellation path.
 
 export interface KeeperChatStreamEvent {
   type: string
@@ -38,7 +40,6 @@ async function callKeeperMessageViaOperator(
   const payload: Record<string, unknown> = {
     message,
     direct_reply: true,
-    timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
   }
   const response = await runOperatorAction({
     actor: currentDashboardActor(),
@@ -144,8 +145,7 @@ export async function streamKeeperMessage(
       name,
       message,
       direct_reply: true,
-      timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
-    }),
+      }),
     signal,
   })
 
@@ -229,4 +229,45 @@ export async function fetchKeeperChatHistory(
   } catch {
     return []
   }
+}
+
+// --- Keeper lifecycle (boot / shutdown) ---
+
+export interface KeeperLifecycleResponse {
+  ok: boolean
+  action?: 'boot' | 'shutdown'
+  name?: string
+  detail?: unknown
+  error?: string
+}
+
+async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promise<T> {
+  try {
+    return await resp.json() as T
+  } catch {
+    return { ok: false, error: `${fallbackError} (HTTP ${resp.status})` } as T
+  }
+}
+
+async function safeKeeperLifecycle(url: string, fallbackError: string): Promise<KeeperLifecycleResponse> {
+  try {
+    const resp = await fetch(url, { method: 'POST', headers: jsonHeaders() })
+    return await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : fallbackError }
+  }
+}
+
+export function bootKeeper(name: string): Promise<KeeperLifecycleResponse> {
+  return safeKeeperLifecycle(
+    `/api/v1/keepers/${encodeURIComponent(name)}/boot`,
+    `Failed to boot ${name}`,
+  )
+}
+
+export function shutdownKeeper(name: string): Promise<KeeperLifecycleResponse> {
+  return safeKeeperLifecycle(
+    `/api/v1/keepers/${encodeURIComponent(name)}/shutdown`,
+    `Failed to shut down ${name}`,
+  )
 }

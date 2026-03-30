@@ -65,6 +65,112 @@ let test_crash_log_empty_for_unknown () =
   check int "empty crash log" 0
     (List.length (Reg.crash_log_of ~base_path:"/tmp" "nonexistent"))
 
+let test_should_cleanup_dead_true () =
+  Reg.clear ();
+  let _entry = Reg.register ~base_path:"/tmp" "dead1"
+      (let json = `Assoc [
+        ("name", `String "dead1");
+        ("agent_name", `String "agent-dead1");
+        ("trace_id", `String "trace-dead1");
+        ("goal", `String "goal");
+      ] in
+      match KT.meta_of_json json with
+      | Ok meta -> meta
+      | Error err -> fail err)
+  in
+  Reg.mark_dead ~base_path:"/tmp" "dead1" ~at:10.0;
+  let entry = Option.get (Reg.get ~base_path:"/tmp" "dead1") in
+  check bool "ttl exceeded" true
+    (Sup.should_cleanup_dead ~now:4000.0 ~dead_ttl_sec:3600.0 entry)
+
+let test_should_cleanup_dead_false_when_recent () =
+  Reg.clear ();
+  let _entry = Reg.register ~base_path:"/tmp" "dead2"
+      (let json = `Assoc [
+        ("name", `String "dead2");
+        ("agent_name", `String "agent-dead2");
+        ("trace_id", `String "trace-dead2");
+        ("goal", `String "goal");
+      ] in
+      match KT.meta_of_json json with
+      | Ok meta -> meta
+      | Error err -> fail err)
+  in
+  Reg.mark_dead ~base_path:"/tmp" "dead2" ~at:100.0;
+  let entry = Option.get (Reg.get ~base_path:"/tmp" "dead2") in
+  check bool "ttl not exceeded" false
+    (Sup.should_cleanup_dead ~now:200.0 ~dead_ttl_sec:3600.0 entry)
+
+(* ── Property: backoff invariants ───────────────────────── *)
+
+let test_backoff_monotonic_until_cap () =
+  (* backoff(n) <= backoff(n+1) for all n until cap *)
+  let cap = Sup.backoff_delay 20 in  (* at attempt 20, always at cap *)
+  let rec check_mono i prev =
+    if i > 20 then ()
+    else begin
+      let curr = Sup.backoff_delay i in
+      check bool (Printf.sprintf "attempt %d >= prev" i)
+        true (curr >= prev);
+      check bool (Printf.sprintf "attempt %d <= cap" i)
+        true (curr <= cap);
+      check_mono (i + 1) curr
+    end
+  in
+  check_mono 0 0.0
+
+let test_backoff_never_negative () =
+  for i = 0 to 30 do
+    let d = Sup.backoff_delay i in
+    check bool (Printf.sprintf "attempt %d >= 0" i) true (d >= 0.0)
+  done
+
+(* ── Property: keep_last_n invariants ──────────────────── *)
+
+let test_keep_last_n_never_exceeds () =
+  let n = 5 in
+  let result = ref [] in
+  for _i = 0 to 20 do
+    result := Sup.keep_last_n n "x" !result
+  done;
+  check bool "length <= n" true (List.length !result <= n)
+
+(* ── Property: self-preservation subset ────────────────── *)
+
+let bp = "/tmp/test-sp-prop"
+let make_meta name =
+  let json = `Assoc [
+    ("name", `String name);
+    ("agent_name", `String ("agent-" ^ name));
+    ("trace_id", `String ("trace-" ^ name));
+    ("goal", `String "test");
+  ] in
+  match KT.meta_of_json json with
+  | Ok meta -> meta
+  | Error err -> fail ("make_meta: " ^ err)
+
+let test_self_preservation_subset () =
+  Reg.clear ();
+  let names = ["a"; "b"; "c"; "d"; "e"] in
+  let entries = List.map (fun name ->
+    let _reg = Reg.register ~base_path:bp name (make_meta name) in
+    Reg.set_state ~base_path:bp name Reg.Crashed;
+    Reg.set_failure_reason ~base_path:bp name
+      (Some (Reg.Heartbeat_consecutive_failures 3));
+    match Reg.get ~base_path:bp name with
+    | Some e -> (e, "crash") | None -> fail name
+  ) names in
+  let result = Sup.apply_self_preservation ~total_keepers:10 entries in
+  let result_names = List.map (fun ((e : Reg.registry_entry), _) -> e.name) result in
+  let input_names = List.map (fun ((e : Reg.registry_entry), _) -> e.name) entries in
+  List.iter (fun rn ->
+    check bool (Printf.sprintf "%s in input" rn) true (List.mem rn input_names)
+  ) result_names
+
+let test_self_preservation_empty_input () =
+  let result = Sup.apply_self_preservation ~total_keepers:5 [] in
+  check int "empty in = empty out" 0 (List.length result)
+
 (* ── Test runner ────────────────────────────────────────── *)
 
 let () =
@@ -83,5 +189,18 @@ let () =
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;
       test_case "registry count zero" `Quick test_registry_count_initially_zero;
       test_case "crash_log empty" `Quick test_crash_log_empty_for_unknown;
+      test_case "should cleanup dead when ttl exceeded" `Quick test_should_cleanup_dead_true;
+      test_case "should not cleanup dead when recent" `Quick test_should_cleanup_dead_false_when_recent;
+    ];
+    "backoff_properties", [
+      test_case "monotonic until cap" `Quick test_backoff_monotonic_until_cap;
+      test_case "never negative" `Quick test_backoff_never_negative;
+    ];
+    "keep_last_n_properties", [
+      test_case "never exceeds limit" `Quick test_keep_last_n_never_exceeds;
+    ];
+    "self_preservation_properties", [
+      test_case "output subset of input" `Quick test_self_preservation_subset;
+      test_case "empty input → empty output" `Quick test_self_preservation_empty_input;
     ];
   ]

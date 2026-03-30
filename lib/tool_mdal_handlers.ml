@@ -248,6 +248,8 @@ let post_final_summary (state : Mdal.loop_state) =
       (Board_dispatch.create_post
          ~author:"mdal"
          ~content:(Mdal.format_final_post state)
+         ~post_kind:Board.System_post
+         ~meta_json:(`Assoc [ ("source", `String "mdal_final") ])
          ~visibility:Board.Internal
          ~ttl_hours:24
          ~hearth:(Mdal.state_hearth state.loop_id)

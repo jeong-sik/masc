@@ -101,7 +101,10 @@ let outcome_to_string = function
   | CostExceeded -> "cost_exceeded"
   | Gated reason -> Printf.sprintf "gated: %s" reason
 
-let entry_to_json (e : tool_call_entry) : Yojson.Safe.t =
+(** Default truncation limit for result text in JSONL persistence. *)
+let default_result_truncation = 500
+
+let entry_to_json ?(result_max_len = default_result_truncation) (e : tool_call_entry) : Yojson.Safe.t =
   `Assoc [
     ("ts", `Float e.ts);
     ("ts_iso", `String e.ts_iso);
@@ -114,8 +117,9 @@ let entry_to_json (e : tool_call_entry) : Yojson.Safe.t =
       (match e.result with
        | None -> `Null
        | Some r ->
-           let trunc = if String.length r > 500 then String.sub r 0 500 ^ "..." else r in
-           `String trunc));
+           if result_max_len > 0 && String.length r > result_max_len then
+             `String (String.sub r 0 result_max_len ^ "...")
+           else `String r));
     ("duration_ms", `Int e.duration_ms);
     ("error", (match e.error with None -> `Null | Some e -> `String e));
     ("cost_usd", `Float e.cost_usd);

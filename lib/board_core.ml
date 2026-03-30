@@ -21,6 +21,16 @@ let create_store () = {
   last_flush = Time_compat.now ();
 }
 
+(** Remove [value] from the string list stored at [key] in [tbl].
+    Removes the key entirely when the list becomes empty. *)
+let remove_from_list_index tbl key value =
+  match Hashtbl.find_opt tbl key with
+  | None -> ()
+  | Some ids ->
+    match List.filter (fun id -> not (String.equal id value)) ids with
+    | [] -> Hashtbl.remove tbl key
+    | filtered -> Hashtbl.replace tbl key filtered
+
 (** Invalidate caches that depend on post data *)
 let invalidate_post_caches store =
   store.karma_cache <- None;
@@ -67,13 +77,8 @@ let sweep store =
     List.iter (fun cid ->
       (match Hashtbl.find_opt store.comments cid with
        | Some c ->
-           let post_key = Post_id.to_string c.post_id in
-           (match Hashtbl.find_opt store.comments_by_post post_key with
-            | Some ids ->
-                (match List.filter (fun id -> not (String.equal id cid)) ids with
-                 | [] -> Hashtbl.remove store.comments_by_post post_key
-                 | filtered -> Hashtbl.replace store.comments_by_post post_key filtered)
-            | None -> ())
+           remove_from_list_index store.comments_by_post
+             (Post_id.to_string c.post_id) cid
        | None -> ());
       Hashtbl.remove store.comments cid
     ) expired_comments;
@@ -161,6 +166,13 @@ let visibility_to_string = function
   | Internal -> "internal"
   | Direct -> "direct"
 
+let visibility_of_string = function
+  | "public" -> Some Public
+  | "unlisted" -> Some Unlisted
+  | "internal" -> Some Internal
+  | "direct" -> Some Direct
+  | _ -> None
+
 let post_kind_to_string = function
   | Human_post -> "human"
   | Automation_post -> "automation"
@@ -172,17 +184,7 @@ let post_kind_of_string = function
   | "system" -> Some System_post
   | _ -> None
 
-let contains_substring haystack needle =
-  let hay_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      if idx + needle_len > hay_len then false
-      else if String.sub haystack idx needle_len = needle then true
-      else loop (idx + 1)
-    in
-    loop 0
+let contains_substring = String_util.contains_substring
 
 (** Take at most [n] elements from a list. *)
 let take n lst =
@@ -193,7 +195,7 @@ let take n lst =
   in
   go n [] lst
 
-let author_looks_automation author =
+let legacy_author_looks_automation author =
   String.starts_with ~prefix:"auto-" author
   || String.starts_with ~prefix:"qa-" author
   || contains_substring author "researcher"
@@ -201,7 +203,7 @@ let author_looks_automation author =
   || contains_substring author "smoke"
   || contains_substring author "probe"
 
-let is_system_board_author author =
+let legacy_system_board_author author =
   List.mem author
     [ "ecosystem"; "keeper"; "keeper-alert-bot"; "keeper-system"; "operator";
       "team-session" ]
@@ -215,14 +217,14 @@ let meta_source = function
       | _ -> None)
   | _ -> None
 
-let infer_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth =
+let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth =
   let author = String.lowercase_ascii author in
   let hearth =
     match hearth with
     | Some value -> String.lowercase_ascii (String.trim value)
     | None -> ""
   in
-  if is_system_board_author author then
+  if legacy_system_board_author author then
     System_post
   else if meta_source meta_json = Some "keeper_board_post" then
     Automation_post
@@ -231,27 +233,15 @@ let infer_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth =
               || contains_substring hearth "harness")
   then
     Automation_post
-  else if author_looks_automation author then
+  else if legacy_author_looks_automation author then
     Automation_post
   else
     Human_post
 
-let classify_post_kind (p : post) =
-  let inferred =
-    infer_post_kind
-      ~author:(Agent_id.to_string p.author)
-      ~meta_json:p.meta_json
-      ~visibility:p.visibility
-      ~expires_at:p.expires_at
-      ~hearth:p.hearth
-  in
-  match p.post_kind, inferred with
-  | Human_post, (Automation_post | System_post as upgraded) -> upgraded
-  | Automation_post, System_post -> System_post
-  | stored, _ -> stored
+let classify_post_kind (p : post) = p.post_kind
 
 let post_matches_filters ~exclude_system ~exclude_automation (p : post) =
-  let kind = classify_post_kind p in
+  let kind = p.post_kind in
   (not exclude_system || kind <> System_post)
   && (not exclude_automation || kind <> Automation_post)
 
@@ -349,8 +339,7 @@ let derive_post_title (body : string) =
   if String.length first_line <= 80 then first_line
   else String.sub first_line 0 77 ^ "..."
 
-let normalize_post_payload ~author ~content ?title ?body ?post_kind ?meta_json
-    ~visibility ~expires_at ~hearth () =
+let normalize_post_payload ~content ?title ?body ~post_kind ?meta_json () =
   let raw_body = Option.value body ~default:content in
   let extracted_state, stripped_body = extract_state_block raw_body in
   let normalized_body = String.trim stripped_body in
@@ -359,13 +348,8 @@ let normalize_post_payload ~author ~content ?title ?body ?post_kind ?meta_json
     | Some value when String.trim value <> "" -> String.trim value
     | _ -> derive_post_title normalized_body
   in
-  let normalized_kind =
-    match post_kind with
-    | Some kind -> kind
-    | None -> infer_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth
-  in
   let merged_meta = merge_meta_json ?state_block:extracted_state meta_json in
-  normalized_title, normalized_body, normalized_kind, merged_meta
+  normalized_title, normalized_body, post_kind, merged_meta
 
 let post_to_yojson (p : post) : Yojson.Safe.t =
   `Assoc ([
@@ -373,7 +357,7 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
     ("author", `String (Agent_id.to_string p.author));
     ("title", `String p.title);
     ("body", `String p.body);
-    ("post_kind", `String (post_kind_to_string (classify_post_kind p)));
+    ("post_kind", `String (post_kind_to_string p.post_kind));
     ("content", `String p.content);
     ("visibility", `String (visibility_to_string p.visibility));
     ("created_at", `Float p.created_at);
@@ -449,7 +433,7 @@ let append_comment (c : comment) =
 
 (** {1 Post Operations} *)
 
-let create_post store ~author ~content ?title ?body ?post_kind ?meta_json
+let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
     ?(visibility=Internal) ?(ttl_hours=Limits.default_ttl_hours) ?hearth ?thread_id ()
   : (post, board_error) result =
   maybe_sweep store;
@@ -468,8 +452,7 @@ let create_post store ~author ~content ?title ?body ?post_kind ?meta_json
     if ttl = 0 then 0.0 else now +. (float_of_int ttl *. 3600.0)
   in
   let normalized_title, normalized_body, normalized_kind, normalized_meta =
-    normalize_post_payload ~author ~content ?title ?body ?post_kind ?meta_json
-      ~visibility ~expires_at ~hearth ()
+    normalize_post_payload ~content ?title ?body ~post_kind ?meta_json ()
   in
 
   (* Validate body length *)
@@ -533,7 +516,54 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
   maybe_sweep store;
   with_lock store (fun () ->
     let scan_limit = max 0 (min limit 5200) in
-    let total = !(store.post_count) in
+    let json_string name json =
+      match Yojson.Safe.Util.member name json with
+      | `String value when String.trim value <> "" -> Some value
+      | _ -> None
+    in
+    let json_float name json =
+      match Yojson.Safe.Util.member name json with
+      | `Float value -> Some value
+      | `Int value -> Some (float_of_int value)
+      | _ -> None
+    in
+    let persisted_candidates =
+      let now = Time_compat.now () in
+      let path = persist_path () in
+      if Fs_compat.file_exists path then
+        Fs_compat.load_jsonl path
+        |> List.filter_map (fun json ->
+               match json_string "id" json, json_string "author" json with
+               | Some id, Some author -> (
+                   match Option.bind (json_string "visibility" json) visibility_of_string with
+                   | Some visibility ->
+                       let expires_at =
+                         json_float "expires_at" json |> Option.value ~default:0.0
+                       in
+                       if expires_at > 0.0 && expires_at <= now then None
+                       else
+                         let stored_kind =
+                           Option.bind (json_string "post_kind" json) post_kind_of_string
+                         in
+                         let hearth = json_string "hearth" json in
+                         let meta_json =
+                           match Yojson.Safe.Util.member "meta" json with
+                           | `Assoc _ as meta -> Some meta
+                           | _ -> None
+                         in
+                         let created_at =
+                           json_float "created_at" json |> Option.value ~default:0.0
+                         in
+                         let canonical_kind =
+                           legacy_migrate_post_kind ~author ~meta_json ~visibility
+                             ~expires_at ~hearth
+                         in
+                         Some (id, created_at, stored_kind, canonical_kind)
+                   | None -> None)
+               | _ -> None)
+      else []
+    in
+    let total = List.length persisted_candidates in
     let scanned = ref 0 in
     let changed = ref 0 in
     let unchanged = ref 0 in
@@ -542,23 +572,23 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
       if List.length !changed_post_ids < 20 then
         changed_post_ids := id :: !changed_post_ids
     in
-    let sorted_posts =
-      Hashtbl.fold (fun _ (post : post) acc -> post :: acc) store.posts []
-      |> List.sort (fun (a : post) (b : post) -> compare b.created_at a.created_at)
-    in
-    sorted_posts
+    persisted_candidates
+    |> List.sort (fun (_, created_a, _, _) (_, created_b, _, _) ->
+           compare created_b created_a)
     |> List.filteri (fun idx _ -> idx < scan_limit)
-    |> List.iter (fun (post : post) ->
+    |> List.iter (fun (post_id, _, stored_kind, canonical_kind) ->
            incr scanned;
-           let canonical_kind = classify_post_kind post in
-           if canonical_kind = post.post_kind then
+           if stored_kind = Some canonical_kind then
              incr unchanged
            else begin
              incr changed;
-             record_changed_id (Post_id.to_string post.id);
+             record_changed_id post_id;
              if not dry_run then
-               Hashtbl.replace store.posts (Post_id.to_string post.id)
-                 { post with post_kind = canonical_kind }
+               match Hashtbl.find_opt store.posts post_id with
+               | Some post ->
+                   Hashtbl.replace store.posts post_id
+                     { post with post_kind = canonical_kind }
+               | None -> ()
            end);
     if not dry_run && !changed > 0 then begin
       invalidate_post_caches store;

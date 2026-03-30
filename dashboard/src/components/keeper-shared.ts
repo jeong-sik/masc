@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useState } from 'preact/hooks'
 import type { Keeper, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -18,15 +18,20 @@ import {
   sendKeeperThreadMessage,
 } from '../keeper-runtime'
 import { isVisibleDirectConversationEntry } from '../keeper-state'
+import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import { showToast } from './common/toast'
+import { signal } from '@preact/signals'
+
+const keeperBooting = signal<Record<string, boolean>>({})
+const keeperShuttingDown = signal<Record<string, boolean>>({})
 
 const KEEPER_CHAT_METADATA_VISIBLE_KEY = 'masc_keeper_chat_metadata_visible'
+const KEEPER_CHAT_INTERNAL_VISIBLE_KEY = 'masc_keeper_chat_internal_visible'
 
 function readKeeperChatMetadataVisible(): boolean {
   try {
     const stored = localStorage.getItem(KEEPER_CHAT_METADATA_VISIBLE_KEY)
-    // Default to hidden so the direct lane reads like chat first.
     return stored === null ? false : stored === 'true'
   } catch {
     return false
@@ -36,9 +41,22 @@ function readKeeperChatMetadataVisible(): boolean {
 function writeKeeperChatMetadataVisible(value: boolean): void {
   try {
     localStorage.setItem(KEEPER_CHAT_METADATA_VISIBLE_KEY, value ? 'true' : 'false')
+  } catch {}
+}
+
+function readKeeperChatInternalVisible(): boolean {
+  try {
+    const stored = localStorage.getItem(KEEPER_CHAT_INTERNAL_VISIBLE_KEY)
+    return stored === null ? false : stored === 'true'
   } catch {
-    // Ignore persistence failures.
+    return false
   }
+}
+
+function writeKeeperChatInternalVisible(value: boolean): void {
+  try {
+    localStorage.setItem(KEEPER_CHAT_INTERNAL_VISIBLE_KEY, value ? 'true' : 'false')
+  } catch {}
 }
 
 function quietReasonLabel(reason?: string | null): string {
@@ -221,17 +239,27 @@ export function KeeperConversationPanel({
 }) {
   const [draft, setDraft] = useState('')
   const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
+  const [showInternal, setShowInternal] = useState(readKeeperChatInternalVisible())
 
-  useEffect(() => {
-    writeKeeperChatMetadataVisible(showMetadata)
-  }, [showMetadata])
+  const toggleMetadata = () => {
+    setShowMetadata(prev => {
+      const next = !prev
+      writeKeeperChatMetadataVisible(next)
+      return next
+    })
+  }
+  const toggleInternal = () => {
+    setShowInternal(prev => {
+      const next = !prev
+      writeKeeperChatInternalVisible(next)
+      return next
+    })
+  }
 
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const rawThread = keeperThreads.value[keeperName] ?? []
-  const thread = rawThread.filter(isVisibleDirectConversationEntry)
-  const hiddenHistoryCount = rawThread.filter(
-    entry => entry.delivery === 'history' && !isVisibleDirectConversationEntry(entry),
-  ).length
+  const thread = showInternal ? rawThread : rawThread.filter(isVisibleDirectConversationEntry)
+  const hiddenCount = rawThread.length - thread.length
   const sending = keeperSending.value[keeperName] ?? false
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
@@ -274,9 +302,16 @@ export function KeeperConversationPanel({
             <button
               type="button"
               class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)]"
-              onClick=${() => { setShowMetadata(!showMetadata) }}
+              onClick=${toggleMetadata}
             >
               ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
+            </button>
+            <button
+              type="button"
+              class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-1.5 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--text-body)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[#a78bfa]' : ''}"
+              onClick=${toggleInternal}
+            >
+              ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
             </button>
             ${!historyExpanded
               ? html`
@@ -306,10 +341,10 @@ export function KeeperConversationPanel({
           />
         </div>
 
-        ${hiddenHistoryCount > 0
+        ${!showInternal && hiddenCount > 0
           ? html`
               <div class="mx-4 mb-4 rounded-[16px] border border-[rgba(245,158,11,0.16)] bg-[rgba(245,158,11,0.06)] px-3 py-2 text-[11px] leading-[1.55] text-[#f4d79e]">
-                이 대화에서 ${hiddenHistoryCount}개의 내부 이력이 가독성을 위해 숨겨져 있습니다.
+                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `
           : null}
@@ -348,17 +383,56 @@ export function KeeperRuntimeActions({
   const diagnostic = effectiveDiagnostic(keeper)
   const probing = keeperProbing.value[keeper.name] ?? false
   const recovering = keeperRecovering.value[keeper.name] ?? false
+  const booting = keeperBooting.value[keeper.name] ?? false
+  const shuttingDown = keeperShuttingDown.value[keeper.name] ?? false
   const recommended = diagnostic?.next_action_path ?? null
   const canRecover = diagnostic?.recoverable === true
+  const isOffline = keeper.status === 'offline' || keeper.status === 'inactive'
+  const isRunning = keeper.status === 'active' || keeper.status === 'running' || keeper.status === 'idle' || keeper.status === 'watching' || keeper.status === 'listening'
 
   const btnBase = 'py-1.5 px-4 rounded-lg text-xs font-medium cursor-pointer transition-colors border'
   const ghostBtn = `${btnBase} border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]`
   const activeGhostBtn = `${btnBase} border-[rgba(71,184,255,0.4)] bg-[var(--accent-12)] text-[#9ad9ff] hover:bg-[rgba(71,184,255,0.2)]`
   const secondaryBtn = `${btnBase} border-[rgba(251,191,36,0.3)] bg-[rgba(251,191,36,0.08)] text-[#fbbf24] hover:bg-[rgba(251,191,36,0.15)]`
   const activeSecondaryBtn = `${btnBase} border-[rgba(251,191,36,0.5)] bg-[rgba(251,191,36,0.15)] text-[#fbbf24] hover:bg-[rgba(251,191,36,0.2)]`
+  const bootBtn = `${btnBase} border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[#4ade80] hover:bg-[rgba(34,197,94,0.15)]`
+  const shutdownBtn = `${btnBase} border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)]`
 
   return html`
     <div class="flex flex-wrap gap-2">
+      ${isOffline ? html`
+        <button type="button"
+          class=${bootBtn}
+          onClick=${() => {
+            keeperBooting.value = { ...keeperBooting.value, [keeper.name]: true }
+            void bootKeeper(keeper.name).then(res => {
+              if (res.ok) showToast(`${keeper.name} booted`, 'success')
+              else showToast(res.error ?? 'Boot failed', 'error')
+            }).catch(err => {
+              showToast(err instanceof Error ? err.message : `Failed to boot ${keeper.name}`, 'error')
+            }).finally(() => {
+              keeperBooting.value = { ...keeperBooting.value, [keeper.name]: false }
+            })
+          }}
+          disabled=${booting}
+        >
+          ${booting ? 'Booting...' : 'Boot'}
+        </button>
+      ` : null}
+      ${isRunning ? html`
+        <button type="button"
+          class=${shutdownBtn}
+          onClick=${() => {
+            keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: true }
+            void shutdownKeeper(keeper.name).finally(() => {
+              keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: false }
+            })
+          }}
+          disabled=${shuttingDown}
+        >
+          ${shuttingDown ? 'Shutting down...' : 'Shutdown'}
+        </button>
+      ` : null}
       <button type="button"
         class=${recommended === 'probe' ? activeGhostBtn : ghostBtn}
         onClick=${() => {
@@ -388,6 +462,16 @@ export function KeeperRuntimeActions({
         onClick=${onSocialSweep}
       >
         Social sweep
+      </button>
+      <button type="button"
+        class="${btnBase} border-[rgba(251,113,133,0.3)] bg-[rgba(251,113,133,0.06)] text-[#fda4af] hover:bg-[rgba(251,113,133,0.12)]"
+        onClick=${() => {
+          if (confirm('키퍼를 종료합니까?')) {
+            void shutdownKeeper(keeper.name)
+          }
+        }}
+      >
+        종료
       </button>
     </div>
   `

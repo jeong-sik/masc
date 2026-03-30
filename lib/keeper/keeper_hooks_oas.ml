@@ -129,7 +129,7 @@ let make_hooks
   ignore config;
   ignore session;
   ignore ctx_ref;
-  ignore generation;
+  let sse_turn_complete = "keeper_turn_complete" in
   let board_write_tools =
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
   in
@@ -145,8 +145,8 @@ let make_hooks
           | None -> (0, 0)
         in
         let total_tok = input_tok + output_tok in
-        Log.Keeper.info "keeper:%s turn=%d model=%s tokens=%d"
-          meta.name turn model total_tok;
+        Log.Keeper.info "keeper:%s turn=%d total_turns=%d model=%s tokens=%d"
+          meta.name turn meta.usage.total_turns model total_tok;
         (* Emit per-turn cost event for task attribution.
            cost_usd is 0.0 until OAS cascade provides actual cost
            (see oas#393). Token counts are the primary data for now. *)
@@ -157,6 +157,20 @@ let make_hooks
              ~model ~input_tokens:input_tok ~output_tokens:output_tok
              ~cost_usd:0.0
          | None -> ());
+        (try
+           Sse.broadcast
+             (`Assoc
+               [
+                 ("type", `String sse_turn_complete);
+                 ("name", `String meta.name);
+                 ("generation", `Int generation);
+                 ("turn", `Int turn);
+                 ("model_used", `String model);
+                 ("input_tokens", `Int input_tok);
+                 ("output_tokens", `Int output_tok);
+                 ("ts_unix", `Float (Unix.gettimeofday ()));
+               ])
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
 

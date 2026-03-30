@@ -6,13 +6,26 @@
 
     @since Unified Keeper Loop *)
 
+(** Structured board activity delivered to keepers without routing heuristics. *)
+type pending_board_event = {
+  post_id : string;
+  author : string;
+  title : string;
+  preview : string;
+  hearth : string option;
+  post_kind : Board_types.post_kind;
+  updated_at : float;
+  explicit_mention : bool;
+  matched_targets : string list;
+}
+
 (** Snapshot of the world as seen by a keeper at heartbeat time. *)
 type world_observation = {
   pending_mentions : (string * string) list;
   (** [(from_agent, content)] pairs of unprocessed direct mentions. *)
 
-  pending_board_events : string list;
-  (** Summaries of board events needing triage. *)
+  pending_board_events : pending_board_event list;
+  (** Structured board events needing triage. *)
 
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or proactive). *)
@@ -50,14 +63,14 @@ type board_signal_match = {
 }
 
 (** Collect recent board activity within the keeper's heartbeat window.
-    Returns [(event_summaries, new_post_count, mention_count)].
+    Returns [(events, new_post_count, mention_count)].
     Used by both the world observation builder and the deliberation triage
     in keepalive to populate board-related triggers. *)
 val collect_board_events :
   base_path:string ->
   continuity_summary:string ->
   meta:Keeper_types.keeper_meta ->
-  string list * int * int
+  pending_board_event list * int * int
 
 val board_signal_match :
   continuity_summary:string ->
@@ -76,7 +89,7 @@ val board_signal_match :
     @param config Room configuration for I/O operations
     @param meta Current keeper metadata *)
 val observe :
-  pending_board_events:string list option ->
+  pending_board_events:pending_board_event list option ->
   config:Room.config ->
   meta:Keeper_types.keeper_meta ->
   world_observation

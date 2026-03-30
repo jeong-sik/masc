@@ -126,10 +126,12 @@ let test_build_output_contract () =
   in
   let oc =
     L.build_output_contract ~workload_name:"coding_task"
-      ~judge_protocol_version:"v0" ~label_owner:"alice"
-      ~metric_owner:"bob" ~total_claims:10 ~drift_note:"" verdicts
+      ~protocol_version:"v0.1" ~judge_protocol_version:"v0"
+      ~label_owner:"alice" ~metric_owner:"bob" ~total_claims:10
+      ~drift_note:"" verdicts
   in
   check string "workload" "coding_task" oc.workload_name;
+  check string "protocol_version" "v0.1" oc.protocol_version;
   check int "confusion.supported" 3 oc.confusion.supported;
   check int "confusion.unsupported" 1 oc.confusion.unsupported;
   check int "confusion.ambiguous" 1 oc.confusion.ambiguous;
@@ -169,6 +171,7 @@ let test_output_contract_json () =
   let oc : L.output_contract =
     {
       workload_name = "coding_task";
+      protocol_version = "v0.1";
       judge_protocol_version = "v0";
       label_owner = "alice";
       metric_owner = "bob";
@@ -185,6 +188,9 @@ let test_output_contract_json () =
     (match List.assoc_opt "workload_name" fields with
      | Some (`String "coding_task") -> ()
      | _ -> fail "missing workload_name");
+    (match List.assoc_opt "protocol_version" fields with
+     | Some (`String "v0.1") -> ()
+     | _ -> fail "missing or wrong protocol_version");
     (match List.assoc_opt "precision_strict" fields with
      | Some (`Float _) -> ()
      | _ -> fail "missing precision_strict")

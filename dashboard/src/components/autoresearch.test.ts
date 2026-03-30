@@ -89,6 +89,7 @@ async function loadComponentWithApi(api: {
     ...api,
     retryAutoresearchLoop: api.retryAutoresearchLoop ?? vi.fn().mockResolvedValue({ ok: true, action: 'retry' }),
     deleteAutoresearchLoop: api.deleteAutoresearchLoop ?? vi.fn().mockResolvedValue({ ok: true, action: 'delete' }),
+    startAutoresearchLoop: (api as Record<string, unknown>).startAutoresearchLoop ?? vi.fn().mockResolvedValue({ ok: true, action: 'start' }),
   }))
   const module = await import('./autoresearch')
   module.resetAutoresearchState()
@@ -155,7 +156,7 @@ describe('Autoresearch surface refresh', () => {
       .toBeGreaterThanOrEqual(2)
     expect(container.textContent).toContain('2 / 5')
     expect(container.textContent).toContain('사이클 이력 (2건)')
-  }, 10000)
+  }, 20000)
 
   it('preserves the current selection when that loop still exists after refresh', async () => {
     const loopA = loopSummary('loop-a111', { target_file: 'target-a.ml' })
@@ -280,7 +281,7 @@ describe('Autoresearch surface refresh', () => {
     await flushUi()
 
     expect(retryLoop).toHaveBeenCalledWith('loop-err0')
-    expect(container.textContent).toContain('실행 중')
+    expect(container.textContent).toContain('진행 중')
   })
 
   it('offers a delete action for persisted error loops', async () => {

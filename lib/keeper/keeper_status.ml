@@ -4,7 +4,6 @@
 open Tool_args
 open Keeper_types
 open Keeper_memory
-open Keeper_alerting
 open Keeper_execution
 open Keeper_exec_status
 open Keeper_exec_status_metrics
@@ -130,12 +129,8 @@ let handle_keeper_list ctx args : tool_result =
 	            in
 	            let skill_route_json =
 	              let open Yojson.Safe.Util in
-                  let configured_selection_mode = keeper_skill_selection_mode () in
-                  let fallback_selection_mode_string, fallback_selection_provenance =
-                    match configured_selection_mode with
-                    | SkillSelectAgent -> ("agent", "judgment")
-                    | SkillSelectHeuristic -> ("heuristic", "fallback")
-                  in
+                  let fallback_selection_mode_string = "agent" in
+                  let fallback_selection_provenance = "fallback" in
 	              match last_skill_metrics with
 	              | None -> `Null
 	              | Some metrics ->

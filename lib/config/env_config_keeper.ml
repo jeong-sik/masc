@@ -1,42 +1,5 @@
 open Env_config_core
 
-module Endpoints = struct
-  let masc_host_result () =
-    match Uri.host (Uri.of_string (masc_http_base_url ())) with
-    | Some host -> Ok host
-    | None -> Error "MASC_HTTP_BASE_URL must include a host"
-
-  (** MASC server host *)
-  let masc_host () =
-    match masc_host_result () with
-    | Ok host -> host
-    | Error msg -> failwith msg
-
-  let masc_port_result () =
-    match Uri.port (Uri.of_string (masc_http_base_url ())) with
-    | Some port -> Ok port
-    | None -> (
-        match Uri.scheme (Uri.of_string (masc_http_base_url ())) with
-        | Some "https" -> Ok 443
-        | Some "http" -> Ok 80
-        | _ -> Error "MASC_HTTP_BASE_URL must include a port or scheme")
-
-  (** MASC server port *)
-  let masc_port () =
-    match masc_port_result () with
-    | Ok port -> port
-    | Error msg -> failwith msg
-
-  let masc_sse_url_result () =
-    Result.map (fun base -> Printf.sprintf "%s/sse" base) (masc_http_base_url_result ())
-
-  (** MASC SSE URL (derived) *)
-  let masc_sse_url () =
-    match masc_sse_url_result () with
-    | Ok url -> url
-    | Error msg -> failwith msg
-end
-
 (** {1 Keeper Bootstrap Configuration} *)
 
 module KeeperBootstrap = struct
@@ -181,9 +144,6 @@ module KeeperRuntime = struct
   let snapshot_sec =
     max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
 
-  (** Keeper skill selection mode raw string (e.g. "agent", "heuristic"). *)
-  let skill_selection_opt () =
-    Sys.getenv_opt "MASC_KEEPER_SKILL_SELECTION" |> trim_opt
 end
 
 (** {1 Alert Dedup Configuration} *)
@@ -193,6 +153,10 @@ module AlertDedup = struct
   let window_sec =
     Float.max 5.0 (get_float ~default:60.0 "MASC_ALERT_DEDUP_WINDOW_SEC")
 end
+
+(** Shared: keepalive interval, read early so WorkAsHeartbeat can reference it. *)
+let keepalive_interval_sec_ =
+  max 5 (min 300 (get_int ~default:30 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"))
 
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
 
@@ -204,9 +168,101 @@ module WorkAsHeartbeat = struct
     get_bool ~default:true "MASC_KEEPER_WORK_AS_HEARTBEAT"
 
   (** Maximum seconds since last successful room heartbeat before presence
-      sync is required again. Must be >= keepalive_interval_sec (30). *)
+      sync is required again. Floor = keepalive interval (dynamic). *)
   let max_silence_sec =
-    Float.max 30.0 (get_float ~default:120.0 "MASC_KEEPER_MAX_SILENCE_SEC")
+    let floor = Float.of_int keepalive_interval_sec_ in
+    Float.max floor (get_float ~default:120.0 "MASC_KEEPER_MAX_SILENCE_SEC")
+end
+
+(** {1 Smart Heartbeat Configuration (Phase 2)} *)
+
+module SmartHeartbeat = struct
+  (** Master switch for adaptive heartbeat scheduling in the keepalive loop.
+      When true, Heartbeat_smart.should_emit gates presence/snapshot/board/turn
+      blocks, skipping cycles when the keeper is busy or deeply idle. *)
+  let enabled =
+    get_bool ~default:true "MASC_KEEPER_SMART_HEARTBEAT"
+end
+
+(** {1 Keeper Keepalive Loop Constants} *)
+
+module KeeperKeepalive = struct
+  (** Heartbeat cycle interval in seconds. Default: 30.
+      Range: [5, 300]. This is the foundational timing constant — every
+      keeper cycle (presence, snapshot, board scan, turn, recurring) runs
+      at this cadence. *)
+  let interval_sec = keepalive_interval_sec_
+
+  (** Maximum consecutive heartbeat failures before raising
+      Keeper_heartbeat_failure (structured crash). Default: 5.
+      Range: [2, 50]. *)
+  let max_consecutive_failures =
+    max 2 (min 50 (get_int ~default:5 "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES"))
+
+  (** Maximum consecutive unified turn failures before marking keeper as
+      crashed. Covers LLM timeout, rate limit, and other turn errors.
+      Default: 10. Range: [3, 100]. *)
+  let max_consecutive_turn_failures =
+    max 3 (min 100 (get_int ~default:10 "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES"))
+
+  (** Board-reactive wakeup debounce in seconds. Prevents rapid repeated
+      wakeups from the same board post. Default: 60.0.
+      Range: [5, 300]. *)
+  let board_debounce_sec =
+    Float.max 5.0 (Float.min 300.0
+      (get_float ~default:60.0 "MASC_KEEPER_BOARD_DEBOUNCE_SEC"))
+
+  (** Interruptible sleep chunk size in seconds. Smaller = faster wakeup
+      response but more CPU polling. Default: 2.0.
+      Range: [0.1, 10.0]. *)
+  let sleep_chunk_sec =
+    Float.max 0.1 (Float.min 10.0
+      (get_float ~default:2.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
+
+  (** Jitter factor applied to heartbeat interval (fraction of base).
+      Default: 0.2 (20%). Range: [0.0, 0.5]. *)
+  let jitter_factor =
+    Float.max 0.0 (Float.min 0.5
+      (get_float ~default:0.2 "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"))
+end
+
+(** {1 gRPC Heartbeat Reconnect} *)
+
+module KeeperGrpc = struct
+  (** Maximum gRPC reconnect attempts before stopping the heartbeat fiber.
+      Default: 5. Range: [1, 20]. *)
+  let max_reconnect_attempts =
+    max 1 (min 20 (get_int ~default:5 "MASC_KEEPER_GRPC_MAX_RECONNECT"))
+
+  (** Backoff delay between gRPC reconnect attempts in seconds.
+      Default: 5.0. Range: [1.0, 60.0]. *)
+  let reconnect_backoff_sec =
+    Float.max 1.0 (Float.min 60.0
+      (get_float ~default:5.0 "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"))
+end
+
+(** {1 Proactive Generation} *)
+
+module KeeperProactive = struct
+  (** Maximum proactive generation attempts before falling back.
+      Default: 3. Range: [1, 10]. *)
+  let max_attempts =
+    max 1 (min 10 (get_int ~default:3 "MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS"))
+
+  (** Stage timing ring buffer size for Phase 0 profiling.
+      Default: 100. Range: [10, 1000]. *)
+  let stage_timing_ring_size =
+    max 10 (min 1000 (get_int ~default:100 "MASC_KEEPER_STAGE_TIMING_RING_SIZE"))
+end
+
+(** {1 Tool Execution} *)
+
+module KeeperToolExec = struct
+  (** Maximum consecutive failures for the same (tool_name, args_hash)
+      before blocking further attempts. Prevents infinite retry loops.
+      Default: 3. Range: [2, 20]. *)
+  let max_consecutive_tool_failures =
+    max 2 (min 20 (get_int ~default:3 "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"))
 end
 
 (** Print configuration summary for debugging *)

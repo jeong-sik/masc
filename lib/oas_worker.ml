@@ -14,6 +14,15 @@
 module Oas = Agent_sdk
 
 (* ================================================================ *)
+(* Inference defaults — single definition point (ADR D2).            *)
+(* Callers override via optional params.                             *)
+(* Cascade config auto-resolution tracked in jeong-sik/me#915.      *)
+(* ================================================================ *)
+
+let default_temperature = 0.7
+let default_max_tokens = 4096
+
+(* ================================================================ *)
 (* Cascade metrics                                                   *)
 (* ================================================================ *)
 
@@ -97,8 +106,8 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
   { name; provider; model_id; system_prompt; tools;
     max_turns = 20;
     max_idle_turns = 3;
-    max_tokens = 4096;
-    temperature = 0.7;
+    max_tokens = default_max_tokens;
+    temperature = default_temperature;
     hooks = None;
     context_reducer = None;
     guardrails = None;
@@ -476,8 +485,8 @@ let run_named
     ?(initial_messages = [])
     ?(max_turns = 20)
     ?(max_idle_turns = 3)
-    ?(temperature = 0.7)
-    ?(max_tokens = 4096)
+    ?(temperature = default_temperature)
+    ?(max_tokens = default_max_tokens)
     ?(accept = fun (_ : Oas_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -557,8 +566,8 @@ let run_model_by_label
     ?(tools = [])
     ?(max_turns = 20)
     ?(max_idle_turns = 3)
-    ?(temperature = 0.7)
-    ?(max_tokens = 4096)
+    ?(temperature = default_temperature)
+    ?(max_tokens = default_max_tokens)
     ?(accept = fun (_ : Oas_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -604,8 +613,8 @@ let run_named_with_masc_tools
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(max_turns = 20)
-    ?(temperature = 0.7)
-    ?(max_tokens = 4096)
+    ?(temperature = default_temperature)
+    ?(max_tokens = default_max_tokens)
     ?guardrails
     ?hooks
     ?memory
@@ -637,8 +646,8 @@ let run_model_with_masc_tools
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(max_turns = 20)
-    ?(temperature = 0.7)
-    ?(max_tokens = 4096)
+    ?(temperature = default_temperature)
+    ?(max_tokens = default_max_tokens)
     ?guardrails
     ?hooks
     ?memory

@@ -29,6 +29,7 @@ type confusion_summary = {
 
 type output_contract = {
   workload_name : string;
+  protocol_version : string;
   judge_protocol_version : string;
   label_owner : string;
   metric_owner : string;
@@ -85,14 +86,16 @@ let compute_claim_coverage ~labeled ~total =
   if total = 0 then 0.0
   else float_of_int labeled /. float_of_int total
 
-let build_output_contract ~workload_name ~judge_protocol_version
-    ~label_owner ~metric_owner ~total_claims ~drift_note verdicts =
+let build_output_contract ~workload_name ~protocol_version
+    ~judge_protocol_version ~label_owner ~metric_owner ~total_claims
+    ~drift_note verdicts =
   let confusion = compute_confusion verdicts in
   let labeled_non_drift =
     confusion.supported + confusion.unsupported + confusion.ambiguous
   in
   {
     workload_name;
+    protocol_version;
     judge_protocol_version;
     label_owner;
     metric_owner;
@@ -163,6 +166,7 @@ let output_contract_to_json oc =
   `Assoc
     [
       ("workload_name", `String oc.workload_name);
+      ("protocol_version", `String oc.protocol_version);
       ("judge_protocol_version", `String oc.judge_protocol_version);
       ("label_owner", `String oc.label_owner);
       ("metric_owner", `String oc.metric_owner);

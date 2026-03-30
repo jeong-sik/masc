@@ -1,7 +1,8 @@
-// Tools main component — orchestrates summary/full inventory views
+// Tools main component — orchestrates summary/full inventory/executor views
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
+import { signal } from '@preact/signals'
 import { Card } from '../common/card'
 import { ToolMetrics } from '../tool-metrics'
 import {
@@ -16,6 +17,10 @@ import { FullInventoryView } from './tool-full-inventory'
 import { PromptRegistryPanel } from './prompt-registry-panel'
 import { ConfigResolutionPanel } from './config-resolution-panel'
 import { ActionButton } from '../common/button'
+import { ToolExecutor } from '../tool-executor/tool-executor'
+
+type ToolsView = 'inventory' | 'executor'
+const activeView = signal<ToolsView>('inventory')
 
 export function Tools() {
   const data = toolsData.value
@@ -32,6 +37,13 @@ export function Tools() {
 
   return html`
     <div>
+      <div class="flex gap-2 mb-4">
+        <${ActionButton} variant=${activeView.value === 'inventory' ? 'primary' : 'ghost'} size="md"
+          onClick=${() => { activeView.value = 'inventory' }}>인벤토리<//>
+        <${ActionButton} variant=${activeView.value === 'executor' ? 'primary' : 'ghost'} size="md"
+          onClick=${() => { activeView.value = 'executor' }}>도구 실행기<//>
+      </div>
+      ${activeView.value === 'executor' ? html`<${ToolExecutor} />` : html`<div>
       <${ConfigResolutionPanel}
         resolution=${data?.config_resolution}
         runtimeResolution=${data?.runtime_resolution}
@@ -82,6 +94,7 @@ export function Tools() {
         : null}
 
       <${PromptRegistryPanel} />
+    </div>`}
     </div>
   `
 }

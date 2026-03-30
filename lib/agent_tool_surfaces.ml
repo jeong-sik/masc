@@ -79,10 +79,6 @@ let spawned_agent_public_tool_names : string list =
     "masc_poll_events";
     (* masc_vote_create, masc_vote_cast, masc_vote_status removed:
        hidden in Tool_catalog (prefer decision/governance V2 tools) *)
-    "masc_run_init";
-    "masc_run_log";
-    "masc_run_deliverable";
-    "masc_run_get";
     "masc_spawn";
   ]
 

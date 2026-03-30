@@ -478,13 +478,7 @@ let planned_worker_to_entry_with_state
              (Oas.Error.InvalidConfig
                 { field = "worker"; detail = Printf.sprintf "%s: %s" name e }))
   in
-  {
-    name;
-    run;
-    role;
-    get_telemetry = Some (fun () -> !telemetry_ref);
-    extensions = [];
-  }
+  { name; run; role; get_telemetry = Some (fun () -> !telemetry_ref); extensions = [] }
 
 let planned_worker_to_entry
     ~(config : Room.config)

@@ -4,13 +4,14 @@ import { Card } from './common/card'
 import { Tools } from './tools'
 import { Autoresearch } from './autoresearch'
 import { HarnessHealth } from './harness-health'
+import { FeatureHealth } from './feature-health'
 import { ServerConfig } from './server-config'
 
-type LabSection = 'tools' | 'autoresearch' | 'harness' | 'config'
+type LabSection = 'tools' | 'autoresearch' | 'harness' | 'features' | 'config'
 
 function currentSection(): LabSection {
   const section = route.value.params.section
-  if (section === 'autoresearch' || section === 'harness' || section === 'config') {
+  if (section === 'autoresearch' || section === 'harness' || section === 'features' || section === 'config') {
     return section
   }
   return 'tools'
@@ -33,6 +34,10 @@ export function Lab() {
 
       ${section === 'harness' ? html`
         <${HarnessHealth} />
+      ` : null}
+
+      ${section === 'features' ? html`
+        <${FeatureHealth} />
       ` : null}
 
       ${section === 'config' ? html`

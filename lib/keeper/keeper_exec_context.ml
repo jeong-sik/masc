@@ -191,11 +191,7 @@ let maybe_rollover_oas_handoff
       else
         let now_ts = Time_compat.now () in
         let prev_trace_id = base_meta.trace_id in
-        let new_trace_id =
-          let ts = int_of_float (Time_compat.now () *. 1000.0) in
-          let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
-          Printf.sprintf "trace-%d-%05x" ts hash
-        in
+        let new_trace_id = Keeper_identity.generate_trace_id () in
         let next_generation = current_generation + 1 in
         let new_session =
           create_session ~session_id:new_trace_id ~base_dir
@@ -394,10 +390,7 @@ let compact_if_needed
         in
         (compacted_ctx, Some reason, "applied:" ^ reason)
 
-let generate_trace_id () =
-  let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
-  Printf.sprintf "trace-%d-%05x" ts hash
+let generate_trace_id = Keeper_identity.generate_trace_id
 
 let keeper_board_write_tool_names =
   [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
@@ -530,24 +523,17 @@ let run_proactive_generation
   let base_prompt =
     proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
   in
-  let max_attempts = 3 in
+  let max_attempts = Env_config.KeeperProactive.max_attempts in
   let previous_preview = String.trim meta.proactive.last_preview in
   let similarity_threshold = Keeper_config.keeper_proactive_similarity_threshold () in
   let fallback_skill_route =
     route_keeper_skill ~soul_profile:meta.soul_profile ~message:"proactive idle automation checkin"
   in
-  let skill_selection_mode = keeper_skill_selection_mode () in
   let base_turn_system_prompt =
-    match skill_selection_mode with
-    | SkillSelectHeuristic ->
-        skill_route_system_prompt_heuristic
-          ~base_system_prompt:ctx_work.system_prompt
-          ~route:fallback_skill_route
-    | SkillSelectAgent ->
-        skill_route_system_prompt_agent
-          ~base_system_prompt:ctx_work.system_prompt
-          ~fallback_route:fallback_skill_route
-          ~soul_profile:meta.soul_profile
+    skill_route_system_prompt_agent
+      ~base_system_prompt:ctx_work.system_prompt
+      ~fallback_route:fallback_skill_route
+      ~soul_profile:meta.soul_profile
   in
   let turn_system_prompt =
     append_continuity_context_prompt

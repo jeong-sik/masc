@@ -1,0 +1,26 @@
+name: Setup OCaml Toolchain
+description: Shared OCaml toolchain bootstrap with compiler and dune cache.
+
+inputs:
+  ocaml-compiler:
+    description: OCaml compiler version
+    required: false
+    default: "5.4.1"
+  dune-cache:
+    description: Whether to enable dune cache
+    required: false
+    default: "true"
+  cache-prefix:
+    description: Prefix for the dune cache key
+    required: false
+    default: oas-otel-02
+
+runs:
+  using: composite
+  steps:
+    - name: Setup OCaml
+      uses: ocaml/setup-ocaml@v3
+      with:
+        ocaml-compiler: ${{ inputs.ocaml-compiler }}
+        dune-cache: ${{ inputs.dune-cache }}
+        cache-prefix: ${{ inputs.cache-prefix }}

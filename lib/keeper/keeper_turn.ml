@@ -45,7 +45,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     let turn_instructions = get_string_opt args "turn_instructions" in
     let no_skill_route = get_bool args "no_skill_route" false in
     let no_state_block = get_bool args "no_state_block" false in
-    let _direct_reply = get_bool args "direct_reply" false in
+    let direct_reply = get_bool args "direct_reply" false in
     (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
     | Error e -> (false, "❌ " ^ e)
     | Ok () ->
@@ -78,7 +78,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
           ~trace_id:meta.trace_id
           ~generation:meta.generation
       in
-      let effective_models = effective_model_labels_for_turn meta in
+      let turn_cascade_name = if direct_reply then "keeper_reply" else "keeper_turn" in
+      let effective_models =
+        if direct_reply then
+          Oas_model_resolve.models_of_cascade_name turn_cascade_name
+        else
+          effective_model_labels_for_turn meta
+      in
       Progress.Tracker.step turn_tracker ~message:"Validating API keys" ();
       (match ensure_api_keys_for_labels effective_models with
        | Error e ->
@@ -90,14 +96,17 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
            Oas_model_resolve.resolve_primary_max_context effective_models
          in
             let base_dir = session_base_dir ctx.config in
-            let effective_no_skill_route = no_skill_route in
+            let effective_no_skill_route = no_skill_route || direct_reply in
+            let effective_no_state_block = no_state_block || direct_reply in
             let fallback_skill_route =
               route_keeper_skill ~soul_profile:meta.soul_profile ~message
             in
-            let skill_selection_mode = keeper_skill_selection_mode () in
             let live_worktree_change =
-              Worktree_live_context.capture_change_block
-                ~base_path:ctx.config.base_path ~actor_key:meta.name
+              if direct_reply then
+                None
+              else
+                Worktree_live_context.capture_change_block
+                  ~base_path:ctx.config.base_path ~actor_key:meta.name
             in
             let build_turn_prompt ~base_system_prompt ~messages =
               let continuity_snapshot = latest_state_snapshot_from_messages messages in
@@ -112,16 +121,10 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 if effective_no_skill_route then
                   base_system_prompt
                 else
-                  match skill_selection_mode with
-                  | SkillSelectHeuristic ->
-                      skill_route_system_prompt_heuristic
-                        ~base_system_prompt
-                        ~route:fallback_skill_route
-                  | SkillSelectAgent ->
-                      skill_route_system_prompt_agent
-                        ~base_system_prompt
-                        ~fallback_route:fallback_skill_route
-                        ~soul_profile:meta.soul_profile
+                  skill_route_system_prompt_agent
+                    ~base_system_prompt
+                    ~fallback_route:fallback_skill_route
+                    ~soul_profile:meta.soul_profile
               in
               let prompt =
                 append_continuity_context_prompt
@@ -130,10 +133,17 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   ~continuity_summary
               in
               let prompt =
+                if direct_reply then
+                  Keeper_prompt.append_direct_reply_mode_prompt
+                    ~base_prompt:prompt
+                else
+                  prompt
+              in
+              let prompt =
                 let policy_guards = [
                   (effective_no_skill_route,
                    "Output guard: NEVER output lines starting with SKILL: or SKILL_REASON:.");
-                  (no_state_block,
+                  (effective_no_state_block,
                    "Output guard: NEVER output [STATE] or [/STATE] blocks in this turn.");
                 ] in
                 let policy_lines =
@@ -174,7 +184,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 ~max_context:primary_max_context
                 ~build_turn_prompt
                 ~user_message:message
-                ~cascade_name:"keeper_turn"
+                ~cascade_name:turn_cascade_name
                 ~generation:meta.generation
                 ?on_event
                 ~trajectory_acc

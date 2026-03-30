@@ -525,11 +525,16 @@ let keeper_config_json (config : Room.config) (name : string)
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
       let active_model = Keeper_exec_status.active_model_of_meta m in
+      let persona_extended =
+        Keeper_types_profile.load_persona_extended m.name
+        |> Option.value ~default:""
+      in
       let effective_system_prompt =
         Keeper_prompt.build_keeper_system_prompt
           ~goal:m.goal ~short_goal:m.short_goal ~mid_goal:m.mid_goal
           ~long_goal:m.long_goal ~soul_profile:m.soul_profile ~will:m.will
-          ~needs:m.needs ~desires:m.desires ~instructions:m.instructions ()
+          ~needs:m.needs ~desires:m.desires ~instructions:m.instructions
+          ~persona_extended ()
       in
       let prompt =
         `Assoc [

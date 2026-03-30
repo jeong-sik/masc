@@ -5,14 +5,7 @@ open Types
 open Server_utils
 
 let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let hay_len = String.length haystack in
-  let rec loop idx =
-    if idx + needle_len > hay_len then false
-    else if String.sub haystack idx needle_len = needle then true
-    else loop (idx + 1)
-  in
-  needle_len = 0 || loop 0
+  String_util.contains_substring haystack needle
 
 let take n xs =
   let rec loop acc remaining xs =

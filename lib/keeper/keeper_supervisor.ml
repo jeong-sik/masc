@@ -25,6 +25,13 @@ let keep_last_n n item lst =
   if List.length full <= n then full
   else List.filteri (fun i _ -> i < n) full
 
+let should_cleanup_dead ~now ~dead_ttl_sec
+    (entry : Keeper_registry.registry_entry) =
+  match entry.state, entry.dead_since_ts with
+  | Keeper_registry.Dead, Some dead_since ->
+      now -. dead_since >= dead_ttl_sec
+  | _ -> false
+
 (* ── Event publishing ────────────────────────────────────── *)
 
 let publish_lifecycle event_name keeper_name detail =
@@ -40,6 +47,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
   let base_path = ctx.config.base_path in
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+    let resolved = ref false in
+    let resolve_done value =
+      if not !resolved then begin
+        resolved := true;
+        Eio.Promise.resolve reg.done_r value
+      end
+    in
     Fun.protect
       (fun () ->
         (try
@@ -48,7 +62,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
            (* Normal exit: stop flag was set *)
            Keeper_registry.set_state ~base_path meta.name
              Keeper_registry.Stopped;
-           Eio.Promise.resolve reg.done_r `Stopped;
+           resolve_done `Stopped;
            publish_lifecycle "stopped" meta.name "normal exit"
          with
          | Keeper_registry.Keeper_heartbeat_failure info ->
@@ -61,7 +75,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              Keeper_registry.record_crash ~base_path
                meta.name (Time_compat.now ()) reason;
              Keeper_registry.record_error ~base_path meta.name reason;
-             Eio.Promise.resolve reg.done_r (`Crashed reason);
+             resolve_done (`Crashed reason);
              publish_lifecycle "crashed" meta.name reason
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -73,13 +87,11 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              Keeper_registry.record_crash ~base_path
                meta.name (Time_compat.now ()) reason;
              Keeper_registry.record_error ~base_path meta.name reason;
-             Eio.Promise.resolve reg.done_r (`Crashed reason);
+             resolve_done (`Crashed reason);
              publish_lifecycle "crashed" meta.name reason))
       ~finally:(fun () ->
         Keeper_registry.cleanup_tracking ~base_path meta.name;
-        match Eio.Promise.peek reg.done_p with
-        | Some _ -> ()  (* Already resolved above *)
-        | None ->
+        if not !resolved then begin
             let reason =
               Keeper_registry.failure_reason_to_string
                 Keeper_registry.Fiber_unresolved in
@@ -90,8 +102,9 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
             Keeper_registry.record_error ~base_path meta.name reason;
             Keeper_registry.set_state ~base_path meta.name
               Keeper_registry.Crashed;
-            Eio.Promise.resolve reg.done_r (`Crashed reason);
-            publish_lifecycle "crashed" meta.name reason))
+            resolve_done (`Crashed reason);
+            publish_lifecycle "crashed" meta.name reason
+        end))
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     (meta : keeper_meta) =
@@ -157,11 +170,50 @@ let reconcile_keepalive_keepers (ctx : _ context) =
                  Log.Keeper.info "%s: reconciled durable keeper" meta.name
                end
              end
-         | _ -> ())
+         | Ok (Some _meta) -> () (* paused, skip *)
+         | Ok None -> ()
+         | Error err ->
+             Log.Keeper.debug "reconcile: read_meta failed for %s: %s" name err)
+
+let cleanup_dead_tombstone (ctx : _ context)
+    (entry : Keeper_registry.registry_entry) =
+  match read_meta ctx.config entry.name with
+  | Ok (Some meta) ->
+      let persisted_paused =
+        if meta.paused then true
+        else
+          match write_meta ctx.config { meta with paused = true } with
+          | Ok () -> true
+          | Error err ->
+              Log.Keeper.warn
+                "%s: dead tombstone cleanup paused write failed: %s"
+                entry.name err;
+              false
+      in
+      Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
+      if persisted_paused then begin
+        publish_lifecycle "dead_cleaned" entry.name "paused meta persisted";
+        Log.Keeper.info "%s: dead tombstone cleaned up" entry.name
+      end else begin
+        publish_lifecycle "dead_cleaned" entry.name "meta write failed, unregistered anyway";
+        Log.Keeper.warn "%s: dead tombstone unregistered despite meta write failure" entry.name
+      end
+  | Ok None ->
+      Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
+      publish_lifecycle "dead_cleaned" entry.name "meta missing";
+      Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name
+  | Error err ->
+      Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
+      publish_lifecycle "dead_cleaned" entry.name
+        (Printf.sprintf "meta read error: %s" err);
+      Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)"
+        entry.name err
+
 (** Cohort key from structured failure_reason ADT.
     Groups failures by variant, ignoring parameters (e.g. failure count). *)
 let cohort_key_of_reason = function
   | Some (Keeper_registry.Heartbeat_consecutive_failures _) -> "heartbeat_failures"
+  | Some (Keeper_registry.Turn_consecutive_failures _) -> "turn_failures"
   | Some Keeper_registry.Fiber_unresolved -> "fiber_unresolved"
   | Some (Keeper_registry.Exception _) -> "exception"
   | None -> "unknown"
@@ -210,6 +262,7 @@ let apply_self_preservation ~total_keepers to_restart =
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts = Env_config.KeeperSupervisor.max_restarts in
+  let dead_ttl_sec = Env_config.KeeperSupervisor.dead_ttl_sec in
   let base_path = ctx.config.base_path in
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
@@ -217,45 +270,46 @@ let sweep_and_recover (ctx : _ context) =
   let entries = Keeper_registry.all ~base_path () in
   let to_restart = ref [] in
   let to_unregister = ref [] in
+  let to_mark_dead = ref [] in
+  let to_cleanup_dead = ref [] in
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     match entry.state with
     | Keeper_registry.Dead ->
-        (* Phase 2: Dead tombstone TTL cleanup *)
-        if now -. entry.last_restart_ts > Env_config.KeeperSupervisor.dead_ttl_sec then begin
-          to_unregister := entry :: !to_unregister;
-          (* Mark meta as paused so reconcile permanently excludes it *)
-          (match read_meta ctx.config entry.name with
-           | Ok (Some meta) ->
-               ignore (write_meta ctx.config { meta with paused = true })
-           | _ -> ())
-        end
+        (match entry.dead_since_ts with
+         | Some dead_since when now -. dead_since >= dead_ttl_sec ->
+             to_cleanup_dead := entry :: !to_cleanup_dead
+         | _ -> ())
+    | Keeper_registry.Stopped ->
+        to_unregister := entry :: !to_unregister
     | Keeper_registry.Running | Keeper_registry.Paused
-    | Keeper_registry.Stopped | Keeper_registry.Crashed ->
+    | Keeper_registry.Crashed ->
       (match Eio.Promise.peek entry.done_p with
+      | None when entry.state = Keeper_registry.Stopped ->
+          to_unregister := entry :: !to_unregister
       | None -> ()  (* Alive — skip *)
       | Some `Stopped ->
           to_unregister := entry :: !to_unregister
       | Some (`Crashed msg) ->
-          if entry.restart_count >= max_restarts then begin
-            (* Phase 2: Dead tombstone instead of unregister *)
-            Keeper_registry.set_state ~base_path entry.name
-              Keeper_registry.Dead;
-            publish_lifecycle "dead" entry.name
-              (Printf.sprintf "restart budget exhausted (%d), last: %s"
-                 max_restarts msg);
-            Log.Keeper.error "%s: restart budget exhausted (%d). Dead."
-              entry.name max_restarts
-          end else begin
+          if entry.restart_count >= max_restarts then
+            to_mark_dead := (entry, msg) :: !to_mark_dead
+          else begin
             let delay = backoff_delay entry.restart_count in
             if now -. entry.last_restart_ts >= delay then
               to_restart := (entry, msg) :: !to_restart
           end)
   ) entries;
-  (* Clean up stopped entries + expired Dead tombstones *)
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     Keeper_registry.unregister ~base_path entry.name
   ) !to_unregister;
-  (* Phase 2: self-preservation gate before restart *)
+  List.iter (fun ((entry : Keeper_registry.registry_entry), msg) ->
+    Keeper_registry.mark_dead ~base_path entry.name ~at:now;
+    publish_lifecycle "dead" entry.name
+      (Printf.sprintf "restart budget exhausted (%d), last: %s"
+         max_restarts msg);
+    Log.Keeper.error "%s: restart budget exhausted (%d). Dead."
+      entry.name max_restarts
+  ) !to_mark_dead;
+  List.iter (cleanup_dead_tombstone ctx) !to_cleanup_dead;
   let active_count =
     List.length (List.filter (fun (e : Keeper_registry.registry_entry) ->
       e.state = Keeper_registry.Running || e.state = Keeper_registry.Crashed

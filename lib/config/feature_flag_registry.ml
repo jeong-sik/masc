@@ -92,6 +92,16 @@ let all_flags : flag list = [
     default = true; category = "keeper";
     lifecycle = Active; since = "2.130.0" };
 
+  { env_name = "MASC_KEEPER_WORK_AS_HEARTBEAT";
+    description = "Count successful room heartbeat after a turn as presence proof";
+    default = true; category = "keeper";
+    lifecycle = Active; since = "2.162.0" };
+
+  { env_name = "MASC_KEEPER_SMART_HEARTBEAT";
+    description = "Skip heartbeat cycles when busy (task proves liveness) or extend interval when idle";
+    default = true; category = "keeper";
+    lifecycle = Active; since = "2.163.0" };
+
   { env_name = "MASC_KEEPER_ALERT_ENABLED";
     description = "Master switch for keeper interesting alert detection";
     default = true; category = "keeper";
@@ -116,11 +126,6 @@ let all_flags : flag list = [
     description = "GitHub issue fanout for keeper alerts";
     default = false; category = "keeper";
     lifecycle = Active; since = "2.150.0" };
-
-  { env_name = "MASC_KEEPER_WORK_AS_HEARTBEAT";
-    description = "Treat meaningful work as implicit heartbeat signal";
-    default = true; category = "keeper";
-    lifecycle = Active; since = "2.162.0" };
 
   { env_name = "MASC_KEEPER_DEBUG";
     description = "Keeper debug logging";
@@ -174,6 +179,22 @@ let all_flags : flag list = [
     description = "Llama.cpp runtime debug output";
     default = false; category = "runtime";
     lifecycle = Active; since = "2.100.0" };
+
+  (* ── CDAL (Contract-Driven Agent Loop) ───────────────────── *)
+  { env_name = "MASC_CDAL_ENABLED";
+    description = "Contract-driven agent loop: proof capture and verdict evaluation";
+    default = true; category = "runtime";
+    lifecycle = Active; since = "2.162.0" };
+
+  { env_name = "MASC_CDAL_RISK_ENFORCEMENT";
+    description = "Enforce risk_contract constraints (fail on violation)";
+    default = false; category = "runtime";
+    lifecycle = Experimental; since = "2.162.0" };
+
+  { env_name = "MASC_CDAL_PROOF_AGGREGATION";
+    description = "Aggregate proof bundles across multi-turn sessions";
+    default = false; category = "runtime";
+    lifecycle = Experimental; since = "2.162.0" };
 ]
 
 (** Lookup a flag by env var name. O(n) — acceptable for 25 flags. *)

@@ -283,17 +283,20 @@ let compare_activity left right =
   Float.compare right_ts left_ts
 
 let judge_runtime_json base_path =
-  let latest_ts = GV2.latest_generated_at base_path in
+  let st = Dashboard_governance_judge.runtime_status base_path in
   `Assoc
     [
-      ("judge_online", `Bool true);
-      ("refreshing", `Bool false);
+      ("judge_online", `Bool st.judge_online);
+      ("refreshing", `Bool st.refreshing);
       ( "generated_at",
-        if latest_ts > 0.0 then `String (iso_of_unix latest_ts) else `Null );
-      ("expires_at", `Null);
-      ("model_used", `String "heuristic:governance_v2");
-      ("keeper_name", `String "governance-judge");
-      ("last_error", `Null);
+        option_to_yojson (fun s -> `String s) st.generated_at );
+      ( "expires_at",
+        option_to_yojson (fun s -> `String s) st.expires_at );
+      ( "model_used",
+        option_to_yojson (fun s -> `String s) st.model_used );
+      ("keeper_name", `String st.keeper_name);
+      ( "last_error",
+        option_to_yojson (fun s -> `String s) st.last_error );
     ]
 
 let factual_snapshot_json ~base_path =
@@ -390,6 +393,9 @@ let dashboard_json ~base_path ~limit ~offset ~status_filter =
          None
   in
   let judge = judge_runtime_json base_path in
+  let judgments =
+    Dashboard_governance_judge.fresh_judgments_json ~base_path ~limit:20
+  in
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));
@@ -417,6 +423,7 @@ let dashboard_json ~base_path ~limit ~offset ~status_filter =
       ("items", `List items);
       ("activity", `List activity);
       ("judge", judge);
+      ("judgments", `List judgments);
       ("pending_actions", `List pending_actions);
       ("cases", `List items);
     ]

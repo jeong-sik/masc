@@ -6,19 +6,13 @@
 
 include Keeper_config
 
-(* Duplicated from Keeper_types to avoid circular dependency. *)
-let mkdir_p_ path =
-  Fs_compat.mkdir_p path
+(* Delegated to Keeper_fs — single fiber-safe ensure_dir implementation. *)
+let mkdir_p_ path = Fs_compat.mkdir_p path
+let ensure_dir_ = Keeper_fs.ensure_dir
 
-(* Directory-creation cache: avoid repeated mkdir_p syscalls for the same path. *)
-let _ensured_dirs_ : (string, unit) Hashtbl.t = Hashtbl.create 8
-
-let ensure_dir_ d =
-  if not (Hashtbl.mem _ensured_dirs_ d) || not (Sys.file_exists d) then begin
-    mkdir_p_ d;
-    Hashtbl.replace _ensured_dirs_ d ()
-  end;
-  d
+(** Backward-compatible mkdir_p: delegates to Keeper_fs.ensure_dir.
+    Used by external callers via [Keeper_types.mkdir_p]. *)
+let mkdir_p path = ignore (Keeper_fs.ensure_dir path)
 
 let keeper_dir_ (config : Room.config) =
   let d = Filename.concat (Room.masc_root_dir config) "keepers" in

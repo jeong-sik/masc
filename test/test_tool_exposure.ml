@@ -234,7 +234,10 @@ let () =
                 internal);
           test_case "non-public tool remains in full registry" `Quick
             (fun () ->
-              let all_names = Config.all_tool_names () in
+              let all_names =
+                Config.raw_all_tool_schemas
+                |> List.map (fun (s : Types.tool_schema) -> s.name)
+              in
               (* masc_team_session_step has a schema but is not public *)
               let internal = "masc_team_session_step" in
               check bool (internal ^ " in registry") true

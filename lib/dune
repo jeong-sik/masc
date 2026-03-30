@@ -88,6 +88,7 @@
    dashboard_http_mdal
    dashboard_http_autoresearch
    dashboard_harness_health
+   dashboard_feature_health
    dashboard_http_repo_synthesis
    dashboard_provider_runs
    proactive_refresh
@@ -252,6 +253,7 @@
    operator_digest_types
    risk_digest
    operator_digest_session
+   operator_review_state
    operator_control
    operator_control_snapshot
    operator_control_action
@@ -382,6 +384,7 @@
    tool_deep_review
    tool_budget
    tool_catalog
+   tool_schema_dsl
    tool_result
    tool_dispatch
    tool_input_validation
@@ -471,6 +474,8 @@
    keeper_exec_status_metrics
    keeper_exec_status
    keeper_exec_persona
+   keeper_fs
+   keeper_identity
    keeper_working_context
    keeper_checkpoint_store
    keeper_text_processing
@@ -610,6 +615,8 @@
   keeper_exec_status
   keeper_status_detail
   keeper_exec_persona
+  keeper_fs
+  keeper_identity
   keeper_working_context
   keeper_checkpoint_store
   keeper_text_processing
@@ -700,8 +707,12 @@
    caqti-driver-postgresql
    sqlite3
    unix
+   threads
+   logs
+   optint
    re
    re.str
+   re.pcre
    mirage-crypto
    mirage-crypto-ec
    mirage-crypto-rng
@@ -725,8 +736,11 @@
    ;; OCaml 5.x Eio concurrency (required for *_eio.ml modules)
    eio
    eio_main
+   eio.unix
    httpun-eio
+   httpun
    gluten-eio
+   gluten
    ipaddr
    cohttp
    cohttp-eio

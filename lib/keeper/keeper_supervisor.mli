@@ -37,5 +37,16 @@ val backoff_delay : int -> float
 val keep_last_n : int -> 'a -> 'a list -> 'a list
 (** [keep_last_n n item lst] prepends [item] and keeps at most [n] entries. *)
 
+val should_cleanup_dead : now:float -> dead_ttl_sec:float -> Keeper_registry.registry_entry -> bool
+(** True when a dead tombstone has exceeded the configured TTL. *)
+
 val cohort_key_of_reason : Keeper_registry.failure_reason option -> string
 (** Map a structured failure_reason to a cohort key for self-preservation grouping. *)
+
+val apply_self_preservation :
+  total_keepers:int ->
+  (Keeper_registry.registry_entry * string) list ->
+  (Keeper_registry.registry_entry * string) list
+(** Self-preservation gate. Suppresses restarts when a dominant failure
+    cohort exceeds ratio threshold AND minimum candidate count.
+    Returns the filtered list of entries that should proceed with restart. *)

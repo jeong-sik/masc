@@ -44,9 +44,20 @@ let post_of_row
             None)
         | None -> None
       in
+      let resolved_kind =
+        match post_kind with
+        | Some kind -> kind
+        | None ->
+            legacy_migrate_post_kind
+              ~author
+              ~meta_json
+              ~visibility:vis
+              ~expires_at
+              ~hearth
+      in
       let title, body, post_kind, meta_json =
-        normalize_post_payload ~author ~content ?title:title_opt ?body:body_opt
-          ?post_kind ?meta_json ~visibility:vis ~expires_at ~hearth ()
+        normalize_post_payload ~content ?title:title_opt ?body:body_opt
+          ~post_kind:resolved_kind ?meta_json ()
       in
       Some {
         id = pid;

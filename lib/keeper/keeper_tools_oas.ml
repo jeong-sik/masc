@@ -61,7 +61,8 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
     consecutive failures with the same (tool_name, args_hash) key.
     Resets on success. Prevents infinite retry loops (e.g. keeper
     reading a non-existent file 400+ times). *)
-let max_consecutive_failures = 3
+let max_consecutive_failures =
+  Env_config.KeeperToolExec.max_consecutive_tool_failures
 
 let keeper_tool_result_is_failure (result : string) : bool =
   try

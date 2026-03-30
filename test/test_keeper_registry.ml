@@ -67,6 +67,20 @@ let test_set_state () =
   | None -> fail "expected k4"
   | Some e -> check string "state" "paused" (R.state_to_string e.state)
 
+let test_extended_states () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "k4x" (make_meta "k4x") in
+  R.set_state ~base_path:bp "k4x" R.Crashed;
+  (match R.get ~base_path:bp "k4x" with
+   | None -> fail "expected k4x"
+   | Some e -> check string "crashed string" "crashed" (R.state_to_string e.state));
+  R.mark_dead ~base_path:bp "k4x" ~at:123.0;
+  match R.get ~base_path:bp "k4x" with
+  | None -> fail "expected k4x"
+  | Some e ->
+      check string "dead string" "dead" (R.state_to_string e.state);
+      check (option (float 0.01)) "dead_since set" (Some 123.0) e.dead_since_ts
+
 let test_count_running () =
   R.clear ();
   let _e1 = R.register ~base_path:bp "r1" (make_meta "r1") in
@@ -104,6 +118,17 @@ let test_record_restart () =
   | Some e ->
       check int "restart count" 2 e.restart_count;
       check bool "last_restart_ts set" true (e.last_restart_ts > 0.0)
+
+let test_is_registered () =
+  R.clear ();
+  check bool "not registered before" false
+    (R.is_registered ~base_path:bp "k5x");
+  let _entry = R.register ~base_path:bp "k5x" (make_meta "k5x") in
+  check bool "registered after add" true
+    (R.is_registered ~base_path:bp "k5x");
+  R.unregister ~base_path:bp "k5x";
+  check bool "not registered after remove" false
+    (R.is_registered ~base_path:bp "k5x")
 
 let test_record_error () =
   R.clear ();
@@ -233,6 +258,14 @@ let test_fiber_health_crashed () =
   | Keeper_types.Fiber_zombie -> ()
   | _ -> fail "expected Fiber_zombie for crashed"
 
+let test_fiber_health_dead_state () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "fh4" (make_meta "fh4") in
+  R.mark_dead ~base_path:bp "fh4" ~at:42.0;
+  match R.fiber_health_of ~base_path:bp "fh4" with
+  | Keeper_types.Fiber_dead -> ()
+  | _ -> fail "expected Fiber_dead for dead state"
+
 let test_shared_refs () =
   R.clear ();
   let entry = R.register ~base_path:bp "ref1" (make_meta "ref1") in
@@ -348,9 +381,11 @@ let () =
           eio_test "all" test_all;
           eio_test "update meta" test_update_meta;
           eio_test "set state" test_set_state;
+          eio_test "extended states" test_extended_states;
           eio_test "count running" test_count_running;
           eio_test "count running atomic transitions" test_count_running_atomic_transitions;
           eio_test "record restart" test_record_restart;
+          eio_test "is_registered" test_is_registered;
           eio_test "record error" test_record_error;
           eio_test "get_exn not found" test_get_exn_not_found;
           eio_test "noop on missing keys" test_noop_on_missing;
@@ -367,6 +402,7 @@ let () =
           eio_test "fiber_health unknown" test_fiber_health_unknown;
           eio_test "fiber_health stopped" test_fiber_health_stopped;
           eio_test "fiber_health crashed" test_fiber_health_crashed;
+          eio_test "fiber_health dead state" test_fiber_health_dead_state;
           eio_test "shared refs" test_shared_refs;
           eio_test "spawn slots" test_spawn_slots;
         ] );

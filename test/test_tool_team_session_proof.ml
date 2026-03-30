@@ -537,6 +537,10 @@ let test_proof_aggregates_worker_proof_refs () =
     Yojson.Safe.Util.(worker_proof |> member "cdal_run_id" |> to_string);
   Alcotest.(check string) "worker proof contract id" "contract-proof-aggregate"
     Yojson.Safe.Util.(worker_proof |> member "contract_id" |> to_string);
+  Alcotest.(check bool) "worker proof hides proof path" true
+    (Yojson.Safe.Util.(worker_proof |> member "proof_path") = `Null);
+  Alcotest.(check bool) "worker proof hides meta path" true
+    (Yojson.Safe.Util.(worker_proof |> member "meta_path") = `Null);
   Alcotest.(check string) "worker proof manifest ref"
     "proof-store://wr-proof-aggregate/manifest.json"
     Yojson.Safe.Util.(worker_proof |> member "manifest_ref" |> to_string);

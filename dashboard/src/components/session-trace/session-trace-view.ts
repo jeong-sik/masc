@@ -1,5 +1,6 @@
 // Session trace view — main container for GitHub Agents-style activity trace.
 // Lazy-loaded inside a CollapsibleSection: fetches data only when opened.
+// State is cleaned up only when the parent overlay closes (agentName changes).
 
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback } from 'preact/hooks'
@@ -14,6 +15,7 @@ import {
   traceSummary,
   loadSessionTrace,
   closeSessionTrace,
+  activeTraceAgent,
 } from './session-trace-state'
 
 // ── Summary bar ────────────────────────────────────────
@@ -72,17 +74,14 @@ interface SessionTraceViewProps {
 
 export function SessionTraceView({ agentName, isKeeper }: SessionTraceViewProps) {
   const listRef = useRef<HTMLDivElement>(null)
-  const wasLoadedRef = useRef(false)
 
-  // Load on first mount (called when CollapsibleSection opens)
+  // Load on first mount. Clean up only when agentName changes (overlay closes).
+  // Collapsing/expanding the CollapsibleSection does NOT destroy state.
   useEffect(() => {
-    if (!wasLoadedRef.current) {
-      wasLoadedRef.current = true
-      void loadSessionTrace(agentName, isKeeper)
-    }
+    activeTraceAgent.value = agentName
+    void loadSessionTrace(agentName, isKeeper)
     return () => {
-      closeSessionTrace()
-      wasLoadedRef.current = false
+      closeSessionTrace(agentName)
     }
   }, [agentName, isKeeper])
 

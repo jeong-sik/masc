@@ -246,6 +246,25 @@ let model_label_for_pool ~model_id runtime_pool =
         Printf.sprintf "custom:%s@%s" model_id base_url
   | None -> Printf.sprintf "llama:%s" model_id
 
+let ensure_runtime_reachable ?runtime_pool ~timeout_sec () =
+  let base_url = runtime_base_url_for_pool runtime_pool |> String.trim in
+  let health_url = base_url ^ "/health" in
+  let probe_timeout = max 1 (min 2 timeout_sec) in
+  match http_get_text_with_status ~timeout_sec:probe_timeout health_url with
+  | Ok (Some 200, _) -> Ok ()
+  | Ok (status, _) ->
+      let status_text =
+        match status with
+        | Some code -> string_of_int code
+        | None -> "no-status"
+      in
+      Error
+        (Printf.sprintf
+           "runtime unavailable: provider health check returned %s for %s"
+           status_text health_url)
+  | Error err ->
+      Error (Printf.sprintf "runtime unavailable: %s" err)
+
 let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec ()
     =
   match Masc_eio_env.get_opt () with
@@ -306,74 +325,77 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
 
 let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
     ~timeout_sec () =
-  let total = parallelism * rounds in
-  let results = Array.make total None in
-  let runtime_breakdown = Hashtbl.create 8 in
-  for round_idx = 0 to rounds - 1 do
-    let offset = round_idx * parallelism in
-    Eio.Fiber.all
-      (List.init parallelism (fun fiber_idx ->
-           fun () ->
-             let resolved_model_id =
-               match model_id with
-               | Some model when String.trim model <> "" -> model
-               | _ -> default_local_model_id ()
-             in
-             let sample, runtime_id =
-               oas_completion_at ?runtime_pool ~model_id:resolved_model_id
-                 ~prompt ~max_tokens ~timeout_sec ()
-             in
-             update_runtime_breakdown runtime_breakdown ~runtime_id ~sample;
-             results.(offset + fiber_idx) <- Some sample))
-  done;
-  let samples = results |> Array.to_list |> List.filter_map (fun item -> item) in
-  let success_count =
-    List.fold_left
-      (fun acc (sample : bench_sample) ->
-        if sample.success then acc + 1 else acc)
-      0 samples
-  in
-  let failure_count = List.length samples - success_count in
-  let latencies =
-    samples
-    |> List.filter_map (fun (sample : bench_sample) ->
-           if sample.success then Some sample.latency_ms else None)
-  in
-  let errors =
-    samples
-    |> List.filter_map (fun (sample : bench_sample) -> sample.error)
-    |> List.sort_uniq String.compare
-  in
-  Local_runtime_pool.record_measured_ceiling success_count;
-  let runtime_breakdown =
-    runtime_breakdown |> per_runtime_breakdown_to_yojson
-    |> List.map finalize_runtime_breakdown
-  in
-  Ok
-    (`Assoc
-      [
-        ("server_url", `String Env_config.Llama.server_url);
-        ("source", `String "oas_complete");
-        ("model_id", string_opt_to_json model_id);
-        ("runtime_pool", string_opt_to_json runtime_pool);
-        ("parallelism", `Int parallelism);
-        ("rounds", `Int rounds);
-        ("total_requests", `Int (List.length samples));
-        ("success_count", `Int success_count);
-        ("failure_count", `Int failure_count);
-        ( "success_rate",
-          `Float
-            (if samples = [] then 0.0
-             else
-               float_of_int success_count
-               /. float_of_int (List.length samples)) );
-        ("p50_latency_ms", int_opt_to_json (pctl 0.50 latencies));
-        ("p95_latency_ms", int_opt_to_json (pctl 0.95 latencies));
-        ("max_latency_ms", int_opt_to_json (pctl 1.0 latencies));
-        ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
-        ("configured_capacity", `Int (Local_runtime_pool.configured_capacity ()));
-        ("measured_ceiling", int_opt_to_json (Local_runtime_pool.measured_ceiling ()));
-        ("per_runtime_breakdown", `List runtime_breakdown);
-        ( "errors",
-          `List (errors |> List.map (fun message -> `String message)) );
-      ])
+  match ensure_runtime_reachable ?runtime_pool ~timeout_sec () with
+  | Error _ as err -> err
+  | Ok () ->
+      let total = parallelism * rounds in
+      let results = Array.make total None in
+      let runtime_breakdown = Hashtbl.create 8 in
+      for round_idx = 0 to rounds - 1 do
+        let offset = round_idx * parallelism in
+        Eio.Fiber.all
+          (List.init parallelism (fun fiber_idx ->
+               fun () ->
+                 let resolved_model_id =
+                   match model_id with
+                   | Some model when String.trim model <> "" -> model
+                   | _ -> default_local_model_id ()
+                 in
+                 let sample, runtime_id =
+                   oas_completion_at ?runtime_pool ~model_id:resolved_model_id
+                     ~prompt ~max_tokens ~timeout_sec ()
+                 in
+                 update_runtime_breakdown runtime_breakdown ~runtime_id ~sample;
+                 results.(offset + fiber_idx) <- Some sample))
+      done;
+      let samples = results |> Array.to_list |> List.filter_map (fun item -> item) in
+      let success_count =
+        List.fold_left
+          (fun acc (sample : bench_sample) ->
+            if sample.success then acc + 1 else acc)
+          0 samples
+      in
+      let failure_count = List.length samples - success_count in
+      let latencies =
+        samples
+        |> List.filter_map (fun (sample : bench_sample) ->
+               if sample.success then Some sample.latency_ms else None)
+      in
+      let errors =
+        samples
+        |> List.filter_map (fun (sample : bench_sample) -> sample.error)
+        |> List.sort_uniq String.compare
+      in
+      Local_runtime_pool.record_measured_ceiling success_count;
+      let runtime_breakdown =
+        runtime_breakdown |> per_runtime_breakdown_to_yojson
+        |> List.map finalize_runtime_breakdown
+      in
+      Ok
+        (`Assoc
+          [
+            ("server_url", `String Env_config.Llama.server_url);
+            ("source", `String "oas_complete");
+            ("model_id", string_opt_to_json model_id);
+            ("runtime_pool", string_opt_to_json runtime_pool);
+            ("parallelism", `Int parallelism);
+            ("rounds", `Int rounds);
+            ("total_requests", `Int (List.length samples));
+            ("success_count", `Int success_count);
+            ("failure_count", `Int failure_count);
+            ( "success_rate",
+              `Float
+                (if samples = [] then 0.0
+                 else
+                   float_of_int success_count
+                   /. float_of_int (List.length samples)) );
+            ("p50_latency_ms", int_opt_to_json (pctl 0.50 latencies));
+            ("p95_latency_ms", int_opt_to_json (pctl 0.95 latencies));
+            ("max_latency_ms", int_opt_to_json (pctl 1.0 latencies));
+            ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
+            ("configured_capacity", `Int (Local_runtime_pool.configured_capacity ()));
+            ("measured_ceiling", int_opt_to_json (Local_runtime_pool.measured_ceiling ()));
+            ("per_runtime_breakdown", `List runtime_breakdown);
+            ( "errors",
+              `List (errors |> List.map (fun message -> `String message)) );
+          ])

@@ -263,13 +263,13 @@ let resolved_keeper_skill_route
        | None ->
            { route = fallback_route; selection_mode = "agent"; provenance = "fallback" })
 
-let skill_route_system_prompt_agent
-    ~(base_system_prompt : string)
+(** Standalone skill routing context text — without base_system_prompt.
+    Used as soft context injected via [extra_system_context]. *)
+let skill_route_context_text
     ~(fallback_route : keeper_skill_route)
     ~(soul_profile : string) : string =
   Printf.sprintf
-    "%s\n\n\
-     Skill routing policy (agent-selected):\n\
+    "Skill routing policy (agent-selected):\n\
      - Available skills: %s\n\
      - SOUL profile: %s\n\
      - You MUST choose exactly one primary skill from the list above.\n\
@@ -279,7 +279,14 @@ let skill_route_system_prompt_agent
      - If uncertain, default to `%s`.\n\
      - After those lines, answer normally and concretely.\n\
      - Do not fabricate capabilities beyond chosen skills."
-    base_system_prompt
     (String.concat ", " keeper_allowed_skills)
     soul_profile
     fallback_route.primary_skill
+
+let skill_route_system_prompt_agent
+    ~(base_system_prompt : string)
+    ~(fallback_route : keeper_skill_route)
+    ~(soul_profile : string) : string =
+  Printf.sprintf "%s\n\n%s"
+    base_system_prompt
+    (skill_route_context_text ~fallback_route ~soul_profile)

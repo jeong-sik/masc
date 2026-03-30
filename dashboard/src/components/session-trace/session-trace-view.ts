@@ -1,6 +1,6 @@
 // Session trace view — main container for GitHub Agents-style activity trace.
-// Lazy-loaded inside a CollapsibleSection: fetches data only when opened.
-// State is cleaned up only when the parent overlay closes (agentName changes).
+// Each instance reads state by its own agentName prop, avoiding global state corruption
+// when multiple overlays are open simultaneously.
 
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback } from 'preact/hooks'
@@ -9,18 +9,20 @@ import { EmptyState } from '../common/empty-state'
 import { SessionTraceEntry } from './session-trace-entry'
 import { SessionTraceFilter } from './session-trace-filter'
 import {
-  traceLoading,
-  traceError,
-  filteredEvents,
-  traceSummary,
+  getTraceLoading,
+  getTraceError,
+  getFilteredEvents,
+  getTraceSummary,
   loadSessionTrace,
   closeSessionTrace,
+  _traceSlots,
 } from './session-trace-state'
+import type { TraceSummary } from './session-trace-state'
 
 // ── Summary bar ────────────────────────────────────────
 
-function TraceSummaryBar() {
-  const s = traceSummary.value
+function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
+  const s = summary
   if (s.tool_call_count === 0 && s.broadcast_count === 0 && s.task_completed_count === 0) return null
 
   const items: string[] = []
@@ -43,14 +45,12 @@ function TraceSummaryBar() {
 
 // ── Live indicator ─────────────────────────────────────
 
-function LiveIndicator() {
-  const events = filteredEvents.value
+function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
   if (events.length === 0) return null
 
   const lastEvt = events[events.length - 1]
   if (!lastEvt) return null
   const isRecent = Date.now() - lastEvt.ts < 60_000
-
   if (!isRecent) return null
 
   return html`
@@ -83,10 +83,16 @@ export function SessionTraceView({ agentName, isKeeper }: SessionTraceViewProps)
     }
   }, [agentName, isKeeper])
 
+  // Subscribe to traceSlots changes for reactivity
+  void _traceSlots.value
+
+  const loading = getTraceLoading(agentName)
+  const error = getTraceError(agentName)
+  const events = getFilteredEvents(agentName)
+  const summary = getTraceSummary(agentName)
+
   // Auto-scroll to bottom when new events arrive
   const prevCountRef = useRef(0)
-  const events = filteredEvents.value
-
   useEffect(() => {
     if (events.length > prevCountRef.current && listRef.current) {
       const el = listRef.current
@@ -103,15 +109,15 @@ export function SessionTraceView({ agentName, isKeeper }: SessionTraceViewProps)
   }, [agentName, isKeeper])
 
   // Loading state
-  if (traceLoading.value && events.length === 0) {
+  if (loading && events.length === 0) {
     return html`<div class="py-8 text-center text-[var(--text-muted)] text-xs">활동 추적 로딩 중...</div>`
   }
 
   // Error state
-  if (traceError.value) {
+  if (error) {
     return html`
       <div class="py-4">
-        <div class="text-xs text-[var(--bad)] mb-2">${traceError.value}</div>
+        <div class="text-xs text-[var(--bad)] mb-2">${error}</div>
         <${ActionButton} variant="ghost" size="sm" onClick=${handleRefresh}>재시도<//>
       </div>
     `
@@ -130,19 +136,19 @@ export function SessionTraceView({ agentName, isKeeper }: SessionTraceViewProps)
     <div class="flex flex-col gap-3">
       ${'' /* Filter + Refresh */}
       <div class="flex items-center justify-between gap-3">
-        <${SessionTraceFilter} />
+        <${SessionTraceFilter} agentName=${agentName} />
         <${ActionButton}
           variant="ghost"
           size="sm"
           onClick=${handleRefresh}
-          disabled=${traceLoading.value}
+          disabled=${loading}
         >
-          ${traceLoading.value ? '로딩...' : '새로고침'}
+          ${loading ? '로딩...' : '새로고침'}
         <//>
       </div>
 
       ${'' /* Summary */}
-      <${TraceSummaryBar} />
+      <${TraceSummaryBar} summary=${summary} />
 
       ${'' /* Event list */}
       <div
@@ -150,7 +156,7 @@ export function SessionTraceView({ agentName, isKeeper }: SessionTraceViewProps)
         class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[var(--white-2)]"
       >
         ${events.map(evt => html`<${SessionTraceEntry} key=${evt.id} event=${evt} />`)}
-        <${LiveIndicator} />
+        <${LiveIndicator} events=${events} />
       </div>
 
       ${'' /* Footer: event count */}

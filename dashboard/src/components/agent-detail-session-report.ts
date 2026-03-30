@@ -15,51 +15,60 @@ import {
 } from './agent-detail-state'
 import type { AgentTimelineEvent } from '../api'
 
-// ── Helpers ──────────────────────────────────────
+// ── Helpers (exported for testing) ───────────────
+
+/** Safely read a string field from evt.detail (typed as Record<string, unknown>) */
+function detailStr(detail: Record<string, unknown>, key: string): string {
+  const val = detail[key]
+  return typeof val === 'string' ? val : ''
+}
 
 /** Extract broadcast events with meaningful content from timeline */
-function extractBroadcasts(events: AgentTimelineEvent[]): AgentTimelineEvent[] {
+export function extractBroadcasts(events: AgentTimelineEvent[]): AgentTimelineEvent[] {
   return events
     .filter(evt => evt.type === 'broadcast')
     .filter(evt => {
-      const content = (evt.detail as Record<string, string>).content ?? ''
+      const content = detailStr(evt.detail, 'content')
       // Skip trivial heartbeat-like messages
       return content.length > 20
     })
 }
 
 /** Extract task-related events from timeline */
-function extractTaskEvents(events: AgentTimelineEvent[]): AgentTimelineEvent[] {
+export function extractTaskEvents(events: AgentTimelineEvent[]): AgentTimelineEvent[] {
   return events.filter(evt => evt.type.startsWith('task_'))
 }
 
-/** Group consecutive broadcasts that are part of the same report */
-function groupBroadcastsIntoReports(
+/** Group consecutive broadcasts that are part of the same report.
+ *  Broadcasts within 60 seconds of each other (compared to the previous event,
+ *  not the group start) are merged into one report card. */
+export function groupBroadcastsIntoReports(
   broadcasts: AgentTimelineEvent[],
 ): { ts: string; content: string }[] {
   if (broadcasts.length === 0) return []
 
-  // Each broadcast with substantial content is shown as its own report card.
-  // Broadcasts within 60 seconds of each other are merged into one report.
   const reports: { ts: string; parts: string[] }[] = []
   let current: { ts: string; parts: string[] } | null = null
+  let prevTs: string | null = null
 
   for (const evt of broadcasts) {
-    const content = (evt.detail as Record<string, string>).content ?? ''
+    const content = detailStr(evt.detail, 'content')
     const ts = evt.ts
 
-    if (current) {
-      const prevTime = new Date(current.ts).getTime()
+    if (current && prevTs) {
+      const prevTime = new Date(prevTs).getTime()
       const curTime = new Date(ts).getTime()
-      const gapSec = Math.abs(curTime - prevTime) / 1000
-      if (gapSec < 60) {
+      const gapSec = (curTime - prevTime) / 1000
+      if (gapSec >= 0 && gapSec < 60) {
         current.parts.push(content)
+        prevTs = ts
         continue
       }
     }
 
     current = { ts, parts: [content] }
     reports.push(current)
+    prevTs = ts
   }
 
   return reports.map(r => ({
@@ -148,8 +157,7 @@ function TaskEventTimeline({ events }: { events: AgentTimelineEvent[] }) {
       <div class="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-2">태스크 이력</div>
       <div class="flex flex-col gap-1">
         ${events.map((evt, idx) => {
-          const detail = evt.detail as Record<string, string>
-          const title = detail.title ?? detail.task_id ?? ''
+          const title = detailStr(evt.detail, 'title') || detailStr(evt.detail, 'task_id')
           const icon = taskEventIcon(evt.type)
           const color = taskEventColor(evt.type)
           return html`
@@ -213,7 +221,7 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
   if (reports.length === 0 && taskEvents.length === 0) return null
 
   return html`
-    <${Card} title="세션 활동 리포트">
+    <${Card} title="세션 활동 리포트" class="mb-5">
       <${SessionMeta} agentName=${agentName} />
 
       ${summary ? html`
@@ -239,7 +247,7 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
       ${reports.length > 0 ? html`
         <div class="flex flex-col gap-3">
           ${reports.map((report, idx) => html`
-            <${BroadcastReport} key=${idx} report=${report} index=${idx} />
+            <${BroadcastReport} key=${report.ts} report=${report} index=${idx} />
           `)}
         </div>
       ` : null}

@@ -190,7 +190,7 @@ export function AgentDetailOverlay() {
 
         <${AgentSessionReport} agentName=${agentName} />
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5 mt-5">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
           <${Card} title="할당된 작업">
             ${ownedTasks.length === 0
               ? html`<div class="h-full min-h-[120px]"><${EmptyState} message="할당된 작업이 없습니다" compact /></div>`

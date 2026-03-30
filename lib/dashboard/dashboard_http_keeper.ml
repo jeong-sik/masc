@@ -252,9 +252,11 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   List.map (fun (ts, reason) ->
                     `Assoc [("ts", `Float ts); ("reason", `String reason)]
                   ) entry.crash_log in
+                let keepers_dir =
+                  Filename.concat (Room.masc_root_dir config) "keepers" in
                 let disk_crashes =
                   (try Keeper_crash_persistence.recent_crashes
-                    ~base_path:config.base_path ~name:m.name ~max_entries:20
+                    ~keepers_dir ~name:m.name ~max_entries:20
                   with _ -> []) in
                 let combined_log = match disk_crashes with
                   | [] -> crash_log

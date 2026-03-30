@@ -255,57 +255,73 @@ let compute_judgments
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
 let should_backoff ~sw ~net =
-  let config_path = Oas_worker.default_config_path () in
-  let cap = Llm_provider.Cascade_config.local_capacity_for_selections
-      ~sw ~net ?config_path ["operator_judge"] in
-  cap.all_discovered && cap.endpoints_found > 0
-  && cap.process_available = 0 && cap.process_queue_length >= 2
+  try
+    let config_path = Oas_worker.default_config_path () in
+    let cap = Llm_provider.Cascade_config.local_capacity_for_selections
+        ~sw ~net ?config_path ["operator_judge"]
+    in
+    cap.all_discovered && cap.endpoints_found > 0
+    && cap.process_available = 0 && cap.process_queue_length >= 2
+  with exn ->
+    Eio.traceln
+      "[operator] capacity check failed in should_backoff: %s"
+      (Printexc.to_string exn);
+    false
 
 let refresh_once ~sw ~net
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~(config : Room.config) ~build_facts =
-  if should_backoff ~sw ~net then
-    Eio.traceln "[operator] backoff: local slots saturated, skipping cycle"
-  else begin
   let st = get_state config.base_path in
-  with_lock st (fun () -> st.refreshing <- true);
-  match compute_judgments ~masc_tools ~dispatch ~facts_json:(build_facts ()) with
-  | Error message ->
+  if should_backoff ~sw ~net then
+    let was_online =
       with_lock st (fun () ->
+          let was_online = st.judge_online in
           st.refreshing <- false;
           st.judge_online <- false;
-          st.last_error <- Some message)
-  | Ok (model_used, result_json) ->
-      let generated_at_unix = Unix.gettimeofday () in
-      let generated_at = iso_of_unix generated_at_unix in
-      let expires_at =
-        iso_of_unix
-          (generated_at_unix +. float_of_int (max (room_ttl_sec ()) (session_ttl_sec ())))
-      in
-      let room_judgment =
-        parse_room_judgment ~config ~generated_at ~generated_at_unix
-          ~model_used result_json
-      in
-      let session_judgments =
-        match result_json |> member "sessions" with
-        | `List items ->
-            items
-            |> List.filter_map
-                 (parse_session_judgment ~config ~generated_at
-                    ~generated_at_unix ~model_used)
-        | _ -> []
-      in
-      let has_any =
-        Option.is_some room_judgment || session_judgments <> []
-      in
-      with_lock st (fun () ->
-          st.refreshing <- false;
-          st.judge_online <- has_any;
-          st.generated_at <- Some generated_at;
-          st.expires_at <- Some expires_at;
-          st.model_used <- Some model_used;
-          st.last_error <- None)
+          st.last_error <- None;
+          was_online)
+    in
+    if was_online then
+      Eio.traceln "[operator] backoff: local slots saturated, skipping cycle"
+  else begin
+    with_lock st (fun () -> st.refreshing <- true);
+    match compute_judgments ~masc_tools ~dispatch ~facts_json:(build_facts ()) with
+    | Error message ->
+        with_lock st (fun () ->
+            st.refreshing <- false;
+            st.judge_online <- false;
+            st.last_error <- Some message)
+    | Ok (model_used, result_json) ->
+        let generated_at_unix = Unix.gettimeofday () in
+        let generated_at = iso_of_unix generated_at_unix in
+        let expires_at =
+          iso_of_unix
+            (generated_at_unix +. float_of_int (max (room_ttl_sec ()) (session_ttl_sec ())))
+        in
+        let room_judgment =
+          parse_room_judgment ~config ~generated_at ~generated_at_unix
+            ~model_used result_json
+        in
+        let session_judgments =
+          match result_json |> member "sessions" with
+          | `List items ->
+              items
+              |> List.filter_map
+                   (parse_session_judgment ~config ~generated_at
+                      ~generated_at_unix ~model_used)
+          | _ -> []
+        in
+        let has_any =
+          Option.is_some room_judgment || session_judgments <> []
+        in
+        with_lock st (fun () ->
+            st.refreshing <- false;
+            st.judge_online <- has_any;
+            st.generated_at <- Some generated_at;
+            st.expires_at <- Some expires_at;
+            st.model_used <- Some model_used;
+            st.last_error <- None)
   end
 
 let start ~sw ~clock ~net ~(config : Room.config)

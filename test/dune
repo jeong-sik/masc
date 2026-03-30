@@ -58,6 +58,7 @@
         test_adversarial_eval
         test_labeling
         test_tool_deep_review
+        test_typed_state
 )
  (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
           test_sse test_encryption test_cancellation test_graphql_api
@@ -97,6 +98,7 @@
           test_adversarial_eval
           test_labeling
           test_tool_deep_review
+          test_typed_state
   )
  (libraries masc_mcp masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.response agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt caqti-eio httpun cohttp-eio masc_mcp.mcp_transport_protocol agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))

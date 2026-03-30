@@ -1,12 +1,15 @@
 (** Decision Executor - Turn council decisions into real actions
 
     토론/투표 결과를 실제 시스템 변경으로 연결.
-    
-    Example:
-    - "Approve PR #123" → gh pr merge 123
-    - "Use OCaml" → update config
-    - "Deploy v2.0" → run deploy script
-    
+
+    Design: Parse, Don't Validate.
+    - [action_mapping] stores a [build_action] function, not a pre-built
+      action value.  Regex capture groups feed the builder directly —
+      no placeholder values, no post-hoc re-extraction.
+    - Regexes are compiled once at module initialisation.
+    - Deterministic (build) / non-deterministic (execute) boundary is
+      explicit: [build_action] is pure, [execute_action] is effectful.
+
     @since MASC v2.7.0
 *)
 
@@ -35,60 +38,99 @@ type exec_result = {
   timestamp: float;
 }
 
-(** Decision to action mapping *)
+(** Decision to action mapping.
+
+    [build_action] receives the regex match group from [compiled_re] and
+    returns either a validated [action_kind] or an error message.
+    This eliminates placeholder values and post-hoc re-extraction. *)
 type action_mapping = {
-  pattern: string;                   (** Regex pattern to match topic *)
-  action: action_kind;
-  requires_unanimous: bool;          (** Only execute if unanimous *)
-  min_threshold: float;              (** Minimum approval threshold *)
+  compiled_re : Re.re;
+  pattern_source : string;
+  build_action : Re.Group.t -> (action_kind, string) result;
+  describe : string -> string;
+  requires_unanimous : bool;
+  min_threshold : float;
 }
 
-(** {1 Built-in Patterns} *)
+(** {1 Helpers — pure, deterministic} *)
 
-let default_mappings : action_mapping list = [
-  (* PR merge pattern - PCRE syntax *)
-  {
-    pattern = "merge pr #?([0-9]+)";
-    action = GitHubAction (MergePR 0);  (* placeholder: actual PR# extracted at execution time *)
-    requires_unanimous = false;
-    min_threshold = 0.6;
-  };
-  (* PR close pattern *)
-  {
-    pattern = "close pr #?([0-9]+)";
-    action = GitHubAction (ClosePR 0);  (* placeholder: actual PR# extracted at execution time *)
-    requires_unanimous = false;
-    min_threshold = 0.5;
-  };
-  (* Deploy pattern *)
-  {
-    pattern = "deploy (v?[0-9.]+)";
-    action = ExecCommand ["echo"; "Deploy placeholder"];  (* stub: blocked at execution time *)
-    requires_unanimous = true;
-    min_threshold = 1.0;
-  };
-]
+(** Extract the first integer from a regex group's first capture.
+    Returns [Error] if no integer can be parsed. *)
+let int_of_group_1 (group : Re.Group.t) ~(context : string) : (int, string) result =
+  match Re.Group.get_opt group 1 with
+  | Some s -> (
+      match int_of_string_opt s with
+      | Some n -> Ok n
+      | None -> Error (Printf.sprintf "%s: capture %S is not an integer" context s))
+  | None -> Error (Printf.sprintf "%s: no capture group 1 in match" context)
 
-(** {1 Pattern Matching} *)
+let compile pat = Re.compile (Re.Pcre.re ~flags:[`CASELESS] pat)
 
-let match_pattern pattern text =
-  try
-    let re = Re.Pcre.re ~flags:[`CASELESS] pattern |> Re.compile in
-    let text_lower = String.lowercase_ascii text in
-    match Re.exec_opt re text_lower with
-    | Some group -> Some (Re.Group.get group 0)
-    | None -> None
-  with Failure _ | Not_found -> None
+(** {1 Built-in Patterns — compiled once at module init} *)
 
-let extract_number text =
-  try
-    let re = Re.Pcre.re "[0-9]+" |> Re.compile in
-    match Re.exec_opt re text with
-    | Some group -> Some (int_of_string (Re.Group.get group 0))
-    | None -> None
-  with Failure _ | Not_found -> None
+let default_mappings : action_mapping list =
+  let merge_re = compile "merge pr #?([0-9]+)" in
+  let close_re = compile "close pr #?([0-9]+)" in
+  let deploy_re = compile "deploy (v?[0-9.]+)" in
+  [
+    { compiled_re = merge_re;
+      pattern_source = "merge pr #?([0-9]+)";
+      build_action = (fun group ->
+        int_of_group_1 group ~context:"MergePR"
+        |> Result.map (fun n -> GitHubAction (MergePR n)));
+      describe = (fun topic ->
+        match Re.exec_opt merge_re (String.lowercase_ascii topic) with
+        | Some g -> (
+            match int_of_group_1 g ~context:"MergePR" with
+            | Ok n -> Printf.sprintf "gh pr merge %d" n
+            | Error _ -> "gh pr merge ?")
+        | None -> "gh pr merge ?");
+      requires_unanimous = false;
+      min_threshold = 0.6;
+    };
+    { compiled_re = close_re;
+      pattern_source = "close pr #?([0-9]+)";
+      build_action = (fun group ->
+        int_of_group_1 group ~context:"ClosePR"
+        |> Result.map (fun n -> GitHubAction (ClosePR n)));
+      describe = (fun topic ->
+        match Re.exec_opt close_re (String.lowercase_ascii topic) with
+        | Some g -> (
+            match int_of_group_1 g ~context:"ClosePR" with
+            | Ok n -> Printf.sprintf "gh pr close %d" n
+            | Error _ -> "gh pr close ?")
+        | None -> "gh pr close ?");
+      requires_unanimous = false;
+      min_threshold = 0.5;
+    };
+    { compiled_re = deploy_re;
+      pattern_source = "deploy (v?[0-9.]+)";
+      build_action = (fun group ->
+        let version = match Re.Group.get_opt group 1 with
+          | Some v -> v
+          | None -> "unknown"
+        in
+        Error (Printf.sprintf
+          "deploy action not implemented for version %S — \
+           requires deployment pipeline integration" version));
+      describe = (fun _topic -> "deploy (not implemented)");
+      requires_unanimous = true;
+      min_threshold = 1.0;
+    };
+  ]
 
-(** {1 Action Execution} *)
+(** {1 Pattern Matching — deterministic} *)
+
+(** Match a topic against a mapping's pre-compiled regex. *)
+let match_mapping (mapping : action_mapping) topic : Re.Group.t option =
+  let text_lower = String.lowercase_ascii topic in
+  Re.exec_opt mapping.compiled_re text_lower
+
+(** Find the first matching mapping for a topic. *)
+let find_action topic =
+  List.find_opt (fun m -> match_mapping m topic <> None) default_mappings
+
+(** {1 Action Execution — non-deterministic, effectful} *)
 
 let read_all_from_ic ic =
   let buf = Buffer.create 4096 in
@@ -128,9 +170,6 @@ let execute_argv argv =
           let stdout_ic, stdin_oc, stderr_ic =
             Unix.open_process_args_full prog (Array.of_list argv) (Unix.environment ())
           in
-          (* NOTE: We intentionally never write to stdin. Most commands we execute
-             (e.g. gh) do not read stdin; leaving it open avoids double-closing
-             issues with [close_process_full]. *)
           let stdout = (try read_all_from_ic stdout_ic with Sys_error _ -> "") in
           let stderr = (try read_all_from_ic stderr_ic with Sys_error _ -> "") in
           let status = Unix.close_process_full (stdout_ic, stdin_oc, stderr_ic) in
@@ -147,7 +186,6 @@ let execute_argv argv =
             output = err;
             timestamp = timestamp () }
   in
-  (* Offload blocking I/O to system thread to avoid blocking Eio scheduler *)
   Eio_guard.run_in_systhread do_exec
 
 let github_argv action =
@@ -173,14 +211,11 @@ let rec ensure_dir path =
     with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
   end
 
-(** Write config to JSON file in .masc/config/ *)
 let execute_config_change key value =
   let config_dir = ".masc/config" in
   let config_file = Filename.concat config_dir (key ^ ".json") in
   try
-    (* Ensure directory exists *)
     ensure_dir config_dir;
-    (* Write JSON config *)
     let json = `Assoc [("key", `String key); ("value", `String value);
                        ("updated_at", `Float (Time_compat.now ()))] in
     Fs_compat.save_file config_file (Yojson.Safe.pretty_to_string json);
@@ -198,7 +233,6 @@ let execute_config_change key value =
       output = msg;
       timestamp = Time_compat.now () }
 
-(** Send notification to target (file-based for now) *)
 let execute_notification target message =
   let notify_file = ".masc/notifications.jsonl" in
   try
@@ -208,7 +242,6 @@ let execute_notification target message =
       ("timestamp", `Float (Time_compat.now ()))
     ] in
     Fs_compat.append_file notify_file (Yojson.Safe.to_string json ^ "\n");
-    (* Also log to stderr for visibility *)
     Log.Misc.info "[Council] %s: %s" target message;
     let msg = Printf.sprintf "Notified %s: %s" target message in
     { success = true;
@@ -240,61 +273,40 @@ let execute_action action =
 
 (** {1 Decision Processing} *)
 
-(** Check if voting result meets threshold *)
 let check_threshold result mapping =
   match result with
   | Consensus.Unanimous Consensus.Approve -> true
-  | Consensus.Majority n -> 
-    not mapping.requires_unanimous && 
+  | Consensus.Majority n ->
+    not mapping.requires_unanimous &&
     (float_of_int n >= mapping.min_threshold *. 100.0)
   | _ -> false
 
-(** Find matching action for a topic *)
-let find_action topic =
-  List.find_opt (fun m -> 
-    match_pattern m.pattern topic <> None
-  ) default_mappings
+(** Execute decision based on voting result.
 
-(** Execute decision based on voting result *)
+    Flow: topic -> [find_action] -> [build_action group] -> [execute_action].
+    The build step is deterministic; the execute step is effectful. *)
 let execute_decision ~topic ~result : exec_result option =
   match find_action topic with
-  | None -> 
+  | None ->
     Log.Misc.warn "Executor: no action mapping for topic: %s" topic;
     None
   | Some mapping ->
     if check_threshold result mapping then begin
       Log.Misc.info "Executor: executing action for: %s" topic;
-      (* Extract parameters from topic if needed *)
-      let action = match mapping.action with
-        | GitHubAction (MergePR _) ->
-          (match extract_number topic with
-           | Some n -> Ok (GitHubAction (MergePR n))
-           | None ->
-             Error (Printf.sprintf
-               "Council: cannot extract PR number from topic %S — \
-                MergePR requires a valid PR number" topic))
-        | GitHubAction (ClosePR _) ->
-          (match extract_number topic with
-           | Some n -> Ok (GitHubAction (ClosePR n))
-           | None ->
-             Error (Printf.sprintf
-               "Council: cannot extract PR number from topic %S — \
-                ClosePR requires a valid PR number" topic))
-        | ExecCommand ["echo"; "Deploy placeholder"] ->
-          Error (Printf.sprintf
-            "Council: deploy action not implemented for topic %S — \
-             requires deployment pipeline integration" topic)
-        | other -> Ok other
-      in
-      (match action with
-       | Ok a -> Some (execute_action a)
-       | Error msg ->
-         Log.Misc.error "Executor: %s" msg;
-         Some { success = false;
-                stdout = "";
-                stderr = msg;
-                output = msg;
-                timestamp = Time_compat.now () })
+      match match_mapping mapping topic with
+      | None ->
+        Log.Misc.error "Executor: pattern matched in find but not in execute for: %s" topic;
+        None
+      | Some group ->
+        match mapping.build_action group with
+        | Ok action -> Some (execute_action action)
+        | Error msg ->
+          Log.Misc.error "Executor: %s" msg;
+          Some { success = false;
+                 stdout = "";
+                 stderr = msg;
+                 output = msg;
+                 timestamp = Time_compat.now () }
     end else begin
       Log.Misc.info "Executor: threshold not met for: %s" topic;
       None
@@ -307,18 +319,7 @@ let dry_run ~topic ~result : string =
   | None -> "No action would be taken (no matching pattern)"
   | Some mapping ->
     if check_threshold result mapping then
-      Printf.sprintf "Would execute: %s" 
-        (match mapping.action with
-         | ExecCommand argv -> Printf.sprintf "exec(%s)" (String.concat " " (List.map Filename.quote argv))
-         | ConfigChange (k, v) -> Printf.sprintf "config(%s=%s)" k v
-         | Notification (t, m) -> Printf.sprintf "notify(%s: %s)" t m
-         | GitHubAction (MergePR _) -> Printf.sprintf "gh pr merge %s" 
-             (match extract_number topic with Some n -> string_of_int n | None -> "?")
-         | GitHubAction (ClosePR _) -> Printf.sprintf "gh pr close %s"
-             (match extract_number topic with Some n -> string_of_int n | None -> "?")
-         | GitHubAction (ApproveReview n) -> Printf.sprintf "gh pr review %d --approve" n
-         | GitHubAction (CreateIssue (t, _)) -> Printf.sprintf "gh issue create '%s'" t
-         | Custom id -> Printf.sprintf "custom(%s)" id)
+      Printf.sprintf "Would execute: %s" (mapping.describe topic)
     else
       Printf.sprintf "Would NOT execute (threshold: %.0f%%, requires_unanimous: %b)"
         (mapping.min_threshold *. 100.0) mapping.requires_unanimous

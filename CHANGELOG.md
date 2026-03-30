@@ -1,6 +1,15 @@
 # Changelog
 
 
+## [2.183.0] - 2026-03-31
+
+### Fixed
+- **Research exit status** — check process exit instead of silently ignoring (#4080).
+- **Explicit naming** — replace `let _ =` with explicit naming in 3 modules (#4083).
+
+### Removed
+- **Mitosis artifacts** — dead tool and docs cleanup (#4057).
+
 ## [2.182.0] - 2026-03-31
 
 ### Added

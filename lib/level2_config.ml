@@ -3,8 +3,6 @@
     MAGI Recommendation: Externalize hardcoded constants for runtime tuning.
 
     Environment variables:
-    - MASC_METRICS_CACHE_TTL: Metrics cache TTL in seconds (default: 300)
-    - MASC_TOKEN_CACHE_SIZE: Max token cache entries (default: 1000)
     - MASC_DRIFT_THRESHOLD: Drift detection threshold (default: 0.85)
     - MASC_LOCK_WARN_MS: Lock contention warning threshold in ms (default: 100)
     - MASC_HEBBIAN_RATE: Symmetric Hebbian learning rate (default: 0.075)
@@ -15,21 +13,6 @@ let get_env_float name default =
   match Sys.getenv_opt name with
   | Some s -> Safe_ops.float_of_string_with_default ~default s
   | None -> default
-
-let get_env_int name default =
-  match Sys.getenv_opt name with
-  | Some s -> Safe_ops.int_of_string_with_default ~default s
-  | None -> default
-
-(** Metrics cache configuration *)
-module Metrics_cache = struct
-  let ttl_seconds () = get_env_float "MASC_METRICS_CACHE_TTL" 300.0
-end
-
-(** Token cache configuration *)
-module Token_cache = struct
-  let max_size () = get_env_int "MASC_TOKEN_CACHE_SIZE" 1000
-end
 
 (** Drift guard configuration *)
 module Drift_guard = struct
@@ -56,28 +39,18 @@ module Hebbian = struct
   let max_weight () = get_env_float "MASC_HEBBIAN_MAX_WEIGHT" 1.0
 end
 
-(** Fitness configuration *)
-module Fitness = struct
-  let recency_halflife_days () = get_env_float "MASC_FITNESS_HALFLIFE" 7.0
-end
-
 (** Get all config as JSON for debugging *)
 let to_json () : Yojson.Safe.t =
   `Assoc [
-    ("metrics_cache_ttl", `Float (Metrics_cache.ttl_seconds ()));
-    ("token_cache_max_size", `Int (Token_cache.max_size ()));
     ("drift_threshold", `Float (Drift_guard.default_threshold ()));
     ("lock_warn_ms", `Float (Lock.warn_threshold_ms ()));
     ("hebbian_rate", `Float (Hebbian.learning_rate ()));
     ("hebbian_decay", `Float (Hebbian.decay_rate ()));
-    ("fitness_halflife_days", `Float (Fitness.recency_halflife_days ()));
   ]
 
 (** Print config to stderr for debugging *)
 let print_config () =
   Log.Level2.info "Configuration:";
-  Log.Level2.info "  MASC_METRICS_CACHE_TTL=%.0f" (Metrics_cache.ttl_seconds ());
-  Log.Level2.info "  MASC_TOKEN_CACHE_SIZE=%d" (Token_cache.max_size ());
   Log.Level2.info "  MASC_DRIFT_THRESHOLD=%.2f" (Drift_guard.default_threshold ());
   Log.Level2.info "  MASC_LOCK_WARN_MS=%.0f" (Lock.warn_threshold_ms ());
   Log.Level2.info "  MASC_HEBBIAN_RATE=%.3f" (Hebbian.learning_rate ())

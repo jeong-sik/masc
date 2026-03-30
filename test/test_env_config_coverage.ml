@@ -2,7 +2,7 @@
 
     Tests for MASC Environment Configuration:
     - get_string, get_int, get_float, get_bool: env var readers
-    - Zombie, Lock, Session, Tempo, Orchestrator, Mitosis, Cancellation modules
+    - Zombie, Lock, Session, Tempo, Orchestrator, Cancellation modules
 *)
 
 open Alcotest
@@ -134,16 +134,6 @@ let test_cluster_name_opt_trims_empty () =
     check string "cluster_name empty -> default" "default"
       (Env_config.cluster_name ()))
 
-let test_endpoints_result_helpers () =
-  with_env "MASC_HTTP_BASE_URL" "https://masc.example.test" (fun () ->
-    check (result string string) "masc_host_result"
-      (Ok "masc.example.test") (Env_config.Endpoints.masc_host_result ());
-    check (result int string) "masc_port_result"
-      (Ok 443) (Env_config.Endpoints.masc_port_result ());
-    check (result string string) "masc_sse_url_result"
-      (Ok "https://masc.example.test/sse")
-      (Env_config.Endpoints.masc_sse_url_result ()))
-
 (* ============================================================
    print_summary Tests
    ============================================================ *)
@@ -221,13 +211,6 @@ let test_orchestrator_interval_positive () =
 
 let test_orchestrator_agent_name_nonempty () =
   check bool "agent name nonempty" true (String.length Env_config.Orchestrator.agent_name > 0)
-
-(* ============================================================
-   Mitosis Module Tests
-   ============================================================ *)
-
-let test_mitosis_interval_positive () =
-  check bool "interval positive" true (Env_config.Mitosis.trigger_interval_seconds > 0.0)
 
 (* ============================================================
    Cancellation Module Tests
@@ -376,7 +359,6 @@ let () =
       test_case "masc_host reads primary env" `Quick test_masc_host_prefers_primary_over_deprecated;
       test_case "assets dir reads primary env" `Quick test_assets_dir_prefers_primary_over_deprecated;
       test_case "cluster_name_opt trims empty" `Quick test_cluster_name_opt_trims_empty;
-      test_case "endpoint result helpers" `Quick test_endpoints_result_helpers;
     ];
     "print_summary", [
       test_case "no error" `Quick test_print_summary_no_error;
@@ -405,9 +387,6 @@ let () =
     "orchestrator", [
       test_case "interval positive" `Quick test_orchestrator_interval_positive;
       test_case "agent name nonempty" `Quick test_orchestrator_agent_name_nonempty;
-    ];
-    "mitosis", [
-      test_case "interval positive" `Quick test_mitosis_interval_positive;
     ];
     "cancellation", [
       test_case "max age positive" `Quick test_cancellation_token_max_age_positive;

@@ -140,14 +140,13 @@ let keeper_keepalive_interval_sec =
 let keeper_dead_ttl_sec =
   Runtime_params.register
     ~key:"keeper.dead_ttl_sec"
-    ~default:(fun () ->
-      Float.to_int Env_config_keeper.KeeperSupervisor.dead_ttl_sec)
-    ~validate:(validate_int_range ~min:60 ~max:86400 "keeper_dead_ttl_sec")
-    ~serialize:(fun v -> `Int v)
+    ~default:(fun () -> Env_config_keeper.KeeperSupervisor.dead_ttl_sec)
+    ~validate:(validate_float_range ~min:60.0 ~max:86400.0 "keeper_dead_ttl_sec")
+    ~serialize:(fun v -> `Float v)
     ~meta:{ description = "Dead 상태 유지 시간(초)";
-            value_type = "int";
-            min_value = Some (`Int 60); max_value = Some (`Int 86400) }
-    ~deserialize:deserialize_int
+            value_type = "float";
+            min_value = Some (`Float 60.0); max_value = Some (`Float 86400.0) }
+    ~deserialize:deserialize_float
     ()
 
 (* ── surface catalog ─────────────────────────────────────────── *)

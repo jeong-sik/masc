@@ -2,6 +2,15 @@
 
 open Masc_mcp
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      (try Unix.rmdir path with Unix.Unix_error _ -> ())
+    end else
+      (try Sys.remove path with Sys_error _ -> ())
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -220,7 +229,9 @@ let () =
           | _ -> Error "expected int")
         ()
     in
-    ignore (Runtime_params.set_by_key "test.clear_by_key_param" (`Int 99));
+    (match Runtime_params.set_by_key "test.clear_by_key_param" (`Int 99) with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail ("set_by_key failed: " ^ msg));
     (match Runtime_params.clear_by_key "test.clear_by_key_param" with
      | Ok () -> ()
      | Error msg -> Alcotest.fail msg);
@@ -279,6 +290,7 @@ let () =
   in
 
   let test_keeper_params_meta_shape () =
+    Governance_registry.ensure_init ();
     let entries = Runtime_params.registry () in
     let hb_entry =
       List.find_opt
@@ -360,7 +372,7 @@ let () =
      with Sys_error _ -> ())
   in
 
-  let test_handle_set_param_high_risk_rejected () =
+  let test_handle_set_param_high_risk_triggers_petition () =
     let ctx =
       Tool_council_feed.{ base_path = "/tmp"; agent_name = "test-agent";
         room_config = None }
@@ -441,7 +453,8 @@ let () =
          Alcotest.(check bool) "reason is string" true (String.length reason > 0);
          let rc = member "restart_count" first |> to_int in
          Alcotest.(check bool) "restart_count >= 1" true (rc >= 1)
-     | [] -> Alcotest.fail "no crashes read back")
+     | [] -> Alcotest.fail "no crashes read back");
+    rm_rf tmp_dir
   in
 
   Alcotest.run "runtime_params"
@@ -483,7 +496,7 @@ let () =
           Alcotest.test_case "medium-risk param set" `Quick
             test_handle_set_param_medium_risk;
           Alcotest.test_case "high-risk triggers petition" `Quick
-            test_handle_set_param_high_risk_rejected;
+            test_handle_set_param_high_risk_triggers_petition;
           Alcotest.test_case "runtime params includes keeper" `Quick
             test_handle_runtime_params_includes_keeper;
         ] );

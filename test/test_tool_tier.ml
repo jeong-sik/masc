@@ -9,7 +9,10 @@ let with_env key value f =
     ~finally:(fun () ->
       match old with
       | Some prev -> Unix.putenv key prev
-      | None -> Unix.putenv key "")
+      | None ->
+          (* OCaml stdlib has no unsetenv; blank matches the enabled default
+             path we are asserting for placeholder_tools_enabled. *)
+          Unix.putenv key "")
     f
 
 let () =
@@ -179,24 +182,28 @@ let () =
         ] );
       ( "placeholder_tools_enabled",
         [
-          test_case "blank value falls back to enabled default" `Quick (fun () ->
+          test_case "unset and blank values keep enabled default" `Quick
+            (fun () ->
+              check bool "unset defaults to enabled" true
+                (Tool_catalog.placeholder_tools_enabled ());
               with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" "" (fun () ->
                   check bool "blank defaults to enabled" true
                     (Tool_catalog.placeholder_tools_enabled ())));
-          test_case "parses falsey variants" `Quick (fun () ->
+          test_case "only exact false and 0 disable placeholder tools" `Quick
+            (fun () ->
               List.iter
                 (fun raw ->
                   with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" raw (fun () ->
                       check bool raw false
                         (Tool_catalog.placeholder_tools_enabled ())))
-                [ "false"; "FALSE"; " false "; "0"; "no"; "NO" ]);
-          test_case "parses truthy and invalid variants as enabled" `Quick
-            (fun () ->
+                [ "false"; "0" ]);
+          test_case "other spellings stay enabled for backward compatibility"
+            `Quick (fun () ->
               List.iter
                 (fun raw ->
                   with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" raw (fun () ->
                       check bool raw true
                         (Tool_catalog.placeholder_tools_enabled ())))
-                [ "true"; "TRUE"; " true "; "1"; "yes"; "YES"; "bogus" ]);
+                [ "FALSE"; " false "; "no"; "NO"; "true"; "1"; "bogus" ]);
         ] );
     ]

@@ -45,10 +45,13 @@ let default_metadata =
   }
 
 (* Runtime-readable like MASC_FULL_SURFACE so tests and local admin flows can
-   toggle placeholder exposure without restarting the server. Invalid or blank
-   values fall back to the default-enabled behavior via Env_config_core. *)
+   toggle placeholder exposure without restarting the server. Keep the legacy
+   exact-match semantics for "false"/"0" so existing deployments do not change
+   behavior when they use other spellings. *)
 let placeholder_tools_enabled () =
-  Env_config_core.get_bool ~default:true "MASC_PLACEHOLDER_TOOLS_ENABLED"
+  match Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" with
+  | Some "false" | Some "0" -> false
+  | _ -> true
 
 let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = false)
     ?(implementation_status = Adapter) reason =

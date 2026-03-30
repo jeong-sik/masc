@@ -484,12 +484,61 @@ let test_executor_github_argv_create_issue () =
     argv
     ["gh"; "issue"; "create"; "--title"; title; "--body"; body]
 
+let contains_substring s sub =
+  let slen = String.length s and sublen = String.length sub in
+  if sublen > slen then false
+  else
+    let rec loop i =
+      if i > slen - sublen then false
+      else if String.sub s i sublen = sub then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let test_executor_merge_with_valid_pr () =
+  (* Topic with valid PR number should match and extract the number *)
+  match Executor.find_action "Merge PR #42" with
+  | None -> fail "should match merge PR pattern"
+  | Some mapping ->
+    (* The template uses MergePR 0 as placeholder *)
+    (match mapping.Executor.action with
+     | Executor.GitHubAction (Executor.MergePR 0) -> ()
+     | _ -> fail "expected MergePR 0 placeholder in template");
+    (* extract_number should find 42 from the topic *)
+    (match Executor.extract_number "Merge PR #42" with
+     | Some 42 -> ()
+     | Some n -> fail (Printf.sprintf "expected 42, got %d" n)
+     | None -> fail "should extract 42")
+
+let test_executor_deploy_errors () =
+  (* Deploy stub should error, not pretend to succeed *)
+  let result = Consensus.Unanimous Consensus.Approve in
+  match Executor.execute_decision ~topic:"deploy v2.0" ~result with
+  | None -> fail "should return Some (error result), not None"
+  | Some r ->
+    check bool "not successful" (not r.Executor.success) true;
+    check bool "mentions deploy"
+      (contains_substring r.output "deploy") true
+
+let test_executor_deploy_not_silent () =
+  (* Verify the deploy mapping still exists but is explicitly blocked *)
+  match Executor.find_action "deploy v1.0" with
+  | None -> fail "deploy pattern should still match"
+  | Some mapping ->
+    (* The template has the echo placeholder *)
+    (match mapping.Executor.action with
+     | Executor.ExecCommand ["echo"; "Deploy placeholder"] -> ()
+     | _ -> fail "expected deploy echo placeholder in template")
+
 let executor_tests = [
   "find action PR", `Quick, test_executor_find_action_pr;
   "no action for random", `Quick, test_executor_find_action_none;
   "dry run approve", `Quick, test_executor_dry_run_approve;
   "dry run reject", `Quick, test_executor_dry_run_reject;
   "github argv create issue", `Quick, test_executor_github_argv_create_issue;
+  "merge with valid PR extracts number", `Quick, test_executor_merge_with_valid_pr;
+  "deploy stub errors", `Quick, test_executor_deploy_errors;
+  "deploy pattern exists but blocked", `Quick, test_executor_deploy_not_silent;
 ]
 
 (* ============================================================

@@ -39,6 +39,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
   let now_ts = Time_compat.now () in
   (* Parallel keeper I/O: each keeper's metadata + metrics reads run concurrently.
      Results are collected into a shared ref array, then filter_map'd. *)
+  let masc_root = Room.masc_root_dir config in
   let results = Array.make (List.length names) None in
   Eio.Fiber.all
     (List.mapi (fun idx name -> fun () ->
@@ -254,7 +255,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ) entry.crash_log in
                 let disk_crashes =
                   (try Keeper_crash_persistence.recent_crashes
-                    ~masc_root:(Room.masc_root_dir config) ~name:m.name ~max_entries:20
+                    ~masc_root ~name:m.name ~max_entries:20
                   with _ -> []) in
                 let combined_log = match disk_crashes with
                   | [] -> crash_log

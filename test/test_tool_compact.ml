@@ -95,8 +95,7 @@ let test_merge_contiguous () =
     check int "2 messages after merge" 2 after
 
 let test_summarize_old () =
-  (* Summarize_old operates on turn groups, not raw message count.
-     Use 6 user-led turns so keep_recent=5 compacts one old turn. *)
+  (* Use enough messages so keep_recent=5 compacts the older prefix. *)
   let messages = List.init 12 (fun i ->
     if i mod 2 = 0 then ("user", Printf.sprintf "Question %d about a topic" i)
     else ("assistant", Printf.sprintf "Answer %d that is quite detailed" i)
@@ -105,11 +104,40 @@ let test_summarize_old () =
   match TC.dispatch ~name:"masc_compact_context" ~args with
   | None -> fail "dispatch returned None"
   | Some result ->
+     let json = parse_result result in
+     let open Yojson.Safe.Util in
+     let before = json |> member "messages_before" |> to_int in
+     let after = json |> member "messages_after" |> to_int in
+     check bool "fewer messages after summarize" true (after < before)
+
+let test_summarize_old_masks_old_tool_output () =
+  let messages = [
+    ("user", "Search reducer files");
+    ("tool", "3 matches in lib/\nlib/context_compact_oas.ml\nlib/tool_compact.ml");
+    ("assistant", "I found 3 matches in lib/.");
+    ("user", "What next?");
+    ("assistant", "Inspect the reducer implementation.");
+    ("user", "Any tests?");
+    ("assistant", "Yes, focused compaction tests exist.");
+  ] in
+  let args = make_args ~strategy:"summarize_old" messages in
+  match TC.dispatch ~name:"masc_compact_context" ~args with
+  | None -> fail "dispatch returned None"
+  | Some result ->
     let json = parse_result result in
     let open Yojson.Safe.Util in
-    let before = json |> member "messages_before" |> to_int in
-    let after = json |> member "messages_after" |> to_int in
-    check bool "fewer messages after summarize" true (after < before)
+    let output_messages = json |> member "messages" |> to_list in
+    let tool_contents =
+      output_messages
+      |> List.filter_map (fun msg ->
+        if msg |> member "role" |> to_string = "tool" then
+          Some (msg |> member "content" |> to_string)
+        else None)
+    in
+    check int "one tool message remains" 1 (List.length tool_contents);
+    let tool_content = List.hd tool_contents in
+    check bool "tool output masked as stub" true
+      (String.starts_with ~prefix:"[tool:unknown id:compact" tool_content)
 
 let test_unknown_strategy () =
   let args = make_args ~strategy:"nonexistent" [("user", "test")] in
@@ -215,6 +243,8 @@ let () =
       test_case "prune tool outputs" `Quick test_prune_tool_outputs;
       test_case "merge contiguous" `Quick test_merge_contiguous;
       test_case "summarize old" `Quick test_summarize_old;
+      test_case "summarize old masks tool output" `Quick
+        test_summarize_old_masks_old_tool_output;
       test_case "unknown strategy" `Quick test_unknown_strategy;
       test_case "unknown tool name" `Quick test_unknown_tool_name;
       test_case "empty messages" `Quick test_empty_messages;

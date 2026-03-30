@@ -22,7 +22,7 @@ Returns compacted messages with token savings statistics. \
 Strategies: 'prune_tool_outputs' (truncate verbose tool results), \
 'merge_contiguous' (merge consecutive same-role messages), \
 'drop_low_importance' (remove low-scored messages), \
-'summarize_old' (summarize oldest 30%% into 1 message), \
+ 'summarize_old' (summarize old text and mask old tool outputs with structured stubs), \
 'all' (apply all strategies in order).";
     input_schema = `Assoc [
       ("type", `String "object");

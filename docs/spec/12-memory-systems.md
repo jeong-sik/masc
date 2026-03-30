@@ -265,7 +265,7 @@ type procedure = {
 | PruneToolOutputs | `Prune_tool_outputs { max_output_len = 500 }` | 도구 출력 잘라내기 |
 | MergeContiguous | `Merge_contiguous` | 연속 동일 역할 메시지 병합 |
 | DropLowImportance | `Custom` (importance scoring closure) | 0.3 미만 score 메시지 제거 |
-| SummarizeOld | `Summarize_old { keep_recent = 5 }` | 오래된 메시지를 extractive 요약 |
+| SummarizeOld | `Custom` (`keep_recent = 5`) | 오래된 일반 메시지를 extractive 요약하고, 오래된 tool result는 structured stub으로 마스킹해 pairing을 보존 |
 
 Importance scoring (`score_messages`):
 - 가중치: recency 40% + role 25% + content_length 20% + tool_content 15%

@@ -1,6 +1,15 @@
 # Changelog
 
 
+## [2.171.0] - 2026-03-30
+
+### Added
+- **Keeper crash persistence** — persist crash state to disk, dashboard diagnostics panel, params editing UI (#3900).
+- **Keeper task autonomy** — default scope, prompt enhancement, dashboard task management (#3886).
+
+### Changed
+- **Lodge terminology removal** — renamed to keeper throughout, hardened startup wrapper (#3892).
+
 ## [2.170.0] - 2026-03-30
 
 ### Added

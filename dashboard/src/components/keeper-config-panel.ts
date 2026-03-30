@@ -87,7 +87,7 @@ const runtimeSaving = signal(false)
 
 function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
-    execution_scope: c.execution_scope ?? 'observe_only',
+    execution_scope: c.execution_scope ?? 'workspace',
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
     proactive_cooldown_sec: c.proactive.cooldown_sec,
@@ -598,7 +598,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           </select>
         </div>
       ` : html`
-        <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'observe_only'} />
+        <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'workspace'} />
       `}
 
       <${SectionHeader} title="프로액티브" />

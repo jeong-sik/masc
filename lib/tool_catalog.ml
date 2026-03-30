@@ -44,14 +44,7 @@ let default_metadata =
     idempotent = None;
   }
 
-(* Runtime-readable like MASC_FULL_SURFACE so tests and local admin flows can
-   toggle placeholder exposure without restarting the server. Keep the legacy
-   exact-match semantics for "false"/"0" so existing deployments do not change
-   behavior when they use other spellings. *)
-let placeholder_tools_enabled () =
-  match Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" with
-  | Some "false" | Some "0" -> false
-  | _ -> true
+let placeholder_tools_enabled () = true
 
 let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = false)
     ?(implementation_status = Adapter) reason =
@@ -98,23 +91,6 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     idempotent = None;
   }
 
-let with_semantic_flags ?readonly ?destructive ?idempotent meta =
-  {
-    meta with
-    readonly =
-      (match readonly with Some value -> Some value | None -> meta.readonly);
-    destructive =
-      (match destructive with Some value -> Some value | None -> meta.destructive);
-    idempotent =
-      (match idempotent with Some value -> Some value | None -> meta.idempotent);
-  }
-
-let readonly_tool =
-  with_semantic_flags ~readonly:true ~idempotent:true default_metadata
-
-let destructive_tool =
-  with_semantic_flags ~destructive:true default_metadata
-
 let explicit_metadata : (string * metadata) list =
   [
     ( "masc_post_create",
@@ -153,60 +129,11 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_judgment_latest",
       hidden_active
         "Internal operator-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    (* Semantic annotations for governance risk classification. *)
-    ("masc_status", readonly_tool);
-    ("masc_tasks", readonly_tool);
-    ("masc_messages", readonly_tool);
-    ("masc_who", readonly_tool);
-    ("masc_agents", readonly_tool);
-    ("masc_dashboard", readonly_tool);
-    ("masc_agent_card", readonly_tool);
-    ("masc_board_list", readonly_tool);
-    ("masc_board_get", readonly_tool);
-    ("masc_tool_help", readonly_tool);
-    ("masc_keeper_list", readonly_tool);
-    ("masc_keeper_status", readonly_tool);
-    ("masc_transport_status", readonly_tool);
-    ("masc_websocket_discovery", readonly_tool);
-    ("masc_plan_get", readonly_tool);
-    ("masc_worktree_list", readonly_tool);
+    (* Annotation overrides: correct misclassifications from name-pattern heuristics *)
     ( "masc_run_get",
-      readonly_tool );
-    ("masc_run_list", readonly_tool);
-    ("masc_execute_dry_run", readonly_tool);
-    ( "masc_admin_cleanup",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Administrative cleanup mutates persisted room state and should be treated as destructive.") );
-    ( "masc_admin_reset",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Administrative reset clears room state and should be treated as destructive.") );
-    ( "masc_gc_force",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Forced garbage collection removes persisted artifacts and should be treated as destructive.") );
-    ( "masc_room_delete",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Room deletion removes persisted state and should be treated as destructive.") );
-    ( "masc_room_destroy",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Room destruction removes persisted state and should be treated as destructive.") );
-    ( "masc_force_leave",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Forced membership removal mutates room state and should be treated as destructive.") );
-    ( "masc_force_remove_agent",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Forced agent removal mutates room state and should be treated as destructive.") );
-    ( "masc_operator_action",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );
-    ( "masc_execute",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Direct execution can apply privileged side effects and should be treated as destructive.") );
-    ("masc_neo4j_query", destructive_tool);
-    ("masc_pg_query", destructive_tool);
-    ("masc_tool_grant", destructive_tool);
-    ("masc_tool_revoke", destructive_tool);
+      { default_metadata with readonly = Some true; idempotent = Some true } );
     ( "masc_operation_stop",
-      destructive_tool );
+      { default_metadata with destructive = Some true } );
     ( "masc_operation_pause",
       { default_metadata with destructive = Some false } );
   ]
@@ -238,7 +165,7 @@ let public_mcp_tools =
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
     (* Board — async agent communication *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote"; "masc_board_delete";
+    "masc_board_comment"; "masc_board_vote";
     (* Agent discovery *)
     "masc_agents"; "masc_dashboard"; "masc_agent_card";
     (* Transport *)
@@ -343,7 +270,7 @@ let standard_tools =
     "masc_board_post"; "masc_board_get"; "masc_board_list";
     "masc_board_vote"; "masc_board_comment"; "masc_board_comment_vote";
     "masc_board_search"; "masc_board_stats"; "masc_board_profile";
-    "masc_board_hearths"; "masc_board_delete";
+    "masc_board_hearths";
     (* Team Session *)
     "masc_team_session_start"; "masc_team_session_step";
     "masc_team_session_status"; "masc_team_session_stop";
@@ -485,7 +412,7 @@ let public_mcp_surface_tools =
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
     (* Board *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote"; "masc_board_delete";
+    "masc_board_comment"; "masc_board_vote";
     (* Agent discovery *)
     "masc_agents"; "masc_dashboard"; "masc_agent_card";
     (* Transport *)

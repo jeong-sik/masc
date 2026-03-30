@@ -18,17 +18,3 @@ val redact_tool_input : tool_name:string -> Yojson.Safe.t -> string option
 val redact_tool_output : tool_name:string -> string -> string option
 (** Produce a redacted preview of tool output text.
     Returns [None] for tools on the deny list. *)
-
-val build_tool_call_trace_json :
-  ?tool_use_id:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  output:string option ->
-  is_error:bool option ->
-  unit ->
-  Yojson.Safe.t
-(** Build a redacted observability-safe tool trace row. *)
-
-val summarize_tool_call_traces :
-  Yojson.Safe.t list -> string option * string option * string option
-(** Returns [(tool_input_preview, tool_args_preview, tool_output_preview)]. *)

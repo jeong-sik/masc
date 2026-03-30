@@ -479,6 +479,7 @@ and run_existing_worker_agent
               session_id;
               raw_trace_run;
               api_response = Some response;
+              proof = None;
             }
       | Error err ->
           let detail = Oas.Error.to_string err in

@@ -18,6 +18,7 @@ type run_result = {
   session_id : string;
   raw_trace_run : Oas.Raw_trace.run_ref option;
   api_response : Oas.Types.api_response option;
+  proof : Oas.Cdal_proof.t option;
 }
 
 type worker_container_state =

@@ -62,6 +62,19 @@ let medium_patterns =
   [ "claim"; "join"; "leave"; "start"; "stop"; "pause"; "resume";
     "confirm"; "approve"; "reject"; "cancel" ]
 
+let overwrite_sensitive_tools =
+  [
+    "masc_code_write";
+    "masc_code_edit";
+    "keeper_edit";
+    "keeper_fs_edit";
+    "keeper_write";
+    "edit_text_file";
+  ]
+
+let destructive_payload_keys = [ "command"; "cmd"; "content"; "new_string" ]
+let empty_overwrite_payload_keys = [ "content"; "new_string" ]
+
 let contains_pattern name patterns =
   let name_lc = String.lowercase_ascii name in
   List.exists (fun pat ->
@@ -93,17 +106,63 @@ let transition_action input =
        | _ -> None)
   | _ -> None
 
+let rec collect_string_values ~keys json =
+  match json with
+  | `Assoc kvs ->
+      List.concat_map
+        (fun (key, value) ->
+          let normalized_key = String.lowercase_ascii (String.trim key) in
+          let direct =
+            if List.mem normalized_key keys then
+              match value with
+              | `String text -> [ text ]
+              | _ -> []
+            else
+              []
+          in
+          direct @ collect_string_values ~keys value)
+        kvs
+  | `List values -> List.concat_map (collect_string_values ~keys) values
+  | _ -> []
+
+let has_destructive_payload input =
+  collect_string_values ~keys:destructive_payload_keys input
+  |> List.exists (fun text -> Eval_gate.detect_destructive text <> None)
+
+let has_empty_overwrite_payload input =
+  collect_string_values ~keys:empty_overwrite_payload_keys input
+  |> List.exists (fun text -> String.trim text = "")
+
+let classify_with_metadata ~tool_name =
+  let meta = Tool_catalog.metadata tool_name in
+  match (meta.Tool_catalog.destructive, meta.Tool_catalog.readonly) with
+  | Some true, _ -> Some Critical
+  | _, Some true -> Some Low
+  | _ -> None
+
+let classify_with_payload ~tool_name ~input =
+  if has_destructive_payload input then Some Critical
+  else if List.mem tool_name overwrite_sensitive_tools && has_empty_overwrite_payload input
+  then Some Critical
+  else None
+
 let assess_risk ~tool_name ~input =
-  (* Check explicit overrides first *)
-  match List.assoc_opt tool_name risk_overrides with
+  match classify_with_metadata ~tool_name with
   | Some level -> level
-  | None ->
-      if String.equal tool_name "masc_transition" then
-        match transition_action input with
-        | Some action -> classify_name action
-        | None -> Low
-      else
-        classify_name tool_name
+  | None -> (
+      match classify_with_payload ~tool_name ~input with
+      | Some level -> level
+      | None ->
+          (* Check explicit overrides after metadata/payload semantics. *)
+          match List.assoc_opt tool_name risk_overrides with
+          | Some level -> level
+          | None ->
+              if String.equal tool_name "masc_transition" then
+                match transition_action input with
+                | Some action -> classify_name action
+                | None -> Low
+              else
+                classify_name tool_name)
 
 (* ── Trace ID generation ────────────────────────────────────── *)
 

@@ -223,12 +223,18 @@ function SpEventsPanel({ sp_events }: { sp_events: any[] }) {
 function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
   const diag = (keeper as any).supervisor_diagnostics
   if (!diag) return null
-  const { restart_count, max_restarts, crash_log, last_failure_reason, dead_since, sp_events } = diag
+  const { restart_count, max_restarts, crash_log, last_failure_reason, dead_since, sp_events, health_score } = diag
   const budgetPct = max_restarts > 0 ? Math.min(100, (restart_count / max_restarts) * 100) : 0
   const budgetColor = budgetPct >= 80 ? '#ef4444' : budgetPct >= 50 ? '#f59e0b' : '#4ade80'
+  const hs = typeof health_score === 'number' ? health_score : 100
+  const hsColor = hs >= 80 ? '#4ade80' : hs >= 50 ? '#f59e0b' : '#ef4444'
   return html`
     <${SectionCard} title="Supervisor 진단">
       <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-[var(--text-muted)]">Health Score</span>
+          <span class="text-sm font-bold font-mono" style="color: ${hsColor}">${hs}</span>
+        </div>
         <div class="flex items-center justify-between">
           <span class="text-xs text-[var(--text-muted)]">Fiber 상태</span>
           ${registryStateBadge((keeper as any).registry_state)}

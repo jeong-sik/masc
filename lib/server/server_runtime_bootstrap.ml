@@ -70,8 +70,7 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   let (_init_msg : string) = Room.init state.room_config ~agent_name:None in
   Mcp_server.set_sse_callback state Sse.broadcast
 
-let bootstrap_chain_state (state : Mcp_server.server_state) =
-  Chain_native_eio.ensure_bootstrap state.room_config;
+let bootstrap_prompt_state (state : Mcp_server.server_state) =
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   (* Initialize prompt registry with defaults and restore saved overrides *)
   let prompt_markdown_dir =
@@ -95,13 +94,7 @@ let bootstrap_chain_state (state : Mcp_server.server_state) =
     Log.Misc.error "prompt templates use unknown variables: %s"
       (invalid_prompt_templates
       |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)
-      |> String.concat ", ");
-  (try Tool_command_plane.backfill_chain_overlays state.room_config
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Misc.error "startup backfill failed: %s"
-       (Printexc.to_string exn))
+      |> String.concat ", ")
 
 let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
   (try
@@ -388,7 +381,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                   end in
                   Team_session_engine_eio.recover_running_sessions ~sw ~env
                     ~config:state.Mcp_server.room_config );
-          ("chain_bootstrap", fun () -> bootstrap_chain_state state);
+          ("prompt_bootstrap", fun () -> bootstrap_prompt_state state);
           ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);
           ("tool_metrics_restore", fun () -> restore_tool_metrics_from_disk state);
           ("legacy_dir_migration", fun () -> migrate_legacy_dirs state);

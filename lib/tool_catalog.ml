@@ -136,10 +136,6 @@ let explicit_metadata : (string * metadata) list =
       { default_metadata with destructive = Some true } );
     ( "masc_operation_pause",
       { default_metadata with destructive = Some false } );
-    ( "masc_chain_snapshot",
-      { default_metadata with readonly = Some true; idempotent = Some true } );
-    ( "masc_chain_run_get",
-      { default_metadata with readonly = Some true; idempotent = Some true } );
   ]
 
 (** {1 Public MCP Surface}

@@ -96,7 +96,7 @@ let default_config hat =
       instructions = "Investigate thoroughly. Gather information. Summarize findings clearly.";
       triggers = ["research"; "explore"; "investigate"; "find"];
       emits = ["findings"; "recommendation"];
-      backend = Some "gemini";  (* Good for search/exploration *)
+      backend = None;  (* Cascade selects provider *)
     }
   | Tester -> {
       name;
@@ -110,7 +110,7 @@ let default_config hat =
       instructions = "Design solutions. Consider trade-offs. Document decisions.";
       triggers = ["design"; "plan"; "architect"];
       emits = ["design_doc"; "decision"];
-      backend = Some "claude-cli";  (* Good for reasoning *)
+      backend = None;  (* Cascade selects provider *)
     }
   | Debugger -> {
       name;

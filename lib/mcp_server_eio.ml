@@ -171,8 +171,6 @@ let () =
 
 include Mcp_server_eio_execute
 
-let () = Chain_native_eio.set_tool_executor execute_tool_eio
-
 (** {1 Resource Subscription Re-exports} *)
 
 let clear_resource_subscriptions_for_session =

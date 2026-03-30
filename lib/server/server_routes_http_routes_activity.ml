@@ -87,6 +87,18 @@ let add_routes ~sw ~clock router =
          Http.Response.json body reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/governance/params/audit" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+         let entries = Runtime_params.recent_audit ~base_path limit in
+         let json = `Assoc [
+           ("entries", `List entries);
+           ("count", `Int (List.length entries));
+         ] in
+         Http.Response.json (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let hearth = query_param req "hearth" in

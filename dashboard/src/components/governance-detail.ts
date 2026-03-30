@@ -20,7 +20,7 @@ import {
   orderStatusLabel,
   stanceLabel,
 } from './governance-utils'
-import { ActivityRail } from './governance-strips'
+import { ActivityRail, ParamAuditTrail } from './governance-strips'
 
 export function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['petitions'][number] }) {
   return html`
@@ -99,6 +99,7 @@ export function DecisionDetail() {
                   : briefs.map(brief => html`<${BriefEntry} key=${brief.id} brief=${brief} />`)}
               </div>
               <${ActivityRail} />
+              <${ParamAuditTrail} />
             `}
     <//>
   `

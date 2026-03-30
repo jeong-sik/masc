@@ -17,6 +17,8 @@ export {
   runtimeParams,
   runtimeSurfaces,
   runtimeLoading,
+  paramAuditEntries,
+  paramAuditLoading,
 } from './governance-signals'
 export {
   selectDecision,
@@ -25,4 +27,5 @@ export {
   submitBrief,
   respondToExecutionOrder,
   loadRuntimeParams,
+  loadParamAudit,
 } from './governance-actions'

@@ -1,6 +1,15 @@
 # Changelog
 
 
+## [2.177.0] - 2026-03-30
+
+### Added
+- **Tailwind CSS integration** — token system, CSS dedup, dashboard style migration (#3961).
+- **Tool budget warning** — keeper warns when schema count exceeds threshold (#3968).
+
+### Changed
+- **Eio transport tightening** — effect-safe transport and session paths refactored (#3952).
+
 ## [2.176.0] - 2026-03-30
 
 ### Added

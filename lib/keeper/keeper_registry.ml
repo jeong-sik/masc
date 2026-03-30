@@ -291,7 +291,7 @@ let fiber_health_of ~base_path name =
         | None -> Fiber_alive
         | Some `Stopped -> Fiber_unknown
         | Some (`Crashed _) ->
-            let max_restarts = Env_config.KeeperSupervisor.max_restarts in
+            let max_restarts = Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
             if entry.restart_count >= max_restarts
             then Fiber_dead
             else Fiber_zombie

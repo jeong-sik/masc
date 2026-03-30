@@ -8,6 +8,16 @@
 
     @since 2.96.0 *)
 
+(** {1 Metadata} *)
+
+(** Optional metadata for UI display and validation hints. *)
+type param_meta = {
+  description : string;
+  value_type : string;
+  min_value : Yojson.Safe.t option;
+  max_value : Yojson.Safe.t option;
+}
+
 (** {1 Parameter Handle} *)
 
 (** Opaque typed parameter handle.  Obtained from {!register}. *)
@@ -16,6 +26,8 @@ type 'a param
 (** {1 Registration} *)
 
 (** Register a named parameter with default thunk, validation, and serialization.
+    Optional [meta] provides UI hints (description, type, bounds).
+    [?meta] is placed before [~deserialize] so existing callers need no change.
     Raises [Invalid_argument] if [key] is already registered. *)
 val register :
   key:string ->
@@ -23,6 +35,8 @@ val register :
   validate:('a -> (unit, string) result) ->
   serialize:('a -> Yojson.Safe.t) ->
   deserialize:(Yojson.Safe.t -> ('a, string) result) ->
+  ?meta:param_meta ->
+  unit ->
   'a param
 
 (** {1 Read / Write} *)
@@ -39,10 +53,13 @@ val set_by_key : string -> Yojson.Safe.t -> (unit, string) result
 (** Clear override; reverts to env default. *)
 val clear : 'a param -> unit
 
+(** Clear override by string key. Returns [Error] if key is unknown. *)
+val clear_by_key : string -> (unit, string) result
+
 (** {1 Introspection} *)
 
-(** [(key, current_json, default_json, has_override)] for every registered param. *)
-val registry : unit -> (string * Yojson.Safe.t * Yojson.Safe.t * bool) list
+(** [(key, current_json, default_json, has_override, meta)] for every registered param. *)
+val registry : unit -> (string * Yojson.Safe.t * Yojson.Safe.t * bool * param_meta option) list
 
 (** {1 Persistence} *)
 

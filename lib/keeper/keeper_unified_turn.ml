@@ -269,7 +269,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           Keeper_registry.increment_turn_failures ~base_path meta.name;
           let count = Keeper_registry.get_turn_failures ~base_path meta.name in
           let threshold =
-            Env_config.KeeperKeepalive.max_consecutive_turn_failures
+            Runtime_params.get Governance_registry.keeper_max_turn_failures
           in
           if count >= threshold then begin
             Log.Keeper.error

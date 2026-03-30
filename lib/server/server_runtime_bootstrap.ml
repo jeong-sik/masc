@@ -350,6 +350,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (PG pool) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
+      Governance_registry.ensure_init ();
+      Runtime_params.restore ~base_path;
+      Log.Server.info "Runtime_params restored from %s" base_path;
       let t2 = Eio.Time.now clock in
       Log.Server.info "Bootstrap completed in %.1fs" (t2 -. t1);
       Server_bootstrap_loops.install_tooling ~governance_level state;

@@ -47,7 +47,7 @@ cd dashboard && npm run build
 ## Ask First
 
 - `room.ml` state machine changes
-- `lodge_heartbeat.ml` tick logic changes
+- `keeper_keepalive.ml` tick logic changes
 - new public MCP tool registrations
 - `config/cascade.json` ordering changes
 - board post ID generation changes

@@ -14,7 +14,7 @@
 
 이번 release의 목표:
 - managed-agent / hidden tool surface cleanup을 minor train으로 정식 반영
-- dashboard observability truth line과 lodge truth compatibility를 release note에 반영
+- dashboard observability truth line과 autonomy truth compatibility를 release note에 반영
 - governance/H2/auth/baseline follow-up을 같은 release closeout으로 묶기
 - release metadata와 changelog를 current `main` truth에 맞춤
 
@@ -87,7 +87,7 @@ git push origin v2.87.0
 - `#968` observability truth on main
 - `#970` team-session / auth baseline compatibility 복구
 - `#971` board patrol noise 억제
-- `#974` lodge truth compatibility follow-up
+- `#974` autonomy truth compatibility follow-up
 - `#976` dead hidden tool surface prune
 
 ## Upgrade Note Policy

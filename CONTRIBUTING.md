@@ -108,7 +108,7 @@ Use conventional commits:
 ```
 feat(council): add conversation loop guard
 fix(heartbeat): reduce GraphQL query cost under limit
-refactor(lodge): rename persona to agent terminology
+refactor(keeper): rename persona to agent terminology
 test(council): add conversation file persistence tests
 docs: update CONTRIBUTING for current architecture
 chore: bump version to 0.9.0

@@ -120,7 +120,6 @@ let projected_team_session_operations ?sessions config units managed_operations 
            created_by = session.created_by;
            source = "projected";
            status = operation_status_of_session session.status;
-           chain = None;
            created_at = session.created_at_iso;
            updated_at = session.updated_at_iso;
          })
@@ -182,7 +181,6 @@ let projected_swarm_operations config units managed_operations =
             created_by = "swarm";
             source = "projected";
             status = Active;
-            chain = None;
             created_at = last_evolution;
             updated_at = last_evolution;
           };

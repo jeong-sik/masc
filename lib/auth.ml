@@ -149,6 +149,13 @@ let resolve_agent_from_token config ~token : (string, masc_error) result =
   | Ok cred -> Ok cred.agent_name
   | Error e -> Error e
 
+let token_alias_matches_agent ~requested_agent ~credential_agent =
+  String.equal requested_agent credential_agent
+  ||
+  let prefix = credential_agent ^ "-" in
+  String.length requested_agent > String.length prefix
+  && String.sub requested_agent 0 (String.length prefix) = prefix
+
 (* ============================================ *)
 (* Token operations                             *)
 (* ============================================ *)
@@ -182,7 +189,14 @@ let create_token config ~agent_name ~role : (string * agent_credential, masc_err
 (** Verify a token *)
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
   match load_credential config agent_name with
-  | None -> Error (Unauthorized ("No credential found for " ^ agent_name))
+  | None -> (
+      match find_credential_by_token config ~token with
+      | Ok cred
+        when token_alias_matches_agent ~requested_agent:agent_name
+               ~credential_agent:cred.agent_name ->
+          Ok cred
+      | Ok _ -> Error (Unauthorized ("No credential found for " ^ agent_name))
+      | Error e -> Error e)
   | Some cred ->
       let token_hash = sha256_hash token in
       if cred.token <> token_hash then

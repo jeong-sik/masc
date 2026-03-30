@@ -83,9 +83,9 @@ let execute_delegate_pipeline
                         | _ -> None)
                       session.planned_workers)
               in
-              let run_delegate () =
+              let run_delegate ~run_sw () =
                 match
-                  Worker_runtime.continue_worker ~sw:ctx.sw
+                  Worker_runtime.continue_worker ~sw:run_sw
                     ~base_path:ctx.config.base_path
                     ~room_config:(Some ctx.config)
                     ~worker_name ~team_session_id:session_id
@@ -95,20 +95,26 @@ let execute_delegate_pipeline
                 | Ok run_result ->
                     (* OAS Verified_output: cross-agent verification *)
                     let verification_outcome =
-                      let goal = match session_opt with
-                        | Some s -> s.Team_session_types.goal
-                        | None -> "unknown"
+                      let delivery_contract =
+                        Tool_team_session_step_exec
+                        .delivery_contract_for_session ctx.config session_id
                       in
-                      Worker_verification.verify_worker_result
-                        ?delivery_contract:
-                          (Tool_team_session_step_exec
-                           .delivery_contract_for_session
-                             ctx.config session_id)
-                        ~goal run_result
+                      match delivery_contract with
+                      | Some delivery_contract ->
+                          let goal =
+                            match session_opt with
+                            | Some s -> s.Team_session_types.goal
+                            | None -> "unknown"
+                          in
+                          Some
+                            (Worker_verification.verify_worker_result
+                               ~delivery_contract ~goal run_result)
+                      | None -> None
                     in
-                    Tool_team_session_step_exec
-                    .record_delivery_verdict_for_worker_run
-                      ~config:ctx.config ~session_id ~worker_run_id
+                    Option.iter
+                      (Tool_team_session_step_exec
+                       .record_delivery_verdict_for_worker_run
+                          ~config:ctx.config ~session_id ~worker_run_id)
                       verification_outcome;
                     let delivery_verdict_json =
                       Tool_team_session_step_exec
@@ -347,7 +353,7 @@ let execute_delegate_pipeline
               in
               (match wait_mode with
               | Team_session_types.Wait_blocking ->
-                  Some (run_delegate ())
+                  Some (run_delegate ~run_sw:ctx.sw ())
               | Team_session_types.Wait_background ->
                   let sw_bg =
                     Option.value ~default:ctx.sw
@@ -356,22 +362,25 @@ let execute_delegate_pipeline
                   append_delegate_requested_event
                     ~worker_run_id ~worker_name
                     ~delegate_prompt;
-                  Eio.Fiber.fork ~sw:sw_bg (fun () ->
-                      try ignore (run_delegate ())
-                      with
-                      | Eio.Cancel.Cancelled _ as exn -> raise exn
-                      | exn ->
-                        let err = Printexc.to_string exn in
-                        Log.Spawn.error
-                          "background delegate failed (worker_run_id=%s, agent=%s): %s"
-                          worker_run_id worker_name err;
-                        append_delegate_event ~worker_run_id
-                          ~worker_name ~delegate_prompt
-                          ?execution_scope
-                          ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
-                          ~trace_capability:"summary_only"
-                          ~resolved_runtime:"local"
-                          ~success:false ~error:err ());
+                  Eio.Fiber.fork_daemon ~sw:sw_bg (fun () ->
+                      let () =
+                        try ignore (run_delegate ~run_sw:sw_bg ())
+                        with
+                        | Eio.Cancel.Cancelled _ as exn -> raise exn
+                        | exn ->
+                          let err = Printexc.to_string exn in
+                          Log.Spawn.error
+                            "background delegate failed (worker_run_id=%s, agent=%s): %s"
+                            worker_run_id worker_name err;
+                          append_delegate_event ~worker_run_id
+                            ~worker_name ~delegate_prompt
+                            ?execution_scope
+                            ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
+                            ~trace_capability:"summary_only"
+                            ~resolved_runtime:"local"
+                            ~success:false ~error:err ()
+                      in
+                      `Stop_daemon);
                   Some
                     (`Assoc
                       [

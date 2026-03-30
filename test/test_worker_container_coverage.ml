@@ -11,6 +11,12 @@ let worker_usage ?cost_usd ~input_tokens ~output_tokens () :
     cost_usd;
   }
 
+let local_worker_schema_exn name =
+  match Agent_tool_surfaces.local_worker_tool_schemas ~names:[ name ] () with
+  | Ok [ schema ] -> schema
+  | Ok _ -> fail ("expected exactly one schema for " ^ name)
+  | Error msg -> fail msg
+
 let test_parse_text_tool_calls_single () =
   let content =
     {|mcp__masc__masc_team_session_step(session_id="ts-123", turn_kind="note", message="[local64-smoke-01] manager decide online for hybrid smoke")|}
@@ -64,6 +70,34 @@ let test_merge_usage_sums_costs_when_both_present () =
   check (option (float 0.000001)) "costs summed" (Some 0.15)
     merged.cost_usd
 
+let test_inject_team_session_id_defaults_missing_arg () =
+  let schema = local_worker_schema_exn "masc_team_session_step" in
+  let args =
+    `Assoc
+      [
+        ("turn_kind", `String "note");
+        ("message", `String "worker note");
+      ]
+  in
+  let normalized =
+    Worker_container_types.inject_team_session_id
+      ~team_session_id:(Some "ts-123-deadbeef") ~worker_name:"local-worker-1"
+      ~schema:(Some schema) args
+  in
+  check string "missing session_id is injected" "ts-123-deadbeef"
+    Yojson.Safe.Util.(normalized |> member "session_id" |> to_string)
+
+let test_inject_team_session_id_rewrites_invalid_alias () =
+  let schema = local_worker_schema_exn "masc_team_session_status" in
+  let args = `Assoc [ ("session_id", `String "local-worker-1") ] in
+  let normalized =
+    Worker_container_types.inject_team_session_id
+      ~team_session_id:(Some "ts-987-cafebabe") ~worker_name:"local-worker-1"
+      ~schema:(Some schema) args
+  in
+  check string "worker alias session_id is rewritten" "ts-987-cafebabe"
+    Yojson.Safe.Util.(normalized |> member "session_id" |> to_string)
+
 let () =
   run "Worker_runtime"
     [
@@ -77,5 +111,9 @@ let () =
             test_merge_usage_preserves_present_cost;
           test_case "merge usage sums costs" `Quick
             test_merge_usage_sums_costs_when_both_present;
+          test_case "inject team session id defaults missing arg" `Quick
+            test_inject_team_session_id_defaults_missing_arg;
+          test_case "inject team session id rewrites invalid alias" `Quick
+            test_inject_team_session_id_rewrites_invalid_alias;
         ] );
     ]

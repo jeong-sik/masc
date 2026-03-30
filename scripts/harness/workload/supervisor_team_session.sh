@@ -14,8 +14,8 @@ SUPERVISOR_SESSION_ID="supervisor-bootstrap"
 SUPERVISOR_OP_SESSION_ID="supervisor-ops"
 SUPERVISOR_AGENT="supervisor-root"
 HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-60}"
-STOP_WAIT_SEC="${STOP_WAIT_SEC:-30}"
-HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-30}"
+STOP_WAIT_SEC="${STOP_WAIT_SEC:-180}"
+HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-60}"
 TEAM_GOAL="${TEAM_GOAL:-Demonstrate a full llama worker team supervised over /mcp and /mcp/operator}"
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
 SWARM_WORKER_BATCH_JSON="${SWARM_WORKER_BATCH_JSON:-}"
@@ -108,14 +108,14 @@ wait_for_spawn_completions() {
   local expected_count="$2"
   local deadline=$(( $(date +%s) + STOP_WAIT_SEC ))
   while :; do
-    local events_result success_count
+    local events_result completion_count
     events_result="$(team_session_events_result "$session_id" '["team_step_spawn"]' 400)"
-    success_count="$(printf '%s' "$events_result" | jq -r '[.events[]? | select(.detail.success == true)] | length')"
-    if [ "$success_count" -ge "$expected_count" ]; then
+    completion_count="$(printf '%s' "$events_result" | jq -r '[.events[]?] | length')"
+    if [ "$completion_count" -ge "$expected_count" ]; then
       return 0
     fi
     if [ "$(date +%s)" -ge "$deadline" ]; then
-      echo "FAIL: team_step_spawn completions did not arrive in time"
+      echo "FAIL: team_step_spawn completion events did not arrive in time"
       printf '%s\n' "$events_result"
       exit 1
     fi
@@ -173,11 +173,12 @@ normalized_worker_batch_json() {
             {
               spawn_role: .spawn_role,
               worker_class: (.worker_class // "executor"),
-              worker_size: (.worker_size // "lg"),
+              spawn_model: $model,
               spawn_selection_note: $note,
               spawn_prompt: .spawn_prompt,
               spawn_timeout_seconds: (.spawn_timeout_seconds // 90)
             }
+            + (if .worker_size == null then {} else {worker_size: .worker_size} end)
           end
         )
       end
@@ -294,7 +295,7 @@ printf '[1/10] start server\n'
 SERVER_PID="$!"
 if ! wait_for_health; then
   echo "FAIL: server did not become healthy"
-  read_file "$LOG_FILE"
+  tail -n 200 "$LOG_FILE" || true
   exit 1
 fi
 

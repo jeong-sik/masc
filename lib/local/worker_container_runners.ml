@@ -131,7 +131,7 @@ let run_worker_oas ~sw ?net ~base_path ~worker_name
         in
         let* mcp_tools =
           build_oas_mcp_tools ~sw ~auth_token ~session_id:mcp_session_id
-            ~worker_name ~prompt ~allowed_tools
+            ~team_session_id ~worker_name ~prompt ~allowed_tools
         in
         let mcp_tools =
           List.map (Oas.Tool.with_defaults
@@ -169,7 +169,8 @@ let run_worker_oas ~sw ?net ~base_path ~worker_name
           Worker_oas.gate_config_of_execution_scope meta.execution_scope
         in
         let* net = resolve_net ?net () in
-        Worker_oas.run_worker_via_oas ~sw ~net ~base_path ~meta ~provider
+        Worker_oas.run_worker_via_oas ~sw ~net ~base_path ~auth_token ~meta
+          ~provider
           ~system_prompt ~prompt ~tools ~raw_trace ~gate_config
           ?worker_run_id ()
 
@@ -232,7 +233,8 @@ let continue_worker ?worker_run_id ~sw ?net ~base_path ~room_config ~worker_name
               in
               let* mcp_tools =
                 build_oas_mcp_tools ~sw ~auth_token
-                  ~session_id:meta.mcp_session_id ~worker_name ~prompt
+                  ~session_id:meta.mcp_session_id
+                  ~team_session_id:meta.team_session_id ~worker_name ~prompt
                   ~allowed_tools
               in
               let mcp_tools =
@@ -303,8 +305,8 @@ let continue_worker ?worker_run_id ~sw ?net ~base_path ~room_config ~worker_name
                 String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
               in
               let* net = resolve_net ?net () in
-              Worker_oas.resume_worker_via_oas ~sw ~net ~base_path ~meta ~checkpoint
-                ~prompt ~tools ~raw_trace ?worker_run_id ()))
+              Worker_oas.resume_worker_via_oas ~sw ~net ~base_path ~auth_token
+                ~meta ~checkpoint ~prompt ~tools ~raw_trace ?worker_run_id ()))
 
 let run_worker ~sw ?net ~base_path ~worker_name ~model_label ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope

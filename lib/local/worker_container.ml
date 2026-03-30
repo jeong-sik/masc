@@ -394,8 +394,8 @@ let resolve_execution_scope ~base_path ~(team_session_id : string option)
           | None -> Team_session_types.Limited_code_change)
       | None -> Team_session_types.Limited_code_change)
 
-let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt:_
-    ~allowed_tools =
+let build_oas_mcp_tools ~sw ~auth_token ~session_id ~team_session_id
+    ~worker_name ~prompt:_ ~allowed_tools =
   let allowed_names =
     match allowed_tools |> List.map strip_mcp_prefix |> unique_preserve_order with
     | [] -> session_min_tool_names
@@ -414,6 +414,8 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name ~prompt:_
                let args =
                  input
                  |> inject_default_agent_name ~worker_name
+                      ~schema:(Some schema)
+                 |> inject_team_session_id ~team_session_id ~worker_name
                       ~schema:(Some schema)
                in
                match
@@ -620,4 +622,3 @@ let materialize_direct_evidence ~base_path ~worker_name
           Log.LocalWorker.error
             "direct evidence persist failed for %s/%s: %s"
             worker_name session_id (Oas.Error.to_string err)
-

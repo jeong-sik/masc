@@ -429,6 +429,7 @@ let record_turn ~(config : Room.config) ~(session_id : string) ~(actor : string)
       then
         Error "actor is not authorized for this team session"
       else
+      let actor = canonical_session_actor ~actor session in
       let message = normalize_opt message in
       let target_agent = normalize_opt target_agent in
       let task_title = normalize_opt task_title in

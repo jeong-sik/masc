@@ -83,38 +83,41 @@ let verdict_to_string = function
   | Warn reason -> sprintf "WARN: %s" reason
   | Fail reason -> sprintf "FAIL: %s" reason
 
+(** Check if keyword at position 0..len is followed by a word boundary
+    (end of string, space, colon, dash, or newline). Prevents "PASSING" matching as PASS. *)
+let has_keyword_boundary upper len =
+  String.length upper = len
+  || (let c = upper.[len] in c = ' ' || c = ':' || c = '-' || c = '\n' || c = '\r')
+
+(** Extract reason text after keyword+separator, stripping leading colon/dash. *)
+let extract_reason trimmed keyword_len default_reason =
+  let reason =
+    if String.length trimmed > keyword_len + 1 then
+      String.trim (String.sub trimmed (keyword_len + 1) (String.length trimmed - keyword_len - 1))
+    else default_reason
+  in
+  if String.length reason > 0 && (reason.[0] = ':' || reason.[0] = '-') then
+    String.trim (String.sub reason 1 (String.length reason - 1))
+  else reason
+
 (** Parse "PASS", "WARN: reason", "FAIL: reason" from model output.
-    Returns Error on unrecognized format instead of silent degrade (ADR D3). *)
+    Returns Error on unrecognized format instead of silent degrade (ADR D3).
+    Requires word boundary after keyword to prevent "PASSING"/"WARNING" false matches. *)
 let parse_verdict (text : string) : (verdict, string) result =
   let trimmed = String.trim text in
   let upper = String.uppercase_ascii trimmed in
-  if String.length upper >= 4 && String.sub upper 0 4 = "PASS" then
+  let len = String.length upper in
+  if len >= 4 && String.sub upper 0 4 = "PASS" && has_keyword_boundary upper 4 then
     Ok Pass
-  else if String.length upper >= 4 && String.sub upper 0 4 = "WARN" then
-    let reason = if String.length trimmed > 5 then
-      String.trim (String.sub trimmed 5 (String.length trimmed - 5))
-    else "unspecified concern" in
-    let reason = if String.length reason > 0 &&
-      (reason.[0] = ':' || reason.[0] = '-') then
-      String.trim (String.sub reason 1 (String.length reason - 1))
-    else reason in
-    Ok (Warn reason)
-  else if String.length upper >= 4 && String.sub upper 0 4 = "FAIL" then
-    let reason = if String.length trimmed > 5 then
-      String.trim (String.sub trimmed 5 (String.length trimmed - 5))
-    else "action did not achieve goal" in
-    let reason = if String.length reason > 0 &&
-      (reason.[0] = ':' || reason.[0] = '-') then
-      String.trim (String.sub reason 1 (String.length reason - 1))
-    else reason in
-    Ok (Fail reason)
-  else if String.length trimmed = 0 then
+  else if len >= 4 && String.sub upper 0 4 = "WARN" && has_keyword_boundary upper 4 then
+    Ok (Warn (extract_reason trimmed 4 "unspecified concern"))
+  else if len >= 4 && String.sub upper 0 4 = "FAIL" && has_keyword_boundary upper 4 then
+    Ok (Fail (extract_reason trimmed 4 "action did not achieve goal"))
+  else if len = 0 then
     Error "empty verifier output"
   else
     Error (sprintf "unrecognized verdict format: %s"
-      (if String.length trimmed > 80
-       then String.sub trimmed 0 80 ^ "..."
-       else trimmed))
+      (if len > 80 then String.sub trimmed 0 80 ^ "..." else trimmed))
 
 (* ================================================================ *)
 (* Verification Prompt                                              *)

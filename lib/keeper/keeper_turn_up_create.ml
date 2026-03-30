@@ -10,6 +10,7 @@ open Keeper_execution
 open Keeper_turn_up_args
 
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
+  Log.Keeper.info "create_keeper: starting for name=%s" p.name;
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
   let tracker = Progress.start_tracking ~task_id ~total_steps:6 () in
   Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
@@ -59,16 +60,21 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~fallback_targets:p.profile_defaults.mention_targets
       ~name:p.name
   in
-  if goal = "" then
+  if goal = "" then begin
+    Log.Keeper.warn "create_keeper failed: goal is required (name=%s)" p.name;
     (false, "goal is required when creating a keeper")
+  end
   else
     let max_active_keepers = Env_config.KeeperBootstrap.max_active_keepers in
     let active_keepers = Keeper_registry.count_running () in
-    if max_active_keepers > 0 && active_keepers >= max_active_keepers then
+    if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
+      Log.Keeper.warn "create_keeper failed: max active keepers reached (%d/%d) for name=%s"
+        active_keepers max_active_keepers p.name;
       (false,
         Printf.sprintf
           "keeper max active reached (%d/%d). Stop/remove a keeper or set MASC_KEEPER_MAX_ACTIVE_KEEPERS."
           active_keepers max_active_keepers)
+    end
     else
     let proactive_enabled =
       Option.value
@@ -139,9 +145,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     let cascade_models = Oas_model_resolve.models_of_cascade_name "keeper_unified" in
     (match ensure_api_keys_for_labels cascade_models with
      | Error e ->
+       Log.Keeper.error "create_keeper failed: API key validation error for name=%s: %s" p.name e;
        Progress.stop_tracking task_id;
        (false, e)
      | Ok () ->
+       Log.Keeper.debug "create_keeper: API keys validated for name=%s cascade=%s"
+         p.name "keeper_unified";
        Progress.Tracker.step tracker ~message:"Initializing session directory" ();
        let primary_max_context = Oas_model_resolve.resolve_primary_max_context cascade_models in
        let trace_id = generate_trace_id () in
@@ -275,17 +284,24 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
          match write_meta ctx.config meta with
          | Error e ->
+           Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
            Progress.stop_tracking task_id;
            (false, e)
          | Ok () ->
+           Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
+             p.name meta.runtime.trace_id;
            Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
+           Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
            start_keepalive ctx meta;
            (* Apply per-persona shard configuration if present *)
            (match p.profile_defaults.shards with
             | Some (_ :: _ as shard_names) ->
+                Log.Keeper.debug "create_keeper: applying shard config for name=%s shards=%d"
+                  p.name (List.length shard_names);
                 Tool_shard.set_agent_shards p.name shard_names
             | Some [] | None -> ());
            Progress.Tracker.complete tracker ~message:"Keeper created" ();
+           Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name meta.runtime.trace_id;
            let json = `Assoc [
              ("name", `String meta.name);
              ("agent_name", `String meta.agent_name);

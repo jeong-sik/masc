@@ -311,33 +311,36 @@ let apply_patch ~(worktree_path : string) ~(hypothesis : hypothesis) : bool =
       false
   end
 
-(** Log a result to the TSV file. *)
+(** Log a result to the TSV file (best-effort: never aborts the caller). *)
 let log_result ~(results_file : string) ~(entry : experiment_entry) : unit =
   let header = "experiment\tbuild_ok\ttest_pass_rate\tloc_delta\tfiles_changed\tstatus\tdescription\n" in
-  let oc = open_out_gen [ Open_append; Open_creat ] 0o644 results_file in
-  (* Check file size after open to avoid TOCTOU race on needs_header *)
-  let needs_header =
-    try
-      let pos = LargeFile.pos_out oc in
-      pos = Int64.zero
-    with exn ->
-      log_best_effort_failure "results header check" exn;
-      false
-  in
-  (try
-     if needs_header then output_string oc header;
-     Printf.fprintf oc "%s\t%d\t%.4f\t%d\t%d\t%s\t%s\n"
-       entry.id
-       (if entry.metric.build_ok then 1 else 0)
-       entry.metric.test_pass_rate
-       entry.metric.loc_delta
-       entry.metric.files_changed
-       (Research_metric.status_to_string entry.metric.status)
-       entry.hypothesis.description;
-     close_out oc
-   with exn ->
-     close_out_noerr oc;
-     raise exn)
+  try
+    let oc = open_out_gen [ Open_append; Open_creat ] 0o644 results_file in
+    (* Check file size after open to avoid TOCTOU race on needs_header *)
+    let needs_header =
+      try
+        let pos = LargeFile.pos_out oc in
+        pos = Int64.zero
+      with exn ->
+        log_best_effort_failure "results header check" exn;
+        false
+    in
+    (try
+       if needs_header then output_string oc header;
+       Printf.fprintf oc "%s\t%d\t%.4f\t%d\t%d\t%s\t%s\n"
+         entry.id
+         (if entry.metric.build_ok then 1 else 0)
+         entry.metric.test_pass_rate
+         entry.metric.loc_delta
+         entry.metric.files_changed
+         (Research_metric.status_to_string entry.metric.status)
+         entry.hypothesis.description;
+       close_out oc
+     with exn ->
+       close_out_noerr oc;
+       log_best_effort_failure "log_result write" exn)
+  with exn ->
+    log_best_effort_failure "log_result" exn
 
 (** Run a single experiment iteration. *)
 let run_experiment ~sw ~net ~clock ~(config : Research_config.t)

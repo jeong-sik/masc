@@ -95,8 +95,8 @@ type keeper_meta = {
   execution_scope: string;
   allowed_paths: string list;
   scope_kind: string;
-  tool_tier: string;
-  extra_masc_tools: string list;
+  tool_allowlist: string list;
+  tool_denylist: string list;
   room_scope: string;
   mention_targets: string list;
   joined_room_ids: string list;

@@ -204,8 +204,6 @@ type keeper_profile_defaults = {
   mention_targets : string list;
   proactive_enabled : bool option;
   shards : string list option;
-  tool_tier : string option;
-  extra_masc_tools : string list option;
   allowed_paths : string list option;
   execution_scope : string option;
 }
@@ -236,8 +234,6 @@ let empty_keeper_profile_defaults = {
   mention_targets = [];
   proactive_enabled = None;
   shards = None;
-  tool_tier = None;
-  extra_masc_tools = None;
   allowed_paths = None;
   execution_scope = None;
 }
@@ -326,11 +322,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            (match strs "shards" with
             | [] -> None
             | xs -> Some xs);
-         tool_tier = str "tool_tier";
-         extra_masc_tools =
-           (match strs "extra_masc_tools" with
-            | [] -> None
-            | xs -> Some xs);
          allowed_paths =
            (match strs "allowed_paths" with
             | [] -> None
@@ -416,11 +407,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
                 shards =
                   (match Safe_ops.json_string_list "shards" keeper_json with
-                   | [] -> None
-                   | xs -> Some xs);
-                tool_tier = Safe_ops.json_string_opt "tool_tier" keeper_json;
-                extra_masc_tools =
-                  (match Safe_ops.json_string_list "extra_masc_tools" keeper_json with
                    | [] -> None
                    | xs -> Some xs);
                 allowed_paths =

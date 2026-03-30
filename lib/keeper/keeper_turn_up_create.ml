@@ -97,16 +97,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       Option.value ~default:default_proactive_cooldown_sec p.proactive_cooldown_sec_opt
       |> normalize_proactive_cooldown_sec
     in
-    let tool_tier =
-      p.tool_tier_opt
-      |> first_some p.profile_defaults.tool_tier
-      |> Option.value ~default:"essential"
-    in
-    let extra_masc_tools =
-      match p.extra_masc_tools_in with
-      | _ :: _ as xs -> xs
-      | [] -> Option.value ~default:[] p.profile_defaults.extra_masc_tools
-    in
     let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
     let handoff_threshold = Option.value ~default:0.85 p.handoff_threshold_opt in
     let handoff_cooldown_sec = Option.value ~default:300 p.handoff_cooldown_sec_opt in
@@ -211,8 +201,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            execution_scope;
            allowed_paths;
            scope_kind;
-           tool_tier;
-           extra_masc_tools;
+           tool_allowlist = [];
+           tool_denylist = [];
            room_scope;
            voice_enabled;
            voice_channel;

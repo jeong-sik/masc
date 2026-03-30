@@ -1,23 +1,23 @@
-(** Test keeper masc_* tool bridge — verifies tier-based schema injection
-    and dispatch passthrough for keeper tool exposure. *)
+(** Test keeper masc_* tool bridge — verifies allowlist/denylist gating
+    and schema injection for keeper tool exposure. *)
 
 module KET = Masc_mcp.Keeper_exec_tools
 
-let make_meta ?(tool_tier = "essential") ?(extra_masc_tools = []) () =
+let make_meta ?(tool_allowlist = []) ?(tool_denylist = []) () =
   match Masc_mcp.Keeper_types.meta_of_json
     (`Assoc
       [
         ("name", `String "keeper-bridge-test");
         ("agent_name", `String "keeper-bridge-test");
         ("trace_id", `String "keeper-bridge-trace");
-        ("tool_tier", `String tool_tier);
-        ("extra_masc_tools", `List (List.map (fun s -> `String s) extra_masc_tools));
+        ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
+        ("tool_denylist", `List (List.map (fun s -> `String s) tool_denylist));
       ])
   with
   | Ok meta -> meta
   | Error e -> failwith e
 
-(** Verify inject_masc_schemas stores all masc_* schemas (no name-based filter). *)
+(** Verify inject_masc_schemas stores all masc_* schemas (no filtering). *)
 let test_inject_stores_all_masc () =
   let schemas : Types.tool_schema list =
     [
@@ -28,61 +28,75 @@ let test_inject_stores_all_masc () =
     ]
   in
   KET.inject_masc_schemas schemas;
-  (* inject stores all 3 masc_* tools, not the keeper_* one *)
-  let meta = make_meta ~tool_tier:"full" () in
+  (* Full tier to verify storage — allowlist all 3 *)
+  let meta = make_meta
+    ~tool_allowlist:["masc_status"; "masc_broadcast"; "masc_messages"] () in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "3 masc tools stored" 3 (List.length names);
-  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "has masc_broadcast" true (List.mem "masc_broadcast" names);
-  Alcotest.(check bool) "has masc_messages" true (List.mem "masc_messages" names);
+  Alcotest.(check int) "3 masc tools" 3 (List.length names);
   Alcotest.(check bool) "no keeper_time_now" false
     (List.mem "keeper_time_now" names)
 
-(** Verify Essential tier includes expected tools and excludes non-essential. *)
-let test_essential_tier_filters () =
+(** Default: empty allowlist = no masc_* tools (deny-by-default). *)
+let test_default_locked () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta ~tool_tier:"essential" () in
+  let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
-  (* Essential tier should include core coordination tools *)
+  Alcotest.(check int) "empty allowlist = 0 masc tools" 0 (List.length names)
+
+(** Default: allowed_tool_names also blocks shard-sourced masc_* tools. *)
+let test_default_blocks_shard_masc () =
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  let meta = make_meta () in
+  let names = KET.keeper_allowed_tool_names meta in
+  (* keeper_* should pass *)
+  Alcotest.(check bool) "has keeper_time_now" true
+    (List.mem "keeper_time_now" names);
+  Alcotest.(check bool) "has keeper_board_post" true
+    (List.mem "keeper_board_post" names);
+  (* masc_* should be blocked *)
+  Alcotest.(check bool) "no masc_status" false (List.mem "masc_status" names);
+  Alcotest.(check bool) "no masc_governance_status" false
+    (List.mem "masc_governance_status" names);
+  Alcotest.(check bool) "no masc_autoresearch_cycle" false
+    (List.mem "masc_autoresearch_cycle" names)
+
+(** Allowlist opens specific tools. *)
+let test_allowlist_opens_tools () =
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  let meta = make_meta
+    ~tool_allowlist:["masc_status"; "masc_broadcast"; "masc_join"] () in
+  let names = KET.keeper_masc_tool_names meta in
+  Alcotest.(check int) "3 allowed" 3 (List.length names);
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "has masc_join" true (List.mem "masc_join" names);
   Alcotest.(check bool) "has masc_broadcast" true (List.mem "masc_broadcast" names);
-  Alcotest.(check bool) "has masc_claim_next" true (List.mem "masc_claim_next" names);
-  Alcotest.(check bool) "has masc_transition" true (List.mem "masc_transition" names);
-  Alcotest.(check bool) "has masc_heartbeat" true (List.mem "masc_heartbeat" names);
-  (* Board tools should NOT be in Essential *)
+  Alcotest.(check bool) "has masc_join" true (List.mem "masc_join" names);
   Alcotest.(check bool) "no masc_board_post" false (List.mem "masc_board_post" names)
 
-(** Verify Standard tier includes board tools. *)
-let test_standard_tier_includes_board () =
+(** Denylist overrides allowlist. *)
+let test_deny_overrides_allow () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta ~tool_tier:"standard" () in
+  let meta = make_meta
+    ~tool_allowlist:["masc_status"; "masc_broadcast"; "masc_join"]
+    ~tool_denylist:["masc_broadcast"] () in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check bool) "has masc_board_post" true (List.mem "masc_board_post" names);
-  Alcotest.(check bool) "has masc_team_session_start" true
-    (List.mem "masc_team_session_start" names);
-  (* Essential tools should also be present in Standard *)
-  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names)
+  Alcotest.(check int) "2 after deny" 2 (List.length names);
+  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
+  Alcotest.(check bool) "no masc_broadcast (denied)" false
+    (List.mem "masc_broadcast" names)
 
-(** Verify extra_masc_tools adds tools beyond the tier. *)
-let test_extra_tools_override () =
+(** Allowlist also gates shard-sourced masc_* in allowed_tool_names. *)
+let test_allowlist_gates_shard_tools () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta ~tool_tier:"essential" ~extra_masc_tools:["masc_board_post"] () in
-  let names = KET.keeper_masc_tool_names meta in
-  (* masc_board_post is NOT in Essential but IS in extra_masc_tools *)
-  Alcotest.(check bool) "extra: has masc_board_post" true
-    (List.mem "masc_board_post" names);
-  (* Normal essential tools still present *)
-  Alcotest.(check bool) "extra: has masc_status" true (List.mem "masc_status" names)
-
-(** Verify Full tier returns all stored schemas. *)
-let test_full_tier_includes_all () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta_full = make_meta ~tool_tier:"full" () in
-  let meta_essential = make_meta ~tool_tier:"essential" () in
-  let full_count = List.length (KET.keeper_masc_tool_names meta_full) in
-  let essential_count = List.length (KET.keeper_masc_tool_names meta_essential) in
-  Alcotest.(check bool) "full > essential" true (full_count > essential_count)
+  let meta = make_meta
+    ~tool_allowlist:["masc_status"; "masc_governance_status"] () in
+  let names = KET.keeper_allowed_tool_names meta in
+  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
+  Alcotest.(check bool) "has masc_governance_status" true
+    (List.mem "masc_governance_status" names);
+  (* Not in allowlist — blocked even though shard provides it *)
+  Alcotest.(check bool) "no masc_cases" false (List.mem "masc_cases" names);
+  Alcotest.(check bool) "no masc_autoresearch_cycle" false
+    (List.mem "masc_autoresearch_cycle" names)
 
 (** Verify dispatch passthrough returns None for unregistered tools. *)
 let test_dispatch_unregistered () =
@@ -94,7 +108,8 @@ let test_dispatch_unregistered () =
 (** Verify schemas and names are consistent. *)
 let test_schemas_match_names () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta () in
+  let meta = make_meta
+    ~tool_allowlist:["masc_status"; "masc_join"; "masc_broadcast"] () in
   let names = KET.keeper_masc_tool_names meta in
   let schemas = KET.keeper_masc_tool_schemas meta in
   Alcotest.(check int) "count matches"
@@ -105,27 +120,6 @@ let test_schemas_match_names () =
         (List.mem s.name names))
     schemas
 
-(** Verify all bridged tools still have masc_ prefix. *)
-let test_all_have_prefix () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta () in
-  let names = KET.keeper_masc_tool_names meta in
-  List.iter
-    (fun name ->
-      Alcotest.(check bool) (name ^ " has masc_ prefix") true
-        (String.starts_with ~prefix:"masc_" name))
-    names
-
-(** Verify allowed tools include essential masc_* tools by default. *)
-let test_allowed_tools_include_essential () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta () in
-  let names = KET.keeper_allowed_tool_names meta in
-  Alcotest.(check bool) "has masc_messages" true (List.mem "masc_messages" names);
-  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "has masc_join" true (List.mem "masc_join" names);
-  Alcotest.(check bool) "has masc_broadcast" true (List.mem "masc_broadcast" names)
-
 let () =
   Alcotest.run "Keeper masc bridge"
     [
@@ -133,17 +127,25 @@ let () =
         [
           Alcotest.test_case "stores all masc_* schemas" `Quick
             test_inject_stores_all_masc;
-          Alcotest.test_case "essential tier filters correctly" `Quick
-            test_essential_tier_filters;
         ] );
-      ( "tiers",
+      ( "deny_by_default",
         [
-          Alcotest.test_case "standard includes board" `Quick
-            test_standard_tier_includes_board;
-          Alcotest.test_case "extra_tools override" `Quick
-            test_extra_tools_override;
-          Alcotest.test_case "full includes all" `Quick
-            test_full_tier_includes_all;
+          Alcotest.test_case "empty allowlist = no masc tools" `Quick
+            test_default_locked;
+          Alcotest.test_case "blocks shard-sourced masc_*" `Quick
+            test_default_blocks_shard_masc;
+        ] );
+      ( "allowlist",
+        [
+          Alcotest.test_case "opens specific tools" `Quick
+            test_allowlist_opens_tools;
+          Alcotest.test_case "gates shard tools too" `Quick
+            test_allowlist_gates_shard_tools;
+        ] );
+      ( "denylist",
+        [
+          Alcotest.test_case "deny overrides allow" `Quick
+            test_deny_overrides_allow;
         ] );
       ( "dispatch",
         [
@@ -153,8 +155,5 @@ let () =
       ( "consistency",
         [
           Alcotest.test_case "schemas match names" `Quick test_schemas_match_names;
-          Alcotest.test_case "all have masc_ prefix" `Quick test_all_have_prefix;
-          Alcotest.test_case "allowed tools include essential" `Quick
-            test_allowed_tools_include_essential;
         ] );
     ]

@@ -79,22 +79,10 @@ let keeper_voice_tool_schemas =
   | Some shard -> shard.tools
   | None -> []
 
-(** Curated masc_* bridge for keepers.
-    Schema list is injected at server init to avoid cyclic dependency on Tools.
-    Keeper tool access is controlled per-keeper via tool_tier (essential/standard/full)
-    in persona config, using Tool_catalog tier definitions. *)
-
-(** @deprecated Legacy hardcoded list. Tier-based filtering via Tool_catalog
-    replaces this. Kept for test backward-compatibility reference. *)
-let keeper_passthrough_masc_tool_names =
-  [
-    "masc_status";
-    "masc_who";
-    "masc_messages";
-    "masc_poll_events";
-    "masc_relay_status";
-    "masc_relay_checkpoint";
-  ]
+(** masc_* bridge for keepers.
+    All masc_* schemas are injected at server init and exposed to keepers
+    unconditionally. Execution dispatch (catch-all at bottom of
+    execute_keeper_tool_call) already handles any masc_* tool. *)
 
 let masc_schemas_ref : Types.tool_schema list ref = ref []
 
@@ -104,27 +92,34 @@ let inject_masc_schemas (schemas : Types.tool_schema list) =
       String.starts_with ~prefix:"masc_" s.name)
       schemas
 
+(** Apply allowlist/denylist filtering to masc_* tool names.
+    - allowlist empty → no masc_* tools (deny-by-default)
+    - allowlist non-empty → only those tools
+    - denylist always wins (deny overrides allow) *)
+let filter_by_access ~(allowlist : string list) ~(denylist : string list)
+    (name : string) : bool =
+  if allowlist = [] then false
+  else
+    List.mem name allowlist
+    && not (List.mem name denylist)
+
 let keeper_masc_tool_names (meta : keeper_meta) : string list =
-  let tier =
-    Tool_catalog.tier_of_string meta.tool_tier
-    |> Option.value ~default:Tool_catalog.Essential
-  in
   !masc_schemas_ref
   |> List.filter_map (fun (schema : Types.tool_schema) ->
-    if Tool_catalog.is_in_tier tier schema.name
-       || List.mem schema.name meta.extra_masc_tools
+    if filter_by_access
+         ~allowlist:meta.tool_allowlist
+         ~denylist:meta.tool_denylist
+         schema.name
     then Some schema.name
     else None)
 
 let keeper_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
-  let tier =
-    Tool_catalog.tier_of_string meta.tool_tier
-    |> Option.value ~default:Tool_catalog.Essential
-  in
   !masc_schemas_ref
   |> List.filter (fun (schema : Types.tool_schema) ->
-    Tool_catalog.is_in_tier tier schema.name
-    || List.mem schema.name meta.extra_masc_tools)
+    filter_by_access
+      ~allowlist:meta.tool_allowlist
+      ~denylist:meta.tool_denylist
+      schema.name)
 
 let dedupe_tool_names names =
   dedupe_keep_order (List.filter (fun name -> String.trim name <> "") names)
@@ -136,9 +131,9 @@ let keeper_default_tool_names (_meta : keeper_meta) : string list =
 let keeper_default_model_tools (_meta : keeper_meta) : Types.tool_schema list =
   keeper_model_tools @ keeper_voice_tool_schemas
 
-(** Return all keeper tool names unconditionally.
-    Mode-based categorization removed: every keeper gets the full tool set.
-    Safety is handled by eval_gate deny lists (kept intact). *)
+(** Return keeper tool names with allowlist/denylist gating on masc_*.
+    keeper_* tools pass unconditionally. masc_* tools from any source
+    (shards, passthrough, defaults) are filtered by tool_allowlist/tool_denylist. *)
 let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     string list =
   if write_done then
@@ -157,11 +152,18 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
       @ (keeper_masc_tool_names meta)
       @ (keeper_default_tool_names meta)
     in
-    dedupe_tool_names all_names
+    all_names
+    |> List.filter (fun name ->
+      if String.starts_with ~prefix:"masc_" name then
+        filter_by_access
+          ~allowlist:meta.tool_allowlist
+          ~denylist:meta.tool_denylist
+          name
+      else
+        true)
+    |> dedupe_tool_names
 
-(** Return all keeper model tool schemas unconditionally.
-    Mode-based categorization removed: every keeper gets the full tool set.
-    Safety is handled by eval_gate deny lists (kept intact). *)
+(** Return keeper model tool schemas with allowlist/denylist gating. *)
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     Types.tool_schema list =
   let allowed = keeper_allowed_tool_names ~write_done meta in
@@ -797,6 +799,13 @@ let execute_keeper_tool_call
                (`Assoc [ ("ok", `Bool false);
                           ("error", `String (Types.masc_error_to_string e)) ]))
   | name when String.starts_with ~prefix:"masc_autoresearch_" name ->
+      if not (filter_by_access
+                ~allowlist:meta.tool_allowlist
+                ~denylist:meta.tool_denylist name) then
+        Yojson.Safe.to_string
+          (`Assoc [ ("error", `String "tool_not_allowed");
+                    ("tool", `String name) ])
+      else
       let ctx : Tool_autoresearch.context = {
         base_path = project_root_of_config config;
         agent_name = Some meta.name;
@@ -815,6 +824,16 @@ let execute_keeper_tool_call
             (`Assoc [ ("error", `String "unknown_autoresearch_tool");
                       ("tool", `String name) ]))
   | name when String.starts_with ~prefix:"masc_" name ->
+      (* Allowlist/denylist enforcement at execution time.
+         Even if the LLM hallucinates a tool name that wasn't in the schema,
+         this gate blocks execution. Deny always wins. *)
+      if not (filter_by_access
+                ~allowlist:meta.tool_allowlist
+                ~denylist:meta.tool_denylist name) then
+        Yojson.Safe.to_string
+          (`Assoc [ ("error", `String "tool_not_allowed");
+                    ("tool", `String name) ])
+      else
       (* Pre-dispatch path guard: if the tool args contain a path/file_path
          key, validate it against effective_allowed_paths before dispatching. *)
       let effective_paths = Keeper_alerting_path.effective_allowed_paths ~meta in

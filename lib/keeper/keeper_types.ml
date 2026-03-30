@@ -92,8 +92,8 @@ type keeper_meta = {
   execution_scope: string;
   allowed_paths: string list;
   scope_kind: string;
-  tool_tier: string;
-  extra_masc_tools: string list;
+  tool_allowlist: string list;
+  tool_denylist: string list;
   room_scope: string;
   mention_targets: string list;
   joined_room_ids: string list;
@@ -249,8 +249,8 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("execution_scope", `String m.execution_scope);
       ("allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths));
       ("scope_kind", `String m.scope_kind);
-      ("tool_tier", `String m.tool_tier);
-      ("extra_masc_tools", `List (List.map (fun s -> `String s) m.extra_masc_tools));
+      ("tool_allowlist", `List (List.map (fun s -> `String s) m.tool_allowlist));
+      ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
       ("room_scope", `String m.room_scope);
       ("mention_targets", `List (List.map (fun s -> `String s) m.mention_targets));
       ("joined_room_ids", `List (List.map (fun s -> `String s) m.joined_room_ids));
@@ -378,12 +378,8 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let scope_kind =
       Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
     in
-    let tool_tier =
-      Safe_ops.json_string ~default:"essential" "tool_tier" json
-    in
-    let extra_masc_tools =
-      Safe_ops.json_string_list "extra_masc_tools" json
-    in
+    let tool_allowlist = Safe_ops.json_string_list "tool_allowlist" json in
+    let tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
     let room_scope =
       Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope
     in
@@ -543,8 +539,8 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           execution_scope;
           allowed_paths;
           scope_kind;
-          tool_tier;
-          extra_masc_tools;
+          tool_allowlist;
+          tool_denylist;
           room_scope;
           mention_targets;
           joined_room_ids;

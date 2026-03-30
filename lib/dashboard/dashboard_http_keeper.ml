@@ -673,6 +673,21 @@ let keeper_config_json (config : Room.config) (name : string)
         in
         Keeper_exec_status.derive_pipeline_stage ~meta:m ~surface_status:surface ~now_ts
       in
+      let tools_access =
+        let allowed = Keeper_exec_tools.keeper_allowed_tool_names m in
+        let masc_tools =
+          allowed
+          |> List.filter (fun n -> String.starts_with ~prefix:"masc_" n)
+        in
+        `Assoc [
+          ("tool_allowlist", `List (List.map (fun s -> `String s) m.tool_allowlist));
+          ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
+          ("active_masc_tool_count", `Int (List.length masc_tools));
+          ("active_keeper_tool_count",
+            `Int (List.length allowed - List.length masc_tools));
+          ("total_active", `Int (List.length allowed));
+        ]
+      in
       (`OK,
        `Assoc [
          ("name", `String m.name);
@@ -685,6 +700,7 @@ let keeper_config_json (config : Room.config) (name : string)
          ("drift", drift);
          ("auto_team_session", auto_team_session_surface_json ());
          ("handoff", handoff);
+         ("tools", tools_access);
          ("runtime", runtime_surface_json config m);
          ("coordination", coordination_surface_json m);
          ("sources", source_provenance_json config m);

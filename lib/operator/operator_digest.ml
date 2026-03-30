@@ -290,7 +290,7 @@ let room_state_json config =
       ]
 
 let keeper_context_ratio (meta : Keeper_types.keeper_meta) =
-  let input_tokens = meta.usage.last_input_tokens in
+  let input_tokens = meta.runtime.usage.last_input_tokens in
   if input_tokens = 0 then None
   else
     let active_model = Keeper_exec_status.active_model_of_meta meta in

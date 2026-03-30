@@ -43,7 +43,7 @@ let handle_keeper_status ctx args : tool_result =
            if include_context then
              let (_session, ctx_opt) =
                load_context_from_checkpoint
-                 ~trace_id:m.trace_id
+                 ~trace_id:m.runtime.trace_id
                  ~primary_model_max_tokens:primary_max_context
                  ~base_dir
              in
@@ -77,17 +77,17 @@ let handle_keeper_status ctx args : tool_result =
            Resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
          in
          let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
-         let last_turn_ago_s = if m.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.usage.last_turn_ts in
-         let last_handoff_ago_s = if m.last_handoff_ts <= 0.0 then 0.0 else now_ts -. m.last_handoff_ts in
-         let last_compaction_ago_s = if m.compaction.last_ts <= 0.0 then 0.0 else now_ts -. m.compaction.last_ts in
+         let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
+         let last_handoff_ago_s = if m.runtime.last_handoff_ts <= 0.0 then 0.0 else now_ts -. m.runtime.last_handoff_ts in
+         let last_compaction_ago_s = if m.runtime.compaction_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.compaction_rt.last_ts in
          let last_proactive_ago_s =
-           if m.proactive.last_ts <= 0.0 then 0.0 else now_ts -. m.proactive.last_ts
+           if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
          in
-         let trace_history_count = List.length m.trace_history in
+         let trace_history_count = List.length m.runtime.trace_history in
          let active_model = active_model_of_meta m in
          let next_model_hint = next_model_hint_of_meta m in
          let last_compaction_saved_tokens =
-           max 0 (m.compaction.last_before_tokens - m.compaction.last_after_tokens)
+           max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
          in
          let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
            compaction_policy_of_keeper m
@@ -114,8 +114,8 @@ let handle_keeper_status ctx args : tool_result =
          let metrics_store = keeper_metrics_store ctx.config m.name in
          let metrics_path = keeper_metrics_path ctx.config m.name in
          let memory_bank_path = keeper_memory_bank_path ctx.config m.name in
-         let session_dir = keeper_session_dir ctx.config m.trace_id in
-         let history_path = keeper_history_path ctx.config m.trace_id in
+         let session_dir = keeper_session_dir ctx.config m.runtime.trace_id in
+         let history_path = keeper_history_path ctx.config m.runtime.trace_id in
 
          let metrics_tail =
            let lines =
@@ -144,7 +144,7 @@ let handle_keeper_status ctx args : tool_result =
            if include_metrics_overview then
              summarize_metrics_lines
                metrics_window_lines
-               ~default_generation:m.generation
+               ~default_generation:m.runtime.generation
            else
              empty_metrics_summary
          in
@@ -336,7 +336,7 @@ let handle_keeper_status ctx args : tool_result =
                            ("ts_unix", `Float ts_unix);
                            ("age_s", match age_s with Some v -> `Float v | None -> `Null);
                            ("trace_id", `String (Safe_ops.json_string ~default:"" "trace_id" j));
-                           ("generation", `Int (Safe_ops.json_int ~default:m.generation "generation" j));
+                           ("generation", `Int (Safe_ops.json_int ~default:m.runtime.generation "generation" j));
                            ("context_ratio", `Float (Safe_ops.json_float ~default:0.0 "context_ratio" j));
                            ("context_before_tokens", `Int before_tokens);
                            ("context_after_tokens", `Int after_tokens);
@@ -417,17 +417,17 @@ let handle_keeper_status ctx args : tool_result =
              ("enabled", `Bool m.proactive.enabled);
              ("idle_sec", `Int m.proactive.idle_sec);
              ("cooldown_sec", `Int m.proactive.cooldown_sec);
-             ("count_total", `Int m.proactive.count_total);
-             ("last_ts", `Float m.proactive.last_ts);
+             ("count_total", `Int m.runtime.proactive_rt.count_total);
+             ("last_ts", `Float m.runtime.proactive_rt.last_ts);
              ("last_ago_s", `Float last_proactive_ago_s);
              ("last_reason",
-               if String.trim m.proactive.last_reason = ""
+               if String.trim m.runtime.proactive_rt.last_reason = ""
                then `Null
-               else `String m.proactive.last_reason);
+               else `String m.runtime.proactive_rt.last_reason);
              ("last_preview",
-               if String.trim m.proactive.last_preview = ""
+               if String.trim m.runtime.proactive_rt.last_preview = ""
                then `Null
-               else `String m.proactive.last_preview);
+               else `String m.runtime.proactive_rt.last_preview);
            ]);
            ("drift", drift_surface_json ());
            ("policy", `Assoc [
@@ -440,13 +440,13 @@ let handle_keeper_status ctx args : tool_result =
            ("auto_team_session", auto_team_session_surface_json ());
            ("auto_team_session_enabled", `Bool false);
            ("autonomy", `Assoc [
-             ("turn_count", `Int m.autonomous_turn_count);
-             ("tool_turn_count", `Int m.autonomous_tool_turn_count);
-             ("text_turn_count", `Int m.autonomous_text_turn_count);
-             ("board_reactive_turn_count", `Int m.board_reactive_turn_count);
-             ("mention_reactive_turn_count", `Int m.mention_reactive_turn_count);
-             ("noop_turn_count", `Int m.noop_turn_count);
-             ("tool_action_count", `Int m.autonomous_action_count);
+             ("turn_count", `Int m.runtime.autonomous_turn_count);
+             ("tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
+             ("text_turn_count", `Int m.runtime.autonomous_text_turn_count);
+             ("board_reactive_turn_count", `Int m.runtime.board_reactive_turn_count);
+             ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
+             ("noop_turn_count", `Int m.runtime.noop_turn_count);
+             ("tool_action_count", `Int m.runtime.autonomous_action_count);
            ]);
            ("active_team_session_id",
              match m.active_team_session_id with

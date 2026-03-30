@@ -414,8 +414,8 @@ let append_memory_notes_from_reply
               ("ts", `String (now_iso ()));
               ("ts_unix", `Float now_ts);
               ("name", `String meta.name);
-              ("trace_id", `String meta.trace_id);
-              ("generation", `Int meta.generation);
+              ("trace_id", `String meta.runtime.trace_id);
+              ("generation", `Int meta.runtime.generation);
               ("turn", `Int turn);
               ("soul_profile", `String meta.soul_profile);
               ("kind", `String kind);

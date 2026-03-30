@@ -43,61 +43,64 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let is_autonomous_turn = true in
   let is_board_reactive = observation.pending_board_events <> [] in
   let is_mention_reactive = observation.pending_mentions <> [] in
+  let rt = meta.runtime in
   {
     meta with
     updated_at = now_iso ();
-    usage = {
-      total_turns = meta.usage.total_turns + 1;
-      total_input_tokens = meta.usage.total_input_tokens + result.usage.input_tokens;
-      total_output_tokens = meta.usage.total_output_tokens + result.usage.output_tokens;
-      total_tokens =
-        meta.usage.total_tokens + Keeper_exec_context.total_tokens result.usage;
-      total_cost_usd = meta.usage.total_cost_usd +. turn_cost;
-      last_turn_ts = now_ts;
-      last_model_used = result.model_used;
-      last_input_tokens = result.usage.input_tokens;
-      last_output_tokens = result.usage.output_tokens;
-      last_total_tokens = Keeper_exec_context.total_tokens result.usage;
-      last_latency_ms = latency_ms;
+    runtime = { rt with
+      usage = {
+        total_turns = rt.usage.total_turns + 1;
+        total_input_tokens = rt.usage.total_input_tokens + result.usage.input_tokens;
+        total_output_tokens = rt.usage.total_output_tokens + result.usage.output_tokens;
+        total_tokens =
+          rt.usage.total_tokens + Keeper_exec_context.total_tokens result.usage;
+        total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
+        last_turn_ts = now_ts;
+        last_model_used = result.model_used;
+        last_input_tokens = result.usage.input_tokens;
+        last_output_tokens = result.usage.output_tokens;
+        last_total_tokens = Keeper_exec_context.total_tokens result.usage;
+        last_latency_ms = latency_ms;
+      };
+      (* Proactive count: any turn that produced text or tools *)
+      proactive_rt = {
+        count_total =
+          rt.proactive_rt.count_total + (if has_text || has_tool_calls then 1 else 0);
+        last_ts =
+          (if has_text || has_tool_calls then now_ts else rt.proactive_rt.last_ts);
+        last_reason =
+          (if has_tool_calls then
+             Printf.sprintf "unified:tools=[%s]"
+               (String.concat "," result.tools_used)
+           else if has_text then "unified:text_response"
+           else rt.proactive_rt.last_reason);
+        last_preview =
+          (if has_text then short_preview result.response_text
+           else if has_tool_calls then
+             Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
+           else rt.proactive_rt.last_preview);
+      };
+      (* Autonomous action tracking from tool calls *)
+      autonomous_action_count =
+        rt.autonomous_action_count + List.length result.tools_used;
+      autonomous_turn_count =
+        rt.autonomous_turn_count + (if is_autonomous_turn then 1 else 0);
+      autonomous_text_turn_count =
+        rt.autonomous_text_turn_count
+        + (if is_autonomous_turn && has_text && not has_tool_calls then 1 else 0);
+      autonomous_tool_turn_count =
+        rt.autonomous_tool_turn_count
+        + (if is_autonomous_turn && has_tool_calls then 1 else 0);
+      board_reactive_turn_count =
+        rt.board_reactive_turn_count + (if is_board_reactive then 1 else 0);
+      mention_reactive_turn_count =
+        rt.mention_reactive_turn_count + (if is_mention_reactive then 1 else 0);
+      noop_turn_count =
+        rt.noop_turn_count
+        + (if is_autonomous_turn && not has_text && not has_tool_calls then 1 else 0);
+      last_autonomous_action_at =
+        (if has_tool_calls then now_iso () else rt.last_autonomous_action_at);
     };
-    (* Proactive count: any turn that produced text or tools *)
-    proactive = { meta.proactive with
-      count_total =
-        meta.proactive.count_total + (if has_text || has_tool_calls then 1 else 0);
-      last_ts =
-        (if has_text || has_tool_calls then now_ts else meta.proactive.last_ts);
-      last_reason =
-        (if has_tool_calls then
-           Printf.sprintf "unified:tools=[%s]"
-             (String.concat "," result.tools_used)
-         else if has_text then "unified:text_response"
-         else meta.proactive.last_reason);
-      last_preview =
-        (if has_text then short_preview result.response_text
-         else if has_tool_calls then
-           Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
-         else meta.proactive.last_preview);
-    };
-    (* Autonomous action tracking from tool calls *)
-    autonomous_action_count =
-      meta.autonomous_action_count + List.length result.tools_used;
-    autonomous_turn_count =
-      meta.autonomous_turn_count + (if is_autonomous_turn then 1 else 0);
-    autonomous_text_turn_count =
-      meta.autonomous_text_turn_count
-      + (if is_autonomous_turn && has_text && not has_tool_calls then 1 else 0);
-    autonomous_tool_turn_count =
-      meta.autonomous_tool_turn_count
-      + (if is_autonomous_turn && has_tool_calls then 1 else 0);
-    board_reactive_turn_count =
-      meta.board_reactive_turn_count + (if is_board_reactive then 1 else 0);
-    mention_reactive_turn_count =
-      meta.mention_reactive_turn_count + (if is_mention_reactive then 1 else 0);
-    noop_turn_count =
-      meta.noop_turn_count
-      + (if is_autonomous_turn && not has_text && not has_tool_calls then 1 else 0);
-    last_autonomous_action_at =
-      (if has_tool_calls then now_iso () else meta.last_autonomous_action_at);
   }
 
 let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
@@ -129,8 +132,8 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("channel", `String channel);
         ("name", `String meta.name);
         ("agent_name", `String meta.agent_name);
-        ("trace_id", `String meta.trace_id);
-        ("generation", `Int meta.generation);
+        ("trace_id", `String meta.runtime.trace_id);
+        ("generation", `Int meta.runtime.generation);
         ("model_used", `String result.model_used);
         ( "usage",
           `Assoc
@@ -191,14 +194,16 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   {
     meta with
     updated_at = now_iso ();
-    usage = { meta.usage with
-      total_turns = meta.usage.total_turns + 1;
-      last_turn_ts = now_ts;
-      last_latency_ms = latency_ms;
-    };
-    proactive = { meta.proactive with
-      last_reason = "unified:error:" ^ String.trim reason;
-      last_preview = preview;
+    runtime = { meta.runtime with
+      usage = { meta.runtime.usage with
+        total_turns = meta.runtime.usage.total_turns + 1;
+        last_turn_ts = now_ts;
+        last_latency_ms = latency_ms;
+      };
+      proactive_rt = { meta.runtime.proactive_rt with
+        last_reason = "unified:error:" ^ String.trim reason;
+        last_preview = preview;
+      };
     };
   }
 
@@ -219,7 +224,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       in
       let base_dir = session_base_dir config in
       (* Ensure session dir tree for filesystem fallback (issue #3019) *)
-      Keeper_types.mkdir_p (Filename.concat base_dir meta.trace_id);
+      Keeper_types.mkdir_p (Filename.concat base_dir meta.runtime.trace_id);
       (* 3. Derive parameters: cascade.json -> keeper env-var fallback *)
       let temperature =
         Cascade_inference.resolve_temperature

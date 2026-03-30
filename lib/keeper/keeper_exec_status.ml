@@ -5,7 +5,7 @@
 open Keeper_types
 
 let active_model_of_meta (m : keeper_meta) : string =
-  if m.usage.last_model_used <> "" then m.usage.last_model_used
+  if m.runtime.usage.last_model_used <> "" then m.runtime.usage.last_model_used
   else
     match Oas_model_resolve.models_of_cascade_name m.cascade_name with
     | model :: _ -> model
@@ -162,7 +162,7 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
 let keeper_error_hint ~agent_status ~meta =
   let agent_error = json_string_opt "error" agent_status in
   let proactive_reason =
-    let reason = String.trim meta.proactive.last_reason in
+    let reason = String.trim meta.runtime.proactive_rt.last_reason in
     if reason = "" then None else Some reason
   in
   let drift_reason = None in
@@ -207,7 +207,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     || agent_status_text = "offline"
     || agent_status_text = "inactive"
   then Some "agent_missing"
-  else if meta.usage.total_turns = 0 && meta.proactive.count_total = 0 then
+  else if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then
     let keeper_age_s =
       match Resilience.Time.parse_iso8601_opt meta.created_at with
       | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
@@ -228,12 +228,12 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     | Some _ -> Some "unknown"
     | None ->
         let last_turn_ago_s =
-          if meta.usage.last_turn_ts <= 0.0 then None
-          else Some (max 0.0 (now_ts -. meta.usage.last_turn_ts))
+          if meta.runtime.usage.last_turn_ts <= 0.0 then None
+          else Some (max 0.0 (now_ts -. meta.runtime.usage.last_turn_ts))
         in
         let last_proactive_ago_s =
-          if meta.proactive.last_ts <= 0.0 then None
-          else Some (max 0.0 (now_ts -. meta.proactive.last_ts))
+          if meta.runtime.proactive_rt.last_ts <= 0.0 then None
+          else Some (max 0.0 (now_ts -. meta.runtime.proactive_rt.last_ts))
         in
         if meta.proactive.enabled then
           match last_proactive_ago_s with
@@ -265,8 +265,8 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   let is_zombie = json_bool "is_zombie" agent_status false in
   let stale_threshold_s = 120.0 in
   let last_turn_ago_s =
-    if meta.usage.last_turn_ts <= 0.0 then max_float
-    else max 0.0 (now_ts -. meta.usage.last_turn_ts)
+    if meta.runtime.usage.last_turn_ts <= 0.0 then max_float
+    else max 0.0 (now_ts -. meta.runtime.usage.last_turn_ts)
   in
   if not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive"
   then "offline"
@@ -279,7 +279,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     match quiet_reason with
     | Some "graphql_error" | Some "model_error" -> "degraded"
     | _ ->
-        if meta.usage.total_turns = 0 && meta.proactive.count_total = 0 then "idle"
+        if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then "idle"
         else if last_turn_ago_s > float_of_int (max meta.proactive.idle_sec 900)
         then "idle"
         else "healthy"
@@ -300,9 +300,9 @@ let keeper_next_action_path ~health_state ~quiet_reason =
 
 let keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts =
   match quiet_reason with
-  | Some "min_gap" when meta.proactive.last_ts > 0.0 ->
+  | Some "min_gap" when meta.runtime.proactive_rt.last_ts > 0.0 ->
       let remaining =
-        float_of_int meta.proactive.cooldown_sec -. (now_ts -. meta.proactive.last_ts)
+        float_of_int meta.proactive.cooldown_sec -. (now_ts -. meta.runtime.proactive_rt.last_ts)
       in
       if remaining > 0.0 then `Float remaining else `Null
   | _ -> `Null
@@ -475,20 +475,20 @@ let derive_pipeline_stage
   else
     let recency_threshold = 30.0 in
     let turn_ago =
-      if meta.usage.last_turn_ts <= 0.0 then Float.infinity
-      else now_ts -. meta.usage.last_turn_ts
+      if meta.runtime.usage.last_turn_ts <= 0.0 then Float.infinity
+      else now_ts -. meta.runtime.usage.last_turn_ts
     in
     let compaction_ago =
-      if meta.compaction.last_ts <= 0.0 then Float.infinity
-      else now_ts -. meta.compaction.last_ts
+      if meta.runtime.compaction_rt.last_ts <= 0.0 then Float.infinity
+      else now_ts -. meta.runtime.compaction_rt.last_ts
     in
     let handoff_ago =
-      if meta.last_handoff_ts <= 0.0 then Float.infinity
-      else now_ts -. meta.last_handoff_ts
+      if meta.runtime.last_handoff_ts <= 0.0 then Float.infinity
+      else now_ts -. meta.runtime.last_handoff_ts
     in
     let proactive_ago =
-      if meta.proactive.last_ts <= 0.0 then Float.infinity
-      else now_ts -. meta.proactive.last_ts
+      if meta.runtime.proactive_rt.last_ts <= 0.0 then Float.infinity
+      else now_ts -. meta.runtime.proactive_rt.last_ts
     in
     (* Pick the most recent activity within the recency window.
        Priority order when multiple are recent: handoff > compacting > proactive > thinking *)

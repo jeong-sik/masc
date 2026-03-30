@@ -202,7 +202,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            execution_scope;
            allowed_paths;
            scope_kind;
-           tool_allowlist = [];
+           tool_access = Unrestricted;
            tool_denylist = [];
            room_scope;
            voice_enabled;

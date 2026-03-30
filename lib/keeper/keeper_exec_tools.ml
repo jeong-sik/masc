@@ -93,18 +93,15 @@ let inject_masc_schemas (schemas : Types.tool_schema list) =
       schemas
 
 (** Apply allowlist/denylist filtering to masc_* tool names.
-    - allowlist empty → all masc_* tools allowed (no restriction).
-      This matches keeper_turn_up_create default (tool_allowlist=[]).
-      TODO: replace string list with [Unrestricted | Restricted of string list]
-      to make empty-vs-unrestricted semantics explicit.
-    - allowlist non-empty → only listed tools allowed
+    - unrestricted → all masc_* tools allowed
+    - restricted → only listed tools allowed
     - denylist always wins (deny overrides allow) *)
-let filter_by_access ~(allowlist : string list) ~(denylist : string list)
+let filter_by_access ~(tool_access : tool_access) ~(denylist : string list)
     (name : string) : bool =
   let allowed =
-    match allowlist with
-    | [] -> true
-    | _ -> List.mem name allowlist
+    match tool_access with
+    | Unrestricted -> true
+    | Restricted allowlist -> List.mem name allowlist
   in
   allowed && not (List.mem name denylist)
 
@@ -112,7 +109,7 @@ let keeper_masc_tool_names (meta : keeper_meta) : string list =
   !masc_schemas_ref
   |> List.filter_map (fun (schema : Types.tool_schema) ->
     if filter_by_access
-         ~allowlist:meta.tool_allowlist
+         ~tool_access:meta.tool_access
          ~denylist:meta.tool_denylist
          schema.name
     then Some schema.name
@@ -122,7 +119,7 @@ let keeper_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
   !masc_schemas_ref
   |> List.filter (fun (schema : Types.tool_schema) ->
     filter_by_access
-      ~allowlist:meta.tool_allowlist
+      ~tool_access:meta.tool_access
       ~denylist:meta.tool_denylist
       schema.name)
 
@@ -138,7 +135,7 @@ let keeper_default_model_tools (_meta : keeper_meta) : Types.tool_schema list =
 
 (** Return keeper tool names with allowlist/denylist gating on masc_*.
     keeper_* tools pass unconditionally. masc_* tools from any source
-    (shards, passthrough, defaults) are filtered by tool_allowlist/tool_denylist. *)
+    (shards, passthrough, defaults) are filtered by tool_access/tool_denylist. *)
 let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     string list =
   if write_done then
@@ -161,7 +158,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     |> List.filter (fun name ->
       if String.starts_with ~prefix:"masc_" name then
         filter_by_access
-          ~allowlist:meta.tool_allowlist
+          ~tool_access:meta.tool_access
           ~denylist:meta.tool_denylist
           name
       else
@@ -805,7 +802,7 @@ let execute_keeper_tool_call
                           ("error", `String (Types.masc_error_to_string e)) ]))
   | name when String.starts_with ~prefix:"masc_autoresearch_" name ->
       if not (filter_by_access
-                ~allowlist:meta.tool_allowlist
+                ~tool_access:meta.tool_access
                 ~denylist:meta.tool_denylist name) then
         Yojson.Safe.to_string
           (`Assoc [ ("error", `String "tool_not_allowed");
@@ -833,7 +830,7 @@ let execute_keeper_tool_call
          Even if the LLM hallucinates a tool name that wasn't in the schema,
          this gate blocks execution. Deny always wins. *)
       if not (filter_by_access
-                ~allowlist:meta.tool_allowlist
+                ~tool_access:meta.tool_access
                 ~denylist:meta.tool_denylist name) then
         Yojson.Safe.to_string
           (`Assoc [ ("error", `String "tool_not_allowed");

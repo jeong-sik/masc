@@ -252,7 +252,7 @@ let run_turn
       ?on_event
       ~agent_ref
       ?contract
-      ~allowed_paths:meta.allowed_paths
+      ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
       ~working_context:checkpoint_sidecar
       ~priority:(Option.value priority ~default:Llm_provider.Request_priority.Interactive)
       ~cache_system_prompt:true

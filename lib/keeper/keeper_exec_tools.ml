@@ -317,7 +317,7 @@ let execute_keeper_tool_call
         Safe_ops.json_int ~default:20000 "max_bytes" args
         |> fun n -> max 512 (min 200000 n)
       in
-      (match resolve_keeper_target_path ~config ~allowed_paths:meta.allowed_paths ~raw_path:path with
+      (match resolve_keeper_target_path ~config ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta) ~raw_path:path with
       | Error e -> Yojson.Safe.to_string (`Assoc [ ("error", `String e) ])
       | Ok target -> (
           match Safe_ops.read_file_safe target with
@@ -346,7 +346,7 @@ let execute_keeper_tool_call
         Safe_ops.json_string ~default:"overwrite" "mode" args
         |> String.lowercase_ascii
       in
-      (match resolve_keeper_target_path ~config ~allowed_paths:meta.allowed_paths ~raw_path:path with
+      (match resolve_keeper_target_path ~config ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta) ~raw_path:path with
       | Error e -> Yojson.Safe.to_string (`Assoc [ ("error", `String e) ])
       | Ok target ->
           (try
@@ -439,7 +439,7 @@ let execute_keeper_tool_call
       let root = project_root_of_config config in
       let read_target () =
         let raw_path = Safe_ops.json_string ~default:"." "path" args in
-        resolve_keeper_target_path ~config ~allowed_paths:meta.allowed_paths ~raw_path
+        resolve_keeper_target_path ~config ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta) ~raw_path
       in
       let render_process_result ~cmd argv =
         let st, out =
@@ -790,9 +790,39 @@ let execute_keeper_tool_call
             (`Assoc [ ("error", `String "unknown_autoresearch_tool");
                       ("tool", `String name) ]))
   | name when String.starts_with ~prefix:"masc_" name ->
-      (* Bridge to main MCP tool dispatch registry.
-         Handlers are closures that already capture their runtime context
-         (sw, clock, net, etc.) from server initialization. *)
+      (* Pre-dispatch path guard: if the tool args contain a path/file_path
+         key, validate it against effective_allowed_paths before dispatching. *)
+      let effective_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
+      let path_blocked =
+        if effective_paths = [] && meta.execution_scope <> "observe_only" then None
+        else if meta.execution_scope = "observe_only" && effective_paths = [] then
+          (* observe_only with no explicit paths: block write-capable tool args *)
+          let has_path_arg =
+            List.exists (fun key ->
+              match Yojson.Safe.Util.member key args with
+              | `String p when String.trim p <> "" -> true
+              | _ -> false) ["path"; "file_path"; "target_path"]
+          in
+          if has_path_arg then Some "observe_only_scope: write paths blocked"
+          else None
+        else
+          let candidates =
+            List.filter_map (fun key ->
+              match Yojson.Safe.Util.member key args with
+              | `String p when String.trim p <> "" -> Some p
+              | _ -> None)
+              ["path"; "file_path"; "target_path"]
+          in
+          List.find_map (fun raw ->
+            match resolve_keeper_target_path ~config
+                    ~allowed_paths:effective_paths ~raw_path:raw with
+            | Error e -> Some e
+            | Ok _ -> None) candidates
+      in
+      (match path_blocked with
+      | Some err ->
+          Yojson.Safe.to_string (`Assoc [ ("error", `String err) ])
+      | None ->
       let t0 = Time_compat.now () in
       let result = Tool_dispatch.dispatch ~name ~args in
       let duration_ms =
@@ -807,7 +837,7 @@ let execute_keeper_tool_call
                         ("tool", `String name) ])
       in
       !on_keeper_tool_call ~tool_name:name ~success ~duration_ms;
-      msg
+      msg)
   | other ->
       Yojson.Safe.to_string
         (`Assoc [ ("error", `String "unknown_tool"); ("tool", `String other) ])

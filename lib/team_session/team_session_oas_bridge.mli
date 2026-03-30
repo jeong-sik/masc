@@ -90,6 +90,8 @@ val planned_worker_to_entry :
   Team_session_types.planned_worker -> Swarm.Swarm_types.agent_entry
 
 val session_to_swarm_config :
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:Room.config ->
   masc_tools:Types.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->

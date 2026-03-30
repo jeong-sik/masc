@@ -576,6 +576,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
       sw;
       clock;
       proc_mgr;
+      net = None;
       mcp_session_id = None;
     }
   in

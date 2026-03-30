@@ -7,6 +7,7 @@ type 'a context = {
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
+  net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
   mcp_session_id : string option;
 }
 
@@ -289,6 +290,7 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
       sw = ctx.sw;
       clock = ctx.clock;
       proc_mgr = ctx.proc_mgr;
+      net = ctx.net;
       mcp_session_id = ctx.mcp_session_id;
     }
   in

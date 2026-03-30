@@ -162,7 +162,7 @@ let test_list_and_compare () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
 
   let s1 = start_session_exn ctx ~goal:"compare-session-base" |> get_session_id in
@@ -228,7 +228,7 @@ let test_turn_events_and_prove () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id = start_session_exn ctx ~goal:"turn-events-prove" |> get_session_id in
 
@@ -365,7 +365,7 @@ let test_idle_session_stays_running_before_first_step () =
   ignore (Room.init config ~agent_name:(Some "tester"));
   ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
   let ctx : _ Tool_team_session.context =
-    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id =
     start_session_exn ctx ~goal:"idle-session-before-first-step" |> get_session_id

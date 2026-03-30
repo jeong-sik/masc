@@ -199,7 +199,9 @@ let test_session_to_swarm_config_health_contract () =
   Team_session_store.ensure_session_dirs config session.session_id;
   Team_session_store.save_session config session;
   let swarm_cfg =
-    Team_session_oas_bridge.session_to_swarm_config ~config ~masc_tools:[]
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    Team_session_oas_bridge.session_to_swarm_config ~sw ~net ~config ~masc_tools:[]
       ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
       session
   in

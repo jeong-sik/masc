@@ -46,6 +46,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
           sw;
           clock;
           proc_mgr = state.Mcp_server.proc_mgr;
+          net = state.Mcp_server.net;
         }
       in
       match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:arguments with
@@ -230,6 +231,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
           sw;
           clock;
           proc_mgr = state.Mcp_server.proc_mgr;
+          net = state.Mcp_server.net;
         }
       in
       match

@@ -79,6 +79,7 @@ let with_snapshot_env f =
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
+          net = None;
         }
       in
       let deps : Lib.Tool_team_session_step_exec.step_deps =

@@ -53,7 +53,7 @@ let create_keeper env sw config name =
       agent_name = "tester";
       sw;
       clock = Eio.Stdenv.clock env;
-      proc_mgr = Some (Eio.Stdenv.process_mgr env);
+      proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None;
     }
   in
   match

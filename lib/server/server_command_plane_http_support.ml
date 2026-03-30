@@ -194,6 +194,7 @@ let command_plane_orchestra_http_json ~deps ~state request =
       sw = deps.get_switch ();
       clock = deps.get_clock ();
       proc_mgr = state.Mcp_server.proc_mgr;
+      net = state.Mcp_server.net;
       mcp_session_id = deps.get_session_id_any request;
     }
   in

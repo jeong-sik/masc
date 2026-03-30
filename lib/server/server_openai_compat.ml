@@ -78,6 +78,7 @@ let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) res
     sw;
     clock;
     proc_mgr = None;
+    net = None;
   } in
   let args = `Assoc [
     ("name", `String keeper_name);

@@ -129,6 +129,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
         sw;
         clock;
         proc_mgr;
+        net = None;
         mcp_session_id = None;
       }
     in

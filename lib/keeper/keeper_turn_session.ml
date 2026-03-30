@@ -87,6 +87,7 @@ let team_session_ctx_of_keeper (ctx : _ context) : _ Tool_team_session.context =
     sw = ctx.sw;
     clock = ctx.clock;
     proc_mgr = ctx.proc_mgr;
+    net = ctx.net;
   }
 
 let dispatch_team_session (ctx : _ context) ~name ~args =

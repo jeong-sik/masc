@@ -547,6 +547,7 @@ let planned_worker_to_entry
 (* ── session -> swarm_config ───────────────────────────────────── *)
 
 let session_to_swarm_config
+    ~sw ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : Room.config)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
@@ -574,15 +575,33 @@ let session_to_swarm_config
       Some (float_of_int session.duration_seconds)
     else None
   in
+  (* Slot-aware max_concurrent_agents for local-only sessions *)
+  let slot_aware_cap =
+    let all_selections =
+      session.planned_workers
+      |> List.map (fun pw ->
+           cascade_of_worker ~session_cascade:session.model_cascade pw)
+      |> List.sort_uniq String.compare
+    in
+    let config_path = Oas_worker.default_config_path () in
+    let cap =
+      Llm_provider.Cascade_config.local_capacity_for_selections
+        ~sw ~net ?config_path all_selections
+    in
+    if cap.all_discovered && cap.endpoints_found > 0 && cap.total > 0
+       && cap.endpoints_found >= List.length all_selections
+    then cap.total
+    else entry_count
+  in
   { entries; mode;
     convergence = make_convergence_metric ~entry_count success_by_agent;
-    max_parallel = max 1 (List.length entries);
+    max_parallel = max 1 entry_count;
     prompt = session.goal; timeout_sec;
     budget = budget_of_session_timeout timeout_sec;
     max_agent_retries = 1;
     collaboration = Some collaboration;
     resource_check = Some (session_runtime_health_check ~config ~session);
-    max_concurrent_agents = Some (max 1 (List.length entries));
+    max_concurrent_agents = Some (max 1 (min entry_count slot_aware_cap));
     enable_streaming = false }
 
 (* ── Inverse: swarm result -> session update ───────────────────── *)

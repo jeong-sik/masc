@@ -2,6 +2,7 @@ open Tool_args
 open Tool_repair_loop_types
 
 module Ocaml = Tool_repair_loop_ocaml
+let repair_loop_rng = Random.State.make_self_init ()
 
 let schemas : Types.tool_schema list =
   [
@@ -70,9 +71,7 @@ let schemas : Types.tool_schema list =
   ]
 
 let make_loop_id () =
-  Printf.sprintf "repair-%Ld-%06x"
-    (Int64.of_float (Unix.gettimeofday () *. 1000.0))
-    (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF)
+  Printf.sprintf "repair-%s" (Uuidm.to_string (Uuidm.v4_gen repair_loop_rng ()))
 
 let resolve_target_mode args =
   match String.lowercase_ascii (get_string args "target_mode" "snippet") with

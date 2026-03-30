@@ -420,7 +420,7 @@ let test_run_repair_loop_until_terminal_with_fake_dispatch () =
     | "masc_repair_loop_iterate" ->
         incr iterate_calls;
         if !iterate_calls = 1 then
-          ( false,
+          ( true,
             Yojson.Safe.to_string
               (`Assoc
                 [
@@ -454,6 +454,46 @@ let test_run_repair_loop_until_terminal_with_fake_dispatch () =
   let json = Yojson.Safe.from_string body in
   Alcotest.(check string) "status passed" "passed"
     Yojson.Safe.Util.(json |> member "status" |> to_string)
+
+let test_run_repair_loop_until_terminal_with_guard () =
+  let iterate_calls = ref 0 in
+  let dispatch_tool ~name ~args:_ =
+    match name with
+    | "masc_repair_loop_start" ->
+        ( true,
+          Yojson.Safe.to_string
+            (`Assoc
+              [
+                ("loop_id", `String "loop-guard");
+                ("status", `String "running");
+                ("attempt_count", `Int 0);
+                ("max_attempts", `Int 2);
+              ]) )
+    | "masc_repair_loop_iterate" ->
+        incr iterate_calls;
+        ( true,
+          Yojson.Safe.to_string
+            (`Assoc
+              [
+                ("loop_id", `String "loop-guard");
+                ("status", `String "running");
+                ("attempt_count", `Int !iterate_calls);
+                ("max_attempts", `Int 2);
+              ]) )
+    | other -> Alcotest.failf "unexpected tool call: %s" other
+  in
+  let ok, body =
+    Team_session_oas_bridge.run_repair_loop_until_terminal_with ~dispatch_tool
+      (`Assoc
+        [
+          ("plugin_id", `String "ocaml");
+          ("task_spec", `String "Never reaches terminal state.");
+        ])
+  in
+  Alcotest.(check bool) "guard returns failure" false ok;
+  Alcotest.(check int) "guard caps iterate calls" 3 !iterate_calls;
+  Alcotest.(check string) "guard message"
+    "repair loop iteration guard exceeded for loop-guard" body
 
 (* ================================================================ *)
 (* Runner                                                           *)
@@ -520,5 +560,7 @@ let () =
         test_dispatch_supported_tool_heartbeat_autojoin;
       Alcotest.test_case "repair loop wrapper iterates until terminal" `Quick
         test_run_repair_loop_until_terminal_with_fake_dispatch;
+      Alcotest.test_case "repair loop wrapper guards runaway status" `Quick
+        test_run_repair_loop_until_terminal_with_guard;
     ];
   ]

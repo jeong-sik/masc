@@ -105,46 +105,40 @@ let recent_messages_json config =
   |> List.map Types.message_to_yojson
   |> fun rows -> `List rows
 
-let latest_keeper_tools_from_metrics config keeper_name =
-  let store = Keeper_types.keeper_metrics_store config keeper_name in
-  let lines =
-    let dated = Dated_jsonl.read_recent_lines store 8 in
-    if dated <> [] then dated
-    else
-      let metrics_path = Keeper_types.keeper_metrics_path config keeper_name in
-      Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:40000 ~max_lines:8
-  in
-  lines
-  |> List.rev
-  |> List.find_map (fun line ->
-         try
-           let json = Yojson.Safe.from_string line in
-           let tools =
-             match Yojson.Safe.Util.member "tools_used" json with
-             | `List items ->
-                 items
-                 |> List.filter_map (function
-                        | `String tool ->
-                            let trimmed = String.trim tool in
-                            if trimmed = "" then None else Some trimmed
-                        | _ -> None)
-             | _ -> []
-           in
-           if tools = [] then None else Some (List.sort_uniq String.compare tools)
-         with Yojson.Json_error _ -> None)
-  |> Option.value ~default:[]
-
 let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
   let fallback_allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let fallback_latest = latest_keeper_tools_from_metrics config meta.name in
-  let fallback_count = None in
-  let fallback_source =
-    if fallback_latest <> [] then Some "keeper_metrics" else None
-  in
-  let fallback_at =
-    let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
-    if last_autonomous <> "" then Some last_autonomous
-    else Some meta.updated_at
+  let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
+  let fallback_snapshot =
+    match
+      Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files config
+        ~keeper_name:meta.name
+    with
+    | Some snapshot ->
+        {
+          snapshot with
+          tool_audit_at =
+            (match snapshot.tool_audit_source, snapshot.tool_audit_at with
+             | Some _, None when last_autonomous <> "" -> Some last_autonomous
+             | Some _, None -> Some meta.updated_at
+             | _ -> snapshot.tool_audit_at);
+        }
+    | None ->
+        let has_runtime_activity =
+          last_autonomous <> ""
+          || meta.runtime.autonomous_turn_count > 0
+          || meta.runtime.autonomous_action_count > 0
+        in
+        {
+          Keeper_exec_status_metrics.empty_tool_audit_snapshot with
+          latest_tool_call_count =
+            (if has_runtime_activity then Some 0 else None);
+          tool_audit_source =
+            (if has_runtime_activity then Some "keeper_runtime_meta" else None);
+          tool_audit_at =
+            (if last_autonomous <> "" then Some last_autonomous
+             else if has_runtime_activity then Some meta.updated_at
+             else None);
+        }
   in
   match A2a_tools.latest_heartbeat_task meta.agent_name,
         A2a_tools.latest_heartbeat_result meta.agent_name with
@@ -170,7 +164,11 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
         Some "heartbeat_result",
         Some result.updated_at )
   | None, None ->
-      (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at)
+      ( fallback_allowed,
+        fallback_snapshot.latest_tool_names,
+        fallback_snapshot.latest_tool_call_count,
+        fallback_snapshot.tool_audit_source,
+        fallback_snapshot.tool_audit_at )
 
 let keepers_json ?keeper_names ?(include_recent_activity = true)
     ?(lightweight = false) config =

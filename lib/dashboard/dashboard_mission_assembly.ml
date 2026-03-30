@@ -5,7 +5,7 @@
 
 include Dashboard_mission_agents
 
-let keeper_tool_audit_json_fields keeper agent_name =
+let keeper_tool_audit_json_fields config keeper agent_name =
   let fallback_allowed =
     string_list_of_json (member_assoc "allowed_tool_names" keeper)
   in
@@ -25,6 +25,28 @@ let keeper_tool_audit_json_fields keeper agent_name =
   in
   let fallback_at =
     trim_to_option (string_field "tool_audit_at" keeper)
+  in
+  let file_snapshot =
+    let keeper_updated_at =
+      trim_to_option (string_field "updated_at" keeper)
+    in
+    match
+      Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files config
+        ~keeper_name:
+          (match trim_to_option (string_field "name" keeper) with
+           | Some name -> name
+           | None -> agent_name)
+    with
+    | Some snapshot ->
+        Some
+          {
+            snapshot with
+            tool_audit_at =
+              (match snapshot.tool_audit_source, snapshot.tool_audit_at, keeper_updated_at with
+               | Some _, None, Some updated_at -> Some updated_at
+               | _ -> snapshot.tool_audit_at);
+          }
+    | None -> None
   in
   let allowed_tool_names, latest_tool_names, latest_tool_call_count,
       tool_audit_source, tool_audit_at =
@@ -52,18 +74,26 @@ let keeper_tool_audit_json_fields keeper agent_name =
           Some "heartbeat_result",
           Some result.updated_at )
     | None, None ->
-        (* Use per-keeper tool tracking as last-resort fallback *)
-        let tracked = Keeper_tools_oas.tool_usage_for_keeper agent_name in
-        if tracked <> [] then
-          let names = List.map fst tracked in
-          let total = List.fold_left (fun acc (_, e) -> acc + e.Keeper_tools_oas.count) 0 tracked in
-          let latest_at = List.fold_left (fun acc (_, e) ->
-            max acc e.Keeper_tools_oas.last_used_at) 0.0 tracked in
-          let at_str = if latest_at > 0.0
-            then Some (Dashboard_utils.iso_of_unix latest_at) else None in
-          (fallback_allowed, names, Some total, Some "keeper_dispatch", at_str)
-        else
-          (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at)
+        (match file_snapshot with
+        | Some snapshot ->
+            ( fallback_allowed,
+              snapshot.latest_tool_names,
+              snapshot.latest_tool_call_count,
+              snapshot.tool_audit_source,
+              snapshot.tool_audit_at )
+        | None ->
+            (* Use per-keeper tool tracking as last-resort fallback *)
+            let tracked = Keeper_tools_oas.tool_usage_for_keeper agent_name in
+            if tracked <> [] then
+              let names = List.map fst tracked in
+              let total = List.fold_left (fun acc (_, e) -> acc + e.Keeper_tools_oas.count) 0 tracked in
+              let latest_at = List.fold_left (fun acc (_, e) ->
+                max acc e.Keeper_tools_oas.last_used_at) 0.0 tracked in
+              let at_str = if latest_at > 0.0
+                then Some (Dashboard_utils.iso_of_unix latest_at) else None in
+              (fallback_allowed, names, Some total, Some "keeper_dispatch", at_str)
+            else
+              (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at))
   in
   [
     ("allowed_tool_names", string_list_json allowed_tool_names);
@@ -149,7 +179,7 @@ let action_matches_incident incident action =
       let action_type = string_field "action_type" action in
       List.mem action_type (incident_action_types (string_field "kind" incident))
 
-let build_keeper_briefs (keepers : Yojson.Safe.t list) =
+let build_keeper_briefs config (keepers : Yojson.Safe.t list) =
   keepers
   |> List.filter_map (fun keeper ->
          let name = string_field "name" keeper in
@@ -194,7 +224,7 @@ let build_keeper_briefs (keepers : Yojson.Safe.t list) =
                            | None -> trim_to_option (string_field "goal" keeper)) );
                       ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
                     ]
-                    @ keeper_tool_audit_json_fields keeper
+                    @ keeper_tool_audit_json_fields config keeper
                         (match trim_to_option (string_field "agent_name" keeper) with
                          | Some agent_name -> agent_name
                          | None -> name));

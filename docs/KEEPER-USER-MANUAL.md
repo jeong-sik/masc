@@ -482,18 +482,24 @@ Keeper는 더 이상 `policy_mode`나 `trigger_mode`로 동작하지 않는다.
 
 ### 6.3 Decision Record 학습
 
-Deliberation의 매 결정은 `{keeper_dir}/{name}.decisions.jsonl`에 기록된다.
+Unified keeper의 내부 decision record는 `{keeper_dir}/{name}.decisions.jsonl`에 기록된다.
+
+이 파일은 public surface가 아니라 사람 운영자용 디버깅/학습 artifact다.
 
 각 레코드에는:
-- `id`: 고유 결정 ID (`dec-{timestamp}-{random}`)
-- `triggers`: 트리거 목록
-- `action_chosen`: 선택된 행동
-- `reasoning`: MODEL의 추론
-- `confidence`: 신뢰도 (0.0~1.0)
-- `outcome`: 결과 (`pending`, `success`, `failed`)
-- `feedback_score`: 인간 피드백 (-1.0~1.0)
+- `id`: 고유 결정 ID (`dec-{timestamp_ms}-{hash}`)
+- `trigger_signals`: turn 시점에 관찰된 트리거 후보 (`direct_mention`, `board_activity`, `new_unclaimed_task` 등)
+- `observed_affordances`: 당시 가능한 액션 후보 (`task_claim`, `reply_in_room`, `board_post_or_comment` 등)
+- `selected_mode`: 실제 최종 결과 분류 (`tool_use`, `text_response`, `skip_text`, `noop`, `error`)
+- `tools_used`: 실제 호출된 tool 목록
+- `claim_was_available` / `claim_executed`: task claim 기회와 실행 여부
+- `response_preview`: 최종 응답 미리보기
+- `response_requests_confirmation`: keeper가 사람 확인을 요청했는지 여부
+- `outcome`: `success` 또는 `error`
 
-`masc_keeper_eval` 도구로 결정 이력을 조회하고, `record_feedback`으로 피드백을 기록할 수 있다.
+주의:
+- unified path는 hidden chain-of-thought나 모델 내부 reasoning/confidence를 저장하지 않는다.
+- decision log는 “무엇을 보고 무엇을 했는지”를 관찰 결과 기준으로 남긴다.
 
 ### 6.4 Checkpoint 시스템 (OAS 기반)
 

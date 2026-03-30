@@ -1205,6 +1205,7 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
       let metrics_store = Masc_mcp.Keeper_types.keeper_metrics_store config meta.name in
       let history_path = Masc_mcp.Keeper_types.keeper_history_path config meta.runtime.trace_id in
       let memory_bank_path = Masc_mcp.Keeper_types.keeper_memory_bank_path config meta.name in
+      let decision_log_path = Masc_mcp.Keeper_types.keeper_decision_log_path config meta.name in
       let turn_json = Yojson.Safe.from_string
           {|{"channel":"turn","generation":0,"trace_id":"trace-1","context_ratio":0.41,"context_tokens":120,"context_max":1024,"message_count":4,"memory_check":{"performed":true,"passed":true,"final_score":0.9},"skill_primary":"masc-heartbeat","skill_secondary":["masc-keeper-autonomy"],"skill_reason":"stateful routing","skill_selection_mode":"agent","skill_provenance":"judgment"}|}
       in
@@ -1259,6 +1260,16 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         Yojson.Safe.Util.(json |> member "metrics_overview" |> member "compaction_events" |> to_int);
       check string "skill route primary" "masc-heartbeat"
         Yojson.Safe.Util.(json |> member "skill_route" |> member "primary" |> to_string);
+      check string "decision log path exposed" decision_log_path
+        Yojson.Safe.Util.(json |> member "storage_paths" |> member "decisions" |> to_string);
+      check string "tool audit source from metrics fallback" "keeper_metrics"
+        Yojson.Safe.Util.(json |> member "tool_audit_source" |> to_string);
+      check int "tool audit count falls back to zero" 0
+        Yojson.Safe.Util.(json |> member "latest_tool_call_count" |> to_int);
+      check bool "tool audit names remain empty without tool use" true
+        (Yojson.Safe.Util.(json |> member "latest_tool_names" |> to_list) = []);
+      check bool "tool audit timestamp exposed" true
+        Yojson.Safe.Util.(json |> member "tool_audit_at" <> `Null);
       let ok, list_body =
         dispatch "masc_keeper_list"
           (`Assoc [ ("detailed", `Bool true); ("limit", `Int 10) ])

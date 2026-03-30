@@ -4,12 +4,18 @@
 ## [2.176.0] - 2026-03-30
 
 ### Added
-- **CDAL risk contract bridge** — canonicalize risk contract composition with typed bridge module (#3927).
-- **Keeper decision logs** — decision logging and tool audit fallback (#3937).
+- **CDAL spawn contract bridge** — worker proof metadata and project worker proof wiring for spawn contracts (#3963).
+- **Keeper handoff delta entry** — structured delta payload type for handoff persistence and restore flow (#3962).
+- **Tool tier policy surface** — config-driven `masc_*` tool exposure for keeper runs (#3959).
+
+### Fixed
+- **Legacy chain checkpoint compatibility** — preserve command-plane reads for older chain checkpoint payloads (#3964).
+- **Version truth docs** — restore roadmap/product/spec release truth after prior release drift (#3958).
 
 ### Changed
-- **Chain config removal** — Chain module removed, fields relocated (#3935, #3936, #3938).
-- **Copilot review followup** — defensive guards from recent PR reviews (#3940).
+- **OAS pin ratchet** — track `agent_sdk >= 0.98.0` and `main@08f54b973c993613cb320682337e9a567477b414` (#3965).
+- **Cross-run spec completion** — document late-arrival handling, schema compatibility, and API details (#3951).
+- **CDAL canonical bridge cleanup** — keep the earlier risk contract and review followup train in the 2.176.0 release set (#3927, #3940).
 
 ## [2.174.0] - 2026-03-30
 

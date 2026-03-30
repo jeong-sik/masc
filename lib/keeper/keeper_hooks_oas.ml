@@ -145,8 +145,8 @@ let make_hooks
           | None -> (0, 0)
         in
         let total_tok = input_tok + output_tok in
-        Log.Keeper.info "keeper:%s turn=%d model=%s tokens=%d"
-          meta.name turn model total_tok;
+        Log.Keeper.info "keeper:%s turn=%d total_turns=%d model=%s tokens=%d"
+          meta.name turn meta.usage.total_turns model total_tok;
         (* Emit per-turn cost event for task attribution.
            cost_usd is 0.0 until OAS cascade provides actual cost
            (see oas#393). Token counts are the primary data for now. *)

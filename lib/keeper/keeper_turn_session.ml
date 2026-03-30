@@ -16,7 +16,7 @@ let write_meta_logged config (meta : keeper_meta) =
       Log.Keeper.error "write_meta failed: %s" msg
 
 let _keeper_team_session_model (meta : keeper_meta) =
-  match String.trim meta.usage.last_model_used with
+  match String.trim meta.runtime.usage.last_model_used with
   | value when value <> "" -> value
   | _ ->
       (match Oas_model_resolve.models_of_cascade_name meta.cascade_name with

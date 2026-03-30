@@ -71,6 +71,28 @@ function GovernanceSummaryStrip() {
       <${KpiCard} label="관리자 승인 대기" value=${summary?.needs_human_gate ?? 0} />
       <${KpiCard} label="집행 완료" value=${summary?.executed ?? 0} />
     </div>
+    <${JudgeStatusBar} />
+  `
+}
+
+function JudgeStatusBar() {
+  const judge = governanceData.value?.judge
+  if (!judge) return null
+  const online = judge.judge_online === true
+  const dotClass = online ? 'bg-ok' : 'bg-text-dim'
+  const label = online
+    ? (judge.refreshing ? '갱신 중' : '온라인')
+    : (judge.last_error ? '오류' : '오프라인')
+  return html`
+    <div class="mb-4 flex items-center gap-3 rounded-lg border border-white/5 bg-white/3 px-3.5 py-2 text-[12px]" data-testid="judge-status">
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-2 h-2 rounded-full ${dotClass}"></span>
+        <span class="font-medium text-text-muted">Judge ${label}</span>
+      </span>
+      ${judge.model_used ? html`<span class="text-text-dim">${judge.model_used}</span>` : null}
+      ${judge.generated_at ? html`<span class="text-text-dim ml-auto"><${TimeAgo} timestamp=${judge.generated_at} /></span>` : null}
+      ${judge.last_error ? html`<span class="text-bad/80 ml-auto truncate max-w-[300px]">${judge.last_error}</span>` : null}
+    </div>
   `
 }
 
@@ -135,10 +157,11 @@ function GovernanceToolbar() {
 function governanceEmptyMessage(): string {
   const data = governanceData.value
   const allItems = data?.items ?? []
+  const judgments = data?.judgments ?? []
   const lastActivityAge = data?.summary?.last_activity_age_s
 
-  // All items empty (not just filtered) — show guidance
-  if (allItems.length === 0) {
+  // All items and judgments empty — show guidance
+  if (allItems.length === 0 && judgments.length === 0) {
     const ageText = formatAgeSummary(lastActivityAge)
     if (ageText != null) {
       return `거버넌스 사건이 없습니다. 마지막 활동: ${ageText} 전. keeper가 활동 중일 때 자동 생성됩니다.`
@@ -203,6 +226,38 @@ function DecisionInbox() {
   `
 }
 
+function JudgmentsSection() {
+  const judgments = governanceData.value?.judgments ?? []
+  if (judgments.length === 0) return null
+  return html`
+    <${Card} title="AI Judge 판단" class="section mb-5" variant="compact">
+      <div class="flex flex-col gap-2.5">
+        ${judgments.map(j => html`
+          <div class="rounded-lg border border-card-border bg-card/34 p-3.5 text-[13px]" data-testid="judgment-item">
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="inline-flex items-center rounded-md border border-accent/20 bg-accent/10 px-1.5 py-0.5 text-[10px] font-bold text-accent">${j.target_kind ?? 'unknown'}</span>
+              <span class="font-medium text-text-strong">${j.target_id ?? ''}</span>
+              ${j.confidence != null ? html`<span class="ml-auto text-[11px] text-text-muted">신뢰도 ${Math.round(j.confidence * 100)}%</span>` : null}
+            </div>
+            <div class="text-text-muted/90 leading-relaxed">${j.summary ?? ''}</div>
+            ${j.recommended_action ? html`
+              <div class="mt-2 flex items-center gap-1.5 text-[11px]">
+                <span class="rounded-md border border-accent/20 bg-accent/8 px-1.5 py-0.5 font-medium text-accent">${j.recommended_action.action_kind ?? 'action'}</span>
+                ${j.recommended_action.resolved_tool ? html`<span class="text-text-dim font-mono">${j.recommended_action.resolved_tool}</span>` : null}
+                ${j.recommended_action.reason ? html`<span class="text-text-muted/80 truncate max-w-[250px]">${j.recommended_action.reason}</span>` : null}
+              </div>
+            ` : null}
+            ${j.guardrail_state?.requires_human_gate ? html`
+              <div class="mt-1.5 inline-flex items-center rounded-md border border-warn/30 bg-warn/10 px-2 py-0.5 text-[10px] font-bold text-warn">승인 필요</div>
+            ` : null}
+            ${j.generated_at ? html`<div class="mt-1.5 text-[11px] text-text-dim"><${TimeAgo} timestamp=${j.generated_at} /></div>` : null}
+          </div>
+        `)}
+      </div>
+    <//>
+  `
+}
+
 export function Governance() {
   useEffect(() => {
     void refreshGovernance()
@@ -212,6 +267,7 @@ export function Governance() {
     <div class="flex flex-col gap-0.5">
       <${GovernanceSummaryStrip} />
       <${GovernanceToolbar} />
+      <${JudgmentsSection} />
       <div class="governance-layout">
         <${DecisionInbox} />
         <${DecisionDetail} />

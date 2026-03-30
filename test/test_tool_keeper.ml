@@ -158,6 +158,19 @@ let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   check string "provenance" "fallback" resolved.provenance;
   check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
+let test_direct_reply_mode_prompt_prioritizes_persona () =
+  let prompt =
+    Masc_mcp.Keeper_prompt.append_direct_reply_mode_prompt
+      ~base_prompt:"base prompt"
+  in
+  check bool "keeps base prompt" true (contains_substring prompt "base prompt");
+  check bool "mentions direct chat" true
+    (contains_substring prompt "direct chat with the user");
+  check bool "mentions persona priority" true
+    (contains_substring prompt "Prioritize the keeper's authored persona");
+  check bool "forbids skill headers" true
+    (contains_substring prompt "Do not emit SKILL:")
+
 let keeper_usage ?cost_usd ~input_tokens ~output_tokens () : Agent_sdk.Types.api_usage =
   {
     input_tokens;
@@ -1185,7 +1198,7 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         | Error e -> fail e
       in
       let metrics_store = Masc_mcp.Keeper_types.keeper_metrics_store config meta.name in
-      let history_path = Masc_mcp.Keeper_types.keeper_history_path config meta.trace_id in
+      let history_path = Masc_mcp.Keeper_types.keeper_history_path config meta.runtime.trace_id in
       let memory_bank_path = Masc_mcp.Keeper_types.keeper_memory_bank_path config meta.name in
       let turn_json = Yojson.Safe.from_string
           {|{"channel":"turn","generation":0,"trace_id":"trace-1","context_ratio":0.41,"context_tokens":120,"context_max":1024,"message_count":4,"memory_check":{"performed":true,"passed":true,"final_score":0.9},"skill_primary":"masc-heartbeat","skill_secondary":["masc-keeper-autonomy"],"skill_reason":"stateful routing","skill_selection_mode":"agent","skill_provenance":"judgment"}|}
@@ -1804,7 +1817,7 @@ let test_keeper_bootstrap_marks_stale_explicit_keeper () =
         {
           meta with
           proactive = { meta.proactive with enabled = false };
-          usage = { meta.usage with last_turn_ts = 0.0 };
+          runtime = { meta.runtime with usage = { meta.runtime.usage with last_turn_ts = 0.0 } };
         }
       in
       (match Masc_mcp.Keeper_types.write_meta config stale_meta with
@@ -2017,6 +2030,8 @@ let () =
            test_resolved_keeper_skill_route_marks_agent_judgment;
          test_case "resolved skill route falls back when parse missing" `Quick
            test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing;
+         test_case "direct reply prompt prioritizes persona" `Quick
+           test_direct_reply_mode_prompt_prioritizes_persona;
          test_case "keeper merge usage preserves present cost" `Quick
            test_keeper_merge_usage_preserves_present_cost;
          test_case "keeper merge usage sums costs" `Quick

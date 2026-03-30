@@ -343,7 +343,10 @@ let verify_worker ~pattern (worker : worker_plan) diff =
           ~goal:prompt ~max_turns:1
           ~temperature:0.0 ~max_tokens:200 ()
       with
-      | Ok result -> Verifier_oas.parse_verdict (Oas_response.text_of_response result.Oas_worker.response)
+      | Ok result ->
+        (match Verifier_oas.parse_verdict (Oas_response.text_of_response result.Oas_worker.response) with
+         | Ok v -> v
+         | Error parse_err -> Verifier_oas.Warn ("verdict_parse_failed: " ^ parse_err))
       | Error e -> Verifier_oas.Warn ("verifier_unavailable: " ^ e)
     in
     let our_verdict =

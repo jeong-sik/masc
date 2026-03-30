@@ -5,7 +5,11 @@ import { SurfaceCard } from '../common/card'
 import { ActionButton } from '../common/button'
 import { TextInput } from '../common/input'
 import { CountBadge } from '../common/badge'
-import { flowState, flowLoading, fetchPauseStatus, pauseRoom, resumeRoom, interruptRoom } from './flow-control-state'
+import {
+  flowState, flowLoading, fetchPauseStatus, pauseRoom, resumeRoom, interruptRoom,
+  roomStrategy, roomStrategyLoading, fetchRoomStrategy,
+  maintenanceResult, maintenanceLoading, runGarbageCollection, cleanupZombies,
+} from './flow-control-state'
 
 const showInterruptConfirm = signal(false)
 const interruptReason = signal('')
@@ -49,6 +53,46 @@ export function FlowControlPanel() {
           </div>
         </div>
       ` : null}
+    <//>
+
+    ${'' /* ── Room Strategy ── */}
+    <${SurfaceCard} variant="compact" class="mb-4">
+      <details>
+        <summary class="cursor-pointer text-[13px] text-[var(--text-strong)] font-medium select-none py-1">룸 전략</summary>
+        <div class="mt-3">
+          ${roomStrategy.value ? html`
+            <div class="flex flex-col gap-1.5 mb-3">
+              ${Object.entries(roomStrategy.value).map(([key, val]) => html`
+                <div key=${key} class="flex items-center justify-between py-1.5 px-3 rounded-lg border border-card-border/50 bg-card/20 text-[12px]">
+                  <span class="font-medium text-text-muted">${key}</span>
+                  <span class="font-semibold text-text-strong font-mono">${String(val)}</span>
+                </div>
+              `)}
+            </div>
+          ` : html`<p class="text-[11px] text-text-dim mb-3">조회되지 않았습니다</p>`}
+          <${ActionButton} variant="ghost" size="sm" disabled=${roomStrategyLoading.value}
+            onClick=${() => void fetchRoomStrategy()}>
+            ${roomStrategyLoading.value ? '...' : '조회'}<//>
+        </div>
+      </details>
+    <//>
+
+    ${'' /* ── Maintenance ── */}
+    <${SurfaceCard} variant="compact">
+      <details>
+        <summary class="cursor-pointer text-[13px] text-[var(--text-strong)] font-medium select-none py-1">유지보수</summary>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <${ActionButton} variant="ghost" size="md" disabled=${maintenanceLoading.value}
+            onClick=${() => { if (confirm('GC를 실행합니까?')) void runGarbageCollection() }}>
+            ${maintenanceLoading.value ? '...' : 'GC 실행'}<//>
+          <${ActionButton} variant="danger" size="md" disabled=${maintenanceLoading.value}
+            onClick=${() => { if (confirm('좀비 에이전트를 정리합니까?')) void cleanupZombies() }}>
+            ${maintenanceLoading.value ? '...' : '좀비 정리'}<//>
+        </div>
+        ${maintenanceResult.value ? html`
+          <pre class="mt-3 p-3 rounded-lg border border-card-border/50 bg-card/30 text-[11px] text-text-body font-mono max-h-[160px] overflow-auto custom-scrollbar whitespace-pre-wrap">${maintenanceResult.value}</pre>
+        ` : null}
+      </details>
     <//>
   `
 }

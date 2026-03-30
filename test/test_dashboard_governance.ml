@@ -56,8 +56,14 @@ let test_empty_governance_structure () =
       let activity = json |> member "activity" |> to_list in
       check int "activity empty" 0 (List.length activity);
       let judge = json |> member "judge" in
-      check bool "judge has judge_online bool" true
-        (match judge |> member "judge_online" with `Bool _ -> true | _ -> false);
+      check bool "judge_online is false when no judge started" false
+        (judge |> member "judge_online" |> to_bool);
+      check string "keeper_name is governance-judge" "governance-judge"
+        (judge |> member "keeper_name" |> to_string);
+      check bool "model_used is null when no judge started" true
+        (judge |> member "model_used" = `Null);
+      let judgments = json |> member "judgments" |> to_list in
+      check int "judgments empty" 0 (List.length judgments);
       let pending = json |> member "pending_actions" |> to_list in
       check int "pending_actions empty" 0 (List.length pending))
 

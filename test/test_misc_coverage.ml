@@ -230,10 +230,6 @@ let test_env_orchestrator_agent_name () =
   let name = Env_config.Orchestrator.agent_name in
   check bool "non-empty name" true (String.length name > 0)
 
-let test_env_mitosis_interval () =
-  let interval = Env_config.Mitosis.trigger_interval_seconds in
-  check bool "positive interval" true (interval > 0.0)
-
 let test_env_cancellation_max_age () =
   let max_age = Env_config.Cancellation.token_max_age_seconds in
   check bool "positive max_age" true (max_age > 0.0)
@@ -324,9 +320,6 @@ let () =
     "env_config.orchestrator", [
       test_case "interval" `Quick test_env_orchestrator_interval;
       test_case "agent_name" `Quick test_env_orchestrator_agent_name;
-    ];
-    "env_config.mitosis", [
-      test_case "interval" `Quick test_env_mitosis_interval;
     ];
     "env_config.cancellation", [
       test_case "max_age" `Quick test_env_cancellation_max_age;

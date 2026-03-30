@@ -10,6 +10,7 @@ import {
   tasks,
 } from '../store'
 import { fetchRoomMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineResponse } from '../api'
+import { callMcpTool } from '../api/mcp'
 import { journal } from '../sse'
 import { route, navigate } from '../router'
 import { missionSnapshot } from '../mission-store'
@@ -39,6 +40,17 @@ export const taskHistories = signal<TaskHistoryRow[]>([])
 export const agentTimeline = signal<AgentTimelineResponse | null>(null)
 export const mentionText = signal('')
 export const sendingMention = signal(false)
+
+// Agent fitness
+export type AgentFitness = {
+  completion_rate?: number
+  reliability_score?: number
+  speed_score?: number
+  overall_fitness?: number
+  [key: string]: unknown
+}
+export const agentFitness = signal<AgentFitness | null>(null)
+export const fitnessLoading = signal(false)
 
 // --- Selectors ---
 
@@ -111,6 +123,7 @@ export function closeAgentDetail(): void {
   taskHistories.value = []
   agentTimeline.value = null
   mentionText.value = ''
+  agentFitness.value = null
   if (route.value.tab === 'monitoring' && route.value.params.agent) {
     navigate('monitoring', { section: 'agents' })
   }
@@ -125,12 +138,16 @@ export async function refreshAgentDetail(): Promise<void> {
   roomActivity.value = []
   taskHistories.value = []
   agentTimeline.value = null
+  agentFitness.value = null
 
   try {
-    // Fetch room messages, task histories, and timeline in parallel
-    const [lines, timelineResult] = await Promise.all([
+    // Fetch room messages, task histories, timeline, and fitness in parallel
+    const [lines, timelineResult, fitnessResult] = await Promise.all([
       fetchRoomMessages(80),
-      fetchAgentTimeline(agentName, 4, 20).catch(() => null),
+      fetchAgentTimeline(agentName, 24, 50).catch(() => null),
+      callMcpTool('masc_agent_fitness', { agent_name: agentName, days: 7 })
+        .then(raw => JSON.parse(raw) as AgentFitness)
+        .catch(() => null),
     ])
 
     roomActivity.value = lines
@@ -138,6 +155,7 @@ export async function refreshAgentDetail(): Promise<void> {
       .slice(0, 20)
 
     agentTimeline.value = timelineResult
+    agentFitness.value = fitnessResult
 
     const ownedTasks = assignedTasks(agentName).slice(0, 6)
     if (ownedTasks.length === 0) return

@@ -104,46 +104,6 @@ module Orchestrator = struct
     get_bool ~default:false "MASC_ORCHESTRATOR_ENABLED"
 end
 
-(** {1 Team Session Configuration} *)
-
-module TeamSession = struct
-  let model_35b_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_35B" |> trim_opt
-
-  let model_27b_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_27B" |> trim_opt
-
-  let model_9b_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_9B" |> trim_opt
-
-  let router_judge_enabled =
-    get_bool ~default:true "MASC_TEAM_SESSION_ROUTER_JUDGE"
-
-  let router_judge_timeout_sec =
-    max 5 (get_int ~default:15 "MASC_TEAM_SESSION_ROUTER_JUDGE_TIMEOUT_SEC")
-
-  let router_judge_confidence_threshold =
-    let v = get_float ~default:0.72 "MASC_TEAM_SESSION_ROUTER_CONFIDENCE_THRESHOLD" in
-    Float.max 0.0 (Float.min 1.0 v)
-
-  let router_judge_model_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_ROUTER_JUDGE_MODEL" |> trim_opt
-end
-
-(** {1 Mitosis (Cell Division) Configuration} *)
-
-module Mitosis = struct
-  (** Time-based trigger interval (seconds) *)
-  let trigger_interval_seconds =
-    get_float ~default:300.0 "MASC_MITOSIS_INTERVAL_SEC"
-
-  (** Cooldown between consecutive handoffs (seconds).
-      Prevents rapid repeated handoffs when context_ratio fluctuates near threshold. *)
-  let handoff_cooldown_seconds =
-    get_float ~default:60.0 "MASC_MITOSIS_HANDOFF_COOLDOWN_SEC"
-
-end
-
 (** {1 Spawn Configuration} *)
 
 module Spawn = struct
@@ -193,29 +153,6 @@ module Cancellation = struct
     get_float ~default:3600.0 "MASC_CANCELLATION_TOKEN_MAX_AGE_SEC"
 end
 
-(** {1 Neo4j Configuration} *)
-
-module Neo4j = struct
-  (** Bolt connection URI *)
-  let uri =
-    get_string ~default:"bolt://turntable.proxy.rlwy.net:11490" "NEO4J_URI"
-
-  (** HTTP API URI (overrides bolt-to-HTTP conversion when set) *)
-  let http_uri =
-    get_string ~default:"" "NEO4J_HTTP_URI"
-
-  (** Database user *)
-  let user =
-    get_string ~default:"neo4j" "NEO4J_USER"
-
-  (** Require NEO4J_PASSWORD from environment. Returns Error if unset or empty. *)
-  let password_result () : (string, string) result =
-    match Sys.getenv_opt "NEO4J_PASSWORD" with
-    | Some pw when String.trim pw <> "" -> Ok pw
-    | Some _ -> Error "NEO4J_PASSWORD is set but empty"
-    | None -> Error "NEO4J_PASSWORD not set"
-end
-
 (** {1 Voice Bridge Configuration} *)
 
 module Voice = struct
@@ -228,55 +165,12 @@ module Voice = struct
     get_int ~default:8936 "VOICE_MCP_PORT"
 end
 
-(** {1 Network Utilities} *)
-
-module Network = struct
-  (** Check if a host string refers to the local machine.
-      Covers localhost, 127.0.0.0/8 (any 127.x address), and ::1. *)
-  let is_localhost host =
-    host = "localhost"
-    || host = "::1"
-    || String.length host >= 4 && String.sub host 0 4 = "127."
-end
-
 (** {1 Timeout Defaults} *)
 
 module Timeout = struct
   (** gcloud auth token fetch (used by a2a_tools, model_client, keeper_alerting) *)
   let gcloud_auth_sec =
     get_float ~default:15.0 "MASC_TIMEOUT_GCLOUD_AUTH_SEC"
-
-  (** Anthropic / Claude API request timeout *)
-  let anthropic_api_sec =
-    get_int ~default:120 "MASC_TIMEOUT_ANTHROPIC_SEC"
-
-  (** OpenAI-compatible API request timeout *)
-  let openai_compat_api_sec =
-    get_int ~default:60 "MASC_TIMEOUT_OPENAI_COMPAT_SEC"
-
-  (** Grace period added on top of MODEL timeouts for curl/network overhead *)
-  let model_grace_sec =
-    get_float ~default:5.0 "MASC_TIMEOUT_MODEL_GRACE_SEC"
-
-  (** Keeper status check timeout *)
-  let keeper_status_sec =
-    get_float ~default:5.0 "MASC_TIMEOUT_KEEPER_STATUS_SEC"
-end
-
-(** {1 MODEL Generation Defaults} *)
-
-module Inference_defaults = struct
-  (** Default max_tokens for MODEL generation (used by spawn, chain, keeper, etc.) *)
-  let default_max_tokens =
-    get_int ~default:4096 "MASC_INFERENCE_DEFAULT_MAX_TOKENS"
-
-  (** SSE retry interval in milliseconds (client reconnection hint) *)
-  let sse_retry_ms =
-    get_int ~default:3000 "MASC_SSE_RETRY_MS"
-
-  (** Log output truncation length *)
-  let log_truncation_len =
-    get_int ~default:1500 "MASC_LOG_TRUNCATION_LEN"
 end
 
 (** {1 Control Plane Cleanup Configuration} *)
@@ -449,16 +343,6 @@ end
 module Pulse_config = struct
   (** Max consecutive consumer failures before recovery. Default: 3. *)
   let max_consumer_failures = max 1 (get_int ~default:3 "MASC_PULSE_MAX_CONSUMER_FAILURES")
-end
-
-(** {1 Circuit Breaker Configuration} *)
-
-module Circuit = struct
-  (** Failure count threshold before opening circuit. Default: 5. *)
-  let failure_threshold = get_int ~default:5 "MASC_CIRCUIT_THRESHOLD"
-
-  (** Cooldown period after circuit opens (seconds). Default: 300. *)
-  let cooldown_sec = get_float ~default:300.0 "MASC_CIRCUIT_COOLDOWN"
 end
 
 (** {1 Tool Surface Configuration} *)

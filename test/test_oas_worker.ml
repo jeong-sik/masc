@@ -651,7 +651,7 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
         }
       in
       let session =
-        Keeper_exec_context.create_session ~session_id:meta.trace_id ~base_dir
+        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
       in
       let ctx =
         Keeper_exec_context.create ~system_prompt:"rollover" ~max_tokens:100
@@ -664,7 +664,7 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
         Keeper_exec_context.save_oas_checkpoint ~session
           ~agent_name:meta.agent_name
           ~model:"llama:auto"
-          ~ctx ~generation:meta.generation
+          ~ctx ~generation:meta.runtime.generation
       in
       let rollover =
         Keeper_exec_context.maybe_rollover_oas_handoff ~base_dir ~meta
@@ -673,21 +673,21 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
           ~checkpoint:(Some checkpoint)
       in
       Alcotest.(check int) "generation incremented" 1
-        rollover.updated_meta.generation;
+        rollover.updated_meta.runtime.generation;
       Alcotest.(check bool) "trace rotated" true
-        (rollover.updated_meta.trace_id <> meta.trace_id);
+        (rollover.updated_meta.runtime.trace_id <> meta.runtime.trace_id);
       Alcotest.(check bool) "trace history contains previous trace" true
-        (List.mem meta.trace_id rollover.updated_meta.trace_history);
+        (List.mem meta.runtime.trace_id rollover.updated_meta.runtime.trace_history);
       Alcotest.(check bool) "handoff json present" true
         (Option.is_some rollover.handoff_json);
       let new_session =
         Keeper_exec_context.create_session
-          ~session_id:rollover.updated_meta.trace_id
+          ~session_id:rollover.updated_meta.runtime.trace_id
           ~base_dir
       in
       match
         Keeper_checkpoint_store.load_oas ~session_dir:new_session.session_dir
-          ~session_id:rollover.updated_meta.trace_id
+          ~session_id:rollover.updated_meta.runtime.trace_id
       with
       | Some loaded ->
           let generation =
@@ -714,7 +714,7 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
         }
       in
       let session =
-        Keeper_exec_context.create_session ~session_id:meta.trace_id ~base_dir
+        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
       in
       let ctx =
         Keeper_exec_context.create ~system_prompt:"stable" ~max_tokens:100
@@ -727,7 +727,7 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
         Keeper_exec_context.save_oas_checkpoint ~session
           ~agent_name:meta.agent_name
           ~model:"llama:auto"
-          ~ctx ~generation:meta.generation
+          ~ctx ~generation:meta.runtime.generation
       in
       let rollover =
         Keeper_exec_context.maybe_rollover_oas_handoff ~base_dir ~meta
@@ -735,10 +735,10 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
           ~primary_model_max_tokens:100
           ~checkpoint:(Some checkpoint)
       in
-      Alcotest.(check string) "trace unchanged" meta.trace_id
-        rollover.updated_meta.trace_id;
-      Alcotest.(check int) "generation unchanged" meta.generation
-        rollover.updated_meta.generation;
+      Alcotest.(check string) "trace unchanged" meta.runtime.trace_id
+        rollover.updated_meta.runtime.trace_id;
+      Alcotest.(check int) "generation unchanged" meta.runtime.generation
+        rollover.updated_meta.runtime.generation;
       Alcotest.(check bool) "handoff json absent" false
         (Option.is_some rollover.handoff_json))
 

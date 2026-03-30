@@ -53,27 +53,27 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             |> Option.value ~default:0.0
           in
           let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
-          let last_turn_ago_s = if m.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.usage.last_turn_ts in
+          let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
           let last_handoff_ago_s =
-            if m.last_handoff_ts <= 0.0 then 0.0 else now_ts -. m.last_handoff_ts
+            if m.runtime.last_handoff_ts <= 0.0 then 0.0 else now_ts -. m.runtime.last_handoff_ts
           in
           let last_compaction_ago_s =
-            if m.compaction.last_ts <= 0.0 then 0.0 else now_ts -. m.compaction.last_ts
+            if m.runtime.compaction_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.compaction_rt.last_ts
           in
           let last_proactive_ago_s =
-            if m.proactive.last_ts <= 0.0 then 0.0 else now_ts -. m.proactive.last_ts
+            if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
           in
           (* C-3 fix: compute last_activity from the most recent activity timestamp
              to avoid showing misleading staleness when agent is actually active *)
           let last_activity_ts =
             List.fold_left max 0.0
-              [ m.usage.last_turn_ts; m.proactive.last_ts; m.last_handoff_ts;
-                m.compaction.last_ts; created_ts ]
+              [ m.runtime.usage.last_turn_ts; m.runtime.proactive_rt.last_ts; m.runtime.last_handoff_ts;
+                m.runtime.compaction_rt.last_ts; created_ts ]
           in
           let last_activity_ago_s =
             if last_activity_ts <= 0.0 then 0.0 else now_ts -. last_activity_ts
           in
-          let trace_history_count = List.length m.trace_history in
+          let trace_history_count = List.length m.runtime.trace_history in
           let active_model = Keeper_exec_status.active_model_of_meta m in
           let next_model_hint = Keeper_exec_status.next_model_hint_of_meta m in
           let cascade_models =
@@ -86,7 +86,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           in
           let primary_model_norm = normalize_model_name primary_model in
           let last_compaction_saved_tokens =
-            max 0 (m.compaction.last_before_tokens - m.compaction.last_after_tokens)
+            max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
           in
 
           let metrics_store = Keeper_types.keeper_metrics_store config m.name in
@@ -146,7 +146,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 
           let (metrics_series_items, metrics_window_summary, last_handoff_event, last_compaction_event) =
             compute_metrics_window
-              ~parsed_metrics ~generation:m.generation ~compact ~series_points
+              ~parsed_metrics ~generation:m.runtime.generation ~compact ~series_points
               ~metrics_window_max_bytes ~primary_model_norm ~primary_model
           in
           let metrics_series = `List metrics_series_items in
@@ -186,7 +186,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           in
           let history_path =
             Filename.concat
-              (Filename.concat (Keeper_types.session_base_dir config) m.trace_id)
+              (Filename.concat (Keeper_types.session_base_dir config) m.runtime.trace_id)
               "history.jsonl"
           in
           let ( conversation_tail,
@@ -267,7 +267,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                      let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =
                        Keeper_execution.load_context_from_checkpoint
-                         ~trace_id:m.trace_id
+                         ~trace_id:m.runtime.trace_id
                          ~primary_model_max_tokens:primary_max_context
                          ~base_dir
                      in
@@ -349,8 +349,8 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("agent_name", `String m.agent_name);
               ("emoji", `String (let (e, _) = get_agent_identity m.name in e));
               ("koreanName", `String (let (_, k) = get_agent_identity m.name in k));
-              ("trace_id", `String m.trace_id);
-              ("generation", `Int m.generation);
+              ("trace_id", `String m.runtime.trace_id);
+              ("generation", `Int m.runtime.generation);
               ("created_at", `String m.created_at);
               ("updated_at", `String m.updated_at);
               ("trace_history_count", `Int trace_history_count);
@@ -399,19 +399,19 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("last_proactive_ago_s", `Float last_proactive_ago_s);
               ("last_activity_ago_s", `Float last_activity_ago_s);
               ("handoff_count_total", `Int trace_history_count);
-              ("total_turns", `Int m.usage.total_turns);
-              ("total_input_tokens", `Int m.usage.total_input_tokens);
-              ("total_output_tokens", `Int m.usage.total_output_tokens);
-              ("total_tokens", `Int m.usage.total_tokens);
-              ("total_cost_usd", `Float m.usage.total_cost_usd);
-              ("last_model_used", `String m.usage.last_model_used);
+              ("total_turns", `Int m.runtime.usage.total_turns);
+              ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);
+              ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);
+              ("total_tokens", `Int m.runtime.usage.total_tokens);
+              ("total_cost_usd", `Float m.runtime.usage.total_cost_usd);
+              ("last_model_used", `String m.runtime.usage.last_model_used);
               ("last_usage", `Assoc [
-                ("input_tokens", `Int m.usage.last_input_tokens);
-                ("output_tokens", `Int m.usage.last_output_tokens);
-                ("total_tokens", `Int m.usage.last_total_tokens);
+                ("input_tokens", `Int m.runtime.usage.last_input_tokens);
+                ("output_tokens", `Int m.runtime.usage.last_output_tokens);
+                ("total_tokens", `Int m.runtime.usage.last_total_tokens);
               ]);
-              ("last_latency_ms", `Int m.usage.last_latency_ms);
-              ("compaction_count", `Int m.compaction.count);
+              ("last_latency_ms", `Int m.runtime.usage.last_latency_ms);
+              ("compaction_count", `Int m.runtime.compaction_rt.count);
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
               ("compaction_profile", `String m.compaction.profile);
               ("compaction_ratio_gate", `Float compact_ratio_gate);
@@ -420,23 +420,23 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
-              ("proactive_count_total", `Int m.proactive.count_total);
-              ("autonomous_turn_count", `Int m.autonomous_turn_count);
-              ("autonomous_text_turn_count", `Int m.autonomous_text_turn_count);
-              ("autonomous_tool_turn_count", `Int m.autonomous_tool_turn_count);
-              ("board_reactive_turn_count", `Int m.board_reactive_turn_count);
-              ("mention_reactive_turn_count", `Int m.mention_reactive_turn_count);
-              ("noop_turn_count", `Int m.noop_turn_count);
-              ("autonomous_action_count", `Int m.autonomous_action_count);
-              ("last_proactive_ts", `Float m.proactive.last_ts);
+              ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
+              ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
+              ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
+              ("autonomous_tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
+              ("board_reactive_turn_count", `Int m.runtime.board_reactive_turn_count);
+              ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
+              ("noop_turn_count", `Int m.runtime.noop_turn_count);
+              ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
+              ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);
               ("last_proactive_reason",
-                if String.trim m.proactive.last_reason = ""
+                if String.trim m.runtime.proactive_rt.last_reason = ""
                 then `Null
-                else `String m.proactive.last_reason);
+                else `String m.runtime.proactive_rt.last_reason);
 	              ("last_proactive_preview",
-	                if String.trim m.proactive.last_preview = ""
+	                if String.trim m.runtime.proactive_rt.last_preview = ""
 	                then `Null
-	                else `String m.proactive.last_preview);
+	                else `String m.runtime.proactive_rt.last_preview);
 	              ("skill_primary",
 	                match last_skill_primary with
 	                | Some s -> `String s
@@ -525,11 +525,16 @@ let keeper_config_json (config : Room.config) (name : string)
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
       let active_model = Keeper_exec_status.active_model_of_meta m in
+      let persona_extended =
+        Keeper_types_profile.load_persona_extended m.name
+        |> Option.value ~default:""
+      in
       let effective_system_prompt =
         Keeper_prompt.build_keeper_system_prompt
           ~goal:m.goal ~short_goal:m.short_goal ~mid_goal:m.mid_goal
           ~long_goal:m.long_goal ~soul_profile:m.soul_profile ~will:m.will
-          ~needs:m.needs ~desires:m.desires ~instructions:m.instructions ()
+          ~needs:m.needs ~desires:m.desires ~instructions:m.instructions
+          ~persona_extended ()
       in
       let prompt =
         `Assoc [
@@ -588,24 +593,24 @@ let keeper_config_json (config : Room.config) (name : string)
       in
       let metrics =
         `Assoc [
-          ("generation", `Int m.generation);
-          ("total_turns", `Int m.usage.total_turns);
-          ("total_input_tokens", `Int m.usage.total_input_tokens);
-          ("total_output_tokens", `Int m.usage.total_output_tokens);
-          ("total_tokens", `Int m.usage.total_tokens);
-          ("total_cost_usd", `Float m.usage.total_cost_usd);
-          ("last_model_used", `String m.usage.last_model_used);
-          ("last_input_tokens", `Int m.usage.last_input_tokens);
-          ("last_output_tokens", `Int m.usage.last_output_tokens);
-          ("last_total_tokens", `Int m.usage.last_total_tokens);
-          ("last_latency_ms", `Int m.usage.last_latency_ms);
+          ("generation", `Int m.runtime.generation);
+          ("total_turns", `Int m.runtime.usage.total_turns);
+          ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);
+          ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);
+          ("total_tokens", `Int m.runtime.usage.total_tokens);
+          ("total_cost_usd", `Float m.runtime.usage.total_cost_usd);
+          ("last_model_used", `String m.runtime.usage.last_model_used);
+          ("last_input_tokens", `Int m.runtime.usage.last_input_tokens);
+          ("last_output_tokens", `Int m.runtime.usage.last_output_tokens);
+          ("last_total_tokens", `Int m.runtime.usage.last_total_tokens);
+          ("last_latency_ms", `Int m.runtime.usage.last_latency_ms);
           ( "last_total_tokens_per_sec",
-            tokens_per_sec_json ~tokens:m.usage.last_total_tokens
-              ~latency_ms:m.usage.last_latency_ms );
+            tokens_per_sec_json ~tokens:m.runtime.usage.last_total_tokens
+              ~latency_ms:m.runtime.usage.last_latency_ms );
           ( "last_output_tokens_per_sec",
-            tokens_per_sec_json ~tokens:m.usage.last_output_tokens
-              ~latency_ms:m.usage.last_latency_ms );
-          ("compaction_count", `Int m.compaction.count);
+            tokens_per_sec_json ~tokens:m.runtime.usage.last_output_tokens
+              ~latency_ms:m.runtime.usage.last_latency_ms );
+          ("compaction_count", `Int m.runtime.compaction_rt.count);
         ]
       in
       let now_ts = Time_compat.now () in

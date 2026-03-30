@@ -171,8 +171,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          let meta = {
            name = p.name;
            agent_name = keeper_agent_name p.name;
-           trace_id;
-           trace_history = [];
            goal;
            short_goal;
            mid_goal;
@@ -194,15 +192,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            mention_targets;
            joined_room_ids = [];
            last_seen_seq_by_room = [];
-           generation = 0;
            proactive = {
              enabled = proactive_enabled;
              idle_sec = proactive_idle_sec;
              cooldown_sec = proactive_cooldown_sec;
-             count_total = 0;
-             last_ts = 0.0;
-             last_reason = "";
-             last_preview = "";
            };
            compaction = {
              profile = compaction_profile;
@@ -210,49 +203,62 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              message_gate = compaction_message_gate;
              token_gate = compaction_token_gate;
              cooldown_sec = continuity_compaction_cooldown_sec;
-             count = 0;
-             last_ts = 0.0;
-             last_before_tokens = 0;
-             last_after_tokens = 0;
-             last_check_ts = now_ts;
-             last_decision = "initialized";
            };
            auto_handoff;
            handoff_threshold;
            handoff_cooldown_sec;
-           last_handoff_ts = 0.0;
            created_at = now_iso ();
            updated_at = now_iso ();
-           usage = {
-             total_turns = 0;
-             total_input_tokens = 0;
-             total_output_tokens = 0;
-             total_tokens = 0;
-             total_cost_usd = 0.0;
-             last_turn_ts = 0.0;
-             last_model_used = "";
-             last_input_tokens = 0;
-             last_output_tokens = 0;
-             last_total_tokens = 0;
-             last_latency_ms = 0;
+           continuity_summary = "";
+           active_goal_ids = [];
+           last_triage_triggers = "";
+           active_team_session_id = None;
+           last_team_session_started_at = "";
+           team_session_start_count_total = 0;
+           paused = false;
+           current_task_id = None;
+           runtime = {
+             usage = {
+               total_turns = 0;
+               total_input_tokens = 0;
+               total_output_tokens = 0;
+               total_tokens = 0;
+               total_cost_usd = 0.0;
+               last_turn_ts = 0.0;
+               last_model_used = "";
+               last_input_tokens = 0;
+               last_output_tokens = 0;
+               last_total_tokens = 0;
+               last_latency_ms = 0;
+             };
+             compaction_rt = {
+               count = 0;
+               last_ts = 0.0;
+               last_before_tokens = 0;
+               last_after_tokens = 0;
+               last_check_ts = now_ts;
+               last_decision = "initialized";
+             };
+             proactive_rt = {
+               count_total = 0;
+               last_ts = 0.0;
+               last_reason = "";
+               last_preview = "";
+             };
+             generation = 0;
+             trace_id;
+             trace_history = [];
+             last_handoff_ts = 0.0;
+             last_continuity_update_ts = now_ts;
+             last_autonomous_action_at = "";
+             autonomous_action_count = 0;
+             autonomous_turn_count = 0;
+             autonomous_text_turn_count = 0;
+             autonomous_tool_turn_count = 0;
+             board_reactive_turn_count = 0;
+             mention_reactive_turn_count = 0;
+             noop_turn_count = 0;
            };
-            last_continuity_update_ts = now_ts;
-            continuity_summary = "";
-            active_goal_ids = [];
-            last_autonomous_action_at = "";
-            autonomous_action_count = 0;
-            autonomous_turn_count = 0;
-            autonomous_text_turn_count = 0;
-            autonomous_tool_turn_count = 0;
-            board_reactive_turn_count = 0;
-            mention_reactive_turn_count = 0;
-            noop_turn_count = 0;
-            last_triage_triggers = "";
-            active_team_session_id = None;
-            last_team_session_started_at = "";
-            team_session_start_count_total = 0;
-            paused = false;
-            current_task_id = None;
          } in
          Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
          (try
@@ -284,8 +290,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            let json = `Assoc [
              ("name", `String meta.name);
              ("agent_name", `String meta.agent_name);
-             ("trace_id", `String meta.trace_id);
-             ("generation", `Int meta.generation);
+             ("trace_id", `String meta.runtime.trace_id);
+             ("generation", `Int meta.runtime.generation);
              ("goal", `String meta.goal);
              ("short_goal", `String meta.short_goal);
              ("mid_goal", `String meta.mid_goal);

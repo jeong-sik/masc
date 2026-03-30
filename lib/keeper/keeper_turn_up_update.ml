@@ -127,7 +127,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     voice_agent_id =
       Option.value ~default:old.voice_agent_id p.voice_agent_id_opt;
     mention_targets;
-    proactive = { old.proactive with
+    proactive = {
       enabled =
         Option.value
           ~default:old.proactive.enabled
@@ -139,7 +139,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
         Option.value ~default:old.proactive.cooldown_sec p.proactive_cooldown_sec_opt
         |> normalize_proactive_cooldown_sec;
     };
-    compaction = { old.compaction with
+    compaction = {
       profile = compaction_profile;
       ratio_gate = compaction_ratio_gate;
       message_gate = compaction_message_gate;

@@ -164,15 +164,77 @@ function registryStateBadge(state: string | null) {
   return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold ${c.bg} ${c.text}">${state}</span>`
 }
 
+function CrashCohortBar({ crash_log }: { crash_log: any[] }) {
+  if (!crash_log || crash_log.length === 0) return null
+  const cohorts: Record<string, number> = {}
+  for (const e of crash_log) {
+    const reason = (e.reason ?? 'unknown') as string
+    const key = reason.startsWith('heartbeat') ? 'heartbeat'
+      : reason.startsWith('turn') ? 'turn'
+      : reason.startsWith('fiber') ? 'fiber'
+      : reason.startsWith('exception') ? 'exception'
+      : 'other'
+    cohorts[key] = (cohorts[key] ?? 0) + 1
+  }
+  const total = crash_log.length
+  const colors: Record<string, string> = {
+    heartbeat: '#f59e0b', turn: '#ef4444', fiber: '#8b5cf6',
+    exception: '#ec4899', other: '#6b7280',
+  }
+  return html`
+    <div>
+      <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">Crash Cohort 분포</div>
+      <div class="flex w-full h-3 rounded-full overflow-hidden bg-[var(--white-5)]">
+        ${Object.entries(cohorts).map(([key, count]) => html`
+          <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${colors[key] ?? '#6b7280'}"
+               title="${key}: ${count}건 (${(count / total * 100).toFixed(0)}%)"
+               class="h-full"></div>
+        `)}
+      </div>
+      <div class="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
+        ${Object.entries(cohorts).map(([key, count]) => html`
+          <span class="text-[10px] text-[var(--text-muted)] flex items-center gap-1">
+            <span class="inline-block w-2 h-2 rounded-full" style="background: ${colors[key] ?? '#6b7280'}"></span>
+            ${key} ${count}
+          </span>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+function SpEventsPanel({ sp_events }: { sp_events: any[] }) {
+  if (!sp_events || sp_events.length === 0) return null
+  return html`
+    <div>
+      <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">Self-Preservation 발동 이력</div>
+      <div class="space-y-1 max-h-28 overflow-y-auto">
+        ${sp_events.slice(0, 10).map((e: any) => html`
+          <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[rgba(139,92,246,0.06)]">
+            <span class="font-mono text-[var(--text-muted)]">${new Date((e.ts ?? 0) * 1000).toLocaleTimeString()}</span>
+            <span class="text-[#8b5cf6]">${e.suppressed_count}/${e.total} suppressed (${e.dominant_cohort})</span>
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
 function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
   const diag = (keeper as any).supervisor_diagnostics
   if (!diag) return null
-  const { restart_count, max_restarts, crash_log, last_failure_reason, dead_since } = diag
+  const { restart_count, max_restarts, crash_log, last_failure_reason, dead_since, sp_events, health_score } = diag
   const budgetPct = max_restarts > 0 ? Math.min(100, (restart_count / max_restarts) * 100) : 0
   const budgetColor = budgetPct >= 80 ? '#ef4444' : budgetPct >= 50 ? '#f59e0b' : '#4ade80'
+  const hs = typeof health_score === 'number' ? health_score : 100
+  const hsColor = hs >= 80 ? '#4ade80' : hs >= 50 ? '#f59e0b' : '#ef4444'
   return html`
     <${SectionCard} title="Supervisor 진단">
       <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-[var(--text-muted)]">Health Score</span>
+          <span class="text-sm font-bold font-mono" style="color: ${hsColor}">${hs}</span>
+        </div>
         <div class="flex items-center justify-between">
           <span class="text-xs text-[var(--text-muted)]">Fiber 상태</span>
           ${registryStateBadge((keeper as any).registry_state)}
@@ -197,6 +259,7 @@ function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
             Dead since ${new Date(dead_since * 1000).toLocaleString()}. Reboot 필요.
           </div>
         ` : null}
+        <${CrashCohortBar} crash_log=${crash_log} />
         ${crash_log && crash_log.length > 0 ? html`
           <div>
             <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">Crash 이력</div>
@@ -210,6 +273,7 @@ function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
             </div>
           </div>
         ` : null}
+        <${SpEventsPanel} sp_events=${sp_events} />
       </div>
     <//>
   `

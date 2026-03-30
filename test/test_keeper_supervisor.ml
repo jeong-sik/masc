@@ -160,7 +160,7 @@ let test_self_preservation_subset () =
     match Reg.get ~base_path:bp name with
     | Some e -> (e, "crash") | None -> fail name
   ) names in
-  let result = Sup.apply_self_preservation ~total_keepers:10 entries in
+  let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:10 entries in
   let result_names = List.map (fun ((e : Reg.registry_entry), _) -> e.name) result in
   let input_names = List.map (fun ((e : Reg.registry_entry), _) -> e.name) entries in
   List.iter (fun rn ->
@@ -168,7 +168,7 @@ let test_self_preservation_subset () =
   ) result_names
 
 let test_self_preservation_empty_input () =
-  let result = Sup.apply_self_preservation ~total_keepers:5 [] in
+  let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:5 [] in
   check int "empty in = empty out" 0 (List.length result)
 
 (* ── Runtime override: fiber_health_of ─────────────────── *)

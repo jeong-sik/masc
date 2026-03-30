@@ -44,6 +44,7 @@ val cohort_key_of_reason : Keeper_registry.failure_reason option -> string
 (** Map a structured failure_reason to a cohort key for self-preservation grouping. *)
 
 val apply_self_preservation :
+  keepers_dir:string ->
   total_keepers:int ->
   (Keeper_registry.registry_entry * string) list ->
   (Keeper_registry.registry_entry * string) list

@@ -64,6 +64,61 @@ let write_event (ev : crash_event) =
   ] in
   Dated_jsonl.append store json
 
+(* ── self-preservation events ──────────────────────────────── *)
+
+type sp_event = {
+  sp_keepers_dir : string;
+  sp_ts : float;
+  sp_suppressed_count : int;
+  sp_total : int;
+  sp_ratio : float;
+  sp_dominant_cohort : string;
+}
+
+let sp_queue : sp_event Queue.t = Queue.create ()
+
+let sp_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 2
+let sp_store_mu = Eio.Mutex.create ()
+
+let sp_store ~keepers_dir : Dated_jsonl.t =
+  let dir = Filename.concat keepers_dir "_self-preservation" in
+  Eio_guard.with_mutex sp_store_mu (fun () ->
+    match Hashtbl.find_opt sp_store_cache dir with
+    | Some store -> store
+    | None ->
+        let store = Dated_jsonl.create ~base_dir:dir () in
+        Hashtbl.replace sp_store_cache dir store;
+        store)
+
+let enqueue_sp_event ~keepers_dir ~ts ~suppressed_count ~total ~ratio
+    ~dominant_cohort =
+  Queue.push {
+    sp_keepers_dir = keepers_dir; sp_ts = ts;
+    sp_suppressed_count = suppressed_count;
+    sp_total = total; sp_ratio = ratio;
+    sp_dominant_cohort = dominant_cohort;
+  } sp_queue
+
+let drain_sp_batch () =
+  let batch = ref [] in
+  while not (Queue.is_empty sp_queue) do
+    batch := Queue.pop sp_queue :: !batch
+  done;
+  List.rev !batch
+
+let write_sp_event (ev : sp_event) =
+  let store = sp_store ~keepers_dir:ev.sp_keepers_dir in
+  let json = `Assoc [
+    ("ts", `Float ev.sp_ts);
+    ("suppressed_count", `Int ev.sp_suppressed_count);
+    ("total", `Int ev.sp_total);
+    ("ratio", `Float ev.sp_ratio);
+    ("dominant_cohort", `String ev.sp_dominant_cohort);
+  ] in
+  Dated_jsonl.append store json
+
+(* ── drain fiber ─────────────────────────────────────────────── *)
+
 let start_drain_fiber ~sw ~clock =
   Eio.Fiber.fork_daemon ~sw (fun () ->
     while true do
@@ -74,7 +129,14 @@ let start_drain_fiber ~sw ~clock =
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Keeper.warn "crash persistence write failed for %s: %s"
              ev.name (Printexc.to_string exn))
-      ) batch
+      ) batch;
+      let sp_batch = drain_sp_batch () in
+      List.iter (fun ev ->
+        (try write_sp_event ev
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+           Log.Keeper.warn "sp persistence write failed: %s"
+             (Printexc.to_string exn))
+      ) sp_batch
     done;
     `Stop_daemon)
 
@@ -82,4 +144,8 @@ let start_drain_fiber ~sw ~clock =
 
 let recent_crashes ~keepers_dir ~name ~max_entries =
   let store = crash_store ~keepers_dir name in
+  Dated_jsonl.read_recent store max_entries
+
+let recent_sp_events ~keepers_dir ~max_entries =
+  let store = sp_store ~keepers_dir in
   Dated_jsonl.read_recent store max_entries

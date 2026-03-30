@@ -769,6 +769,17 @@ let test_normalize_response_text_rewrites_generic_skip () =
              true
            with Not_found -> false
          in
+         found);
+      check bool "encodes reason spaces" true
+        (let found =
+           try
+             ignore
+               (Str.search_forward
+                  (Str.regexp_string "reason=tool%20is%20on%20the%20keeper%20deny%20list")
+                  text 0);
+             true
+           with Not_found -> false
+         in
          found)
   | Error e -> fail ("unexpected error: " ^ e)
 

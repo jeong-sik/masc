@@ -1786,9 +1786,8 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
   Alcotest.(check int) "error code" (-32601) (error_code_exn response);
   let msg = error_message_exn response in
   Alcotest.(check bool) "mentions keeper-internal" true
-    (String.contains msg 'k' &&
-     try
-       ignore (Str.search_forward (Str.regexp_string "keeper-internal") msg 0);
+    (try
+       ignore (Str.search_forward (Str.regexp_case_fold "keeper-internal") msg 0);
        true
      with Not_found -> false);
   cleanup_dir base_path

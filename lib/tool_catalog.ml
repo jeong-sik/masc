@@ -218,7 +218,8 @@ let explicit_metadata : (string * metadata) list =
     adapters do not. This keeps the MCP surface focused on agent communication,
     coordination, and stable public operations.
 
-    Override: set [MASC_FULL_SURFACE=1] to restore the full inventory. *)
+    Override: set [MASC_FULL_SURFACE=1] to restore the full inventory,
+    excluding keeper-internal tools. *)
 
 let public_mcp_tools =
   [

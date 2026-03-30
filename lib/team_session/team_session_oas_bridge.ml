@@ -327,6 +327,7 @@ let is_safe_worker_run_id value =
   let len = String.length value in
   len > 0
   && len <= 128
+  && value <> "." && value <> ".."
   && String.for_all
        (function
          | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '.' | '_' | '-' -> true

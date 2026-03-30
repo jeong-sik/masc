@@ -62,8 +62,6 @@ let worker_proof_refs config session_id =
                      match string_member_opt "result_status" proof_json with
                      | Some value -> `String value
                      | None -> `Null );
-                   ("proof_path", `String proof_path);
-                   ("meta_path", `String meta_path);
                    ( "manifest_ref",
                      `String
                        (Agent_sdk.Proof_store.make_ref ~run_id
@@ -85,11 +83,16 @@ let worker_proof_refs config session_id =
                      | Some value -> `String value
                      | None -> `Null );
                  ])
-           with exn ->
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
              Log.Session.warn
                "team_session_report_proof: skipping malformed worker proof json for %s/%s: %s"
                session_id worker_run_id (Printexc.to_string exn);
              None)
+  |> List.sort (fun a b ->
+       let id_of j = Yojson.Safe.Util.(member "worker_run_id" j |> to_string) in
+       String.compare (id_of a) (id_of b))
 
 let proof_markdown ~(session : Team_session_types.session)
     ~(proof_level : Team_session_types.proof_level)

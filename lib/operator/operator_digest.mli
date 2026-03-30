@@ -90,7 +90,7 @@ val recommended_confirm_required : string -> bool
 val recommended_action_to_yojson : actor:string -> recommended_action -> Yojson.Safe.t
 val worker_card_to_yojson : worker_card -> Yojson.Safe.t
 
-val spawn_batch_stub_of_cards : worker_card list -> Yojson.Safe.t
+val spawn_batch_template_of_cards : worker_card list -> Yojson.Safe.t
 
 val aggregate_worker_class_counts : Team_session_types.session list -> Yojson.Safe.t
 val aggregate_runtime_pool_counts : Team_session_types.session list -> Yojson.Safe.t

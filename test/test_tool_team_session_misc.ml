@@ -159,6 +159,57 @@ let test_unauthorized_session_access () =
   ignore (wait_until_terminal owner_ctx session_id);
   cleanup_dir base_dir
 
+let test_generated_worker_alias_session_access () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let owner_ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let worker_name = "local-worker-1234" in
+  let alias_name = "local-worker-1234-calm-otter" in
+  let session_id =
+    start_session_custom_exn owner_ctx ~goal:"generated-alias-session-access"
+      ~min_agents:1 ~agents:[ worker_name ] ~operation_id:None
+    |> get_session_id
+  in
+  let alias_ctx : _ Tool_team_session.context =
+    { config; agent_name = alias_name; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let status_ok, _ =
+    dispatch_exn alias_ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "generated alias can read status" true status_ok;
+  let turn_ok, _ =
+    dispatch_exn alias_ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "note");
+            ("message", `String "alias worker note");
+          ])
+  in
+  Alcotest.(check bool) "generated alias can record turn" true turn_ok;
+  let team_turn_actor =
+    Team_session_store.read_events config session_id
+    |> List.find_map (fun json ->
+           match
+             ( Yojson.Safe.Util.member "event_type" json,
+               Yojson.Safe.Util.member "detail" json
+               |> Yojson.Safe.Util.member "actor" )
+           with
+           | `String "team_turn", `String actor -> Some actor
+           | _ -> None)
+  in
+  Alcotest.(check (option string)) "turn actor canonicalized to base worker"
+    (Some worker_name) team_turn_actor;
+  cleanup_dir base_dir
+
 let test_final_done_delta_snapshot_stable () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->

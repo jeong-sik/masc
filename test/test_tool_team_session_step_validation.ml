@@ -374,7 +374,7 @@ let test_step_rejects_legacy_spawn_fields () =
     (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
   cleanup_dir base_dir
 
-let test_step_rejects_legacy_batch_spawn_fields () =
+let test_step_spawn_batch_accepts_explicit_spawn_model () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -385,10 +385,10 @@ let test_step_rejects_legacy_batch_spawn_fields () =
     { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
   let session_id =
-    start_session_exn ctx ~goal:"step-rejects-legacy-batch-fields"
+    start_session_exn ctx ~goal:"step-batch-accepts-explicit-spawn-model"
     |> get_session_id
   in
-  let ok, body =
+  let step_ok, _ =
     dispatch_exn ctx ~name:"masc_team_session_step"
       ~args:
         (`Assoc
@@ -400,16 +400,28 @@ let test_step_rejects_legacy_batch_spawn_fields () =
                   `Assoc
                     [
                       ("spawn_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
+                      ("spawn_role", `String "planner");
                       ("spawn_prompt", `String "normalize evidence into strict JSON schema");
                     ];
                 ] );
           ])
   in
-  Alcotest.(check bool) "legacy batch field rejected" false ok;
-  let json = parse_json_exn body in
-  Alcotest.(check string) "legacy batch error"
-    "spawn_batch[0].spawn_model is no longer supported in masc_team_session_step; use spawn_prompt, spawn_role, worker_class, and worker_size"
-    (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check bool) "batch still fails later without proc manager" false
+    step_ok;
+  let session =
+    Team_session_store.load_session config session_id |> Option.get
+  in
+  let planner =
+    List.find
+      (fun worker ->
+        worker.Team_session_types.spawn_role = Some "planner")
+      session.planned_workers
+  in
+  Alcotest.(check (option string)) "explicit spawn_model preserved"
+    (Some "qwen3.5-35b-a3b-ud-q8-xl") planner.spawn_model;
+  Alcotest.(check (option string)) "model tier inferred from explicit model"
+    (Some "35b")
+    (Option.map Team_session_types.model_tier_to_string planner.model_tier);
   cleanup_dir base_dir
 
 let test_step_spawn_batch_defaults_execution_scope_by_worker_class () =

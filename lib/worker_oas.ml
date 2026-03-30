@@ -294,6 +294,7 @@ let rec run_worker_via_oas
     ~(sw : Eio.Switch.t)
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(base_path : string)
+    ~(auth_token : string option)
     ~(meta : Worker_container_types.worker_container_meta)
     ~(provider : Oas.Provider.config)
     ~(system_prompt : string)
@@ -301,15 +302,11 @@ let rec run_worker_via_oas
     ~(tools : Oas.Tool.t list)
     ~(raw_trace : Oas.Raw_trace.t)
     ?(gate_config : Eval_gate.gate_config option)
-    ?contract
     ?worker_run_id
     () : (Worker_container_types.run_result, string) result =
   let session_id = meta.mcp_session_id in
   let team_session_id = meta.team_session_id in
   let worker_name = meta.worker_name in
-  let* auth_token =
-    Worker_container_types.worker_auth_token ~base_path ~worker_name
-  in
   let heartbeat_cbs =
     make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name
   in
@@ -341,25 +338,22 @@ let rec run_worker_via_oas
         else base_path
       in
       run_existing_worker_agent ~sw ~base_path ~meta ~prompt ~workspace_path
-        ~raw_trace ?worker_run_id ?contract ~tool_names_ref agent)
+        ~raw_trace ?worker_run_id ~tool_names_ref agent)
 
 and resume_worker_via_oas
     ~(sw : Eio.Switch.t)
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(base_path : string)
+    ~(auth_token : string option)
     ~(meta : Worker_container_types.worker_container_meta)
     ~(checkpoint : Oas.Checkpoint.t)
     ~(prompt : string)
     ~(tools : Oas.Tool.t list)
     ~(raw_trace : Oas.Raw_trace.t)
-    ?contract
     ?worker_run_id
     () : (Worker_container_types.run_result, string) result =
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in
-  let* auth_token =
-    Worker_container_types.worker_auth_token ~base_path ~worker_name
-  in
   let heartbeat_cbs =
     make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name
   in
@@ -395,7 +389,8 @@ and resume_worker_via_oas
     (fun () ->
       let _ =
         match
-          Worker_container_types.join_worker ~sw ~auth_token ~session_id
+          Worker_container_types.join_worker ~sw
+            ~auth_token ~session_id
             ~worker_name
         with
         | Ok _ -> ()
@@ -409,7 +404,7 @@ and resume_worker_via_oas
         else base_path
       in
       run_existing_worker_agent ~sw ~base_path ~meta ~prompt ~workspace_path
-        ~raw_trace ?worker_run_id ?contract ~tool_names_ref agent)
+        ~raw_trace ?worker_run_id ~tool_names_ref agent)
 
 and run_existing_worker_agent
     ~(sw : Eio.Switch.t)
@@ -419,7 +414,6 @@ and run_existing_worker_agent
     ~(workspace_path : string)
     ~(raw_trace : Oas.Raw_trace.t)
     ?worker_run_id
-    ?contract
     ~(tool_names_ref : string list ref)
     (agent : Oas.Agent.t)
   : (Worker_container_types.run_result, string) result =
@@ -435,12 +429,16 @@ and run_existing_worker_agent
           Log.LocalWorker.warn "agent close failed for %s: %s" worker_name
             (Printexc.to_string exn))
     (fun () ->
-      let result, proof = match contract with
-        | Some c ->
-          let cr = Oas.Contract_runner.run ~sw ~contract:c agent prompt in
-          (cr.response, Some cr.proof)
-        | None ->
-          (Oas.Agent.run ~sw agent prompt, None)
+      let agent_result =
+        match meta.timeout_seconds, Eio_context.get_clock_opt () with
+        | Some timeout_sec, Some clock when timeout_sec > 0 -> (
+            try
+              `Completed
+                (Eio.Time.with_timeout_exn clock
+                   (float_of_int timeout_sec)
+                   (fun () -> Oas.Agent.run ~sw agent prompt))
+            with Eio.Time.Timeout -> `Timed_out timeout_sec)
+        | _ -> `Completed (Oas.Agent.run ~sw agent prompt)
       in
       let raw_trace_run = Oas.Agent.last_raw_trace_run agent in
       let checkpoint = Oas.Agent.checkpoint ~session_id agent in
@@ -457,11 +455,11 @@ and run_existing_worker_agent
           ~team_session_id ~worker_name
           { meta with last_run_at = Some (Time_compat.now ()) }
       in
-      Worker_container.materialize_direct_evidence
-        ~base_path ~worker_name ~worker_run_id ~meta ~prompt ~workspace_path
-        ~agent ~raw_trace;
-      match result with
-      | Ok response ->
+      match agent_result with
+      | `Completed (Ok response) ->
+          Worker_container.materialize_direct_evidence
+            ~base_path ~worker_name ~worker_run_id ~meta ~prompt
+            ~workspace_path ~agent ~raw_trace;
           let output =
             response.content
             |> List.filter_map (function
@@ -488,21 +486,19 @@ and run_existing_worker_agent
               session_id;
               raw_trace_run;
               api_response = Some response;
-              proof;
             }
-      | Error err ->
+      | `Completed (Error err) ->
           let detail = Oas.Error.to_string err in
-          (match proof with
-           | Some p ->
-             Log.LocalWorker.warn
-               "worker %s errored with CDAL proof: run_id=%s status=%s (proof persisted by Proof_store)"
-               worker_name p.run_id
-               (match p.result_status with
-                | Oas.Cdal_proof.Completed -> "completed"
-                | Oas.Cdal_proof.Errored -> "errored"
-                | Oas.Cdal_proof.Timed_out -> "timed_out"
-                | Oas.Cdal_proof.Cancelled -> "cancelled")
-           | None -> ());
+          let* () =
+            Worker_container.append_worker_completion_log
+              ~base_path ~team_session_id ~worker_name ~prompt ~tool_names
+              ~status:"error" ~output:detail ~error:detail ()
+          in
+          Error detail
+      | `Timed_out timeout_sec ->
+          let detail =
+            Printf.sprintf "Worker timed out after %ds" timeout_sec
+          in
           let* () =
             Worker_container.append_worker_completion_log
               ~base_path ~team_session_id ~worker_name ~prompt ~tool_names

@@ -56,8 +56,10 @@ let () =
             Test_tool_team_session_step_validation.test_step_spawn_batch_defaults_execution_scope_by_worker_class;
           Alcotest.test_case "step-rejects-legacy-spawn-fields" `Quick
             Test_tool_team_session_step_validation.test_step_rejects_legacy_spawn_fields;
-          Alcotest.test_case "step-rejects-legacy-batch-spawn-fields" `Quick
-            Test_tool_team_session_step_validation.test_step_rejects_legacy_batch_spawn_fields;
+          Alcotest.test_case "step-spawn-batch-accepts-explicit-spawn-model"
+            `Quick
+            Test_tool_team_session_step_validation
+              .test_step_spawn_batch_accepts_explicit_spawn_model;
           Alcotest.test_case "step-delegate-requires-target-agent" `Quick
             Test_tool_team_session_step_validation.test_step_delegate_requires_target_agent;
           Alcotest.test_case "step-delegate-unknown-worker-rejected" `Quick
@@ -90,6 +92,8 @@ let () =
           Alcotest.test_case "dispatch-unknown" `Quick Test_tool_team_session_misc.test_dispatch_unknown;
           Alcotest.test_case "unauthorized-session-access" `Quick
             Test_tool_team_session_misc.test_unauthorized_session_access;
+          Alcotest.test_case "generated-worker-alias-session-access" `Quick
+            Test_tool_team_session_misc.test_generated_worker_alias_session_access;
           Alcotest.test_case "final-done-delta-snapshot-stable" `Quick
             Test_tool_team_session_misc.test_final_done_delta_snapshot_stable;
           Alcotest.test_case "verify-trace-uses-worker-run-raw-trace"

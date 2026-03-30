@@ -116,6 +116,25 @@ let test_verify_token () =
   | Error _, _ ->
       fail "create_token should succeed"
 
+let test_verify_token_allows_generated_nickname_alias () =
+  let dir = setup_test_room () in
+  let create_result =
+    Auth.create_token dir ~agent_name:"local-abc123" ~role:Types.Worker
+  in
+  let verify_result =
+    match create_result with
+    | Ok (raw_token, _) ->
+        Auth.verify_token dir
+          ~agent_name:"local-abc123-calm-otter" ~token:raw_token
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match verify_result with
+  | Ok cred ->
+      check string "alias verification resolves base credential" "local-abc123"
+        cred.agent_name
+  | Error e -> fail (Types.masc_error_to_string e)
+
 let test_verify_wrong_token () =
   let dir = setup_test_room () in
   let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Types.Worker in
@@ -351,6 +370,8 @@ let () =
     "credentials", [
       test_case "create credential" `Quick test_create_credential;
       test_case "verify token" `Quick test_verify_token;
+      test_case "verify token allows generated nickname alias" `Quick
+        test_verify_token_allows_generated_nickname_alias;
       test_case "verify wrong token" `Quick test_verify_wrong_token;
       test_case "resolve agent from token" `Quick test_resolve_agent_from_token;
       test_case "list credentials" `Quick test_list_credentials;

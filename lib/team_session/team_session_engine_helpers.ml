@@ -200,14 +200,34 @@ let session_active_agent_names ?events config session ~now =
 let bootstrap_grace_seconds (session : Team_session_types.session) =
   float_of_int (session.checkpoint_interval_sec * max 1 session.min_agents)
 
+let generated_alias_match a b =
+  let prefix_a = a ^ "-" in
+  let prefix_b = b ^ "-" in
+  (String.length b > String.length prefix_a
+   && String.sub b 0 (String.length prefix_a) = prefix_a)
+  || (String.length a > String.length prefix_b
+      && String.sub a 0 (String.length prefix_b) = prefix_b)
+
+let same_session_actor a b =
+  String.equal a b || generated_alias_match a b
+
+let canonical_session_actor ~(actor : string)
+    (session : Team_session_types.session) =
+  if same_session_actor actor session.created_by then
+    session.created_by
+  else
+    match List.find_opt (same_session_actor actor) session.agent_names with
+    | Some session_actor -> session_actor
+    | None -> actor
+
 let session_visible_to_agent ~(agent_name : string)
     (session : Team_session_types.session) =
-  String.equal agent_name session.created_by
-  || List.exists (String.equal agent_name) session.agent_names
+  same_session_actor agent_name session.created_by
+  || List.exists (same_session_actor agent_name) session.agent_names
 
 let session_allows_actor ~(actor : string) (session : Team_session_types.session) =
-  String.equal actor session.created_by
-  || List.exists (String.equal actor) session.agent_names
+  same_session_actor actor session.created_by
+  || List.exists (same_session_actor actor) session.agent_names
 
 let increment_broadcast_from_external (config : Room.config) ~(agent_name : string) =
   (* Use update_session for atomic read-modify-write per session to avoid

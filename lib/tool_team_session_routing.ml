@@ -23,7 +23,8 @@ let is_local_spawn_agent agent_name =
   | "default" | "llama" -> true
   | _ -> false
 
-let legacy_spawn_fields = [ "spawn_agent"; "spawn_model"; "model_tier" ]
+let legacy_top_level_spawn_fields = [ "spawn_agent"; "spawn_model"; "model_tier" ]
+let legacy_batch_spawn_fields = [ "spawn_agent"; "model_tier" ]
 
 let find_present_json_key keys json =
   List.find_opt (fun key -> Yojson.Safe.Util.member key json <> `Null) keys

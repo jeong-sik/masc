@@ -97,6 +97,63 @@ let inject_default_agent_name ~(worker_name : string)
       `Assoc (("agent_name", `String worker_name) :: fields)
   | _ -> args
 
+let is_worker_team_session_tool (schema : Types.tool_schema) =
+  match schema.name with
+  | "masc_team_session_status" | "masc_team_session_step" -> true
+  | _ -> false
+
+let is_valid_team_session_id (session_id : string) =
+  let is_all_digits s =
+    let len = String.length s in
+    len > 0
+    && String.for_all
+         (function
+           | '0' .. '9' -> true
+           | _ -> false)
+         s
+  in
+  let is_all_hex s =
+    let len = String.length s in
+    len > 0
+    && String.for_all
+         (function
+           | '0' .. '9'
+           | 'a' .. 'f'
+           | 'A' .. 'F' ->
+               true
+           | _ -> false)
+         s
+  in
+  match String.split_on_char '-' session_id with
+  | [ "ts"; epoch_ms; suffix ] -> is_all_digits epoch_ms && is_all_hex suffix
+  | _ -> false
+
+let upsert_assoc key value fields =
+  (key, value) :: List.remove_assoc key fields
+
+let inject_team_session_id ~(team_session_id : string option)
+    ~(worker_name : string) ~(schema : Types.tool_schema option)
+    (args : Yojson.Safe.t) =
+  match (team_session_id, schema, args) with
+  | Some session_id, Some schema, `Assoc fields
+    when is_worker_team_session_tool schema ->
+      let should_override =
+        match List.assoc_opt "session_id" fields with
+        | None -> true
+        | Some (`String value) ->
+            let trimmed = String.trim value in
+            trimmed = ""
+            || String.equal trimmed "active"
+            || String.equal trimmed worker_name
+            || not (is_valid_team_session_id trimmed)
+        | Some _ -> true
+      in
+      if should_override then
+        `Assoc (upsert_assoc "session_id" (`String session_id) fields)
+      else
+        args
+  | _ -> args
+
 let extract_prompt_block ~start_marker ~end_marker (text : string) =
   let start_re = Re.str start_marker |> Re.compile in
   let end_re = Re.str end_marker |> Re.compile in

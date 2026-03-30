@@ -607,6 +607,7 @@ let action_json ?actor_hint (ctx : _ context) args :
       }
     in
     upsert_pending_confirm ctx.config entry;
+    Operator_control_snapshot.invalidate_snapshot_cache ();
     append_action_log ctx.config
       {
         trace_id;
@@ -635,6 +636,7 @@ let action_json ?actor_hint (ctx : _ context) args :
   else
     let* executed = execute_action ctx request in
     let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
+    Operator_control_snapshot.invalidate_snapshot_cache ();
     append_action_log ctx.config
       {
         trace_id;
@@ -679,6 +681,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
       | None -> Error "pending confirmation not found"
       | Some entry when pending_confirm_expired entry ->
           remove_pending_confirm ctx.config confirm_token;
+          Operator_control_snapshot.invalidate_snapshot_cache ();
           append_action_log ctx.config
             {
               trace_id = entry.trace_id;
@@ -723,6 +726,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
       | Some entry ->
           if String.equal decision "deny" then (
             remove_pending_confirm ctx.config confirm_token;
+            Operator_control_snapshot.invalidate_snapshot_cache ();
             append_action_log ctx.config
               {
                 trace_id = entry.trace_id;
@@ -762,6 +766,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
             in
             let* executed = execute_action ctx request in
             remove_pending_confirm ctx.config confirm_token;
+            Operator_control_snapshot.invalidate_snapshot_cache ();
             let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
             append_action_log ctx.config
               {

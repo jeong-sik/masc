@@ -4,7 +4,7 @@ open Tool_args
 
 let parse_spawn_spec_from_object ?(default_timeout = 300)
     ?top_level_worker_policy batch_index json =
-  match find_present_json_key legacy_spawn_fields json with
+  match find_present_json_key legacy_batch_spawn_fields json with
   | Some field -> Error (legacy_spawn_field_error ~batch_index field)
   | None ->
   let open Yojson.Safe.Util in
@@ -124,12 +124,13 @@ let parse_spawn_spec_from_object ?(default_timeout = 300)
   in
   match get_required_string "spawn_prompt" with
   | Ok spawn_prompt ->
+      let spawn_model = get_optional_string "spawn_model" in
       Ok
         {
           spawn_agent = "default";
           spawn_prompt;
-          spawn_model = None;
-          spawn_model_explicit = false;
+          spawn_model;
+          spawn_model_explicit = Option.is_some spawn_model;
           spawn_role = get_optional_string "spawn_role";
           execution_scope =
             (match get_optional_execution_scope "execution_scope" with
@@ -162,7 +163,7 @@ let parse_spawn_spec_from_object ?(default_timeout = 300)
   | Error e -> Error e
 
 let parse_step_spawn_specs args =
-  match find_present_json_key legacy_spawn_fields args with
+  match find_present_json_key legacy_top_level_spawn_fields args with
   | Some field -> Error (legacy_spawn_field_error field)
   | None ->
   let singular_prompt = get_string_opt args "spawn_prompt" in
@@ -497,4 +498,3 @@ let status_of_engine_status_json (json : Yojson.Safe.t) =
   match Yojson.Safe.Util.member "session" json |> Yojson.Safe.Util.member "status" with
   | `String s -> s
   | _ -> "unknown"
-

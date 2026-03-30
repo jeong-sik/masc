@@ -192,9 +192,20 @@ let parse_status_filter args =
           Ok (Some (Team_session_types.status_of_string normalized))
       | _ -> Error "invalid status filter"
 
+let generated_alias_match a b =
+  let prefix_a = a ^ "-" in
+  let prefix_b = b ^ "-" in
+  (String.length b > String.length prefix_a
+   && String.sub b 0 (String.length prefix_a) = prefix_a)
+  || (String.length a > String.length prefix_b
+      && String.sub a 0 (String.length prefix_b) = prefix_b)
+
+let same_session_actor a b =
+  String.equal a b || generated_alias_match a b
+
 let can_access_session ~agent_name (session : Team_session_types.session) =
-  String.equal agent_name session.created_by
-  || List.exists (String.equal agent_name) session.agent_names
+  same_session_actor agent_name session.created_by
+  || List.exists (same_session_actor agent_name) session.agent_names
 
 let ensure_session_access ctx session_id =
   match Team_session_store.load_session ctx.config session_id with

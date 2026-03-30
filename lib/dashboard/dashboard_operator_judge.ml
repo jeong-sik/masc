@@ -254,10 +254,20 @@ let compute_judgments
       | exn ->
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
-let refresh_once
+let should_backoff ~sw ~net =
+  let config_path = Oas_worker.default_config_path () in
+  let cap = Llm_provider.Cascade_config.local_capacity_for_selections
+      ~sw ~net ?config_path ["operator_judge"] in
+  cap.all_discovered && cap.endpoints_found > 0
+  && cap.process_available = 0 && cap.process_queue_length >= 2
+
+let refresh_once ~sw ~net
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~(config : Room.config) ~build_facts =
+  if should_backoff ~sw ~net then
+    Eio.traceln "[operator] backoff: local slots saturated, skipping cycle"
+  else begin
   let st = get_state config.base_path in
   with_lock st (fun () -> st.refreshing <- true);
   match compute_judgments ~masc_tools ~dispatch ~facts_json:(build_facts ()) with
@@ -296,8 +306,9 @@ let refresh_once
           st.expires_at <- Some expires_at;
           st.model_used <- Some model_used;
           st.last_error <- None)
+  end
 
-let start ~sw ~clock ~(config : Room.config)
+let start ~sw ~clock ~net ~(config : Room.config)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~build_facts () =
@@ -312,7 +323,7 @@ let start ~sw ~clock ~(config : Room.config)
   if should_start then
     Eio.Fiber.fork_daemon ~sw (fun () ->
         let rec loop () =
-          refresh_once ~masc_tools ~dispatch ~config ~build_facts;
+          refresh_once ~sw ~net ~masc_tools ~dispatch ~config ~build_facts;
           Eio.Time.sleep clock (float_of_int (interval_sec ()));
           loop ()
         in

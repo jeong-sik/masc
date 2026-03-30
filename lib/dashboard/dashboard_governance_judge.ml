@@ -336,10 +336,20 @@ let append_judgments base_path judgments =
   let store = get_judgments_store base_path in
   List.iter (fun json -> Dated_jsonl.append store json) judgments
 
-let refresh_once
+let should_backoff ~sw ~net =
+  let config_path = Oas_worker.default_config_path () in
+  let cap = Llm_provider.Cascade_config.local_capacity_for_selections
+      ~sw ~net ?config_path ["governance_judge"] in
+  cap.all_discovered && cap.endpoints_found > 0
+  && cap.process_available = 0 && cap.process_queue_length >= 2
+
+let refresh_once ~sw ~net
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~base_path ~build_facts =
+  if should_backoff ~sw ~net then
+    Eio.traceln "[governance] backoff: local slots saturated, skipping cycle"
+  else begin
   let st = get_state base_path in
   with_lock st (fun () -> st.refreshing <- true);
   match compute_judgments ~masc_tools ~dispatch ~factual_json:(build_facts ()) with
@@ -362,8 +372,9 @@ let refresh_once
           st.refreshing <- false;
           st.judge_online <- false;
           st.last_error <- Some message)
+  end
 
-let start ~sw ~clock ~base_path
+let start ~sw ~clock ~net ~base_path
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~build_facts () =
@@ -381,7 +392,7 @@ let start ~sw ~clock ~base_path
   if should_start then
     Eio.Fiber.fork_daemon ~sw (fun () ->
         let rec loop () =
-          refresh_once ~masc_tools ~dispatch ~base_path ~build_facts;
+          refresh_once ~sw ~net ~masc_tools ~dispatch ~base_path ~build_facts;
           Eio.Time.sleep clock (float_of_int (interval_sec ()));
           loop ()
         in

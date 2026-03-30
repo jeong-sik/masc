@@ -485,7 +485,7 @@ let public_mcp_surface_tools =
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
     (* Board *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote";
+    "masc_board_comment"; "masc_board_vote"; "masc_board_delete";
     (* Agent discovery *)
     "masc_agents"; "masc_dashboard"; "masc_agent_card";
     (* Transport *)

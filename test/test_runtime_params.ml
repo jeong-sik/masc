@@ -205,6 +205,244 @@ let () =
      | Ok () -> Alcotest.fail "should reject empty model name")
   in
 
+  (* ── clear_by_key ────────────────────────────────────────── *)
+
+  let test_clear_by_key () =
+    let _p =
+      Runtime_params.register
+        ~key:"test.clear_by_key_param"
+        ~default:(fun () -> 50)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(fun json ->
+          match json with
+          | `Int i -> Ok i
+          | _ -> Error "expected int")
+        ()
+    in
+    ignore (Runtime_params.set_by_key "test.clear_by_key_param" (`Int 99));
+    (match Runtime_params.clear_by_key "test.clear_by_key_param" with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail msg);
+    let entries = Runtime_params.registry () in
+    let entry =
+      List.find_opt (fun (k, _, _, _, _) -> k = "test.clear_by_key_param") entries
+    in
+    (match entry with
+     | Some (_, current, _, has_override, _) ->
+         Alcotest.(check bool) "no override after clear" false has_override;
+         Alcotest.(check string) "back to default" "50"
+           (Yojson.Safe.to_string current)
+     | None -> Alcotest.fail "param not in registry")
+  in
+
+  let test_clear_by_key_unknown () =
+    match Runtime_params.clear_by_key "nonexistent.clear" with
+    | Error _ -> ()
+    | Ok () -> Alcotest.fail "should reject unknown key"
+  in
+
+  (* ── keeper lifecycle params ─────────────────────────────── *)
+
+  let test_keeper_params_registered () =
+    Governance_registry.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let has key = List.exists (fun (k, _, _, _, _) -> k = key) entries in
+    Alcotest.(check bool) "keeper.max_consecutive_hb_failures"
+      true (has "keeper.max_consecutive_hb_failures");
+    Alcotest.(check bool) "keeper.max_consecutive_turn_failures"
+      true (has "keeper.max_consecutive_turn_failures");
+    Alcotest.(check bool) "keeper.supervisor_max_restarts"
+      true (has "keeper.supervisor_max_restarts");
+    Alcotest.(check bool) "keeper.keepalive_interval_sec"
+      true (has "keeper.keepalive_interval_sec");
+    Alcotest.(check bool) "keeper.dead_ttl_sec"
+      true (has "keeper.dead_ttl_sec")
+  in
+
+  let test_keeper_lifecycle_surface () =
+    let surfaces = Governance_registry.surfaces in
+    let keeper_surface =
+      List.find_opt
+        (fun (s : Governance_registry.surface) -> s.id = "keeper_lifecycle")
+        surfaces
+    in
+    match keeper_surface with
+    | None -> Alcotest.fail "keeper_lifecycle surface not found"
+    | Some s ->
+        Alcotest.(check string) "risk" "medium" s.risk;
+        Alcotest.(check int) "param count" 5 (List.length s.param_keys);
+        Alcotest.(check bool) "has hb_failures"
+          true (List.mem "keeper.max_consecutive_hb_failures" s.param_keys);
+        Alcotest.(check bool) "has supervisor_max_restarts"
+          true (List.mem "keeper.supervisor_max_restarts" s.param_keys)
+  in
+
+  let test_keeper_params_meta_shape () =
+    let entries = Runtime_params.registry () in
+    let hb_entry =
+      List.find_opt
+        (fun (k, _, _, _, _) -> k = "keeper.max_consecutive_hb_failures")
+        entries
+    in
+    match hb_entry with
+    | Some (_, _, _, _, Some meta) ->
+        Alcotest.(check bool) "has description"
+          true (String.length meta.Runtime_params.description > 0);
+        Alcotest.(check string) "value_type" "int" meta.value_type;
+        Alcotest.(check bool) "has min_value" true (meta.min_value <> None);
+        Alcotest.(check bool) "has max_value" true (meta.max_value <> None)
+    | Some (_, _, _, _, None) -> Alcotest.fail "meta is None"
+    | None -> Alcotest.fail "keeper hb param not found"
+  in
+
+  let test_keeper_param_override_persist_restore () =
+    let tmp_dir = Filename.temp_dir "masc_keeper_restore_" "" in
+    let masc_dir = Filename.concat tmp_dir ".masc" in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    (* Override a keeper param *)
+    (match Runtime_params.set Governance_registry.keeper_max_hb_failures 7 with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail msg);
+    Alcotest.(check int) "overridden" 7
+      (Runtime_params.get Governance_registry.keeper_max_hb_failures);
+    (* Persist, clear, restore *)
+    Runtime_params.persist ~base_path:tmp_dir;
+    Runtime_params.clear Governance_registry.keeper_max_hb_failures;
+    Alcotest.(check bool) "cleared to default" true
+      (Runtime_params.get Governance_registry.keeper_max_hb_failures <> 7);
+    Runtime_params.restore ~base_path:tmp_dir;
+    Alcotest.(check int) "restored from disk" 7
+      (Runtime_params.get Governance_registry.keeper_max_hb_failures);
+    (* Restore default for other tests *)
+    Runtime_params.clear Governance_registry.keeper_max_hb_failures;
+    (try
+       Sys.remove (Filename.concat masc_dir "runtime_params.json");
+       Sys.rmdir masc_dir;
+       Sys.rmdir tmp_dir
+     with Sys_error _ -> ())
+  in
+
+  (* ── handle_set_param / handle_runtime_params ────────────── *)
+
+  let test_handle_set_param_medium_risk () =
+    let tmp_dir = Filename.temp_dir "masc_setparam_" "" in
+    let masc_dir = Filename.concat tmp_dir ".masc" in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    let ctx =
+      Tool_council_feed.{ base_path = tmp_dir; agent_name = "test-agent";
+        room_config = None }
+    in
+    let petition_called = ref false in
+    let submit_petition _ctx _args =
+      petition_called := true; (false, "unexpected petition")
+    in
+    let args = `Assoc [
+      ("param_key", `String "keeper.max_consecutive_hb_failures");
+      ("value", `Int 8);
+      ("reason", `String "test override");
+    ] in
+    let (ok, _msg) =
+      Tool_council_feed.handle_set_param ~submit_petition ctx args
+    in
+    Alcotest.(check bool) "set succeeded" true ok;
+    Alcotest.(check bool) "no petition for medium risk" false !petition_called;
+    Alcotest.(check int) "value applied" 8
+      (Runtime_params.get Governance_registry.keeper_max_hb_failures);
+    (* Restore default *)
+    Runtime_params.clear Governance_registry.keeper_max_hb_failures;
+    (try
+       Sys.remove (Filename.concat masc_dir "runtime_params.json");
+       (try Sys.remove (Filename.concat masc_dir "param_audit.jsonl")
+        with Sys_error _ -> ());
+       Sys.rmdir masc_dir;
+       Sys.rmdir tmp_dir
+     with Sys_error _ -> ())
+  in
+
+  let test_handle_set_param_high_risk_rejected () =
+    let ctx =
+      Tool_council_feed.{ base_path = "/tmp"; agent_name = "test-agent";
+        room_config = None }
+    in
+    let petition_called = ref false in
+    let submit_petition _ctx _args =
+      petition_called := true; (true, "petition-123")
+    in
+    let args = `Assoc [
+      ("param_key", `String "inference.default_model");
+      ("value", `String "gpt-4");
+    ] in
+    let (ok, msg) =
+      Tool_council_feed.handle_set_param ~submit_petition ctx args
+    in
+    Alcotest.(check bool) "petition created" true !petition_called;
+    Alcotest.(check bool) "ok" true ok;
+    Alcotest.(check bool) "mentions petition" true
+      (String.lowercase_ascii msg |> fun s ->
+       String.length s > 0 && (try ignore (Str.search_forward
+         (Str.regexp_string "petition") s 0); true with Not_found -> false))
+  in
+
+  let test_handle_runtime_params_includes_keeper () =
+    let ctx =
+      Tool_council_feed.{ base_path = "/tmp"; agent_name = "test-agent";
+        room_config = None }
+    in
+    let (ok, json_str) =
+      Tool_council_feed.handle_runtime_params ctx `Null
+    in
+    Alcotest.(check bool) "ok" true ok;
+    let json = Yojson.Safe.from_string json_str in
+    let open Yojson.Safe.Util in
+    let params = member "parameters" json |> to_list in
+    let has_keeper_param =
+      List.exists (fun p ->
+        let key = member "key" p |> to_string in
+        String.length key > 7
+        && String.sub key 0 7 = "keeper."
+      ) params
+    in
+    Alcotest.(check bool) "has keeper params" true has_keeper_param;
+    let surfaces = member "surfaces" json |> to_list in
+    let has_keeper_surface =
+      List.exists (fun s ->
+        member "id" s |> to_string = "keeper_lifecycle"
+      ) surfaces
+    in
+    Alcotest.(check bool) "has keeper_lifecycle surface" true has_keeper_surface
+  in
+
+  (* ── crash persistence ───────────────────────────────────── *)
+
+  let test_crash_persistence_enqueue_read () =
+    let tmp_dir = Filename.temp_dir "masc_crash_" "" in
+    let clock = Eio.Stdenv.clock env in
+    Eio.Switch.run @@ fun sw ->
+    Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
+    Keeper_crash_persistence.enqueue_record
+      ~base_path:tmp_dir ~name:"test-keeper"
+      ~ts:1000.0 ~reason:"heartbeat_failures" ~restart_count:1;
+    Keeper_crash_persistence.enqueue_record
+      ~base_path:tmp_dir ~name:"test-keeper"
+      ~ts:1010.0 ~reason:"exception" ~restart_count:2;
+    (* Wait for drain fiber to flush (drain interval = 2s) *)
+    Eio.Time.sleep clock 3.0;
+    let crashes =
+      Keeper_crash_persistence.recent_crashes
+        ~base_path:tmp_dir ~name:"test-keeper" ~max_entries:10
+    in
+    Alcotest.(check bool) "has crash events" true (List.length crashes >= 2);
+    (match crashes with
+     | first :: _ ->
+         let open Yojson.Safe.Util in
+         let reason = member "reason" first |> to_string in
+         Alcotest.(check bool) "reason is string" true (String.length reason > 0);
+         let rc = member "restart_count" first |> to_int in
+         Alcotest.(check bool) "restart_count >= 1" true (rc >= 1)
+     | [] -> Alcotest.fail "no crashes read back")
+  in
+
   Alcotest.run "runtime_params"
     [
       ( "core",
@@ -215,6 +453,8 @@ let () =
           Alcotest.test_case "set_by_key" `Quick test_set_by_key;
           Alcotest.test_case "set_by_key_unknown" `Quick test_set_by_key_unknown;
           Alcotest.test_case "clear" `Quick test_clear;
+          Alcotest.test_case "clear_by_key" `Quick test_clear_by_key;
+          Alcotest.test_case "clear_by_key_unknown" `Quick test_clear_by_key_unknown;
         ] );
       ( "persistence",
         [
@@ -225,5 +465,30 @@ let () =
         [
           Alcotest.test_case "registration" `Quick test_governance_registry;
           Alcotest.test_case "validation" `Quick test_governance_registry_validation;
+        ] );
+      ( "keeper_lifecycle",
+        [
+          Alcotest.test_case "keeper params registered" `Quick
+            test_keeper_params_registered;
+          Alcotest.test_case "keeper_lifecycle surface" `Quick
+            test_keeper_lifecycle_surface;
+          Alcotest.test_case "keeper params meta shape" `Quick
+            test_keeper_params_meta_shape;
+          Alcotest.test_case "keeper param override persist/restore" `Quick
+            test_keeper_param_override_persist_restore;
+        ] );
+      ( "handle_set_param",
+        [
+          Alcotest.test_case "medium-risk param set" `Quick
+            test_handle_set_param_medium_risk;
+          Alcotest.test_case "high-risk triggers petition" `Quick
+            test_handle_set_param_high_risk_rejected;
+          Alcotest.test_case "runtime params includes keeper" `Quick
+            test_handle_runtime_params_includes_keeper;
+        ] );
+      ( "crash_persistence",
+        [
+          Alcotest.test_case "enqueue and read" `Slow
+            test_crash_persistence_enqueue_read;
         ] );
     ]

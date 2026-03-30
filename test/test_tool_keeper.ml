@@ -1268,6 +1268,17 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         Yojson.Safe.Util.(json |> member "latest_tool_call_count" |> to_int);
       check bool "tool audit names remain empty without tool use" true
         (Yojson.Safe.Util.(json |> member "latest_tool_names" |> to_list) = []);
+      let allowed_tool_names =
+        Yojson.Safe.Util.(
+          json |> member "allowed_tool_names" |> to_list |> List.map to_string)
+      in
+      check int "allowed tool count mirrors allowed names"
+        (List.length allowed_tool_names)
+        Yojson.Safe.Util.(json |> member "allowed_tool_count" |> to_int);
+      check (list string) "allowed tool preview uses first 10 names"
+        (allowed_tool_names |> List.filteri (fun idx _ -> idx < 10))
+        Yojson.Safe.Util.(
+          json |> member "allowed_tool_preview" |> to_list |> List.map to_string);
       check bool "tool audit timestamp exposed" true
         Yojson.Safe.Util.(json |> member "tool_audit_at" <> `Null);
       let ok, list_body =

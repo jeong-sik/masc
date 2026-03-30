@@ -370,6 +370,9 @@ let handle_keeper_status ctx args : tool_result =
           keeper_model_tools |> List.map (fun tool -> tool.Types.name)
         in
         let allowed_tools = keeper_allowed_tool_names m in
+        let allowed_tool_preview =
+          allowed_tools |> List.filteri (fun idx _ -> idx < 10)
+        in
         let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
         let tool_audit_snapshot =
           match latest_tool_audit_snapshot_from_files ctx.config ~keeper_name:m.name with
@@ -438,7 +441,9 @@ let handle_keeper_status ctx args : tool_result =
            ("trace_history_count", `Int trace_history_count);
            ("handoff_count_total", `Int trace_history_count);
            ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
+           ("allowed_tool_count", `Int (List.length allowed_tools));
            ("allowed_tool_names", string_list_to_json allowed_tools);
+           ("allowed_tool_preview", string_list_to_json allowed_tool_preview);
            ("latest_tool_names",
              string_list_to_json tool_audit_snapshot.latest_tool_names);
            ("latest_tool_call_count",

@@ -176,6 +176,8 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const skillRouteLabel =
     keeper.skill_primary
     ?? (runtimeState === 'offline' ? 'offline' : 'not_collected')
+  const allowedToolCountLabel =
+    allowedTools.length > 0 ? String(allowedTools.length) : allowlistFallback
   const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? recentTools[0] ?? null
 
   return html`
@@ -186,6 +188,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />
       <${SignalRow} label="스킬 경로" value=${skillRouteLabel} />
       <${SignalRow} label="컨텍스트 출처" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
+      <${SignalRow} label="허용 도구 수" value=${allowedToolCountLabel} />
 
       <div class="flex justify-end mt-1">
         <button type="button"

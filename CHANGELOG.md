@@ -1,6 +1,25 @@
 # Changelog
 
 
+## [2.164.0] - 2026-03-30
+
+### Added
+- **Dashboard control plane** — tool executor, keeper spawn, task management, flow control (#3745).
+- **Turn failure tracking** — count unified turn failures toward keeper crash threshold + keepalive loop wiring (#3767, #3783).
+- **.mli interfaces** — 6 new (server 4, room 2, dashboard 2) for Phase 2 capsulation (#3769, #3770, #3791).
+- **Operator control surface ADR** documentation (#3786).
+
+### Changed
+- **OCaml 5.4.1 pin** + **MCP SDK v1.3.0** bump (#3771).
+- **Dashboard** — Intl API, format consolidation, TextArea a11y, error resilience (#3781).
+- **Tool schemas** — remove duplicates, compress descriptions (-114 lines) (#3790).
+- **Config** — remove dead env_config_server/dashboard (-288 lines, 57 duplicate reads) (#3772).
+- **Keeper** — extract tool failure threshold to env_config (#3768).
+
+### Fixed
+- **Keeper** — deduplicate turn failure counter, registry SSOT (#3795).
+- **Keeper_fs** — add missing Log.Keeper.warn to operations (#3779).
+
 ## [2.163.0] - 2026-03-30
 
 ### Added

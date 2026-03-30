@@ -7,7 +7,18 @@ import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { fetchKeeperTrajectory } from '../api/dashboard'
 import type { TrajectoryEntry, TrajectoryResponse } from '../api/dashboard'
+import { truncate } from '../lib/truncate'
 import { TimeAgo } from './common/time-ago'
+
+// ── Constants ────────────────────────────────────────────
+
+const TRAJECTORY_DEFAULT_LIMIT = 50
+const ARGS_PREVIEW_MAX_CHARS = 80
+const ARGS_VALUE_MAX_CHARS = 30
+const ARGS_MAX_KEYS = 3
+const RESULT_PREVIEW_MAX_CHARS = 80
+const DURATION_FAST_MS = 500
+const DURATION_SLOW_MS = 2000
 
 // ── State (per-keeper to avoid cross-keeper corruption) ──
 
@@ -48,16 +59,6 @@ export function clearTrajectory(keeperName: string): void {
   trajectoryStates.value = next
 }
 
-// ── Display constants ────────────────────────────────────
-
-const TRAJECTORY_DEFAULT_LIMIT = 50
-const ARGS_PREVIEW_MAX_CHARS = 80
-const ARGS_VALUE_MAX_CHARS = 30
-const ARGS_MAX_KEYS = 3
-const RESULT_PREVIEW_MAX_CHARS = 80
-const DURATION_FAST_MS = 500
-const DURATION_SLOW_MS = 2000
-
 // Tool category → icon/color mapping. Order matters: first match wins.
 const TOOL_CATEGORIES: Array<{ match: (n: string) => boolean; icon: string; color: string }> = [
   { match: n => n.includes('bash'),                         icon: '>', color: 'text-[#4ade80]' },
@@ -81,25 +82,23 @@ function durationColor(ms: number): string {
 }
 
 function formatArgs(args: Record<string, unknown> | string): string {
-  if (typeof args === 'string') {
-    return args.length > ARGS_PREVIEW_MAX_CHARS ? args.slice(0, ARGS_PREVIEW_MAX_CHARS) + '...' : args
-  }
+  if (typeof args === 'string') return truncate(args, ARGS_PREVIEW_MAX_CHARS)
   const keys = Object.keys(args)
   if (keys.length === 0) return '{}'
   const preview = keys.slice(0, ARGS_MAX_KEYS).map(k => {
     const v = args[k]
     const vs = typeof v === 'string'
-      ? (v.length > ARGS_VALUE_MAX_CHARS ? v.slice(0, ARGS_VALUE_MAX_CHARS) + '...' : v)
-      : JSON.stringify(v)?.slice(0, ARGS_VALUE_MAX_CHARS) ?? ''
+      ? truncate(v, ARGS_VALUE_MAX_CHARS)
+      : truncate(JSON.stringify(v) ?? '', ARGS_VALUE_MAX_CHARS)
     return `${k}: ${vs}`
   }).join(', ')
   return keys.length > ARGS_MAX_KEYS ? `{${preview}, ...}` : `{${preview}}`
 }
 
 function formatResult(result: string | null, error: string | null): string {
-  if (error) return `err: ${error.slice(0, RESULT_PREVIEW_MAX_CHARS)}`
+  if (error) return `err: ${truncate(error, RESULT_PREVIEW_MAX_CHARS)}`
   if (!result) return '-'
-  return result.length > RESULT_PREVIEW_MAX_CHARS ? result.slice(0, RESULT_PREVIEW_MAX_CHARS) + '...' : result
+  return truncate(result, RESULT_PREVIEW_MAX_CHARS)
 }
 
 // ── Components ───────────────────────────────────────────
@@ -147,7 +146,6 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
   `
 }
 
-// Group entries by turn number
 function groupByTurn(entries: TrajectoryEntry[]): Map<number, TrajectoryEntry[]> {
   const groups = new Map<number, TrajectoryEntry[]>()
   for (const e of entries) {

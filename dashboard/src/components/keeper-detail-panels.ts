@@ -76,7 +76,7 @@ function KpiCard({ label, value, hint, tone = 'default', progress }: {
       <div class="text-2xl font-bold ${KPI_VALUE_TONE[tone]} tabular-nums leading-none">${value}</div>
       ${progress != null ? html`
         <div class="w-full h-1 bg-[var(--white-6)] rounded-full overflow-hidden mt-0.5">
-          <div class="h-full rounded-full transition-all duration-500" style="width:${Math.min(progress, 100)}%;background:${progress > CTX_CRITICAL_PCT ? CTX_COLOR_CRITICAL : progress > CTX_WARN_PCT ? '#fbbf24' : '#4ade80'}"></div>
+          <div class="h-full rounded-full transition-all duration-500" style="width:${Math.min(progress, 100)}%;background:${ctxColor(progress)}"></div>
         </div>
       ` : null}
       ${hint ? html`<div class="text-[10px] text-[var(--text-dim)] leading-snug">${hint}</div>` : null}
@@ -254,7 +254,6 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
   const lastLatency = latencies[latencies.length - 1] ?? 0
   const totalCost = costs.reduce((a: number, b: number) => a + b, 0)
 
-  // Model switches: detect when model_used changes
   const modelSwitches: { index: number; model: string }[] = []
   for (let i = 1; i < series.length; i++) {
     if ((series[i] as KeeperMetricPoint).model_used !== (series[i - 1] as KeeperMetricPoint).model_used) {

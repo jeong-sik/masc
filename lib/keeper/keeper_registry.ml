@@ -465,27 +465,23 @@ let restore_tool_usage ~base_path name =
            | _ -> []
          in
          List.iter (fun item ->
-           try
-             match item with
-             | `Assoc fields ->
-               let str key = match List.assoc_opt key fields with
-                 | Some (`String s) -> s | _ -> raise Exit in
-               let int key = match List.assoc_opt key fields with
-                 | Some (`Int n) -> n | _ -> raise Exit in
-               let float key = match List.assoc_opt key fields with
-                 | Some (`Float f) -> f
-                 | Some (`Int n) -> Float.of_int n
-                 | _ -> raise Exit in
-               let tool_name = str "tool" in
-               let e = {
-                 count = int "count";
-                 successes = int "successes";
-                 failures = int "failures";
-                 last_used_at = float "last_used_at";
-               } in
-               Hashtbl.replace entry.tool_usage tool_name e
-             | _ -> ()
-           with Exit -> ()
+           match
+             ( Safe_ops.json_string_opt "tool" item,
+               Safe_ops.json_int_opt "count" item,
+               Safe_ops.json_int_opt "successes" item,
+               Safe_ops.json_int_opt "failures" item,
+               Safe_ops.json_float_opt "last_used_at" item )
+           with
+           | Some tool_name, Some count, Some successes, Some failures, Some last_used_at
+             when tool_name <> "" ->
+             let e = {
+               count;
+               successes;
+               failures;
+               last_used_at;
+             } in
+             Hashtbl.replace entry.tool_usage tool_name e
+           | _ -> ()
          ) tools
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

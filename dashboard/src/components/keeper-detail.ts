@@ -34,6 +34,8 @@ import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
 import { KeeperTrajectoryTimeline } from './keeper-trajectory-timeline'
 import { DialogOverlay } from './common/dialog'
+import { CollapsibleSection } from './common/collapsible'
+import { SessionTraceView } from './session-trace/session-trace-view'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -301,6 +303,12 @@ export function KeeperDetailOverlay() {
           <div class="md:col-span-2">
             <${SectionCard} title="도구 호출 궤적">
               <${KeeperTrajectoryTimeline} keeperName=${keeper.name} />
+            <//>
+          </div>
+
+          <div class="md:col-span-2">
+            <${CollapsibleSection} title="통합 활동 추적" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">브로드캐스트 + 태스크 + 도구 호출</span>`}>
+              <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} />
             <//>
           </div>
 

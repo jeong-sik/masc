@@ -655,4 +655,3 @@ masc_keeper_up(name: "sangsu")
 | [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) | Room/Task 운영 |
 | [SUPERVISOR-MODE.md](./SUPERVISOR-MODE.md) | 감독 모드 운영 |
 | [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md) | 아키텍처 SSOT |
-| [MITOSIS.md](./MITOSIS.md) | Handoff/Compaction 상세 |

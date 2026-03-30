@@ -176,8 +176,17 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
       @ Tool_code_write.schemas
       @ (keeper_masc_tool_schemas meta)
     in
-    all_schemas
-    |> List.filter (fun tool -> List.mem tool.Types.name allowed)
+    let result =
+      all_schemas
+      |> List.filter (fun tool -> List.mem tool.Types.name allowed)
+    in
+    let count = List.length result in
+    if count > 100 then
+      Log.Keeper.warn
+        "tool budget exceeded: %d schemas in LLM context (~%dKB estimated). \
+         Consider restricting tool tier."
+        count (count * 470 / 1024);
+    result
 
 let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
   let voice = Voice_bridge.get_voice_for_agent agent_id in

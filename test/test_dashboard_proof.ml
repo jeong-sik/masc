@@ -371,7 +371,13 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
       check int "worker proof evidence count" 2
         (worker |> U.member "proof_evidence_count" |> U.to_int);
       check string "worker final text" "Patched calc.py and verification passed."
-        (worker |> U.member "final_text" |> U.to_string))
+        (worker |> U.member "final_text" |> U.to_string);
+      check bool "worker proof path hidden" true
+        (worker |> U.member "proof_path" = `Null);
+      check bool "worker proof evidence path hidden" true
+        ((worker_proof |> U.member "proof_path") = `Null);
+      check bool "worker proof evidence meta path hidden" true
+        ((worker_proof |> U.member "meta_path") = `Null))
 
 let test_team_session_proof_projects_worker_proof_metadata () =
   let dir = test_dir () in

@@ -145,7 +145,6 @@ let worker_run_summary_json json =
       ("stop_reason", if U.member "stop_reason" json <> `Null then U.member "stop_reason" json else U.member "stop_reason" summary);
       ("failure_reason", U.member "failure_reason" json);
       ("error", if U.member "error" json <> `Null then U.member "error" json else U.member "error" summary);
-      ("proof_path", U.member "proof_path" json);
       ("proof_present", U.member "proof_present" json);
       ("tool_trace_refs", U.member "tool_trace_refs" json);
       ("raw_evidence_refs", U.member "raw_evidence_refs" json);

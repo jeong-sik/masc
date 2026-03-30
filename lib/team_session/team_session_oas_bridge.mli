@@ -75,6 +75,8 @@ val cascade_of_worker :
 val telemetry_of_run_result :
   Oas_worker.run_result -> Swarm.Swarm_types.agent_telemetry
 
+val is_safe_worker_run_id : string -> bool
+
 val planned_worker_to_entry :
   config:Room.config ->
   session_id:string ->

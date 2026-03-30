@@ -295,6 +295,16 @@ let test_telemetry_of_run_result_carries_trace_ref () =
         actual.agent_name
   | None -> Alcotest.fail "expected trace_ref in telemetry"
 
+let test_is_safe_worker_run_id_rejects_dot_segments () =
+  Alcotest.(check bool) "plain run id accepted" true
+    (Team_session_oas_bridge.is_safe_worker_run_id "run-123");
+  Alcotest.(check bool) "dot rejected" false
+    (Team_session_oas_bridge.is_safe_worker_run_id ".");
+  Alcotest.(check bool) "dot-dot rejected" false
+    (Team_session_oas_bridge.is_safe_worker_run_id "..");
+  Alcotest.(check bool) "slash rejected" false
+    (Team_session_oas_bridge.is_safe_worker_run_id "run/123")
+
 (* ================================================================ *)
 (* Supported tool runtime tests                                     *)
 (* ================================================================ *)
@@ -442,6 +452,8 @@ let () =
         test_session_to_swarm_config_health_contract;
       Alcotest.test_case "telemetry carries trace_ref" `Quick
         test_telemetry_of_run_result_carries_trace_ref;
+      Alcotest.test_case "worker run id rejects dot segments" `Quick
+        test_is_safe_worker_run_id_rejects_dot_segments;
     ];
     "supported_tools", [
       Alcotest.test_case "schemas present" `Quick

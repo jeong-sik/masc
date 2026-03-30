@@ -58,11 +58,19 @@ if needs_rebuild; then
   echo "[dashboard] Sources changed, rebuilding SPA..." >&2
   temp_root="${TMPDIR:-/tmp}"
   temp_root="${temp_root%/}"
-  log_file="$(mktemp "$temp_root/masc-dashboard-build.XXXXXX")"
+  if [ ! -d "$temp_root" ] || [ ! -w "$temp_root" ]; then
+    temp_root="/tmp"
+  fi
+  if ! log_file="$(TMPDIR="$temp_root" mktemp "$temp_root/masc-dashboard-build.XXXXXX" 2>/dev/null)"; then
+    echo "[dashboard] Unable to create temp log file; falling back to stderr-less logging." >&2
+    log_file="/dev/null"
+  fi
   if [ -d "$DASHBOARD_DIR/node_modules" ]; then
     if (cd "$DASHBOARD_DIR" && "${dashboard_pm[@]}" run build >"$log_file" 2>&1); then
       tail -n 3 "$log_file" >&2 || true
-      rm -f "$log_file"
+      if [ "$log_file" != "/dev/null" ]; then
+        rm -f "$log_file"
+      fi
       touch "$STAMP"
       echo "[dashboard] Build complete." >&2
       exit 0
@@ -72,12 +80,16 @@ if needs_rebuild; then
 
   if ! (cd "$DASHBOARD_DIR" && "${dashboard_pm[@]}" install --frozen-lockfile --prefer-offline >"$log_file" 2>&1 && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
     tail -n 20 "$log_file" >&2 || true
-    rm -f "$log_file"
+    if [ "$log_file" != "/dev/null" ]; then
+      rm -f "$log_file"
+    fi
     echo "[dashboard] Build failed (non-fatal)." >&2
     exit 0
   fi
   tail -n 6 "$log_file" >&2 || true
-  rm -f "$log_file"
+  if [ "$log_file" != "/dev/null" ]; then
+    rm -f "$log_file"
+  fi
   touch "$STAMP"
   echo "[dashboard] Build complete." >&2
 else

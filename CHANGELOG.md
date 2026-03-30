@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.173.0] - 2026-03-30
+
+### Fixed
+- **Governance petition from dashboard** — high-risk runtime param set/clear now creates governance petitions instead of failing with stub error. Dashboard UI shows "Petition" button for high-risk params with toast feedback (#3916, closes #3898).
+
 ## [2.172.0] - 2026-03-30
 
 ### Added

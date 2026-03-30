@@ -215,6 +215,57 @@ let test_different_canonical_actions_no_merge () =
   check bool "different canonical actions do not merge" false second.merged;
   check bool "different case ids" true (first.case_.id <> second.case_.id)
 
+(** "clear_param" and "revert_param" should NOT merge because
+    clear→reset and revert→revert are now distinct canonical groups. *)
+let test_clear_vs_revert_no_merge () =
+  with_base @@ fun () ->
+  let make_action action_type =
+    Some { GV2.action_type; target_type = Some "runtime_param";
+           target_id = Some "db_timeout";
+           payload = Some (`Assoc [("param_key", `String "db_timeout")]) }
+  in
+  let first =
+    match submit ~title:"Clear db_timeout"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "clear_param")
+      ~source_refs:[] ~created_by:"agent-a"
+    with Ok v -> v | Error e -> fail e
+  in
+  let second =
+    match submit ~title:"Revert db_timeout"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "revert_param")
+      ~source_refs:[] ~created_by:"agent-b"
+    with Ok v -> v | Error e -> fail e
+  in
+  check bool "clear vs revert do not merge" false second.merged;
+  check bool "different case ids" true (first.case_.id <> second.case_.id)
+
+(** Different target_type values must produce separate cases. *)
+let test_different_target_type_no_merge () =
+  with_base @@ fun () ->
+  let make_action target_type =
+    Some { GV2.action_type = "set_param"; target_type = Some target_type;
+           target_id = Some "max_conn";
+           payload = Some (`Assoc [("param_key", `String "max_conn"); ("value", `Int 100)]) }
+  in
+  let first =
+    match submit ~title:"Set max_conn"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "runtime_param")
+      ~source_refs:[] ~created_by:"agent-a"
+    with Ok v -> v | Error e -> fail e
+  in
+  let second =
+    match submit ~title:"Set max_conn"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "system_param")
+      ~source_refs:[] ~created_by:"agent-b"
+    with Ok v -> v | Error e -> fail e
+  in
+  check bool "different target_type do not merge" false second.merged;
+  check bool "different case ids" true (first.case_.id <> second.case_.id)
+
 let () =
   run "governance_v2"
     [
@@ -235,5 +286,9 @@ let () =
             test_set_update_synonym_merge;
           test_case "set vs delete no merge" `Quick
             test_different_canonical_actions_no_merge;
+          test_case "clear vs revert no merge" `Quick
+            test_clear_vs_revert_no_merge;
+          test_case "different target_type no merge" `Quick
+            test_different_target_type_no_merge;
         ] );
     ]

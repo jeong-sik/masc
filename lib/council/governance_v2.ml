@@ -129,7 +129,8 @@ let canonical_semantic_token token =
   | "threshold" | "thresholds" -> Some "threshold"
   (* Action verbs — mutative *)
   | "set" | "update" | "change" | "modify" | "alter" | "adjust" -> Some "set"
-  | "clear" | "reset" | "restore" | "revert" | "rollback" | "undo" -> Some "reset"
+  | "clear" | "reset" -> Some "reset"
+  | "restore" | "revert" | "rollback" | "undo" -> Some "revert"
   | "create" | "add" | "new" | "insert" -> Some "create"
   | "delete" | "remove" | "drop" | "destroy" | "purge" -> Some "delete"
   | "restart" | "reboot" | "reload" -> Some "restart"
@@ -191,7 +192,7 @@ let semantic_action_key = function
         (String.concat "::"
            [
              canonicalize_action_str request.action_type;
-             canonicalize_action_str (Option.value ~default:"none" request.target_type);
+             normalize_text (Option.value ~default:"none" request.target_type);
              normalize_text (Option.value ~default:"none" request.target_id);
              payload_key;
            ])

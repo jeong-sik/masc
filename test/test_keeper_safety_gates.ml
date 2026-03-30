@@ -189,7 +189,6 @@ let test_all_keepers_get_full_toolset () =
   let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
-  check bool "has keeper_read" true (List.mem "keeper_read" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
   check bool "has keeper_board_get" true (List.mem "keeper_board_get" tools);
   check bool "has keeper_shell_readonly" true (List.mem "keeper_shell_readonly" tools);

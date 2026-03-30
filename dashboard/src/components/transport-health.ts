@@ -378,6 +378,7 @@ export function TransportHealthPanel() {
   const webrtcStatus = webrtcTone(data)
   const h2Status = http2Tone(data)
   const clusterStatus = data.cluster.topology_available ? staleTone(data.agent_health.stale_total) : 'warn'
+  const hasAnyBadTransport = [sseStatus, grpcStatus, wsStatus, webrtcStatus, h2Status, clusterStatus].includes('bad')
   const clusterEyebrow = data.cluster.topology_available
     ? `${formatMetricValue(data.cluster.live_agents)} live`
     : data.cluster.topology_source
@@ -404,84 +405,105 @@ export function TransportHealthPanel() {
         >refresh</button>
       </div>
 
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
-        <${SectionCard} title="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} live`}>
-          <${MetricRow} label="Observer" value=${data.sse.sessions_observer} />
-          <${MetricRow} label="Coordinator" value=${data.sse.sessions_coordinator} />
-          <${MetricRow} label="External Fanout" value=${data.sse.external_subscribers} />
-          <${MetricRow} label="Queue" value=${data.sse.queue_max_depth} sub=${`max / avg ${formatFloat(data.sse.queue_avg_depth)}`} />
-          <${MetricRow} label="Broadcast Avg" value=${formatLatency(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count} events`} />
-        <//>
+      <details class="group rounded-xl border border-card-border/50 bg-card/18 overflow-hidden" open=${hasAnyBadTransport}>
+        <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-[13px] font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
+          <span>트랜스포트 상세</span>
+          <span class="ml-auto flex items-center gap-2 text-[11px] font-normal text-text-muted">
+            <span class="inline-flex items-center gap-1"><span class=${`w-1.5 h-1.5 rounded-full ${statusDot(sseStatus)}`}></span>SSE</span>
+            <span class="inline-flex items-center gap-1"><span class=${`w-1.5 h-1.5 rounded-full ${statusDot(grpcStatus)}`}></span>gRPC</span>
+            <span class="inline-flex items-center gap-1"><span class=${`w-1.5 h-1.5 rounded-full ${statusDot(wsStatus)}`}></span>WS</span>
+            <span class="inline-flex items-center gap-1"><span class=${`w-1.5 h-1.5 rounded-full ${statusDot(webrtcStatus)}`}></span>RTC</span>
+            <span class="inline-flex items-center gap-1"><span class=${`w-1.5 h-1.5 rounded-full ${statusDot(h2Status)}`}></span>HTTP</span>
+          </span>
+        </summary>
+        <div class="p-4">
+          <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
+            <${SectionCard} title="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} live`}>
+              <${MetricRow} label="Observer" value=${data.sse.sessions_observer} />
+              <${MetricRow} label="Coordinator" value=${data.sse.sessions_coordinator} />
+              <${MetricRow} label="External Fanout" value=${data.sse.external_subscribers} />
+              <${MetricRow} label="Queue" value=${data.sse.queue_max_depth} sub=${`max / avg ${formatFloat(data.sse.queue_avg_depth)}`} />
+              <${MetricRow} label="Broadcast Avg" value=${formatLatency(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count} events`} />
+            <//>
 
-        <${SectionCard} title="gRPC" status=${grpcStatus} eyebrow=${transportEyebrow(data.grpc.configured, data.grpc.listening, data.grpc.port)}>
-          <${MetricRow} label="Listener" value=${data.grpc.listening ? 'live' : 'down'} />
-          <${MetricRow} label="Subscribers" value=${data.grpc.subscribers} />
-          <${MetricRow} label="Active Streams" value=${data.grpc.active_streams} />
-          <${MetricRow} label="Heartbeat Avg" value=${formatLatency(data.grpc.heartbeat_avg_seconds)} />
-          <${MetricRow} label="Events Delivered" value=${data.grpc.events_delivered} />
-        <//>
+            <${SectionCard} title="gRPC" status=${grpcStatus} eyebrow=${transportEyebrow(data.grpc.configured, data.grpc.listening, data.grpc.port)}>
+              <${MetricRow} label="Listener" value=${data.grpc.listening ? 'live' : 'down'} />
+              <${MetricRow} label="Subscribers" value=${data.grpc.subscribers} />
+              <${MetricRow} label="Active Streams" value=${data.grpc.active_streams} />
+              <${MetricRow} label="Heartbeat Avg" value=${formatLatency(data.grpc.heartbeat_avg_seconds)} />
+              <${MetricRow} label="Events Delivered" value=${data.grpc.events_delivered} />
+            <//>
 
-        <${SectionCard} title="WebSocket" status=${wsStatus} eyebrow=${transportEyebrow(data.websocket.configured, data.websocket.listening, data.websocket.port)}>
-          <${MetricRow} label="리스너" value=${data.websocket.listening ? 'live' : 'down'} />
-          <${MetricRow} label="세션" value=${data.websocket.sessions} />
-          <${MetricRow} label="모드" value=${data.websocket.mode} />
-          <${MetricRow} label="릴레이 소스" value=${data.websocket.relay_source} />
-        <//>
+            <${SectionCard} title="WebSocket" status=${wsStatus} eyebrow=${transportEyebrow(data.websocket.configured, data.websocket.listening, data.websocket.port)}>
+              <${MetricRow} label="리스너" value=${data.websocket.listening ? 'live' : 'down'} />
+              <${MetricRow} label="세션" value=${data.websocket.sessions} />
+              <${MetricRow} label="모드" value=${data.websocket.mode} />
+              <${MetricRow} label="릴레이 소스" value=${data.websocket.relay_source} />
+            <//>
 
-        <${SectionCard} title="WebRTC" status=${webrtcStatus} eyebrow=${data.webrtc.enabled ? `${data.webrtc.ice_server_count} ICE` : 'disabled'}>
-          <${MetricRow} label="연결된 채널" value=${data.webrtc.connected_channels} />
-          <${MetricRow} label="활성 피어" value=${data.webrtc.active_peers} />
-          <${MetricRow} label="대기 오퍼" value=${data.webrtc.pending_offers} />
-          <${MetricRow} label="라이브 연결" value=${data.webrtc.live_connections} />
-        <//>
+            <${SectionCard} title="WebRTC" status=${webrtcStatus} eyebrow=${data.webrtc.enabled ? `${data.webrtc.ice_server_count} ICE` : 'disabled'}>
+              <${MetricRow} label="연결된 채널" value=${data.webrtc.connected_channels} />
+              <${MetricRow} label="활성 피어" value=${data.webrtc.active_peers} />
+              <${MetricRow} label="대기 오퍼" value=${data.webrtc.pending_offers} />
+              <${MetricRow} label="라이브 연결" value=${data.webrtc.live_connections} />
+            <//>
 
-        <${SectionCard} title="HTTP" status=${h2Status} eyebrow=${data.http2.listener_mode}>
-          <${MetricRow} label="POST" value=${data.streamable_http.endpoint} />
-          <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
-          <${MetricRow} label="오퍼레이터 표면" value=${data.streamable_http.operator_endpoint} />
-          <${MetricRow} label="레거시" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
-        <//>
+            <${SectionCard} title="HTTP" status=${h2Status} eyebrow=${data.http2.listener_mode}>
+              <${MetricRow} label="POST" value=${data.streamable_http.endpoint} />
+              <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
+              <${MetricRow} label="오퍼레이터 표면" value=${data.streamable_http.operator_endpoint} />
+              <${MetricRow} label="레거시" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
+            <//>
 
-        <${SectionCard} title="에이전트 풀" status=${clusterStatus} eyebrow=${clusterEyebrow}>
-          <${MetricRow} label="관리 유닛" value=${formatMetricValue(data.cluster.managed_units)} sub=${managedUnitsSub} />
-          <${MetricRow} label="활성 작업" value=${formatMetricValue(data.cluster.active_operations)} />
-          <${MetricRow} label="부실 유닛" value=${formatMetricValue(data.cluster.stale_units)} />
-          <${MetricRow} label="부실 에이전트" value=${data.agent_health.stale_total} />
-        <//>
-      </div>
+            <${SectionCard} title="에이전트 풀" status=${clusterStatus} eyebrow=${clusterEyebrow}>
+              <div class="text-[10px] text-text-muted mb-2">클러스터 내 관리 유닛 풀. 부실(stale) = 하트비트가 끊긴 에이전트.</div>
+              <${MetricRow} label="관리 유닛" value=${formatMetricValue(data.cluster.managed_units)} sub=${managedUnitsSub} />
+              <${MetricRow} label="활성 작업" value=${formatMetricValue(data.cluster.active_operations)} />
+              <${MetricRow} label="부실 유닛" value=${formatMetricValue(data.cluster.stale_units)} />
+              <${MetricRow} label="부실 에이전트" value=${data.agent_health.stale_total} />
+            <//>
+          </div>
+        </div>
+      </details>
 
       ${data.sse.hot_sessions.length > 0
         ? html`
-            <div class="rounded-xl border border-card-border/70 bg-card/35 p-4">
-              <div class="flex items-center justify-between gap-3 mb-3">
-                <span class="text-xs font-semibold text-text-strong uppercase tracking-wider">핫 큐</span>
-                <span class="text-[10px] text-text-muted">backpressure candidates</span>
-              </div>
-              <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
-                ${data.sse.hot_sessions.map((session) => html`
-                  <div class="rounded-lg border border-card-border/60 bg-bg-1/60 p-3">
-                    <div class="flex items-center justify-between gap-2 mb-1">
-                      <span class="text-[11px] font-mono text-text-strong">${compactId(session.session_id)}</span>
-                      <span class="text-[10px] uppercase tracking-wider text-text-muted">${session.kind}</span>
+            <details class="group rounded-xl border border-card-border/50 bg-card/18 overflow-hidden" open=${data.sse.hot_sessions.length >= 3}>
+              <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-[13px] font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
+                <span>핫 큐</span>
+                <span class="ml-auto text-[11px] font-normal text-text-muted">${data.sse.hot_sessions.length}개 세션 -- SSE 백프레셔 위험</span>
+              </summary>
+              <div class="p-4">
+                <div class="text-[11px] text-text-muted mb-3">SSE 세션 중 메시지 큐가 쌓여 있는 세션입니다. 큐 depth가 높으면 해당 클라이언트가 이벤트 처리를 따라가지 못하고 있습니다.</div>
+                <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
+                  ${data.sse.hot_sessions.map((session) => html`
+                    <div class="rounded-lg border border-card-border/60 bg-bg-1/60 p-3">
+                      <div class="flex items-center justify-between gap-2 mb-1">
+                        <span class="text-[11px] font-mono text-text-strong">${compactId(session.session_id)}</span>
+                        <span class="text-[10px] uppercase tracking-wider text-text-muted">${session.kind}</span>
+                      </div>
+                      <div class="text-[11px] text-text-body">queue ${session.queue_depth}</div>
+                      <div class="text-[10px] text-text-muted mt-1">idle ${formatIdle(session.idle_seconds)} · last ${session.last_event_id}</div>
                     </div>
-                    <div class="text-[11px] text-text-body">queue ${session.queue_depth}</div>
-                    <div class="text-[10px] text-text-muted mt-1">idle ${formatIdle(session.idle_seconds)} · last ${session.last_event_id}</div>
-                  </div>
-                `)}
+                  `)}
+                </div>
               </div>
-            </div>
+            </details>
           `
         : null}
 
-      <div class="rounded-xl border border-card-border/70 bg-card/35 p-4">
-        <div class="flex items-center justify-between gap-3 mb-3">
-          <span class="text-xs font-semibold text-text-strong uppercase tracking-wider">실용 경로</span>
-          <span class="text-[10px] text-text-muted">${data.generated_at}</span>
+      <details class="group rounded-xl border border-card-border/50 bg-card/18 overflow-hidden">
+        <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-[13px] font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
+          <span>실용 경로</span>
+          <span class="ml-auto text-[11px] font-normal text-text-muted">각 트랜스포트의 실제 연결 방법 레퍼런스</span>
+        </summary>
+        <div class="p-4">
+          <div class="text-[11px] text-text-muted mb-3">5가지 트랜스포트(SSE, gRPC, WebSocket, WebRTC, HTTP)를 실제로 어떻게 연결하는지 보여주는 가이드입니다. 운영 데이터가 아닌 참조용 정보입니다.</div>
+          <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
+            ${PRACTICAL_CASES.map((item) => html`<${CaseCard} item=${item} data=${data} />`)}
+          </div>
         </div>
-        <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
-          ${PRACTICAL_CASES.map((item) => html`<${CaseCard} item=${item} data=${data} />`)}
-        </div>
-      </div>
+      </details>
     </div>
   `
 }

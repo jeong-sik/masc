@@ -239,7 +239,7 @@ export function Mission() {
         <div class="flex flex-col gap-3">
           ${sessionRows.length > 0
             ? sessionRows.map(row => html`<${SessionBriefCard} key=${row.session_id} brief=${row} selected=${activeSessionId === row.session_id} />`)
-            : html`<div class="text-xs text-[var(--text-muted)] py-4 text-center">세션 없음.</div>`}
+            : html`<div class="text-xs text-[var(--text-muted)] py-4 text-center">활성 세션 없음. 세션은 SSE로 연결된 실시간 작업 단위입니다.</div>`}
         </div>
       <//>
 

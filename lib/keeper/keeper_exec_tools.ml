@@ -799,6 +799,13 @@ let execute_keeper_tool_call
                (`Assoc [ ("ok", `Bool false);
                           ("error", `String (Types.masc_error_to_string e)) ]))
   | name when String.starts_with ~prefix:"masc_autoresearch_" name ->
+      if not (filter_by_access
+                ~allowlist:meta.tool_allowlist
+                ~denylist:meta.tool_denylist name) then
+        Yojson.Safe.to_string
+          (`Assoc [ ("error", `String "tool_not_allowed");
+                    ("tool", `String name) ])
+      else
       let ctx : Tool_autoresearch.context = {
         base_path = project_root_of_config config;
         agent_name = Some meta.name;
@@ -817,6 +824,16 @@ let execute_keeper_tool_call
             (`Assoc [ ("error", `String "unknown_autoresearch_tool");
                       ("tool", `String name) ]))
   | name when String.starts_with ~prefix:"masc_" name ->
+      (* Allowlist/denylist enforcement at execution time.
+         Even if the LLM hallucinates a tool name that wasn't in the schema,
+         this gate blocks execution. Deny always wins. *)
+      if not (filter_by_access
+                ~allowlist:meta.tool_allowlist
+                ~denylist:meta.tool_denylist name) then
+        Yojson.Safe.to_string
+          (`Assoc [ ("error", `String "tool_not_allowed");
+                    ("tool", `String name) ])
+      else
       (* Pre-dispatch path guard: if the tool args contain a path/file_path
          key, validate it against effective_allowed_paths before dispatching. *)
       let effective_paths = Keeper_alerting_path.effective_allowed_paths ~meta in

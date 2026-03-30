@@ -487,6 +487,58 @@ let test_voice_session_urls_prefer_http_base_url () =
                   "http://127.0.0.1:9415/health"
                   (Uri.to_string (Masc_mcp.Voice_bridge.voice_health_uri ())))))))
 
+let test_voice_session_urls_default_to_builtin_http_defaults () =
+  let config_json =
+    {|
+{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "Roger",
+    "endpoints": [
+      {
+        "id": "elevenlabs-direct",
+        "kind": "elevenlabs_direct",
+        "base_url": "https://api.elevenlabs.io/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "stt": {
+    "default_model": "whisper-1",
+    "endpoints": [
+      {
+        "id": "openai-stt",
+        "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "enabled": true
+      }
+    ]
+  },
+  "session": {
+    "endpoints": [
+      {
+        "id": "local-voice-mcp",
+        "kind": "voice_mcp",
+        "enabled": true
+      }
+    ]
+  }
+}
+|}
+  in
+  with_temp_voice_config config_json @@ fun () ->
+      with_env "MASC_HTTP_BASE_URL" "" (fun () ->
+        with_env "MASC_HOST" "" (fun () ->
+          with_env "MASC_HTTP_PORT" "" (fun () ->
+            with_env "VOICE_MCP_HOST" "" (fun () ->
+              with_env "VOICE_MCP_PORT" "" (fun () ->
+                check string "mcp uri falls back to builtin HTTP defaults"
+                  "http://127.0.0.1:8935/mcp"
+                  (Uri.to_string (Masc_mcp.Voice_bridge.voice_mcp_uri ()));
+                check string "health uri falls back to builtin HTTP defaults"
+                  "http://127.0.0.1:8935/health"
+                  (Uri.to_string (Masc_mcp.Voice_bridge.voice_health_uri ())))))))
+
 let test_voice_session_urls_use_legacy_voice_env_fallback () =
   let config_json =
     {|
@@ -959,6 +1011,8 @@ let () =
             test_voice_session_urls_default_to_http_listener;
           test_case "voice session urls prefer HTTP base url" `Quick
             test_voice_session_urls_prefer_http_base_url;
+          test_case "voice session urls default to builtin HTTP defaults" `Quick
+            test_voice_session_urls_default_to_builtin_http_defaults;
           test_case "voice session urls use legacy voice env fallback" `Quick
             test_voice_session_urls_use_legacy_voice_env_fallback;
           test_case "speak without net errors" `Quick

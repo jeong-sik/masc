@@ -44,6 +44,10 @@ let default_metadata =
     idempotent = None;
   }
 
+(* Runtime-readable like MASC_FULL_SURFACE so tests and local admin flows can
+   toggle placeholder exposure without restarting the server. Keep the legacy
+   exact-match semantics for "false"/"0" so existing deployments do not change
+   behavior when they use other spellings. *)
 let placeholder_tools_enabled () =
   match Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" with
   | Some "false" | Some "0" -> false

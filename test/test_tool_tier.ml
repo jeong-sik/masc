@@ -2,6 +2,19 @@
 
 module Tool_catalog = Masc_mcp.Tool_catalog
 
+let with_env key value f =
+  let old = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some prev -> Unix.putenv key prev
+      | None ->
+          (* OCaml stdlib has no unsetenv; blank matches the enabled default
+             path we are asserting for placeholder_tools_enabled. *)
+          Unix.putenv key "")
+    f
+
 let () =
   let open Alcotest in
   run "Tool_tier"
@@ -166,5 +179,31 @@ let () =
                 (List.assoc_opt "visibility" fields = None);
               check bool "lifecycle omitted" true
                 (List.assoc_opt "lifecycle" fields = None));
+        ] );
+      ( "placeholder_tools_enabled",
+        [
+          test_case "unset and blank values keep enabled default" `Quick
+            (fun () ->
+              check bool "unset defaults to enabled" true
+                (Tool_catalog.placeholder_tools_enabled ());
+              with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" "" (fun () ->
+                  check bool "blank defaults to enabled" true
+                    (Tool_catalog.placeholder_tools_enabled ())));
+          test_case "only exact false and 0 disable placeholder tools" `Quick
+            (fun () ->
+              List.iter
+                (fun raw ->
+                  with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" raw (fun () ->
+                      check bool raw false
+                        (Tool_catalog.placeholder_tools_enabled ())))
+                [ "false"; "0" ]);
+          test_case "other spellings stay enabled for backward compatibility"
+            `Quick (fun () ->
+              List.iter
+                (fun raw ->
+                  with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" raw (fun () ->
+                      check bool raw true
+                        (Tool_catalog.placeholder_tools_enabled ())))
+                [ "FALSE"; " false "; "no"; "NO"; "true"; "1"; "bogus" ]);
         ] );
     ]

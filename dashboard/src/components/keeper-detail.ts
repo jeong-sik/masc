@@ -248,10 +248,10 @@ function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
             <div class="h-full rounded-full transition-all duration-300" style="width: ${budgetPct}%; background: ${budgetColor}"></div>
           </div>
         </div>
-        ${typeof dead_eta_sec === 'number' && !dead_since ? html`
+        ${typeof dead_eta_sec === 'number' && dead_eta_sec > 0 && dead_since == null ? html`
           <div class="flex items-center justify-between">
             <span class="text-xs text-[var(--text-muted)]">Dead 예상</span>
-            <span class="text-[11px] font-mono text-[${budgetPct >= 50 ? '#f59e0b' : 'var(--text-body)'}]">${dead_eta_sec >= 3600 ? (dead_eta_sec / 3600).toFixed(1) + 'h' : (dead_eta_sec / 60).toFixed(0) + 'm'} 후</span>
+            <span class="text-[11px] font-mono" style="color: ${budgetPct >= 50 ? '#f59e0b' : 'var(--text-body)'}">${dead_eta_sec >= 3600 ? (dead_eta_sec / 3600).toFixed(1) + 'h' : (dead_eta_sec / 60).toFixed(0) + 'm'} 후</span>
           </div>
         ` : null}
         ${last_failure_reason ? html`

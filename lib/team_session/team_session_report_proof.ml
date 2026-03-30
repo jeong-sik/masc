@@ -441,6 +441,22 @@ let generate_proof ?(proof_level = default_proof_level) config
     let spawn_tool_names = collect_spawn_tool_names events in
     let spawn_tool_call_count = sum_spawn_tool_call_count events in
     let write_capable_spawn_count = count_write_capable_spawns events in
+    let projected_worker_proof_count =
+      Team_session_store.list_worker_run_ids config session.session_id
+      |> List.fold_left
+           (fun acc worker_run_id ->
+             let path =
+               Team_session_store.worker_run_meta_path config session.session_id
+                 worker_run_id
+             in
+             match Room_utils.read_json_opt config path with
+             | Some meta -> (
+                 match Yojson.Safe.Util.member "proof_run_id" meta with
+                 | `String _ -> acc + 1
+                 | _ -> acc)
+             | None -> acc)
+           0
+    in
     let min_turn_events = min_turn_events_for_session required_turn_actors in
     let min_communication = min_communication_for_session required_turn_actors in
     let vote_events =
@@ -564,9 +580,10 @@ let generate_proof ?(proof_level = default_proof_level) config
           ("oas_cdal_integration", `Assoc [
             ("contract_wired", `Bool (Option.is_some session.delivery_contract));
             ("proof_schema_version", `Int 1);
-            ("worker_proof_count", `Int (List.length worker_proofs));
+            ("worker_proof_count",
+             `Int (max (List.length worker_proofs) projected_worker_proof_count));
             ("aggregated", `Bool (worker_proofs <> []));
-            ("note", `String "Session proof aggregates worker-level OAS proof refs when present and falls back cleanly for legacy sessions without stored worker proofs.");
+            ("proof_projected", `Bool (projected_worker_proof_count > 0));
           ]);
         ]
     in

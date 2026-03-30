@@ -79,30 +79,45 @@ let execute_spawn_pipeline
                    Some (`Assoc [ ("error", `String msg) ])
                | Ok () ->
                    let execute_spawn index prepared =
-                     (* Phase C-3a: Route spawn through OAS Agent.run via Oas_worker.
-                        This replaces the old Spawn.spawn subprocess call, giving us
-                        trace data, tool_names, and tool_call_count for free. *)
-                     let start_time = Time_compat.now () in
-                     let max_turns =
-                       match prepared.spec.max_turns with
-                       | Some n -> n | None -> 10
-                     in
-                     let oas_result =
-                       Oas_worker.run_model_by_label
-                         ~model_label:prepared.runtime_model_label
-                         ~goal:prepared.spec.spawn_prompt
-                         ~system_prompt:(Printf.sprintf
-                           "You are agent '%s'. Execute the task and return a clear result."
+                   (* Phase C-3a: Route spawn through OAS Agent.run via Oas_worker.
+                       This replaces the old Spawn.spawn subprocess call, giving us
+                       trace data, tool_names, and tool_call_count for free. *)
+                    let start_time = Time_compat.now () in
+                    let max_turns =
+                      match prepared.spec.max_turns with
+                      | Some n -> n | None -> 10
+                    in
+                    let delivery_contract =
+                      Tool_team_session_step_exec.delivery_contract_for_session
+                        ctx.config session_id
+                    in
+                    let contract =
+                      Option.map
+                        (fun delivery_contract ->
+                          (* Spawn workers currently run without an attached
+                             MASC tool surface, so the composed contract uses
+                             the current runtime tool list: [] *)
+                          Contract_composer.compose ~delivery_contract
+                            ~tool_names:[])
+                        delivery_contract
+                    in
+                    let oas_result =
+                      Oas_worker.run_model_by_label
+                        ~model_label:prepared.runtime_model_label
+                        ~goal:prepared.spec.spawn_prompt
+                        ~system_prompt:(Printf.sprintf
+                          "You are agent '%s'. Execute the task and return a clear result."
                            prepared.spec.spawn_agent)
-                         ~max_turns
-                         ~temperature:(Safe_ops.get_env_float_logged
-                           "MASC_SPAWN_TEMPERATURE" ~default:0.3)
-                         ~max_tokens:(Safe_ops.get_env_int_logged
-                           "MASC_SPAWN_MAX_TOKENS" ~default:4096)
-                         ~priority:Llm_provider.Request_priority.Interactive
-                         ~sw:ctx.sw
-                         ()
-                     in
+                        ~max_turns
+                        ~temperature:(Safe_ops.get_env_float_logged
+                          "MASC_SPAWN_TEMPERATURE" ~default:0.3)
+                        ~max_tokens:(Safe_ops.get_env_int_logged
+                          "MASC_SPAWN_MAX_TOKENS" ~default:4096)
+                        ~priority:Llm_provider.Request_priority.Interactive
+                        ?contract
+                        ~sw:ctx.sw
+                        ()
+                    in
                      let elapsed_ms =
                        int_of_float ((Time_compat.now () -. start_time) *. 1000.0)
                      in
@@ -175,6 +190,11 @@ let execute_spawn_pipeline
                      let output_preview =
                        deps.truncate_for_event spawn_result.output
                      in
+                     let proof =
+                       match oas_result with
+                       | Ok result -> result.proof
+                       | Error _ -> None
+                     in
                      let verification_outcome =
                        match oas_result with
                        | Ok result ->
@@ -195,6 +215,7 @@ let execute_spawn_pipeline
                                session_id = result.session_id;
                                raw_trace_run = oas_trace_ref;
                                api_response = Some result.response;
+                               proof = result.proof;
                              }
                            in
                            let goal =
@@ -207,10 +228,7 @@ let execute_spawn_pipeline
                            in
                            Some
                              (Worker_verification.verify_worker_result
-                                ?delivery_contract:
-                                  (Tool_team_session_step_exec
-                                   .delivery_contract_for_session
-                                     ctx.config session_id)
+                                ?delivery_contract
                                 ~goal run_result)
                        | Error _ -> None
                      in
@@ -263,6 +281,7 @@ let execute_spawn_pipeline
                        ?trace_ref:oas_trace_ref
                        ?trace_summary:trace_summary_json
                        ?trace_validation:trace_validation_json
+                       ?proof
                          ~trace_capability:"raw"
                        ();
                      append_spawn_event

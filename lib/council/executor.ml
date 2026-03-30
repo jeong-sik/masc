@@ -115,36 +115,40 @@ let combine_output ~stdout ~stderr =
 
 let execute_argv argv =
   let timestamp () = Time_compat.now () in
-  match argv with
-  | [] ->
-      { success = false;
-        stdout = "";
-        stderr = "Empty argv";
-        output = "Empty argv";
-        timestamp = timestamp () }
-  | prog :: _ ->
-      try
-        let stdout_ic, stdin_oc, stderr_ic =
-          Unix.open_process_args_full prog (Array.of_list argv) (Unix.environment ())
-        in
-        (* NOTE: We intentionally never write to stdin. Most commands we execute
-           (e.g. gh) do not read stdin; leaving it open avoids double-closing
-           issues with [close_process_full]. *)
-        let stdout = (try read_all_from_ic stdout_ic with Sys_error _ -> "") in
-        let stderr = (try read_all_from_ic stderr_ic with Sys_error _ -> "") in
-        let status = Unix.close_process_full (stdout_ic, stdin_oc, stderr_ic) in
-        let success = match status with Unix.WEXITED 0 -> true | _ -> false in
-        let output = combine_output ~stdout ~stderr in
-        { success; stdout; stderr; output; timestamp = timestamp () }
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e ->
-        let err = Printexc.to_string e in
+  let do_exec () =
+    match argv with
+    | [] ->
         { success = false;
           stdout = "";
-          stderr = err;
-          output = err;
+          stderr = "Empty argv";
+          output = "Empty argv";
           timestamp = timestamp () }
+    | prog :: _ ->
+        try
+          let stdout_ic, stdin_oc, stderr_ic =
+            Unix.open_process_args_full prog (Array.of_list argv) (Unix.environment ())
+          in
+          (* NOTE: We intentionally never write to stdin. Most commands we execute
+             (e.g. gh) do not read stdin; leaving it open avoids double-closing
+             issues with [close_process_full]. *)
+          let stdout = (try read_all_from_ic stdout_ic with Sys_error _ -> "") in
+          let stderr = (try read_all_from_ic stderr_ic with Sys_error _ -> "") in
+          let status = Unix.close_process_full (stdout_ic, stdin_oc, stderr_ic) in
+          let success = match status with Unix.WEXITED 0 -> true | _ -> false in
+          let output = combine_output ~stdout ~stderr in
+          { success; stdout; stderr; output; timestamp = timestamp () }
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | e ->
+          let err = Printexc.to_string e in
+          { success = false;
+            stdout = "";
+            stderr = err;
+            output = err;
+            timestamp = timestamp () }
+  in
+  (* Offload blocking I/O to system thread to avoid blocking Eio scheduler *)
+  Eio_guard.run_in_systhread do_exec
 
 let github_argv action =
   match action with

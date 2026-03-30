@@ -31,6 +31,9 @@ type run_result = {
   tools_used : string list;
   checkpoint : Agent_sdk.Checkpoint.t option;
   proof : Agent_sdk.Cdal_proof.t option;
+  trace_ref : Agent_sdk.Raw_trace.run_ref option;
+  provider_label : string option;
+  thinking_enabled : bool option;
 }
 
 let normalize_response_text ~(text : string) ~(tool_names : string list) :
@@ -351,4 +354,7 @@ let run_turn
            tools_used = tool_names;
            checkpoint = result.checkpoint;
            proof = result.proof;
+           trace_ref = result.trace_ref;
+           provider_label = Oas_model_resolve.provider_name_of_label model;
+           thinking_enabled = None;
          })

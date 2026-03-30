@@ -205,6 +205,19 @@ let append_decision_record
                   ("tool_trace_count", `Int (List.length p.tool_trace_refs));
                 ]
           | _ -> `Null );
+        ( "trace_ref",
+          match result with
+          | Some { trace_ref = Some ref_; _ } ->
+              `String ref_.Agent_sdk.Raw_trace.worker_run_id
+          | _ -> `Null );
+        ( "provider_label",
+          match result with
+          | Some { provider_label = Some label; _ } -> `String label
+          | _ -> `Null );
+        ( "thinking_enabled",
+          match result with
+          | Some { thinking_enabled = Some b; _ } -> `Bool b
+          | _ -> `Null );
       ]
       @ social_fields)
   in
@@ -403,6 +416,18 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
              ("mode_source", `String p.mode_decision_source);
            ]
          | None -> `Null);
+        ( "trace_ref",
+          match result.trace_ref with
+          | Some ref_ -> `String ref_.Agent_sdk.Raw_trace.worker_run_id
+          | None -> `Null );
+        ( "provider_label",
+          match result.provider_label with
+          | Some label -> `String label
+          | None -> `Null );
+        ( "thinking_enabled",
+          match result.thinking_enabled with
+          | Some b -> `Bool b
+          | None -> `Null );
       ]
   in
   Dated_jsonl.append metrics_store snapshot

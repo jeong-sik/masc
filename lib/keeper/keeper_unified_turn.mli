@@ -25,6 +25,7 @@ val update_metrics_from_result :
   Keeper_types.keeper_meta ->
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
+  ?social_state:Keeper_social_model.social_state ->
   Keeper_agent_run.run_result ->
   Keeper_types.keeper_meta
 
@@ -32,6 +33,8 @@ val update_metrics_from_failure :
   Keeper_types.keeper_meta ->
   latency_ms:int ->
   reason:string ->
+  ?social_state:Keeper_social_model.social_state ->
+  unit ->
   Keeper_types.keeper_meta
 
 val run_unified_turn :

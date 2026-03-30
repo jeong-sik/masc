@@ -102,7 +102,16 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
      claim one with keeper_task_claim and work on it.\n\
      When you have findings, opinions, or status updates worth sharing, post them to the board \
      using keeper_board_post. When responding to board activity, use keeper_board_comment.\n\
-     Take a concrete step only when it materially helps; otherwise emit `SKIP: <reason>`."
+     Every response must begin with these machine-readable headers exactly once:\n\
+     SOCIAL_MODEL: bdi_speech_v1\n\
+     BELIEF_SUMMARY: <short summary>\n\
+     ACTIVE_DESIRE: <value or none>\n\
+     CURRENT_INTENTION: <value or none>\n\
+     BLOCKER: <value or none>\n\
+     NEED: <value or none>\n\
+     SPEECH_ACT: stay_silent|inform|request_help|claim_task|comment_board|post_board|broadcast|defer\n\
+     DELIVERY_SURFACE: silent|visible_reply|board_post|board_comment|task_claim|broadcast\n\
+     If DELIVERY_SURFACE is silent, emit no visible body after the headers."
   in
   let system_prompt =
     Printf.sprintf "%s\n\n## Turn Intent\n%s" base_system_prompt turn_intent_block

@@ -507,6 +507,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
+              ("social_model", `String m.social_model);
               ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
               ("autonomous_tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
@@ -519,6 +520,18 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 if String.trim m.runtime.proactive_rt.last_reason = ""
                 then `Null
                 else `String m.runtime.proactive_rt.last_reason);
+              ("last_speech_act",
+                if String.trim m.runtime.last_speech_act = ""
+                then `Null
+                else `String m.runtime.last_speech_act);
+              ("last_blocker",
+                if String.trim m.runtime.last_blocker = ""
+                then `Null
+                else `String m.runtime.last_blocker);
+              ("last_need",
+                if String.trim m.runtime.last_need = ""
+                then `Null
+                else `String m.runtime.last_need);
 	              ("last_proactive_preview",
 	                if String.trim m.runtime.proactive_rt.last_preview = ""
 	                then `Null

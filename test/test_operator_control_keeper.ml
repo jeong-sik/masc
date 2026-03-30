@@ -372,8 +372,13 @@ let test_snapshot_keeper_tool_audit_fallback () =
         (keeper |> member "status" |> to_string);
       Alcotest.(check bool) "allowed tool fallback present" true
         ((keeper |> member "allowed_tool_names" |> to_list) <> []);
-      Alcotest.(check bool) "tool audit source omitted without evidence" true
-        (keeper |> member "tool_audit_source" = `Null);
+      Alcotest.(check string) "tool audit source reflects failed turn evidence"
+        "keeper_decision_log"
+        (keeper |> member "tool_audit_source" |> to_string);
+      Alcotest.(check int) "tool audit count exposed as zero" 0
+        (keeper |> member "latest_tool_call_count" |> to_int);
+      Alcotest.(check bool) "tool audit names remain empty" true
+        ((keeper |> member "latest_tool_names" |> to_list) = []);
       Alcotest.(check bool) "diagnostic removed from snapshot" true
         (keeper |> member "diagnostic" = `Null);
       let ok, _ =

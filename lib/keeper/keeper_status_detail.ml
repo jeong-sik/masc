@@ -370,11 +370,19 @@ let handle_keeper_status ctx args : tool_result =
           keeper_model_tools |> List.map (fun tool -> tool.Types.name)
         in
         let allowed_tools = keeper_allowed_tool_names m in
+        let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
         let tool_audit_snapshot =
           match latest_tool_audit_snapshot_from_files ctx.config ~keeper_name:m.name with
-          | Some snapshot -> snapshot
+          | Some snapshot ->
+              {
+                snapshot with
+                tool_audit_at =
+                  (match snapshot.tool_audit_source, snapshot.tool_audit_at with
+                   | Some _, None when last_autonomous <> "" -> Some last_autonomous
+                   | Some _, None -> Some m.updated_at
+                   | _ -> snapshot.tool_audit_at);
+              }
           | None ->
-              let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
               let has_runtime_activity =
                 last_autonomous <> ""
                 || m.runtime.autonomous_turn_count > 0

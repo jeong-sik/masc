@@ -107,14 +107,22 @@ let recent_messages_json config =
 
 let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
   let fallback_allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
   let fallback_snapshot =
     match
       Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files config
         ~keeper_name:meta.name
     with
-    | Some snapshot -> snapshot
+    | Some snapshot ->
+        {
+          snapshot with
+          tool_audit_at =
+            (match snapshot.tool_audit_source, snapshot.tool_audit_at with
+             | Some _, None when last_autonomous <> "" -> Some last_autonomous
+             | Some _, None -> Some meta.updated_at
+             | _ -> snapshot.tool_audit_at);
+        }
     | None ->
-        let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
         let has_runtime_activity =
           last_autonomous <> ""
           || meta.runtime.autonomous_turn_count > 0

@@ -27,11 +27,26 @@ let keeper_tool_audit_json_fields config keeper agent_name =
     trim_to_option (string_field "tool_audit_at" keeper)
   in
   let file_snapshot =
-    Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files config
-      ~keeper_name:
-        (match trim_to_option (string_field "name" keeper) with
-         | Some name -> name
-         | None -> agent_name)
+    let keeper_updated_at =
+      trim_to_option (string_field "updated_at" keeper)
+    in
+    match
+      Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files config
+        ~keeper_name:
+          (match trim_to_option (string_field "name" keeper) with
+           | Some name -> name
+           | None -> agent_name)
+    with
+    | Some snapshot ->
+        Some
+          {
+            snapshot with
+            tool_audit_at =
+              (match snapshot.tool_audit_source, snapshot.tool_audit_at, keeper_updated_at with
+               | Some _, None, Some updated_at -> Some updated_at
+               | _ -> snapshot.tool_audit_at);
+          }
+    | None -> None
   in
   let allowed_tool_names, latest_tool_names, latest_tool_call_count,
       tool_audit_source, tool_audit_at =

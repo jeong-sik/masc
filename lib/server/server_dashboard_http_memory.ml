@@ -1,0 +1,108 @@
+(** Dashboard memory, governance, and planning HTTP handlers *)
+
+open Types
+open Server_utils
+open Server_dashboard_http_util
+
+let dashboard_memory_http_json request : Yojson.Safe.t =
+  let hearth = query_param request "hearth" in
+  let sort_by = board_sort_order_of_request request in
+  let exclude_system = bool_query_param request "exclude_system" ~default:false in
+  let exclude_automation =
+    bool_query_param request "exclude_automation" ~default:false
+  in
+  let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+  let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+  let fetch_limit =
+    board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
+  in
+  let posts =
+    Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
+      ~exclude_automation ~limit:fetch_limit ()
+  in
+  let karma_map = Board_dispatch.get_all_karma () in
+  let get_karma author =
+    Option.value ~default:0 (List.assoc_opt author karma_map)
+  in
+  let paged = posts |> drop offset |> take limit in
+  let posts_json =
+    List.map
+      (fun (post : Board.post) ->
+        let author = Board.Agent_id.to_string post.author in
+        board_post_dashboard_json ~author_karma:(get_karma author) post)
+      paged
+  in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ( "summary",
+        `Assoc
+          [
+            ("visible_posts", `Int (List.length posts_json));
+            ("sort_by", `String (board_sort_label sort_by));
+            ("exclude_system", `Bool exclude_system);
+            ("exclude_automation", `Bool exclude_automation);
+          ] );
+      ("posts", `List posts_json);
+      ("count", `Int (List.length posts_json));
+      ("limit", `Int limit);
+      ("offset", `Int offset);
+      ("sort_by", `String (board_sort_label sort_by));
+    ]
+
+let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
+  let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+  let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+  let status_filter =
+    match query_param request "status" with
+    | None -> None
+    | Some raw -> (
+        match String.lowercase_ascii (String.trim raw) with
+        | "pending_ruling" -> Some Council.Governance_v2.Pending_ruling
+        | "ready_auto_execute" -> Some Council.Governance_v2.Ready_auto_execute
+        | "needs_human_gate" -> Some Council.Governance_v2.Needs_human_gate
+        | "executed" -> Some Council.Governance_v2.Executed
+        | "blocked" -> Some Council.Governance_v2.Blocked
+        | "closed" -> Some Council.Governance_v2.Closed
+        | _ -> None)
+  in
+  Dashboard_governance.dashboard_json ~base_path ~limit ~offset
+    ~status_filter
+
+let dashboard_planning_http_json request ~(config : Room.config) : Yojson.Safe.t =
+  let goals = Goal_store.list_goals config () in
+  let rollup = Goal_store.compute_rollup goals in
+  let mdal_json =
+    match mdal_loops_json ~config request with
+    | Ok json -> json
+    | Error message -> `Assoc [ ("error", `String message); ("loops", `List []) ]
+  in
+  let task_rollup =
+    dashboard_tasks_safe config
+    |> List.fold_left
+         (fun (todo, claimed, running, done_count, cancelled) (task : Types.task) ->
+           match task.task_status with
+           | Todo -> (todo + 1, claimed, running, done_count, cancelled)
+           | Claimed _ -> (todo, claimed + 1, running, done_count, cancelled)
+           | InProgress _ -> (todo, claimed, running + 1, done_count, cancelled)
+           | Done _ -> (todo, claimed, running, done_count + 1, cancelled)
+           | Cancelled _ -> (todo, claimed, running, done_count, cancelled + 1))
+         (0, 0, 0, 0, 0)
+  in
+  let (todo_count, claimed_count, running_count, done_count, cancelled_count) = task_rollup in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("goals", `List (List.map Goal_store.goal_to_yojson goals));
+      ("rollup", Goal_store.rollup_to_yojson rollup);
+      ("mdal", mdal_json);
+      ( "task_backlog",
+        `Assoc
+          [
+            ("todo", `Int todo_count);
+            ("claimed", `Int claimed_count);
+            ("in_progress", `Int running_count);
+            ("done", `Int done_count);
+            ("cancelled", `Int cancelled_count);
+          ] );
+    ]

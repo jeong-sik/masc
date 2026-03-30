@@ -540,7 +540,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           Error e
       | Ok result ->
           let result, social_state =
-            Social.apply_to_result ~config ~meta ~observation result
+            Social.apply_to_result ~meta ~observation result
           in
           let used_model_id =
             let strip_latest s =

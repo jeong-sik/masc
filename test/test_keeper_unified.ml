@@ -502,9 +502,8 @@ let test_metrics_persist_social_state_fields () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
       let routed, social_state =
-        KSM.apply_to_result ~config ~meta:minimal_meta
+        KSM.apply_to_result ~meta:minimal_meta
           ~observation:base_observation result
       in
       let updated =
@@ -652,9 +651,8 @@ let test_social_model_silences_skip_only_turn () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
       let routed, state =
-        KSM.apply_to_result ~config ~meta:minimal_meta
+        KSM.apply_to_result ~meta:minimal_meta
           ~observation:base_observation result
       in
       check string "speech act" "stay_silent"
@@ -673,9 +671,8 @@ let test_social_model_requires_explicit_headers () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
       let routed, state =
-        KSM.apply_to_result ~config ~meta:minimal_meta
+        KSM.apply_to_result ~meta:minimal_meta
           ~observation:base_observation result
       in
       check string "speech act" "defer"
@@ -708,7 +705,7 @@ let test_social_model_routes_blocker_to_board_post () =
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
       let routed, state =
-        KSM.apply_to_result ~config ~meta:minimal_meta
+        KSM.apply_to_result ~meta:minimal_meta
           ~observation:base_observation result
       in
       let posts =

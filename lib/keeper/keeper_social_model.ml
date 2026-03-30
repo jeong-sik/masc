@@ -121,28 +121,35 @@ let nonempty_header_opt headers key =
 
 let belief_summary_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
-  let beliefs = ref [] in
-  let add value =
-    if String.trim value <> "" then beliefs := value :: !beliefs
+  let parts =
+    List.filter_map Fun.id [
+      (if observation.pending_mentions <> [] then
+         Some (Printf.sprintf "mentions=%d" (List.length observation.pending_mentions))
+       else None);
+      (if observation.pending_board_events <> [] then
+         Some (Printf.sprintf "board_events=%d"
+                 (List.length observation.pending_board_events))
+       else None);
+      (if observation.unclaimed_task_count > 0 then
+         Some (Printf.sprintf "unclaimed_tasks=%d" observation.unclaimed_task_count)
+       else None);
+      (if observation.failed_task_count > 0 then
+         Some (Printf.sprintf "failed_tasks=%d" observation.failed_task_count)
+       else None);
+      (if observation.active_goals <> [] then
+         Some (Printf.sprintf "active_goals=%d" (List.length observation.active_goals))
+       else None);
+      (if observation.idle_seconds > 0 then
+         Some (Printf.sprintf "idle=%ds" observation.idle_seconds)
+       else None);
+      (if Option.is_some observation.worktree_change_summary then
+         Some "worktree_delta"
+       else None);
+    ]
   in
-  if observation.pending_mentions <> [] then
-    add (Printf.sprintf "mentions=%d" (List.length observation.pending_mentions));
-  if observation.pending_board_events <> [] then
-    add
-      (Printf.sprintf "board_events=%d"
-         (List.length observation.pending_board_events));
-  if observation.unclaimed_task_count > 0 then
-    add (Printf.sprintf "unclaimed_tasks=%d" observation.unclaimed_task_count);
-  if observation.failed_task_count > 0 then
-    add (Printf.sprintf "failed_tasks=%d" observation.failed_task_count);
-  if observation.active_goals <> [] then
-    add (Printf.sprintf "active_goals=%d" (List.length observation.active_goals));
-  if observation.idle_seconds > 0 then
-    add (Printf.sprintf "idle=%ds" observation.idle_seconds);
-  if Option.is_some observation.worktree_change_summary then add "worktree_delta";
-  match List.rev !beliefs with
+  match parts with
   | [] -> "quiet_room"
-  | values -> String.concat "; " values
+  | _ -> String.concat "; " parts
 
 let protocol_violation_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation) ~(reason : string)
@@ -159,10 +166,7 @@ let protocol_violation_state ~(meta : keeper_meta)
   }
 
 let social_state_of_headers ~(meta : keeper_meta)
-    ~(observation : Keeper_world_observation.world_observation) headers
-    ~response_body ~(tools_used : string list) =
-  let _ = response_body in
-  let _ = tools_used in
+    ~(observation : Keeper_world_observation.world_observation) headers =
   match nonempty_header_opt headers "SPEECH_ACT", header_assoc_opt headers "DELIVERY_SURFACE" with
   | Some speech_raw, Some delivery_raw -> (
       match
@@ -257,14 +261,12 @@ let deliver_request_help_post ~(meta : keeper_meta) ~(state : social_state) =
       | Ok _ -> Request_help_posted
       | Error _ -> Request_help_failed
 
-let apply_to_result ~(config : Room.config) ~(meta : keeper_meta)
+let apply_to_result ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     (result : Keeper_agent_run.run_result) =
-  let _ = config in
   let headers, response_body = parse_header_block result.response_text in
   let state =
-    social_state_of_headers ~meta ~observation headers ~response_body
-      ~tools_used:result.tools_used
+    social_state_of_headers ~meta ~observation headers
   in
   match state.speech_act, state.delivery_surface with
   | Request_help, Board_post when result.tools_used = [] ->

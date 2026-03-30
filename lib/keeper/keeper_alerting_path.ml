@@ -64,6 +64,12 @@ let resolve_keeper_target_path ~(config : Room.config)
     - non-empty list → list as-is (explicit restriction)
     - [] + workspace → keeper's own dirs (computed default)
     - [] + otherwise → [] (observe_only blocks writes; local = full access) *)
+let sanitize_keeper_name (name : string) : string =
+  String.map (fun c ->
+    if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+       || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.'
+    then c else '_') name
+
 let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   match meta.allowed_paths with
   | ["*"] -> []
@@ -71,7 +77,8 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   | [] ->
     (match String.lowercase_ascii meta.execution_scope with
      | "workspace" ->
-       [ Printf.sprintf ".masc/keepers/%s/" meta.name;
+       let safe_name = sanitize_keeper_name meta.name in
+       [ Printf.sprintf ".masc/keepers/%s/" safe_name;
          ".masc/traces/" ]
      | _ -> [])
 

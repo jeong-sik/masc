@@ -794,7 +794,17 @@ let execute_keeper_tool_call
          key, validate it against effective_allowed_paths before dispatching. *)
       let effective_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
       let path_blocked =
-        if effective_paths = [] then None
+        if effective_paths = [] && meta.execution_scope <> "observe_only" then None
+        else if meta.execution_scope = "observe_only" && effective_paths = [] then
+          (* observe_only with no explicit paths: block write-capable tool args *)
+          let has_path_arg =
+            List.exists (fun key ->
+              match Yojson.Safe.Util.member key args with
+              | `String p when String.trim p <> "" -> true
+              | _ -> false) ["path"; "file_path"; "target_path"]
+          in
+          if has_path_arg then Some "observe_only_scope: write paths blocked"
+          else None
         else
           let candidates =
             List.filter_map (fun key ->

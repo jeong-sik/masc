@@ -212,11 +212,11 @@ let test_post_create_structured_payload () =
   Alcotest.(check bool) "state_block absent after strip" true
     (Yojson.Safe.Util.(json |> member "meta" |> member "state_block") = `Null)
 
-let test_post_create_rejects_non_human_kind () =
+let test_post_create_accepts_automation_rejects_system () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let ok, body = dispatch "masc_board_post"
+  let ok_auto, _body_auto = dispatch "masc_board_post"
     (make_args
        [
          ("content", `String "automation attempt");
@@ -224,9 +224,18 @@ let test_post_create_rejects_non_human_kind () =
          ("post_kind", `String "automation");
        ])
   in
-  Alcotest.(check bool) "public automation rejected" false ok;
-  Alcotest.(check bool) "error mentions human-only surface" true
-    (contains_substring body "human posts")
+  Alcotest.(check bool) "automation accepted" true ok_auto;
+  let ok_sys, body_sys = dispatch "masc_board_post"
+    (make_args
+       [
+         ("content", `String "system attempt");
+         ("author", `String "tester");
+         ("post_kind", `String "system");
+       ])
+  in
+  Alcotest.(check bool) "system rejected" false ok_sys;
+  Alcotest.(check bool) "error mentions reserved" true
+    (contains_substring body_sys "reserved")
 
 let test_post_create_empty_content () =
   Eio_main.run @@ fun env ->
@@ -540,7 +549,7 @@ let test_tools_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check int) "12 tool schemas" 12 (List.length Tool_board.tools)
+  Alcotest.(check int) "13 tool schemas" 13 (List.length Tool_board.tools)
 
 let test_tools_names_unique () =
   Eio_main.run @@ fun env ->
@@ -584,8 +593,8 @@ let () =
           Alcotest.test_case "create success" `Quick test_post_create_success;
           Alcotest.test_case "create structured payload" `Quick
             test_post_create_structured_payload;
-          Alcotest.test_case "reject non-human kind" `Quick
-            test_post_create_rejects_non_human_kind;
+          Alcotest.test_case "accept automation reject system" `Quick
+            test_post_create_accepts_automation_rejects_system;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;
           Alcotest.test_case "create empty title rejected" `Quick
             test_post_create_empty_title_rejected;

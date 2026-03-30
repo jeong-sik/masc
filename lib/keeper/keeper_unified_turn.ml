@@ -239,8 +239,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       let max_turns = Keeper_config.keeper_unified_max_turns () in
       let max_cost_usd = Keeper_config.keeper_tool_cost_max_usd () in
       (* 4. Build turn prompt callback: use our unified system prompt *)
-      let build_turn_prompt ~base_system_prompt:_ ~messages:_ =
-        system_prompt
+      let build_turn_prompt ~base_system_prompt:_ ~messages:_
+          : Keeper_agent_run.turn_prompt =
+        (* Unified path already places soft context (continuity, worktree)
+           in the user_message via Keeper_unified_prompt.build_prompt.
+           No dynamic_context needed here. *)
+        { system_prompt; dynamic_context = "" }
       in
       (* 5. Run via OAS Agent.run() *)
       let run_result, latency_ms =

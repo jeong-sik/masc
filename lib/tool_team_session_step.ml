@@ -83,13 +83,23 @@ let execute_delegate_pipeline
                         | _ -> None)
                       session.planned_workers)
               in
+              let contract =
+                let delivery_contract =
+                  Tool_team_session_step_exec.delivery_contract_for_session
+                    ctx.config session_id
+                in
+                Option.map
+                  (fun dc -> Contract_composer.compose ~delivery_contract:dc
+                    ~tool_names:[])
+                  delivery_contract
+              in
               let run_delegate () =
                 match
                   Worker_runtime.continue_worker ~sw:ctx.sw
                     ~base_path:ctx.config.base_path
                     ~room_config:(Some ctx.config)
                     ~worker_name ~team_session_id:session_id
-                    ~worker_run_id
+                    ~worker_run_id ?contract
                     ~prompt:delegate_prompt ()
                 with
                 | Ok run_result ->
@@ -149,7 +159,7 @@ let execute_delegate_pipeline
                       ?trace_ref:run_result.raw_trace_run
                       ?trace_summary:trace_summary_json
                       ?trace_validation:trace_validation_json
-                      ?proof:None
+                      ?proof:run_result.proof
                       ~trace_capability:
                         (if Option.is_some run_result.raw_trace_run
                          then "raw"

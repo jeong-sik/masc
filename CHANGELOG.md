@@ -1,6 +1,23 @@
 # Changelog
 
 
+## [2.181.0] - 2026-03-31
+
+### Added
+- **Dead ETA prediction** — dashboard health score followup (#4038).
+- **Observability smoke harness** — harness scripts for CI observability (#4031).
+- **Keeper crash cohort + health score** — status summary (#4015).
+- **Board nested replies** — dashboard reply UI (#4014).
+- **Board cleaner persona** — sonsukku keeper persona (#4012, #4016).
+- **Keeper social model** — typed social state routing (#4036).
+- **Council capability routing** — replace keyword heuristics with capability-aware routing (#4039).
+
+### Fixed
+- **Research tool exposure** — restore keeper autoresearch/research test parity after SSOT refactor (#4032).
+- **Team session capacity** — harden slot-aware runtime guards (#4022).
+- **Governance action dedup** — expand canonical action normalization (#4020).
+- **Dashboard SSE delete** — real-time board post deletion (#4019).
+
 ## [2.180.0] - 2026-03-30
 
 ### Added

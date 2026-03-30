@@ -2,6 +2,7 @@
 
 open Alcotest
 module CC = Masc_mcp.Contract_composer
+module CB = Masc_mcp.Cdal_contract_bridge
 module RC = Agent_sdk.Risk_contract
 module EM = Agent_sdk.Execution_mode
 
@@ -67,6 +68,52 @@ let test_eval_criteria_fields () =
   check string "contract_id" "dc-test"
     (criteria |> member "contract_id" |> to_string)
 
+let make_keeper_meta ?(name = "keeper-test") ?(goal = "stabilize proof spine")
+    ?(scope_kind = "local") ?(execution_scope = "workspace")
+    ?(allowed_paths = []) () =
+  match Masc_mcp.Keeper_types.meta_of_json
+          (`Assoc
+            [
+              ("name", `String name);
+              ("agent_name", `String name);
+              ("goal", `String goal);
+              ("scope_kind", `String scope_kind);
+              ("execution_scope", `String execution_scope);
+              ( "allowed_paths",
+                `List (List.map (fun path -> `String path) allowed_paths) );
+            ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail err
+
+let test_keeper_bridge_compose_workspace () =
+  let meta = make_keeper_meta ~scope_kind:"local" ~execution_scope:"workspace" () in
+  let rc = CB.of_keeper_meta meta in
+  let criteria = rc.eval_criteria in
+  let open Yojson.Safe.Util in
+  check string "local -> draft" "draft"
+    (EM.to_string rc.runtime_constraints.requested_execution_mode);
+  check string "local -> medium" "medium"
+    (Agent_sdk.Risk_class.to_string rc.runtime_constraints.risk_class);
+  check (list string) "workspace allowed mutations"
+    [ "workspace_only" ] rc.runtime_constraints.allowed_mutations;
+  check (option string) "keeper review_requirement is None"
+    None rc.runtime_constraints.review_requirement;
+  check string "keeper criteria name" "keeper-test"
+    (criteria |> member "keeper_name" |> to_string)
+
+let test_keeper_bridge_compose_read_only () =
+  let meta =
+    make_keeper_meta ~scope_kind:"read_only" ~execution_scope:"observe_only" ()
+  in
+  let rc = CB.of_keeper_meta meta in
+  check string "read_only -> diagnose" "diagnose"
+    (EM.to_string rc.runtime_constraints.requested_execution_mode);
+  check string "read_only -> low" "low"
+    (Agent_sdk.Risk_class.to_string rc.runtime_constraints.risk_class);
+  check (list string) "read_only allowed mutations"
+    [] rc.runtime_constraints.allowed_mutations
+
 let () =
   Eio_main.run @@ fun _env ->
   run "Contract_composer" [
@@ -75,5 +122,7 @@ let () =
       "zero budget → Draft", `Quick, test_compose_zero_budget;
       "high risk → review required", `Quick, test_compose_high_risk_review;
       "eval_criteria fields", `Quick, test_eval_criteria_fields;
+      "keeper bridge workspace", `Quick, test_keeper_bridge_compose_workspace;
+      "keeper bridge read_only", `Quick, test_keeper_bridge_compose_read_only;
     ];
   ]

@@ -387,8 +387,34 @@ let add_routes ~sw ~clock router =
              let base_path = state.Mcp_server.room_config.base_path in
              let actor = agent_from_request request
                |> Option.value ~default:"dashboard" in
-             let submit_petition _ctx _petition_args =
-               (false, "High-risk parameter changes from dashboard require governance petition via CLI")
+             let module GV2 = Council.Governance_v2 in
+             let submit_petition ctx petition_args =
+               let open Yojson.Safe.Util in
+               let title = member "title" petition_args |> to_string_option
+                 |> Option.value ~default:"Dashboard param change" in
+               let subject_type = member "subject_type" petition_args |> to_string_option
+                 |> Option.value ~default:"param_change" in
+               let ra_json = member "requested_action" petition_args in
+               let requested_action = match ra_json with
+                 | `Null -> None
+                 | ra ->
+                   let at = member "action_type" ra |> to_string_option
+                     |> Option.value ~default:"set_param" in
+                   let payload = match member "payload" ra with
+                     | `Null -> None | p -> Some p in
+                   Some ({ action_type = at; target_type = Some "param";
+                           target_id = None; payload } : GV2.action_request)
+               in
+               let source_refs = match member "source_refs" petition_args with
+                 | `List items -> List.filter_map to_string_option items
+                 | _ -> [] in
+               match GV2.submit_petition ctx.Tool_council_feed.base_path
+                 ~title ~origin:"dashboard" ~subject_type
+                 ~risk_class:GV2.High
+                 ~requested_action ~source_refs ~created_by:actor with
+               | Ok result ->
+                 (true, Printf.sprintf "Petition created: case %s" result.case_.id)
+               | Error msg -> (false, msg)
              in
              let ctx = Tool_council_feed.{ base_path; agent_name = actor;
                room_config = Some state.Mcp_server.room_config } in
@@ -430,12 +456,36 @@ let add_routes ~sw ~clock router =
                       List.mem param_key s.param_keys)
                  |> Option.map (fun (s : Governance_registry.surface) -> s.risk)
                  |> Option.value ~default:"low" in
-               if risk = "high" then
-                 respond_json_with_cors request reqd
-                   (Yojson.Safe.to_string (`Assoc [
-                     ("ok", `Bool false);
-                     ("error", `String "High-risk param clear requires governance petition. Use masc_set_param tool.");
-                   ]))
+               if risk = "high" then begin
+                 let module GV2 = Council.Governance_v2 in
+                 let title = Printf.sprintf "Clear %s to default" param_key in
+                 let requested_action = Some ({
+                   action_type = "clear_param";
+                   target_type = Some "param";
+                   target_id = None;
+                   payload = Some (`Assoc [("param_key", `String param_key)]);
+                 } : GV2.action_request) in
+                 let source_refs = [param_key] in
+                 match GV2.submit_petition base_path
+                   ~title ~origin:"dashboard" ~subject_type:"param_change"
+                   ~risk_class:GV2.High ~requested_action ~source_refs
+                   ~created_by:actor with
+                 | Ok result ->
+                   respond_json_with_cors request reqd
+                     (Yojson.Safe.to_string (`Assoc [
+                       ("ok", `Bool true);
+                       ("message", `String (Printf.sprintf
+                         "High-risk param. Governance petition created: case %s"
+                         result.case_.id));
+                     ]))
+                 | Error msg ->
+                   respond_json_with_cors ~status:`Bad_request request reqd
+                     (Yojson.Safe.to_string (`Assoc [
+                       ("ok", `Bool false);
+                       ("error", `String (Printf.sprintf
+                         "Failed to create governance petition: %s" msg));
+                     ]))
+               end
                else begin
                  let old_value =
                    match Runtime_params.registry ()

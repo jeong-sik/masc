@@ -364,20 +364,22 @@ let register_agent config ~name ?(capabilities=[]) () =
   match Backend.FileSystem.set config.backend (agent_key name) json_str with
   | Ok () ->
       (* Atomically update room state to include this agent *)
-      let _ = atomic_update_state config ~f:(fun state ->
+      (match atomic_update_state config ~f:(fun state ->
         let active_agents =
           if List.mem name state.active_agents then state.active_agents
           else name :: state.active_agents
         in
         { state with active_agents }
-      ) in
+      ) with
+      | Ok _ -> ()
+      | Error msg -> Log.Room.warn "join_agent: state update failed for %s: %s" name msg);
 
       (* Auto-subscribe to Messages for A2A communication (via hook) *)
       !Room_hooks.subscribe_messages_fn ~subscriber:name;
 
       (* Log join event only for new agents, skip for re-joins *)
       if not already_active then begin
-        let _ = log_event config
+        let _event = log_event config
           ~event_type:AgentJoin
           ~agent:name
           ~payload:(`Assoc [
@@ -412,13 +414,15 @@ let remove_agent config ~name =
   match Backend.FileSystem.delete config.backend (agent_key name) with
   | Ok () ->
       (* Atomically update room state to remove this agent *)
-      let _ = atomic_update_state config ~f:(fun state ->
+      (match atomic_update_state config ~f:(fun state ->
         let active_agents = List.filter (fun n -> n <> name) state.active_agents in
         { state with active_agents }
-      ) in
+      ) with
+      | Ok _ -> ()
+      | Error msg -> Log.Room.warn "remove_agent: state update failed for %s: %s" name msg);
 
       (* Log leave event *)
-      let _ = log_event config
+      let _event = log_event config
         ~event_type:AgentLeave
         ~agent:name
         ~payload:`Null in
@@ -587,12 +591,14 @@ let broadcast config ~from_agent ~content =
   match Backend.FileSystem.set config.backend (message_key seq) json_str with
   | Ok () ->
       (* Atomically update state's message_seq for consistency *)
-      let _ = atomic_update_state config ~f:(fun state ->
+      (match atomic_update_state config ~f:(fun state ->
         { state with message_seq = seq }
-      ) in
+      ) with
+      | Ok _ -> ()
+      | Error msg -> Log.Room.warn "broadcast: state update failed for seq %d: %s" seq msg);
 
       (* Log broadcast event *)
-      let _ = log_event config
+      let _event = log_event config
         ~event_type:Broadcast
         ~agent:from_agent
         ~payload:(`Assoc [

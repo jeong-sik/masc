@@ -322,7 +322,7 @@ let permission_for_tool = function
       Some CanReadState
   | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
   | "masc_board_comment_vote" -> Some CanBroadcast
-  | "masc_board_reclassify" -> Some CanAdmin
+  | "masc_board_reclassify" | "masc_board_delete" -> Some CanAdmin
   (* Auth tools - special handling *)
   | "masc_auth_enable" | "masc_auth_disable"
   | "masc_auth_revoke" -> Some CanInit  (* Admin only *)

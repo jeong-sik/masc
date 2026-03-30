@@ -301,7 +301,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("timestamp", `String (Types.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
-        emit_activity config ~kind:"board.deleted" ~actor:"operator"
+        emit_activity config ~kind:"board.deleted" ~actor:agent_name
           ~subject:(Activity_graph.entity ~kind:"post" post_id)
           ~tags:[ "board"; "board.deleted" ]
           ~payload:(`Assoc [ ("post_id", `String post_id) ])

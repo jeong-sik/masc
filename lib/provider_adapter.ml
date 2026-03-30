@@ -468,17 +468,6 @@ let nonempty_env name =
 
 let env_present name = Option.is_some (nonempty_env name)
 
-let dedupe_keep_order items =
-  let seen = Hashtbl.create (List.length items) in
-  List.filter
-    (fun item ->
-      if Hashtbl.mem seen item then
-        false
-      else (
-        Hashtbl.add seen item ();
-        true))
-    items
-
 let bare_ollama_migration_message () =
   "Bare `ollama` is no longer supported. Use `default` for normal selection, or `llama:<model>` / another explicit provider:model label as an override."
 
@@ -571,7 +560,7 @@ let default_model_label_for_family = function
       Error "Custom provider requires explicit runtime_model"
 
 let preferred_execution_model_labels () =
-  dedupe_keep_order
+  Json_util.dedupe_keep_order
     (List.filter_map
        Fun.id
        [
@@ -600,7 +589,7 @@ let preferred_execution_model_labels () =
        ])
 
 let preferred_verifier_model_labels () =
-  dedupe_keep_order
+  Json_util.dedupe_keep_order
     (List.filter_map
        Fun.id
        [

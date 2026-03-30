@@ -49,7 +49,7 @@ let trim_nonempty value =
 let dedupe_keep_order values =
   values
   |> List.filter_map trim_nonempty
-  |> Provider_adapter.dedupe_keep_order
+  |> Json_util.dedupe_keep_order
 
 let string_of_run_status = function
   | Queued -> "queued"

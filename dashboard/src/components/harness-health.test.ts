@@ -10,14 +10,14 @@ function sampleResponse() {
     overview: {
       evaluator_status: 'warning',
       pre_compact_status: 'healthy',
-      dna_status: 'stale',
+      handoff_status: 'healthy',
       last_signal_at: 1711440300,
       evaluator_last_event_at: 1711440300,
       pre_compact_last_event_at: 1711440000,
-      dna_last_event_at: 1711430000,
+      handoff_last_event_at: 1711430000,
       fallback_ratio: 0.83,
       latest_pre_compact_ratio: 0.91,
-      latest_dna_score: 0.82,
+      latest_handoff_generation: 27,
     },
     calibration: {
       total_verdicts: 12,
@@ -62,24 +62,22 @@ function sampleResponse() {
         },
       ],
     },
-    dna_quality: {
-      description: 'DNA signal',
-      status: 'stale',
+    recent_handoffs: {
+      description: 'Keeper checkpoint rollovers sourced from keeper metrics snapshots.',
+      status: 'healthy',
       last_event_at: 1711430000,
       empty_reason: null,
       total_recent: 1,
       recent_events: [
         {
-          timestamp: 1711440000,
+          timestamp: 1711430000,
           keeper_name: 'keeper-a',
-          score: 0.82,
-          dimensions: {
-            has_goal_anchor: true,
-            has_task_anchor: true,
-            has_recent_context: true,
-            truncation_artifacts: 0,
-            content_length: 420,
-          },
+          trace_id: 'trace-abc123',
+          generation: 5,
+          next_generation: 6,
+          prev_trace_id: 'trace-prev',
+          new_trace_id: 'trace-new',
+          to_model: null,
         },
       ],
     },
@@ -151,7 +149,7 @@ describe('HarnessHealth', () => {
     expect(container.textContent).toContain('Can I Trust The Experiment Machinery?')
     expect(container.textContent).toContain('Judge of the Judge')
     expect(container.textContent).toContain('Continuity Pressure')
-    expect(container.textContent).toContain('Continuity DNA')
+    expect(container.textContent).toContain('Keeper Handoff')
     expect(container.textContent).toContain('오토리서치 열기')
     expect(container.textContent).toContain('Fallback 비율')
     expect(container.textContent).toContain('judge timeout')

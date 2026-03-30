@@ -31,14 +31,14 @@ interface CalibrationStats {
 interface HarnessOverview {
   evaluator_status: RailStatus
   pre_compact_status: RailStatus
-  dna_status: RailStatus
+  handoff_status: RailStatus
   last_signal_at: number | null
   evaluator_last_event_at: number | null
   pre_compact_last_event_at: number | null
-  dna_last_event_at: number | null
+  handoff_last_event_at: number | null
   fallback_ratio: number
   latest_pre_compact_ratio: number | null
-  latest_dna_score: number | null
+  latest_handoff_generation: number | null
 }
 
 interface HarnessVerdictItem {
@@ -63,19 +63,15 @@ interface PreCompactEvent {
   trigger: string
 }
 
-interface DnaQualityDimensions {
-  has_goal_anchor?: boolean
-  has_task_anchor?: boolean
-  has_recent_context?: boolean
-  truncation_artifacts?: number
-  content_length?: number
-}
-
-interface DnaQualityEvent {
+interface HandoffEvent {
   timestamp: number
   keeper_name: string
-  score: number
-  dimensions: DnaQualityDimensions
+  trace_id: string
+  generation: number
+  next_generation: number | null
+  prev_trace_id: string | null
+  new_trace_id: string | null
+  to_model: string | null
 }
 
 interface HarnessSignalSection<T> {
@@ -94,7 +90,7 @@ interface HarnessHealthData {
   calibration: CalibrationStats
   recent_verdicts: HarnessVerdictItem[]
   pre_compact: HarnessSignalSection<PreCompactEvent>
-  dna_quality: HarnessSignalSection<DnaQualityEvent>
+  recent_handoffs: HarnessSignalSection<HandoffEvent>
 }
 
 const HARNESS_RELOAD_DEBOUNCE_MS = 700
@@ -243,7 +239,7 @@ function heroTitle(data: HarnessHealthData): string {
   const statuses = [
     data.overview.evaluator_status,
     data.overview.pre_compact_status,
-    data.overview.dna_status,
+    data.overview.handoff_status,
   ]
   if (statuses.includes('warning')) return '실험 기계에 주의가 필요합니다.'
   if (statuses.includes('stale')) return '신호는 있지만 최신성이 떨어집니다.'
@@ -256,8 +252,8 @@ function heroBody(data: HarnessHealthData): string {
     const ratio = Math.round((data.overview.fallback_ratio ?? 0) * 100)
     return `Evaluator fallback 비중이 ${ratio}%라 verdict를 그대로 신뢰하기 어렵습니다.`
   }
-  if (data.overview.dna_status === 'warning') {
-    return 'Continuity DNA 품질이 낮아 handoff/mitosis 전 점검이 필요합니다.'
+  if (data.overview.handoff_status === 'warning') {
+    return 'Handoff 기록에 누락 필드가 있어 keeper continuity 점검이 필요합니다.'
   }
   if (data.overview.pre_compact_status === 'warning') {
     return 'Compaction 직전 컨텍스트 압력이 높아 keeper continuity가 흔들릴 수 있습니다.'
@@ -268,7 +264,7 @@ function heroBody(data: HarnessHealthData): string {
   return `마지막 안전 신호는 ${freshnessLabel(data.overview.last_signal_at)}에 들어왔습니다.`
 }
 
-function railDetail(data: HarnessHealthData, rail: 'evaluator' | 'pre_compact' | 'dna'): string {
+function railDetail(data: HarnessHealthData, rail: 'evaluator' | 'pre_compact' | 'handoff'): string {
   if (rail === 'evaluator') {
     if (data.calibration.total_verdicts === 0) return 'verdict 기록 없음'
     return `${data.calibration.total_verdicts} verdict`
@@ -277,19 +273,19 @@ function railDetail(data: HarnessHealthData, rail: 'evaluator' | 'pre_compact' |
     if (data.overview.latest_pre_compact_ratio == null) return '최근 compaction 없음'
     return `ratio ${data.overview.latest_pre_compact_ratio.toFixed(2)}`
   }
-  if (data.overview.latest_dna_score == null) return '최근 DNA 검사 없음'
-  return `score ${data.overview.latest_dna_score.toFixed(2)}`
+  if (data.overview.latest_handoff_generation == null) return '최근 handoff 없음'
+  return `generation ${data.overview.latest_handoff_generation}`
 }
 
-function railFreshness(data: HarnessHealthData, rail: 'evaluator' | 'pre_compact' | 'dna'): string {
+function railFreshness(data: HarnessHealthData, rail: 'evaluator' | 'pre_compact' | 'handoff'): string {
   switch (rail) {
     case 'evaluator':
       return freshnessLabel(data.overview.evaluator_last_event_at, '기록 없음')
     case 'pre_compact':
       return freshnessLabel(data.overview.pre_compact_last_event_at, '기록 없음')
-    case 'dna':
+    case 'handoff':
     default:
-      return freshnessLabel(data.overview.dna_last_event_at, '기록 없음')
+      return freshnessLabel(data.overview.handoff_last_event_at, '기록 없음')
   }
 }
 
@@ -373,46 +369,6 @@ function handleHarnessSSE(): void {
         last_signal_at: nextItem.timestamp,
         pre_compact_last_event_at: nextItem.timestamp,
         latest_pre_compact_ratio: nextItem.context_ratio,
-      },
-    }))
-    scheduleHarnessReload()
-  }
-
-  if (type === 'oas:masc:harness:dna_quality') {
-    const nextItem: DnaQualityEvent = {
-      timestamp:
-        typeof payload.timestamp === 'number'
-          ? payload.timestamp
-          : Date.now() / 1000,
-      keeper_name: String(payload.keeper_name ?? ''),
-      score: Number(payload.score ?? 0),
-      dimensions:
-        payload.dimensions && typeof payload.dimensions === 'object'
-          ? payload.dimensions as DnaQualityDimensions
-          : {},
-    }
-    updateHarnessData(data => ({
-      ...data,
-      dna_quality: {
-        ...data.dna_quality,
-        recent_events: mergeRecent(
-          data.dna_quality.recent_events,
-          nextItem,
-          (left, right) =>
-            left.timestamp === right.timestamp
-            && left.keeper_name === right.keeper_name
-            && left.score === right.score,
-          8,
-        ),
-        total_recent: data.dna_quality.total_recent + 1,
-        last_event_at: nextItem.timestamp,
-        empty_reason: null,
-      },
-      overview: {
-        ...data.overview,
-        last_signal_at: nextItem.timestamp,
-        dna_last_event_at: nextItem.timestamp,
-        latest_dna_score: nextItem.score,
       },
     }))
     scheduleHarnessReload()
@@ -519,7 +475,7 @@ function ScopePairing() {
           <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Safety Rails</div>
           <div class="text-sm font-medium text-[var(--text-strong)]">Harness가 답하는 것</div>
           <div class="text-sm leading-[1.6] text-[var(--text-body)]">
-            evaluator가 건강한지, 장기 keeper turn에서 compaction이 어떻게 걸리는지, continuity DNA가 안전한지 봅니다.
+            evaluator가 건강한지, 장기 keeper turn에서 compaction이 어떻게 걸리는지, handoff가 정상인지 봅니다.
           </div>
         </div>
       <//>
@@ -613,7 +569,7 @@ function PreCompactList({ section }: { section: HarnessSignalSection<PreCompactE
   `
 }
 
-function DnaQualityList({ section }: { section: HarnessSignalSection<DnaQualityEvent> }) {
+function HandoffList({ section }: { section: HarnessSignalSection<HandoffEvent> }) {
   if (section.recent_events.length === 0) {
     return html`<${EmptySignal} text=${emptyReasonText(section.empty_reason)} />`
   }
@@ -626,24 +582,15 @@ function DnaQualityList({ section }: { section: HarnessSignalSection<DnaQualityE
             <div class="text-sm font-medium text-[var(--text-strong)]">${item.keeper_name}</div>
             <div class="text-xs text-[var(--text-muted)]">${formatTimestamp(item.timestamp)}</div>
           </div>
-          <div class="mt-2 text-sm text-[var(--text-body)]">score ${item.score.toFixed(2)}</div>
-          <div class="mt-2 flex flex-wrap gap-1 text-[10px]">
-            <span class="rounded-full border border-[var(--white-8)] px-2 py-0.5 text-[var(--text-muted)]">
-              goal ${item.dimensions.has_goal_anchor ? 'yes' : 'no'}
-            </span>
-            <span class="rounded-full border border-[var(--white-8)] px-2 py-0.5 text-[var(--text-muted)]">
-              task ${item.dimensions.has_task_anchor ? 'yes' : 'no'}
-            </span>
-            <span class="rounded-full border border-[var(--white-8)] px-2 py-0.5 text-[var(--text-muted)]">
-              recent ${item.dimensions.has_recent_context ? 'yes' : 'no'}
-            </span>
-            <span class="rounded-full border border-[var(--white-8)] px-2 py-0.5 text-[var(--text-muted)]">
-              truncation ${item.dimensions.truncation_artifacts ?? 0}
-            </span>
-            <span class="rounded-full border border-[var(--white-8)] px-2 py-0.5 text-[var(--text-muted)]">
-              length ${item.dimensions.content_length ?? 0}
-            </span>
+          <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-body)]">
+            <span>generation ${item.generation}</span>
+            <span>next ${item.next_generation ?? '-'}</span>
+            <span class="font-mono">${item.trace_id.slice(0, 8)}</span>
+            <span>${item.to_model ?? 'model 미상'}</span>
           </div>
+          ${item.prev_trace_id ? html`
+            <div class="mt-2 text-xs text-[var(--text-muted)]">prev ${item.prev_trace_id.slice(0, 8)} -> new ${item.new_trace_id?.slice(0, 8) ?? '-'}</div>
+          ` : null}
         </div>
       `)}
     </div>
@@ -715,10 +662,10 @@ export function HarnessHealth() {
                   freshness=${railFreshness(data, 'pre_compact')}
                 />
                 <${HeroRailCard}
-                  label="DNA Quality"
-                  status=${data.overview.dna_status}
-                  detail=${railDetail(data, 'dna')}
-                  freshness=${railFreshness(data, 'dna')}
+                  label="Handoff"
+                  status=${data.overview.handoff_status}
+                  detail=${railDetail(data, 'handoff')}
+                  freshness=${railFreshness(data, 'handoff')}
                 />
               </div>
 
@@ -827,33 +774,33 @@ export function HarnessHealth() {
         `}
       <//>
 
-      <${Card} title="DNA Quality Rail" class="section">
+      <${Card} title="Handoff Rail" class="section">
         ${!data ? html`
-          <${EmptySignal} text="DNA quality 데이터가 없습니다." />
+          <${EmptySignal} text="Handoff 데이터가 없습니다." />
         ` : html`
           <div class="space-y-4">
             <${RailHeader}
-              title="Continuity DNA"
-              description=${data.dna_quality.description}
-              status=${data.dna_quality.status}
-              lastEventAt=${data.dna_quality.last_event_at}
+              title="Keeper Handoff"
+              description=${data.recent_handoffs.description}
+              status=${data.recent_handoffs.status}
+              lastEventAt=${data.recent_handoffs.last_event_at}
             />
             <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
               <${StatCard}
-                label="최근 score"
-                value=${data.overview.latest_dna_score != null ? data.overview.latest_dna_score.toFixed(2) : '-'}
-                sub=${`최근 ${data.dna_quality.total_recent}건`}
+                label="최근 generation"
+                value=${data.overview.latest_handoff_generation != null ? data.overview.latest_handoff_generation : '-'}
+                sub=${`최근 ${data.recent_handoffs.total_recent}건`}
               />
               <${StatCard}
                 label="최근 freshness"
-                value=${freshnessLabel(data.dna_quality.last_event_at)}
+                value=${freshnessLabel(data.recent_handoffs.last_event_at)}
               />
               <${StatCard}
                 label="status"
-                value=${statusLabel(data.dna_quality.status)}
+                value=${statusLabel(data.recent_handoffs.status)}
               />
             </div>
-            <${DnaQualityList} section=${data.dna_quality} />
+            <${HandoffList} section=${data.recent_handoffs} />
           </div>
         `}
       <//>

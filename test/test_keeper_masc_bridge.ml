@@ -110,9 +110,9 @@ let test_allowlist_gates_shard_tools () =
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_governance_status" true
     (List.mem "masc_governance_status" names);
-  (* Shard/autoresearch tools bypass allowlist in keeper_allowed_tool_names.
-     Only keeper_masc_tool_names gates by allowlist. *)
-  Alcotest.(check bool) "masc_autoresearch_cycle via shard (bypasses allowlist)" true
+  (* Allowlist now gates ALL masc_* tools uniformly, including shard-sourced ones.
+     masc_autoresearch_cycle is NOT in the allowlist, so it must be excluded. *)
+  Alcotest.(check bool) "masc_autoresearch_cycle blocked by allowlist" false
     (List.mem "masc_autoresearch_cycle" names)
 
 (** Verify dispatch passthrough returns None for unregistered tools. *)

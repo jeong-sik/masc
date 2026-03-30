@@ -69,13 +69,15 @@ let observed_affordances_of_observation
 
 let response_requests_confirmation (text : string) : bool =
   let trimmed = String.trim text in
-  trimmed <> ""
-  && (String.contains trimmed '?'
-      || string_contains_substring_ci ~needle:"would you like" trimmed
-      || string_contains_substring_ci ~needle:"do you want" trimmed
-      || string_contains_substring_ci ~needle:"let me know" trimmed
-      || string_contains_substring_ci ~needle:"어떻게 할까" trimmed
-      || string_contains_substring_ci ~needle:"할까" trimmed)
+  if trimmed = "" then false
+  else
+    let lower = String.lowercase_ascii trimmed in
+    String.contains trimmed '?'
+    || string_contains_substring ~needle:"would you like" lower
+    || string_contains_substring ~needle:"do you want" lower
+    || string_contains_substring ~needle:"let me know" lower
+    || string_contains_substring ~needle:{|어떻게 할까|} trimmed
+    || string_contains_substring ~needle:{|할까|} trimmed
 
 let decision_id ~(meta : keeper_meta) ~(ts : float) ~(suffix_seed : string) : string =
   let digest =

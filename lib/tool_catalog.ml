@@ -44,7 +44,8 @@ let default_metadata =
     idempotent = None;
   }
 
-let placeholder_tools_enabled () = true
+let placeholder_tools_enabled () =
+  Env_config_core.get_bool ~default:true "MASC_PLACEHOLDER_TOOLS_ENABLED"
 
 let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = false)
     ?(implementation_status = Adapter) reason =

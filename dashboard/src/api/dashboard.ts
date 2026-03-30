@@ -584,6 +584,8 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
 }
 
 export type KeeperConfigUpdatePayload = {
+  // Scope
+  execution_scope?: string
   // Prompt fields
   goal?: string
   short_goal?: string

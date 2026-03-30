@@ -3,17 +3,17 @@
 (** Relay configuration *)
 type relay_config = {
   threshold: float;          (* Context usage threshold (0.0-1.0), default 0.8 *)
-  target_agent: string;      (* Agent to relay to, default "claude" *)
+  target_agent: string;      (* Agent to relay to; "auto" defers to cascade *)
   compress_ratio: float;     (* Target compression ratio, default 0.1 *)
   include_todos: bool;       (* Include TODO list in handoff *)
   include_pdca: bool;        (* Include PDCA state in handoff *)
   neo4j_episode: bool;       (* Create Neo4j Episode for continuity *)
 }
 
-(** Default relay configuration *)
+(** Default relay configuration — reads from environment *)
 let default_config = {
   threshold = 0.8;
-  target_agent = "claude";
+  target_agent = Env_config_runtime.Relay.target_agent;
   compress_ratio = 0.1;
   include_todos = true;
   include_pdca = true;

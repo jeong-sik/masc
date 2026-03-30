@@ -191,6 +191,8 @@ let current_evidence_status (state : loop_state) =
 (* Built-in Profiles                                                *)
 (* ================================================================ *)
 
+let default_mdal_agent = Env_config_runtime.Mdal.default_agent
+
 let builtin_profile name =
   match name with
   | "ssim" ->
@@ -199,7 +201,7 @@ let builtin_profile name =
       goal = { path = "metric"; condition = Bounded.Gte 0.95 };
       target = "SSIM >= 0.95 (perceptual similarity)";
       reference = None;
-      agent = "claude";
+      agent = default_mdal_agent;
       max_iterations = 20;
       max_time_seconds = Some 3600.0;
       stagnation_threshold = 0.005;
@@ -214,7 +216,7 @@ let builtin_profile name =
       goal = { path = "metric"; condition = Bounded.Gte 80.0 };
       target = "Test coverage >= 80%";
       reference = None;
-      agent = "claude";
+      agent = default_mdal_agent;
       max_iterations = 15;
       max_time_seconds = Some 1800.0;
       stagnation_threshold = 1.0;
@@ -229,7 +231,7 @@ let builtin_profile name =
       goal = { path = "metric"; condition = Bounded.Lte 0.0 };
       target = "Zero lint errors/warnings";
       reference = None;
-      agent = "claude";
+      agent = default_mdal_agent;
       max_iterations = 10;
       max_time_seconds = Some 900.0;
       stagnation_threshold = 1.0;
@@ -244,7 +246,7 @@ let builtin_profile name =
       goal = { path = "metric"; condition = Bounded.Gte 0.9 };
       target = "Code review score >= 0.9";
       reference = None;
-      agent = "claude";
+      agent = default_mdal_agent;
       max_iterations = 5;
       max_time_seconds = Some 1200.0;
       stagnation_threshold = 0.05;
@@ -259,7 +261,7 @@ let builtin_profile name =
       goal = { path = "metric"; condition = Bounded.Gte 0.8 };
       target = "Documentation coverage >= 0.8";
       reference = None;
-      agent = "claude";
+      agent = default_mdal_agent;
       max_iterations = 10;
       max_time_seconds = Some 1200.0;
       stagnation_threshold = 0.05;

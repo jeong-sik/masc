@@ -124,7 +124,7 @@ let spawn_orchestrator ~sw:_ ~proc_mgr:_ ?domain_mgr:_ config room_config =
   end else begin
   Log.Orchestrator.info "spawning agent: %s (with MCP tools)" config.orchestrator_agent;
 
-  let _ = Room.broadcast room_config ~from_agent:"system"
+  let _msg = Room.broadcast room_config ~from_agent:"system"
     ~content:"Auto-orchestrator activated - spawning coordinator with MCP tools" in
 
   let prompt = make_orchestrator_prompt ~port:config.port in

@@ -101,12 +101,10 @@ let check_floor ~floor_holder ~speaker =
   match floor_holder with
   | None -> None  (* No floor holder = open floor *)
   | Some holder when holder = speaker -> None  (* Speaker has the floor *)
-  | Some holder ->
-      (* Allow response if floor holder addressed the speaker *)
-      (* For now, allow anyone to speak (relaxed floor) *)
-      (* Future: enforce strict floor with yield/request *)
-      let _ = holder in  (* Suppress unused warning *)
-      None  (* Relaxed: anyone can respond *)
+  | Some _holder ->
+      (* Relaxed floor: anyone can respond.
+         Future: enforce strict floor with yield/request. *)
+      None
 
 (** {1 Main Check Function} *)
 

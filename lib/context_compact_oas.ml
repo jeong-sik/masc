@@ -65,6 +65,122 @@ let starts_with ~prefix s =
   let lp = String.length prefix in
   String.length s >= lp && String.sub s 0 lp = prefix
 
+let first_sentence (s : string) =
+  let s = String.trim s in
+  let max_len = 120 in
+  let cut_at =
+    let period = try Some (String.index s '.') with Not_found -> None in
+    let newline = try Some (String.index s '\n') with Not_found -> None in
+    match period, newline with
+    | Some p, Some n -> Some (min p n + 1)
+    | Some p, None -> Some (p + 1)
+    | None, Some n -> Some n
+    | None, None -> None
+  in
+  match cut_at with
+  | Some pos when pos <= max_len -> String.sub s 0 pos
+  | _ -> if String.length s > max_len then String.sub s 0 max_len ^ "..." else s
+
+let tool_names_by_id (msgs : Agent_sdk.Types.message list) : (string * string) list =
+  let add_tool_name acc (m : Agent_sdk.Types.message) =
+    List.fold_left (fun acc -> function
+      | Agent_sdk.Types.ToolUse { id; name; _ } ->
+        if List.mem_assoc id acc then acc else (id, name) :: acc
+      | _ -> acc
+    ) acc m.content
+  in
+  List.fold_left add_tool_name [] msgs
+
+let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message option =
+  let lines =
+    msgs
+    |> List.mapi (fun i (m : Agent_sdk.Types.message) ->
+      let role_str = match m.role with
+        | Agent_sdk.Types.User -> "user"
+        | Agent_sdk.Types.Assistant -> "assistant"
+        | Agent_sdk.Types.System -> "system"
+        | Agent_sdk.Types.Tool -> "tool"
+      in
+      let text = String.trim (Agent_sdk.Types.text_of_message m) in
+      if text = "" then None
+      else Some (Printf.sprintf "[%d] %s: %s" (i + 1) role_str (first_sentence text))
+    )
+    |> List.filter_map Fun.id
+  in
+  match lines with
+  | [] -> None
+  | _ ->
+    Some {
+      Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
+      content = [
+        Agent_sdk.Types.Text
+          (Printf.sprintf "[Compacted %d messages into summary]\n%s"
+             (List.length msgs) (String.concat "\n" lines))
+      ];
+      name = None;
+      tool_call_id = None;
+    }
+
+let mask_tool_result_content ~(tool_name : string option) ~(tool_use_id : string)
+    ~(content : string) : string =
+  let lines =
+    if content = "" then 0
+    else 1 + String.fold_left (fun acc ch -> if ch = '\n' then acc + 1 else acc) 0 content
+  in
+  let preview = first_sentence content in
+  let name = Option.value tool_name ~default:"unknown" in
+  Printf.sprintf "[tool:%s id:%s lines:%d chars:%d summary:%S]"
+    name tool_use_id lines (String.length content) preview
+
+let mask_tool_result_message ~(tool_names : (string * string) list)
+    (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
+  let content = List.map (function
+    | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error } ->
+      let tool_name = List.assoc_opt tool_use_id tool_names in
+      Agent_sdk.Types.ToolResult {
+        tool_use_id;
+        content = mask_tool_result_content ~tool_name ~tool_use_id ~content;
+        is_error;
+      }
+    | other -> other
+  ) m.content in
+  { m with content }
+
+let summarize_old_messages ~(keep_recent : int)
+    (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  let total = List.length msgs in
+  if total <= keep_recent then msgs
+  else
+    let tool_names = tool_names_by_id msgs in
+    let old_count = total - keep_recent in
+    let rec split i acc rest =
+      if i <= 0 then (List.rev acc, rest)
+      else match rest with
+        | [] -> (List.rev acc, [])
+        | x :: xs -> split (i - 1) (x :: acc) xs
+    in
+    let old_msgs, recent_msgs = split old_count [] msgs in
+    let rec flush_chunk chunk acc =
+      match summarize_chunk (List.rev chunk) with
+      | Some summary -> summary :: acc
+      | None -> acc
+    in
+    let rec compact_old old chunk acc =
+      match old with
+      | [] -> List.rev (flush_chunk chunk acc)
+      | ({ content; _ } as m) :: tl ->
+        let has_tool_use = List.exists (function Agent_sdk.Types.ToolUse _ -> true | _ -> false) content in
+        let has_tool_result = List.exists (function Agent_sdk.Types.ToolResult _ -> true | _ -> false) content in
+        if has_tool_use then
+          compact_old tl [] (m :: flush_chunk chunk acc)
+        else if has_tool_result then
+          let masked = mask_tool_result_message ~tool_names m in
+          compact_old tl [] (masked :: flush_chunk chunk acc)
+        else
+          compact_old tl (m :: chunk) acc
+    in
+    compact_old old_msgs [] [] @ recent_msgs
+
 (** Score a list of messages by importance for context compaction.
     Returns [(index, score)] pairs where score is in [0.0, 1.0].
 
@@ -136,7 +252,8 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
 
     - PruneToolOutputs and MergeContiguous use OAS built-in strategies directly.
     - DropLowImportance uses OAS Custom with importance scoring (OAS has no scoring).
-    - SummarizeOld uses OAS Custom with extractive summarization (deterministic, no model call). *)
+    - SummarizeOld uses OAS Custom with extractive summaries plus ToolResult
+      structured stubs so ToolUse/ToolResult pairing survives compaction. *)
 let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
   | PruneToolOutputs ->
@@ -164,40 +281,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
         | None -> true
       ) msgs)
   | SummarizeOld ->
-    Agent_sdk.Context_reducer.Summarize_old {
-      keep_recent = 5;
-      summarizer = (fun old_msgs ->
-        let first_sentence (s : string) =
-          let s = String.trim s in
-          let max_len = 120 in
-          let cut_at =
-            let period = try Some (String.index s '.') with Not_found -> None in
-            let newline = try Some (String.index s '\n') with Not_found -> None in
-            match period, newline with
-            | Some p, Some n -> Some (min p n + 1)
-            | Some p, None -> Some (p + 1)
-            | None, Some n -> Some n
-            | None, None -> None
-          in
-          match cut_at with
-          | Some pos when pos <= max_len -> String.sub s 0 pos
-          | _ -> if String.length s > max_len then String.sub s 0 max_len ^ "..." else s
-        in
-        let lines = old_msgs |> List.mapi (fun i m ->
-          let role_str = match m.Agent_sdk.Types.role with
-            | Agent_sdk.Types.User -> "user"
-            | Agent_sdk.Types.Assistant -> "assistant"
-            | Agent_sdk.Types.System -> "system"
-            | Agent_sdk.Types.Tool -> "tool"
-          in
-          let text = String.trim (Agent_sdk.Types.text_of_message m) in
-          if text = "" then None
-          else Some (Printf.sprintf "[%d] %s: %s" (i + 1) role_str (first_sentence text))
-        ) |> List.filter_map Fun.id in
-        Printf.sprintf "[Compacted %d messages into summary]\n%s"
-          (List.length old_msgs) (String.concat "\n" lines)
-      );
-    }
+    Agent_sdk.Context_reducer.Custom (summarize_old_messages ~keep_recent:5)
 
 (* ================================================================ *)
 (* Public API                                                       *)

@@ -65,14 +65,31 @@ let resolve_keeper_target_path ~(config : Room.config)
     - [] + workspace → keeper's own dirs (computed default)
     - [] + otherwise → [] (observe_only blocks writes; local = full access) *)
 let sanitize_keeper_name (name : string) : string =
-  String.map (fun c ->
+  let mapped = String.map (fun c ->
     if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
        || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.'
     then c else '_') name
+  in
+  (* Collapse consecutive dots to prevent ".." traversal in paths *)
+  let len = String.length mapped in
+  let buf = Buffer.create len in
+  let prev_dot = ref false in
+  String.iter (fun c ->
+    if c = '.' then begin
+      if not !prev_dot then Buffer.add_char buf c;
+      prev_dot := true
+    end else begin
+      prev_dot := false;
+      Buffer.add_char buf c
+    end) mapped;
+  Buffer.contents buf
 
 let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   match meta.allowed_paths with
   | ["*"] -> []
+  | paths when List.mem "*" paths ->
+    (* Mixed sentinel: strip "*" and use remaining explicit paths *)
+    List.filter (fun p -> p <> "*") paths
   | _ :: _ as explicit -> explicit
   | [] ->
     (match String.lowercase_ascii meta.execution_scope with

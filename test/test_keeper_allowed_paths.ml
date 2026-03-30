@@ -90,6 +90,39 @@ let test_computed_default_uses_keeper_name () =
   check (list string) "name embedded in path"
     [".masc/keepers/cdal-formalist/"; ".masc/traces/"] effective
 
+(* ── Edge cases: security boundaries ── *)
+
+let test_dotdot_in_keeper_name () =
+  (* sanitize_keeper_name is the defense-in-depth layer.
+     meta_of_json already rejects ".." in name, but sanitize_keeper_name
+     is called on the already-parsed meta.name as a second barrier. *)
+  let sanitized = KAP.sanitize_keeper_name "../escape" in
+  let has_dotdot =
+    try ignore (Str.search_forward (Str.regexp_string "..") sanitized 0); true
+    with Not_found -> false in
+  check bool "no .. in sanitized name" false has_dotdot;
+  check bool "sanitized non-empty" true (String.length sanitized > 0)
+
+let test_mixed_sentinel_strips_star () =
+  let meta = make_meta ~execution_scope:"workspace"
+      ~allowed_paths:["*"; "src/"] ~name:"t" () in
+  let effective = KAP.effective_allowed_paths ~meta in
+  check (list string) "mixed sentinel strips *" ["src/"] effective
+
+let test_absolute_path_in_allowed_paths () =
+  let meta = make_meta ~execution_scope:"workspace"
+      ~allowed_paths:["/etc/passwd"; "src/"] ~name:"t" () in
+  let effective = KAP.effective_allowed_paths ~meta in
+  check (list string) "absolute path passed through (caller validates)"
+    ["/etc/passwd"; "src/"] effective
+
+let test_dotdot_path_in_allowed_paths () =
+  let meta = make_meta ~execution_scope:"workspace"
+      ~allowed_paths:["../../../etc/"; "src/"] ~name:"t" () in
+  let effective = KAP.effective_allowed_paths ~meta in
+  check (list string) "traversal path passed through (resolve_keeper_target_path validates)"
+    ["../../../etc/"; "src/"] effective
+
 (* ── Runner ── *)
 
 let () =
@@ -115,5 +148,16 @@ let () =
             test_explicit_paths_any_scope;
           test_case "keeper name in computed default" `Quick
             test_computed_default_uses_keeper_name;
+        ] );
+      ( "security_edge_cases",
+        [
+          test_case ".. in keeper name rejected" `Quick
+            test_dotdot_in_keeper_name;
+          test_case "mixed sentinel strips *" `Quick
+            test_mixed_sentinel_strips_star;
+          test_case "absolute path passed through" `Quick
+            test_absolute_path_in_allowed_paths;
+          test_case ".. traversal passed through" `Quick
+            test_dotdot_path_in_allowed_paths;
         ] );
     ]

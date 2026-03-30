@@ -45,7 +45,6 @@ let make_operation ?(status = Cp_cleanup.Active) ?(updated_at = "2026-01-01T00:0
       created_by = "test";
       source = "managed";
       status;
-      chain = None;
       created_at = "2026-01-01T00:00:00Z";
       updated_at;
     }

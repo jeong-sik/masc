@@ -162,7 +162,6 @@ let test_start_attached_operation_session () =
       created_by = "tester";
       source = "managed";
       status = Command_plane_v2.Active;
-      chain = None;
       created_at = Types.now_iso ();
       updated_at = Types.now_iso ();
     }

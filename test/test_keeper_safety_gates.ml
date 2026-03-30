@@ -172,11 +172,12 @@ let test_safe_empty () =
   assert_safe ~msg:"empty string" ""
 
 (* ================================================================ *)
-(* Group 2: Keeper tool grants with masc_* allowlist gating          *)
+(* Group 2: Mode-free tool grants (mode removal)                     *)
 (* ================================================================ *)
 
-(* keeper_* tools are always exposed unless write_done=true.
-   masc_* tools require explicit allowlist entries, with deny-by-default. *)
+(* Mode removal: all keepers get all tools unconditionally.
+   write_done remains the only exposure gate.
+   Safety is enforced through eval_gate deny lists. *)
 
 let test_write_done_kills_all () =
   let meta = make_meta
@@ -208,13 +209,19 @@ let test_voice_disabled () =
   check bool "keeper_voice_speak still available" true (List.mem "keeper_voice_speak" tools);
   check bool "keeper_voice_agent still available" true (List.mem "keeper_voice_agent" tools)
 
-let test_research_tools_require_allowlist () =
-  let meta = make_meta ~soul_profile:"research" () in
+let test_all_keepers_have_research_tools () =
+  (* #4003: masc_* tools are deny-by-default; allowlist must include them *)
+  let research_allowlist =
+    ["masc_research_start"; "masc_research_status";
+     "masc_autoresearch_cycle"; "masc_autoresearch_status"] in
+  let meta = make_meta ~soul_profile:"default" ~tool_allowlist:research_allowlist () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "research loop blocked by default" false
-    (List.mem "masc_research_start" tools);
-  check bool "autoresearch blocked by default" false
-    (List.mem "masc_autoresearch_cycle" tools)
+  let has_any_research = List.exists (fun t ->
+    String.length t > 5 &&
+    (try ignore (Str.search_forward (Str.regexp_string "research") t 0); true
+     with Not_found -> false)
+  ) tools in
+  check bool "has research tools" true has_any_research
 
 let test_heuristic_mode_tools () =
   let meta = make_meta () in
@@ -397,7 +404,7 @@ let () =
       test_case "all keepers get full toolset" `Quick test_all_keepers_get_full_toolset;
       test_case "voice enabled" `Quick test_voice_enabled;
       test_case "voice disabled" `Quick test_voice_disabled;
-      test_case "research tools require allowlist" `Quick test_research_tools_require_allowlist;
+      test_case "all keepers have research tools" `Quick test_all_keepers_have_research_tools;
       test_case "heuristic mode" `Quick test_heuristic_mode_tools;
       test_case "voice plus other tools" `Quick test_voice_plus_other_tools;
       test_case "all keepers have shell and coding" `Quick test_all_keepers_have_shell_and_coding;

@@ -1,8 +1,7 @@
 # Changelog
 
 
-<<<<<<< HEAD
-## [2.182.0] - 2026-03-31
+## [2.181.0] - 2026-03-31
 
 ### Added
 - **Dead ETA prediction** — dashboard health score followup (#4038).

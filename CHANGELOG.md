@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.169.0] - 2026-03-30
+
+### Added
+- **Source-aware telemetry** — `call_source` ADT (External_mcp / Keeper_internal / Inline_dispatch / Deprecated_alias) for tool call attribution (#3871).
+- **OAS dependency inversion assessment** — issue #3015 status documentation (#3870).
+
+### Fixed
+- **Keeper unclaimed task trigger** — turn now fires when backlog has unclaimed/failed tasks (#3869).
+- **Paused keeper cleanup** — 24h TTL auto-prune of stale paused keeper meta files (#3869).
+- **Timeline sort** — dashboard narrative timeline no longer double-reverses events (#3869).
+
 ## [2.168.0] - 2026-03-30
 
 ### Added

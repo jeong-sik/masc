@@ -81,9 +81,42 @@ let get_calibration_info () =
     ("enabled", `Bool (Env_config_core.relay_calibration_enabled ()));
   ]
 
-(** Estimate context usage based on heuristics *)
+(** Resolve max context tokens from OAS Provider_registry / Capabilities (SSOT).
+    Resolution order:
+    1. Capabilities.for_model_id — per-model override (e.g. "claude-opus-4-6" -> 1M)
+    2. Provider_registry.find — provider-level default (e.g. "claude" -> 200K)
+    3. 100_000 conservative fallback *)
+let resolve_max_context model =
+  (* Layer 1: per-model capabilities (e.g. "claude-opus-4-6" -> 1M) *)
+  let from_caps =
+    match Llm_provider.Capabilities.for_model_id model with
+    | Some caps -> caps.Llm_provider.Capabilities.max_context_tokens
+    | None -> None
+  in
+  match from_caps with
+  | Some n -> n
+  | None ->
+    let registry = Llm_provider.Provider_registry.default () in
+    (* Layer 2: exact provider name lookup (e.g. "claude" -> 200K) *)
+    (match Llm_provider.Provider_registry.find registry model with
+     | Some entry -> entry.Llm_provider.Provider_registry.max_context
+     | None ->
+       (* Layer 3: extract base provider from hyphenated name
+          e.g. "claude-opus" -> "claude", "gpt-4o" -> registry lookup "gpt" *)
+       let base =
+         match String.index_opt model '-' with
+         | Some idx when idx > 0 -> String.sub model 0 idx
+         | _ -> ""
+       in
+       if base <> "" then
+         match Llm_provider.Provider_registry.find registry base with
+         | Some entry -> entry.Llm_provider.Provider_registry.max_context
+         | None -> 100_000
+       else 100_000)
+
+(** Estimate context usage.
+    Token-per-message estimates are rough heuristics, corrected by calibration. *)
 let estimate_context ~messages ~tool_calls ~model =
-  (* Rough token estimates per message type *)
   let tokens_per_user_msg = 150 in
   let tokens_per_assistant_msg = 500 in
   let tokens_per_tool_call = 200 in
@@ -95,14 +128,7 @@ let estimate_context ~messages ~tool_calls ~model =
   let factor = calibration.correction_factor in
   let estimated = int_of_float (float_of_int estimated_raw *. factor) in
 
-  (* Model-specific max context *)
-  let max_tokens = match model with
-    | "claude" | "claude-sonnet" -> 200000
-    | "claude-opus" -> 200000
-    | "gemini" -> 1000000
-    | "codex" | "gpt" -> 128000
-    | _ -> 100000  (* conservative default *)
-  in
+  let max_tokens = resolve_max_context model in
 
   {
     estimated_tokens = estimated;

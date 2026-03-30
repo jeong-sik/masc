@@ -169,7 +169,7 @@ let audit_decision (config : Room.config) (decision : governance_decision) =
 let maybe_create_petition ~config ~(decision : governance_decision) =
   if risk_level_to_int decision.risk >= risk_level_to_int High then begin
     let module GV2 = Council.Governance_v2 in
-    let gv2_risk = if decision.risk = Critical then GV2.High else GV2.Low in
+    let gv2_risk = GV2.High in
     let action : GV2.action_request = {
       action_type = "review_tool_usage";
       target_type = Some "tool";

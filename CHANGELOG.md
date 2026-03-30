@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.174.0] - 2026-03-30
+
+### Added
+- **Repair loop host** — detachable repair loop restored on fresh main (+1,615 lines) (#3931).
+- **Workspace scope guardrail** — `effective_allowed_paths` for keeper file access control (#3913).
+- **P1-1c cache harness** — behavior/cache test suite for prompt separation metrics (#3929).
+
+### Removed
+- **Chain layer + vendor hardcoding** — -27,765 lines of legacy chain/vendor/model coupling removed (#3863).
+
 ## [2.173.0] - 2026-03-30
 
 ### Fixed

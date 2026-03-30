@@ -35,6 +35,7 @@
         test_keeper_deliberation
         test_keeper_registry
         test_keeper_supervisor
+        test_keeper_allowed_paths
         test_metrics_rotation
         test_tool_tier
         test_tool_budget
@@ -79,6 +80,7 @@
           test_keeper_deliberation
           test_keeper_registry
           test_keeper_supervisor
+          test_keeper_allowed_paths
           test_metrics_rotation
           test_tool_tier
           test_tool_budget

@@ -7,7 +7,8 @@ open Masc_mcp
 let make_test_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String name); ("agent_name", `String name);
-             ("trace_id", `String "test-trace-001")]) with
+             ("trace_id", `String "test-trace-001");
+             ("allowed_paths", `List [`String "*"])]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 

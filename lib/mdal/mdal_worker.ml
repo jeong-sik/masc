@@ -94,6 +94,7 @@ let resolve_model_label ~(agent : string) ~(worker_model : string option) :
         (* Map bare agent names to canonical provider:model strings,
            then route through parse_worker_model for uniform validation. *)
         match normalized with
+        | "auto" -> parse_worker_model "glm:auto"
         | "claude" -> parse_worker_model "claude:opus"
         | "openai" | "codex-api" -> parse_worker_model "openai:gpt-4o"
         | "gemini" -> parse_worker_model "gemini:pro"

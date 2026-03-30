@@ -307,6 +307,48 @@ let test_is_safe_worker_run_id_rejects_dot_segments () =
   Alcotest.(check bool) "slash rejected" false
     (Team_session_oas_bridge.is_safe_worker_run_id "run/123")
 
+let test_slot_aware_cap_reduces_parallelism () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:4
+      ~selection_count:2 ~all_discovered:true ~endpoints_found:2 ~total:2
+  in
+  Alcotest.(check int) "cap reduced to discovered total" 2 cap
+
+let test_slot_aware_cap_keeps_single_entry_sessions_unchanged () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:1
+      ~selection_count:2 ~all_discovered:true ~endpoints_found:1 ~total:1
+  in
+  Alcotest.(check int) "single-entry sessions keep original entry count" 1 cap
+
+let test_slot_aware_cap_accepts_shared_endpoint_selections () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:3
+      ~selection_count:2 ~all_discovered:true ~endpoints_found:1 ~total:1
+  in
+  Alcotest.(check int) "shared endpoint still caps concurrency" 1 cap
+
+let test_slot_aware_cap_accepts_partially_collapsed_endpoint_selections () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:4
+      ~selection_count:3 ~all_discovered:true ~endpoints_found:2 ~total:2
+  in
+  Alcotest.(check int) "partially collapsed shared endpoints still cap concurrency" 2 cap
+
+let test_slot_aware_cap_falls_back_without_full_discovery () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:3
+      ~selection_count:2 ~all_discovered:false ~endpoints_found:1 ~total:1
+  in
+  Alcotest.(check int) "fallback keeps original entry count" 3 cap
+
+let test_slot_aware_cap_falls_back_for_non_positive_selection_count () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:3
+      ~selection_count:0 ~all_discovered:true ~endpoints_found:1 ~total:1
+  in
+  Alcotest.(check int) "non-positive selection count keeps original entry count" 3 cap
+
 (* ================================================================ *)
 (* Supported tool runtime tests                                     *)
 (* ================================================================ *)
@@ -456,6 +498,18 @@ let () =
         test_telemetry_of_run_result_carries_trace_ref;
       Alcotest.test_case "worker run id rejects dot segments" `Quick
         test_is_safe_worker_run_id_rejects_dot_segments;
+      Alcotest.test_case "slot-aware cap reduces parallelism" `Quick
+        test_slot_aware_cap_reduces_parallelism;
+      Alcotest.test_case "slot-aware cap keeps single-entry sessions unchanged" `Quick
+        test_slot_aware_cap_keeps_single_entry_sessions_unchanged;
+      Alcotest.test_case "slot-aware cap accepts shared endpoint selections" `Quick
+        test_slot_aware_cap_accepts_shared_endpoint_selections;
+      Alcotest.test_case "slot-aware cap accepts partially collapsed endpoint selections" `Quick
+        test_slot_aware_cap_accepts_partially_collapsed_endpoint_selections;
+      Alcotest.test_case "slot-aware cap falls back without full discovery" `Quick
+        test_slot_aware_cap_falls_back_without_full_discovery;
+      Alcotest.test_case "slot-aware cap falls back for non-positive selection count" `Quick
+        test_slot_aware_cap_falls_back_for_non_positive_selection_count;
     ];
     "supported_tools", [
       Alcotest.test_case "schemas present" `Quick

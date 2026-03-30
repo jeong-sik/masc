@@ -197,14 +197,15 @@ let handle_resume (ctx : _ context) args =
 let maybe_tick_from_keepalive ~(config : Room.config) ~(agent_name : string)
     ~(keeper_name : string) ~(sw : Eio.Switch.t)
     ~(clock : _ Eio.Time.clock)
-    ~(proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option) () =
+    ~(proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option)
+    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option) () =
   let state = load_state config in
   let now = Time_compat.now () in
   if state.enabled && state.status = Running
      && String.equal state.keeper_name keeper_name
      && tick_due state ~now
   then
-    let ctx = { config; agent_name; sw = Some sw; clock = Some clock; proc_mgr; net = None } in
+    let ctx = { config; agent_name; sw = Some sw; clock = Some clock; proc_mgr; net } in
     let _ok, _body =
       tick_with_driver default_driver ctx
         (`Assoc [ ("execute", `Bool true) ])

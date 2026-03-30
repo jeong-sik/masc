@@ -62,6 +62,14 @@ val run_repair_loop_until_terminal :
   Yojson.Safe.t ->
   bool * string
 
+val slot_aware_concurrency_cap :
+  entry_count:int ->
+  selection_count:int ->
+  all_discovered:bool ->
+  endpoints_found:int ->
+  total:int ->
+  int
+
 val role_of_worker_class :
   Team_session_types.worker_class option -> Swarm.Swarm_types.agent_role
 

@@ -269,7 +269,6 @@ if [ "$has_provider_info" = "true" ]; then
 else
   echo "FAIL: provider info missing in proof data"
   FAIL_COUNT=$((FAIL_COUNT + 1))
-  exit 1
 fi
 
 # Assert: no raw API key patterns in all preview fields

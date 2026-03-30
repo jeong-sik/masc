@@ -296,7 +296,6 @@ fi
 if [ "$preview_found" -eq 0 ]; then
   echo "FAIL: no tool preview fields found in proof data"
   FAIL_COUNT=$((FAIL_COUNT + 1))
-  exit 1
 fi
 
 # Also check output_preview fields (worker run level)

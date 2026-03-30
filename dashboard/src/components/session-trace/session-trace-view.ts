@@ -15,7 +15,6 @@ import {
   traceSummary,
   loadSessionTrace,
   closeSessionTrace,
-  activeTraceAgent,
 } from './session-trace-state'
 
 // ── Summary bar ────────────────────────────────────────
@@ -76,9 +75,8 @@ export function SessionTraceView({ agentName, isKeeper }: SessionTraceViewProps)
   const listRef = useRef<HTMLDivElement>(null)
 
   // Load on first mount. Clean up only when agentName changes (overlay closes).
-  // Collapsing/expanding the CollapsibleSection does NOT destroy state.
+  // CollapsibleSection uses native <details> — children stay mounted when collapsed.
   useEffect(() => {
-    activeTraceAgent.value = agentName
     void loadSessionTrace(agentName, isKeeper)
     return () => {
       closeSessionTrace(agentName)

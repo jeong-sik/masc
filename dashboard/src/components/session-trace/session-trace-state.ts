@@ -247,8 +247,8 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
 
     patchSlot(agentName, { events: deduped, loading: false })
   } catch (err) {
+    // Preserve existing events on refresh failure so the user doesn't lose what they were viewing
     patchSlot(agentName, {
-      events: [],
       loading: false,
       error: err instanceof Error ? err.message : 'fetch failed',
     })

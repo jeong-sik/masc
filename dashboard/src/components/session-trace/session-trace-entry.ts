@@ -12,7 +12,6 @@ import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
 const ARGS_PREVIEW_MAX = 80
 const ARGS_VALUE_MAX = 30
 const ARGS_MAX_KEYS = 3
-const RESULT_PREVIEW_MAX = 100
 const BROADCAST_PREVIEW_MAX = 160
 
 // ── Kind styling ───────────────────────────────────────
@@ -64,13 +63,6 @@ function formatArgs(args: Record<string, unknown> | string): string {
     return `${k}: ${vs}`
   }).join(', ')
   return keys.length > ARGS_MAX_KEYS ? `{${preview}, …}` : `{${preview}}`
-}
-
-/** Format tool result for inline preview. Exported for potential reuse. */
-export function formatResult(result: string | null, error: string | null): string {
-  if (error) return `err: ${truncate(error, RESULT_PREVIEW_MAX)}`
-  if (!result) return '-'
-  return truncate(result, RESULT_PREVIEW_MAX)
 }
 
 // ── Task event helpers ─────────────────────────────────

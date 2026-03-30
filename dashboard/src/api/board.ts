@@ -371,9 +371,11 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   const postId = asString(raw.post_id, '').trim()
   const author = asString(raw.author, '').trim()
   if (!id || !author) return null
+  const parentId = asString(raw.parent_id, '').trim() || null
   return {
     id,
     post_id: postId,
+    parent_id: parentId,
     author,
     content: asString(raw.content, ''),
     created_at: toIsoTimestamp(raw.created_at) ?? '',
@@ -444,10 +446,8 @@ export function createPost(title: string, content: string, author: string): Prom
   })
 }
 
-export function commentPost(postId: string, author: string, content: string): Promise<unknown> {
-  return post(`/api/v1/tools/masc_board_comment`, {
-    post_id: postId,
-    author,
-    content,
-  })
+export function commentPost(postId: string, author: string, content: string, parentId?: string): Promise<unknown> {
+  const body: Record<string, string> = { post_id: postId, author, content }
+  if (parentId) body.parent_id = parentId
+  return post(`/api/v1/tools/masc_board_comment`, body)
 }

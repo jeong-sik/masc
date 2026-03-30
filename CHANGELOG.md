@@ -1,6 +1,21 @@
 # Changelog
 
 
+## [2.166.0] - 2026-03-30
+
+### Added
+- **Dashboard session activity report** — broadcast grouping and task timeline in agent detail (#3840).
+- **Dashboard governance judgment UX** — judge status bar and action detail rendering (#3843).
+
+### Changed
+- **keeper_meta split** — 83-field god record split into domain/policy + agent_runtime_state; flat JSON preserved (#3833, closes #3813).
+- **Verifier strict verdict** — `parse_verdict` returns `Result` instead of silent degrade to `Warn` (#3842).
+- **Relay provider registry** — model→context_size lookup delegated to OAS Provider_registry (#3832).
+- **OAS worker inference defaults** — consolidated `temperature`/`max_tokens` to single definition point (#3837).
+
+### Removed
+- Dead config modules: `Endpoints`, `TeamSession`, `Metrics_cache`, `Token_cache`, `Fitness`, `Mitosis` (#3835).
+
 ## [2.165.0] - 2026-03-30
 
 ### Added

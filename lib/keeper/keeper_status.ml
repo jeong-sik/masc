@@ -48,15 +48,15 @@ let handle_keeper_list ctx args : tool_result =
               Resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
             in
             let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
-            let last_turn_ago_s = if m.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.usage.last_turn_ts in
+            let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
             let last_proactive_ago_s =
-              if m.proactive.last_ts <= 0.0 then 0.0 else now_ts -. m.proactive.last_ts
+              if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
             in
             let active_model = active_model_of_meta m in
             let next_model_hint = next_model_hint_of_meta m in
-            let trace_history_count = List.length m.trace_history in
+            let trace_history_count = List.length m.runtime.trace_history in
             let last_compaction_saved_tokens =
-              max 0 (m.compaction.last_before_tokens - m.compaction.last_after_tokens)
+              max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
             in
             let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
               compaction_policy_of_keeper m
@@ -74,7 +74,7 @@ let handle_keeper_list ctx args : tool_result =
 	              | [] -> None
 	            in
 	            let metrics_overview =
-	              summarize_metrics_lines metrics_window_lines ~default_generation:m.generation
+	              summarize_metrics_lines metrics_window_lines ~default_generation:m.runtime.generation
 	            in
 	            let last_skill_metrics =
 	              let rec find_latest = function
@@ -105,7 +105,7 @@ let handle_keeper_list ctx args : tool_result =
             let continuity_reflection_hold_s =
               let cooldown = Float.of_int m.compaction.cooldown_sec in
               let last_reflection_ts =
-                max m.last_continuity_update_ts m.proactive.last_ts
+                max m.runtime.last_continuity_update_ts m.runtime.proactive_rt.last_ts
               in
               if cooldown <= 0.0 then
                 0.0
@@ -162,8 +162,8 @@ let handle_keeper_list ctx args : tool_result =
 	            Some (`Assoc [
               ("name", `String m.name);
               ("agent_name", `String m.agent_name);
-              ("trace_id", `String m.trace_id);
-              ("generation", `Int m.generation);
+              ("trace_id", `String m.runtime.trace_id);
+              ("generation", `Int m.runtime.generation);
               ("goal", `String m.goal);
               ("short_goal", `String m.short_goal);
               ("mid_goal", `String m.mid_goal);
@@ -185,7 +185,7 @@ let handle_keeper_list ctx args : tool_result =
               ("last_proactive_ago_s", `Float last_proactive_ago_s);
               ("trace_history_count", `Int trace_history_count);
               ("handoff_count_total", `Int trace_history_count);
-              ("compaction_count", `Int m.compaction.count);
+              ("compaction_count", `Int m.runtime.compaction_rt.count);
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
               ("compaction_profile", `String m.compaction.profile);
               ("compaction_ratio_gate", `Float compact_ratio_gate);
@@ -194,34 +194,34 @@ let handle_keeper_list ctx args : tool_result =
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
-              ("proactive_count_total", `Int m.proactive.count_total);
-              ("last_compaction_check_ts", `Float m.compaction.last_check_ts);
+              ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
+              ("last_compaction_check_ts", `Float m.runtime.compaction_rt.last_check_ts);
               ("last_compaction_decision",
-                if String.trim m.compaction.last_decision = "" then `Null
-                else `String m.compaction.last_decision);
-              ("last_proactive_ts", `Float m.proactive.last_ts);
+                if String.trim m.runtime.compaction_rt.last_decision = "" then `Null
+                else `String m.runtime.compaction_rt.last_decision);
+              ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);
               ("last_proactive_reason",
-                if String.trim m.proactive.last_reason = ""
+                if String.trim m.runtime.proactive_rt.last_reason = ""
                 then `Null
-                else `String m.proactive.last_reason);
+                else `String m.runtime.proactive_rt.last_reason);
               ("last_proactive_preview",
-                if String.trim m.proactive.last_preview = ""
+                if String.trim m.runtime.proactive_rt.last_preview = ""
                 then `Null
-                else `String m.proactive.last_preview);
+                else `String m.runtime.proactive_rt.last_preview);
               ("continuity_summary",
                 if String.trim m.continuity_summary = ""
                 then `Null
                 else `String m.continuity_summary);
               ("continuity_compaction_cooldown_sec", `Int m.compaction.cooldown_sec);
               ("continuity_reflection_hold_s", `Float continuity_reflection_hold_s);
-              ("last_continuity_update_ts", `Float m.last_continuity_update_ts);
-              ("autonomous_turn_count", `Int m.autonomous_turn_count);
-              ("autonomous_text_turn_count", `Int m.autonomous_text_turn_count);
-              ("autonomous_tool_turn_count", `Int m.autonomous_tool_turn_count);
-              ("board_reactive_turn_count", `Int m.board_reactive_turn_count);
-              ("mention_reactive_turn_count", `Int m.mention_reactive_turn_count);
-              ("noop_turn_count", `Int m.noop_turn_count);
-              ("autonomous_action_count", `Int m.autonomous_action_count);
+              ("last_continuity_update_ts", `Float m.runtime.last_continuity_update_ts);
+              ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
+              ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
+              ("autonomous_tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
+              ("board_reactive_turn_count", `Int m.runtime.board_reactive_turn_count);
+              ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
+              ("noop_turn_count", `Int m.runtime.noop_turn_count);
+              ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
               ("active_team_session_id",
                 match m.active_team_session_id with
                 | Some session_id -> `String session_id
@@ -254,8 +254,8 @@ let handle_keeper_list ctx args : tool_result =
                 ("policy", `String (keeper_policy_log_path ctx.config m.name));
                 ("feedback", `String (keeper_feedback_log_path ctx.config m.name));
                 ("dataset_export", `String (keeper_dataset_export_path ctx.config m.name));
-                ("session_dir", `String (keeper_session_dir ctx.config m.trace_id));
-                ("history", `String (keeper_history_path ctx.config m.trace_id));
+                ("session_dir", `String (keeper_session_dir ctx.config m.runtime.trace_id));
+                ("history", `String (keeper_history_path ctx.config m.runtime.trace_id));
               ]);
             ])
         ) keeper_names
@@ -278,7 +278,7 @@ let handle_keeper_trajectory ctx args : tool_result =
       let limit = get_int args "limit" 20 in
       let masc_root = Filename.concat ctx.config.base_path ".masc" in
       let entries =
-        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:m.trace_id
+        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:m.runtime.trace_id
       in
       let total = List.length entries in
       (* Take the last N entries (most recent) *)
@@ -289,13 +289,13 @@ let handle_keeper_trajectory ctx args : tool_result =
           List.filteri (fun i _e -> i >= drop) entries
       in
       if recent = [] then
-        (true, Printf.sprintf "Keeper %s (trace: %s) has no trajectory entries." name m.trace_id)
+        (true, Printf.sprintf "Keeper %s (trace: %s) has no trajectory entries." name m.runtime.trace_id)
       else
         let json_list = List.map Trajectory.entry_to_json recent in
         let json = `Assoc [
           ("keeper", `String name);
-          ("trace_id", `String m.trace_id);
-          ("generation", `Int m.generation);
+          ("trace_id", `String m.runtime.trace_id);
+          ("generation", `Int m.runtime.generation);
           ("total_entries", `Int total);
           ("showing", `Int (List.length recent));
           ("entries", `List json_list);
@@ -314,7 +314,7 @@ let handle_keeper_eval ctx args : tool_result =
       let scenario_file = get_string_opt args "scenario_file" in
       let masc_root = Filename.concat ctx.config.base_path ".masc" in
       let entries =
-        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:m.trace_id
+        Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:m.runtime.trace_id
       in
       if entries = [] then
         (true, Printf.sprintf "Keeper %s has no trajectory data to evaluate." name)
@@ -352,15 +352,15 @@ let handle_keeper_eval ctx args : tool_result =
         in
         let json = `Assoc [
           ("keeper", `String name);
-          ("trace_id", `String m.trace_id);
-          ("generation", `Int m.generation);
-          ("total_turns", `Int m.usage.total_turns);
-          ("total_input_tokens", `Int m.usage.total_input_tokens);
-          ("total_output_tokens", `Int m.usage.total_output_tokens);
+          ("trace_id", `String m.runtime.trace_id);
+          ("generation", `Int m.runtime.generation);
+          ("total_turns", `Int m.runtime.usage.total_turns);
+          ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);
+          ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);
           ("total_tool_calls", `Int total);
           ("unique_tools", `Int (List.length unique_tools));
           ("tool_distribution", `List tool_stats);
           ("scenario_file", scenario_info);
-          ("autonomous_action_count", `Int m.autonomous_action_count);
+          ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
         ] in
         (true, Yojson.Safe.pretty_to_string json)

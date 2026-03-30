@@ -1198,7 +1198,7 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         | Error e -> fail e
       in
       let metrics_store = Masc_mcp.Keeper_types.keeper_metrics_store config meta.name in
-      let history_path = Masc_mcp.Keeper_types.keeper_history_path config meta.trace_id in
+      let history_path = Masc_mcp.Keeper_types.keeper_history_path config meta.runtime.trace_id in
       let memory_bank_path = Masc_mcp.Keeper_types.keeper_memory_bank_path config meta.name in
       let turn_json = Yojson.Safe.from_string
           {|{"channel":"turn","generation":0,"trace_id":"trace-1","context_ratio":0.41,"context_tokens":120,"context_max":1024,"message_count":4,"memory_check":{"performed":true,"passed":true,"final_score":0.9},"skill_primary":"masc-heartbeat","skill_secondary":["masc-keeper-autonomy"],"skill_reason":"stateful routing","skill_selection_mode":"agent","skill_provenance":"judgment"}|}
@@ -1817,7 +1817,7 @@ let test_keeper_bootstrap_marks_stale_explicit_keeper () =
         {
           meta with
           proactive = { meta.proactive with enabled = false };
-          usage = { meta.usage with last_turn_ts = 0.0 };
+          runtime = { meta.runtime with usage = { meta.runtime.usage with last_turn_ts = 0.0 } };
         }
       in
       (match Masc_mcp.Keeper_types.write_meta config stale_meta with

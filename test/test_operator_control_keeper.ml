@@ -228,18 +228,21 @@ proactive_enabled = true
           meta with
           room_scope = "current";
           proactive = { meta.proactive with enabled = false };
-          usage =
-            {
-              meta.usage with
-              total_input_tokens = 1200;
-              total_output_tokens = 800;
-              total_tokens = 2000;
-              total_cost_usd = 0.042;
-              last_model_used = "glm:auto";
-              last_input_tokens = 120;
-              last_output_tokens = 80;
-              last_total_tokens = 200;
-              last_latency_ms = 4000;
+          runtime =
+            { meta.runtime with
+              usage =
+                {
+                  meta.runtime.usage with
+                  total_input_tokens = 1200;
+                  total_output_tokens = 800;
+                  total_tokens = 2000;
+                  total_cost_usd = 0.042;
+                  last_model_used = "glm:auto";
+                  last_input_tokens = 120;
+                  last_output_tokens = 80;
+                  last_total_tokens = 200;
+                  last_latency_ms = 4000;
+                };
             };
           paused = true;
           updated_at = Types.now_iso ();

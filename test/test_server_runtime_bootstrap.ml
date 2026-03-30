@@ -286,9 +286,9 @@ let test_migrate_legacy_keeper_dirs_promotes_valid_meta () =
         read_meta_exn (Filename.concat keepers_dir "other.json")
       in
       Alcotest.(check string) "sangsu trace promoted from perpetual-keepers"
-        "trace-sangsu-live" sangsu_meta.trace_id;
+        "trace-sangsu-live" sangsu_meta.runtime.trace_id;
       Alcotest.(check string) "other keeper migrated from perpetual-keepers"
-        "trace-other-live" other_meta.trace_id;
+        "trace-other-live" other_meta.runtime.trace_id;
       Alcotest.(check bool) "legacy dir removed after merge" false
         (Sys.file_exists legacy_dir);
       Alcotest.(check bool) "replaced stale keeper quarantined" true

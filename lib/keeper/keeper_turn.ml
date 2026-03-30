@@ -75,8 +75,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
         Trajectory.create_accumulator
           ~masc_root
           ~keeper_name:meta.name
-          ~trace_id:meta.trace_id
-          ~generation:meta.generation
+          ~trace_id:meta.runtime.trace_id
+          ~generation:meta.runtime.generation
       in
       let turn_cascade_name = if direct_reply then "keeper_reply" else "keeper_turn" in
       let effective_models =
@@ -185,7 +185,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 ~build_turn_prompt
                 ~user_message:message
                 ~cascade_name:turn_cascade_name
-                ~generation:meta.generation
+                ~generation:meta.runtime.generation
                 ?on_event
                 ~trajectory_acc
                 ()

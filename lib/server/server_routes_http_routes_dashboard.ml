@@ -377,7 +377,7 @@ let add_routes ~sw ~clock router =
                 let masc_root = Filename.concat config.base_path ".masc" in
                 let entries =
                   Trajectory.read_entries ~masc_root ~keeper_name:m.name
-                    ~trace_id:m.trace_id
+                    ~trace_id:m.runtime.trace_id
                 in
                 let total = List.length entries in
                 let recent =
@@ -388,8 +388,8 @@ let add_routes ~sw ~clock router =
                 in
                 let json = `Assoc [
                   ("keeper", `String name);
-                  ("trace_id", `String m.trace_id);
-                  ("generation", `Int m.generation);
+                  ("trace_id", `String m.runtime.trace_id);
+                  ("generation", `Int m.runtime.generation);
                   ("total_entries", `Int total);
                   ("showing", `Int (List.length recent));
                   ("entries", `List (List.map (Trajectory.entry_to_json ~result_max_len:2000) recent));

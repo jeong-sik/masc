@@ -103,12 +103,12 @@ let run_turn
      exist before any file I/O (checkpoint load, history persist).
      In filesystem fallback mode (PG unavailable), these directories may
      not have been created by keeper_up if it only registered in-memory. *)
-  let session_dir = Filename.concat base_dir meta.trace_id in
+  let session_dir = Filename.concat base_dir meta.runtime.trace_id in
   Keeper_types.mkdir_p session_dir;
   (* 2. Load checkpoint *)
   let (session, ctx_opt) =
     Keeper_exec_context.load_context_from_checkpoint
-      ~trace_id:meta.trace_id
+      ~trace_id:meta.runtime.trace_id
       ~primary_model_max_tokens:max_context
       ~base_dir
   in
@@ -178,7 +178,7 @@ let run_turn
     Memory_oas_bridge.create_memory_full
       ~agent_name
       ~base_dir
-      ~session_id:meta.trace_id
+      ~session_id:meta.runtime.trace_id
       ~config
       ~episode_limit:30
       ~procedure_limit:10
@@ -201,7 +201,7 @@ let run_turn
     Oas_worker.run_named
       ~cascade_name
       ~goal:user_message
-      ~session_id:meta.trace_id
+      ~session_id:meta.runtime.trace_id
       ~system_prompt:turn_system_prompt
       ~tools
       ~initial_messages:history_messages
@@ -229,7 +229,7 @@ let run_turn
               checkpoint on the next turn. oas_worker generates a per-turn
               session_id that differs from trace_id, causing a load miss. *)
            let checkpoint =
-             { checkpoint with Agent_sdk.Checkpoint.session_id = meta.trace_id }
+             { checkpoint with Agent_sdk.Checkpoint.session_id = meta.runtime.trace_id }
            in
            Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir
              checkpoint

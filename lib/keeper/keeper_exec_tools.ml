@@ -205,13 +205,13 @@ let execute_keeper_tool_call
         (`Assoc
           [
             ("name", `String meta.name);
-            ("trace_id", `String meta.trace_id);
-            ("generation", `Int meta.generation);
+            ("trace_id", `String meta.runtime.trace_id);
+            ("generation", `Int meta.runtime.generation);
             ("context_ratio", `Float (Keeper_working_context.context_ratio ctx_work));
             ("context_tokens", `Int ctx_work.token_count);
             ("context_max", `Int ctx_work.max_tokens);
             ("message_count", `Int (List.length ctx_work.messages));
-            ("last_model_used", `String meta.usage.last_model_used);
+            ("last_model_used", `String meta.runtime.usage.last_model_used);
             ( "continuity_state",
               match continuity with
               | None -> `Null

@@ -73,7 +73,7 @@ let keeper_brief_meta_json (meta : keeper_meta) =
     [
       ("name", `String meta.name);
       ("goal", `String meta.goal);
-      ("trace_id", `String meta.trace_id);
+      ("trace_id", `String meta.runtime.trace_id);
       ("created_at", `String meta.created_at);
       ("updated_at", `String meta.updated_at);
     ]

@@ -173,8 +173,8 @@ let proactive_prompt_for_keeper
     |> Option.value ~default:default_soul_profile
   in
   let last_preview =
-    if String.trim meta.proactive.last_preview = "" then "none"
-    else meta.proactive.last_preview
+    if String.trim meta.runtime.proactive_rt.last_preview = "" then "none"
+    else meta.runtime.proactive_rt.last_preview
   in
   let continuity_snapshot =
     match snapshot with

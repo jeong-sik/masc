@@ -32,6 +32,8 @@ Never work outside masc-mcp. Use worktrees. One active lane at a time.
 room_scope = "current"
 scope_kind = "local"
 mention_targets = ["masc-improver", "improver"]
+execution_scope = "workspace"
+allowed_paths = ["*"]
 
 proactive_enabled = true
 presence_keepalive = true

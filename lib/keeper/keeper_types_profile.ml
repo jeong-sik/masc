@@ -205,6 +205,8 @@ type keeper_profile_defaults = {
   shards : string list option;
   tool_tier : string option;
   extra_masc_tools : string list option;
+  allowed_paths : string list option;
+  execution_scope : string option;
 }
 
 type persona_summary = {
@@ -235,6 +237,8 @@ let empty_keeper_profile_defaults = {
   shards = None;
   tool_tier = None;
   extra_masc_tools = None;
+  allowed_paths = None;
+  execution_scope = None;
 }
 
 let personas_root_opt () =
@@ -326,6 +330,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            (match strs "extra_masc_tools" with
             | [] -> None
             | xs -> Some xs);
+         allowed_paths =
+           (match strs "allowed_paths" with
+            | [] -> None
+            | xs -> Some xs);
+         execution_scope = str "execution_scope";
        })
 
 let load_keeper_toml (path : string)
@@ -413,6 +422,11 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   (match Safe_ops.json_string_list "extra_masc_tools" keeper_json with
                    | [] -> None
                    | xs -> Some xs);
+                allowed_paths =
+                  (match Safe_ops.json_string_list "allowed_paths" keeper_json with
+                   | [] -> None
+                   | xs -> Some xs);
+                execution_scope = Safe_ops.json_string_opt "execution_scope" keeper_json;
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 

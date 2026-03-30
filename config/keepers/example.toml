@@ -32,6 +32,19 @@ proactive_enabled = true
 presence_keepalive = true
 presence_keepalive_sec = 30
 
+# Execution scope — controls what the keeper can modify.
+#   observe_only = read-only, no file writes (default for new keepers until #3886)
+#   workspace    = write to allowed_paths only (current default)
+#   local        = full filesystem access
+# execution_scope = "workspace"
+
+# Allowed paths — restrict file writes to these path prefixes.
+#   []       + observe_only = no writes (tool-level block)
+#   []       + workspace    = computed default (.masc/keepers/<name>/, .masc/traces/)
+#   ["*"]    = explicit full access (operator opt-in)
+#   ["src/"] = only src/ prefix allowed
+# allowed_paths = ["src/", "lib/"]
+
 # Tool shards — restrict which tool groups are available.
 # Omit or leave empty to grant all default shards (backward compatible).
 # Available: base, board, filesystem, shell, coding, voice, library,

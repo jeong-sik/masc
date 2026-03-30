@@ -254,7 +254,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ) entry.crash_log in
                 let disk_crashes =
                   (try Keeper_crash_persistence.recent_crashes
-                    ~base_path:config.base_path ~name:m.name ~max_entries:20
+                    ~masc_root:(Room.masc_root_dir config) ~name:m.name ~max_entries:20
                   with _ -> []) in
                 let combined_log = match disk_crashes with
                   | [] -> crash_log

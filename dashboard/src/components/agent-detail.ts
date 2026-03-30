@@ -14,6 +14,8 @@ import { AgentJournalStream } from './agent-detail-journal'
 import { AgentSessionReport } from './agent-detail-session-report'
 import { AgentTimelineSection } from './agent-detail-timeline'
 import { AgentWorkerBrief } from './agent-detail-worker'
+import { CollapsibleSection } from './common/collapsible'
+import { SessionTraceView } from './session-trace/session-trace-view'
 import {
   selectedAgentName,
   loading,
@@ -189,6 +191,10 @@ export function AgentDetailOverlay() {
         ${detailError.value ? html`<div class="p-4 mb-4 text-bad border border-bad/30 rounded-xl bg-bad/10 shadow-sm font-medium text-sm">${detailError.value}</div>` : null}
 
         <${AgentSessionReport} agentName=${agentName} />
+
+        <${CollapsibleSection} title="활동 추적" class="mb-5" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">GitHub Agents 스타일</span>`}>
+          <${SessionTraceView} agentName=${agentName} isKeeper=${!!keeper} />
+        <//>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
           <${Card} title="할당된 작업">

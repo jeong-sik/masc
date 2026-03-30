@@ -2,7 +2,7 @@ name: Issue Triage
 
 on:
   issues:
-    types: [opened, edited, reopened, labeled, unlabeled]
+    types: [opened, edited, reopened]
 
 permissions:
   contents: read
@@ -134,7 +134,12 @@ jobs:
             const typeMatches = [...nextLabels].filter((name) => name.startsWith("type:"));
             const areaMatches = [...nextLabels].filter((name) => name.startsWith("area:"));
             const targetMatches = [...nextLabels].filter((name) => name.startsWith("target:"));
-            const needsTriage = typeMatches.length !== 1 || areaMatches.length !== 1 || targetMatches.length !== 1;
+
+            // Epics are trackers — they don't need area/target labels
+            const isEpic = typeMatches.includes("type:epic");
+            const needsTriage = isEpic
+              ? false
+              : typeMatches.length !== 1 || areaMatches.length !== 1 || targetMatches.length !== 1;
 
             if (needsTriage) {
               nextLabels.add(process.env.TRIAGE_LABEL);

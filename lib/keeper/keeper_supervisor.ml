@@ -56,6 +56,8 @@ let publish_lifecycle event_name keeper_name detail =
 let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
   let base_path = ctx.config.base_path in
+  let keepers_dir =
+    Filename.concat (Room.masc_root_dir ctx.config) "keepers" in
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     let resolved = ref false in
     let resolve_done value =
@@ -87,7 +89,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                meta.name ts reason;
              let rc = match Keeper_registry.get ~base_path meta.name with
                | Some e -> e.restart_count | None -> 0 in
-             Keeper_crash_persistence.enqueue_record ~base_path
+             Keeper_crash_persistence.enqueue_record ~keepers_dir
                ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
              resolve_done (`Crashed reason);
@@ -104,7 +106,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                meta.name ts reason;
              let rc = match Keeper_registry.get ~base_path meta.name with
                | Some e -> e.restart_count | None -> 0 in
-             Keeper_crash_persistence.enqueue_record ~base_path
+             Keeper_crash_persistence.enqueue_record ~keepers_dir
                ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
              resolve_done (`Crashed reason);
@@ -122,7 +124,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
               meta.name ts reason;
             let rc = match Keeper_registry.get ~base_path meta.name with
               | Some e -> e.restart_count | None -> 0 in
-            Keeper_crash_persistence.enqueue_record ~base_path
+            Keeper_crash_persistence.enqueue_record ~keepers_dir
               ~name:meta.name ~ts ~reason ~restart_count:rc;
             Keeper_registry.record_error ~base_path meta.name reason;
             Keeper_registry.set_state ~base_path meta.name

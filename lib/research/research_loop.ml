@@ -28,6 +28,15 @@ type experiment_entry = {
 let log_best_effort_failure step exn =
   Log.Server.warn "research: %s failed: %s" step (Printexc.to_string exn)
 
+(** Run a command and return true only on exit status 0. Logs on failure. *)
+let run_ok ~label ~timeout_sec argv =
+  match Process_eio.run_argv_with_status ~timeout_sec argv with
+  | Unix.WEXITED 0, _ -> true
+  | Unix.WEXITED n, output ->
+    Log.Server.warn "research: %s exited %d: %s" label n output; false
+  | _, output ->
+    Log.Server.warn "research: %s signalled: %s" label output; false
+
 (** Gather minimal context about the repo for the LLM. *)
 let gather_context ~(config : Research_config.repo_config) : string =
   let parts = Buffer.create 2048 in
@@ -238,16 +247,10 @@ let create_worktree ~(repo_path : string) ~(experiment_id : string) : string opt
   let worktree_path = Printf.sprintf "%s/.worktrees/research-%s" repo_path experiment_id in
   let branch = Printf.sprintf "research/exp-%s" experiment_id in
   try
-    match Process_eio.run_argv_with_status ~timeout_sec:30.0
-      [ "git"; "-C"; repo_path; "worktree"; "add"; worktree_path; "-b"; branch; "HEAD" ]
-    with
-    | Unix.WEXITED 0, _ -> Some worktree_path
-    | Unix.WEXITED n, output ->
-      Log.Server.warn "research: worktree creation exited %d: %s" n output;
-      None
-    | _, output ->
-      Log.Server.warn "research: worktree creation signalled: %s" output;
-      None
+    if run_ok ~label:"worktree creation" ~timeout_sec:30.0
+         [ "git"; "-C"; repo_path; "worktree"; "add"; worktree_path; "-b"; branch; "HEAD" ]
+    then Some worktree_path
+    else None
   with exn ->
     log_best_effort_failure "worktree creation" exn;
     None
@@ -255,14 +258,8 @@ let create_worktree ~(repo_path : string) ~(experiment_id : string) : string opt
 (** Remove experiment worktree. Best-effort; logs on failure. *)
 let cleanup_worktree ~(repo_path : string) ~(worktree_path : string) : unit =
   (try
-    match Process_eio.run_argv_with_status ~timeout_sec:30.0
-      [ "git"; "-C"; repo_path; "worktree"; "remove"; worktree_path ]
-    with
-    | Unix.WEXITED 0, _ -> ()
-    | Unix.WEXITED n, output ->
-      Log.Server.warn "research: worktree cleanup exited %d: %s" n output
-    | _, output ->
-      Log.Server.warn "research: worktree cleanup signalled: %s" output
+    ignore (run_ok ~label:"worktree cleanup" ~timeout_sec:30.0
+      [ "git"; "-C"; repo_path; "worktree"; "remove"; worktree_path ])
   with exn -> log_best_effort_failure "worktree cleanup" exn)
 
 (** Apply a patch to the target file in the worktree.
@@ -402,14 +399,6 @@ let run_experiment ~sw ~net ~clock ~(config : Research_config.t)
        (if entry.metric.status = Research_metric.Keep then begin
          Log.Server.info "research: creating PR for kept experiment %s" experiment_id;
          let branch = Printf.sprintf "research/exp-%s" experiment_id in
-         let run_ok ~label ~timeout_sec argv =
-           match Process_eio.run_argv_with_status ~timeout_sec argv with
-           | Unix.WEXITED 0, _ -> true
-           | Unix.WEXITED n, output ->
-             Log.Server.warn "research: %s exited %d: %s" label n output; false
-           | _, output ->
-             Log.Server.warn "research: %s signalled: %s" label output; false
-         in
          (try
            let msg = Printf.sprintf "research(%s): %s" experiment_id
              entry.hypothesis.description in

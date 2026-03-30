@@ -153,10 +153,29 @@ let dispatch_supported_tool ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.conf
 let parse_tool_json body =
   try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
 
+let int_member_opt key json =
+  match Yojson.Safe.Util.member key json with
+  | `Int value -> Some value
+  | `Intlit raw -> int_of_string_opt raw
+  | _ -> None
+
 let repair_loop_status_of_body body =
   match parse_tool_json body with
   | Some json -> Tool_repair_loop_types.status_of_json json
   | None -> None
+
+let repair_loop_iteration_budget body =
+  match parse_tool_json body with
+  | Some json ->
+      let attempt_count =
+        Option.value ~default:0 (int_member_opt "attempt_count" json)
+      in
+      let max_attempts =
+        Option.value ~default:(max 1 (attempt_count + 1))
+          (int_member_opt "max_attempts" json)
+      in
+      max 1 (min 64 (max_attempts - attempt_count + 1))
+  | None -> 16
 
 let run_repair_loop_until_terminal_with
     ~(dispatch_tool : name:string -> args:Yojson.Safe.t -> bool * string)
@@ -169,22 +188,26 @@ let run_repair_loop_until_terminal_with
   | Some started_json -> (
       match Yojson.Safe.Util.member "loop_id" started_json with
       | `String loop_id ->
-          let rec loop last_ok last_body =
+          let rec loop remaining last_ok last_body =
             match repair_loop_status_of_body last_body with
             | Some status when Tool_repair_loop_types.is_terminal_status status ->
                 (last_ok, last_body)
+            | Some _ when remaining <= 0 ->
+                ( false,
+                  Printf.sprintf
+                    "repair loop iteration guard exceeded for %s" loop_id )
             | Some _ ->
                 let iterate_ok, iterate_body =
                   dispatch_tool ~name:"masc_repair_loop_iterate"
                     ~args:(`Assoc [ ("loop_id", `String loop_id) ])
                 in
-                if not iterate_ok && Option.is_none (parse_tool_json iterate_body) then
+                if not iterate_ok then
                   (iterate_ok, iterate_body)
                 else
-                  loop iterate_ok iterate_body
+                  loop (remaining - 1) iterate_ok iterate_body
             | None -> (last_ok, last_body)
           in
-          loop started_ok started_body
+          loop (repair_loop_iteration_budget started_body) started_ok started_body
       | _ -> (started_ok, started_body))
 
 let run_repair_loop_until_terminal ~sw ~(clock : _ Eio.Time.clock)

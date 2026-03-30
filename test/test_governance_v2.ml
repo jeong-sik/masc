@@ -266,6 +266,31 @@ let test_different_target_type_no_merge () =
   check bool "different target_type do not merge" false second.merged;
   check bool "different case ids" true (first.case_.id <> second.case_.id)
 
+(** Compound phrase synonyms like "turn on" should canonicalize before splitting. *)
+let test_turn_on_enable_synonym_merge () =
+  with_base @@ fun () ->
+  let make_action action_type =
+    Some { GV2.action_type; target_type = Some "runtime_param";
+           target_id = Some "feature_gate";
+           payload = Some (`Assoc [("param_key", `String "feature_gate"); ("value", `Bool true)]) }
+  in
+  let first =
+    match submit ~title:"Turn on feature_gate"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "turn on")
+      ~source_refs:[] ~created_by:"agent-a"
+    with Ok v -> v | Error e -> fail e
+  in
+  let second =
+    match submit ~title:"Enable feature_gate"
+      ~subject_type:"param_change"
+      ~requested_action:(make_action "enable")
+      ~source_refs:[] ~created_by:"agent-b"
+    with Ok v -> v | Error e -> fail e
+  in
+  check bool "turn on/enable synonym merge" true second.merged;
+  check string "same case id" first.case_.id second.case_.id
+
 let () =
   run "governance_v2"
     [
@@ -290,5 +315,7 @@ let () =
             test_clear_vs_revert_no_merge;
           test_case "different target_type no merge" `Quick
             test_different_target_type_no_merge;
+          test_case "turn on/enable synonym merge" `Quick
+            test_turn_on_enable_synonym_merge;
         ] );
     ]

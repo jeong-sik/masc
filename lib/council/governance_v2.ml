@@ -163,18 +163,28 @@ let rec normalize_json_semantics (json : Yojson.Safe.t) : Yojson.Safe.t =
   | `String value -> `String (normalize_text value)
   | (`Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) as value -> value
 
-(** Canonicalize a compound action string like "set_param" or "clear-param".
-    Splits on underscores/hyphens/spaces, maps each token, and rejoins. *)
+(** Canonicalize a compound action string like "set_param" or "turn on".
+    First preserve phrase-level synonyms such as "turn_on"/"scale_up",
+    then fall back to token-wise canonicalization. *)
 let canonicalize_action_str s =
-  s
-  |> normalize_text
-  |> String.to_seq
-  |> Seq.map (fun ch ->
-       match ch with 'a'..'z' | '0'..'9' -> ch | _ -> ' ')
-  |> String.of_seq
-  |> String.split_on_char ' '
-  |> List.filter_map canonical_semantic_token
-  |> String.concat "_"
+  let normalized =
+    s
+    |> normalize_text
+    |> String.to_seq
+    |> Seq.map (fun ch ->
+         match ch with 'a'..'z' | '0'..'9' -> ch | _ -> '_')
+    |> String.of_seq
+    |> String.split_on_char '_'
+    |> List.filter (fun token -> token <> "")
+    |> String.concat "_"
+  in
+  match canonical_semantic_token normalized with
+  | Some whole -> whole
+  | None ->
+      normalized
+      |> String.split_on_char '_'
+      |> List.filter_map canonical_semantic_token
+      |> String.concat "_"
 
 let semantic_action_key = function
   | None -> None

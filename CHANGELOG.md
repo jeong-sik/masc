@@ -1,6 +1,26 @@
 # Changelog
 
 
+## [2.182.0] - 2026-03-31
+
+### Added
+- **Observation masking** — mask summarized tool results with structured stubs (#4043).
+- **Judge slot backoff** — per-cycle slot backoff for governance/operator judges (#4041).
+- **Governance action dedup** — expand canonical action normalization (#4020).
+
+### Fixed
+- **Build break** — resolve unused-rec and type ambiguity in context_compact_oas (#4074).
+- **Keeper tool_choice** — set Auto + relax dashboard tools API auth (#4042).
+- **Room atomic_update** — surface errors instead of silent ignore (#4077).
+- **Persona normalization** — normalize persona soul profiles (#4064).
+- **Voice config** — reset voice configuration boundaries (#4027).
+
+### Changed
+- **Keeper social model** — remove unused params and mutable ref (#4075).
+
+### Removed
+- **Mitosis/sentinel dead code** — final cleanup (#4067).
+
 ## [2.181.0] - 2026-03-31
 
 ### Added

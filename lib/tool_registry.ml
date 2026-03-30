@@ -10,6 +10,20 @@
     - Data resets on server restart (telemetry.jsonl is the durable store)
 *)
 
+(** Call source for source-aware telemetry.
+    Distinguishes external MCP calls from keeper-internal dispatch. *)
+type call_source =
+  | External_mcp
+  | Keeper_internal
+  | Inline_dispatch
+  | Deprecated_alias
+
+let string_of_source = function
+  | External_mcp -> "external_mcp"
+  | Keeper_internal -> "keeper_internal"
+  | Inline_dispatch -> "inline_dispatch"
+  | Deprecated_alias -> "deprecated_alias"
+
 (** Per-tool call statistics *)
 type call_stats = {
   mutable call_count : int;
@@ -17,23 +31,30 @@ type call_stats = {
   mutable failure_count : int;
   mutable last_called_at : float;  (** Unix timestamp, 0.0 = never *)
   mutable total_duration_ms : int;
+  mutable external_mcp_count : int;
+  mutable keeper_internal_count : int;
+  mutable inline_dispatch_count : int;
+  mutable deprecated_alias_count : int;
 }
 
 (** Global registry - process-lifetime, protected by mutex for fiber safety *)
 let registry : (string, call_stats) Hashtbl.t = Hashtbl.create 128
+(** Use raw_all_tool_schemas to include hidden/internal tools.
+    Previously used Config.all_tool_schemas (public-filtered), which caused
+    hidden tools to be structurally undercounted in telemetry. *)
 let known_tool_names : (string, unit) Hashtbl.t Eio.Lazy.t =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let tbl = Hashtbl.create 256 in
+    let tbl = Hashtbl.create 512 in
     List.iter
       (fun (schema : Types.tool_schema) -> Hashtbl.replace tbl schema.name ())
-      Config.all_tool_schemas;
+      Config.raw_all_tool_schemas;
     tbl)
 
 let is_known_tool tool_name =
   Hashtbl.mem (Eio.Lazy.force known_tool_names) tool_name
 
-(** Record a tool call. Called from handle_call_tool_eio after execution. *)
-let record_call ~tool_name ~success ~duration_ms =
+(** Record a tool call with source attribution. *)
+let record_call ?(source = External_mcp) ~tool_name ~success ~duration_ms () =
   let stats =
     match Hashtbl.find_opt registry tool_name with
     | Some s -> s
@@ -44,11 +65,20 @@ let record_call ~tool_name ~success ~duration_ms =
           failure_count = 0;
           last_called_at = 0.0;
           total_duration_ms = 0;
+          external_mcp_count = 0;
+          keeper_internal_count = 0;
+          inline_dispatch_count = 0;
+          deprecated_alias_count = 0;
         } in
         Hashtbl.replace registry tool_name s;
         s
   in
   stats.call_count <- stats.call_count + 1;
+  (match source with
+   | External_mcp -> stats.external_mcp_count <- stats.external_mcp_count + 1
+   | Keeper_internal -> stats.keeper_internal_count <- stats.keeper_internal_count + 1
+   | Inline_dispatch -> stats.inline_dispatch_count <- stats.inline_dispatch_count + 1
+   | Deprecated_alias -> stats.deprecated_alias_count <- stats.deprecated_alias_count + 1);
   if success then
     stats.success_count <- stats.success_count + 1
   else
@@ -56,9 +86,9 @@ let record_call ~tool_name ~success ~duration_ms =
   stats.last_called_at <- Time_compat.now ();
   stats.total_duration_ms <- stats.total_duration_ms + duration_ms
 
-let record_call_if_known ~tool_name ~success ~duration_ms =
+let record_call_if_known ?(source = External_mcp) ~tool_name ~success ~duration_ms () =
   if is_known_tool tool_name then
-    record_call ~tool_name ~success ~duration_ms
+    record_call ~source ~tool_name ~success ~duration_ms ()
 
 (** Get all stats as a sorted list (by call_count descending) *)
 let get_stats () : (string * call_stats) list =
@@ -113,6 +143,12 @@ let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
            then stats.total_duration_ms / stats.call_count
            else 0));
     ("last_called_at", `Float stats.last_called_at);
+    ("by_source", `Assoc [
+       ("external_mcp", `Int stats.external_mcp_count);
+       ("keeper_internal", `Int stats.keeper_internal_count);
+       ("inline_dispatch", `Int stats.inline_dispatch_count);
+       ("deprecated_alias", `Int stats.deprecated_alias_count);
+     ]);
   ]
 
 (** Generate a full stats report as JSON *)
@@ -152,6 +188,10 @@ let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
               | Some t -> t
               | None -> 0.0);
             total_duration_ms = 0;
+            external_mcp_count = 0;
+            keeper_internal_count = 0;
+            inline_dispatch_count = 0;
+            deprecated_alias_count = 0;
           };
         incr count))
     summary.stats_by_tool;

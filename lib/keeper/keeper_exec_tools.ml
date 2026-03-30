@@ -4,6 +4,13 @@ open Keeper_types
 open Keeper_memory
 open Keeper_alerting
 
+(** Callback for recording keeper-internal tool calls.
+    Set at server initialization to avoid Config dependency cycle.
+    Default: no-op. Set to Tool_registry.record_call_if_known in mcp_server_eio.ml. *)
+let on_keeper_tool_call :
+  (tool_name:string -> success:bool -> duration_ms:int -> unit) ref =
+  ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
+
 let ensure_keeper_board_post_args ~author ~source = function
   | `Assoc fields ->
       let fields =
@@ -786,14 +793,21 @@ let execute_keeper_tool_call
       (* Bridge to main MCP tool dispatch registry.
          Handlers are closures that already capture their runtime context
          (sw, clock, net, etc.) from server initialization. *)
-      (match Tool_dispatch.dispatch ~name ~args with
-       | Some (true, msg) -> msg
-       | Some (false, msg) ->
-           Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
-       | None ->
-           Yojson.Safe.to_string
-             (`Assoc [ ("error", `String "unregistered_masc_tool");
-                        ("tool", `String name) ]))
+      let t0 = Time_compat.now () in
+      let result = Tool_dispatch.dispatch ~name ~args in
+      let duration_ms =
+        int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+      let success, msg = match result with
+        | Some (true, msg) -> true, msg
+        | Some (false, msg) ->
+            false, Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+        | None ->
+            false, Yojson.Safe.to_string
+              (`Assoc [ ("error", `String "unregistered_masc_tool");
+                        ("tool", `String name) ])
+      in
+      !on_keeper_tool_call ~tool_name:name ~success ~duration_ms;
+      msg
   | other ->
       Yojson.Safe.to_string
         (`Assoc [ ("error", `String "unknown_tool"); ("tool", `String other) ])

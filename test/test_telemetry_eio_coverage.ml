@@ -106,6 +106,7 @@ let test_event_tool_called () =
     success = true;
     duration_ms = 100;
     agent_id = Some "claude-001";
+    source = Some "external_mcp";
   } in
   match e with
   | Telemetry_eio.Tool_called r ->

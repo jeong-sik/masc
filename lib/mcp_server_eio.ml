@@ -161,6 +161,12 @@ let () =
   (* Inject masc_* schemas into keeper bridge for profile-based filtering.
      Must happen after all schemas are assembled. *)
   Keeper_exec_tools.inject_masc_schemas Tools.all_schemas_extended;
+  (* Wire keeper-internal tool call recording to break Config dependency cycle.
+     keeper_exec_tools cannot reference Tool_registry directly. *)
+  Keeper_exec_tools.on_keeper_tool_call :=
+    (fun ~tool_name ~success ~duration_ms ->
+       Tool_registry.record_call_if_known ~source:Keeper_internal
+         ~tool_name ~success ~duration_ms ());
   Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ());
   (* C-4: Register input schema validation pre-hook.
      Validates tool arguments against their declared input_schema

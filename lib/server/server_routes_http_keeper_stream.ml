@@ -87,7 +87,8 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     | Some fs ->
         (try
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
-             ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms ()
+             ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
+             ~source:"keeper_internal" ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -95,8 +96,8 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
              (Printexc.to_string exn))
     | None -> ()
   );
-  Tool_registry.record_call_if_known ~tool_name:"masc_keeper_msg" ~success
-    ~duration_ms;
+  Tool_registry.record_call_if_known ~source:Keeper_internal
+    ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
   (success, body)
 
 let parse_keeper_chat_stream_request body_str =
@@ -274,15 +275,15 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
         (try
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
-             ~duration_ms ()
+             ~duration_ms ~source:"keeper_internal" ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
            Log.Misc.error "telemetry tracking failed: %s"
              (Printexc.to_string exn))
     | None -> ());
-  Tool_registry.record_call_if_known ~tool_name:"masc_keeper_msg" ~success
-    ~duration_ms;
+  Tool_registry.record_call_if_known ~source:Keeper_internal
+    ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
   (success, body)
 
 (** Send a Run_error AG-UI event with the given message. *)

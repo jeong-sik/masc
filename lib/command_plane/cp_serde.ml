@@ -90,6 +90,11 @@ let get_string_list json key =
       |> dedup_strings
   | _ -> []
 
+let legacy_chain_run_id json =
+  match U.member "chain" json with
+  | `Assoc _ as chain_json -> get_string_opt chain_json "run_id"
+  | _ -> None
+
 let operation_workload_profile (operation : operation_record) =
   Cp_search_fabric.normalized_workload_profile operation.workload_profile
 
@@ -422,12 +427,14 @@ let operation_to_json (operation : operation_record) =
       ("created_by", `String operation.created_by);
       ("source", `String operation.source);
       ("status", `String (string_of_operation_status operation.status));
+      ("chain", `Null);
       ("created_at", `String operation.created_at);
       ("updated_at", `String operation.updated_at);
     ]
 
-(* operation_of_json tolerates a "chain" key in stored JSON for backwards
-   compatibility but does not parse it — chain_record was removed in #3936. *)
+(* operation_of_json tolerates a legacy "chain" key in stored JSON for
+   backwards compatibility and keeps chain.run_id as a checkpoint_ref
+   fallback without reintroducing chain_record. *)
 let operation_of_json json =
   match Option.bind (get_string_opt json "status") operation_status_of_string with
   | None -> None
@@ -459,7 +466,9 @@ let operation_of_json json =
             search_strategy = get_string_default json "search_strategy" "best_first_v1";
             detachment_session_id = get_string_opt json "detachment_session_id";
             trace_id;
-            checkpoint_ref = get_string_opt json "checkpoint_ref";
+            checkpoint_ref =
+              option_or_else (get_string_opt json "checkpoint_ref") (fun () ->
+                  legacy_chain_run_id json);
             active_goal_ids = get_string_list json "active_goal_ids";
             note = get_string_opt json "note";
             created_by;

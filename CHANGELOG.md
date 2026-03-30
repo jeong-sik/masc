@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [2.180.0] - 2026-03-30
+
+### Added
+- **Tool surface SSOT** — single source of truth for tool catalog + observability redaction (#3998).
+- **Board delete tool** — `masc_board_delete` + label corrections (#3991).
+
 ## [2.179.0] - 2026-03-30
 
 ### Added

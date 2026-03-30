@@ -186,7 +186,6 @@ let test_post_create_structured_payload () =
          ("title", `String "Why");
          ("content", `String "Visible answer\n\n[STATE]\nGoal: keep context\n[/STATE]");
          ("author", `String "sangsu");
-         ("post_kind", `String "automation");
          ("meta", `Assoc [ ("source", `String "keeper_autonomy") ]);
        ])
   in
@@ -204,7 +203,7 @@ let test_post_create_structured_payload () =
     Yojson.Safe.Util.(json |> member "body" |> to_string);
   Alcotest.(check string) "content alias" "Visible answer"
     Yojson.Safe.Util.(json |> member "content" |> to_string);
-  Alcotest.(check string) "explicit kind" "automation"
+  Alcotest.(check string) "public posts stay human" "human"
     Yojson.Safe.Util.(json |> member "post_kind" |> to_string);
   Alcotest.(check string) "source meta kept" "keeper_autonomy"
     Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string);
@@ -212,6 +211,22 @@ let test_post_create_structured_payload () =
      so meta.state_block is absent (null) in the created post. *)
   Alcotest.(check bool) "state_block absent after strip" true
     (Yojson.Safe.Util.(json |> member "meta" |> member "state_block") = `Null)
+
+let test_post_create_rejects_non_human_kind () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body = dispatch "masc_board_post"
+    (make_args
+       [
+         ("content", `String "automation attempt");
+         ("author", `String "tester");
+         ("post_kind", `String "automation");
+       ])
+  in
+  Alcotest.(check bool) "public automation rejected" false ok;
+  Alcotest.(check bool) "error mentions human-only surface" true
+    (contains_substring body "human posts")
 
 let test_post_create_empty_content () =
   Eio_main.run @@ fun env ->
@@ -324,19 +339,14 @@ let test_post_list_filter_combinations () =
   cleanup ();
   ignore (dispatch "masc_board_post"
     (make_args [("content", `String "human"); ("author", `String "human-author")]));
-  ignore (dispatch "masc_board_post"
-    (make_args
-      [ ("content", `String "automation");
-        ("author", `String "dashboard-harness-bot");
-        ("visibility", `String "internal");
-        ("ttl_hours", `Int 1);
-        ("hearth", `String "dashboard-harness") ]));
-  ignore (dispatch "masc_board_post"
-    (make_args
-      [ ("content", `String "keeper");
-        ("author", `String "dm-keeper");
-        ("post_kind", `String "automation");
-        ("meta", `Assoc [ ("source", `String "keeper_board_post") ]) ]));
+  ignore (Board_dispatch.create_post ~author:"dashboard-harness-bot"
+            ~content:"automation" ~visibility:Board.Internal ~ttl_hours:1
+            ~hearth:"dashboard-harness" ~post_kind:Board.Automation_post ());
+  ignore (Board_dispatch.create_post ~author:"dm-keeper" ~content:"keeper"
+            ~post_kind:Board.Automation_post
+            ~meta_json:(`Assoc [ ("source", `String "keeper_board_post") ]) ());
+  ignore (Board_dispatch.create_post ~author:"keeper-alert-bot" ~content:"system"
+            ~post_kind:Board.System_post ());
   let ok1, body1 = dispatch "masc_board_list"
     (make_args [("exclude_system", `Bool true)]) in
   let ok2, body2 = dispatch "masc_board_list"
@@ -346,8 +356,12 @@ let test_post_list_filter_combinations () =
   Alcotest.(check bool) "exclude_system ok" true ok1;
   Alcotest.(check bool) "exclude_automation ok" true ok2;
   Alcotest.(check bool) "exclude both ok" true ok3;
+  Alcotest.(check bool) "exclude_system hides system" false
+    (contains_substring body1 "keeper-alert-bot");
   Alcotest.(check bool) "exclude_system keeps keeper" true
     (contains_substring body1 "dm-keeper");
+  Alcotest.(check bool) "exclude_automation keeps system" true
+    (contains_substring body2 "keeper-alert-bot");
   Alcotest.(check bool) "exclude_automation hides keeper" false
     (contains_substring body2 "dm-keeper");
   Alcotest.(check bool) "exclude_automation hides harness" false
@@ -363,12 +377,9 @@ let test_dispatch_reclassify_dry_run () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  ignore (dispatch "masc_board_post"
-    (make_args
-      [ ("content", `String "keeper");
-        ("author", `String "dm-keeper");
-        ("post_kind", `String "automation");
-        ("meta", `Assoc [ ("source", `String "keeper_board_post") ]) ]));
+  ignore (Board_dispatch.create_post ~author:"dm-keeper" ~content:"keeper"
+            ~post_kind:Board.Automation_post
+            ~meta_json:(`Assoc [ ("source", `String "keeper_board_post") ]) ());
   let ok, body = dispatch "masc_board_reclassify"
     (make_args [("dry_run", `Bool true)]) in
   Alcotest.(check bool) "reclassify ok" true ok;
@@ -573,6 +584,8 @@ let () =
           Alcotest.test_case "create success" `Quick test_post_create_success;
           Alcotest.test_case "create structured payload" `Quick
             test_post_create_structured_payload;
+          Alcotest.test_case "reject non-human kind" `Quick
+            test_post_create_rejects_non_human_kind;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;
           Alcotest.test_case "create empty title rejected" `Quick
             test_post_create_empty_title_rejected;

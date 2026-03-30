@@ -181,9 +181,6 @@ module KeeperRuntime = struct
   let snapshot_sec =
     max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
 
-  (** Keeper skill selection mode raw string (e.g. "agent", "heuristic"). *)
-  let skill_selection_opt () =
-    Sys.getenv_opt "MASC_KEEPER_SKILL_SELECTION" |> trim_opt
 end
 
 (** {1 Alert Dedup Configuration} *)

@@ -13,7 +13,7 @@ vi.mock('../store', () => ({
   boardPosts: { value: [] },
   boardLoading: { value: false },
   boardSortMode: { value: 'recent' },
-  boardExcludeSystem: { value: false },
+  boardExcludeSystem: { value: true },
   boardExcludeAutomation: { value: false },
   lastBoardRefreshAt: { value: 0 },
   refreshBoard: vi.fn(),
@@ -42,7 +42,7 @@ describe('Memory Component', () => {
     boardPosts.value = []
     boardLoading.value = false
     boardSortMode.value = 'recent'
-    boardExcludeSystem.value = false
+    boardExcludeSystem.value = true
     boardExcludeAutomation.value = false
     route.value = { params: {} } as any
   })
@@ -74,10 +74,10 @@ describe('Memory Component', () => {
     ] as any
     render(h(Memory, null))
     expect(screen.getByText('Test Post')).toBeInTheDocument()
+    expect(screen.getByText(/현재 목록은 사람 글만 있어서/)).toBeInTheDocument()
   })
 
-  it('hides automation posts when the automation filter is enabled', () => {
-    boardExcludeAutomation.value = true
+  it('separates automation posts into the autonomy section', () => {
     boardPosts.value = [
       {
         id: 'post-automation',
@@ -92,6 +92,26 @@ describe('Memory Component', () => {
       },
     ] as any
     render(h(Memory, null))
-    expect(screen.queryByText('Automation Post')).not.toBeInTheDocument()
+    expect(screen.getByText(/자율 글 \(1\)/)).toBeInTheDocument()
+    expect(screen.getByText('Automation Post')).toBeInTheDocument()
+  })
+
+  it('hides system posts by default and reports the hidden count', () => {
+    boardPosts.value = [
+      {
+        id: 'post-system',
+        title: 'System Post',
+        body: 'ops',
+        author: 'keeper-alert-bot',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        comment_count: 0,
+        votes: 0,
+        post_kind: 'system',
+      },
+    ] as any
+    render(h(Memory, null))
+    expect(screen.queryByText('System Post')).not.toBeInTheDocument()
+    expect(screen.getByText(/시스템 1건 제외/)).toBeInTheDocument()
   })
 })

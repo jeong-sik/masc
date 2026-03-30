@@ -223,10 +223,20 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
     in
     (match Post_id.of_string id_str, Agent_id.of_string author_str, visibility_of_string vis_str with
     | Ok id, Ok author, Some visibility ->
+        let resolved_kind =
+          match post_kind_opt with
+          | Some kind -> kind
+          | None ->
+              legacy_migrate_post_kind
+                ~author:author_str
+                ~meta_json
+                ~visibility
+                ~expires_at
+                ~hearth
+        in
         let title, body, post_kind, meta_json =
-          normalize_post_payload ~author:author_str ~content ?title:title_opt
-            ?body:body_opt ?post_kind:post_kind_opt ?meta_json
-            ~visibility ~expires_at ~hearth ()
+          normalize_post_payload ~content ?title:title_opt ?body:body_opt
+            ~post_kind:resolved_kind ?meta_json ()
         in
         Some {
           id;
@@ -564,7 +574,7 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
     ("author_karma", `Int author_karma);
     ("title", `String p.title);
     ("body", `String p.body);
-    ("post_kind", `String (post_kind_to_string (classify_post_kind p)));
+    ("post_kind", `String (post_kind_to_string p.post_kind));
     ("content", `String p.body);
     ("flair", flair_json);
     ("visibility", `String (visibility_to_string p.visibility));

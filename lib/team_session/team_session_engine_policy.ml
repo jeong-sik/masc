@@ -46,6 +46,8 @@ let maybe_post_board_alert ~(config : Room.config) ~(session : Team_session_type
     ~(message : string) : bool =
   match
     Board_dispatch.create_post ~author:"team-session" ~content:message
+      ~post_kind:Board.System_post
+      ~meta_json:(`Assoc [ ("source", `String "team_session_alert") ])
       ~visibility:Board.Internal ~ttl_hours:24
       ~hearth:"team-session"
       ~thread_id:session.session_id ()

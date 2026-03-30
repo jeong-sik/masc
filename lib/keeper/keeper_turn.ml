@@ -94,7 +94,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             let fallback_skill_route =
               route_keeper_skill ~soul_profile:meta.soul_profile ~message
             in
-            let skill_selection_mode = keeper_skill_selection_mode () in
             let live_worktree_change =
               Worktree_live_context.capture_change_block
                 ~base_path:ctx.config.base_path ~actor_key:meta.name
@@ -112,16 +111,10 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 if effective_no_skill_route then
                   base_system_prompt
                 else
-                  match skill_selection_mode with
-                  | SkillSelectHeuristic ->
-                      skill_route_system_prompt_heuristic
-                        ~base_system_prompt
-                        ~route:fallback_skill_route
-                  | SkillSelectAgent ->
-                      skill_route_system_prompt_agent
-                        ~base_system_prompt
-                        ~fallback_route:fallback_skill_route
-                        ~soul_profile:meta.soul_profile
+                  skill_route_system_prompt_agent
+                    ~base_system_prompt
+                    ~fallback_route:fallback_skill_route
+                    ~soul_profile:meta.soul_profile
               in
               let prompt =
                 append_continuity_context_prompt

@@ -26,7 +26,10 @@ let () =
   (* Test 2: Create permanent post (default) *)
   let test_permanent_post () =
     let store = create_store () in
-    match create_post store ~author:"test-agent" ~content:"Permanent post" () with
+    match
+      create_post store ~author:"test-agent" ~content:"Permanent post"
+        ~post_kind:Human_post ()
+    with
     | Ok post ->
         assert (post.expires_at = 0.0);
         Printf.printf "✓ Permanent post has expires_at = 0.0\n"
@@ -36,7 +39,10 @@ let () =
   (* Test 3: Create post with explicit TTL *)
   let test_expiring_post () =
     let store = create_store () in
-    match create_post store ~author:"test-agent" ~content:"Expiring post" ~ttl_hours:24 () with
+    match
+      create_post store ~author:"test-agent" ~content:"Expiring post"
+        ~post_kind:Human_post ~ttl_hours:24 ()
+    with
     | Ok post ->
         assert (post.expires_at > 0.0);
         Printf.printf "✓ Expiring post has expires_at > 0.0 (%.0f)\n" post.expires_at
@@ -47,7 +53,8 @@ let () =
   let test_sweeper_skips_permanent () =
     let store = create_store () in
     (* Create permanent post *)
-    (match create_post store ~author:"test-agent" ~content:"Permanent" () with
+    (match create_post store ~author:"test-agent" ~content:"Permanent"
+             ~post_kind:Human_post () with
      | Ok _ -> ()
      | Error e ->
          fail_board_test "Failed to create permanent post for sweep test" e);
@@ -59,7 +66,10 @@ let () =
 
   let test_post_kind_human_default () =
     let store = create_store () in
-    match create_post store ~author:"test-agent" ~content:"Human post" () with
+    match
+      create_post store ~author:"test-agent" ~content:"Human post"
+        ~post_kind:Human_post ()
+    with
     | Ok post ->
         let json = post_to_yojson post in
         let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
@@ -71,23 +81,25 @@ let () =
   let test_post_kind_automation_contract () =
     let store = create_store () in
     match create_post store ~author:"dashboard-harness-bot" ~content:"Harness post"
-            ~visibility:Internal ~ttl_hours:1 ~hearth:"dashboard-harness" () with
+            ~visibility:Internal ~ttl_hours:1 ~hearth:"dashboard-harness"
+            ~post_kind:Automation_post () with
     | Ok post ->
         let json = post_to_yojson post in
         let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
         assert (String.equal kind "automation");
-        Printf.printf "✓ Harness metadata classifies post as automation\n"
+        Printf.printf "✓ Explicit automation contract is preserved\n"
     | Error e -> fail_board_test "Failed to create automation post" e
   in
 
-  let test_post_kind_system_author () =
+  let test_post_kind_system_contract () =
     let store = create_store () in
-    match create_post store ~author:"operator" ~content:"System post" () with
+    match create_post store ~author:"operator" ~content:"System post"
+            ~post_kind:System_post () with
     | Ok post ->
         let json = post_to_yojson post in
         let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
         assert (String.equal kind "system");
-        Printf.printf "✓ System author classifies post as system\n"
+        Printf.printf "✓ Explicit system contract is preserved\n"
     | Error e -> fail_board_test "Failed to create system post" e
   in
 
@@ -113,7 +125,7 @@ let test_post_kind_keeper_provenance_upgrade () =
   test_sweeper_skips_permanent ();
   test_post_kind_human_default ();
   test_post_kind_automation_contract ();
-  test_post_kind_system_author ();
+  test_post_kind_system_contract ();
   test_post_kind_keeper_provenance_upgrade ();
 
   Printf.printf "\n✅ All Board TTL tests passed!\n\n"

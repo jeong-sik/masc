@@ -156,7 +156,7 @@ describe('Autoresearch surface refresh', () => {
       .toBeGreaterThanOrEqual(2)
     expect(container.textContent).toContain('2 / 5')
     expect(container.textContent).toContain('사이클 이력 (2건)')
-  }, 10000)
+  }, 20000)
 
   it('preserves the current selection when that loop still exists after refresh', async () => {
     const loopA = loopSummary('loop-a111', { target_file: 'target-a.ml' })

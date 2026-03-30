@@ -529,18 +529,11 @@ let run_proactive_generation
   let fallback_skill_route =
     route_keeper_skill ~soul_profile:meta.soul_profile ~message:"proactive idle automation checkin"
   in
-  let skill_selection_mode = keeper_skill_selection_mode () in
   let base_turn_system_prompt =
-    match skill_selection_mode with
-    | SkillSelectHeuristic ->
-        skill_route_system_prompt_heuristic
-          ~base_system_prompt:ctx_work.system_prompt
-          ~route:fallback_skill_route
-    | SkillSelectAgent ->
-        skill_route_system_prompt_agent
-          ~base_system_prompt:ctx_work.system_prompt
-          ~fallback_route:fallback_skill_route
-          ~soul_profile:meta.soul_profile
+    skill_route_system_prompt_agent
+      ~base_system_prompt:ctx_work.system_prompt
+      ~fallback_route:fallback_skill_route
+      ~soul_profile:meta.soul_profile
   in
   let turn_system_prompt =
     append_continuity_context_prompt

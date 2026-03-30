@@ -1,4 +1,4 @@
-(** Keeper_skill_routing — skill routing types, heuristic/agent selection,
+(** Keeper_skill_routing — skill routing types and agent-selected prompt assembly
     and prompt assembly for keeper execution.
 
     Extracted from keeper_alerting.ml to separate alert infrastructure
@@ -16,7 +16,6 @@ type keeper_skill_route = {
 }
 
 type keeper_skill_selection_mode =
-  | SkillSelectHeuristic
   | SkillSelectAgent
 
 type keeper_skill_route_resolution = {
@@ -32,13 +31,7 @@ let contains_ci (haystack : string) (needle : string) : bool =
   else Re.execp (Re.str n |> Re.compile) h
 
 let keeper_skill_selection_mode () : keeper_skill_selection_mode =
-  match Env_config.KeeperRuntime.skill_selection_opt () with
-  | None -> SkillSelectAgent
-  | Some raw ->
-      let v = String.lowercase_ascii (String.trim raw) in
-      if v = "" || v = "agent" || v = "model" || v = "auto"
-      then SkillSelectAgent
-      else SkillSelectHeuristic
+  SkillSelectAgent
 
 let keeper_allowed_skills = [
   "masc-heartbeat";
@@ -263,32 +256,12 @@ let resolved_keeper_skill_route
     ~(fallback_route : keeper_skill_route)
     ~(reply_raw : string) : keeper_skill_route_resolution =
   match selection_mode with
-  | SkillSelectHeuristic ->
-      { route = fallback_route; selection_mode = "heuristic"; provenance = "fallback" }
   | SkillSelectAgent ->
       (match agent_selected_skill_route_from_reply reply_raw with
        | Some route ->
            { route; selection_mode = "agent"; provenance = "judgment" }
        | None ->
-           { route = fallback_route; selection_mode = "heuristic"; provenance = "fallback" })
-
-let skill_route_system_prompt_heuristic
-    ~(base_system_prompt : string)
-    ~(route : keeper_skill_route) : string =
-  Printf.sprintf
-    "%s\n\n\
-     Skill routing policy (strict):\n\
-     - Selected primary skill: %s\n\
-     - Secondary skill(s): %s\n\
-     - Selection reason: %s\n\
-     - First line of assistant output MUST be exactly `%s`.\n\
-     - After the first line, answer normally and concretely.\n\
-     - Do not fabricate capabilities beyond the selected skills."
-    base_system_prompt
-    route.primary_skill
-    (if route.secondary_skills = [] then "none" else String.concat ", " route.secondary_skills)
-    route.reason
-    (skill_route_header route)
+           { route = fallback_route; selection_mode = "agent"; provenance = "fallback" })
 
 let skill_route_system_prompt_agent
     ~(base_system_prompt : string)

@@ -15,6 +15,13 @@ let sprintf = Printf.sprintf
 
 (* ── types ───────────────────────────────────────────────────── *)
 
+type param_meta = {
+  description : string;
+  value_type : string;
+  min_value : Yojson.Safe.t option;
+  max_value : Yojson.Safe.t option;
+}
+
 type 'a param_entry = {
   key : string;
   default : unit -> 'a;
@@ -34,6 +41,7 @@ type erased = {
   has_override : unit -> bool;
   set_from_json : Yojson.Safe.t -> (unit, string) result;
   clear_override : unit -> unit; [@warning "-69"]
+  meta : param_meta option;
 }
 
 type 'a param = 'a param_entry
@@ -53,7 +61,7 @@ let with_ro f = Eio_guard.with_mutex_ro mu f
 
 (* ── registration ────────────────────────────────────────────── *)
 
-let register ~key ~default ~validate ~serialize ~deserialize =
+let register ~key ~default ~validate ~serialize ~deserialize ?meta () =
   let entry = { key; default; validate; serialize; deserialize; override = None } in
   let erased =
     {
@@ -75,6 +83,7 @@ let register ~key ~default ~validate ~serialize ~deserialize =
                   entry.override <- Some v;
                   Ok ()));
       clear_override = (fun () -> entry.override <- None);
+      meta;
     }
   in
   (* Check + insert under mutex to prevent TOCTOU race.
@@ -109,13 +118,20 @@ let set_by_key key json =
 let clear (entry : 'a param) =
   with_rw (fun () -> entry.override <- None)
 
+let clear_by_key key =
+  with_rw (fun () ->
+    match Hashtbl.find_opt registry_tbl key with
+    | None -> Error (sprintf "unknown parameter: %s" key)
+    | Some erased -> erased.clear_override (); Ok ())
+
 let registry () =
   with_ro (fun () ->
     Hashtbl.fold
       (fun _key (erased : erased) acc ->
-        (erased.key, erased.current_json (), erased.default_json (), erased.has_override ()) :: acc)
+        (erased.key, erased.current_json (), erased.default_json (),
+         erased.has_override (), erased.meta) :: acc)
       registry_tbl [])
-  |> List.sort (fun (a, _, _, _) (b, _, _, _) -> String.compare a b)
+  |> List.sort (fun (a, _, _, _, _) (b, _, _, _, _) -> String.compare a b)
 
 (* ── persistence ─────────────────────────────────────────────── *)
 

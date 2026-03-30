@@ -64,15 +64,26 @@ let handle_governance_feed ctx args =
 
 let handle_runtime_params _ctx _args =
   let params = Runtime_params.registry () in
+  let meta_to_json = function
+    | None -> `Null
+    | Some (m : Runtime_params.param_meta) ->
+        `Assoc ([
+          ("description", `String m.description);
+          ("value_type", `String m.value_type);
+        ]
+        @ (match m.min_value with Some v -> [("min_value", v)] | None -> [])
+        @ (match m.max_value with Some v -> [("max_value", v)] | None -> []))
+  in
   let items =
     List.map
-      (fun (key, current, default, has_override) ->
+      (fun (key, current, default, has_override, meta) ->
         `Assoc
           [
             ("key", `String key);
             ("current", current);
             ("default", default);
             ("has_override", `Bool has_override);
+            ("meta", meta_to_json meta);
           ])
       params
   in
@@ -141,8 +152,8 @@ let handle_set_param ~submit_petition ctx args =
         else begin
           let old_value =
             match Runtime_params.registry ()
-                  |> List.find_opt (fun (k, _, _, _) -> k = param_key) with
-            | Some (_, current, _, _) -> current
+                  |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+            | Some (_, current, _, _, _) -> current
             | None -> `Null
           in
           match Runtime_params.set_by_key param_key value with

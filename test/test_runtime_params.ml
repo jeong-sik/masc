@@ -21,6 +21,7 @@ let () =
           | `Float f -> Ok f
           | `Int i -> Ok (float_of_int i)
           | _ -> Error "expected number")
+        ()
     in
     let v = Runtime_params.get p in
     Alcotest.(check (float 0.01)) "default value" 42.0 v
@@ -39,6 +40,7 @@ let () =
           match json with
           | `Int i -> Ok i
           | _ -> Error "expected int")
+        ()
     in
     (match Runtime_params.set p 25 with
      | Ok () -> ()
@@ -60,6 +62,7 @@ let () =
           match json with
           | `Int i -> Ok i
           | _ -> Error "expected int")
+        ()
     in
     (match Runtime_params.set p 99 with
      | Error _ -> ()
@@ -81,6 +84,7 @@ let () =
           match json with
           | `String s -> Ok s
           | _ -> Error "expected string")
+        ()
     in
     (match Runtime_params.set_by_key "test.keyed_param" (`String "world") with
      | Ok () -> ()
@@ -88,10 +92,10 @@ let () =
     (* Verify via registry *)
     let entries = Runtime_params.registry () in
     let entry =
-      List.find_opt (fun (k, _, _, _) -> k = "test.keyed_param") entries
+      List.find_opt (fun (k, _, _, _, _) -> k = "test.keyed_param") entries
     in
     (match entry with
-     | Some (_, current, _, has_override) ->
+     | Some (_, current, _, has_override, _meta) ->
          Alcotest.(check bool) "has override" true has_override;
          Alcotest.(check string) "current value"
            "\"world\"" (Yojson.Safe.to_string current)
@@ -117,6 +121,7 @@ let () =
           match json with
           | `Int i -> Ok i
           | _ -> Error "expected int")
+        ()
     in
     ignore (Runtime_params.set p 200);
     Alcotest.(check int) "overridden" 200 (Runtime_params.get p);
@@ -138,6 +143,7 @@ let () =
           match json with
           | `Int i -> Ok i
           | _ -> Error "expected int")
+        ()
     in
     ignore (Runtime_params.set p 42);
     Runtime_params.persist ~base_path:tmp_dir;
@@ -178,7 +184,7 @@ let () =
     (* Verify that governance_registry registered params *)
     let entries = Runtime_params.registry () in
     let has key =
-      List.exists (fun (k, _, _, _) -> k = key) entries
+      List.exists (fun (k, _, _, _, _) -> k = key) entries
     in
     Alcotest.(check bool) "inference.default_model registered"
       true (has "inference.default_model");

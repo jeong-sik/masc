@@ -271,8 +271,8 @@ let apply_self_preservation ~total_keepers to_restart =
 
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
-  let max_restarts = Env_config.KeeperSupervisor.max_restarts in
-  let dead_ttl_sec = Env_config.KeeperSupervisor.dead_ttl_sec in
+  let max_restarts = Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
+  let dead_ttl_sec = Float.of_int (Runtime_params.get Governance_registry.keeper_dead_ttl_sec) in
   let base_path = ctx.config.base_path in
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about

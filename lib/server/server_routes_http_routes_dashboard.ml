@@ -11,6 +11,76 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
+(** Handle POST /api/v1/keepers/:name/tools.
+    Extracted so it can be called from any prefix_post handler that
+    catches POST /api/v1/keepers/* requests. *)
+let handle_keeper_tools_post state req reqd =
+  Http.Request.read_body_async reqd (fun body_str ->
+    let req_path = Http.Request.path req in
+    let prefix = "/api/v1/keepers/" in
+    let suffix = "/tools" in
+    let plen = String.length prefix in
+    let slen = String.length suffix in
+    let tlen = String.length req_path in
+    let name = String.trim (String.sub req_path plen (tlen - plen - slen)) in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request {|{"error":"keeper name required"}|} reqd
+    else
+      let config = state.Mcp_server.room_config in
+      match Keeper_types.read_meta config name with
+      | Error msg ->
+          Http.Response.json ~status:`Not_found
+            (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
+      | Ok None ->
+          Http.Response.json ~status:`Not_found
+            (Printf.sprintf {|{"error":"keeper %S not found"}|} name) reqd
+      | Ok (Some meta) ->
+          (try
+             let args = Yojson.Safe.from_string body_str in
+             let action = Safe_ops.json_string ~default:"" "action" args in
+             let tools = Safe_ops.json_string_list "tools" args in
+             let dedupe xs =
+               List.fold_left (fun acc x ->
+                 if List.mem x acc then acc else x :: acc) [] xs
+               |> List.rev in
+             let updated_meta = match action with
+               | "set_allowlist" ->
+                   Ok { meta with tool_allowlist = dedupe tools; updated_at = Keeper_types.now_iso () }
+               | "set_denylist" ->
+                   Ok { meta with tool_denylist = dedupe tools; updated_at = Keeper_types.now_iso () }
+               | "add_allow" ->
+                   Ok { meta with tool_allowlist = dedupe (meta.tool_allowlist @ tools); updated_at = Keeper_types.now_iso () }
+               | "remove_allow" ->
+                   Ok { meta with tool_allowlist = List.filter (fun n -> not (List.mem n tools)) meta.tool_allowlist; updated_at = Keeper_types.now_iso () }
+               | "add_deny" ->
+                   Ok { meta with tool_denylist = dedupe (meta.tool_denylist @ tools); updated_at = Keeper_types.now_iso () }
+               | "remove_deny" ->
+                   Ok { meta with tool_denylist = List.filter (fun n -> not (List.mem n tools)) meta.tool_denylist; updated_at = Keeper_types.now_iso () }
+               | "" -> Error "action required (set_allowlist|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
+               | other -> Error (Printf.sprintf "unknown action: %s" other) in
+             (match updated_meta with
+             | Error msg ->
+                 Http.Response.json ~status:`Bad_request
+                   (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
+             | Ok meta' ->
+                 (match Keeper_types.write_meta config meta' with
+                  | Ok () ->
+                      let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta' in
+                      let masc_count = List.length (List.filter (fun n -> String.starts_with ~prefix:"masc_" n) allowed) in
+                      Http.Response.json ~compress:true ~request:req
+                        (Yojson.Safe.to_string (`Assoc [
+                           ("ok", `Bool true);
+                           ("tool_allowlist", `List (List.map (fun s -> `String s) meta'.tool_allowlist));
+                           ("tool_denylist", `List (List.map (fun s -> `String s) meta'.tool_denylist));
+                           ("active_masc_tool_count", `Int masc_count);
+                           ("total_active", `Int (List.length allowed))])) reqd
+                  | Error e ->
+                      Http.Response.json ~status:`Internal_server_error
+                        (Printf.sprintf {|{"error":"write failed: %s"}|} (String.escaped e)) reqd))
+           with Yojson.Json_error e ->
+             Http.Response.json ~status:`Bad_request
+               (Printf.sprintf {|{"error":"invalid json: %s"}|} (String.escaped e)) reqd))
+
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
@@ -404,9 +474,85 @@ let add_routes ~sw ~clock router =
              {|{"error":"not found"}|} reqd
        ) request reqd)
 
-  (* Keeper config update — POST (PATCH semantic) to update an existing keeper
-     with the same durable fields accepted by masc_keeper_up. *)
+  (* Keeper config or tools update.  This prefix_post catches ALL POST
+     /api/v1/keepers/* requests.  We check the suffix BEFORE auth so that
+     /tools gets with_tool_auth (localhost-friendly) while /config keeps
+     with_token_permission_auth (admin token required). *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       let _p = Http.Request.path request in
+       let _pfx_len = 16 in (* String.length "/api/v1/keepers/" *)
+       let _tl = "/tools" in let _tll = String.length _tl in let _pl = String.length _p in
+       if _pl > _pfx_len + _tll && String.sub _p (_pl - _tll) _tll = _tl then begin
+         with_tool_auth ~tool_name:"masc_keeper_up"
+           (fun state req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             let req_path = Http.Request.path req in
+             let prefix = "/api/v1/keepers/" in
+             let suffix = "/tools" in
+             let plen = String.length prefix in
+             let slen = String.length suffix in
+             let tlen = String.length req_path in
+             let name = String.trim (String.sub req_path plen (tlen - plen - slen)) in
+             if String.length name = 0 then
+               Http.Response.json ~status:`Bad_request
+                 {|{"error":"keeper name required"}|} reqd
+             else
+               let config = state.Mcp_server.room_config in
+               match Keeper_types.read_meta config name with
+               | Error msg ->
+                   Http.Response.json ~status:`Not_found
+                     (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
+               | Ok None ->
+                   Http.Response.json ~status:`Not_found
+                     (Printf.sprintf {|{"error":"keeper %S not found"}|} name) reqd
+               | Ok (Some meta) ->
+                   (try
+                      let args = Yojson.Safe.from_string body_str in
+                      let action = Safe_ops.json_string ~default:"" "action" args in
+                      let tools = Safe_ops.json_string_list "tools" args in
+                      let dedupe xs =
+                        List.fold_left (fun acc x ->
+                          if List.mem x acc then acc else x :: acc) [] xs
+                        |> List.rev in
+                      let updated_meta = match action with
+                        | "set_allowlist" ->
+                            Ok { meta with tool_allowlist = dedupe tools; updated_at = Keeper_types.now_iso () }
+                        | "set_denylist" ->
+                            Ok { meta with tool_denylist = dedupe tools; updated_at = Keeper_types.now_iso () }
+                        | "add_allow" ->
+                            Ok { meta with tool_allowlist = dedupe (meta.tool_allowlist @ tools); updated_at = Keeper_types.now_iso () }
+                        | "remove_allow" ->
+                            Ok { meta with tool_allowlist = List.filter (fun n -> not (List.mem n tools)) meta.tool_allowlist; updated_at = Keeper_types.now_iso () }
+                        | "add_deny" ->
+                            Ok { meta with tool_denylist = dedupe (meta.tool_denylist @ tools); updated_at = Keeper_types.now_iso () }
+                        | "remove_deny" ->
+                            Ok { meta with tool_denylist = List.filter (fun n -> not (List.mem n tools)) meta.tool_denylist; updated_at = Keeper_types.now_iso () }
+                        | "" -> Error "action required (set_allowlist|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
+                        | other -> Error (Printf.sprintf "unknown action: %s" other) in
+                      (match updated_meta with
+                      | Error msg ->
+                          Http.Response.json ~status:`Bad_request
+                            (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
+                      | Ok meta' ->
+                          (match Keeper_types.write_meta config meta' with
+                           | Ok () ->
+                               let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta' in
+                               let masc_count = List.length (List.filter (fun n -> String.starts_with ~prefix:"masc_" n) allowed) in
+                               Http.Response.json ~compress:true ~request:req
+                                 (Yojson.Safe.to_string (`Assoc [
+                                    ("ok", `Bool true);
+                                    ("tool_allowlist", `List (List.map (fun s -> `String s) meta'.tool_allowlist));
+                                    ("tool_denylist", `List (List.map (fun s -> `String s) meta'.tool_denylist));
+                                    ("active_masc_tool_count", `Int masc_count);
+                                    ("total_active", `Int (List.length allowed))])) reqd
+                           | Error e ->
+                               Http.Response.json ~status:`Internal_server_error
+                                 (Printf.sprintf {|{"error":"write failed: %s"}|} (String.escaped e)) reqd))
+                    with Yojson.Json_error e ->
+                      Http.Response.json ~status:`Bad_request
+                        (Printf.sprintf {|{"error":"invalid json: %s"}|} (String.escaped e)) reqd)
+           )) request reqd
+       end else begin
        with_token_permission_auth ~permission:Types.CanAdmin
          (fun state agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
@@ -514,7 +660,8 @@ let add_routes ~sw ~clock router =
              Http.Response.json ~status:`Not_found
                {|{"error":"not found"}|} reqd
          )
-       ) request reqd)
+       ) request reqd
+       end)
 
   (* Keeper tools — POST /api/v1/keepers/:name/tools
      Body: { "action": "set_allowlist"|"set_denylist"|"add_allow"|"remove_allow"|"add_deny"|"remove_deny",
@@ -683,6 +830,15 @@ let add_routes ~sw ~clock router =
 
   (* Keeper shutdown — POST /api/v1/keepers/:name/shutdown *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       let _p = Http.Request.path request in
+       let _pfx_len = 16 in (* String.length "/api/v1/keepers/" *)
+       let _tl = "/tools" in let _tll = String.length _tl in let _pl = String.length _p in
+       if _pl > _pfx_len + _tll && String.sub _p (_pl - _tll) _tll = _tl then begin
+         with_tool_auth ~tool_name:"masc_keeper_up"
+           (fun state req reqd ->
+             handle_keeper_tools_post state req reqd
+           ) request reqd
+       end else begin
        with_token_permission_auth ~permission:Types.CanAdmin
          (fun state agent_name req reqd ->
            let req_path = Http.Request.path req in
@@ -733,7 +889,8 @@ let add_routes ~sw ~clock router =
            else
              Http.Response.json ~status:`Not_found
                {|{"error":"not found"}|} reqd
-         ) request reqd)
+         ) request reqd
+       end)
 
   (* Agent activity — per-agent tool call stats from telemetry *)
   |> Http.Router.get "/api/v1/agent-activity" (fun request reqd ->

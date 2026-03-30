@@ -89,7 +89,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
         (try
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
-             ~source:"keeper_internal" ()
+             ~source:(Tool_registry.string_of_source Keeper_internal) ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -277,7 +277,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
         (try
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
-             ~duration_ms ~source:"keeper_internal" ()
+             ~duration_ms ~source:(Tool_registry.string_of_source Keeper_internal) ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->

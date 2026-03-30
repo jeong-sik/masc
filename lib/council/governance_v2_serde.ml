@@ -144,13 +144,8 @@ let order_status_of_string = function
 let string_list_json values =
   `List (List.map (fun value -> `String value) values)
 
-let string_opt_json = function
-  | Some value -> `String value
-  | None -> `Null
-
-let float_opt_json = function
-  | Some value -> `Float value
-  | None -> `Null
+let string_opt_json = Json_util.string_opt_to_json
+let float_opt_json = Json_util.float_opt_to_json
 
 let action_request_to_yojson (request : action_request) =
   let fields =

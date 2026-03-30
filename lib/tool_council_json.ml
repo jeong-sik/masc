@@ -7,9 +7,7 @@ module GV2 = Council.Governance_v2
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
-let string_opt_json = function
-  | Some value -> `String value
-  | None -> `Null
+let string_opt_json = Json_util.string_opt_to_json
 
 let action_request_json (request : GV2.action_request) =
   `Assoc

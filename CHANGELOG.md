@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.167.0] - 2026-03-30
+
+### Changed
+- **CI dedup** — PR sync check extracted to single job, 5 duplicated blocks removed (#3839).
+- **CI webrtc interop** — external deps pinned before install, schedule weekly (#3838).
+- **keeper_meta cleanup** — `last_triage_triggers` removed (duplicated in `deliberation_meta`) (#3859, closes #3814).
+- **Governance judge cache** — TTL extended to survive slow inference (#3858).
+- **Dashboard governance** — ml-auto layout followup, badge test (#3857).
+- **Copilot review followup** — relay registry cache, verifier word boundary (#3853).
+
 ## [2.166.0] - 2026-03-30
 
 ### Added

@@ -374,6 +374,83 @@ goal = "works"
     (Sys.readdir tmp_dir);
   Unix.rmdir tmp_dir
 
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let rec rm_rf path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
+let rec mkdir_p dir =
+  if dir = "" || dir = "." || dir = "/" then ()
+  else if Sys.file_exists dir then ()
+  else begin
+    mkdir_p (Filename.dirname dir);
+    Unix.mkdir dir 0o755
+  end
+
+let write_file path content =
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc
+
+let with_personas_dir f =
+  with_temp_dir "keeper-personas" @@ fun personas_dir ->
+  let original = Sys.getenv_opt "MASC_PERSONAS_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match original with
+      | Some value -> Unix.putenv "MASC_PERSONAS_DIR" value
+      | None -> Unix.putenv "MASC_PERSONAS_DIR" "");
+      Masc_mcp.Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+      Masc_mcp.Config_dir_resolver.reset ();
+      f personas_dir)
+
+let test_persona_profile_canonicalizes_soul_profile () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test",
+    "soul_profile": "delivery"
+  }
+}
+|};
+  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
+  check (option string) "canonical soul_profile" (Some "delivery") defaults.soul_profile
+
+let test_persona_profile_ignores_invalid_soul_profile () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test",
+    "soul_profile": "utility"
+  }
+}
+|};
+  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
+  check (option string) "invalid soul_profile dropped" None defaults.soul_profile
+
 (* ================================================================ *)
 (* Test suite                                                        *)
 (* ================================================================ *)
@@ -420,5 +497,9 @@ let () =
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
+          test_case "persona profile canonicalizes soul_profile" `Quick
+            test_persona_profile_canonicalizes_soul_profile;
+          test_case "persona profile ignores invalid soul_profile" `Quick
+            test_persona_profile_ignores_invalid_soul_profile;
         ] );
     ]

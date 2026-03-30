@@ -383,6 +383,18 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
           let keeper_json = Yojson.Safe.Util.member "keeper" json in
           match keeper_json with
           | `Assoc _ ->
+              let soul_profile =
+                match Safe_ops.json_string_opt "soul_profile" keeper_json with
+                | None -> None
+                | Some raw -> (
+                    match canonical_soul_profile raw with
+                    | Some profile -> Some profile
+                    | None ->
+                        Log.Keeper.warn
+                          "persona profile %s has invalid soul_profile '%s'; ignoring"
+                          path raw;
+                        None)
+              in
               {
                 manifest_path = Some path;
                 goal = Safe_ops.json_string_opt "goal" keeper_json;
@@ -392,7 +404,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   normalize_goal_horizon_opt (Safe_ops.json_string_opt "mid_goal" keeper_json);
                 long_goal =
                   normalize_goal_horizon_opt (Safe_ops.json_string_opt "long_goal" keeper_json);
-                soul_profile = Safe_ops.json_string_opt "soul_profile" keeper_json;
+                soul_profile;
                 will = Safe_ops.json_string_opt "will" keeper_json;
                 needs = Safe_ops.json_string_opt "needs" keeper_json;
                 desires = Safe_ops.json_string_opt "desires" keeper_json;

@@ -33,73 +33,13 @@ let prefixed_tool_names names =
   names |> List.map (fun name -> "mcp__masc__" ^ name)
 
 let spawned_agent_public_tool_names : string list =
-  [
-    "masc_status";
-    "masc_tasks";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_task_history";
-    "masc_broadcast";
-    "masc_join";
-    "masc_leave";
-    "masc_who";
-    "masc_agent_update";
-    "masc_add_task";
-    "masc_heartbeat";
-    "masc_messages";
-    "masc_worktree_create";
-    "masc_worktree_remove";
-    "masc_worktree_list";
-    "masc_handover_create";
-    "masc_handover_list";
-    "masc_handover_claim";
-    "masc_handover_get";
-    "masc_relay_status";
-    "masc_relay_checkpoint";
-    "masc_board_list";
-    "masc_board_post";
-    "masc_board_comment";
-    "masc_board_vote";
-    "masc_board_get";
-    "masc_tool_help";
-    "masc_portal_open";
-    "masc_portal_send";
-    "masc_portal_status";
-    "masc_team_session_start";
-    "masc_team_session_step";
-    "masc_team_session_status";
-    "masc_team_session_events";
-    "masc_team_session_finalize";
-    "masc_team_session_stop";
-    "masc_team_session_report";
-    "masc_team_session_list";
-    "masc_a2a_delegate";
-    "masc_a2a_subscribe";
-    "masc_poll_events";
-    (* masc_vote_create, masc_vote_cast, masc_vote_status removed:
-       hidden in Tool_catalog (prefer decision/governance V2 tools) *)
-    "masc_spawn";
-  ]
+  Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent
 
 let spawned_agent_prefixed_tools : string list =
   prefixed_tool_names spawned_agent_public_tool_names
 
 let mdal_auditable_tool_names : string list =
-  [
-    "masc_code_search";
-    "masc_code_symbols";
-    "masc_code_read";
-    "masc_worktree_create";
-    "masc_worktree_list";
-    "masc_worktree_remove";
-    "masc_run_init";
-    "masc_run_plan";
-    "masc_run_log";
-    "masc_run_deliverable";
-    "masc_run_get";
-    "masc_run_list";
-    "masc_spawn";
-  ]
+  Tool_catalog.tools_for_surface Tool_catalog.Mdal_auditable
 
 let local_worker_public_tool_names : string list =
   unique_preserve_order

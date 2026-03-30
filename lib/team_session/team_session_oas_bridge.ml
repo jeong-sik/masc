@@ -11,36 +11,7 @@ module Swarm = Agent_sdk_swarm
 module Oas = Agent_sdk
 
 let supported_local_worker_tool_names =
-  [
-    "masc_status";
-    "masc_tasks";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_add_task";
-    "masc_heartbeat";
-    "masc_board_post";
-    "masc_board_list";
-    "masc_board_get";
-    "masc_board_comment";
-    "masc_board_vote";
-    "masc_board_search";
-    "masc_code_search";
-    "masc_code_symbols";
-    "masc_code_read";
-    "masc_worktree_create";
-    "masc_worktree_remove";
-    "masc_worktree_list";
-    "masc_run_init";
-    "masc_run_plan";
-    "masc_run_log";
-    "masc_run_deliverable";
-    "masc_run_get";
-    "masc_run_list";
-    "masc_repair_loop_start";
-    "masc_repair_loop_status";
-    "masc_repair_loop_iterate";
-    "masc_repair_loop_stop";
-  ]
+  Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 
 let supported_local_worker_tools () =
   match

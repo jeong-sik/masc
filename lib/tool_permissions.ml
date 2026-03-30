@@ -1,31 +1,11 @@
 (** Tool permission filter *)
 
+(* Derived from Tool_catalog surface SSOT.
+   team_session_stop intentionally stays outside this list:
+   owner/intruder authorization is enforced per session in the team
+   session handlers and contract tests exercise that path directly. *)
 let admin_tools =
-  [
-    (* Capability-gated: require "admin" capability at runtime *)
-    "masc_auth_create_token";
-    "masc_autoresearch_cycle";
-    "masc_autoresearch_inject";
-    "masc_autoresearch_start";
-    "masc_autoresearch_stop";
-    "masc_autoresearch_swarm_start";
-    "masc_repo_synthesis_swarm_start";
-    "masc_policy_freeze_unit";
-    "masc_policy_kill_switch";
-    "masc_tool_admin_update";
-    "masc_tool_grant";
-    "masc_tool_revoke";
-    (* Operator/session-management: excluded from autonomous agents at
-       build-time (agent_tool_surfaces) AND gated here for defense-in-depth *)
-    "masc_operator_action";
-    "masc_operator_confirm";
-    "masc_operator_snapshot";
-    (* team_session_stop intentionally stays outside this list:
-       owner/intruder authorization is enforced per session in the team
-       session handlers and contract tests exercise that path directly. *)
-    "masc_team_session_finalize";
-    "masc_tool_admin_snapshot";
-  ]
+  Tool_catalog.tools_for_surface Tool_catalog.Admin
 
 let admin_set : (string, unit) Hashtbl.t = Hashtbl.create 20
 

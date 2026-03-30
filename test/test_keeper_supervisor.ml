@@ -171,6 +171,36 @@ let test_self_preservation_empty_input () =
   let result = Sup.apply_self_preservation ~total_keepers:5 [] in
   check int "empty in = empty out" 0 (List.length result)
 
+(* ── Runtime override: fiber_health_of ─────────────────── *)
+
+let test_fiber_health_respects_max_restarts_override () =
+  Reg.clear ();
+  let name = "override-test-keeper" in
+  let meta = make_meta name in
+  let reg = Reg.register ~base_path:bp name meta in
+  (* Simulate crash: resolve done_p as Crashed *)
+  Eio.Promise.resolve reg.done_r (`Crashed "test crash");
+  (* Set restart_count to 3 *)
+  Reg.restore_supervisor_state ~base_path:bp name
+    ~restart_count:3 ~last_restart_ts:0.0 ~crash_log:[];
+  (* Default max_restarts is 5 (from env_config).
+     With restart_count=3 and done_p=Crashed, health = Fiber_zombie *)
+  let health_before = Reg.fiber_health_of ~base_path:bp name in
+  check bool "zombie at 3/5 restarts (restartable)"
+    true (health_before = KT.Fiber_zombie);
+  (* Override max_restarts to 2 — now restart_count 3 >= 2 = dead *)
+  (match Masc_mcp.Runtime_params.set
+    Masc_mcp.Governance_registry.keeper_supervisor_max_restarts 2 with
+  | Ok () -> ()
+  | Error msg -> fail msg);
+  let health_after = Reg.fiber_health_of ~base_path:bp name in
+  check bool "dead at 3/2 restarts (overridden)"
+    true (health_after = KT.Fiber_dead);
+  (* Restore default *)
+  Masc_mcp.Runtime_params.clear
+    Masc_mcp.Governance_registry.keeper_supervisor_max_restarts;
+  Reg.clear ()
+
 (* ── Test runner ────────────────────────────────────────── *)
 
 let () =
@@ -202,5 +232,9 @@ let () =
     "self_preservation_properties", [
       test_case "output subset of input" `Quick test_self_preservation_subset;
       test_case "empty input → empty output" `Quick test_self_preservation_empty_input;
+    ];
+    "runtime_override", [
+      test_case "fiber_health_of respects max_restarts override" `Quick
+        test_fiber_health_respects_max_restarts_override;
     ];
   ]

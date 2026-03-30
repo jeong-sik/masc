@@ -92,6 +92,9 @@ let tool_names_by_id (msgs : Agent_sdk.Types.message list) : (string * string) l
   List.fold_left add_tool_name [] msgs
 
 let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message option =
+  if List.length msgs < 2 then
+    None
+  else
   let lines =
     msgs
     |> List.mapi (fun i (m : Agent_sdk.Types.message) ->

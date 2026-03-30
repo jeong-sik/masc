@@ -387,8 +387,35 @@ let add_routes ~sw ~clock router =
              let base_path = state.Mcp_server.room_config.base_path in
              let actor = agent_from_request request
                |> Option.value ~default:"dashboard" in
-             let submit_petition _ctx _petition_args =
-               (false, "High-risk parameter changes from dashboard require governance petition via CLI")
+             let submit_petition _ctx petition_args =
+               let open Yojson.Safe.Util in
+               let title = member "title" petition_args |> to_string in
+               let origin = member "origin" petition_args |> to_string in
+               let subject_type = member "subject_type" petition_args |> to_string in
+               let risk_class_str = member "risk_class" petition_args |> to_string in
+               let risk_class = match risk_class_str with
+                 | "high" -> Council.Governance_v2.High
+                 | _ -> Council.Governance_v2.Low in
+               let raw_action = member "requested_action" petition_args in
+               let requested_action = match raw_action with
+                 | `Null -> None
+                 | action ->
+                   Some Council.Governance_v2.{
+                     action_type = member "action_type" action |> to_string_option
+                       |> Option.value ~default:"set_param";
+                     target_type = member "target_type" action |> to_string_option;
+                     target_id = member "target_id" action |> to_string_option;
+                     payload = (match member "payload" action with
+                       | `Null -> None | p -> Some p);
+                   } in
+               let source_refs = member "source_refs" petition_args
+                 |> to_list |> List.map to_string in
+               match Council.Governance_v2.submit_petition base_path
+                 ~title ~origin ~subject_type ~risk_class
+                 ~requested_action ~source_refs ~created_by:actor with
+               | Ok result ->
+                 (true, Printf.sprintf "Governance petition created: %s" result.case_.id)
+               | Error msg -> (false, msg)
              in
              let ctx = Tool_council_feed.{ base_path; agent_name = actor;
                room_config = Some state.Mcp_server.room_config } in
@@ -430,12 +457,35 @@ let add_routes ~sw ~clock router =
                       List.mem param_key s.param_keys)
                  |> Option.map (fun (s : Governance_registry.surface) -> s.risk)
                  |> Option.value ~default:"low" in
-               if risk = "high" then
-                 respond_json_with_cors request reqd
-                   (Yojson.Safe.to_string (`Assoc [
-                     ("ok", `Bool false);
-                     ("error", `String "High-risk param clear requires governance petition. Use masc_set_param tool.");
-                   ]))
+               if risk = "high" then begin
+                 let title = Printf.sprintf "Clear %s to default" param_key in
+                 let requested_action = Some Council.Governance_v2.{
+                   action_type = "clear_param";
+                   target_type = None;
+                   target_id = None;
+                   payload = Some (`Assoc [
+                     ("param_key", `String param_key);
+                     ("clear", `Bool true) ]);
+                 } in
+                 let source_refs = [param_key] in
+                 match Council.Governance_v2.submit_petition base_path
+                   ~title ~origin:"dashboard" ~subject_type:"param_change"
+                   ~risk_class:Council.Governance_v2.High
+                   ~requested_action ~source_refs ~created_by:actor with
+                 | Ok result ->
+                   respond_json_with_cors request reqd
+                     (Yojson.Safe.to_string (`Assoc [
+                       ("ok", `Bool true);
+                       ("message", `String (Printf.sprintf
+                         "Governance petition created for clear: %s" result.case_.id));
+                     ]))
+                 | Error msg ->
+                   respond_json_with_cors ~status:`Bad_request request reqd
+                     (Yojson.Safe.to_string (`Assoc [
+                       ("ok", `Bool false);
+                       ("error", `String (Printf.sprintf "Petition failed: %s" msg));
+                     ]))
+               end
                else begin
                  let old_value =
                    match Runtime_params.registry ()

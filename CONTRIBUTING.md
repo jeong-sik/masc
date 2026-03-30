@@ -44,7 +44,8 @@ bin/
 ├── main_eio.ml               # Primary HTTP server entry point
 ├── main_stdio_eio.ml         # stdio compatibility entry point
 ├── masc_cost.ml              # Cost analysis tool
-└── masc_tui.ml               # Terminal UI dashboard
+├── masc_tui.ml               # Terminal UI dashboard
+└── ...                       # Additional executables and build files
 
 lib/
 ├── command_plane/            # CPv2 orchestration subsystems

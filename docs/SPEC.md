@@ -181,7 +181,7 @@ Client Request
 | Execution Memory (Runs) | run_init, run_plan, run_log, run_deliverable, run_get, run_list |
 | Cache | cache_set/get/list/delete/clear/stats (+ internal MODEL response cache metrics) |
 | Relay & Handoff | relay_status, relay_checkpoint, relay_now, relay_smart_check, handover_*, verify_handoff |
-| OAS Lifecycle | memento_mori, compact, keeper OAS checkpoint rollover |
+| OAS Lifecycle | compact, keeper OAS checkpoint rollover |
 | Tempo & Dashboard | tempo_get/set/adjust/reset, dashboard |
 | Swarm | swarm_init/join/leave/status/vote/propose/trails/deposit/evolve |
 | Security & Governance | auth_*, rate_limit_*, encryption_*, governance_set, audit_query/audit_stats |

@@ -577,17 +577,29 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
 }
 
 export type KeeperConfigUpdatePayload = {
-  new_goal?: string
-  new_short_goal?: string
-  new_mid_goal?: string
-  new_long_goal?: string
-  new_soul_profile?: string
-  new_will?: string
-  new_needs?: string
-  new_desires?: string
-  new_instructions?: string
-  new_drift_enabled?: boolean
-  new_drift_min_turn_gap?: number
+  // Prompt fields
+  goal?: string
+  short_goal?: string
+  mid_goal?: string
+  long_goal?: string
+  soul_profile?: string
+  will?: string
+  needs?: string
+  desires?: string
+  instructions?: string
+  // Proactive
+  proactive_enabled?: boolean
+  proactive_idle_sec?: number
+  proactive_cooldown_sec?: number
+  // Compaction
+  compaction_ratio_gate?: number
+  compaction_message_gate?: number
+  compaction_token_gate?: number
+  continuity_compaction_cooldown_sec?: number
+  // Handoff
+  auto_handoff?: boolean
+  handoff_threshold?: number
+  handoff_cooldown_sec?: number
 }
 
 export function patchKeeperConfig(

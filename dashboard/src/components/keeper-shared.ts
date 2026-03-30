@@ -18,7 +18,7 @@ import {
   sendKeeperThreadMessage,
 } from '../keeper-runtime'
 import { isVisibleDirectConversationEntry } from '../keeper-state'
-import { bootKeeper } from '../api/keeper'
+import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import { showToast } from './common/toast'
 import { signal } from '@preact/signals'

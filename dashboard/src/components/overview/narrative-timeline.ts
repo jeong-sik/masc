@@ -72,9 +72,10 @@ function groupByTime(events: NarrativeEvent[]): TimeGroup[] {
   return groups
 }
 
+const timeOnlyFmt = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
+
 function formatTimestamp(ts: number): string {
-  const d = new Date(ts)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return timeOnlyFmt.format(new Date(ts))
 }
 
 export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps) {

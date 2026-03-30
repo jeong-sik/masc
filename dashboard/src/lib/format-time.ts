@@ -1,15 +1,20 @@
 // Unified time formatting utilities.
 
-/** Relative time from ISO string — "3분 전", "2시간 전" etc. */
+const rtf = new Intl.RelativeTimeFormat('ko', { numeric: 'auto' })
+
+function formatRelativeSec(deltaSec: number): string {
+  if (deltaSec < 60) return rtf.format(-deltaSec, 'second')
+  if (deltaSec < 3600) return rtf.format(-Math.round(deltaSec / 60), 'minute')
+  if (deltaSec < 86400) return rtf.format(-Math.round(deltaSec / 3600), 'hour')
+  return rtf.format(-Math.round(deltaSec / 86400), 'day')
+}
+
+/** Relative time from ISO string — "3분 전", "2시간 전" etc. Uses Intl.RelativeTimeFormat. */
 export function relativeTime(iso?: string | null, fallback = '정보 없음'): string {
   if (!iso) return fallback
   const ts = Date.parse(iso)
   if (Number.isNaN(ts)) return iso
-  const deltaSec = Math.max(0, Math.round((Date.now() - ts) / 1000))
-  if (deltaSec < 60) return `${deltaSec}초 전`
-  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}분 전`
-  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}시간 전`
-  return `${Math.round(deltaSec / 86400)}일 전`
+  return formatRelativeSec(Math.max(0, Math.round((Date.now() - ts) / 1000)))
 }
 
 /** Format elapsed seconds — "3초", "5분", "2시간". Returns '정보 없음' for invalid. */
@@ -62,12 +67,21 @@ export function formatTimeAgo(ts: string | number): string {
     typeof ts === 'number'
       ? (ts < 1_000_000_000_000 ? ts * 1000 : ts)
       : new Date(ts).getTime()
-  const diffSec = Math.floor((now - then) / 1000)
-  if (diffSec < 60) return `${diffSec}초 전`
-  const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}분 전`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}시간 전`
-  const diffDay = Math.floor(diffHr / 24)
-  return `${diffDay}일 전`
+  return formatRelativeSec(Math.max(0, Math.floor((now - then) / 1000)))
+}
+
+/** Format unix timestamp (seconds) as "MM. DD. HH:MM" in ko-KR locale. */
+export function formatTimestampKo(ts: number): string {
+  return new Date(ts * 1000).toLocaleString('ko-KR', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/** Format a numeric delta with sign prefix. */
+export function formatDelta(delta: number, decimals = 4): string {
+  const sign = delta >= 0 ? '+' : ''
+  return `${sign}${delta.toFixed(decimals)}`
 }

@@ -8,7 +8,7 @@ import { SurfaceCard } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { DialogOverlay } from './common/dialog'
 import { TextInput, TextArea } from './common/input'
-import { formatElapsedCompact } from '../lib/format-time'
+import { formatElapsedCompact, formatTimestampKo, formatDelta } from '../lib/format-time'
 import { statusLabel } from '../lib/status-label'
 import {
   AUTORESEARCH_DEFAULT_MAX_CYCLES,
@@ -182,18 +182,8 @@ function decisionLabel(decision: string): string {
   return decision === 'keep' ? '유지' : '삭제'
 }
 
-function formatDelta(delta: number): string {
-  const sign = delta >= 0 ? '+' : ''
-  return `${sign}${delta.toFixed(4)}`
-}
-
 function formatTimestamp(ts: number): string {
-  return new Date(ts * 1000).toLocaleString('ko-KR', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return formatTimestampKo(ts)
 }
 
 function liveLabel(loop: Pick<AutoresearchLoopSummary, 'live'>): string {

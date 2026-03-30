@@ -110,11 +110,6 @@ let extract_prompt_block ~start_marker ~end_marker (text : string) =
       let raw = String.sub text start_idx (end_idx - start_idx) |> String.trim in
       if raw = "" then None else Some raw)
 
-let inject_prompt_full_context ~(prompt : string) ~(tool_name : string)
-    (args : Yojson.Safe.t) =
-  ignore (prompt, tool_name);
-  args
-
 let masc_http_base_url () =
   Env_config.masc_http_base_url ()
 

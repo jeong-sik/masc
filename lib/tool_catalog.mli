@@ -103,8 +103,6 @@ val explicit_metadata : (string * metadata) list
 val deprecated_tool_entries : (string * metadata) list
 (** Precomputed subset of [explicit_metadata] where lifecycle = Deprecated. *)
 
-val hidden_placeholder_tools : unit -> string list
-
 val implementation_allows_public_visibility : implementation_status -> bool
 (** [true] when an implementation status permits public surface listing. *)
 

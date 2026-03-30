@@ -290,7 +290,11 @@ let create_readonly ~sw ~env ~url ~cluster_name ~node_id =
   | Ok pool ->
       Ok { pool; namespace = cluster_name; node_id }
 
-let close _t = ()
+let close t =
+  try Caqti_eio.Pool.drain t.pool
+  with exn ->
+    Log.Backend.warn "[EioPG] close: pool drain failed: %s"
+      (Printexc.to_string exn)
 
 let get_pool t = t.pool
 

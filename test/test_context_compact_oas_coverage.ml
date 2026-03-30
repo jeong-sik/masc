@@ -101,7 +101,14 @@ let test_compact_summarize_old () =
 
 let test_summarize_old_masks_tool_results_but_preserves_pairing () =
   let tool_id = "call-123" in
+  (* Need enough old messages (> keep_recent=5) so summarization can
+     actually reduce count. The 3 extra user/assistant pairs before the
+     tool call become summarizable old messages. *)
   let msgs = [
+    msg Agent_sdk.Types.User "Start by understanding the architecture.";
+    msg Agent_sdk.Types.Assistant "The architecture uses a layered approach.";
+    msg Agent_sdk.Types.User "What patterns do they follow?";
+    msg Agent_sdk.Types.Assistant "Primarily functional with Eio concurrency.";
     msg Agent_sdk.Types.User "Find all reducer references in lib/.";
     tool_use_msg ~id:tool_id ~name:"grep_search" ();
     tool_msg ~id:tool_id "3 matches in lib/\nlib/context_compact_oas.ml\nlib/tool_compact.ml";

@@ -92,10 +92,10 @@ let emit_cost_event
     @param on_tool_executed Optional callback after each tool execution
     @param trajectory_acc Optional trajectory accumulator for cost attribution *)
 let make_hooks
-    ~(config : Room.config)
+    ~config:(_config : Room.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
-    ~(session : Keeper_working_context.session_context)
-    ~(ctx_ref : Keeper_working_context.working_context ref)
+    ~session:(_session : Keeper_working_context.session_context)
+    ~ctx_ref:(_ctx_ref : Keeper_working_context.working_context ref)
     ~(generation : int)
     ?(max_cost_usd : float option)
     ?(destructive_check : bool = true)
@@ -104,9 +104,6 @@ let make_hooks
     ?(trajectory_acc : Trajectory.accumulator option)
     ()
   : Agent_sdk.Hooks.hooks =
-  ignore config;
-  ignore session;
-  ignore ctx_ref;
   let sse_turn_complete = "keeper_turn_complete" in
   let board_write_tools =
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]

@@ -211,7 +211,7 @@ let worker_card_to_yojson (card : worker_card) =
       ("authoritative", `Bool true);
     ]
 
-let spawn_batch_stub_of_cards (cards : worker_card list) =
+let spawn_batch_template_of_cards (cards : worker_card list) =
   let items =
     cards
     |> List.filter_map (fun (card : worker_card) ->

@@ -104,7 +104,11 @@ let test_keeper_bridge_compose_workspace () =
 
 let test_keeper_bridge_compose_read_only () =
   let meta =
-    make_keeper_meta ~scope_kind:"read_only" ~execution_scope:"observe_only" ()
+    {
+      (make_keeper_meta ~scope_kind:"local" ~execution_scope:"observe_only" ())
+      with
+      scope_kind = "read_only";
+    }
   in
   let rc = CB.of_keeper_meta meta in
   check string "read_only -> diagnose" "diagnose"

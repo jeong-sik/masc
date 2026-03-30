@@ -71,6 +71,9 @@ type agent_runtime_state = {
   board_reactive_turn_count: int;
   mention_reactive_turn_count: int;
   noop_turn_count: int;
+  last_speech_act: string;
+  last_blocker: string;
+  last_need: string;
 }
 
 type keeper_meta = {
@@ -82,6 +85,7 @@ type keeper_meta = {
   mid_goal: string;
   long_goal: string;
   soul_profile: string;
+  social_model: string;
   cascade_name: string;
   will: string;
   needs: string;
@@ -124,6 +128,8 @@ type keeper_meta = {
   (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
   runtime: agent_runtime_state;
 }
+
+let default_social_model = "bdi_speech_v1"
 
 (* -- Updater helpers for nested record updates -- *)
 
@@ -240,6 +246,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("mid_goal", `String m.mid_goal);
       ("long_goal", `String m.long_goal);
       ("soul_profile", `String m.soul_profile);
+      ("social_model", `String m.social_model);
       ("cascade_name", `String m.cascade_name);
       ("will", `String m.will);
       ("needs", `String m.needs);
@@ -311,6 +318,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("board_reactive_turn_count", `Int rt.board_reactive_turn_count);
       ("mention_reactive_turn_count", `Int rt.mention_reactive_turn_count);
       ("noop_turn_count", `Int rt.noop_turn_count);
+      ("last_speech_act", `String rt.last_speech_act);
+      ("last_blocker", `String rt.last_blocker);
+      ("last_need", `String rt.last_need);
       ("paused", `Bool m.paused);
       ("current_task_id",
         (match m.current_task_id with None -> `Null | Some s -> `String s));
@@ -341,6 +351,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_string ~default:default_soul_profile "soul_profile" json
       |> canonical_soul_profile
       |> Option.value ~default:default_soul_profile
+    in
+    let social_model =
+      Safe_ops.json_string ~default:default_social_model "social_model" json
     in
     let will =
       Safe_ops.json_string ~default:default_keeper_will "will" json
@@ -512,6 +525,15 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let noop_turn_count =
       Safe_ops.json_int ~default:0 "noop_turn_count" json
     in
+    let last_speech_act =
+      Safe_ops.json_string ~default:"" "last_speech_act" json
+    in
+    let last_blocker =
+      Safe_ops.json_string ~default:"" "last_blocker" json
+    in
+    let last_need =
+      Safe_ops.json_string ~default:"" "last_need" json
+    in
     let paused =
       Safe_ops.json_bool ~default:false "paused" json
     in
@@ -530,6 +552,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           mid_goal;
           long_goal;
           soul_profile;
+          social_model;
           cascade_name;
           will;
           needs;
@@ -613,6 +636,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
             board_reactive_turn_count;
             mention_reactive_turn_count;
             noop_turn_count;
+            last_speech_act;
+            last_blocker;
+            last_need;
           };
         }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

@@ -1713,7 +1713,11 @@ let test_keeper_up_persists_allowed_paths_to_status_policy () =
         Yojson.Safe.Util.(
           status_json |> member "policy" |> member "allowed_paths" |> to_list |> filter_string)
       in
-      check (list string) "allowed_paths roundtrip" allowed_paths persisted)
+      check (list string) "allowed_paths roundtrip" allowed_paths persisted;
+      check string "social model surfaced" "bdi_speech_v1"
+        Yojson.Safe.Util.(status_json |> member "social" |> member "model" |> to_string);
+      check bool "last speech act null by default" true
+        Yojson.Safe.Util.(status_json |> member "social" |> member "last_speech_act" = `Null))
 (* test_keeper_policy_set_accepts_explicit_event_v1: removed — keeper policy_mode system removed *)
 
 (* Issue #3019: session dir must be created from scratch in filesystem fallback.

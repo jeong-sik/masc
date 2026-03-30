@@ -63,15 +63,18 @@ let infer_keeper_risk_class ~(scope_kind : string) : Oas.Risk_class.t =
 let infer_keeper_execution_mode ~(scope_kind : string) : Oas.Execution_mode.t =
   match String.lowercase_ascii scope_kind with
   | "read_only" | "readonly" | "observe" -> Oas.Execution_mode.Diagnose
-  | "workspace" | "local" -> Oas.Execution_mode.Draft
   | _ -> Oas.Execution_mode.Execute
 
 let infer_keeper_allowed_mutations ~(execution_scope : string)
     ~(allowed_paths : string list) =
-  match String.lowercase_ascii execution_scope with
-  | "workspace" | "local" -> [ "workspace_only" ]
-  | _ ->
-      if allowed_paths <> [] then [ "workspace_only" ] else []
+  ignore execution_scope;
+  ignore allowed_paths;
+  (* Keeper tools handle their own access control via allowlist/denylist
+     in keeper_hooks_oas.ml and keeper_exec_tools.ml.  Setting
+     "workspace_only" here caused mode_enforcer to block all keeper_*
+     and masc_* tools as External_Effect — false positives since these
+     are internal MASC operations, not external effects. *)
+  []
 
 let build_keeper_eval_criteria ~keeper_name ~(goal : string) =
   `Assoc [ ("keeper_name", `String keeper_name); ("goal", `String goal) ]

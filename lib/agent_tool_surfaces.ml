@@ -265,26 +265,6 @@ let local_worker_internal_schemas : Types.tool_schema list =
           ];
     };
     {
-      Types.name = "masc_memento_mori";
-      description =
-        "Check context pressure and auto-handle prepare or handoff when thresholds are crossed.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("context_ratio", `Assoc [ ("type", `String "number") ]);
-                  ("full_context", `Assoc [ ("type", `String "string") ]);
-                  ("summary", `Assoc [ ("type", `String "string") ]);
-                  ("current_task", `Assoc [ ("type", `String "string") ]);
-                  ("target_agent", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "context_ratio" ]);
-          ];
-    };
-    {
       Types.name = "keeper_research";
       description = "Research a topic using the MODEL and share findings with the board.";
       input_schema =

@@ -63,9 +63,6 @@ jobs:
           {
             "governance_judge_models": ["glm:glm-4.7-flash"],
             "operator_judge_models": ["glm:glm-4.7-flash"],
-            "sentinel_board_models": ["glm:glm-4.7-flash"],
-            "sentinel_task_models": ["glm:glm-4.7-flash"],
-            "sentinel_keeper_models": ["glm:glm-4.7-flash"],
             "heartbeat_action_models": ["glm:glm-4.7-flash"],
             "heartbeat_wake_models": ["glm:glm-4.7-flash"],
             "autonomy_direct_models": ["glm:glm-4.7-flash"],

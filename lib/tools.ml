@@ -47,4 +47,4 @@ let all_schemas_extended =
 
 (** Get tool by name *)
 let find_tool name =
-  List.find_opt (fun s -> s.name = name) all_schemas_extended
+  List.find_opt (fun (s : Types.tool_schema) -> s.name = name) all_schemas_extended

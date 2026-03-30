@@ -206,6 +206,7 @@
    operator_digest_event
    operator_digest_guidance
    operator_digest_types
+   observability_redact
    risk_digest
    operator_digest_session
    operator_review_state
@@ -469,6 +470,7 @@
    ;; Context management (used by keeper agents)
    masc_eio_env
    discovery_cache
+   observability_redact
    oas_model_resolve
    context_compact_oas
    verifier_oas

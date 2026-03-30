@@ -211,7 +211,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            updated_at = now_iso ();
            continuity_summary = "";
            active_goal_ids = [];
-           last_triage_triggers = "";
            active_team_session_id = None;
            last_team_session_started_at = "";
            team_session_start_count_total = 0;

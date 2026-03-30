@@ -257,6 +257,118 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
            (annotate_keeper_json ~runtime_class:"keeper" json))
       end
 
+let resolve_keeper_meta ctx args =
+  let name = get_string args "name" "" in
+  match read_meta ctx.config name with
+  | Ok (Some meta) -> Ok meta
+  | Ok None -> Error (Printf.sprintf "❌ keeper not found: %s" name)
+  | Error err -> Error (Printf.sprintf "❌ %s" err)
+
+let default_keeper_model_label (meta : keeper_meta) =
+  match String.trim meta.runtime.usage.last_model_used with
+  | "" -> (
+      match Oas_model_resolve.models_of_cascade_name meta.cascade_name with
+      | first :: _ when String.trim first <> "" -> first
+      | _ -> "llama:qwen3.5-9b-local")
+  | model -> model
+
+let annotate_keeper_repair_json ~(keeper_name : string) body =
+  let parsed =
+    try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
+  in
+  match parsed with
+  | Some (`Assoc fields) ->
+      Yojson.Safe.pretty_to_string
+        (`Assoc
+          ( ("runtime_class", `String "keeper")
+          :: ("keeper_name", `String keeper_name)
+          :: ("delegated_tool", `String "masc_repair_loop")
+          :: fields ))
+  | _ -> body
+
+let handle_keeper_repair ctx args : tool_result =
+  match resolve_keeper_meta ctx args with
+  | Error err -> (false, err)
+  | Ok meta ->
+      let task_spec = get_string args "task_spec" "" in
+      if String.trim task_spec = "" then
+        (false, "task_spec is required")
+      else
+        let target_mode = get_string args "target_mode" "snippet" in
+        let working_dir_arg = get_string args "working_dir" (Sys.getcwd ()) in
+        let plugin_id = get_string args "plugin_id" "ocaml" in
+        let target_file_opt = get_string_opt args "target_file" in
+        let cwd_root =
+          try Unix.realpath (Sys.getcwd ()) with
+          | Unix.Unix_error _ -> Sys.getcwd ()
+        in
+        let resolved_working_dir_result =
+          try Ok (Unix.realpath working_dir_arg) with
+          | Unix.Unix_error _ ->
+              Error "working_dir does not exist or is not accessible"
+        in
+        match resolved_working_dir_result with
+        | Error msg -> (false, msg)
+        | Ok working_dir ->
+            if not
+                 (Tool_repair_loop.is_safe_subpath ~parent:cwd_root
+                    ~child:working_dir)
+            then
+              (false, "working_dir must be within the current workspace")
+            else
+              match
+                Tool_repair_loop.validate_target_file ~working_dir
+                  ~target_file:target_file_opt
+              with
+              | Error msg -> (false, msg)
+              | Ok validated_target_file ->
+                  let validator_profile =
+                    get_string args "validator_profile"
+                      (if
+                         String.equal (String.lowercase_ascii target_mode)
+                           "repo"
+                       then
+                         "repo_dune_build"
+                       else
+                         "snippet_ocamlc")
+                  in
+                  let max_attempts =
+                    min 10 (max 1 (get_int args "max_attempts" 2))
+                  in
+                  let fields =
+                    [
+                      ("plugin_id", `String plugin_id);
+                      ("task_spec", `String task_spec);
+                      ("target_mode", `String target_mode);
+                      ("working_dir", `String working_dir);
+                      ("validator_profile", `String validator_profile);
+                      ( "model_label",
+                        `String
+                          (get_string args "model_label"
+                             (default_keeper_model_label meta)) );
+                      ("max_attempts", `Int max_attempts);
+                      ("artifact_session_id", `String meta.runtime.trace_id);
+                    ]
+                  in
+                  let fields =
+                    match validated_target_file with
+                    | Some target_file ->
+                        ("target_file", `String target_file) :: fields
+                    | None -> fields
+                  in
+                  let fields =
+                    match get_string_opt args "source_text" with
+                    | Some source_text ->
+                        ("source_text", `String source_text) :: fields
+                    | None -> fields
+                  in
+                  let ok, body =
+                    Team_session_oas_bridge.run_repair_loop_until_terminal
+                      ~sw:ctx.sw ~clock:ctx.clock ~config:ctx.config
+                      (`Assoc fields)
+                  in
+                  (ok, annotate_keeper_repair_json ~keeper_name:meta.name body)
+
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();
   Turn.handle_keeper_down ctx args
@@ -330,6 +442,9 @@ let handle_persistent_agent_status ctx args : tool_result =
 let handle_persistent_agent_msg ctx args : tool_result =
   handle_keeper_msg ctx args
 
+let handle_persistent_agent_repair ctx args : tool_result =
+  handle_keeper_repair ctx args
+
 let handle_persistent_agent_down ctx args : tool_result =
   handle_keeper_down ctx args
 
@@ -399,6 +514,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_up" -> Some (handle_keeper_up ctx args)
   | "masc_keeper_status" -> Some (handle_keeper_status ctx args)
   | "masc_keeper_msg" -> Some (handle_keeper_msg ctx args)
+  | "masc_keeper_repair" -> Some (handle_keeper_repair ctx args)
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
   | "masc_keeper_autonomy" | "masc_keeper_goals" ->
@@ -410,6 +526,8 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_persistent_agent_up" -> Some (handle_persistent_agent_up ctx args)
   | "masc_persistent_agent_status" -> Some (handle_persistent_agent_status ctx args)
   | "masc_persistent_agent_msg" -> Some (handle_persistent_agent_msg ctx args)
+  | "masc_persistent_agent_repair" ->
+      Some (handle_persistent_agent_repair ctx args)
   | "masc_persistent_agent_down" -> Some (handle_persistent_agent_down ctx args)
   | "masc_persistent_agent_list" -> Some (handle_persistent_agent_list ctx args)
   | "masc_persistent_agent_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)

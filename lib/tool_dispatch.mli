@@ -89,7 +89,7 @@ type module_tag =
   | Mod_tempo | Mod_goals | Mod_compact
   | Mod_agent | Mod_task | Mod_room
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
-  | Mod_library | Mod_keeper | Mod_mdal
+  | Mod_library | Mod_keeper | Mod_mdal | Mod_repair_loop
   | Mod_inline
   | Mod_improve_loop
   | Mod_autoresearch

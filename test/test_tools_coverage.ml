@@ -714,6 +714,22 @@ let test_masc_keeper_msg_schema () =
             (List.mem_assoc "new_long_goal" props)
       | None -> Alcotest.fail "masc_keeper_msg missing properties"
 
+let test_masc_keeper_repair_schema () =
+  match find_tool "masc_keeper_repair" with
+  | None -> Alcotest.fail "masc_keeper_repair not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has task_spec" true
+            (List.mem_assoc "task_spec" props);
+          Alcotest.(check bool) "has source_text" true
+            (List.mem_assoc "source_text" props);
+          Alcotest.(check bool) "has target_mode" true
+            (List.mem_assoc "target_mode" props);
+          Alcotest.(check bool) "has validator_profile" true
+            (List.mem_assoc "validator_profile" props)
+      | None -> Alcotest.fail "masc_keeper_repair missing properties"
+
 (* keeper policy schema tests removed — policy tool schemas no longer exist *)
 
 let test_masc_tool_admin_snapshot_schema () =
@@ -1069,6 +1085,8 @@ let () =
         test_masc_keeper_up_schema;
       Alcotest.test_case "keeper-msg" `Quick
         test_masc_keeper_msg_schema;
+      Alcotest.test_case "keeper-repair" `Quick
+        test_masc_keeper_repair_schema;
     ];
     "runtime_admin_tools", [
       Alcotest.test_case "tool-admin-snapshot" `Quick

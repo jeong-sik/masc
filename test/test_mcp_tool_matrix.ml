@@ -29,6 +29,26 @@ let source_root () =
 
 let quote = Filename.quote
 
+let realpath_or_self path =
+  try Unix.realpath path with
+  | Unix.Unix_error _ -> path
+
+let path_is_within ~parent ~child =
+  let parent = realpath_or_self parent in
+  let child = realpath_or_self child in
+  if String.equal parent child then
+    true
+  else
+    let parent_with_sep =
+      if Filename.check_suffix parent Filename.dir_sep then
+        parent
+      else
+        parent ^ Filename.dir_sep
+    in
+    let plen = String.length parent_with_sep in
+    String.length child >= plen
+    && String.sub child 0 plen = parent_with_sep
+
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -52,7 +72,9 @@ let runner_path () =
   let candidate =
     Filename.concat (Filename.dirname Sys.executable_name) "tool_matrix_case_runner.exe"
   in
-  if Sys.file_exists candidate then
+  if Sys.file_exists candidate
+     && path_is_within ~parent:(source_root ()) ~child:candidate
+  then
     candidate
   else
     Filename.concat (source_root ()) "_build/default/test/tool_matrix_case_runner.exe"

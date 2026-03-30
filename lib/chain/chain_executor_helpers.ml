@@ -505,7 +505,7 @@ let judge_call ~prompt () : (string, string) result =
   match
     Oas_worker.run_named ~cascade_name:"chain_judge"
       ~goal:prompt ~max_turns:1
-      ~priority:Oas.Llm_provider.Request_priority.Interactive
+      ~priority:Llm_provider.Request_priority.Interactive
       ()
   with
   | Ok run_result ->

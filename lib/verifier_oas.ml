@@ -166,7 +166,7 @@ let verify (req : verification_request) : (verdict, string) result =
         ~max_turns:1
         ~temperature:0.0
         ~max_tokens:200
-        ~priority:Oas.Llm_provider.Request_priority.Interactive
+        ~priority:Llm_provider.Request_priority.Interactive
         ()
     with
     | Ok result ->

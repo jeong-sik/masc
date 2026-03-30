@@ -254,7 +254,7 @@ let run_turn
       ?contract
       ~allowed_paths:meta.allowed_paths
       ~working_context:checkpoint_sidecar
-      ~priority:(Option.value priority ~default:Oas.Llm_provider.Request_priority.Interactive)
+      ~priority:(Option.value priority ~default:Llm_provider.Request_priority.Interactive)
       ()
   with
   | Error e -> Error e

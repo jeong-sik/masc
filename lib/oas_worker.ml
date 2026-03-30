@@ -100,7 +100,7 @@ type config = {
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
   working_context : Yojson.Safe.t option;
-  priority : Oas.Llm_provider.Request_priority.t option;
+  priority : Llm_provider.Request_priority.t option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =

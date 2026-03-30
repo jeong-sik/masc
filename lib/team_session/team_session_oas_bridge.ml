@@ -326,7 +326,7 @@ let planned_worker_to_entry_with_state
         ~max_tokens:(Cascade_inference.resolve_max_tokens
           ~cascade_name ~fallback:(fun () -> 4096))
         ?raw_trace ?contract ~sw
-        ~priority:Oas.Llm_provider.Request_priority.Proactive ()
+        ~priority:Llm_provider.Request_priority.Proactive ()
     with
     | Ok result ->
         Hashtbl.replace success_by_agent name true;

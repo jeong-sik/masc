@@ -71,6 +71,7 @@ let cache_ttl_sec () =
 let enabled () = Env_config.Dashboard_config.governance_judge_enabled
 
 let keeper_name = "governance-judge"
+let backoff_status = "Backoff: local slots saturated"
 
 let get_state base_path =
   with_outer_rw (fun () ->
@@ -336,34 +337,61 @@ let append_judgments base_path judgments =
   let store = get_judgments_store base_path in
   List.iter (fun json -> Dated_jsonl.append store json) judgments
 
-let refresh_once
+let should_backoff ~sw ~net =
+  try
+    let config_path = Oas_worker.default_config_path () in
+    let cap = Llm_provider.Cascade_config.local_capacity_for_selections
+        ~sw ~net ?config_path ["governance_judge"]
+    in
+    cap.all_discovered && cap.endpoints_found > 0
+    && cap.process_available = 0 && cap.process_queue_length >= 2
+  with exn ->
+    Eio.traceln
+      "[governance] capacity check failed in should_backoff: %s"
+      (Printexc.to_string exn);
+    false
+
+let refresh_once ~sw ~net
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~base_path ~build_facts =
   let st = get_state base_path in
-  with_lock st (fun () -> st.refreshing <- true);
-  match compute_judgments ~masc_tools ~dispatch ~factual_json:(build_facts ()) with
-  | Ok (model_used, generated_at, expires_at, judgments) ->
-      append_judgments base_path judgments;
+  if should_backoff ~sw ~net then
+    let was_online =
       with_lock st (fun () ->
-          st.refreshing <- false;
-          st.judge_online <- true;
-          st.generated_at <- Some generated_at;
-          st.generated_at_unix <- Some (Types.parse_iso8601 generated_at);
-          st.expires_at <- Some expires_at;
-          st.expires_at_unix <- Some (Types.parse_iso8601 expires_at);
-          st.model_used <- Some model_used;
-          st.last_error <- None;
-          List.iter
-            (fun json -> Hashtbl.replace st.judgments (judgment_key json) json)
-            judgments)
-  | Error message ->
-      with_lock st (fun () ->
+          let was_online = st.judge_online in
           st.refreshing <- false;
           st.judge_online <- false;
-          st.last_error <- Some message)
+          st.last_error <- Some backoff_status;
+          was_online)
+    in
+    if was_online then
+      Eio.traceln "[governance] backoff: local slots saturated, skipping cycle"
+  else begin
+    with_lock st (fun () -> st.refreshing <- true);
+    match compute_judgments ~masc_tools ~dispatch ~factual_json:(build_facts ()) with
+    | Ok (model_used, generated_at, expires_at, judgments) ->
+        append_judgments base_path judgments;
+        with_lock st (fun () ->
+            st.refreshing <- false;
+            st.judge_online <- true;
+            st.generated_at <- Some generated_at;
+            st.generated_at_unix <- Some (Types.parse_iso8601 generated_at);
+            st.expires_at <- Some expires_at;
+            st.expires_at_unix <- Some (Types.parse_iso8601 expires_at);
+            st.model_used <- Some model_used;
+            st.last_error <- None;
+            List.iter
+              (fun json -> Hashtbl.replace st.judgments (judgment_key json) json)
+              judgments)
+    | Error message ->
+        with_lock st (fun () ->
+            st.refreshing <- false;
+            st.judge_online <- false;
+            st.last_error <- Some message)
+  end
 
-let start ~sw ~clock ~base_path
+let start ~sw ~clock ~net ~base_path
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~build_facts () =
@@ -381,7 +409,7 @@ let start ~sw ~clock ~base_path
   if should_start then
     Eio.Fiber.fork_daemon ~sw (fun () ->
         let rec loop () =
-          refresh_once ~masc_tools ~dispatch ~base_path ~build_facts;
+          refresh_once ~sw ~net ~masc_tools ~dispatch ~base_path ~build_facts;
           Eio.Time.sleep clock (float_of_int (interval_sec ()));
           loop ()
         in

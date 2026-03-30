@@ -17,6 +17,7 @@
 - **Team session capacity** — harden slot-aware runtime guards (#4022).
 - **Governance action dedup** — expand canonical action normalization (#4020).
 - **Dashboard SSE delete** — real-time board post deletion (#4019).
+- **Judge per-cycle slot backoff** — governance and operator judges skip refresh when local LLM slots are saturated (#4041).
 
 ## [2.180.0] - 2026-03-30
 

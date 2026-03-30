@@ -56,7 +56,7 @@ needs_rebuild() {
 
 if needs_rebuild; then
   echo "[dashboard] Sources changed, rebuilding SPA..." >&2
-  log_file="$(mktemp /tmp/masc-dashboard-build.XXXXXX.log)"
+  log_file="$(mktemp -t masc-dashboard-build)"
   if [ -d "$DASHBOARD_DIR/node_modules" ]; then
     if (cd "$DASHBOARD_DIR" && "${dashboard_pm[@]}" run build >"$log_file" 2>&1); then
       tail -n 3 "$log_file" >&2 || true

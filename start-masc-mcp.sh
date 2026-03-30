@@ -87,13 +87,21 @@ build_dashboard_spa() {
     fi
     dashboard_pm_label="${dashboard_pm[*]}"
 
-    # macOS mktemp requires the template to end with Xs; a ".log" suffix
-    # makes it treat the literal path as fixed and fail with EEXIST.
-    log_file="$(mktemp "${TMPDIR:-/tmp}/masc-dashboard-build.XXXXXX")"
+    local temp_root="${TMPDIR:-/tmp}"
+    temp_root="${temp_root%/}"
+    if [ ! -d "$temp_root" ] || [ ! -w "$temp_root" ]; then
+        temp_root="/tmp"
+    fi
+    if ! log_file="$(TMPDIR="$temp_root" mktemp "$temp_root/masc-dashboard-build.XXXXXX" 2>/dev/null)"; then
+        echo "[dashboard] Unable to create temp log file; falling back to stderr-less logging." >&2
+        log_file="/dev/null"
+    fi
     if [ -d "$dashboard_dir/node_modules" ]; then
         if (cd "$dashboard_dir" && "${dashboard_pm[@]}" run build >"$log_file" 2>&1); then
             tail -n 3 "$log_file" >&2 || true
-            rm -f "$log_file"
+            if [ "$log_file" != "/dev/null" ]; then
+                rm -f "$log_file"
+            fi
             return 0
         fi
         echo "[dashboard] Existing deps build failed, retrying after ${dashboard_pm_label} install..." >&2
@@ -101,12 +109,16 @@ build_dashboard_spa() {
 
     if (cd "$dashboard_dir" && "${dashboard_pm[@]}" install --frozen-lockfile --prefer-offline >"$log_file" 2>&1 && "${dashboard_pm[@]}" run build >>"$log_file" 2>&1); then
         tail -n 6 "$log_file" >&2 || true
-        rm -f "$log_file"
+        if [ "$log_file" != "/dev/null" ]; then
+            rm -f "$log_file"
+        fi
         return 0
     fi
 
     tail -n 20 "$log_file" >&2 || true
-    rm -f "$log_file"
+    if [ "$log_file" != "/dev/null" ]; then
+        rm -f "$log_file"
+    fi
     echo "[dashboard] Build failed (non-fatal, server will show fallback page)." >&2
 }
 

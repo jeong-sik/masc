@@ -14,8 +14,8 @@ module Web_dashboard = Masc_mcp.Web_dashboard
    so assets_root() can't find assets/dashboard/index.html.
    Resolve it from the executable path: _build/default/test/foo.exe → 3 dirs up. *)
 let has_repo_root root =
-  let web_index = Filename.concat (Filename.concat root "web") "index.html" in
-  Sys.file_exists web_index
+  Sys.file_exists (Filename.concat root "dune-project")
+  && Sys.file_exists (Filename.concat (Filename.concat root "dashboard") "package.json")
 
 let rec ascend_repo_root dir =
   if has_repo_root dir then Some dir
@@ -233,11 +233,11 @@ let test_html_ignores_invalid_explicit_assets_dir () =
         ]
         (fun () ->
           let html = Web_dashboard.html () in
-          check bool "falls back to base_path assets" true
+          check bool "does not fall back to base_path assets" false
             (contains_substr "dashboard-from-base-path" html)))
     ~finally:(fun () -> cleanup_temp_dashboard_root base_root)
 
-let test_html_uses_base_path_assets () =
+let test_html_ignores_base_path_assets () =
   let base_root = make_temp_dashboard_root "base" "dashboard-from-base-path" in
   Fun.protect
     (fun () ->
@@ -248,7 +248,7 @@ let test_html_uses_base_path_assets () =
         ]
         (fun () ->
           let html = Web_dashboard.html () in
-          check bool "uses base_path assets" true
+          check bool "ignores base_path assets" false
             (contains_substr "dashboard-from-base-path" html)))
     ~finally:(fun () ->
       cleanup_temp_dashboard_root base_root)
@@ -302,8 +302,8 @@ let () =
     ];
     "fallback", [
       test_case "missing asset dir" `Quick test_fallback_on_missing_asset;
-      test_case "invalid explicit assets dir falls back" `Quick test_html_ignores_invalid_explicit_assets_dir;
-      test_case "base_path assets" `Quick test_html_uses_base_path_assets;
+      test_case "invalid explicit assets dir ignores base path" `Quick test_html_ignores_invalid_explicit_assets_dir;
+      test_case "base_path assets ignored" `Quick test_html_ignores_base_path_assets;
     ];
     "asset_path_safety", [
       test_case "accept normal" `Quick test_safe_asset_relative_path_accepts_normal;

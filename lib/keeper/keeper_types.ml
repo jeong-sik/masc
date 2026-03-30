@@ -22,6 +22,10 @@ type proactive_policy = {
   cooldown_sec: int;
 }
 
+type tool_access =
+  | Unrestricted
+  | Restricted of string list
+
 (* -- Runtime types (moved into agent_runtime_state) -- *)
 
 type compaction_runtime = {
@@ -96,7 +100,7 @@ type keeper_meta = {
   execution_scope: string;
   allowed_paths: string list;
   scope_kind: string;
-  tool_allowlist: string list;
+  tool_access: tool_access;
   tool_denylist: string list;
   room_scope: string;
   mention_targets: string list;
@@ -130,6 +134,52 @@ type keeper_meta = {
 }
 
 let default_social_model = "bdi_speech_v1"
+
+let normalize_tool_access = function
+  | Unrestricted -> Unrestricted
+  | Restricted names ->
+      Restricted
+        (names
+        |> List.filter (fun name -> String.trim name <> "")
+        |> dedupe_keep_order)
+
+let tool_access_allowlist = function
+  | Unrestricted -> []
+  | Restricted names -> names
+
+let tool_access_to_json access =
+  match normalize_tool_access access with
+  | Unrestricted ->
+      `Assoc [ ("kind", `String "unrestricted") ]
+  | Restricted names ->
+      `Assoc
+        [
+          ("kind", `String "restricted");
+          ("tools", `List (List.map (fun s -> `String s) names));
+        ]
+
+let tool_access_of_meta_json (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member "tool_access" json with
+  | `Null ->
+      let legacy_allowlist =
+        match Safe_ops.json_string_list "tool_allowlist" json with
+        | [] -> Tool_catalog.standard_tools
+        | names -> names
+      in
+      Ok (normalize_tool_access (Restricted legacy_allowlist))
+  | `Assoc _ as access_json -> (
+      let kind =
+        Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
+      in
+      let tools = Safe_ops.json_string_list "tools" access_json in
+      match kind with
+      | Some "unrestricted" -> Ok Unrestricted
+      | Some "restricted" ->
+          Ok (normalize_tool_access (Restricted tools))
+      | Some other ->
+          Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
+      | None -> Error "keeper tool_access.kind required")
+  | _ -> Error "keeper tool_access must be an object"
 
 (* -- Updater helpers for nested record updates -- *)
 
@@ -256,7 +306,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("execution_scope", `String m.execution_scope);
       ("allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths));
       ("scope_kind", `String m.scope_kind);
-      ("tool_allowlist", `List (List.map (fun s -> `String s) m.tool_allowlist));
+      ("tool_access", tool_access_to_json m.tool_access);
       ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
       ("room_scope", `String m.room_scope);
       ("mention_targets", `List (List.map (fun s -> `String s) m.mention_targets));
@@ -391,10 +441,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let scope_kind =
       Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
     in
-    let tool_allowlist =
-      match Safe_ops.json_string_list "tool_allowlist" json with
-      | [] -> Tool_catalog.standard_tools  (* migrate: empty → standard default *)
-      | xs -> xs
+    let tool_access =
+      match tool_access_of_meta_json json with
+      | Ok access -> access
+      | Error msg -> raise (Invalid_argument msg)
     in
     let tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
     let room_scope =
@@ -566,7 +616,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           execution_scope;
           allowed_paths;
           scope_kind;
-          tool_allowlist;
+          tool_access;
           tool_denylist;
           room_scope;
           mention_targets;

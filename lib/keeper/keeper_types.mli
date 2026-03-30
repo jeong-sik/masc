@@ -23,6 +23,10 @@ type proactive_policy = {
   cooldown_sec: int;
 }
 
+type tool_access =
+  | Unrestricted
+  | Restricted of string list
+
 (** {1 Runtime types (embedded in agent_runtime_state)} *)
 
 type compaction_runtime = {
@@ -99,7 +103,7 @@ type keeper_meta = {
   execution_scope: string;
   allowed_paths: string list;
   scope_kind: string;
-  tool_allowlist: string list;
+  tool_access: tool_access;
   tool_denylist: string list;
   room_scope: string;
   mention_targets: string list;
@@ -129,6 +133,9 @@ type keeper_meta = {
 val default_social_model : string
 
 val now_iso : unit -> string
+
+val tool_access_allowlist : tool_access -> string list
+val tool_access_to_json : tool_access -> Yojson.Safe.t
 
 (** {1 Updater helpers for nested record updates} *)
 

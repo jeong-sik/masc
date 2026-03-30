@@ -13,6 +13,11 @@ open Masc_mcp
 
 let make_meta ?(name = "test-keeper") ?(soul_profile = "")
     ?(policy_voice_enabled = false) ?(tool_allowlist = []) () : Keeper_types.keeper_meta =
+  let tool_access =
+    match tool_allowlist with
+    | [] -> Keeper_types.Unrestricted
+    | names -> Keeper_types.Restricted names
+  in
   let json =
     `Assoc
       [
@@ -21,7 +26,7 @@ let make_meta ?(name = "test-keeper") ?(soul_profile = "")
         ("trace_id", `String "test-trace-exposure");
         ("soul_profile", `String soul_profile);
         ("policy_voice_enabled", `Bool policy_voice_enabled);
-        ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
+        ("tool_access", Keeper_types.tool_access_to_json tool_access);
       ]
   in
   match Keeper_types.meta_of_json json with

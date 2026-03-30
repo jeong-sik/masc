@@ -4,13 +4,18 @@
 module KET = Masc_mcp.Keeper_exec_tools
 
 let make_meta ?(tool_allowlist = []) ?(tool_denylist = []) () =
+  let tool_access =
+    match tool_allowlist with
+    | [] -> Masc_mcp.Keeper_types.Unrestricted
+    | names -> Masc_mcp.Keeper_types.Restricted names
+  in
   match Masc_mcp.Keeper_types.meta_of_json
     (`Assoc
       [
         ("name", `String "keeper-bridge-test");
         ("agent_name", `String "keeper-bridge-test");
         ("trace_id", `String "keeper-bridge-trace");
-        ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
+        ("tool_access", Masc_mcp.Keeper_types.tool_access_to_json tool_access);
         ("tool_denylist", `List (List.map (fun s -> `String s) tool_denylist));
       ])
   with

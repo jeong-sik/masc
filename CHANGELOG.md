@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.174.0] - 2026-03-30
+
+### Added
+- **Keeper task autonomy** -- default execution_scope changed from observe_only to workspace. Prompt reclassifies unclaimed tasks as actionable work. Dashboard execution_scope dropdown (#3886).
+- **effective_allowed_paths guardrail** -- workspace-scope keepers restricted to own dirs by default. `["*"]` sentinel for explicit full access. Pre-dispatch path guard on masc_* passthrough. 9 unit tests (#3913, closes #3876).
+
+### Fixed
+- **Keeper turn trigger** -- unclaimed/failed tasks use shorter cooldown (1/3, min 60s) when proactive enabled (#3869).
+- **Stale paused keeper cleanup** -- auto-prune paused keeper meta files older than 24h (#3869).
+- **Timeline sort** -- narrative-timeline.ts no longer reverses backend's newest-first ordering (#3869).
+
 ## [2.173.0] - 2026-03-30
 
 ### Fixed

@@ -10,9 +10,10 @@ const confirmTarget = signal<string | null>(null)
 function PersonaCard({ persona }: { persona: PersonaSummary }) {
   const isConfirming = confirmTarget.value === persona.name
   const isSpawning = spawning.value && isConfirming
+  const title = persona.displayName ?? persona.name
   return html`
     <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-4)] p-4 flex flex-col gap-2 min-w-[180px]">
-      <div class="text-[14px] text-[var(--text-strong)] font-medium">${persona.name}</div>
+      <div class="text-[14px] text-[var(--text-strong)] font-medium">${title}</div>
       ${persona.role ? html`<div class="text-[11px] text-[var(--text-muted)]">${persona.role}</div>` : null}
       ${persona.mode ? html`<div class="text-[10px] text-[var(--text-muted)]">모드: ${persona.mode}</div>` : null}
       ${persona.description ? html`<div class="text-[11px] text-[var(--text-body)] mt-1 line-clamp-2">${persona.description}</div>` : null}

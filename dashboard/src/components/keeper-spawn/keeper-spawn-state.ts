@@ -1,12 +1,35 @@
 import { signal } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
+import { asString, extractArray, isRecord } from '../common/normalize'
 import { showToast } from '../common/toast'
 
 export interface PersonaSummary {
   name: string
+  displayName?: string
   role?: string
   mode?: string
   description?: string
+}
+
+export function normalizePersonaSummary(raw: unknown): PersonaSummary | null {
+  if (!isRecord(raw)) return null
+
+  const name = asString(raw.persona_name) ?? asString(raw.name)
+  if (!name) return null
+
+  return {
+    name,
+    displayName: asString(raw.display_name) ?? asString(raw.displayName) ?? asString(raw.name),
+    role: asString(raw.role),
+    mode: asString(raw.mode),
+    description: asString(raw.description) ?? asString(raw.trait),
+  }
+}
+
+export function normalizePersonaSummaries(raw: unknown): PersonaSummary[] {
+  return extractArray(raw, ['personas'])
+    .map(normalizePersonaSummary)
+    .filter((persona): persona is PersonaSummary => persona !== null)
 }
 
 export const personas = signal<PersonaSummary[]>([])
@@ -19,9 +42,7 @@ export async function loadPersonas(): Promise<void> {
   personasError.value = null
   try {
     const raw = await callMcpTool('masc_persona_list', {})
-    const parsed = JSON.parse(raw) as { personas?: PersonaSummary[] } | PersonaSummary[]
-    const list = Array.isArray(parsed) ? parsed : (parsed.personas ?? [])
-    personas.value = list
+    personas.value = normalizePersonaSummaries(JSON.parse(raw))
   } catch (err) {
     personasError.value = err instanceof Error ? err.message : String(err)
     showToast('페르소나 목록 로드 실패', 'error')

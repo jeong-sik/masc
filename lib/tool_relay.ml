@@ -52,7 +52,7 @@ let handle_relay_checkpoint _ctx args =
      Log.Misc.info "[RELAY] active_goal_ids provided but not persisted (goal store not integrated): %s"
        (String.concat "," goal_ids));
   let metrics = Relay.estimate_context ~messages ~tool_calls ~model:"claude" in
-  let _ = Relay.save_checkpoint ~summary ~task:current_task ~todos ~pdca:pdca_state ~files:relevant_files ~metrics in
+  let _cp = Relay.save_checkpoint ~summary ~task:current_task ~todos ~pdca:pdca_state ~files:relevant_files ~metrics in
   let json = `Assoc [
     ("status", `String "checkpoint_saved");
     ("usage_ratio", `Float metrics.Relay.usage_ratio);

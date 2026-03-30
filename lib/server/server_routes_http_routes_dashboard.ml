@@ -515,6 +515,116 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
+  (* Keeper tools — POST /api/v1/keepers/:name/tools
+     Body: { "action": "set_allowlist"|"set_denylist"|"add_allow"|"remove_allow"|"add_deny"|"remove_deny",
+             "tools": ["masc_status", ...] } *)
+  |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           let req_path = Http.Request.path req in
+           let prefix = "/api/v1/keepers/" in
+           let suffix = "/tools" in
+           let plen = String.length prefix in
+           let slen = String.length suffix in
+           let tlen = String.length req_path in
+           if tlen > plen + slen
+              && String.sub req_path 0 plen = prefix
+              && String.sub req_path (tlen - slen) slen = suffix
+           then
+             let name =
+               String.trim
+                 (String.sub req_path plen (tlen - plen - slen))
+             in
+             if String.length name = 0 then
+               Http.Response.json ~status:`Bad_request
+                 {|{"error":"keeper name required"}|} reqd
+             else
+               let config = state.Mcp_server.room_config in
+               match Keeper_types.read_meta config name with
+               | Error msg ->
+                   Http.Response.json ~status:`Not_found
+                     (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
+                     reqd
+               | Ok None ->
+                   Http.Response.json ~status:`Not_found
+                     (Printf.sprintf {|{"error":"keeper %S not found"}|} name)
+                     reqd
+               | Ok (Some meta) ->
+                   (try
+                      let args = Yojson.Safe.from_string body_str in
+                      let action = Safe_ops.json_string ~default:"" "action" args in
+                      let tools = Safe_ops.json_string_list "tools" args in
+                      let dedupe xs =
+                        List.fold_left (fun acc x ->
+                          if List.mem x acc then acc else x :: acc) [] xs
+                        |> List.rev
+                      in
+                      let updated_meta = match action with
+                        | "set_allowlist" ->
+                            Ok { meta with tool_allowlist = dedupe tools;
+                                           updated_at = Keeper_types.now_iso () }
+                        | "set_denylist" ->
+                            Ok { meta with tool_denylist = dedupe tools;
+                                           updated_at = Keeper_types.now_iso () }
+                        | "add_allow" ->
+                            Ok { meta with tool_allowlist = dedupe (meta.tool_allowlist @ tools);
+                                           updated_at = Keeper_types.now_iso () }
+                        | "remove_allow" ->
+                            Ok { meta with tool_allowlist =
+                                             List.filter (fun n -> not (List.mem n tools))
+                                               meta.tool_allowlist;
+                                           updated_at = Keeper_types.now_iso () }
+                        | "add_deny" ->
+                            Ok { meta with tool_denylist = dedupe (meta.tool_denylist @ tools);
+                                           updated_at = Keeper_types.now_iso () }
+                        | "remove_deny" ->
+                            Ok { meta with tool_denylist =
+                                             List.filter (fun n -> not (List.mem n tools))
+                                               meta.tool_denylist;
+                                           updated_at = Keeper_types.now_iso () }
+                        | "" -> Error "action required (set_allowlist|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
+                        | other -> Error (Printf.sprintf "unknown action: %s" other)
+                      in
+                      match updated_meta with
+                      | Error msg ->
+                          Http.Response.json ~status:`Bad_request
+                            (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
+                            reqd
+                      | Ok meta' ->
+                          (match Keeper_types.write_meta config meta' with
+                           | Ok () ->
+                               let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta' in
+                               let masc_count =
+                                 List.length (List.filter
+                                   (fun n -> String.starts_with ~prefix:"masc_" n) allowed)
+                               in
+                               Http.Response.json ~compress:true ~request:req
+                                 (Yojson.Safe.to_string
+                                    (`Assoc [
+                                       ("ok", `Bool true);
+                                       ("tool_allowlist", `List (List.map (fun s -> `String s) meta'.tool_allowlist));
+                                       ("tool_denylist", `List (List.map (fun s -> `String s) meta'.tool_denylist));
+                                       ("active_masc_tool_count", `Int masc_count);
+                                       ("total_active", `Int (List.length allowed));
+                                     ]))
+                                 reqd
+                           | Error e ->
+                               Http.Response.json ~status:`Internal_server_error
+                                 (Printf.sprintf {|{"error":"write failed: %s"}|}
+                                    (String.escaped e))
+                                 reqd)
+                    with Yojson.Json_error e ->
+                      Http.Response.json ~status:`Bad_request
+                        (Printf.sprintf {|{"error":"invalid json: %s"}|}
+                           (String.escaped e))
+                        reqd)
+           else
+             Http.Response.json ~status:`Not_found
+               {|{"error":"not found"}|} reqd
+         )
+       ) request reqd)
+
   (* Keeper boot — POST /api/v1/keepers/:name/boot *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
        with_token_permission_auth ~permission:Types.CanAdmin

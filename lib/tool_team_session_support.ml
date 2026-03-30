@@ -260,7 +260,79 @@ type oas_worker_evidence = Tool_team_session_step.oas_worker_evidence = {
   worker_json : Yojson.Safe.t option;
   conformance_json : Yojson.Safe.t option;
   worker : Oas.Sessions.worker_run option;
+  tool_call_traces_json : Yojson.Safe.t list;
+  tool_input_preview : string option;
+  tool_args_preview : string option;
+  tool_output_preview : string option;
 }
+
+let tool_call_traces_of_raw_records (records : Oas.Raw_trace.record list) =
+  let pending : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 8 in
+  let anonymous = ref 0 in
+  let ensure_trace ~tool_use_id ~tool_name ~input =
+    match Hashtbl.find_opt pending tool_use_id with
+    | Some trace -> trace
+    | None ->
+        let trace =
+          Observability_redact.build_tool_call_trace_json ~tool_use_id
+            ~tool_name ~input ~output:None ~is_error:None ()
+        in
+        Hashtbl.replace pending tool_use_id trace;
+        trace
+  in
+  List.iter
+    (fun (record : Oas.Raw_trace.record) ->
+      match record.record_type with
+      | Oas.Raw_trace.Tool_execution_started -> (
+          match record.tool_name, record.tool_input with
+          | Some tool_name, Some input ->
+              let tool_use_id =
+                Option.value
+                  ~default:
+                    (let id = Printf.sprintf "anon-%d" !anonymous in
+                     incr anonymous;
+                     id)
+                  record.tool_use_id
+              in
+              ignore (ensure_trace ~tool_use_id ~tool_name ~input)
+          | _ -> ())
+      | Oas.Raw_trace.Tool_execution_finished -> (
+          match record.tool_name with
+          | Some tool_name ->
+              let tool_use_id =
+                Option.value
+                  ~default:
+                    (let id = Printf.sprintf "anon-%d" !anonymous in
+                     incr anonymous;
+                     id)
+                  record.tool_use_id
+              in
+              let trace =
+                match Hashtbl.find_opt pending tool_use_id with
+                | Some (`Assoc fields) ->
+                    `Assoc
+                      (("tool_output_preview",
+                        Option.fold ~none:`Null
+                          ~some:(fun value -> `String value)
+                          (Option.bind record.tool_result
+                             (Observability_redact.redact_tool_output ~tool_name)))
+                      :: ("is_error",
+                          Option.fold ~none:`Null
+                            ~some:(fun value -> `Bool value)
+                            record.tool_error)
+                      :: List.remove_assoc "tool_output_preview"
+                           (List.remove_assoc "is_error" fields))
+                | _ ->
+                    Observability_redact.build_tool_call_trace_json ~tool_use_id
+                      ~tool_name
+                      ~input:(Option.value ~default:(`Assoc []) record.tool_input)
+                      ~output:record.tool_result ~is_error:record.tool_error ()
+              in
+              Hashtbl.replace pending tool_use_id trace
+          | None -> ())
+      | _ -> ())
+    records;
+  Hashtbl.to_seq_values pending |> List.of_seq
 
 let oas_worker_evidence_payload ~config ~evidence_session_id =
   let session_root = oas_trace_session_root config in
@@ -271,6 +343,20 @@ let oas_worker_evidence_payload ~config ~evidence_session_id =
   | Ok bundle, Ok report ->
       let latest_trace_run = bundle.latest_raw_trace_run in
       let worker = bundle.latest_worker_run in
+      let tool_call_traces_json, tool_input_preview, tool_args_preview,
+          tool_output_preview =
+        match latest_trace_run with
+        | Some run_ref -> (
+            match Oas.Raw_trace_query.read_run run_ref with
+            | Ok records ->
+                let traces = tool_call_traces_of_raw_records records in
+                let input_preview, args_preview, output_preview =
+                  Observability_redact.summarize_tool_call_traces traces
+                in
+                (traces, input_preview, args_preview, output_preview)
+            | Error _ -> ([], None, None, None))
+        | None -> ([], None, None, None)
+      in
       let trace_summary_json =
         match latest_trace_run with
         | Some run_ref -> (
@@ -307,6 +393,10 @@ let oas_worker_evidence_payload ~config ~evidence_session_id =
           worker_json = Option.map Oas.Sessions.worker_run_to_yojson worker;
           conformance_json = Some (Oas.Conformance.report_to_yojson report);
           worker;
+          tool_call_traces_json;
+          tool_input_preview;
+          tool_args_preview;
+          tool_output_preview;
         }
   | _ -> None
 

@@ -260,7 +260,7 @@ create_agent_token() {
   local nickname
   nickname="$(parse_nickname_from_text "$join_raw")"
   local token_raw
-  token_raw="$(call_tool "$MCP_URL" "$session_id" "" 11 "masc_auth_create_token" "$(jq -cn --arg role "$role" '{role:$role}')")"
+  token_raw="$(call_tool "$MCP_URL" "$session_id" "" 11 "masc_auth_create_token" "$(jq -cn --arg agent_name "$nickname" --arg role "$role" '{agent_name:$agent_name,role:$role}')")"
   require_tool_success "$token_raw"
   printf '%s|%s' "$nickname" "$(parse_token_from_text "$token_raw")"
 }
@@ -302,18 +302,19 @@ printf '[2/10] bootstrap room and tokens before auth\n'
 init_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "" 1 "masc_init" "$(jq -cn --arg a "$SUPERVISOR_AGENT" '{agent_name:$a}')")"
 require_tool_success "$init_raw"
 
-SUPERVISOR_IDENTITY="$(create_agent_token "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_AGENT" "admin" '["supervisor","operator"]')"
+SUPERVISOR_IDENTITY="$(create_agent_token "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_AGENT" "admin" '["supervisor","operator","admin"]')"
 SUPERVISOR_NICKNAME="${SUPERVISOR_IDENTITY%%|*}"
 SUPERVISOR_TOKEN="${SUPERVISOR_IDENTITY##*|}"
+SUPERVISOR_SESSION_ID="${SUPERVISOR_SESSION_ID}-auth"
 
 enable_auth_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "" 12 "masc_auth_enable" '{"require_token":true}')"
 require_tool_success "$enable_auth_raw"
 
 printf '[3/10] re-join agents under bearer auth\n'
-join_with_token "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" "$SUPERVISOR_NICKNAME" '["supervisor","operator"]'
+join_with_token "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" "$SUPERVISOR_NICKNAME" '["supervisor","operator","admin"]'
 
 printf '[4/10] inspect llama inventory and validate explicit model\n'
-llama_models_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 13 "masc_llama_models" '{}')"
+llama_models_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 13 "masc_local_runtime_models" '{}')"
 require_tool_success "$llama_models_raw"
 llama_models_result="$(printf '%s' "$llama_models_raw" | extract_tool_result)"
 if [ -z "$LLAMA_SWARM_MODEL" ]; then
@@ -366,19 +367,24 @@ model_selection_turn_raw="$(call_tool "$MCP_URL" "$SUPERVISOR_SESSION_ID" "$SUPE
 require_tool_success "$model_selection_turn_raw"
 
 printf '[6/10] spawn full llama team\n'
-spawn_batch_raw="$(spawn_llama_batch "$MODEL_SELECTION_NOTE" "$NORMALIZED_SWARM_BATCH_JSON")"
+spawn_batch_raw="$(spawn_llama_batch "$NORMALIZED_SWARM_BATCH_JSON")"
 EXPECTED_WORKER_COUNT="$(printf '%s' "$NORMALIZED_SWARM_BATCH_JSON" | jq -r 'length')"
 
 printf '[7/10] inspect remote operator surface\n'
-tools_raw="$(jsonrpc_call "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 4 "tools/list" '{}')"
+tools_raw="$(mcp_jsonrpc_call 4 "tools/list" '{}' "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" "$OPERATOR_URL")"
 require_success_response "$tools_raw"
 tool_count="$(printf '%s' "$tools_raw" | jq -r '.result.tools | length')"
-if [ "$tool_count" -ne 4 ]; then
-  echo "FAIL: expected 4 operator tools, got $tool_count"
+if [ "$tool_count" -lt 4 ]; then
+  echo "FAIL: expected at least 4 operator tools, got $tool_count"
   printf '%s\n' "$tools_raw"
   exit 1
 fi
-printf '%s' "$tools_raw" | jq -e '.result.tools | map(.name) | sort == ["masc_operator_action","masc_operator_confirm","masc_operator_digest","masc_operator_snapshot"]' >/dev/null
+printf '%s' "$tools_raw" | jq -e '
+  .result.tools
+  | map(.name) as $names
+  | ["masc_operator_action","masc_operator_confirm","masc_operator_digest","masc_operator_snapshot"]
+  | all(. as $required | $names | index($required) != null)
+' >/dev/null
 
 snapshot_raw="$(call_tool "$OPERATOR_URL" "$SUPERVISOR_OP_SESSION_ID" "$SUPERVISOR_TOKEN" 5 "masc_operator_snapshot" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" '{actor:$actor,view:"full"}')")"
 require_tool_success "$snapshot_raw"

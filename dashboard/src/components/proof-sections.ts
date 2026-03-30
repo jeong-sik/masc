@@ -25,6 +25,15 @@ import {
   type DedupedTimelineItem,
 } from './proof-helpers'
 
+function traceField(trace: Record<string, unknown>, key: string): string | null {
+  const value = trace?.[key]
+  return typeof value === 'string' && value.trim() !== '' ? value : null
+}
+
+function traceRows(traces: Record<string, unknown>[] | undefined): Record<string, unknown>[] {
+  return Array.isArray(traces) ? traces.slice(0, 4) : []
+}
+
 export function SelectionCard({
   selection,
   summary,
@@ -61,6 +70,7 @@ export function SelectionCard({
 }
 
 export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) {
+  const traces = traceRows(item.tool_call_traces)
   return html`
     <article class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm hover:-translate-y-0.5 hover:shadow-md hover:bg-card/60 transition-all duration-200">
       <div class="flex items-start justify-between gap-4 mb-3">
@@ -74,6 +84,29 @@ export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) 
         </div>
         <span class="text-[11px] font-mono text-text-dim bg-white/5 px-2 py-0.5 rounded-md border border-white/5 shrink-0">${relativeTime(item.timestamp ?? null)}</span>
       </div>
+      ${item.input_preview || item.output_preview
+        ? html`<div class="grid grid-cols-2 gap-3 mb-3">
+            <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
+              <strong>입력</strong>
+              <span>${item.input_preview ?? '표시 가능한 입력 없음'}</span>
+            </div>
+            <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
+              <strong>출력</strong>
+              <span>${item.output_preview ?? '표시 가능한 출력 없음'}</span>
+            </div>
+          </div>`
+        : null}
+      ${traces.length > 0
+        ? html`<div class="grid gap-2 mb-3">
+            ${traces.map(trace => html`
+              <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
+                <strong>${traceField(trace, 'tool_name') ?? 'tool'}</strong>
+                ${traceField(trace, 'tool_input_preview') ? html`<span>in: ${traceField(trace, 'tool_input_preview')}</span>` : null}
+                ${traceField(trace, 'tool_output_preview') ? html`<span>out: ${traceField(trace, 'tool_output_preview')}</span>` : null}
+              </div>
+            `)}
+          </div>`
+        : null}
       ${(() => {
         const tags = toolEvidenceTags(item)
         return tags.length > 0
@@ -90,6 +123,7 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
   const preview = workerRunEvidencePreview(item)
   const validationFailures = Array.isArray(item.validation_failures) ? item.validation_failures : []
   const toolNames = Array.isArray(item.tool_names) ? item.tool_names : []
+  const traces = traceRows(item.tool_call_traces)
   return html`
     <article class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm hover:border-accent/30 transition-all duration-200 flex flex-col gap-3">
       <div class="flex justify-between gap-4 items-start">
@@ -114,10 +148,33 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
             <span class="text-[12px] text-text-body leading-relaxed whitespace-pre-wrap font-mono opacity-90">${preview}</span>
           </div>`
         : null}
+      ${item.tool_input_preview || item.tool_args_preview || item.tool_output_preview
+        ? html`<div class="grid grid-cols-2 gap-3">
+            <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
+              <strong>도구 입력</strong>
+              <span>${item.tool_args_preview ?? item.tool_input_preview ?? '표시 가능한 입력 없음'}</span>
+            </div>
+            <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
+              <strong>도구 출력</strong>
+              <span>${item.tool_output_preview ?? '표시 가능한 출력 없음'}</span>
+            </div>
+          </div>`
+        : null}
       ${validationFailures.length > 0
         ? html`<div class="flex flex-col gap-1.5 py-3 px-4 rounded-xl border border-warn/30 bg-warn/10 shadow-inner mt-1">
             <strong class="text-[11px] font-semibold uppercase tracking-widest text-warn">검증 실패</strong>
             <span class="text-[12px] text-text-body leading-relaxed whitespace-pre-wrap">${validationFailures.join(' · ')}</span>
+          </div>`
+        : null}
+      ${traces.length > 0
+        ? html`<div class="grid gap-2 mt-1">
+            ${traces.map(trace => html`
+              <div class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-6)] grid gap-1">
+                <strong>${traceField(trace, 'tool_name') ?? 'tool'}</strong>
+                ${traceField(trace, 'tool_input_preview') ? html`<span>in: ${traceField(trace, 'tool_input_preview')}</span>` : null}
+                ${traceField(trace, 'tool_output_preview') ? html`<span>out: ${traceField(trace, 'tool_output_preview')}</span>` : null}
+              </div>
+            `)}
           </div>`
         : null}
       ${toolNames.length > 0

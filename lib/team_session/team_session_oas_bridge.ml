@@ -341,6 +341,57 @@ let persist_worker_run_proof_if_present ~(config : Room.config)
         let proof_path =
           Team_session_store.worker_run_proof_path config session_id worker_run_id
         in
+        let tool_call_traces, tool_input_preview, tool_args_preview,
+            trace_output_preview =
+          match trace_ref with
+          | Some run_ref -> (
+              match Oas.Raw_trace_query.read_run run_ref with
+              | Ok records ->
+                  let traces =
+                    records
+                    |> List.filter_map (fun record ->
+                           match record.Oas.Raw_trace.record_type with
+                           | Oas.Raw_trace.Tool_execution_started -> (
+                               match record.tool_name, record.tool_input with
+                               | Some tool_name, Some input ->
+                                   Some
+                                     (Observability_redact
+                                      .build_tool_call_trace_json
+                                        ?tool_use_id:record.tool_use_id
+                                        ~tool_name ~input ~output:None
+                                        ~is_error:None ())
+                               | _ -> None)
+                           | Oas.Raw_trace.Tool_execution_finished -> (
+                               match record.tool_name with
+                               | Some tool_name ->
+                                   Some
+                                     (Observability_redact
+                                      .build_tool_call_trace_json
+                                        ?tool_use_id:record.tool_use_id
+                                        ~tool_name
+                                        ~input:
+                                          (Option.value ~default:(`Assoc [])
+                                             record.tool_input)
+                                        ~output:record.tool_result
+                                        ~is_error:record.tool_error ())
+                               | None -> None)
+                           | _ -> None)
+                  in
+                  let input_preview, args_preview, output_preview =
+                    Observability_redact.summarize_tool_call_traces traces
+                  in
+                  (traces, input_preview, args_preview, output_preview)
+              | Error _ -> ([], None, None, None))
+          | None -> ([], None, None, None)
+        in
+        let provider_label =
+          Option.bind resolved_model Oas_model_resolve.provider_name_of_label
+        in
+        let effective_output_preview =
+          match trace_output_preview with
+          | Some _ as value -> value
+          | None -> output_preview
+        in
         Team_session_store.save_worker_run_proof_json config session_id
           worker_run_id (Oas.Cdal_proof.to_json proof);
         Team_session_store.save_worker_run_meta_json config session_id
@@ -371,15 +422,32 @@ let persist_worker_run_proof_if_present ~(config : Room.config)
                   planned_worker.worker_class );
               ("requested_worker_size", `Null);
               ("resolved_runtime", `String "oas_swarm");
+              ( "provider_label",
+                Option.fold ~none:`Null ~some:(fun value -> `String value)
+                  provider_label );
               ( "resolved_model",
                 Option.fold ~none:`Null ~some:(fun value -> `String value)
                   resolved_model );
+              ( "thinking_enabled",
+                Option.fold ~none:`Null ~some:(fun value -> `Bool value)
+                  planned_worker.thinking_enabled );
               ( "routing_reason",
                 Option.fold ~none:`Null ~some:(fun value -> `String value)
                   planned_worker.routing_reason );
+              ( "tool_call_traces",
+                `List tool_call_traces );
+              ( "tool_input_preview",
+                Option.fold ~none:`Null ~some:(fun value -> `String value)
+                  tool_input_preview );
+              ( "tool_args_preview",
+                Option.fold ~none:`Null ~some:(fun value -> `String value)
+                  tool_args_preview );
+              ( "tool_output_preview",
+                Option.fold ~none:`Null ~some:(fun value -> `String value)
+                  trace_output_preview );
               ( "output_preview",
                 Option.fold ~none:`Null ~some:(fun value -> `String value)
-                  output_preview );
+                  effective_output_preview );
               ("error", Option.fold ~none:`Null ~some:(fun value -> `String value) error);
               ( "trace_ref",
                 Option.fold ~none:`Null ~some:trace_ref_to_json trace_ref );
@@ -389,7 +457,7 @@ let persist_worker_run_proof_if_present ~(config : Room.config)
               ("oas_worker_run", `Null);
               ("session_conformance", `Null);
               ("validated", `Null);
-              ("final_text", Option.fold ~none:`Null ~some:(fun value -> `String value) output_preview);
+              ("final_text", Option.fold ~none:`Null ~some:(fun value -> `String value) effective_output_preview);
               ("stop_reason", `Null);
               ("failure_reason", Option.fold ~none:`Null ~some:(fun value -> `String value) error);
               ("ts_iso", `String (Types.now_iso ()));

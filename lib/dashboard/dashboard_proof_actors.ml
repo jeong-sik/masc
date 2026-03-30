@@ -134,11 +134,18 @@ let worker_run_summary_json json =
       ("requested_worker_class", U.member "requested_worker_class" json);
       ("requested_worker_size", U.member "requested_worker_size" json);
       ("resolved_runtime", U.member "resolved_runtime" json);
+      ("provider_label", U.member "provider_label" json);
       ("resolved_model", U.member "resolved_model" json);
+      ("thinking_enabled", U.member "thinking_enabled" json);
       ("routing_reason", U.member "routing_reason" json);
       ("tool_names", U.member "tool_names" json);
       ("tool_call_count", U.member "tool_call_count" json);
+      ("tool_call_traces", U.member "tool_call_traces" json);
+      ("tool_input_preview", U.member "tool_input_preview" json);
+      ("tool_args_preview", U.member "tool_args_preview" json);
+      ("tool_output_preview", U.member "tool_output_preview" json);
       ("output_preview", U.member "output_preview" json);
+      ("trace_ref", U.member "trace_ref" json);
       ("record_count", U.member "record_count" summary);
       ("assistant_block_count", U.member "assistant_block_count" summary);
       ("final_text", if U.member "final_text" json <> `Null then U.member "final_text" json else U.member "final_text" summary);

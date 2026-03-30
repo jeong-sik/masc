@@ -48,7 +48,12 @@ let install ~get_agent_name =
              | Some value ->
                  let trimmed = String.trim value in
                  if trimmed = "" then None else Some trimmed
-             | None -> None)
+             | None ->
+                 (match Safe_ops.json_string_opt "actor" args with
+                  | Some value ->
+                      let trimmed = String.trim value in
+                      if trimmed = "" then None else Some trimmed
+                  | None -> None))
       in
       match agent_name_opt with
       | None ->

@@ -268,6 +268,19 @@ let execute_spawn_pipeline
                        ?requested_worker_size:(deps.worker_size_of_spec prepared.spec)
                        ?resolved_runtime:prepared.assigned_runtime
                        ~resolved_model:prepared.runtime_model_label
+                       ?provider_label:
+                         (Option.bind
+                            (deps.oas_worker_evidence_payload
+                               ~config:ctx.config
+                               ~evidence_session_id:
+                                 (Worker_runtime
+                                  .oas_worker_evidence_session_id
+                              ~worker_run_id:
+                                      prepared.worker_run_id))
+                            (fun payload ->
+                              Option.bind payload.worker (fun worker ->
+                                  worker.resolved_provider)))
+                       ?thinking_enabled:prepared.spec.thinking_enabled
                        ?routing_reason:prepared.spec.routing_reason
                        ~tool_names:oas_tool_names
                        ~tool_call_count:oas_tool_call_count
@@ -284,6 +297,14 @@ let execute_spawn_pipeline
                        ?proof
                          ~trace_capability:"raw"
                        ();
+                     let oas_evidence =
+                       deps.oas_worker_evidence_payload ~config:ctx.config
+                         ~evidence_session_id:
+                           (Worker_runtime
+                            .oas_worker_evidence_session_id
+                              ~worker_run_id:
+                                prepared.worker_run_id)
+                     in
                      append_spawn_event
                        ~worker_run_id:prepared.worker_run_id
                        ~spawn_agent:prepared.spec.spawn_agent
@@ -314,6 +335,24 @@ let execute_spawn_pipeline
                          prepared.spec.spawn_selection_note
                        ~tool_names:oas_tool_names
                        ~tool_call_count:oas_tool_call_count
+                       ?tool_call_traces:
+                         (Option.bind oas_evidence (fun payload ->
+                              if payload.tool_call_traces_json = [] then None
+                              else Some payload.tool_call_traces_json))
+                       ?tool_input_preview:
+                         (Option.bind oas_evidence (fun payload ->
+                              payload.tool_input_preview))
+                       ?tool_args_preview:
+                         (Option.bind oas_evidence (fun payload ->
+                              payload.tool_args_preview))
+                       ?tool_output_preview:
+                         (Option.bind oas_evidence (fun payload ->
+                              payload.tool_output_preview))
+                       ?provider_label:
+                         (Option.bind oas_evidence (fun payload ->
+                              Option.bind payload.worker (fun worker ->
+                                  worker.resolved_provider)))
+                       ?thinking_enabled:prepared.spec.thinking_enabled
                        ~success:spawn_result.success
                        ~exit_code:spawn_result.exit_code
                        ~elapsed_ms:spawn_result.elapsed_ms
@@ -384,10 +423,34 @@ let execute_spawn_pipeline
                          ("status", `String "completed");
                          ("trace_capability", `String (if Option.is_some oas_trace_ref then "raw" else "summary_only"));
                          ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
+                         ( "provider_label",
+                           Option.fold ~none:`Null ~some:(fun s -> `String s)
+                             (Option.bind oas_evidence (fun payload ->
+                                  Option.bind payload.worker (fun worker ->
+                                      worker.resolved_provider))) );
                          ("resolved_model", `String prepared.runtime_model_label);
+                         ("thinking_enabled", Option.fold ~none:`Null ~some:(fun v -> `Bool v) prepared.spec.thinking_enabled);
                          ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
                          ("tool_call_count", `Int oas_tool_call_count);
                          ("tool_names", `List (List.map (fun name -> `String name) oas_tool_names));
+                         ( "tool_call_traces",
+                           Option.fold ~none:(`List [])
+                             ~some:(fun items -> `List items)
+                             (Option.bind oas_evidence (fun payload ->
+                                  if payload.tool_call_traces_json = [] then None
+                                  else Some payload.tool_call_traces_json)) );
+                         ( "tool_input_preview",
+                           Option.fold ~none:`Null ~some:(fun s -> `String s)
+                             (Option.bind oas_evidence (fun payload ->
+                                  payload.tool_input_preview)) );
+                         ( "tool_args_preview",
+                           Option.fold ~none:`Null ~some:(fun s -> `String s)
+                             (Option.bind oas_evidence (fun payload ->
+                                  payload.tool_args_preview)) );
+                         ( "tool_output_preview",
+                           Option.fold ~none:`Null ~some:(fun s -> `String s)
+                             (Option.bind oas_evidence (fun payload ->
+                                  payload.tool_output_preview)) );
                          ("success", `Bool spawn_result.success);
                          ("elapsed_ms", `Int spawn_result.elapsed_ms);
                          ("output_preview", `String output_preview);

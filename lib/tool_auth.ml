@@ -61,12 +61,13 @@ Bind Host: %s (%s)
   (true, msg)
 
 let handle_auth_create_token ctx args =
+  let agent_name = get_string args "agent_name" ctx.agent_name in
   let role_str = get_string args "role" "worker" in
   let role = match Types.agent_role_of_string role_str with
     | Ok r -> r
     | Error _ -> Types.Worker
   in
-  match Auth.create_token ctx.config.base_path ~agent_name:ctx.agent_name ~role with
+  match Auth.create_token ctx.config.base_path ~agent_name ~role with
   | Ok (raw_token, cred) ->
       let expires = match cred.expires_at with
         | Some exp -> exp
@@ -81,14 +82,15 @@ Role: %s
 Expires: %s
 
 Pass this token in requests to authenticate.
-|} ctx.agent_name raw_token (Types.agent_role_to_string role) expires in
+|} agent_name raw_token (Types.agent_role_to_string role) expires in
       (true, msg)
   | Error e ->
       (false, Types.masc_error_to_string e)
 
 let handle_auth_refresh ctx args =
+  let agent_name = get_string args "agent_name" ctx.agent_name in
   let token = get_string args "token" "" in
-  match Auth.refresh_token ctx.config.base_path ~agent_name:ctx.agent_name ~old_token:token with
+  match Auth.refresh_token ctx.config.base_path ~agent_name ~old_token:token with
   | Ok (new_token, cred) ->
       let expires = match cred.expires_at with
         | Some exp -> exp
@@ -100,14 +102,15 @@ New Token:
 `%s`
 
 Expires: %s
-|} ctx.agent_name new_token expires in
+|} agent_name new_token expires in
       (true, msg)
   | Error e ->
       (false, Types.masc_error_to_string e)
 
-let handle_auth_revoke ctx _args =
-  Auth.delete_credential ctx.config.base_path ctx.agent_name;
-  (true, Printf.sprintf "🗑️ Token revoked for %s" ctx.agent_name)
+let handle_auth_revoke ctx args =
+  let agent_name = get_string args "agent_name" ctx.agent_name in
+  Auth.delete_credential ctx.config.base_path agent_name;
+  (true, Printf.sprintf "🗑️ Token revoked for %s" agent_name)
 
 let handle_auth_list ctx _args =
   let creds = Auth.list_credentials ctx.config.base_path in

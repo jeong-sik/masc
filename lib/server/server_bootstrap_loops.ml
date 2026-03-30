@@ -5,6 +5,11 @@
 
 let install_tooling ~governance_level (state : Mcp_server.server_state) =
   Governance_pipeline.install ~config:state.room_config ~governance_level;
+  Tool_permissions.set_capability_checker (fun agent_name capability ->
+      Room.get_agents_raw state.room_config
+      |> List.exists (fun (agent : Types.agent) ->
+             String.equal agent.name agent_name
+             && List.mem capability agent.capabilities));
   Tool_permissions.install ~get_agent_name:(fun () -> None)
 
 let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr

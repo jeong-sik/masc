@@ -60,13 +60,6 @@ let default_mappings : action_mapping list = [
     requires_unanimous = false;
     min_threshold = 0.5;
   };
-  (* Deploy pattern *)
-  {
-    pattern = "deploy (v?[0-9.]+)";
-    action = ExecCommand ["echo"; "Deploy placeholder"];  (* stub: blocked at execution time *)
-    requires_unanimous = true;
-    min_threshold = 1.0;
-  };
 ]
 
 (** {1 Pattern Matching} *)
@@ -280,10 +273,6 @@ let execute_decision ~topic ~result : exec_result option =
              Error (Printf.sprintf
                "Council: cannot extract PR number from topic %S — \
                 ClosePR requires a valid PR number" topic))
-        | ExecCommand ["echo"; "Deploy placeholder"] ->
-          Error (Printf.sprintf
-            "Council: deploy action not implemented for topic %S — \
-             requires deployment pipeline integration" topic)
         | other -> Ok other
       in
       (match action with

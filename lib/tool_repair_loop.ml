@@ -178,6 +178,40 @@ let generate_or_repair_code (ctx : _ context) (state : state) :
           (Repair, Oas_response.text_of_response run_result.response))
         result
 
+(* Security: Ensure [child] is either equal to [parent] or located under [parent]. *)
+let is_safe_subpath ~parent ~child =
+  if child = parent then
+    true
+  else
+    let parent_with_sep =
+      if Filename.check_suffix parent Filename.dir_sep then
+        parent
+      else
+        parent ^ Filename.dir_sep
+    in
+    let plen = String.length parent_with_sep in
+    String.length child >= plen
+    && String.sub child 0 plen = parent_with_sep
+
+(* Security: Validate that [target_file], if provided, is a relative path whose
+   resolved location stays within [working_dir]. *)
+let validate_target_file ~working_dir ~target_file =
+  match target_file with
+  | None -> Ok None
+  | Some tf ->
+      if not (Filename.is_relative tf) then
+        Error "target_file must be a relative path"
+      else
+        let candidate = Filename.concat working_dir tf in
+        let resolved =
+          try Unix.realpath candidate with
+          | Unix.Unix_error _ -> candidate
+        in
+        if is_safe_subpath ~parent:working_dir ~child:resolved then
+          Ok (Some tf)
+        else
+          Error "target_file must reside within working_dir"
+
 let update_state_with_attempt (state : state) ~(attempt : attempt_record)
     ~(classification : attempt_classification) ~(status : repair_status)
     ~(last_error : string option) ~(current_code : string) =
@@ -199,48 +233,74 @@ let handle_start (ctx : _ context) args : tool_result =
   | Error message -> error_result message
   | Ok plugin_id ->
       let target_mode = resolve_target_mode args in
-      let working_dir = get_string args "working_dir" (Sys.getcwd ()) in
+      let working_dir_arg = get_string args "working_dir" (Sys.getcwd ()) in
       let target_file = get_string_opt args "target_file" in
-      let validator_profile =
-        get_string args "validator_profile" (Ocaml.default_validator_profile target_mode)
+      (* Normalize current workspace root. *)
+      let cwd_root =
+        try Unix.realpath (Sys.getcwd ()) with
+        | Unix.Unix_error _ -> Sys.getcwd ()
       in
-      if target_mode = Repo && Option.is_none target_file then
-        error_result "target_file is required when target_mode=repo"
-      else
-        let loop_id = make_loop_id () in
-        let state =
-          {
-            loop_id;
-            plugin_id;
-            target_mode;
-            task_spec;
-            working_dir;
-            target_file;
-            validator_profile;
-            model_label = get_string args "model_label" (default_model_label ());
-            max_attempts = max 1 (get_int args "max_attempts" 2);
-            attempt_count = 0;
-            artifact_session_id =
-              get_string args "artifact_session_id" loop_id;
-            status = Running;
-            last_error = None;
-            source_text = get_string_opt args "source_text";
-            current_code = None;
-            attempts = [];
-            created_at = Time_compat.now ();
-            updated_at = Time_compat.now ();
-            stopped_at = None;
-          }
-        in
-        Tool_repair_loop_storage.save_state ctx.config state;
-        Tool_repair_loop_storage.append_event ctx.config state.loop_id "started"
-          (`Assoc
-            [
-              ("agent_name", `String ctx.agent_name);
-              ("plugin_id", `String state.plugin_id);
-              ("target_mode", `String (target_mode_to_string state.target_mode));
-            ]);
-        (true, state_json_string state)
+      (* Normalize and validate working_dir. *)
+      let resolved_working_dir_result =
+        try Ok (Unix.realpath working_dir_arg) with
+        | Unix.Unix_error _ ->
+            Error "working_dir does not exist or is not accessible"
+      in
+      (match resolved_working_dir_result with
+      | Error msg -> error_result msg
+      | Ok working_dir ->
+          if not (is_safe_subpath ~parent:cwd_root ~child:working_dir) then
+            error_result "working_dir must be within the current workspace"
+          else
+            match validate_target_file ~working_dir ~target_file with
+            | Error msg -> error_result msg
+            | Ok validated_target_file ->
+                let validator_profile =
+                  get_string args "validator_profile"
+                    (Ocaml.default_validator_profile target_mode)
+                in
+                (* Cap max_attempts to prevent DoS *)
+                let max_attempts = min 10 (max 1 (get_int args "max_attempts" 2)) in
+                if target_mode = Repo && Option.is_none validated_target_file then
+                  error_result "target_file is required when target_mode=repo"
+                else
+                  let loop_id = make_loop_id () in
+                  let state =
+                    {
+                      loop_id;
+                      plugin_id;
+                      target_mode;
+                      task_spec;
+                      working_dir;
+                      target_file = validated_target_file;
+                      validator_profile;
+                      model_label =
+                        get_string args "model_label" (default_model_label ());
+                      max_attempts;
+                      attempt_count = 0;
+                      artifact_session_id =
+                        get_string args "artifact_session_id" loop_id;
+                      status = Running;
+                      last_error = None;
+                      source_text = get_string_opt args "source_text";
+                      current_code = None;
+                      attempts = [];
+                      created_at = Time_compat.now ();
+                      updated_at = Time_compat.now ();
+                      stopped_at = None;
+                    }
+                  in
+                  Tool_repair_loop_storage.save_state ctx.config state;
+                  Tool_repair_loop_storage.append_event ctx.config state.loop_id
+                    "started"
+                    (`Assoc
+                      [
+                        ("agent_name", `String ctx.agent_name);
+                        ("plugin_id", `String state.plugin_id);
+                        ( "target_mode",
+                          `String (target_mode_to_string state.target_mode) );
+                      ]);
+                  (true, state_json_string state))
 
 let handle_status (ctx : _ context) args : tool_result =
   let*! loop_id = get_string_required args "loop_id" in

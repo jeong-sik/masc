@@ -78,15 +78,16 @@ let strip_markdown_fences text =
     match lines with
     | [] -> trimmed
     | _opening :: rest ->
-        let body_rev =
-          List.fold_left
-            (fun acc line ->
-              if String.trim line = "```" then []
-              else line :: acc)
-            [] rest
+        (* Collect lines until the first closing fence ``` *)
+        let rec collect_until_closing acc = function
+          | [] -> List.rev acc
+          | line :: tl ->
+              if String.trim line = "```" then List.rev acc
+              else collect_until_closing (line :: acc) tl
         in
-        if body_rev = [] then trimmed
-        else String.concat "\n" (List.rev body_rev)
+        let body = collect_until_closing [] rest in
+        if body = [] then trimmed
+        else String.concat "\n" body
 
 let validator_output_text (result : validator_result) =
   let stdout = String.trim result.stdout in
@@ -169,7 +170,8 @@ let run_repo_validation (ctx : _ context) (state : state) ~attempt_index
   in
   Fs_compat.mkdir_p (Filename.dirname target_path);
   Fs_compat.save_file target_path code;
-  let argv = [ "dune"; "build" ] in
+  (* Use --root flag to ensure dune build runs in the correct directory *)
+  let argv = [ "dune"; "build"; "--root"; state.working_dir ] in
   let validation =
     Fun.protect
       ~finally:(fun () ->

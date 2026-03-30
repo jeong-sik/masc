@@ -1,7 +1,7 @@
 (** MASC Runtime Environment Configuration
 
     Runtime-specific settings: zombies, locks, sessions, tempo, decisions,
-    cache, orchestrator, mitosis, spawn, local runtime, federation,
+    cache, orchestrator, spawn, local runtime, federation,
     cancellation, neo4j, voice, custom model, network, timeouts,
     inference defaults, control plane cleanup, message GC, chain. *)
 
@@ -56,11 +56,6 @@ module TeamSession : sig
   val router_judge_timeout_sec : int
   val router_judge_confidence_threshold : float
   val router_judge_model_opt : unit -> string option
-end
-
-module Mitosis : sig
-  val trigger_interval_seconds : float
-  val handoff_cooldown_seconds : float
 end
 
 module Spawn : sig

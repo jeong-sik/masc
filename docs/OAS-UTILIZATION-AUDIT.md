@@ -21,7 +21,7 @@ The main remaining problems are no longer “missing migration” at large. They
 
 | Area | Status | Evidence |
 |------|--------|----------|
-| Single-agent runtime | Strong | `oas_worker`, keeper turn path, verifier, council, mitosis, router/judge flows use `Agent.run` through OAS wrappers |
+| Single-agent runtime | Strong | `oas_worker`, keeper turn path, verifier, council, keeper rollover, router/judge flows use `Agent.run` through OAS wrappers |
 | Context reduction | Real | `context_compact_oas.ml` delegates directly to OAS `Context_reducer` |
 | Event bus / SSE | Real | `oas_events.ml` publishes `masc:*` events and `oas_sse_bridge.ml` relays them to SSE |
 | Memory bridge | Partial but real | `memory_oas_bridge.ml` now seeds long-term, procedural, and episodic memory; Working/Scratchpad remain runtime-only |
@@ -71,7 +71,7 @@ The resume path now shares the same checkpoint/evidence/completion-log cleanup h
 ### 3. Memory bridge scope is now honest, but not universal
 
 The episodic source of truth is `Institution_eio` JSONL.
-That is enough for current keeper/council/mitosis usage, but it does not mean every historical MASC memory source has been unified into OAS memory.
+That is enough for current keeper/council/handoff usage, but it does not mean every historical MASC memory source has been unified into OAS memory.
 
 ### 4. Some older docs are still stale by implication
 

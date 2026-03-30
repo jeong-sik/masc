@@ -108,7 +108,7 @@ end
 
 module Spawn = struct
   (** Default spawn timeout for agent processes (seconds).
-      Used by spawn.ml, spawn_eio.ml, mitosis/mitosis_spawn.ml, and tool_relay.ml.
+      Used by spawn.ml, spawn_eio.ml, and tool_relay.ml.
       Higher value (600s) allows for slow network/API conditions while preventing indefinite hangs. *)
   let timeout_seconds =
     int_of_float (get_float ~default:600.0 "MASC_SPAWN_TIMEOUT_SEC")

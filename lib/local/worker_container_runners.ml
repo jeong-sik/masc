@@ -220,7 +220,12 @@ let continue_worker ?worker_run_id ~sw ?net ~base_path ~room_config ~worker_name
               let allowed_tools =
                 match meta.shell_profile with
                 | Shell_dev ->
-                    [ "mcp__masc__masc_heartbeat"; "mcp__masc__masc_memento_mori" ]
+                    [
+                      "mcp__masc__masc_heartbeat";
+                      "mcp__masc__masc_relay_status";
+                      "mcp__masc__masc_relay_checkpoint";
+                      "mcp__masc__masc_relay_now";
+                    ]
                 | _ ->
                     session_min_tool_names
                     |> List.map (fun name -> "mcp__masc__" ^ name)

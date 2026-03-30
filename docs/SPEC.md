@@ -54,7 +54,7 @@ MASC-MCP는 MCP(Model Context Protocol) 2025-11-25 기반의 OCaml MCP 서버이
 
 | Phase | Feature | Tools | Description |
 |-------|---------|-------|-------------|
-| **8** | Cellular Agent Handover | 5 | DNA-based state transfer between agents |
+| **8** | Cellular Agent Handover | 5 | Capsule-based state transfer between agents |
 | **9** | Execution Memory | 6 | Task execution tracking (runs/) |
 | **10** | Token Usage Tracking | - | Cost attribution in spawn results |
 | **11** | Internal Caching | 6 | Shared context store with TTL |
@@ -93,13 +93,12 @@ lib/
 │   ├── orchestrator.ml    # Multi-agent orchestration
 │   └── masc_pb.ml         # Protobuf (auto-generated)
 │
-├── Cellular Agent (6 modules) [NEW in v3.0]
-│   ├── handover.ml        # DNA-based state transfer (353 lines)
+├── Cellular Agent (5 modules) [NEW in v3.0]
+│   ├── handover.ml        # Capsule-based state transfer (353 lines)
 │   ├── execution_memory.ml # Run tracking (287 lines)
 │   ├── cache.ml           # Shared context store (224 lines)
 │   ├── tempo.ml           # Adaptive intervals (164 lines)
-│   ├── dashboard.ml       # Terminal visualization (235 lines)
-│   └── mitosis.ml         # Agent division (460 lines)
+│   └── dashboard.ml       # Terminal visualization (235 lines)
 │
 ├── Planning & Execution (4 modules)
 │   ├── planning.ml        # Planning files (374 lines)
@@ -191,13 +190,13 @@ Client Request
 
 ### Cellular Agent Tools Detail (New in v3.0)
 
-#### Handover (DNA Transfer)
+#### Handover (Capsule Transfer)
 | Tool | Description |
 |------|-------------|
-| `masc_handover_create` | Create DNA checkpoint with task state, learnings, blockers |
+| `masc_handover_create` | Create a capsule checkpoint with task state, learnings, blockers |
 | `masc_handover_list` | List pending handovers |
 | `masc_handover_claim` | Claim a handover |
-| `masc_handover_get` | Get DNA as markdown prompt |
+| `masc_handover_get` | Get the capsule as a markdown prompt |
 | `masc_handover_claim_and_spawn` | Claim + spawn successor in one step |
 | `masc_verify_handoff` | Verify handoff context integrity |
 
@@ -229,14 +228,13 @@ Client Request
 | `masc_tempo_adjust` | Auto-adjust based on tasks |
 | `masc_tempo_reset` | Reset to default |
 
-#### Relay & Memento
+#### Relay & Handover
 | Tool | Description |
 |------|-------------|
-| `masc_relay_status` | Check context usage and relay readiness |
-| `masc_relay_checkpoint` | Save a relay checkpoint |
+| `masc_relay_status` | Check context usage and relay readiness (`messages`, `tool_calls` required) |
+| `masc_relay_checkpoint` | Save a relay checkpoint (`summary`, `messages`, `tool_calls` required) |
 | `masc_relay_now` | Trigger immediate relay to successor |
 | `masc_relay_smart_check` | Proactive relay check with task hints |
-| `masc_memento_mori` | Auto-manage lifecycle based on context pressure |
 
 #### Dashboard
 | Tool | Description |
@@ -337,7 +335,7 @@ Endpoint: `GET /.well-known/agent-card.json`
 
 | Feature | Description | Use Case |
 |---------|-------------|----------|
-| **Cellular Handover** | DNA-based state transfer | Agent continuity across context limits |
+| **Cellular Handover** | Capsule-based state transfer | Agent continuity across context limits |
 | **Execution Memory** | Run tracking with plans/logs | Audit trail, debugging |
 | **Shared Cache** | TTL-based context store | Cross-agent data sharing |
 | **Cluster Tempo** | Adaptive check intervals | Resource optimization |
@@ -346,7 +344,6 @@ Endpoint: `GET /.well-known/agent-card.json`
 | **Git Worktree** | Branch-based isolation | Code collaboration |
 | **Cost Tracking** | Token/cost attribution | Budget management |
 | **Human-in-the-loop** | interrupt/approve/reject | Safety-critical ops |
-| **Mitosis** | Agent division | Complex task parallelization |
 
 ### Protocol Comparison
 
@@ -418,7 +415,7 @@ masc_heartbeat_stop --heartbeat_id hb-xxxx
 | Skip task claim | Task conflicts | Always claim first with `masc_transition --action claim` or `masc_claim_next` |
 | Ignore heartbeat | Marked as zombie | Call every 2-3 mins |
 | Direct file edit | Bypasses tracking | Use worktree |
-| No handover on exit | Lost context | Always create DNA |
+| No handover on exit | Lost context | Always create a capsule checkpoint |
 
 ---
 
@@ -482,7 +479,7 @@ MASC_GRPC_PORT=8936
 ├── tasks.json         # Task queue
 ├── agents/            # Agent metadata
 ├── messages/          # Broadcast history
-├── handovers/         # DNA checkpoints [NEW]
+├── handovers/         # Capsule checkpoints [NEW]
 ├── runs/              # Execution memory [NEW]
 ├── cache/             # Shared context [NEW]
 ├── tempo.json         # Tempo state [NEW]
@@ -500,7 +497,6 @@ MASC_GRPC_PORT=8936
 - [A2A Protocol](https://google.github.io/A2A/)
 - [MASC V2 Design](./MASC-V2-DESIGN.md)
 - [Cellular Agent Pattern](./CELLULAR-AGENT.md)
-- [Mitosis Design](./MITOSIS.md)
 
 ---
 

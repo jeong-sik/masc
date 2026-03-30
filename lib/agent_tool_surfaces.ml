@@ -54,7 +54,6 @@ let spawned_agent_public_tool_names : string list =
     "masc_handover_list";
     "masc_handover_claim";
     "masc_handover_get";
-    "masc_memento_mori";
     "masc_relay_status";
     "masc_relay_checkpoint";
     "masc_board_list";
@@ -261,26 +260,6 @@ let local_worker_internal_schemas : Types.tool_schema list =
                   ("task_priority", `Assoc [ ("type", `String "integer") ]);
                 ] );
             ("required", `List [ `String "session_id"; `String "turn_kind" ]);
-          ];
-    };
-    {
-      Types.name = "masc_memento_mori";
-      description =
-        "Check context pressure and auto-handle prepare or handoff when thresholds are crossed.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("context_ratio", `Assoc [ ("type", `String "number") ]);
-                  ("full_context", `Assoc [ ("type", `String "string") ]);
-                  ("summary", `Assoc [ ("type", `String "string") ]);
-                  ("current_task", `Assoc [ ("type", `String "string") ]);
-                  ("target_agent", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "context_ratio" ]);
           ];
     };
     {
@@ -643,7 +622,6 @@ let coordination_tool_names : string list =
 let execution_tool_names : string list =
   [
     "masc_heartbeat";
-    "masc_memento_mori";
     "masc_team_session_step";
     "masc_team_session_status";
     "masc_claim_next";

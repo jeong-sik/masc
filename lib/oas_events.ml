@@ -191,16 +191,3 @@ let publish_pre_compact (bus : Agent_sdk.Event_bus.t) ~keeper_name
   ] in
   Agent_sdk.Event_bus.publish bus
     (Agent_sdk.Event_bus.Custom ("masc:harness:pre_compact", payload))
-
-(** Publish a DNA quality assessment event.
-    Emitted when [Mitosis.prepare_for_division] validates DNA quality. *)
-let publish_dna_quality (bus : Agent_sdk.Event_bus.t) ~keeper_name
-    ~score ~dimensions =
-  let payload = `Assoc [
-    ("keeper_name", `String keeper_name);
-    ("score", `Float score);
-    ("dimensions", dimensions);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  Agent_sdk.Event_bus.publish bus
-    (Agent_sdk.Event_bus.Custom ("masc:harness:dna_quality", payload))

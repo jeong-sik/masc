@@ -41,7 +41,14 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     |> Option.value ~default:false
   in
   let allowed_paths =
-    Option.value ~default:[] p.allowed_paths_opt
+    match p.allowed_paths_opt with
+    | Some paths -> paths
+    | None -> Option.value ~default:[] p.profile_defaults.allowed_paths
+  in
+  let execution_scope =
+    p.execution_scope_opt
+    |> first_some p.profile_defaults.execution_scope
+    |> Option.value ~default:default_execution_scope
   in
   let voice_enabled =
     Option.value ~default:(default_voice_enabled_for p.name) p.voice_enabled_opt
@@ -201,7 +208,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            desires;
            instructions;
            policy_voice_enabled;
-           execution_scope = default_execution_scope;
+           execution_scope;
            allowed_paths;
            scope_kind;
            tool_tier;

@@ -135,10 +135,11 @@ function GovernanceToolbar() {
 function governanceEmptyMessage(): string {
   const data = governanceData.value
   const allItems = data?.items ?? []
+  const judgments = data?.judgments ?? []
   const lastActivityAge = data?.summary?.last_activity_age_s
 
-  // All items empty (not just filtered) — show guidance
-  if (allItems.length === 0) {
+  // All items and judgments empty — show guidance
+  if (allItems.length === 0 && judgments.length === 0) {
     const ageText = formatAgeSummary(lastActivityAge)
     if (ageText != null) {
       return `거버넌스 사건이 없습니다. 마지막 활동: ${ageText} 전. keeper가 활동 중일 때 자동 생성됩니다.`
@@ -203,6 +204,28 @@ function DecisionInbox() {
   `
 }
 
+function JudgmentsSection() {
+  const judgments = governanceData.value?.judgments ?? []
+  if (judgments.length === 0) return null
+  return html`
+    <${Card} title="AI Judge 판단" class="section mb-5" variant="compact">
+      <div class="flex flex-col gap-2.5">
+        ${judgments.map(j => html`
+          <div class="rounded-lg border border-card-border bg-card/34 p-3.5 text-[13px]">
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="inline-flex items-center rounded-md border border-accent/20 bg-accent/10 px-1.5 py-0.5 text-[10px] font-bold text-accent">${j.target_kind ?? 'unknown'}</span>
+              <span class="font-medium text-text-strong">${j.target_id ?? ''}</span>
+              ${j.confidence != null ? html`<span class="ml-auto text-[11px] text-text-muted">신뢰도 ${Math.round(j.confidence * 100)}%</span>` : null}
+            </div>
+            <div class="text-text-muted/90 leading-relaxed">${j.summary ?? ''}</div>
+            ${j.generated_at ? html`<div class="mt-1.5 text-[11px] text-text-dim"><${TimeAgo} timestamp=${j.generated_at} /></div>` : null}
+          </div>
+        `)}
+      </div>
+    <//>
+  `
+}
+
 export function Governance() {
   useEffect(() => {
     void refreshGovernance()
@@ -212,6 +235,7 @@ export function Governance() {
     <div class="flex flex-col gap-0.5">
       <${GovernanceSummaryStrip} />
       <${GovernanceToolbar} />
+      <${JudgmentsSection} />
       <div class="governance-layout">
         <${DecisionInbox} />
         <${DecisionDetail} />

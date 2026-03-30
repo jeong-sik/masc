@@ -107,7 +107,7 @@ function normalizeGovernanceGuardrailState(raw: unknown): GovernanceGuardrailSta
   }
 }
 
-function normalizeGovernanceJudgment(raw: unknown): GovernanceJudgment | null {
+export function normalizeGovernanceJudgment(raw: unknown): GovernanceJudgment | null {
   if (!isRecord(raw)) return null
   const summary = asNullableString(raw.summary)
   const targetId = asNullableString(raw.target_id)

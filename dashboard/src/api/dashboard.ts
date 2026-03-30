@@ -6,6 +6,7 @@ import {
   normalizeGovernanceDecisionItem,
   normalizeGovernanceTimelineEvent,
   normalizeGovernanceJudgeSummary,
+  normalizeGovernanceJudgment,
   normalizePendingConfirmation,
 } from './board'
 import { get, post, patch, withRetries, ROOM_TRUTH_GET_TIMEOUT_MS } from './core'
@@ -23,6 +24,7 @@ import type {
   DashboardShellResponse,
   BoardSortMode,
   GovernanceDecisionItem,
+  GovernanceJudgment,
   GovernanceTimelineEvent,
   PendingConfirmation,
   CommandPlaneHelpResponse,
@@ -238,6 +240,11 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
             .filter((item): item is GovernanceTimelineEvent => item !== null)
         : [],
       judge: normalizeGovernanceJudgeSummary(raw.judge),
+      judgments: Array.isArray(raw.judgments)
+        ? raw.judgments
+            .map(item => normalizeGovernanceJudgment(item))
+            .filter((item): item is GovernanceJudgment => item !== null)
+        : [],
       pending_actions: pendingActions,
     }
   })

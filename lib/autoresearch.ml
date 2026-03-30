@@ -130,7 +130,6 @@ let apply_code_change = Autoresearch_file.apply_code_change
 (* ================================================================ *)
 
 let build_code_change_prompt = Autoresearch_codegen.build_code_change_prompt
-let extract_tag = Autoresearch_codegen.extract_tag
 let parse_model_code_response = Autoresearch_codegen.parse_model_code_response
 let generate_code_change = Autoresearch_codegen.generate_code_change
 

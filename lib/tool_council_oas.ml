@@ -264,6 +264,7 @@ let handle_route _ctx args =
     if by_schema <> "" then by_schema else get_string args "input" ""
   in
   let decision = Council.Router.route query in
+  let r = decision.requirements in
   json_ok (`Assoc [
     ("reason", `String decision.reason);
     ("estimated_cost", `Float decision.estimated_cost);
@@ -274,6 +275,15 @@ let handle_route _ctx args =
         ("model", `String a.model);
         ("tier", `String (Council.Router.show_model_tier a.tier));
       ]) decision.agents));
+    ("requirements", `Assoc [
+      ("reasoning_depth", `Float r.reasoning_depth);
+      ("code_ability", `Float r.code_ability);
+      ("creativity", `Float r.creativity);
+      ("factual_precision", `Float r.factual_precision);
+      ("speed_priority", `Float r.speed_priority);
+    ]);
+    ("match_scores", `Assoc (List.map (fun (name, score) ->
+      (name, `Float score)) decision.match_scores));
   ])
 
 let voting_result_of_args args =

@@ -431,6 +431,49 @@ let consensus_tests = [
   test_consensus_persist_vote_failure_is_atomic;
 ]
 
+(* --- New capability-aware router tests --- *)
+
+let test_router_short_complex_query () =
+  let r = Router.extract_requirements "OCaml mutex deadlock analysis" in
+  check bool "reasoning > 0.3" (r.reasoning_depth > 0.3) true;
+  check bool "code > 0.3" (r.code_ability > 0.3) true
+
+let test_router_deep_reasoning () =
+  let r = Router.extract_requirements "why is the halting problem undecidable" in
+  check bool "reasoning > 0.3" (r.reasoning_depth > 0.3) true
+
+let test_router_speed_priority () =
+  let r = Router.extract_requirements "quick one-liner to reverse a string" in
+  check bool "speed > 0.3" (r.speed_priority > 0.3) true
+
+let test_router_complex_selects_large_tier () =
+  let decision = Router.route
+    "prove that this distributed algorithm satisfies safety and liveness under partial synchrony" in
+  let has_large = List.exists (fun (a : Router.agent_spec) ->
+    match a.tier with Router.Large | Router.Giant -> true | _ -> false
+  ) decision.agents in
+  check bool "complex selects large tier" has_large true
+
+let test_router_simple_prefers_cheap () =
+  let decision = Router.route "what is 2+2" in
+  let top = List.hd decision.agents in
+  check bool "cheap top agent" (top.cost_per_1k < 0.01) true
+
+let test_router_dot_product_correctness () =
+  let r = Router.extract_requirements "debug this OCaml concurrent mutex issue" in
+  let complexity = Router.calculate_complexity "debug this OCaml concurrent mutex issue" in
+  let opus_cap = { Router.reasoning_score = 0.95; code_score = 0.9;
+                   creativity_score = 0.9; factual_score = 0.9; speed_score = 0.3 } in
+  let tiny_cap = { Router.reasoning_score = 0.3; code_score = 0.4;
+                   creativity_score = 0.3; factual_score = 0.5; speed_score = 1.0 } in
+  let opus_agent = { Router.name = "opus"; model = "opus"; tier = Router.Large;
+                     capabilities = opus_cap; cost_per_1k = 0.015 } in
+  let tiny_agent = { Router.name = "tiny"; model = "tiny"; tier = Router.Tiny;
+                     capabilities = tiny_cap; cost_per_1k = 0.0 } in
+  let opus_score = Router.score_agent ~requirements:r ~complexity opus_agent in
+  let tiny_score = Router.score_agent ~requirements:r ~complexity tiny_agent in
+  check bool "opus > tiny for complex+code" (opus_score > tiny_score) true
+
 let router_tests = [
   "classify code", `Quick, test_router_classify_code;
   "classify analysis", `Quick, test_router_classify_analysis;
@@ -438,6 +481,12 @@ let router_tests = [
   "complexity complex", `Quick, test_router_complexity_complex;
   "agent selection", `Quick, test_router_agent_selection;
   "reason mentions heuristic", `Quick, test_router_reason_mentions_heuristic;
+  "short complex query", `Quick, test_router_short_complex_query;
+  "deep reasoning", `Quick, test_router_deep_reasoning;
+  "speed priority", `Quick, test_router_speed_priority;
+  "complex selects large tier", `Quick, test_router_complex_selects_large_tier;
+  "simple prefers cheap", `Quick, test_router_simple_prefers_cheap;
+  "dot product correctness", `Quick, test_router_dot_product_correctness;
 ]
 
 let balance_tests = [

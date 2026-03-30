@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { shutdownKeeper } from './keeper-spawn/keeper-spawn-state'
 import type { Keeper, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,

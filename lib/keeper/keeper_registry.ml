@@ -465,15 +465,23 @@ let restore_tool_usage ~base_path name =
            | _ -> []
          in
          List.iter (fun item ->
-           let tool_name = Safe_ops.json_string "tool" item in
-           if tool_name <> "" then
+           match
+             ( Safe_ops.json_string_opt "tool" item,
+               Safe_ops.json_int_opt "count" item,
+               Safe_ops.json_int_opt "successes" item,
+               Safe_ops.json_int_opt "failures" item,
+               Safe_ops.json_float_opt "last_used_at" item )
+           with
+           | Some tool_name, Some count, Some successes, Some failures, Some last_used_at
+             when tool_name <> "" ->
              let e = {
-               count = Safe_ops.json_int "count" item;
-               successes = Safe_ops.json_int "successes" item;
-               failures = Safe_ops.json_int "failures" item;
-               last_used_at = Safe_ops.json_float "last_used_at" item;
+               count;
+               successes;
+               failures;
+               last_used_at;
              } in
              Hashtbl.replace entry.tool_usage tool_name e
+           | _ -> ()
          ) tools
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

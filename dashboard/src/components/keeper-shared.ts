@@ -242,14 +242,18 @@ export function KeeperConversationPanel({
   const [showInternal, setShowInternal] = useState(readKeeperChatInternalVisible())
 
   const toggleMetadata = () => {
-    const next = !showMetadata
-    setShowMetadata(next)
-    writeKeeperChatMetadataVisible(next)
+    setShowMetadata(prev => {
+      const next = !prev
+      writeKeeperChatMetadataVisible(next)
+      return next
+    })
   }
   const toggleInternal = () => {
-    const next = !showInternal
-    setShowInternal(next)
-    writeKeeperChatInternalVisible(next)
+    setShowInternal(prev => {
+      const next = !prev
+      writeKeeperChatInternalVisible(next)
+      return next
+    })
   }
 
   const [historyExpanded, setHistoryExpanded] = useState(false)

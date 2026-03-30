@@ -4,11 +4,12 @@ open Agent_sdk
 open Alcotest
 open Masc_mcp
 
-let make_test_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
+let make_test_meta ?(name = "test-keeper") ?(tool_allowlist = []) () : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String name); ("agent_name", `String name);
              ("trace_id", `String "test-trace-001");
-             ("allowed_paths", `List [`String "*"])]) with
+             ("allowed_paths", `List [`String "*"]);
+             ("tool_allowlist", `List (List.map (fun name -> `String name) tool_allowlist))]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 
@@ -235,17 +236,25 @@ let test_failure_tracking_is_independent_per_args () =
             (is_guardrail_message message)
       | Ok _ -> fail "guardrail should block original failing args")
 
-let make_research_meta () : Keeper_types.keeper_meta =
+let make_research_meta ?(tool_allowlist = []) () : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String "test-researcher");
              ("agent_name", `String "test-researcher");
              ("trace_id", `String "test-trace-research");
-             ("soul_profile", `String "research")]) with
+             ("soul_profile", `String "research");
+             ("tool_allowlist", `List (List.map (fun name -> `String name) tool_allowlist))]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_research_meta failed: %s" e)
 
 let test_research_keeper_has_autoresearch_tools () =
-  let meta = make_research_meta () in
+  let meta =
+    make_research_meta
+      ~tool_allowlist:
+        [ "masc_autoresearch_cycle";
+          "masc_autoresearch_start";
+          "masc_autoresearch_status" ]
+      ()
+  in
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_cycle = List.mem "masc_autoresearch_cycle" allowed in
   let has_start = List.mem "masc_autoresearch_start" allowed in
@@ -255,8 +264,13 @@ let test_research_keeper_has_autoresearch_tools () =
   check bool "has status" true has_status
 
 let test_non_research_keeper_has_autoresearch () =
-  (* Mode removal: all keepers get all tools unconditionally *)
-  let meta = make_test_meta () in
+  let meta =
+    make_test_meta
+      ~tool_allowlist:
+        [ "masc_autoresearch_cycle";
+          "masc_autoresearch_status" ]
+      ()
+  in
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_any = List.exists (fun n ->
     String.length n > 18
@@ -264,7 +278,13 @@ let test_non_research_keeper_has_autoresearch () =
   check bool "has autoresearch tools" true has_any
 
 let test_research_model_tools_include_autoresearch () =
-  let meta = make_research_meta () in
+  let meta =
+    make_research_meta
+      ~tool_allowlist:
+        [ "masc_autoresearch_cycle";
+          "masc_autoresearch_status" ]
+      ()
+  in
   let tools = Keeper_exec_tools.keeper_allowed_model_tools meta in
   let has_cycle = List.exists (fun (t : Types_core.tool_schema) ->
     t.name = "masc_autoresearch_cycle") tools in
@@ -351,8 +371,8 @@ let () =
     ];
     "research_profile", [
       test_case "has autoresearch tools" `Quick test_research_keeper_has_autoresearch_tools;
-      test_case "non-research has autoresearch" `Quick test_non_research_keeper_has_autoresearch;
-      test_case "model tools include autoresearch" `Quick test_research_model_tools_include_autoresearch;
+      test_case "allowlisted non-research has autoresearch" `Quick test_non_research_keeper_has_autoresearch;
+      test_case "allowlisted model tools include autoresearch" `Quick test_research_model_tools_include_autoresearch;
     ];
     "library_tools", [
       test_case "all keepers have library tools" `Quick test_all_keepers_have_library_tools;

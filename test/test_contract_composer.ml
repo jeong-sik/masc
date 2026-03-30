@@ -70,12 +70,14 @@ let test_eval_criteria_fields () =
 
 let make_keeper_meta ?(name = "keeper-test") ?(goal = "stabilize proof spine")
     ?(scope_kind = "local") ?(execution_scope = "workspace")
+    ?(trace_id = "trace-keeper-test")
     ?(allowed_paths = []) () =
   match Masc_mcp.Keeper_types.meta_of_json
           (`Assoc
             [
               ("name", `String name);
               ("agent_name", `String name);
+              ("trace_id", `String trace_id);
               ("goal", `String goal);
               ("scope_kind", `String scope_kind);
               ("execution_scope", `String execution_scope);

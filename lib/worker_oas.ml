@@ -301,6 +301,7 @@ let rec run_worker_via_oas
     ~(tools : Oas.Tool.t list)
     ~(raw_trace : Oas.Raw_trace.t)
     ?(gate_config : Eval_gate.gate_config option)
+    ?contract
     ?worker_run_id
     () : (Worker_container_types.run_result, string) result =
   let session_id = meta.mcp_session_id in
@@ -340,7 +341,7 @@ let rec run_worker_via_oas
         else base_path
       in
       run_existing_worker_agent ~sw ~base_path ~meta ~prompt ~workspace_path
-        ~raw_trace ?worker_run_id ~tool_names_ref agent)
+        ~raw_trace ?worker_run_id ?contract ~tool_names_ref agent)
 
 and resume_worker_via_oas
     ~(sw : Eio.Switch.t)
@@ -351,6 +352,7 @@ and resume_worker_via_oas
     ~(prompt : string)
     ~(tools : Oas.Tool.t list)
     ~(raw_trace : Oas.Raw_trace.t)
+    ?contract
     ?worker_run_id
     () : (Worker_container_types.run_result, string) result =
   let worker_name = meta.worker_name in
@@ -407,7 +409,7 @@ and resume_worker_via_oas
         else base_path
       in
       run_existing_worker_agent ~sw ~base_path ~meta ~prompt ~workspace_path
-        ~raw_trace ?worker_run_id ~tool_names_ref agent)
+        ~raw_trace ?worker_run_id ?contract ~tool_names_ref agent)
 
 and run_existing_worker_agent
     ~(sw : Eio.Switch.t)
@@ -417,6 +419,7 @@ and run_existing_worker_agent
     ~(workspace_path : string)
     ~(raw_trace : Oas.Raw_trace.t)
     ?worker_run_id
+    ?contract
     ~(tool_names_ref : string list ref)
     (agent : Oas.Agent.t)
   : (Worker_container_types.run_result, string) result =
@@ -432,7 +435,13 @@ and run_existing_worker_agent
           Log.LocalWorker.warn "agent close failed for %s: %s" worker_name
             (Printexc.to_string exn))
     (fun () ->
-      let result = Oas.Agent.run ~sw agent prompt in
+      let result, proof = match contract with
+        | Some c ->
+          let cr = Oas.Contract_runner.run ~sw ~contract:c agent prompt in
+          (cr.response, Some cr.proof)
+        | None ->
+          (Oas.Agent.run ~sw agent prompt, None)
+      in
       let raw_trace_run = Oas.Agent.last_raw_trace_run agent in
       let checkpoint = Oas.Agent.checkpoint ~session_id agent in
       let tool_names =
@@ -479,7 +488,7 @@ and run_existing_worker_agent
               session_id;
               raw_trace_run;
               api_response = Some response;
-              proof = None;
+              proof;
             }
       | Error err ->
           let detail = Oas.Error.to_string err in

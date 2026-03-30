@@ -255,6 +255,7 @@ let run_turn
       ~allowed_paths:meta.allowed_paths
       ~working_context:checkpoint_sidecar
       ~priority:(Option.value priority ~default:Llm_provider.Request_priority.Interactive)
+      ~cache_system_prompt:true
       ()
   with
   | Error e -> Error e

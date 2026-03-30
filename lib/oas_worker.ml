@@ -101,6 +101,7 @@ type config = {
   allowed_paths : string list;
   working_context : Yojson.Safe.t option;
   priority : Llm_provider.Request_priority.t option;
+  cache_system_prompt : bool;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -124,6 +125,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     allowed_paths = [];
     working_context = None;
     priority = None;
+    cache_system_prompt = false;
   }
 
 (* ================================================================ *)
@@ -264,6 +266,11 @@ let build
   let builder = match config.priority with
     | Some p -> Oas.Builder.with_priority p builder
     | None -> builder
+  in
+  let builder =
+    if config.cache_system_prompt then
+      Oas.Builder.with_cache_system_prompt true builder
+    else builder
   in
   Oas.Builder.build_safe builder
   |> Result.map_error Oas.Error.to_string
@@ -504,6 +511,7 @@ let run_named
     ?transport
     ?(allowed_paths = [])
     ?working_context
+    ?(cache_system_prompt = false)
     ?sw
     ?net
     ()
@@ -548,6 +556,7 @@ let run_named
       working_context;
       session_id;
       priority;
+      cache_system_prompt;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in

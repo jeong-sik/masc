@@ -664,8 +664,8 @@ let tool_migrate : Types.tool_schema = {
 }
 
 let handle_delete args =
-  let post_id = get_string args "post_id" "" in
-  if String.trim post_id = "" then
+  let post_id = String.trim (get_string args "post_id" "") in
+  if post_id = "" then
     (false, "post_id is required")
   else
     match Board_dispatch.delete_post ~post_id with

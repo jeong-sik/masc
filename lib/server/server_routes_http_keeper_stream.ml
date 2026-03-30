@@ -29,65 +29,43 @@ let contains_casefold haystack needle =
   in
   loop 0
 
-let keeper_stream_timeout_sec arguments =
-  let default_timeout_sec =
-    float_of_int
-      (Keeper_config.int_of_env_default
-         "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC"
-         ~default:45
-         ~min_v:10
-         ~max_v:300)
-  in
-  match Safe_ops.json_float_opt "timeout_sec" arguments with
-  | None -> default_timeout_sec
-  | Some raw when raw <= 0.0 -> default_timeout_sec
-  | Some raw ->
-      let raw_sec = int_of_float (Float.ceil raw) in
-      float_of_int (max 5 (min 300 raw_sec))
 
+(* No external timeout for keeper_msg. Keeper has its own internal limits
+   (max_turns, max_cost_usd, max_tokens) that control call duration.
+   A fixed external timeout conflicts with multi-turn tool-use loops and
+   causes lost turn metrics when the timeout fires mid-Agent.run().
+   Aligned with MCP path (mcp_server_eio_call_tool.ml:139-143). *)
 let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~arguments =
-  let timeout_sec = keeper_stream_timeout_sec arguments in
   let start_time = Eio.Time.now clock in
-  let timeout_hit = ref false in
   let success, body =
     try
-      Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
-          let keeper_ctx : _ Tool_keeper.context =
-            {
-              config = state.Mcp_server.room_config;
-              agent_name;
-              sw;
-              clock;
-              proc_mgr = state.Mcp_server.proc_mgr;
-            }
-          in
-          match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:arguments with
-          | Some result -> result
-          | None -> (false, "masc_keeper_msg dispatch unavailable"))
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config = state.Mcp_server.room_config;
+          agent_name;
+          sw;
+          clock;
+          proc_mgr = state.Mcp_server.proc_mgr;
+        }
+      in
+      match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:arguments with
+      | Some result -> result
+      | None -> (false, "masc_keeper_msg dispatch unavailable")
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Eio.Time.Timeout ->
-        timeout_hit := true;
-        Log.Mcp.error "tools/call timeout: masc_keeper_msg after %.0fs" timeout_sec;
-        ( false,
-          Printf.sprintf
-            "❌ Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
-            timeout_sec "masc_keeper_msg" )
     | exn ->
         let err = Printexc.to_string exn in
         if contains_casefold err "Invalid_argument(\"MASC not initialized" then
           (false, Types.masc_error_to_string Types.NotInitialized)
         else (
           Log.Mcp.error "tools/call crashed: %s" err;
-          (false, Printf.sprintf "❌ Internal error: %s" err))
+          (false, Printf.sprintf "Internal error: %s" err))
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
   let error_msg =
     if success then None
-    else Some
-      (Printf.sprintf "timeout=%d|duration_ms=%d"
-         (if !timeout_hit then 1 else 0) duration_ms)
+    else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
   Audit_log.log_tool_call state.Mcp_server.room_config
     ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
@@ -100,7 +78,6 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
             ("tool_name", `String "masc_keeper_msg");
             ("agent_name", `String agent_name);
             ("duration_ms", `Int duration_ms);
-            ("timeout_hit", `Bool !timeout_hit);
             ("streaming", `Bool false);
           ])
       "keeper tool call failed: masc_keeper_msg";
@@ -238,40 +215,30 @@ let keeper_stream_send_event writer mutex closed event =
 (** Execute keeper dispatch with real-time streaming.
     Calls [dispatch_stream] which forwards MODEL text deltas to [on_text_delta].
     Returns the same [(bool, string)] result as the batch path.
-    Includes timeout, audit, and telemetry — same bookkeeping as the batch path. *)
+    No external timeout — keeper internal limits control duration
+    (aligned with MCP path, see mcp_server_eio_call_tool.ml:139-143). *)
 let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
     ~agent_name ~arguments ~on_text_delta =
-  let timeout_sec = keeper_stream_timeout_sec arguments in
   let start_time = Eio.Time.now clock in
-  let timeout_hit = ref false in
   let success, body =
     try
-      Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
-          let keeper_ctx : _ Tool_keeper.context =
-            {
-              config = state.Mcp_server.room_config;
-              agent_name;
-              sw;
-              clock;
-              proc_mgr = state.Mcp_server.proc_mgr;
-            }
-          in
-          match
-            Tool_keeper.dispatch_stream ~on_text_delta keeper_ctx
-              ~name:"masc_keeper_msg" ~args:arguments
-          with
-          | Some result -> result
-          | None -> (false, "masc_keeper_msg stream dispatch unavailable"))
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config = state.Mcp_server.room_config;
+          agent_name;
+          sw;
+          clock;
+          proc_mgr = state.Mcp_server.proc_mgr;
+        }
+      in
+      match
+        Tool_keeper.dispatch_stream ~on_text_delta keeper_ctx
+          ~name:"masc_keeper_msg" ~args:arguments
+      with
+      | Some result -> result
+      | None -> (false, "masc_keeper_msg stream dispatch unavailable")
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Eio.Time.Timeout ->
-        timeout_hit := true;
-        Log.Mcp.error "tools/call timeout: masc_keeper_msg (stream) after %.0fs"
-          timeout_sec;
-        ( false,
-          Printf.sprintf
-            "Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
-            timeout_sec "masc_keeper_msg" )
     | exn ->
         let err = Printexc.to_string exn in
         if contains_casefold err "Invalid_argument(\"MASC not initialized" then
@@ -284,11 +251,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
   let error_msg =
     if success then None
-    else
-      Some
-        (Printf.sprintf "timeout=%d|duration_ms=%d"
-           (if !timeout_hit then 1 else 0)
-           duration_ms)
+    else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
   Audit_log.log_tool_call state.Mcp_server.room_config ~agent_id:agent_name
     ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
@@ -301,7 +264,6 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
             ("tool_name", `String "masc_keeper_msg");
             ("agent_name", `String agent_name);
             ("duration_ms", `Int duration_ms);
-            ("timeout_hit", `Bool !timeout_hit);
             ("streaming", `Bool true);
           ])
       "keeper tool call failed: masc_keeper_msg";
@@ -423,13 +385,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                    ~role:(Some Assistant) Text_message_start));
           let args =
             `Assoc
-              ([ ("name", `String payload.name);
-                 ("message", `String payload.message);
-                 ("direct_reply", `Bool true) ]
-              @
-              (match payload.timeout_sec with
-               | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
-               | None -> []))
+              [ ("name", `String payload.name);
+                ("message", `String payload.message);
+                ("direct_reply", `Bool true) ]
           in
           let agent_name =
             match agent_from_request request with

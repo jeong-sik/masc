@@ -132,12 +132,79 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_judgment_latest",
       hidden_active
         "Internal operator-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    (* Annotation overrides: correct misclassifications from name-pattern heuristics *)
+    (* ── Annotation overrides ─────────────────────────────────── *)
+    (* Correct misclassifications from name-pattern heuristics.
+       Categories aligned with Contract_risk axis model:
+       - destructive=true  → external effect or irreversible mutation
+       - destructive=false → safe despite pattern match on name
+       - readonly=true     → read-only, no side effects *)
+
+    (* Read-only / idempotent tools *)
     ( "masc_run_get",
       { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "masc_status",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "masc_who",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "masc_messages",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "masc_poll_events",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "masc_relay_status",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "keeper_read",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "keeper_fs_read",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "keeper_memory_search",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "keeper_library_search",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "keeper_library_read",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "keeper_time_now",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "keeper_context_status",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "keeper_shell_readonly",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+
+    (* External-effect tools: irreversible side effects outside workspace *)
+    ( "keeper_bash",
+      { default_metadata with destructive = Some true } );
+    ( "keeper_github",
+      { default_metadata with destructive = Some true } );
+    ( "masc_broadcast",
+      { default_metadata with destructive = Some false } );
+    ( "masc_spawn",
+      { default_metadata with destructive = Some true } );
+    ( "masc_execute",
+      { default_metadata with destructive = Some true } );
     ( "masc_operation_stop",
       { default_metadata with destructive = Some true } );
+
+    (* Workspace-mutating tools: reversible file mutations *)
+    ( "keeper_fs_edit",
+      { default_metadata with destructive = Some false } );
+    ( "keeper_edit",
+      { default_metadata with destructive = Some false } );
+    ( "keeper_write",
+      { default_metadata with destructive = Some false } );
+    ( "masc_code_write",
+      { default_metadata with destructive = Some false } );
+    ( "masc_code_edit",
+      { default_metadata with destructive = Some false } );
+
+    (* Safe despite pattern-match false positives *)
     ( "masc_operation_pause",
+      { default_metadata with destructive = Some false } );
+    ( "masc_set_room",
+      { default_metadata with destructive = Some false } );
+    ( "masc_join",
+      { default_metadata with destructive = Some false } );
+    ( "masc_leave",
+      { default_metadata with destructive = Some false } );
+    ( "masc_start",
       { default_metadata with destructive = Some false } );
   ]
 

@@ -13,6 +13,12 @@ type risk_axes = {
   recovery_cost : recovery_cost;
 }
 
+(** Tools with irreversible external side effects (git push, bash, broadcast). *)
+val external_effect_tools : string list
+
+(** Tools that mutate workspace files but have no external effect. *)
+val workspace_mutating_tools : string list
+
 val assess :
   delivery_contract:Team_session_types.delivery_contract ->
   tool_names:string list ->

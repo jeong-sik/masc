@@ -72,7 +72,9 @@ let overwrite_sensitive_tools =
     "edit_text_file";
   ]
 
-let destructive_payload_keys = [ "command"; "cmd"; "content"; "new_string" ]
+let destructive_payload_keys =
+  [ "command"; "cmd"; "content"; "new_string"; "body"; "script";
+    "shell"; "bash"; "query"; "message"; "text"; "code" ]
 let empty_overwrite_payload_keys = [ "content"; "new_string" ]
 
 let contains_pattern name patterns =
@@ -133,12 +135,24 @@ let has_empty_overwrite_payload input =
   collect_string_values ~keys:empty_overwrite_payload_keys input
   |> List.exists (fun text -> String.trim text = "")
 
+(** Metadata-based classification.
+    Returns a (level, is_definitive) pair:
+    - destructive=true or readonly=true are definitive (skip payload check)
+    - destructive=false is a hint (payload can still escalate) *)
 let classify_with_metadata ~tool_name =
   let meta = Tool_catalog.metadata tool_name in
   match (meta.Tool_catalog.destructive, meta.Tool_catalog.readonly) with
-  | Some true, _ -> Some Critical
-  | _, Some true -> Some Low
+  | Some true, _ -> Some (Critical, true)
+  | _, Some true -> Some (Low, true)
+  | Some false, _ -> Some (Medium, false)  (* hint: payload can override *)
   | _ -> None
+
+(** Semantic classification using Contract_risk tool lists.
+    Maps external_effect → High, workspace_mutating → Medium. *)
+let classify_with_contract_risk ~tool_name =
+  if List.mem tool_name Contract_risk.external_effect_tools then Some High
+  else if List.mem tool_name Contract_risk.workspace_mutating_tools then Some Medium
+  else None
 
 let classify_with_payload ~tool_name ~input =
   if has_destructive_payload input then Some Critical
@@ -146,23 +160,37 @@ let classify_with_payload ~tool_name ~input =
   then Some Critical
   else None
 
+(** Risk assessment cascade (most specific → least specific):
+    1. Tool_catalog metadata annotations (definitive: destructive/readonly)
+    2. Payload content inspection (destructive patterns, empty overwrites)
+    3. Tool_catalog metadata hint (non-definitive: destructive=false → Medium)
+    4. Contract_risk tool lists (external_effect, workspace_mutating)
+    5. Explicit per-tool overrides (false positive corrections)
+    6. Substring pattern matching on tool name (fallback) *)
 let assess_risk ~tool_name ~input =
   match classify_with_metadata ~tool_name with
-  | Some level -> level
-  | None -> (
+  | Some (level, true) -> level  (* definitive metadata: destructive=true or readonly=true *)
+  | definitive_or_hint -> (
+      (* Payload can escalate even when metadata says destructive=false *)
       match classify_with_payload ~tool_name ~input with
       | Some level -> level
-      | None ->
-          (* Check explicit overrides after metadata/payload semantics. *)
-          match List.assoc_opt tool_name risk_overrides with
-          | Some level -> level
-          | None ->
-              if String.equal tool_name "masc_transition" then
-                match transition_action input with
-                | Some action -> classify_name action
-                | None -> Low
-              else
-                classify_name tool_name)
+      | None -> (
+          (* Non-definitive metadata hint: destructive=false → Medium *)
+          match definitive_or_hint with
+          | Some (level, false) -> level
+          | _ -> (
+              match classify_with_contract_risk ~tool_name with
+              | Some level -> level
+              | None ->
+                  match List.assoc_opt tool_name risk_overrides with
+                  | Some level -> level
+                  | None ->
+                      if String.equal tool_name "masc_transition" then
+                        match transition_action input with
+                        | Some action -> classify_name action
+                        | None -> Low
+                      else
+                        classify_name tool_name)))
 
 (* ── Trace ID generation ────────────────────────────────────── *)
 

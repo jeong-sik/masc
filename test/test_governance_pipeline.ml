@@ -237,7 +237,9 @@ let test_risk_payload_destructive_content () =
   Alcotest.(check string) "destructive payload content is critical"
     "critical" (Gp.risk_level_to_string risk)
 
-let test_risk_payload_safe_write_remains_high () =
+(* masc_code_write has metadata destructive=false → medium for safe payloads.
+   Destructive payloads still escalate to critical via payload inspection. *)
+let test_risk_payload_safe_write_remains_medium () =
   let risk =
     Gp.assess_risk ~tool_name:"masc_code_write"
       ~input:
@@ -247,8 +249,8 @@ let test_risk_payload_safe_write_remains_high () =
             ("content", `String "let answer = 42\n");
           ])
   in
-  Alcotest.(check string) "safe write payload remains high"
-    "high" (Gp.risk_level_to_string risk)
+  Alcotest.(check string) "safe write payload is medium (metadata annotated)"
+    "medium" (Gp.risk_level_to_string risk)
 
 (* ── Governance Level Decision Tests ────────────────────────── *)
 
@@ -524,6 +526,52 @@ let test_case_insensitive_matching () =
   Alcotest.(check string) "uppercase delete is critical"
     "critical" (Gp.risk_level_to_string risk)
 
+(* ── Semantic risk classification tests ────────────────────── *)
+
+let test_metadata_readonly_is_low () =
+  let risk = Gp.assess_risk ~tool_name:"keeper_read" ~input:`Null in
+  Alcotest.(check string) "readonly metadata → low"
+    "low" (Gp.risk_level_to_string risk)
+
+let test_metadata_readonly_fs_read () =
+  let risk = Gp.assess_risk ~tool_name:"keeper_fs_read" ~input:`Null in
+  Alcotest.(check string) "fs_read readonly → low"
+    "low" (Gp.risk_level_to_string risk)
+
+let test_metadata_destructive_bash () =
+  let risk = Gp.assess_risk ~tool_name:"keeper_bash" ~input:`Null in
+  Alcotest.(check string) "keeper_bash destructive → critical"
+    "critical" (Gp.risk_level_to_string risk)
+
+let test_metadata_nondestruct_edit () =
+  let risk = Gp.assess_risk ~tool_name:"keeper_fs_edit" ~input:`Null in
+  Alcotest.(check string) "fs_edit non-destructive → medium"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_contract_risk_external_effect () =
+  let risk = Gp.assess_risk ~tool_name:"masc_execute" ~input:`Null in
+  Alcotest.(check string) "masc_execute destructive → critical"
+    "critical" (Gp.risk_level_to_string risk)
+
+let test_contract_risk_workspace_mutating () =
+  let risk = Gp.assess_risk ~tool_name:"create_text_file" ~input:`Null in
+  Alcotest.(check string) "create_text_file workspace-mutating → medium"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_metadata_overrides_name_pattern () =
+  (* masc_join has "join" pattern → medium, and metadata destructive=false → medium.
+     But masc_start has "start" pattern → medium, and metadata destructive=false → medium.
+     keeper_shell_readonly has no pattern match but readonly=true → low *)
+  let risk = Gp.assess_risk ~tool_name:"keeper_shell_readonly" ~input:`Null in
+  Alcotest.(check string) "readonly override → low"
+    "low" (Gp.risk_level_to_string risk)
+
+let test_payload_expanded_keys () =
+  let input = `Assoc [("script", `String "rm -rf /")] in
+  let risk = Gp.assess_risk ~tool_name:"masc_some_tool" ~input in
+  Alcotest.(check string) "destructive in script key → critical"
+    "critical" (Gp.risk_level_to_string risk)
+
 (* ── Runner ─────────────────────────────────────────────────── *)
 
 let () =
@@ -570,9 +618,27 @@ let () =
         test_risk_payload_empty_overwrite;
       Alcotest.test_case "payload: destructive content" `Quick
         test_risk_payload_destructive_content;
-      Alcotest.test_case "payload: safe write remains high" `Quick
-        test_risk_payload_safe_write_remains_high;
+      Alcotest.test_case "payload: safe write is medium (metadata)" `Quick
+        test_risk_payload_safe_write_remains_medium;
       Alcotest.test_case "case insensitive" `Quick test_case_insensitive_matching;
+    ];
+    "semantic_classification", [
+      Alcotest.test_case "metadata: readonly → low" `Quick
+        test_metadata_readonly_is_low;
+      Alcotest.test_case "metadata: fs_read readonly → low" `Quick
+        test_metadata_readonly_fs_read;
+      Alcotest.test_case "metadata: bash destructive → critical" `Quick
+        test_metadata_destructive_bash;
+      Alcotest.test_case "metadata: fs_edit non-destructive → medium" `Quick
+        test_metadata_nondestruct_edit;
+      Alcotest.test_case "contract_risk: external_effect → critical" `Quick
+        test_contract_risk_external_effect;
+      Alcotest.test_case "contract_risk: workspace_mutating → medium" `Quick
+        test_contract_risk_workspace_mutating;
+      Alcotest.test_case "metadata overrides name pattern" `Quick
+        test_metadata_overrides_name_pattern;
+      Alcotest.test_case "payload: expanded keys (script)" `Quick
+        test_payload_expanded_keys;
     ];
     "governance_levels", [
       Alcotest.test_case "development allows all" `Quick

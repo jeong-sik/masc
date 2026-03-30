@@ -36,7 +36,7 @@ let build_delivery_eval_criteria
     ]
 
 let requested_mode_of_repair_budget repair_budget =
-  if repair_budget > 0 then Oas.Execution_mode.Execute else Draft
+  if repair_budget > 0 then Oas.Execution_mode.Execute else Oas.Execution_mode.Draft
 
 let of_delivery_contract
     ~(delivery_contract : Team_session_types.delivery_contract)

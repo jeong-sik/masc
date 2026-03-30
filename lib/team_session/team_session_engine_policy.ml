@@ -399,18 +399,25 @@ let finalize_session ~(config : Room.config) ~(session_id : string)
             in
             let terminal_status =
               match Team_session_state.terminal_status_of_session_status final_status with
-              | Some status -> status
+              | Some status -> Some status
               | None ->
-                  invalid_arg
-                    "team_session_engine_policy.finalize_session: expected terminal status"
+                  Log.Session.warn "finalize_session %s: non-terminal status %s, skipping"
+                    session_id (Team_session_types.status_to_string final_status);
+                  None
             in
             let running =
               match Team_session_state.of_running session with
-              | Some running -> running
+              | Some running -> Some running
               | None ->
-                  invalid_arg
-                    "team_session_engine_policy.finalize_session: expected running session"
+                  Log.Session.warn "finalize_session %s: session not in running state, skipping"
+                    session_id;
+                  None
             in
+            (match terminal_status, running with
+            | None, _ | _, None ->
+                with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id);
+                None
+            | Some terminal_status, Some running ->
             let updated =
               Team_session_state.finalize running ~final_status:terminal_status
                 ~reason ~now
@@ -438,4 +445,4 @@ let finalize_session ~(config : Room.config) ~(session_id : string)
             if generate_report then
               generate_and_mark_report ~config updated;
             with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id);
-            Some updated)
+            Some updated))

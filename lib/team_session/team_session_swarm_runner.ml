@@ -16,7 +16,7 @@ let run_swarm ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.Proce
   | None -> Error (Printf.sprintf "session %s not found" session_id)
   | Some session -> (
       match Team_session_state.require_running session with
-      | Error msg -> Error (Printf.sprintf "session %s %s" session_id msg)
+      | Error msg -> Error (Printf.sprintf "session %s: %s" session_id msg)
       | Ok running_session ->
       let session = Team_session_state.session running_session in
       let swarm_config =

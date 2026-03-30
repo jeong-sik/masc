@@ -33,7 +33,7 @@ export function FocusSidebar() {
       </div>
       <div class="grid gap-1.5 content-start overflow-y-auto max-h-[560px] pr-1">
         ${list.length === 0
-          ? html`<div class="py-6 text-center text-[var(--text-muted)] text-[13px]">활성 에이전트 없음</div>`
+          ? html`<div class="py-6 text-center text-[var(--text-muted)] text-[13px]">활성 에이전트 없음. masc_join으로 접속하면 여기에 표시됩니다.</div>`
           : list.map(agent => html`
             <div
               key=${agent.name}

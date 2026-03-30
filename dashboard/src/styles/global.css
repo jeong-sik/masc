@@ -828,7 +828,7 @@ tbody tr:hover {
 }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
+  50% { opacity: 0.75; }
 }
 
 @media (max-width: 1200px) {
@@ -889,7 +889,7 @@ tbody tr:hover {
 /* ── Agent state animations ────────────────────────────── */
 @keyframes workingPulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--ok-soft); }
-  50% { box-shadow: 0 0 12px 2px var(--ok-25); }
+  50% { box-shadow: 0 0 6px 1px var(--ok-25); }
 }
 
 @keyframes warnBlink {
@@ -900,7 +900,7 @@ tbody tr:hover {
 /* ── Component keyframes (consolidated) ──────────────────── */
 @keyframes blocker-pulse {
   0%, 100% { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.4); }
-  50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.7); }
+  50% { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.5); }
 }
 @keyframes orchestraFlow { to { stroke-dashoffset: -40; } }
 @keyframes orchestraPulse {
@@ -909,7 +909,7 @@ tbody tr:hover {
 }
 @keyframes livePulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--ok-25); }
-  50% { box-shadow: 0 0 8px 2px var(--ok-12); }
+  50% { box-shadow: 0 0 6px 1px var(--ok-12); }
 }
 @keyframes activityFadeIn {
   from { opacity: 0; transform: translateY(-4px); }
@@ -925,7 +925,7 @@ tbody tr:hover {
 }
 @keyframes pipeline-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); }
-  50% { box-shadow: 0 0 6px 2px rgba(96, 165, 250, 0.35); }
+  50% { box-shadow: 0 0 4px 1px rgba(96, 165, 250, 0.25); }
 }
 @keyframes pipeline-badge-pulse {
   0%, 100% { opacity: 1; }
@@ -933,7 +933,7 @@ tbody tr:hover {
 }
 @keyframes keeperPulse {
   0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--ok-40); }
-  50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(74,222,128,0); }
+  50% { opacity: 0.8; box-shadow: 0 0 0 3px rgba(74,222,128,0); }
 }
 
 /* State tone utilities */
@@ -1885,7 +1885,7 @@ button.council-row.selected {
 .pipeline-stage-node.active.stage-thinking .pipeline-stage-dot {
   background: rgba(96, 165, 250, 0.7);
   border-color: rgba(96, 165, 250, 0.9);
-  animation: pipeline-pulse 1.5s ease-in-out infinite;
+  animation: pipeline-pulse 2.5s ease-in-out infinite;
 }
 
 .pipeline-stage-node.active.stage-tool_use .pipeline-stage-dot {
@@ -2190,4 +2190,10 @@ button.council-row.selected {
     box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.6);
   }
   .activity-dot--live-pulse { animation: none; }
+  .pulse-working { animation: none; }
+  .pipeline-stage-node.active.stage-thinking .pipeline-stage-dot { animation: none; }
+  .pipeline-stage-badge.stage-thinking { animation: none; }
+  [class*="avatar-pulse-glow"] { animation: none; }
+  [style*="workingPulse"] { animation: none; }
+  [style*="keeperPulse"] { animation: none; }
 }

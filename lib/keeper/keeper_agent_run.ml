@@ -33,10 +33,71 @@ type run_result = {
   proof : Agent_sdk.Cdal_proof.t option;
 }
 
-let normalize_response_text ~(text : string) ~(tool_names : string list) :
+let contains_casefold haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec matches_at idx j =
+    if j = needle_len then true
+    else if String.get haystack (idx + j) <> String.get needle j then false
+    else matches_at idx (j + 1)
+  in
+  let rec search idx =
+    if idx + needle_len > hay_len then false
+    else if matches_at idx 0 then true
+    else search (idx + 1)
+  in
+  needle_len > 0 && search 0
+
+(* Percent-encode field values for structured key=value output.
+   Encodes separators and control characters to keep the output unambiguous. *)
+let escape_field_value (s : string) : string =
+  let buf = Buffer.create (String.length s * 3 / 2 + 1) in
+  String.iter
+    (fun ch ->
+      match ch with
+      | ' ' -> Buffer.add_string buf "%20"
+      | '=' -> Buffer.add_string buf "%3D"
+      | '\n' -> Buffer.add_string buf "%0A"
+      | '\r' -> Buffer.add_string buf "%0D"
+      | '\t' -> Buffer.add_string buf "%09"
+      | '%' -> Buffer.add_string buf "%25"
+      | _ -> Buffer.add_char buf ch)
+    s;
+  Buffer.contents buf
+
+let render_skip_reason_text (reason : Keeper_hooks_oas.skip_reason) : string =
+  let replacement_hint =
+    match (Tool_catalog.metadata reason.tool_name).Tool_catalog.replacement with
+    | Some replacement ->
+        Printf.sprintf " replacement=%s" (escape_field_value replacement)
+    | None -> ""
+  in
+  Printf.sprintf
+    "[tool_skipped] tool=%s source=%s code=%s reason=%s%s"
+    (escape_field_value reason.tool_name)
+    (escape_field_value reason.source)
+    (escape_field_value reason.reason_code)
+    (escape_field_value reason.reason_text)
+    replacement_hint
+
+let normalize_response_text
+    ?skip_reason
+    ~(text : string)
+    ~(tool_names : string list)
+    () :
     (string, string) result =
-  if String.trim text <> "" then Ok text
+  let trimmed = String.trim text in
+  if trimmed <> "" then
+    match skip_reason with
+    | Some reason when contains_casefold trimmed "skipped by hook" ->
+        Ok (render_skip_reason_text reason)
+    | _ -> Ok text
   else
+    match skip_reason with
+    | Some reason -> Ok (render_skip_reason_text reason)
+    | None ->
     match tool_names with
     | [] -> Error "keeper turn completed with no textual reply"
     | _ ->
@@ -156,6 +217,7 @@ let run_turn
     Keeper_exec_context.set_system_prompt base_ctx
       ~system_prompt:base_system_prompt
   in
+  Keeper_hooks_oas.clear_skip_reason meta.name;
   (* 5. Build final turn system prompt via caller callback.
      Hard constraints stay in system_prompt; soft context is injected
      via OAS extra_system_context (prepended as User message after reduction). *)
@@ -233,90 +295,94 @@ let run_turn
     then Keeper_cdal_contract.of_keeper_meta meta
     else None
   in
-  match
-    Oas_worker.run_named
-      ~cascade_name
-      ~goal:user_message
-      ~session_id:meta.runtime.trace_id
-      ~system_prompt:turn_system_prompt
-      ~tools
-      ~initial_messages:history_messages
-      ~hooks
-      ~context_reducer:reducer
-      ~memory
-      ~max_turns
-      ~max_idle_turns:5
-      ~temperature
-      ~max_tokens
-      ?guardrails
-      ?on_event
-      ~agent_ref
-      ?contract
-      ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
-      ~working_context:checkpoint_sidecar
-      ~priority:(Option.value priority ~default:Llm_provider.Request_priority.Interactive)
-      ~cache_system_prompt:true
-      ()
-  with
-  | Error e -> Error e
-  | Ok result ->
-    (match result.checkpoint with
-     | Some checkpoint -> (
-         try
-           (* Unify session_id to trace_id so load_oas can find this
-              checkpoint on the next turn. oas_worker generates a per-turn
-              session_id that differs from trace_id, causing a load miss. *)
-           let checkpoint =
-             { checkpoint with Agent_sdk.Checkpoint.session_id = meta.runtime.trace_id }
-           in
-           Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir
-             checkpoint
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-             Log.Keeper.error "keeper:%s OAS checkpoint save failed: %s"
-               meta.name (Printexc.to_string exn))
-     | None ->
-         Log.Keeper.warn "keeper:%s missing OAS checkpoint after run"
-           meta.name);
-    let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
-    let text = Agent_sdk.Types.text_of_content result.response.content in
-    let model = result.response.model in
-    let tool_names =
-      List.filter_map (function
-        | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
-        result.response.content
-    in
-    let usage = Keeper_exec_context.usage_of_response result.response in
-    (match normalize_response_text ~text ~tool_names with
-     | Error e -> Error e
-     | Ok response_text ->
-         let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
-         Keeper_exec_context.persist_message
-           ~source:history_assistant_source
-           session assistant_msg;
-         ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
-         (match result.proof with
-         | Some p ->
-            Log.Keeper.info "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
-              meta.name p.run_id
-              (Agent_sdk.Execution_mode.to_string p.effective_execution_mode)
-              (Agent_sdk.Cdal_proof.show_result_status p.result_status)
-              (List.length p.raw_evidence_refs);
-            let store = Agent_sdk.Proof_store.default_config in
-            let outcome = Cdal_eval_v1.evaluate ~store p in
-            let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
-            Cdal_eval_v1.persist verdict;
-            Log.Keeper.info
-              "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
-              meta.name
-              (Cdal_types.contract_status_to_string verdict.status)
-              verdict.claim_scope
-              verdict.judgment_hash;
-            (match outcome with
-             | Cdal_eval_v1.Load_failure (err, _) ->
-               Log.Keeper.warn "keeper:%s contract_verdict load failure: %s"
-                 meta.name (Cdal_loader.load_error_to_string err)
+  Fun.protect
+    ~finally:(fun () -> Keeper_hooks_oas.clear_skip_reason meta.name)
+    (fun () ->
+      match
+        Oas_worker.run_named
+          ~cascade_name
+          ~goal:user_message
+          ~session_id:meta.runtime.trace_id
+          ~system_prompt:turn_system_prompt
+          ~tools
+          ~initial_messages:history_messages
+          ~hooks
+          ~context_reducer:reducer
+          ~memory
+          ~max_turns
+          ~max_idle_turns:5
+          ~temperature
+          ~max_tokens
+          ?guardrails
+          ?on_event
+          ~agent_ref
+          ?contract
+          ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
+          ~working_context:checkpoint_sidecar
+          ~priority:(Option.value priority ~default:Llm_provider.Request_priority.Interactive)
+          ~cache_system_prompt:true
+          ()
+      with
+      | Error e -> Error e
+      | Ok result ->
+        (match result.checkpoint with
+         | Some checkpoint -> (
+             try
+               (* Unify session_id to trace_id so load_oas can find this
+                  checkpoint on the next turn. oas_worker generates a per-turn
+                  session_id that differs from trace_id, causing a load miss. *)
+               let checkpoint =
+                 { checkpoint with Agent_sdk.Checkpoint.session_id = meta.runtime.trace_id }
+               in
+               Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir
+                 checkpoint
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+                 Log.Keeper.error "keeper:%s OAS checkpoint save failed: %s"
+                   meta.name (Printexc.to_string exn))
+         | None ->
+             Log.Keeper.warn "keeper:%s missing OAS checkpoint after run"
+               meta.name);
+        let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
+        let text = Agent_sdk.Types.text_of_content result.response.content in
+        let model = result.response.model in
+        let tool_names =
+          List.filter_map (function
+            | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
+            result.response.content
+        in
+        let usage = Keeper_exec_context.usage_of_response result.response in
+        let skip_reason = Keeper_hooks_oas.consume_skip_reason meta.name in
+        (match normalize_response_text ?skip_reason ~text ~tool_names () with
+         | Error e -> Error e
+         | Ok response_text ->
+             let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
+             Keeper_exec_context.persist_message
+               ~source:history_assistant_source
+               session assistant_msg;
+             ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
+             (match result.proof with
+             | Some p ->
+                Log.Keeper.info "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
+                  meta.name p.run_id
+                  (Agent_sdk.Execution_mode.to_string p.effective_execution_mode)
+                  (Agent_sdk.Cdal_proof.show_result_status p.result_status)
+                  (List.length p.raw_evidence_refs);
+                let store = Agent_sdk.Proof_store.default_config in
+                let outcome = Cdal_eval_v1.evaluate ~store p in
+                let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
+                Cdal_eval_v1.persist verdict;
+                Log.Keeper.info
+                  "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
+                  meta.name
+                  (Cdal_types.contract_status_to_string verdict.status)
+                  verdict.claim_scope
+                  verdict.judgment_hash;
+                (match outcome with
+                 | Cdal_eval_v1.Load_failure (err, _) ->
+                   Log.Keeper.warn "keeper:%s contract_verdict load failure: %s"
+                     meta.name (Cdal_loader.load_error_to_string err)
              | Cdal_eval_v1.Verdict (_, _) -> ());
             (match Cdal_eval_v1.friction_of_outcome outcome with
              | Some fp ->
@@ -351,4 +417,4 @@ let run_turn
            tools_used = tool_names;
            checkpoint = result.checkpoint;
            proof = result.proof;
-         })
+         }))

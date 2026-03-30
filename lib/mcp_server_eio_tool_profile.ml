@@ -94,12 +94,18 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
           Config.visible_tool_schemas
             ~include_hidden:show_all ~include_deprecated ()
         in
-        if show_all then all
+        let without_keeper_internal =
+          List.filter
+            (fun (schema : Types.tool_schema) ->
+              not (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name))
+            all
+        in
+        if show_all then without_keeper_internal
         else
           List.filter
             (fun (schema : Types.tool_schema) ->
               Tool_catalog.is_public_mcp schema.name)
-            all
+            without_keeper_internal
     | Managed_agent ->
         let passthrough =
           Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false ()
@@ -116,11 +122,16 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
 let tool_allowed_in_profile state profile tool_name =
   match profile with
   | Full ->
-      (* tools/call accepts any registered tool regardless of the public MCP
-         surface or visibility. include_hidden ensures Hidden tools are callable. *)
-      Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()
-      |> List.exists (fun (schema : Types.tool_schema) ->
-             String.equal schema.name tool_name)
+      if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name then
+        false
+      else if Tool_catalog.full_surface_override () then
+        Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()
+        |> List.exists (fun (schema : Types.tool_schema) ->
+               String.equal schema.name tool_name)
+      else if Tool_catalog.is_public_mcp tool_name then
+        true
+      else
+        Tool_catalog.allow_direct_call tool_name
   | Managed_agent ->
       tool_schemas_for_profile state Managed_agent
       |> List.exists (fun (schema : Types.tool_schema) ->

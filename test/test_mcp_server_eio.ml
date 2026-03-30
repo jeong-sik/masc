@@ -1765,6 +1765,33 @@ let test_handle_request_tools_call_board_post_structured_content () =
     Yojson.Safe.Util.(structured |> member "author" |> to_string);
   cleanup_dir base_path
 
+let test_handle_request_tools_call_blocks_keeper_internal_tool () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 118);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "keeper_time_now");
+      ("arguments", `Assoc []);
+    ]);
+  ]) in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check int) "error code" (-32601) (error_code_exn response);
+  let msg = error_message_exn response in
+  Alcotest.(check bool) "mentions keeper-internal" true
+    (try
+       ignore (Str.search_forward (Str.regexp_case_fold "keeper-internal") msg 0);
+       true
+     with Not_found -> false);
+  cleanup_dir base_path
+
 let test_handle_request_batch_rejected () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2630,6 +2657,8 @@ let eio_tests = [
   (* cache get structured content test removed: cache tools retired (#3640) *)
   "handle tools/call board post structured content", `Quick,
     test_handle_request_tools_call_board_post_structured_content;
+  "handle tools/call blocks keeper internal tool", `Quick,
+    test_handle_request_tools_call_blocks_keeper_internal_tool;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)

@@ -238,9 +238,6 @@ module Chain = struct
     | Some "0" | Some "false" | Some "no" -> false
     | _ -> true
 
-  (** Whether chain run log streaming is enabled. Default: false. *)
-  let run_log_stream () =
-    get_bool ~default:false "MASC_CHAIN_RUN_LOG_STREAM"
 
   (** Chain run log file path override. *)
   let run_log_path_opt () =

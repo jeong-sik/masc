@@ -67,6 +67,17 @@ graph TB
 | `B-migration-targets.md` | Migration Targets | OAS 이관 대상 모듈, deprecation 일정 | Draft |
 | `C-implementation-status.md` | Implementation Status | 구현 상태와 coverage snapshot | Draft |
 
+## Active Design Documents
+
+이 spec suite 외에 `docs/design/`와 `docs/rfc/`에 위치한 활성 설계 문서들:
+
+| Document | Description | Related Spec |
+|----------|-------------|--------------|
+| `docs/rfc/RFC-dashboard-control-plane.md` | Dashboard MCP tool executor, schema-based form builder, keeper/task UI | `10-dashboard.md` |
+| `docs/design/keeper-continuity-product-rfc.md` | Keeper continuity contract and promise level | `05-keeper-agent.md` |
+| `docs/design/LLM-JUDGE-DESIGN.md` | LLM judge for contract verification | `15-testing.md` |
+| `docs/design/contract-driven-agent-loop-rfc.md` | Contract-driven agent loop (CDAL) framework | `05-keeper-agent.md` |
+
 ## Conventions
 
 ### Document Structure

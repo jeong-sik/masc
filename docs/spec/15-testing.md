@@ -371,3 +371,13 @@ bisect-ppx-report html --coverage-path _coverage
 2. Deterministic grader를 우선 사용. LLM grader는 cost 고려.
 3. `trajectory` 로깅으로 재현성 확보.
 4. `eval_gate` 설정으로 안전 경계 지정.
+
+---
+
+## 11. References
+
+| 문서 | 경로 |
+|------|------|
+| Verification matrix | `docs/VERIFICATION-MATRIX.md` |
+| LLM judge design | `docs/design/LLM-JUDGE-DESIGN.md` |
+| Contract-driven agent loop RFC | `docs/design/contract-driven-agent-loop-rfc.md` |

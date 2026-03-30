@@ -19,12 +19,14 @@ let make_meta
     ?(policy_voice_enabled = false)
     ?(soul_profile = "default")
     ?(name = "test-keeper")
-    ?(tool_allowlist = [])
+    ?tool_access
+    ?tool_allowlist
     () : Keeper_types.keeper_meta =
   let tool_access =
-    match tool_allowlist with
-    | [] -> Keeper_types.Unrestricted
-    | names -> Keeper_types.Restricted names
+    match tool_access, tool_allowlist with
+    | Some access, _ -> access
+    | None, Some names -> Keeper_types.Restricted names
+    | None, None -> Keeper_types.Unrestricted
   in
   let json = `Assoc [
     ("name", `String name);

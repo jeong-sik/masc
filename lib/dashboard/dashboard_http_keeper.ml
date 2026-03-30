@@ -35,6 +35,18 @@ let compute_health_score
     let raw = 100.0 -. budget_penalty -. crash_penalty -. context_penalty in
     Int.max 0 (Int.min 100 (Float.to_int raw))
 
+(** Estimate seconds until Dead based on current restart_count and
+    exponential backoff schedule. Returns None if already dead or
+    restart_count >= max_restarts. *)
+let estimate_dead_eta_sec ~restart_count ~max_restarts =
+  if max_restarts <= 0 || restart_count >= max_restarts then None
+  else
+    let total = ref 0.0 in
+    for i = restart_count to max_restarts - 1 do
+      total := !total +. Keeper_supervisor.backoff_delay i
+    done;
+    Some !total
+
 let prompt_block_json key =
   let resolved = Prompt_registry.resolve_prompt key in
   `Assoc
@@ -314,6 +326,11 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                     | None -> `Null);
                   ("sp_events", `List sp_events);
                   ("health_score", `Int health_score);
+                  ("dead_eta_sec",
+                    match estimate_dead_eta_sec
+                      ~restart_count:entry.restart_count ~max_restarts with
+                    | Some eta -> `Float eta
+                    | None -> `Null);
                 ]
             | None ->
                 `Assoc [
@@ -324,6 +341,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ("dead_since", `Null);
                   ("sp_events", `List []);
                   ("health_score", `Int 100);
+                  ("dead_eta_sec", `Null);
                 ]
           in
 

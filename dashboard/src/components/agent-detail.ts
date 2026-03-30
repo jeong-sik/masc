@@ -11,6 +11,7 @@ import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { keeperIdentityHint } from './common/keeper-identity'
 import { AgentJournalStream } from './agent-detail-journal'
+import { AgentSessionReport } from './agent-detail-session-report'
 import { AgentTimelineSection } from './agent-detail-timeline'
 import { AgentWorkerBrief } from './agent-detail-worker'
 import {
@@ -187,7 +188,9 @@ export function AgentDetailOverlay() {
 
         ${detailError.value ? html`<div class="p-4 mb-4 text-bad border border-bad/30 rounded-xl bg-bad/10 shadow-sm font-medium text-sm">${detailError.value}</div>` : null}
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+        <${AgentSessionReport} agentName=${agentName} />
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5 mt-5">
           <${Card} title="할당된 작업">
             ${ownedTasks.length === 0
               ? html`<div class="h-full min-h-[120px]"><${EmptyState} message="할당된 작업이 없습니다" compact /></div>`

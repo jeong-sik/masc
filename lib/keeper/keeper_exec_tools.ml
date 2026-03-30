@@ -93,15 +93,20 @@ let inject_masc_schemas (schemas : Types.tool_schema list) =
       schemas
 
 (** Apply allowlist/denylist filtering to masc_* tool names.
-    - allowlist empty → no masc_* tools (deny-by-default)
-    - allowlist non-empty → only those tools
+    - allowlist empty → all masc_* tools allowed (no restriction).
+      This matches keeper_turn_up_create default (tool_allowlist=[]).
+      TODO: replace string list with [Unrestricted | Restricted of string list]
+      to make empty-vs-unrestricted semantics explicit.
+    - allowlist non-empty → only listed tools allowed
     - denylist always wins (deny overrides allow) *)
 let filter_by_access ~(allowlist : string list) ~(denylist : string list)
     (name : string) : bool =
-  if allowlist = [] then false
-  else
-    List.mem name allowlist
-    && not (List.mem name denylist)
+  let allowed =
+    match allowlist with
+    | [] -> true
+    | _ -> List.mem name allowlist
+  in
+  allowed && not (List.mem name denylist)
 
 let keeper_masc_tool_names (meta : keeper_meta) : string list =
   !masc_schemas_ref

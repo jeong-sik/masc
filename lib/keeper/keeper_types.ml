@@ -114,7 +114,6 @@ type keeper_meta = {
   active_team_session_id: string option;
   last_team_session_started_at: string;
   team_session_start_count_total: int;
-  last_triage_triggers: string;
   paused: bool;
   current_task_id: string option;
   (** Currently claimed task ID for cost attribution.
@@ -308,7 +307,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("board_reactive_turn_count", `Int rt.board_reactive_turn_count);
       ("mention_reactive_turn_count", `Int rt.mention_reactive_turn_count);
       ("noop_turn_count", `Int rt.noop_turn_count);
-      ("last_triage_triggers", `String m.last_triage_triggers);
       ("paused", `Bool m.paused);
       ("current_task_id",
         (match m.current_task_id with None -> `Null | Some s -> `String s));
@@ -508,9 +506,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let noop_turn_count =
       Safe_ops.json_int ~default:0 "noop_turn_count" json
     in
-    let last_triage_triggers =
-      Safe_ops.json_string ~default:"" "last_triage_triggers" json
-    in
     let paused =
       Safe_ops.json_bool ~default:false "paused" json
     in
@@ -567,7 +562,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           active_team_session_id;
           last_team_session_started_at;
           team_session_start_count_total;
-          last_triage_triggers;
           paused;
           current_task_id;
           runtime = {

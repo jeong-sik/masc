@@ -545,6 +545,23 @@ let test_http_client_fd_safety_contracts () =
     (file_contains_pattern "lib/council/thread_persist.ml"
        "Masc_http_client.make_closing_client")
 
+let test_router_contract_alignment () =
+  check bool "router schema describes heuristic routing" true
+    (file_contains_pattern "lib/tool_council_internal_schemas.ml"
+       "deterministic heuristic classification and sparse tier selection");
+  check bool "router schema no longer claims MoE" true
+    (file_not_contains_pattern "lib/tool_council_internal_schemas.ml"
+       "MoE-style selection");
+  check bool "router handler accepts schema query field" true
+    (file_contains_pattern "lib/tool_council_oas.ml"
+       {|let by_schema = get_string args "query" ""|});
+  check bool "router handler keeps legacy input fallback" true
+    (file_contains_pattern "lib/tool_council_oas.ml"
+       {|else get_string args "input" ""|});
+  check bool "router module declares heuristic implementation" true
+    (file_contains_pattern "lib/council/router.ml"
+       "LLM-routed MoE system.")
+
 let () =
   run "ci_hardening_source"
     [
@@ -585,5 +602,7 @@ let () =
              test_http_client_fd_safety_contracts;
            test_case "room-truth adaptive timeout contracts" `Quick
              test_room_truth_adaptive_timeout_contracts;
+           test_case "router contract alignment" `Quick
+             test_router_contract_alignment;
          ]);
     ]

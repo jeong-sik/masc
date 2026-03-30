@@ -259,8 +259,11 @@ let handle_set_param ctx args =
 (* ================================================================ *)
 
 let handle_route _ctx args =
-  let input = get_string args "input" "" in
-  let decision = Council.Router.route input in
+  let query =
+    let by_schema = get_string args "query" "" in
+    if by_schema <> "" then by_schema else get_string args "input" ""
+  in
+  let decision = Council.Router.route query in
   json_ok (`Assoc [
     ("reason", `String decision.reason);
     ("estimated_cost", `Float decision.estimated_cost);

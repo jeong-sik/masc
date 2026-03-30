@@ -42,7 +42,6 @@ describe('sendKeeperMessageDetailed', () => {
       payload: {
         message: 'ping',
         direct_reply: true,
-        timeout_sec: 120,
       },
     })
     expect(reply.text).toBe('pong')
@@ -72,7 +71,6 @@ describe('streamKeeperMessage', () => {
       name: 'sangsu',
       message: 'ping',
       direct_reply: true,
-      timeout_sec: 120,
     })
     expect(events).toEqual(['RUN_FINISHED'])
   })

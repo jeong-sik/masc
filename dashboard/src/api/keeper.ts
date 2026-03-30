@@ -15,7 +15,9 @@ export interface KeeperToolReply {
   details: KeeperConversationDetails | null
 }
 
-const KEEPER_DIRECT_REPLY_TIMEOUT_SEC = 120
+// Server no longer enforces an external timeout for keeper_msg.
+// Keeper internal limits (max_turns, max_cost_usd, max_tokens) control duration.
+// Client-side abort via AbortSignal is the recommended cancellation path.
 
 export interface KeeperChatStreamEvent {
   type: string
@@ -38,7 +40,6 @@ async function callKeeperMessageViaOperator(
   const payload: Record<string, unknown> = {
     message,
     direct_reply: true,
-    timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
   }
   const response = await runOperatorAction({
     actor: currentDashboardActor(),
@@ -144,8 +145,7 @@ export async function streamKeeperMessage(
       name,
       message,
       direct_reply: true,
-      timeout_sec: KEEPER_DIRECT_REPLY_TIMEOUT_SEC,
-    }),
+      }),
     signal,
   })
 

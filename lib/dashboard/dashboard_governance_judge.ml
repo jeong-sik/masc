@@ -302,6 +302,7 @@ let compute_judgments
   match
     Oas_worker.run_named_with_masc_tools ~cascade_name:"governance_judge"
       ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
+      ~priority:Llm_provider.Request_priority.Background
       ()
   with
   | Error message -> Error message

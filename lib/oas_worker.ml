@@ -100,6 +100,7 @@ type config = {
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
   working_context : Yojson.Safe.t option;
+  priority : Llm_provider.Request_priority.t option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -122,6 +123,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     transport = Masc_grpc_transport.from_env ();
     allowed_paths = [];
     working_context = None;
+    priority = None;
   }
 
 (* ================================================================ *)
@@ -258,6 +260,10 @@ let build
     if config.allowed_paths <> [] then
       Oas.Builder.with_allowed_paths config.allowed_paths builder
     else builder
+  in
+  let builder = match config.priority with
+    | Some p -> Oas.Builder.with_priority p builder
+    | None -> builder
   in
   Oas.Builder.build_safe builder
   |> Result.map_error Oas.Error.to_string
@@ -489,6 +495,7 @@ let run_named
     ?guardrails
     ?hooks
     ?context_reducer
+    ?priority
     ?memory
     ?raw_trace
     ?on_event
@@ -540,6 +547,7 @@ let run_named
       allowed_paths;
       working_context;
       session_id;
+      priority;
     }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in
@@ -572,6 +580,7 @@ let run_model_by_label
     ?memory
     ?on_event
     ?transport
+    ?priority
     ?sw
     ?net
     ()
@@ -595,7 +604,7 @@ let run_model_by_label
             ~description:(Some (Printf.sprintf "model_label:%s" model_label))
             ()
         in
-        let config = { config with transport = transport_resolved } in
+        let config = { config with transport = transport_resolved; priority } in
         (match run ~sw ~net ~config ?on_event goal with
         | Ok result when accept result.response -> Ok result
         | Ok _ ->
@@ -619,6 +628,7 @@ let run_named_with_masc_tools
     ?on_event
     ?contract
     ?transport
+    ?priority
     ?sw
     ?net
     ()
@@ -633,7 +643,7 @@ let run_named_with_masc_tools
   ) masc_tools in
   run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
-    ?raw_trace ?on_event ?contract ?transport ?sw ?net ()
+    ?raw_trace ?on_event ?contract ?transport ?priority ?sw ?net ()
 
 let run_model_with_masc_tools
     ~(model_label : string)
@@ -650,6 +660,7 @@ let run_model_with_masc_tools
     ?raw_trace
     ?on_event
     ?transport
+    ?priority
     ?sw
     ?net
     ()
@@ -668,6 +679,6 @@ let run_model_with_masc_tools
           ~description:(Some (Printf.sprintf "model_label:%s" model_label))
           ()
       in
-      let config = { config with raw_trace; transport = transport_resolved } in
+      let config = { config with raw_trace; transport = transport_resolved; priority } in
       run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event
         goal

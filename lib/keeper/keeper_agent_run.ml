@@ -91,6 +91,7 @@ let run_turn
     ?max_cost_usd
     ?on_event
     ?(trajectory_acc : Trajectory.accumulator option)
+    ?priority
     ()
   : (run_result, string) result =
   (* 0. Resolve inference parameters via Cascade_inference *)
@@ -253,6 +254,7 @@ let run_turn
       ?contract
       ~allowed_paths:meta.allowed_paths
       ~working_context:checkpoint_sidecar
+      ~priority:(Option.value priority ~default:Llm_provider.Request_priority.Interactive)
       ()
   with
   | Error e -> Error e

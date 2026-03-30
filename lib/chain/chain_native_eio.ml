@@ -282,7 +282,7 @@ let call_model_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~promp
       let result =
         if tool_defs = [] then
           Oas_worker.run_model_by_label ~model_label ~goal:prompt ~system_prompt
-            ~max_turns:1 ~sw:runtime.sw ?net:runtime.mcp_state.Mcp_server.net ()
+            ~max_turns:1 ~priority:Llm_provider.Request_priority.Interactive ~sw:runtime.sw ?net:runtime.mcp_state.Mcp_server.net ()
         else
           (Oas_worker.run_model_with_masc_tools ~model_label ~goal:prompt
               ~system_prompt ~masc_tools:tool_defs
@@ -305,7 +305,7 @@ let call_model_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~promp
                       ?mcp_session_id:runtime.mcp_session_id
                       ?auth_token:runtime.auth_token runtime.mcp_state ~name
                       ~arguments:final_args)
-              ~max_turns:1 ~sw:runtime.sw
+              ~max_turns:1 ~priority:Llm_provider.Request_priority.Interactive ~sw:runtime.sw
               ?net:runtime.mcp_state.Mcp_server.net ())
       in
       (match result with

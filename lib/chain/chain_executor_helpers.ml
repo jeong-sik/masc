@@ -504,7 +504,9 @@ type exec_fn = Chain_conversation.exec_fn
 let judge_call ~prompt () : (string, string) result =
   match
     Oas_worker.run_named ~cascade_name:"chain_judge"
-      ~goal:prompt ~max_turns:1 ()
+      ~goal:prompt ~max_turns:1
+      ~priority:Llm_provider.Request_priority.Interactive
+      ()
   with
   | Ok run_result ->
     let text =

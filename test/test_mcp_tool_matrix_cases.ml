@@ -52,9 +52,6 @@ let all_known_tool_names =
     "masc_agents";
     "masc_approve";
     "masc_archive_view";
-    "masc_audit_query";
-    "masc_audit_stats";
-    "masc_audit_trail";
     "masc_auth_create_token";
     "masc_auth_disable";
     "masc_auth_enable";
@@ -120,8 +117,6 @@ let all_known_tool_names =
     "masc_convo_list";
     "masc_convo_reply";
     "masc_convo_start";
-    "masc_cost_log";
-    "masc_cost_report";
     "masc_dashboard";
     "masc_deliver";
     "masc_detachment_list";
@@ -132,9 +127,6 @@ let all_known_tool_names =
     "masc_dispatch_rebalance";
     "masc_dispatch_recall";
     "masc_dispatch_tick";
-    "masc_encryption_disable";
-    "masc_encryption_enable";
-    "masc_encryption_status";
     "masc_episode_flush";
     "masc_episode_list";
     "masc_error_add";
@@ -144,9 +136,7 @@ let all_known_tool_names =
     "masc_execution_orders";
     "masc_feature_flags";
     "masc_find_by_capability";
-    "masc_fire_task";
     "masc_gc";
-    "masc_generate_key";
     "masc_get_metrics";
     "masc_goal_dispatch";
     "masc_goal_list";
@@ -155,7 +145,6 @@ let all_known_tool_names =
     "masc_goal_snapshot";
     "masc_goal_upsert";
     "masc_governance_feed";
-    "masc_governance_report";
     "masc_governance_set";
     "masc_governance_status";
     "masc_handover_claim";
@@ -216,7 +205,6 @@ let all_known_tool_names =
     "masc_mdal_swarm_start";
     "masc_memento_mori";
     "masc_messages";
-    "masc_model_catalog";
     "masc_note_add";
     "masc_observe_alerts";
     "masc_observe_capacity";
@@ -271,8 +259,6 @@ let all_known_tool_names =
     "masc_portal_send";
     "masc_portal_status";
     "masc_progress";
-    "masc_rate_limit_config";
-    "masc_rate_limit_status";
     "masc_recall_search";
     "masc_register_capabilities";
     "masc_reject";
@@ -318,11 +304,6 @@ let all_known_tool_names =
     "masc_team_session_step";
     "masc_team_session_stop";
     "masc_team_session_verify_trace";
-    "masc_tempo";
-    "masc_tempo_adjust";
-    "masc_tempo_get";
-    "masc_tempo_reset";
-    "masc_tempo_set";
     "masc_tool_admin_snapshot";
     "masc_tool_admin_update";
     "masc_tool_help";

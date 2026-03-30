@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.184.0] - 2026-03-31
+
+### Added
+- **Governance audit trail** — param audit trail + rollback UI (#4072).
+- **Pulse rhythm API** — set_rhythm/get_rhythm for runtime interval (#4063).
+
+### Fixed
+- **Keeper tool_allowlist** — correct semantics: empty means none (#4059).
+- **Keeper bridge tests** — update for allowlist semantics + shard bypass (#4088).
+- **Json_util dedup** — consolidate to canonical SSOT (#4085).
+
 ## [2.183.0] - 2026-03-31
 
 ### Fixed

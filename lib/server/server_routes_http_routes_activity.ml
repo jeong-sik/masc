@@ -52,9 +52,10 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/activity/swimlane" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let room_id = query_param req "room_id" in
-         let limit = int_query_param req "limit" ~default:500 |> clamp ~min_v:1 ~max_v:2000 in
-         let json = Activity_graph.agent_spans_json state.Mcp_server.room_config ?room_id ~limit () in
+         let json =
+           Server_activity_http.swimlane_http_json
+             ~deps:(activity_http_deps ~sw ~clock) ~state req
+         in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/governance/cases" (fun request reqd ->

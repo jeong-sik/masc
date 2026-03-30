@@ -6,20 +6,33 @@ import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState, LoadingState } from './common/feedback-state'
 import { ActionButton } from './common/button'
+import { FilterChips } from './common/filter-chips'
 import { TimeAgo } from './common/time-ago'
 import { Sparkline } from './common/sparkline'
 import { GraphView } from './activity-graph-view'
 import { ActivitySwimlane } from './activity-swimlane'
 import { ActivityHeatmap } from './activity-heatmap'
 import { CollapsibleSection } from './common/collapsible'
+import {
+  buildActionTimelineGroups,
+  buildCategoryCounts,
+  buildRawCategoryCounts,
+  categoryLabel,
+  eventDetail,
+  eventKindLabel as activityEventKindLabel,
+  type ActionTimelineFilter,
+} from './activity-graph-groups'
 import { fetchActivityGraph } from '../api'
 import { registerActivityRefresh } from '../sse-store'
-import type { ActivityGraphResponse, ActivityGraphNode, ActivityGraphTimelineEvent } from '../types'
+import type { ActivityGraphResponse, ActivityGraphNode, ActionTimelineGroup } from '../types'
 
 const graphData = signal<ActivityGraphResponse | null>(null)
 const graphError = signal<string | null>(null)
 const graphLoading = signal(false)
 export const selectedTimeRange = signal<string>('all')
+const actionFilter = signal<ActionTimelineFilter>('all')
+const showLifecycle = signal(false)
+const expandedActionGroups = signal<Set<string>>(new Set())
 
 const TIME_RANGES: Array<{ value: string; label: string }> = [
   { value: '1h', label: '1시간' },
@@ -74,49 +87,6 @@ function kindLabel(kind: string): string {
   }
 }
 
-function eventKindLabel(kind: string): string {
-  switch (kind) {
-    case 'agent.joined': return '입장'
-    case 'agent.left': return '퇴장'
-    case 'message.broadcast': return '브로드캐스트'
-    case 'message.mentioned': return '멘션'
-    case 'task.created': return '작업 생성'
-    case 'task.claimed': return '작업 점유'
-    case 'task.started': return '작업 시작'
-    case 'task.done': return '작업 완료'
-    case 'task.released': return '작업 반환'
-    case 'task.cancelled': return '작업 취소'
-    case 'board.posted': return '게시'
-    case 'board.commented': return '댓글'
-    case 'board.voted': return '투표'
-    case 'operation.started': return '세션 시작'
-    case 'operation.resumed': return '세션 재개'
-    case 'operation.finalized': return '세션 종료'
-    case 'team.turn': return '팀 턴'
-    case 'team.turn_failed': return '팀 턴 실패'
-    default: return kind
-  }
-}
-
-function eventActor(event: ActivityGraphTimelineEvent): string {
-  const actor = event.actor as Record<string, unknown>
-  if (actor?.id) return actor.id as string
-  const payload = event.payload as Record<string, unknown>
-  return (payload.agent as string) ?? (payload.author as string) ?? (payload.from as string) ?? ''
-}
-
-function eventSummary(event: ActivityGraphTimelineEvent): string {
-  const payload = event.payload as Record<string, unknown>
-  const message = (payload.message as string) ?? (payload.content as string) ?? ''
-  if (message) return message.length > 80 ? `${message.slice(0, 77)}...` : message
-  const taskTitle = payload.task_title as string | undefined
-  if (taskTitle) return taskTitle
-  const reason = payload.reason as string | undefined
-  if (reason) return reason
-  if (event.subject?.id) return `-> ${event.subject.id}`
-  return event.kind
-}
-
 function StatsRow({ data }: { data: ActivityGraphResponse }) {
   const s = data.stats
   const h = data.stats_history ?? []
@@ -146,34 +116,146 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
   `
 }
 
-function ActivityFeed({ events }: { events: ActivityGraphTimelineEvent[] }) {
-  if (events.length === 0) {
-    return html`<${EmptyState} message="최근 실행 이벤트가 없습니다." compact />`
+function actionCategoryClass(group: ActionTimelineGroup): string {
+  switch (group.category) {
+    case 'task':
+      return 'border-[#fbbf24]/35 bg-[#fbbf24]/10 text-[#fcd34d]'
+    case 'session':
+      return 'border-[#4ade80]/35 bg-[#4ade80]/10 text-[#86efac]'
+    case 'message':
+      return 'border-[#22d3ee]/35 bg-[#22d3ee]/10 text-[#67e8f9]'
+    case 'board':
+      return 'border-[#c084fc]/35 bg-[#c084fc]/10 text-[#d8b4fe]'
+    case 'governance':
+      return 'border-[#fb7185]/35 bg-[#fb7185]/10 text-[#fda4af]'
+    case 'lifecycle':
+      return 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)]'
+    default:
+      return 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-muted)]'
   }
+}
+
+function toggleExpandedGroup(id: string): void {
+  const next = new Set(expandedActionGroups.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedActionGroups.value = next
+}
+
+function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
+  const groups = buildActionTimelineGroups(data.timeline)
+  const visibleBaseGroups = showLifecycle.value
+    ? groups
+    : groups.filter(group => group.category !== 'lifecycle')
+  const baseCounts = buildCategoryCounts(visibleBaseGroups)
+  const rawCounts = buildRawCategoryCounts(data.kind_counts)
+  const lifecycleHiddenCount = showLifecycle.value ? 0 : rawCounts.lifecycle
+  const filter = actionFilter.value
+  const filteredGroups = visibleBaseGroups.filter(group =>
+    filter === 'all' ? true : group.category === filter,
+  )
+  const chips = [
+    { key: 'all', label: 'All', count: visibleBaseGroups.length },
+    { key: 'task', label: 'Task', count: baseCounts.task },
+    { key: 'session', label: 'Session', count: baseCounts.session },
+    { key: 'message', label: 'Message', count: baseCounts.message },
+    { key: 'board', label: 'Board', count: baseCounts.board },
+    { key: 'governance', label: 'Governance', count: baseCounts.governance },
+    ...(baseCounts.other > 0 || filter === 'other'
+      ? [{ key: 'other' as const, label: 'Other', count: baseCounts.other }]
+      : []),
+  ]
+
+  if (groups.length === 0) {
+    return html`<${EmptyState} message="액션 단위로 묶을 실행 이벤트가 없습니다." compact />`
+  }
+
   return html`
     <div class="flex flex-col gap-3">
-      ${events.map(event => {
-        const actor = eventActor(event)
-        return html`
-          <div class="monitor-row rounded-xl p-4 ok" key=${event.seq}>
-            <div class="monitor-row rounded-xl-header">
-              <div class="min-w-0">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="monitor-title">${actor || '(unknown)'}</span>
-                  <span class="monitor-sub">${eventKindLabel(event.kind)}</span>
-                </div>
-                <div class="monitor-note">${eventSummary(event)}</div>
-              </div>
-              <span class="monitor-pill ok inline-flex items-center rounded-full px-2 py-[3px] text-[11px] uppercase tracking-[0.06em]">${eventKindLabel(event.kind)}</span>
-            </div>
-            <div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[13px]">
-              <span>${event.room_id}</span>
-              ${event.ts_iso ? html`<span><${TimeAgo} timestamp=${event.ts_iso} /></span>` : null}
-              ${event.tags.length > 0 ? html`<span>${event.tags.join(', ')}</span>` : null}
-            </div>
+      <div class="flex flex-col gap-3 rounded-xl border border-[var(--card-border)] bg-[var(--card)]/50 p-4">
+        <div class="flex flex-col gap-1">
+          <div class="text-[14px] font-semibold text-[var(--text-strong)]">라이브 패널은 원본 스트림, 여기서는 최근 실행을 액션 단위로 묶어 봅니다.</div>
+          <div class="text-[12px] text-[var(--text-muted)]">
+            액션 ${filteredGroups.length}개 · 원본 타임라인 ${data.timeline.length}건 · 분석 범위 ${data.stats.event_count ?? data.timeline.length}건
+            ${lifecycleHiddenCount > 0 ? ` · lifecycle ${lifecycleHiddenCount}건 숨김` : ''}
           </div>
-        `
-      })}
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <${FilterChips} chips=${chips} active=${actionFilter} tone="accent" />
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] transition-all duration-150 ${showLifecycle.value
+              ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--text-strong)]'
+              : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)]'}"
+            onClick=${() => { showLifecycle.value = !showLifecycle.value }}
+          >
+            Lifecycle ${showLifecycle.value ? '표시 중' : '숨김'}
+            <span class="rounded-md bg-[var(--white-6)] px-1.5 py-0.5 text-[10px]">${rawCounts.lifecycle}</span>
+          </button>
+        </div>
+      </div>
+
+      ${filteredGroups.length === 0
+        ? html`<${EmptyState} message="선택한 필터에 맞는 액션 그룹이 없습니다." compact />`
+        : filteredGroups.map(group => {
+            const expanded = expandedActionGroups.value.has(group.id)
+            return html`
+              <div class="rounded-xl border border-[var(--card-border)] bg-[var(--card)]/55 p-4 shadow-sm shadow-black/8" key=${group.id}>
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${actionCategoryClass(group)}">
+                        ${categoryLabel(group.category)}
+                      </span>
+                      ${group.actor ? html`<span class="text-[11px] font-medium text-[var(--text-body)]">${group.actor}</span>` : null}
+                      ${group.subjectId ? html`<span class="text-[11px] text-[var(--text-muted)] font-mono">${group.subjectId}</span>` : null}
+                    </div>
+                    <div class="mt-2 text-[15px] font-semibold text-[var(--text-strong)]">${group.title}</div>
+                    <div class="mt-1 text-[13px] leading-[1.6] text-[var(--text-body)]">${group.summary}</div>
+                  </div>
+                  <div class="flex shrink-0 flex-col items-end gap-2 text-[11px] text-[var(--text-muted)]">
+                    <span>${group.rawCount} events</span>
+                    <${TimeAgo} timestamp=${group.latestTs} />
+                  </div>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-1.5">
+                  ${group.kinds.slice(0, 4).map(kind => html`
+                    <span class="inline-flex items-center rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]" key=${kind}>
+                      ${activityEventKindLabel(kind)}
+                    </span>
+                  `)}
+                </div>
+                <div class="mt-3 flex items-center justify-between gap-3 border-t border-[var(--white-6)] pt-3">
+                  <span class="text-[11px] text-[var(--text-muted)]">원본 이벤트를 펼쳐서 순서를 확인할 수 있습니다.</span>
+                  <button
+                    type="button"
+                    class="rounded-lg border border-[var(--white-10)] bg-[var(--white-4)] px-3 py-1.5 text-[11px] text-[var(--text-body)] transition-all duration-150 hover:bg-[var(--white-8)]"
+                    onClick=${() => toggleExpandedGroup(group.id)}
+                  >
+                    ${expanded ? '원본 접기' : '원본 보기'}
+                  </button>
+                </div>
+                ${expanded ? html`
+                  <div class="mt-3 flex flex-col gap-2 rounded-xl border border-[var(--white-8)] bg-[rgba(15,23,42,0.42)] p-3">
+                    ${group.rawEvents.map(event => html`
+                      <div class="flex items-start gap-3 rounded-lg border border-[var(--white-6)] bg-[var(--white-3)] px-3 py-2" key=${event.seq}>
+                        <span class="inline-flex min-w-[72px] items-center rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                          ${activityEventKindLabel(event.kind)}
+                        </span>
+                        <div class="min-w-0 flex-1">
+                          <div class="text-[12px] text-[var(--text-body)]">${eventDetail(event, 160)}</div>
+                          <div class="mt-1 text-[11px] text-[var(--text-muted)]">${event.room_id}</div>
+                        </div>
+                        <span class="shrink-0 text-[11px] text-[var(--text-muted)]">
+                          <${TimeAgo} timestamp=${event.ts_iso} />
+                        </span>
+                      </div>
+                    `)}
+                  </div>
+                ` : null}
+              </div>
+            `
+          })}
     </div>
   `
 }
@@ -261,8 +343,10 @@ export { loadGraph as refreshActivityGraph }
 
 export function ActivityGraphSurface() {
   useEffect(() => {
-    loadGraph()
-    registerActivityRefresh(loadGraph)
+    void loadGraph()
+    return registerActivityRefresh(() => {
+      void loadGraph()
+    })
   }, [])
 
   const data = graphData.value
@@ -292,13 +376,15 @@ export function ActivityGraphSurface() {
     return html`<${EmptyActivityGraph} />`
   }
 
+  const since = selectedTimeRange.value !== 'all' ? selectedTimeRange.value : undefined
+
   return html`
     <div class="flex flex-col gap-5">
 
       <${Card} title="활동 그래프" class="section mb-4" testId="activity_graph.graph">
         <div class="mb-4">
           <h2 class="monitor-headline">실행 이벤트 관계 그래프</h2>
-          <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 시각화합니다. 노드 크기는 의미적 중요도를 반영합니다. 노드를 클릭하면 상세 정보를 확인할 수 있습니다.</p>
+          <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 시각화합니다. Live 패널은 원본 스트림이고, 이 영역은 필터링된 이력과 분석에 집중합니다.</p>
         </div>
         <${TimeRangeSelector} />
         <${StatsRow} data=${data} />
@@ -312,7 +398,7 @@ export function ActivityGraphSurface() {
       <//>
 
       <${CollapsibleSection} title="에이전트 타임라인" open=${true}>
-        <${ActivitySwimlane} />
+        <${ActivitySwimlane} since=${since} />
       <//>
 
       <div class="grid grid-cols-[minmax(0,1.08fr)_minmax(0,0.96fr)_minmax(0,0.88fr)] gap-4">
@@ -332,12 +418,12 @@ export function ActivityGraphSurface() {
           <${KindBreakdown} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="최근 실행 이벤트" class="section mb-4" testId="activity_graph.timeline">
+        <${Card} title="액션 타임라인" class="section mb-4" testId="activity_graph.timeline">
           <div class="mb-4">
             <h2 class="monitor-headline">타임라인</h2>
-            <p class="monitor-subheadline">가장 최근의 실행 이벤트를 시간순으로 보여줍니다.</p>
+            <p class="monitor-subheadline">최근 실행을 액션 단위로 묶고, 필요할 때만 원본 이벤트를 펼쳐 봅니다.</p>
           </div>
-          <${ActivityFeed} events=${[...data.timeline].reverse().slice(0, 30)} />
+          <${ActionTimeline} data=${data} />
         <//>
       </div>
 

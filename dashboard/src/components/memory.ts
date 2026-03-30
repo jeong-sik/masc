@@ -191,6 +191,7 @@ function authorAvatar(name: string): string {
 
 function kindBadgeColor(kind: string): string {
   switch (kind) {
+    case 'human': return 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)]'
     case 'automation': return 'bg-[var(--cyan-16)] text-[#38bdf8] border-[rgba(34,211,238,0.3)]'
     case 'system': return 'bg-[var(--slate-gray-15)] text-[var(--text-slate)] border-[var(--border-slate-22)]'
     default: return 'bg-[var(--white-8)] text-[var(--text-muted)] border-[var(--border-slate-16)]'
@@ -199,7 +200,7 @@ function kindBadgeColor(kind: string): string {
 
 function visibilityLabel(vis: string): string | null {
   switch (vis) {
-    case 'internal': return '내부'
+    case 'internal': return '내부(에이전트 전용)'
     case 'unlisted': return '비공개'
     case 'direct': return 'DM'
     case 'public': return null
@@ -382,7 +383,20 @@ function SortBar() {
         >
           ${systemLabel} (${grouped.totalSystem})
         </button>
-        <div class="ml-auto">
+        <div class="ml-auto flex items-center gap-2">
+          ${selectedPostIds.value.size > 0 ? html`
+            <button type="button"
+              class="px-3 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-[rgba(239,68,68,0.1)] text-[#f87171] border-[rgba(239,68,68,0.3)] hover:bg-[rgba(239,68,68,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick=${bulkDeleteSelected}
+              disabled=${bulkDeleting.value}
+            >
+              ${bulkDeleting.value ? '삭제 중...' : `선택 삭제 (${selectedPostIds.value.size})`}
+            </button>
+            <button type="button"
+              class="px-2 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]"
+              onClick=${() => { selectedPostIds.value = new Set() }}
+            >선택 해제</button>
+          ` : null}
           <button type="button"
             class="px-3 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${refreshBoard}
@@ -437,6 +451,36 @@ function MemorySummary() {
 }
 
 const deletingPostId = signal<string | null>(null)
+const selectedPostIds = signal<Set<string>>(new Set())
+const bulkDeleting = signal(false)
+
+function togglePostSelection(postId: string, event: Event) {
+  event.stopPropagation()
+  const next = new Set(selectedPostIds.value)
+  if (next.has(postId)) next.delete(postId)
+  else next.add(postId)
+  selectedPostIds.value = next
+}
+
+async function bulkDeleteSelected() {
+  const ids = Array.from(selectedPostIds.value)
+  if (ids.length === 0) return
+  if (!confirm(`${ids.length}개의 글을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return
+  bulkDeleting.value = true
+  let deleted = 0
+  for (const id of ids) {
+    try {
+      await deleteBoardPost(id)
+      deleted += 1
+    } catch (err) {
+      console.warn('[board] bulk delete failed for', id, err instanceof Error ? err.message : err)
+    }
+  }
+  bulkDeleting.value = false
+  selectedPostIds.value = new Set()
+  showToast(`${deleted}/${ids.length}개 게시글을 삭제했습니다`, deleted === ids.length ? 'success' : 'error')
+  refreshBoard()
+}
 
 function PostCard({ post }: { post: BoardPost }) {
   const kind = boardPostKind(post)
@@ -474,6 +518,15 @@ function PostCard({ post }: { post: BoardPost }) {
       class="board-post group flex gap-3 rounded-xl p-4 border border-[var(--card-border)] bg-[var(--card)] hover:bg-[var(--white-6)] hover:border-[rgba(71,184,255,0.26)] transition-all duration-200 cursor-pointer"
       onClick=${() => navigateToPost(post.id)}
     >
+      <!-- Select checkbox -->
+      <div class="flex items-start pt-1">
+        <input type="checkbox"
+          class="w-3.5 h-3.5 rounded cursor-pointer accent-[var(--accent)]"
+          checked=${selectedPostIds.value.has(post.id)}
+          onClick=${(e: Event) => togglePostSelection(post.id, e)}
+        />
+      </div>
+
       <!-- Vote column -->
       <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-[36px]">
         <button type="button"
@@ -513,9 +566,9 @@ function PostCard({ post }: { post: BoardPost }) {
           <span class="text-[11px] text-[var(--text-muted)]">댓글 ${post.comment_count}</span>
 
           <!-- Category badges -->
-          ${kind !== 'human' ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(kind)}">${kind}</span>` : null}
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(kind)}">${kind === 'human' ? '사람' : kind}</span>
           ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]">${visibilityLabel(post.visibility)}</span>` : null}
+          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${post.visibility === 'internal' ? 'bg-[rgba(168,85,247,0.12)] text-[#a855f7] border-[rgba(168,85,247,0.25)]' : 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]'}">${visibilityLabel(post.visibility)}</span>` : null}
 
           <!-- Delete button -->
           <button type="button"
@@ -651,8 +704,8 @@ function PostDetail({ post }: { post: BoardPost }) {
             ? html`
                 <div class="flex gap-1.5 flex-wrap">
                   ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-                  ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]">${visibilityLabel(post.visibility)}</span>` : null}
-                  ${boardPostKind(post) !== 'human' ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(boardPostKind(post))}">${boardPostKind(post)}</span>` : null}
+                  ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${post.visibility === 'internal' ? 'bg-[rgba(168,85,247,0.12)] text-[#a855f7] border-[rgba(168,85,247,0.25)]' : 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]'}">${visibilityLabel(post.visibility)}</span>` : null}
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(boardPostKind(post))}">${boardPostKind(post) === 'human' ? '사람' : boardPostKind(post)}</span>
                   ${expiryChip(post)}
                 </div>
               `

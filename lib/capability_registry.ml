@@ -173,16 +173,16 @@ let make_seed ?capability_id ?(risk_class = Safe)
   }
 
 let spawned_agent_public_tool_names : string list =
-  Agent_tool_surfaces.spawned_agent_public_tool_names
+  Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent
 
 let spawned_agent_prefixed_tools : string list =
-  Agent_tool_surfaces.spawned_agent_prefixed_tools
+  prefixed_tool_names (Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent)
 
 let mdal_auditable_tool_names : string list =
-  Agent_tool_surfaces.mdal_auditable_tool_names
+  Tool_catalog.tools_for_surface Tool_catalog.Mdal_auditable
 
 let local_worker_public_tool_names : string list =
-  Agent_tool_surfaces.local_worker_public_tool_names
+  Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 
 let local_worker_internal_schemas : Types.tool_schema list =
   Agent_tool_surfaces.local_worker_internal_schemas

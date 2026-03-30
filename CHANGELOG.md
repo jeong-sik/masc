@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.170.0] - 2026-03-30
+
+### Added
+- **Unified session activity trace** — GitHub Agents-style chronological trace view in agent/keeper detail overlays. Merges broadcast, task, and tool call events with expandable details, type filtering, live indicator, and cost summary (#3875).
+
 ## [2.169.0] - 2026-03-30
 
 ### Added

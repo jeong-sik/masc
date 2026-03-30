@@ -338,7 +338,7 @@ let start_webrtc_connection ~sw ~env peer_id =
       (try
          Webrtc.Webrtc_eio.run wrtc ~sw ~net ~clock
        with
-       | Eio.Cancel.Cancelled _ -> ()
+       | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Log.Server.warn "WebRTC peer %s run failed: %s"
            peer_id (Printexc.to_string exn);

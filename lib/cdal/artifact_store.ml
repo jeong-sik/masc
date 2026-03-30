@@ -127,10 +127,7 @@ let write config ~(metadata : artifact_metadata) ~(payload : Yojson.Safe.t) =
   mkdir_p dir;
   let path = artifact_path config metadata.kind metadata.artifact_id in
   let envelope = envelope_to_json metadata payload in
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc (Yojson.Safe.pretty_to_string envelope))
+  Fs_compat.save_file path (Yojson.Safe.pretty_to_string envelope)
 
 let read config ~kind ~artifact_id =
   let path = artifact_path config kind artifact_id in
@@ -138,16 +135,7 @@ let read config ~kind ~artifact_id =
     Error (Printf.sprintf "artifact not found: %s" path)
   else
     try
-      let ic = open_in path in
-      let content =
-        Fun.protect
-          ~finally:(fun () -> close_in_noerr ic)
-          (fun () ->
-            let n = in_channel_length ic in
-            let buf = Bytes.create n in
-            really_input ic buf 0 n;
-            Bytes.to_string buf)
-      in
+      let content = Fs_compat.load_file path in
       let json = Yojson.Safe.from_string content in
       envelope_of_json json
     with

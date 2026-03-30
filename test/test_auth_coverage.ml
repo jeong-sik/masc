@@ -255,6 +255,11 @@ let test_permission_for_tool_board_reclassify () =
   | Some Types.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
+let test_permission_for_tool_board_delete () =
+  match Auth.permission_for_tool "masc_board_delete" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
 let test_permission_for_tool_portal_open () =
   match Auth.permission_for_tool "masc_portal_open" with
   | Some Types.CanOpenPortal -> ()
@@ -666,6 +671,7 @@ let () =
       test_case "board_list" `Quick test_permission_for_tool_board_list;
       test_case "board_post" `Quick test_permission_for_tool_board_post;
       test_case "board_reclassify" `Quick test_permission_for_tool_board_reclassify;
+      test_case "board_delete" `Quick test_permission_for_tool_board_delete;
       test_case "portal_open" `Quick test_permission_for_tool_portal_open;
       test_case "portal_send" `Quick test_permission_for_tool_portal_send;
       test_case "worktree_create" `Quick test_permission_for_tool_worktree_create;

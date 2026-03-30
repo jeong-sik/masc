@@ -70,6 +70,7 @@ let all_known_tool_names =
     "masc_batch_add_tasks";
     "masc_board_comment";
     "masc_board_comment_vote";
+    "masc_board_delete";
     "masc_board_get";
     "masc_board_hearths";
     "masc_board_list";
@@ -809,7 +810,7 @@ let prepare_for_name fixture name =
     ignore (ensure_task fixture);
   if List.mem name [ "masc_plan_get"; "masc_plan_update"; "masc_plan_get_task"; "masc_plan_clear_task" ] then
     ensure_plan_initialized fixture;
-  if List.mem name [ "masc_board_get"; "masc_board_comment"; "masc_board_vote"; "masc_board_comment_vote" ] then
+  if List.mem name [ "masc_board_get"; "masc_board_comment"; "masc_board_vote"; "masc_board_comment_vote"; "masc_board_delete" ] then
     ignore (ensure_board_post fixture);
   if List.mem name [ "masc_verify_submit"; "masc_verify_status"; "masc_verify_auto"; "masc_verify_pending" ] then
     ignore (ensure_verification_request fixture);

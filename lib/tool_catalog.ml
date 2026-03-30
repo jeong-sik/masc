@@ -168,7 +168,7 @@ let public_mcp_tools =
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
     (* Board — async agent communication *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote";
+    "masc_board_comment"; "masc_board_vote"; "masc_board_delete";
     (* Agent discovery *)
     "masc_agents"; "masc_dashboard"; "masc_agent_card";
     (* Transport *)
@@ -273,7 +273,7 @@ let standard_tools =
     "masc_board_post"; "masc_board_get"; "masc_board_list";
     "masc_board_vote"; "masc_board_comment"; "masc_board_comment_vote";
     "masc_board_search"; "masc_board_stats"; "masc_board_profile";
-    "masc_board_hearths";
+    "masc_board_hearths"; "masc_board_delete";
     (* Team Session *)
     "masc_team_session_start"; "masc_team_session_step";
     "masc_team_session_status"; "masc_team_session_stop";

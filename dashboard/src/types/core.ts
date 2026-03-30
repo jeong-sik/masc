@@ -72,6 +72,7 @@ export interface BoardPost {
 export interface BoardComment {
   id: string
   post_id: string
+  parent_id?: string | null
   author: string
   content: string
   created_at: string

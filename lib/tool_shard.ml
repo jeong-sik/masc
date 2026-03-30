@@ -19,7 +19,8 @@ let base_tools : Types.tool_schema list = [
   (* Time *)
   {
     name = "keeper_time_now";
-    description = "Get current server time in ISO8601 and unix timestamp.";
+    description = "Get current server time. Returns now_iso (ISO8601) and now_unix (float). \
+Use to timestamp events, check elapsed time, or include current time in reports.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -28,7 +29,9 @@ let base_tools : Types.tool_schema list = [
   (* Context status *)
   {
     name = "keeper_context_status";
-    description = "Get keeper context usage and lifecycle status.";
+    description = "Check your own context window usage and session state. Returns context_ratio (0.0-1.0), \
+token_count, message_count, generation, continuity_summary. Use when deciding whether to \
+compact context, extend turns, or hand off to the next generation.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -37,7 +40,9 @@ let base_tools : Types.tool_schema list = [
   (* Memory *)
   {
     name = "keeper_memory_search";
-    description = "Search recent user messages in keeper memory by keyword.";
+    description = "Search recent user messages in your conversation history by keyword. \
+Returns matching message snippets. Use to recall earlier instructions or context \
+from this session without re-reading full history.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -52,7 +57,9 @@ let base_tools : Types.tool_schema list = [
 let board_tools : Types.tool_schema list = [
   {
     name = "keeper_board_get";
-    description = "Read a board post with its comments before deciding whether to comment, vote, or escalate.";
+    description = "Read a single board post with all its comments and votes. \
+Use before deciding to comment, vote, or escalate. Returns post content, author, \
+timestamp, vote_count, and comment thread.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -63,12 +70,14 @@ let board_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_board_post";
-    description = "Create a post on the MASC Board. Use hearth to target a topic channel.";
+    description = "Create a new post on the MASC Board. Use hearth to target a topic channel \
+(e.g. 'code-review', 'research', 'ops'). Use for sharing findings, asking questions, \
+or starting discussions that other keepers should see.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("content", `Assoc [("type", `String "string"); ("description", `String "Post content (max 4000 chars)")]);
-        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic hearth name (e.g. code-review, research)")]);
+        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic channel name (e.g. code-review, research, ops)")]);
         ("thread_id", `Assoc [("type", `String "string"); ("description", `String "Linked conversation thread ID (optional)")]);
       ]);
       ("required", `List [`String "content"]);
@@ -76,11 +85,13 @@ let board_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_board_list";
-    description = "List recent posts on the MASC Board. Filter by hearth to see topic-specific posts.";
+    description = "List recent posts on the MASC Board. Filter by hearth (topic channel) to see \
+specific topics. Returns post_id, author, hearth, timestamp, vote_count, comment_count, \
+and content preview for each post.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by hearth topic (e.g. code-review)")]);
+        ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by topic channel (e.g. code-review, research)")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max posts to return (default: 20, max: 50)")]);
         ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort: recent (newest), hot (score+recency), updated (most active)")]);
       ]);
@@ -88,7 +99,8 @@ let board_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_board_comment";
-    description = "Add a comment/reply to an existing Board post.";
+    description = "Add a comment to an existing board post. Use to respond to questions, \
+provide feedback, or continue a discussion thread.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -100,7 +112,8 @@ let board_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_board_vote";
-    description = "Vote on an existing Board post to signal support or disagreement.";
+    description = "Vote on a board post (up or down). Use to signal agreement/support \
+or disagreement with a proposal or finding.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -123,7 +136,9 @@ let select_named_schemas (names : string list) (schemas : Types.tool_schema list
 let filesystem_tools : Types.tool_schema list = [
   {
     name = "keeper_fs_read";
-    description = "Read a file under current project root. Use for source inspection before edits.";
+    description = "Read a file from the project. Returns file content as text (truncated at max_bytes). \
+Use to inspect source code, configs, logs, or any file before making decisions. \
+For searching across files, use keeper_shell_readonly with op=rg instead.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -138,15 +153,18 @@ let filesystem_tools : Types.tool_schema list = [
 let shell_tools : Types.tool_schema list = [
   {
     name = "keeper_shell_readonly";
-    description = "Run a structured read-only project command. Supported ops: pwd, ls, cat, rg, git_status.";
+    description = "Run a read-only project command. Safe, no side effects. \
+ops: pwd (working dir), ls (directory listing), cat (file content), \
+rg (ripgrep search across files), git_status (repo state). \
+Use for exploring the project before taking action.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("op", `Assoc [("type", `String "string"); ("description", `String "One of: pwd, ls, cat, rg, git_status")]);
-        ("path", `Assoc [("type", `String "string"); ("description", `String "Optional target path for ls/cat/rg")]);
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg")]);
         ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg")]);
-        ("limit", `Assoc [("type", `String "integer"); ("description", `String "Optional result limit for ls/rg")]);
-        ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Optional max bytes for cat")]);
+        ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg")]);
+        ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes for cat")]);
       ]);
       ("required", `List [`String "op"]);
     ];
@@ -156,7 +174,11 @@ let shell_tools : Types.tool_schema list = [
 let coding_keeper_bridge_tools : Types.tool_schema list = [
   {
     name = "keeper_bash";
-    description = "Run a shell command from project root. Use for build/test/check commands.";
+    description = "Run a shell command from project root with full shell access. \
+Use for builds (dune build, make), tests (dune test), git operations, \
+and any command that may modify files. Returns exit_code and output. \
+For read-only exploration, prefer keeper_shell_readonly (safer). \
+For worktree-isolated code operations, prefer masc_code_shell (restricted path).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -168,7 +190,9 @@ let coding_keeper_bridge_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_github";
-    description = "Run gh CLI commands from project root. Use for issue/PR/review/comment operations.";
+    description = "Run gh CLI commands for GitHub operations. Use for creating issues, \
+opening PRs, posting review comments, checking CI status. \
+Returns gh command output. Example: cmd='pr list --state open'.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -246,7 +270,9 @@ let voice_tools : Types.tool_schema list = [
 let library_tools : Types.tool_schema list = [
   {
     name = "keeper_library_search";
-    description = "Search agent knowledge library documents by keyword query. Returns matching titles, confidence scores, and snippets.";
+    description = "Search the knowledge library by keyword. Returns matching document titles, \
+relevance scores (0-1), and text snippets. Use to discover relevant docs \
+before reading full content with keeper_library_read.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -257,11 +283,13 @@ let library_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_library_read";
-    description = "Read a specific document from the agent knowledge library by topic name.";
+    description = "Read a full document from the knowledge library by exact topic name. \
+Use after keeper_library_search identifies a relevant document, or with \
+a known topic name. Returns full document text.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("topic", `Assoc [("type", `String "string"); ("description", `String "Document topic name to read")]);
+        ("topic", `Assoc [("type", `String "string"); ("description", `String "Exact document topic name (from search results or known)")]);
       ]);
       ("required", `List [`String "topic"]);
     ];
@@ -271,7 +299,8 @@ let library_tools : Types.tool_schema list = [
 let taskboard_tools : Types.tool_schema list = [
   {
     name = "keeper_tasks_list";
-    description = "List tasks on the MASC backlog. Filter by status: todo, claimed, in_progress, done, cancelled.";
+    description = "List tasks on the MASC backlog. Returns task_id, title, status, assignee, \
+and priority for each task. Use to see what work is available or in progress.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -282,7 +311,9 @@ let taskboard_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_tasks_audit";
-    description = "Audit task board health: find claimed/in_progress tasks whose assignees are no longer active agents (orphans).";
+    description = "Find orphaned tasks: claimed/in_progress tasks assigned to agents that are \
+offline (no heartbeat >10 min). Returns orphan list with assignee and last_seen. \
+Use keeper_task_force_release to reassign orphaned tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -290,7 +321,9 @@ let taskboard_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_task_force_release";
-    description = "Force-release a task back to Todo regardless of current assignee. Keeper privilege for orphan cleanup.";
+    description = "Release a stuck task back to Todo status, removing the current assignee. \
+Use when an agent went offline and left a task claimed. Broadcasts the \
+release to the room. Provide a reason for audit.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -302,19 +335,22 @@ let taskboard_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_task_force_done";
-    description = "Force-mark a task as Done regardless of current assignee. Use for tasks confirmed complete but not transitioned.";
+    description = "Mark a task Done when the work is confirmed complete but the assignee \
+did not transition it (e.g. they finished but went offline). Requires notes \
+explaining the completion evidence. Broadcasts to room.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to force-complete")]);
-        ("notes", `Assoc [("type", `String "string"); ("description", `String "Completion notes")]);
+        ("notes", `Assoc [("type", `String "string"); ("description", `String "Evidence that the task is actually complete")]);
       ]);
       ("required", `List [`String "task_id"]);
     ];
   };
   {
     name = "keeper_broadcast";
-    description = "Broadcast a message to the MASC room. Use for status reports and announcements.";
+    description = "Send a message visible to all agents in the MASC room. Use for status \
+updates, announcements, warnings, or coordination. All keepers will see this.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -325,7 +361,9 @@ let taskboard_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_task_claim";
-    description = "Claim the next unclaimed task from the backlog that matches your capabilities. Returns the claimed task details or empty if none available.";
+    description = "Claim the next unclaimed todo task that matches your capabilities. \
+Returns claimed task details (task_id, title, description) or empty if none available. \
+After claiming, do the work and call keeper_task_done when finished.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -333,7 +371,9 @@ let taskboard_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_task_done";
-    description = "Mark a claimed task as done with a result summary.";
+    description = "Mark your claimed task as complete with a result summary. \
+The task must be claimed by you. Provide a clear summary of what was \
+accomplished so other agents can verify.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

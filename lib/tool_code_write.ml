@@ -341,9 +341,10 @@ let dispatch ctx ~name ~args : result option =
 let schemas : Types.tool_schema list = [
   {
     name = "masc_code_write";
-    description = "Create or overwrite a file (restricted to .worktrees/ directories). \
-Use when generating new code files or replacing file contents entirely. \
-Pair with masc_worktree_create to set up an isolated workspace first.";
+    description = "Create or overwrite a file in a worktree (.worktrees/ only). \
+Use to generate new source files, configs, or replace entire file contents. \
+For partial edits (change a function, fix a line), use masc_code_edit instead. \
+Returns bytes_written. Max 1MB. Set up a worktree first with masc_worktree_create.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -367,9 +368,11 @@ Pair with masc_worktree_create to set up an isolated workspace first.";
 
   {
     name = "masc_code_edit";
-    description = "Replace a string in a file (restricted to .worktrees/ directories). \
-Use for surgical edits — changing a function body, fixing a bug, updating a value. \
-The old_string must match exactly once unless replace_all is true.";
+    description = "Replace text in a file in a worktree (.worktrees/ only). \
+Use for surgical edits: fix a bug, update a function, change a config value. \
+old_string must match exactly once (unless replace_all=true). Returns replacement_count. \
+For full file replacement, use masc_code_write. Read the file first with masc_code_read \
+to get the exact text to replace.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -397,8 +400,8 @@ The old_string must match exactly once unless replace_all is true.";
 
   {
     name = "masc_code_delete";
-    description = "Delete a file (restricted to .worktrees/ directories). \
-Cannot delete directories. Use when removing generated or obsolete files.";
+    description = "Delete a file in a worktree (.worktrees/ only). Cannot delete directories. \
+Use when removing generated, obsolete, or conflicting files during code work.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -413,9 +416,11 @@ Cannot delete directories. Use when removing generated or obsolete files.";
 
   {
     name = "masc_code_shell";
-    description = "Run a shell command from an allowlist (dune, make, npm, git, rg, ls, etc.). \
-Restricted to .worktrees/ working directory. Use for building, testing, and inspecting code. \
-Output truncated to 10KB. Timeout default 30s, max 120s.";
+    description = "Run an allowlisted command in a worktree (.worktrees/ only). \
+Allowed: dune, make, npm, npx, node, git, ls, cat, head, tail, wc, rg, find, \
+diff, patch, mkdir, opam, ocamlfind, tsc. Use for building and testing code \
+in isolated worktrees. For unrestricted shell at project root, use keeper_bash. \
+Returns exit_code and stdout (truncated at 10KB).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -439,8 +444,10 @@ Output truncated to 10KB. Timeout default 30s, max 120s.";
 
   {
     name = "masc_code_git";
-    description = "Run git commands in a worktree (add, commit, push, diff, status, log, branch). \
-Restricted to .worktrees/ working directory. Force push and push to main/master are blocked.";
+    description = "Run git commands in a worktree (.worktrees/ only). Structured alternative \
+to masc_code_shell for git operations. Supports: add, commit, push, diff, status, \
+log, branch, checkout, stash, fetch. Force push and push to main/master are blocked. \
+Returns git command output.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

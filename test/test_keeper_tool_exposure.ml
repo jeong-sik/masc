@@ -154,7 +154,7 @@ let test_any_mode_has_board_tools () =
 let test_any_mode_has_read_tools () =
   let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has keeper_read" true (has_tool "keeper_read" tools);
+  (* keeper_read removed: dead alias with no schema, keeper_fs_read is the actual tool *)
   check bool "has keeper_fs_read" true (has_tool "keeper_fs_read" tools);
   check bool "has keeper_library_search" true (has_tool "keeper_library_search" tools)
 
@@ -194,7 +194,7 @@ let test_research_learned_voice_combined () =
   check bool "has shell readonly" true (has_tool "keeper_shell_readonly" tools);
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools);
   check bool "has board" true (has_tool "keeper_board_get" tools);
-  check bool "has read" true (has_tool "keeper_read" tools)
+  check bool "has read" true (has_tool "keeper_fs_read" tools)
 
 (* ============================================================
    9. Tool deduplication

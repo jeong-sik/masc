@@ -8,8 +8,14 @@ val keeper_allowed_model_tools :
   ?write_done:bool -> keeper_meta -> Types.tool_schema list
 
 (** Inject all masc_* schemas for keeper allowlist/denylist filtering.
-    Must be called once during server initialization. *)
+    Must be called once during server initialization.
+    Keeper_denied tools are excluded at injection time. *)
 val inject_masc_schemas : Types.tool_schema list -> unit
+
+(** Check if a tool name is in the Keeper_denied surface (Tool_catalog).
+    Denied tools are excluded from both the schema list sent to the LLM
+    and blocked at execution time by the pre_tool_use hook. *)
+val is_keeper_denied : string -> bool
 
 (** Callback for recording keeper-internal tool calls.
     Set at server initialization to avoid Config dependency cycle. *)

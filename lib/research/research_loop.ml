@@ -324,9 +324,8 @@ let log_result ~(results_file : string) ~(entry : experiment_entry) : unit =
     entry.metric.files_changed
     (Research_metric.status_to_string entry.metric.status)
     entry.hypothesis.description in
-  try
-    if needs_header then Fs_compat.append_file results_file header;
-    Fs_compat.append_file results_file line
+  let content = if needs_header then header ^ line else line in
+  try Fs_compat.append_file results_file content
   with exn ->
     log_best_effort_failure "log_result" exn
 

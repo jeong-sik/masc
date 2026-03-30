@@ -108,8 +108,10 @@ let resolve_board_post_kind ~author ~(meta_json : Yojson.Safe.t option)
   | _, Some Board.Human_post
   | _, None when author <> "anonymous" ->
       Ok Board.Human_post
-  | _, Some (Board.Automation_post | Board.System_post) ->
-      Error "masc_board_post only accepts human posts on the public/dashboard surface"
+  | _, Some Board.Automation_post ->
+      Ok Board.Automation_post
+  | _, Some Board.System_post ->
+      Error "system posts are reserved for internal surfaces (keeper, operator)"
   | _ ->
       Ok Board.Human_post
 
@@ -661,6 +663,27 @@ let tool_migrate : Types.tool_schema = {
   ];
 }
 
+let handle_delete args =
+  let post_id = get_string args "post_id" "" in
+  if String.trim post_id = "" then
+    (false, "post_id is required")
+  else
+    match Board_dispatch.delete_post ~post_id with
+    | Ok () -> (true, Printf.sprintf "Deleted post %s" post_id)
+    | Error e -> (false, Printf.sprintf "Delete failed: %s" (board_error_to_string e))
+
+let tool_delete : Types.tool_schema = {
+  name = "masc_board_delete";
+  description = "Delete a board post and its associated comments and votes. Use for cleanup of stale, test, or expired posts.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("post_id", `Assoc [("type", `String "string"); ("description", `String "ID of the post to delete")]);
+    ]);
+    ("required", `List [`String "post_id"]);
+  ];
+}
+
 let tool_reclassify : Types.tool_schema = {
   name = "masc_board_reclassify";
   description = "Backfill legacy board rows that predate explicit post_kind contracts. Hidden admin tool for safe dry-run migration only.";
@@ -685,6 +708,7 @@ let tools = [
   tool_comment_vote;
   tool_profile;
   tool_hearth_list;
+  tool_delete;
   tool_migrate;
   tool_reclassify;
 ]
@@ -702,6 +726,7 @@ let handle_tool name args =
   | "masc_board_comment_vote" -> handle_comment_vote args
   | "masc_board_profile" -> handle_profile args
   | "masc_board_hearths" -> handle_hearth_list args
+  | "masc_board_delete" -> handle_delete args
   | "masc_board_migrate" -> handle_migrate args
   | "masc_board_reclassify" -> handle_reclassify args
   | _ -> (false, Printf.sprintf "Unknown tool: %s" name)

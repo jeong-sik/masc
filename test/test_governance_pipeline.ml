@@ -276,6 +276,22 @@ let test_risk_payload_safe_write_remains_high () =
   Alcotest.(check string) "safe write payload remains high"
     "high" (Gp.risk_level_to_string risk)
 
+let test_risk_payload_safe_nested_string_remains_low () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_status"
+      ~input:
+        (`Assoc
+          [
+            ( "payload",
+              `Assoc
+                [
+                  ("note", `String "temporary scratch directory");
+                ] );
+          ])
+  in
+  Alcotest.(check string) "safe nested payload stays low"
+    "low" (Gp.risk_level_to_string risk)
+
 let test_risk_contract_risk_from_delivery_contract () =
   let risk =
     Gp.assess_risk ~tool_name:"masc_team_session_step"
@@ -303,6 +319,45 @@ let test_risk_contract_risk_from_delivery_contract () =
   in
   Alcotest.(check string) "delivery contract drives critical risk"
     "critical" (Gp.risk_level_to_string risk)
+
+let test_risk_contract_risk_medium_delivery_contract () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_team_session_step"
+      ~input:
+        (`Assoc
+          [
+            ( "delivery_contract",
+              `Assoc
+                [
+                  ("contract_id", `String "contract-risk-002");
+                  ("summary", `String "medium risk execution");
+                  ( "required_artifacts",
+                    `List [ `String "report.md"; `String "test.xml" ] );
+                  ("repair_budget", `Int 3);
+                ] );
+            ("tool_names", `List [ `String "keeper_fs_edit" ]);
+          ])
+  in
+  Alcotest.(check string) "delivery contract drives medium risk"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_risk_invalid_delivery_contract_falls_back_to_heuristic () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_create_room"
+      ~input:
+        (`Assoc
+          [
+            ( "delivery_contract",
+              `Assoc
+                [
+                  ("summary", `String "missing contract id");
+                  ("repair_budget", `Int 0);
+                ] );
+            ("tool_names", `List [ `Int 1 ]);
+          ])
+  in
+  Alcotest.(check string) "invalid contract falls back to heuristic"
+    "high" (Gp.risk_level_to_string risk)
 
 (* ── Governance Level Decision Tests ────────────────────────── *)
 
@@ -632,8 +687,14 @@ let () =
         test_risk_payload_destructive_nested_string;
       Alcotest.test_case "payload: safe write remains high" `Quick
         test_risk_payload_safe_write_remains_high;
+      Alcotest.test_case "payload: safe nested string remains low" `Quick
+        test_risk_payload_safe_nested_string_remains_low;
       Alcotest.test_case "contract risk: delivery contract" `Quick
         test_risk_contract_risk_from_delivery_contract;
+      Alcotest.test_case "contract risk: medium delivery contract" `Quick
+        test_risk_contract_risk_medium_delivery_contract;
+      Alcotest.test_case "contract risk: invalid contract falls back" `Quick
+        test_risk_invalid_delivery_contract_falls_back_to_heuristic;
       Alcotest.test_case "case insensitive" `Quick test_case_insensitive_matching;
     ];
     "governance_levels", [

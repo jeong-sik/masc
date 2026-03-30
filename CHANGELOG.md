@@ -1,6 +1,15 @@
 # Changelog
 
 
+## [2.179.0] - 2026-03-30
+
+### Added
+- **Activity timeline grouping** — dashboard groups events by action type (#3995).
+- **CDAL worker contract** — contract wired into local/delegate execution paths (#3992).
+
+### Changed
+- **Placeholder tools env var** — `MASC_PLACEHOLDER_TOOLS_ENABLED` config (#3994).
+
 ## [2.178.0] - 2026-03-30
 
 ### Changed

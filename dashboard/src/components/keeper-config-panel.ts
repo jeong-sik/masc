@@ -68,8 +68,10 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
 }
 
 // Runtime config draft for proactive/compaction/handoff inline editing
+type ExecutionScope = 'observe_only' | 'workspace' | 'local'
+
 type RuntimeDraft = {
-  execution_scope: string
+  execution_scope: ExecutionScope
   proactive_enabled: boolean
   proactive_idle_sec: number
   proactive_cooldown_sec: number
@@ -87,7 +89,7 @@ const runtimeSaving = signal(false)
 
 function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
-    execution_scope: c.execution_scope ?? 'workspace',
+    execution_scope: (c.execution_scope as ExecutionScope) ?? 'workspace',
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
     proactive_cooldown_sec: c.proactive.cooldown_sec,
@@ -103,7 +105,7 @@ function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
 
 function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
   const payload: KeeperConfigUpdatePayload = {}
-  if (draft.execution_scope !== (orig.execution_scope ?? 'observe_only')) payload.execution_scope = draft.execution_scope
+  if (draft.execution_scope !== (orig.execution_scope ?? 'workspace')) payload.execution_scope = draft.execution_scope
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
   if (draft.proactive_idle_sec !== orig.proactive.idle_sec) payload.proactive_idle_sec = draft.proactive_idle_sec
   if (draft.proactive_cooldown_sec !== orig.proactive.cooldown_sec) payload.proactive_cooldown_sec = draft.proactive_cooldown_sec
@@ -591,7 +593,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           <span class="text-xs text-[var(--text-body)]">execution_scope</span>
           <select class="text-xs bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1 text-[var(--text-body)]"
             value=${rd.execution_scope}
-            onChange=${(e: Event) => updateRuntimeDraft('execution_scope', (e.target as HTMLSelectElement).value)}>
+            onChange=${(e: Event) => updateRuntimeDraft('execution_scope', (e.target as HTMLSelectElement).value as ExecutionScope)}>
             <option value="observe_only">observe_only</option>
             <option value="workspace">workspace</option>
             <option value="local">local</option>

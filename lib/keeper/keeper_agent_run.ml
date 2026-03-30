@@ -33,10 +33,49 @@ type run_result = {
   proof : Agent_sdk.Cdal_proof.t option;
 }
 
-let normalize_response_text ~(text : string) ~(tool_names : string list) :
+let contains_casefold haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if idx + needle_len > hay_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  needle_len > 0 && loop 0
+
+let render_skip_reason_text (reason : Keeper_hooks_oas.skip_reason) : string =
+  let replacement_hint =
+    match (Tool_catalog.metadata reason.tool_name).Tool_catalog.replacement with
+    | Some replacement ->
+        Printf.sprintf " replacement=%s" replacement
+    | None -> ""
+  in
+  Printf.sprintf
+    "[tool_skipped] tool=%s source=%s code=%s reason=%s%s"
+    reason.tool_name
+    reason.source
+    reason.reason_code
+    reason.reason_text
+    replacement_hint
+
+let normalize_response_text
+    ?skip_reason
+    ~(text : string)
+    ~(tool_names : string list)
+    () :
     (string, string) result =
-  if String.trim text <> "" then Ok text
+  let trimmed = String.trim text in
+  if trimmed <> "" then
+    match skip_reason with
+    | Some reason when contains_casefold trimmed "skipped by hook" ->
+        Ok (render_skip_reason_text reason)
+    | _ -> Ok text
   else
+    match skip_reason with
+    | Some reason -> Ok (render_skip_reason_text reason)
+    | None ->
     match tool_names with
     | [] -> Error "keeper turn completed with no textual reply"
     | _ ->
@@ -156,6 +195,7 @@ let run_turn
     Keeper_exec_context.set_system_prompt base_ctx
       ~system_prompt:base_system_prompt
   in
+  Keeper_hooks_oas.clear_skip_reason meta.name;
   (* 5. Build final turn system prompt via caller callback.
      Hard constraints stay in system_prompt; soft context is injected
      via OAS extra_system_context (prepended as User message after reduction). *)
@@ -288,7 +328,8 @@ let run_turn
         result.response.content
     in
     let usage = Keeper_exec_context.usage_of_response result.response in
-    (match normalize_response_text ~text ~tool_names with
+    let skip_reason = Keeper_hooks_oas.consume_skip_reason meta.name in
+    (match normalize_response_text ?skip_reason ~text ~tool_names () with
      | Error e -> Error e
      | Ok response_text ->
          let assistant_msg = Agent_sdk.Types.assistant_msg response_text in

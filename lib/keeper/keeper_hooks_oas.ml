@@ -25,6 +25,42 @@ let destructive_check_tools =
 let keeper_denied_tools =
   Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
 
+type skip_reason = {
+  tool_name : string;
+  source : string;
+  reason_code : string;
+  reason_text : string;
+  skipped_at_unix : float;
+}
+
+let recent_skip_reasons : (string, skip_reason) Hashtbl.t = Hashtbl.create 16
+let recent_skip_reasons_mu = Eio.Mutex.create ()
+
+let with_skip_rw f = Eio_guard.with_mutex recent_skip_reasons_mu f
+
+let clear_skip_reason keeper_name =
+  with_skip_rw (fun () -> Hashtbl.remove recent_skip_reasons keeper_name)
+
+let record_skip_reason ~keeper_name ~tool_name ~source ~reason_code ~reason_text =
+  let reason =
+    {
+      tool_name;
+      source;
+      reason_code;
+      reason_text;
+      skipped_at_unix = Unix.gettimeofday ();
+    }
+  in
+  with_skip_rw (fun () -> Hashtbl.replace recent_skip_reasons keeper_name reason)
+
+let consume_skip_reason keeper_name =
+  with_skip_rw (fun () ->
+      match Hashtbl.find_opt recent_skip_reasons keeper_name with
+      | None -> None
+      | Some reason ->
+          Hashtbl.remove recent_skip_reasons keeper_name;
+          Some reason)
+
 (** Extract command or content string from tool input JSON for screening.
     Reads "command", "cmd" (keeper_github), or "content" keys. *)
 let extract_command_from_input (input : Yojson.Safe.t) : string =
@@ -185,18 +221,34 @@ let make_hooks
     pre_tool_use = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
+        let keeper_name = (!meta_ref).name in
         (* Safety gate 0: Keeper deny list *)
         if List.mem tool_name keeper_denied_tools then begin
+          record_skip_reason
+            ~keeper_name
+            ~tool_name
+            ~source:"keeper_hook"
+            ~reason_code:"keeper_deny"
+            ~reason_text:"tool is on the keeper deny list";
           Log.Keeper.warn "keeper:%s deny list: blocked %s"
-            (!meta_ref).name tool_name;
+            keeper_name tool_name;
           Agent_sdk.Hooks.Skip
         end
         else
         (* Safety gate 1: Cost budget *)
         (match max_cost_usd with
          | Some limit when accumulated_cost_usd >= limit ->
+           record_skip_reason
+             ~keeper_name
+             ~tool_name
+             ~source:"keeper_hook"
+             ~reason_code:"cost_gate"
+             ~reason_text:
+               (Printf.sprintf
+                  "accumulated_cost_usd=%.4f exceeded limit=%.4f"
+                  accumulated_cost_usd limit);
            Log.Keeper.warn "keeper:%s cost gate: $%.4f >= $%.4f limit, skipping %s"
-             (!meta_ref).name accumulated_cost_usd limit tool_name;
+             keeper_name accumulated_cost_usd limit tool_name;
            Agent_sdk.Hooks.Skip
          | _ ->
            (* Safety gate 2: Destructive pattern detection *)
@@ -204,8 +256,15 @@ let make_hooks
              let cmd = extract_command_from_input input in
              match Eval_gate.detect_destructive cmd with
              | Some (pattern, desc) ->
+               record_skip_reason
+                 ~keeper_name
+                 ~tool_name
+                 ~source:"keeper_hook"
+                 ~reason_code:"destructive_guard"
+                 ~reason_text:
+                   (Printf.sprintf "pattern='%s' (%s)" pattern desc);
                Log.Keeper.warn "keeper:%s destructive pattern in %s: '%s' (%s)"
-                 (!meta_ref).name tool_name pattern desc;
+                 keeper_name tool_name pattern desc;
                Agent_sdk.Hooks.Skip
              | None -> Agent_sdk.Hooks.Continue
            else

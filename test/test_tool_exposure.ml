@@ -140,6 +140,20 @@ let () =
         ] );
       ( "hidden_tools_contract",
         [
+          test_case "keeper internal tools are hidden and not directly callable" `Quick
+            (fun () ->
+              List.iter
+                (fun name ->
+                  let meta = Tool_catalog.metadata name in
+                  check bool (name ^ " hidden") false
+                    (Tool_catalog.is_visible name);
+                  check bool (name ^ " direct call blocked") false
+                    (Tool_catalog.allow_direct_call name);
+                  check bool (name ^ " on keeper_internal surface") true
+                    (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name);
+                  check bool (name ^ " reason present") true
+                    (Option.is_some meta.reason))
+                [ "keeper_time_now"; "keeper_board_post"; "keeper_bash" ]);
           test_case "known hidden tools are not visible by default" `Quick
             (fun () ->
               let hidden_names =

@@ -120,6 +120,7 @@ type surface =
   | Local_worker
   | Session_min
   | Admin
+  | Keeper_internal
   | Keeper_denied
   | Mdal_auditable
 

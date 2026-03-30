@@ -597,7 +597,7 @@ let test_metrics_mixed_response () =
      in found)
 
 let test_normalize_response_text_passthrough () =
-  match KAR.normalize_response_text ~text:"All good." ~tool_names:[] with
+  match KAR.normalize_response_text ~text:"All good." ~tool_names:[] () with
   | Ok text -> check string "keeps text" "All good." text
   | Error e -> fail ("unexpected error: " ^ e)
 
@@ -605,6 +605,7 @@ let test_normalize_response_text_tool_only_synthesizes () =
   match KAR.normalize_response_text
           ~text:""
           ~tool_names:["keeper_board_post"; "keeper_board_comment"]
+          ()
   with
   | Ok text ->
       check bool "mentions no textual reply" true
@@ -624,7 +625,7 @@ let test_normalize_response_text_tool_only_synthesizes () =
   | Error e -> fail ("unexpected error: " ^ e)
 
 let test_normalize_response_text_empty_without_tools_errors () =
-  match KAR.normalize_response_text ~text:"" ~tool_names:[] with
+  match KAR.normalize_response_text ~text:"" ~tool_names:[] () with
   | Ok text -> fail ("expected error, got: " ^ text)
   | Error e ->
       check bool "error mentions textual reply" true
@@ -728,6 +729,81 @@ let test_social_model_routes_blocker_to_board_post () =
             (contains_substring post.body "blocked")
       | _ -> fail "expected one request-help board post")
 
+let test_normalize_response_text_rewrites_generic_skip () =
+  let skip_reason : HK.skip_reason =
+    {
+      tool_name = "keeper_board_post";
+      source = "keeper_hook";
+      reason_code = "keeper_deny";
+      reason_text = "tool is on the keeper deny list";
+      skipped_at_unix = 0.0;
+    }
+  in
+  match KAR.normalize_response_text
+          ~text:"Tool execution skipped by hook"
+          ~tool_names:["keeper_board_post"]
+          ~skip_reason
+          ()
+  with
+  | Ok text ->
+      check bool "structured prefix" true
+        (String.starts_with ~prefix:"[tool_skipped]" text);
+      check bool "mentions tool" true
+        (let found =
+           try
+             ignore
+               (Str.search_forward
+                  (Str.regexp_string "keeper_board_post")
+                  text 0);
+             true
+           with Not_found -> false
+         in
+         found);
+      check bool "mentions replacement" true
+        (let found =
+           try
+             ignore
+               (Str.search_forward
+                  (Str.regexp_string "replacement=masc_board_post")
+                  text 0);
+             true
+           with Not_found -> false
+         in
+         found)
+  | Error e -> fail ("unexpected error: " ^ e)
+
+let test_normalize_response_text_empty_with_skip_reason () =
+  let skip_reason : HK.skip_reason =
+    {
+      tool_name = "keeper_bash";
+      source = "keeper_hook";
+      reason_code = "destructive_guard";
+      reason_text = "pattern='rm -rf' (recursive forced deletion)";
+      skipped_at_unix = 0.0;
+    }
+  in
+  match KAR.normalize_response_text
+          ~text:""
+          ~tool_names:[]
+          ~skip_reason
+          ()
+  with
+  | Ok text ->
+      check bool "structured prefix" true
+        (String.starts_with ~prefix:"[tool_skipped]" text);
+      check bool "mentions code" true
+        (let found =
+           try
+             ignore
+               (Str.search_forward
+                  (Str.regexp_string "destructive_guard")
+                  text 0);
+             true
+           with Not_found -> false
+         in
+         found)
+  | Error e -> fail ("unexpected error: " ^ e)
+
 (* ---------- Test runner ---------- *)
 
 let () =
@@ -796,5 +872,9 @@ let () =
             test_social_model_requires_explicit_headers;
           test_case "social model routes blocker to board post" `Quick
             test_social_model_routes_blocker_to_board_post;
+          test_case "normalize rewrites generic skip" `Quick
+            test_normalize_response_text_rewrites_generic_skip;
+          test_case "normalize empty with skip reason" `Quick
+            test_normalize_response_text_empty_with_skip_reason;
         ] );
     ]

@@ -20,6 +20,22 @@ let get_id = Mcp_server.get_id
 let is_valid_request_id = Mcp_server.is_valid_request_id
 let jsonrpc_request_of_yojson = Mcp_server.jsonrpc_request_of_yojson
 
+let unavailable_tool_message name =
+  if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name then
+    let replacement_hint =
+      match (Tool_catalog.metadata name).Tool_catalog.replacement with
+      | Some replacement ->
+          Printf.sprintf " Try `%s` instead." replacement
+      | None -> ""
+    in
+    Printf.sprintf
+      "Tool '%s' is keeper-internal and unavailable on this MCP endpoint.%s"
+      name replacement_hint
+  else
+    Printf.sprintf
+      "Tool '%s' is not available on this MCP endpoint."
+      name
+
 (** {1 Resource Subscriptions} *)
 
 let resource_subscription_mutex = Eio.Mutex.create ()
@@ -467,15 +483,13 @@ let handle_request
                        | Some params ->
                            (try
                              let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
-                             let call_profile = match profile with
-                               | Operator_remote | Managed_agent -> profile
-                               | _ -> Full
-                             in
+                            let call_profile = match profile with
+                              | Operator_remote | Managed_agent -> profile
+                              | _ -> Full
+                            in
                             if not (TP.tool_allowed_in_profile state call_profile name) then
                                make_error ~id (-32601)
-                                 (Printf.sprintf
-                                    "Tool '%s' is not available on this MCP endpoint."
-                                    name)
+                                 (unavailable_tool_message name)
                              else (
                                Log.Mcp.info "tools/call: %s (id=%s, session=%s)" name
                                  (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?")

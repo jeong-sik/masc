@@ -214,9 +214,9 @@ let explicit_metadata : (string * metadata) list =
 (** {1 Public MCP Surface}
 
     The subset of tools exposed via tools/list on the Full (external MCP client)
-    profile. Internal tools remain callable via [Tool_dispatch.dispatch] but are
-    hidden from discovery. This keeps the MCP surface focused on agent
-    communication and coordination.
+    profile. Some hidden tools remain callable directly, but keeper-internal
+    adapters do not. This keeps the MCP surface focused on agent communication,
+    coordination, and stable public operations.
 
     Override: set [MASC_FULL_SURFACE=1] to restore the full inventory. *)
 
@@ -247,6 +247,76 @@ let public_mcp_tools =
     (* Utility *)
     "masc_tool_help"; "masc_check";
   ]
+
+let keeper_internal_tools =
+  [
+    "keeper_read";
+    "keeper_fs_read";
+    "keeper_fs_edit";
+    "keeper_edit";
+    "keeper_memory_search";
+    "keeper_library_search";
+    "keeper_library_read";
+    "keeper_time_now";
+    "keeper_context_status";
+    "keeper_tasks_list";
+    "keeper_tasks_audit";
+    "keeper_task_claim";
+    "keeper_task_done";
+    "keeper_task_force_release";
+    "keeper_task_force_done";
+    "keeper_broadcast";
+    "keeper_board_get";
+    "keeper_board_post";
+    "keeper_board_list";
+    "keeper_board_comment";
+    "keeper_board_vote";
+    "keeper_shell_readonly";
+    "keeper_bash";
+    "keeper_github";
+    "keeper_voice_speak";
+    "keeper_voice_agent";
+    "keeper_voice_sessions";
+    "keeper_voice_session_start";
+    "keeper_voice_session_end";
+    "keeper_search";
+    "keeper_profile";
+    "keeper_research";
+  ]
+
+let keeper_internal_set : (string, unit) Hashtbl.t =
+  let tbl = Hashtbl.create (List.length keeper_internal_tools) in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) keeper_internal_tools;
+  tbl
+
+let keeper_internal_replacement = function
+  | "keeper_board_get" -> Some "masc_board_get"
+  | "keeper_board_post" -> Some "masc_board_post"
+  | "keeper_board_list" -> Some "masc_board_list"
+  | "keeper_board_comment" -> Some "masc_board_comment"
+  | "keeper_board_vote" -> Some "masc_board_vote"
+  | "keeper_voice_speak" -> Some "masc_voice_speak"
+  | "keeper_voice_agent" -> Some "masc_voice_agent"
+  | "keeper_voice_sessions" -> Some "masc_voice_sessions"
+  | "keeper_voice_session_start" -> Some "masc_voice_session_start"
+  | "keeper_voice_session_end" -> Some "masc_voice_session_end"
+  | "keeper_tasks_list" -> Some "masc_tasks"
+  | "keeper_broadcast" -> Some "masc_broadcast"
+  | _ -> None
+
+let keeper_internal_metadata name =
+  let replacement = keeper_internal_replacement name in
+  let implementation_status =
+    match replacement with
+    | Some _ -> Adapter
+    | None -> Real
+  in
+  hidden_active
+    ?canonical_name:replacement
+    ?replacement
+    ~allow_direct_call_when_hidden:false
+    ~implementation_status
+    "Keeper-internal tool. Use the keeper runtime or the public MASC equivalent when available."
 
 let public_mcp_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create 64 in
@@ -281,6 +351,8 @@ let metadata name =
   | Some meta -> meta
   | None ->
     if is_public_mcp name then default_metadata
+    else if Hashtbl.mem keeper_internal_set name then
+      keeper_internal_metadata name
     else
       (* Non-public, non-explicit tools are internal: hidden from tools/list
          but callable via tools/call (tool_allowed_in_profile uses include_hidden). *)
@@ -464,6 +536,7 @@ type surface =
   | Local_worker
   | Session_min
   | Admin
+  | Keeper_internal
   | Keeper_denied
   | Mdal_auditable
 
@@ -551,6 +624,8 @@ let admin_surface_tools =
     "masc_team_session_finalize"; "masc_tool_admin_snapshot";
   ]
 
+let keeper_internal_surface_tools = keeper_internal_tools
+
 let keeper_denied_surface_tools =
   [
     "masc_room_delete"; "masc_room_destroy";
@@ -579,12 +654,13 @@ let tools_for_surface = function
   | Local_worker -> local_worker_surface_tools
   | Session_min -> session_min_surface_tools
   | Admin -> admin_surface_tools
+  | Keeper_internal -> keeper_internal_surface_tools
   | Keeper_denied -> keeper_denied_surface_tools
   | Mdal_auditable -> mdal_auditable_surface_tools
 
 let all_surfaces =
   [Public_mcp; Spawned_agent; Local_worker; Session_min;
-   Admin; Keeper_denied; Mdal_auditable]
+   Admin; Keeper_internal; Keeper_denied; Mdal_auditable]
 
 let surface_sets : (surface * (string, unit) Hashtbl.t) list =
   List.map (fun surface ->
@@ -605,5 +681,6 @@ let surface_to_string = function
   | Local_worker -> "local_worker"
   | Session_min -> "session_min"
   | Admin -> "admin"
+  | Keeper_internal -> "keeper_internal"
   | Keeper_denied -> "keeper_denied"
   | Mdal_auditable -> "mdal_auditable"

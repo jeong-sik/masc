@@ -52,9 +52,9 @@ module TeamSession : sig
   val model_35b_opt : unit -> string option
   val model_27b_opt : unit -> string option
   val model_9b_opt : unit -> string option
-  val router_judge_enabled : bool
-  val router_judge_timeout_sec : int
-  val router_judge_confidence_threshold : float
+  val router_judge_enabled : unit -> bool
+  val router_judge_timeout_sec : unit -> int
+  val router_judge_confidence_threshold : unit -> float
   val router_judge_model_opt : unit -> string option
 end
 
@@ -149,7 +149,14 @@ module Transport : sig
   val use_h2 : unit -> string
   val agent_transport_opt : unit -> string option
   val openai_compat_enabled : bool
+  val http_auth_strict_env_enabled : unit -> bool
   val startup_watchdog_sec : unit -> float
+end
+
+module Cdal : sig
+  val enabled : unit -> bool
+  val risk_enforcement_enabled : unit -> bool
+  val proof_aggregation_enabled : unit -> bool
 end
 
 module Board : sig

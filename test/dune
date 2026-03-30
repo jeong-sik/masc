@@ -262,11 +262,6 @@
  (libraries alcotest unix yojson))
 
 (test
- (name test_chain_presets)
- (modules test_chain_presets)
- (libraries masc_mcp alcotest yojson str masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-(test
  (name test_ci_run_tests_script)
  (modules test_ci_run_tests_script)
  (libraries alcotest unix))
@@ -398,11 +393,6 @@
  (libraries masc_mcp alcotest str yojson eio eio_main masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
 (test
- (name test_race_cancel)
- (modules test_race_cancel)
- (libraries masc_mcp alcotest eio eio_main str unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt yojson mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-(test
  (name test_metrics_store_eio)
  (modules test_metrics_store_eio)
  (libraries masc_mcp alcotest str yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
@@ -531,11 +521,6 @@
  (libraries masc_mcp yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
 (test
- (name test_chain_orchestrator_eio)
- (modules test_chain_orchestrator_eio)
- (libraries masc_mcp alcotest str yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-(test
  (name test_swarm_persistence)
  (modules test_swarm_persistence)
  (libraries masc_mcp alcotest yojson unix eio eio_main masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
@@ -595,12 +580,6 @@
  (name test_autoresearch_knowledge)
  (modules test_autoresearch_knowledge)
  (libraries masc_mcp alcotest yojson unix mirage-crypto-rng.unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str eio_main eio caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-; Dispatch chain evidence test
-(test
- (name test_dispatch_chain_evidence)
- (modules test_dispatch_chain_evidence)
- (libraries masc_mcp alcotest eio eio_main yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt str mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
 ; Mention module monkey/fuzz test
 (executable
  (name test_mention_monkey)
@@ -1081,34 +1060,10 @@
  (modules test_lifecycle)
  (libraries masc_mcp eio eio_main yojson unix masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
-; Chain mermaid parse coverage tests (strip_quotes, infer_type_from_id, parse_meta_comment, etc.)
-(test
- (name test_chain_mermaid_parse_coverage)
- (modules test_chain_mermaid_parse_coverage)
- (libraries masc_mcp alcotest str yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-; Chain coverage tests (node_content, mermaid_parser, parser_serialize)
-(test
- (name test_chain_coverage)
- (modules test_chain_coverage)
- (libraries masc_mcp alcotest str yojson eio eio_main masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-; Chain category/error/types coverage tests
-(test
- (name test_chain_category_coverage)
- (modules test_chain_category_coverage)
- (libraries masc_mcp alcotest str yojson eio eio_main masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
 ; Auto_recall + Activity_feed coverage tests
 (test
  (name test_auto_recall_activity_coverage)
  (modules test_auto_recall_activity_coverage)
- (libraries masc_mcp alcotest str yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
-
-; Chain utils/iteration/trace_types/conversation coverage tests
-(test
- (name test_chain_utils_coverage)
- (modules test_chain_utils_coverage)
  (libraries masc_mcp alcotest str yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context unix fmt eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm council astring uri base64 ocaml-webrtc dated_jsonl grpc-direct masc_compression))
 
 ; gRPC coordination service types and config tests

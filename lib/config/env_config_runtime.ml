@@ -335,11 +335,61 @@ module Transport = struct
   (** Whether OpenAI-compatible endpoint is enabled. Default: false. *)
   let openai_compat_enabled = get_bool ~default:false "MASC_OPENAI_COMPAT"
 
+  let _http_auth_strict_registry =
+    get_bool ~default:false "MASC_HTTP_AUTH_STRICT"
+
+  (** Force strict auth for all HTTP endpoints. Default: false. *)
+  let http_auth_strict_env_enabled () =
+    match Sys.getenv_opt "MASC_HTTP_AUTH_STRICT" |> trim_opt with
+    | Some ("1" | "true" | "yes" | "y" | "on") -> true
+    | _ -> false
+
   (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
       Runtime-readable (tests change this via putenv). *)
   let startup_watchdog_sec () =
     let v = get_float ~default:240.0 "MASC_STARTUP_WATCHDOG_SEC" in
     Float.max 30.0 (Float.min 600.0 v)
+end
+
+module TeamSession = struct
+  let model_35b_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_35B" |> trim_opt
+
+  let model_27b_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_27B" |> trim_opt
+
+  let model_9b_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_9B" |> trim_opt
+
+  (** Enable routing judge in team session dispatch. Default: true. *)
+  let router_judge_enabled () =
+    get_bool ~default:true "MASC_TEAM_SESSION_ROUTER_JUDGE"
+
+  let router_judge_timeout_sec () =
+    max 5 (get_int ~default:15 "MASC_TEAM_SESSION_ROUTER_JUDGE_TIMEOUT_SEC")
+
+  let router_judge_confidence_threshold () =
+    let value =
+      get_float ~default:0.72 "MASC_TEAM_SESSION_ROUTER_CONFIDENCE_THRESHOLD"
+    in
+    Float.max 0.0 (Float.min 1.0 value)
+
+  let router_judge_model_opt () =
+    Sys.getenv_opt "MASC_TEAM_SESSION_ROUTER_JUDGE_MODEL" |> trim_opt
+end
+
+module Cdal = struct
+  (** Enable contract-driven proof capture. Default: true. *)
+  let enabled () =
+    get_bool ~default:true "MASC_CDAL_ENABLED"
+
+  (** Enforce contract risk violations. Default: false. *)
+  let risk_enforcement_enabled () =
+    get_bool ~default:false "MASC_CDAL_RISK_ENFORCEMENT"
+
+  (** Aggregate proof bundles across turns. Default: false. *)
+  let proof_aggregation_enabled () =
+    get_bool ~default:false "MASC_CDAL_PROOF_AGGREGATION"
 end
 
 (** {1 Board Configuration} *)

@@ -67,8 +67,8 @@ let validate_model_label (label : string) : (string, string) result =
   else
     Error
       (sprintf
-         "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, llama:<model>, or glm."
-         provider_prefix)
+         "MDAL strict worker does not support provider `%s`. Supported: %s."
+         provider_prefix (String.concat ", " supported_mdal_providers))
 
 (** Validate model label syntax: must be "provider:model" with non-empty parts.
     Unlike [Cascade_config.parse_model_string], does not check runtime availability
@@ -91,13 +91,22 @@ let resolve_model_label ~(agent : string) ~(worker_model : string option) :
       let normalized = String.trim agent |> String.lowercase_ascii in
       if String.contains normalized ':' then parse_worker_model normalized
       else
-        (* Map bare agent names to canonical provider:model strings,
-           then route through parse_worker_model for uniform validation. *)
+        (* Map bare agent names to canonical provider:model via env config.
+           Provider_adapter.default_model_for_family resolves from env vars. *)
         match normalized with
         | "auto" -> parse_worker_model "glm:auto"
-        | "claude" -> parse_worker_model "claude:opus"
-        | "openai" | "codex-api" -> parse_worker_model "openai:gpt-4o"
-        | "gemini" -> parse_worker_model "gemini:pro"
+        | "claude" ->
+            (match Provider_adapter.default_model_label_for_family Provider_adapter.Claude_family with
+             | Ok label -> parse_worker_model label
+             | Error msg -> Error msg)
+        | "openai" | "codex-api" ->
+            (match Provider_adapter.default_model_label_for_family Provider_adapter.OpenAI_family with
+             | Ok label -> parse_worker_model label
+             | Error msg -> Error msg)
+        | "gemini" ->
+            (match Provider_adapter.default_model_label_for_family Provider_adapter.Gemini_family with
+             | Ok label -> parse_worker_model label
+             | Error msg -> Error msg)
         | "glm" -> parse_worker_model "glm:auto"
         | "ollama" ->
             Error (Provider_adapter.bare_ollama_migration_message ())

@@ -255,7 +255,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Tool_metrics_persist.start_flush_fiber ~sw ~clock
     ~base_path:state.room_config.base_path;
   Otel_dispatch_hook.install ();
-  Otel_chain_subscriber.install ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
   (match Board_dispatch.get_pg_pool () with

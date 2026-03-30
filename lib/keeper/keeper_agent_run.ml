@@ -229,7 +229,7 @@ let run_turn
   ] in
   (* 8. Run Agent *)
   let contract =
-    if Env_config_core.get_bool ~default:true "MASC_CDAL_ENABLED"
+    if Env_config.Cdal.enabled ()
     then Keeper_cdal_contract.of_keeper_meta meta
     else None
   in

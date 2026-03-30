@@ -1,7 +1,7 @@
 (** Server_runtime_bootstrap — Server lifecycle orchestrator.
 
     Initializes the Eio runtime, creates server state, bootstraps
-    subsystems (chains, keepers, PG schemas), and runs the HTTP
+    subsystems (keepers, PG schemas), and runs the HTTP
     accept loop with auto-detect HTTP/1.1 + HTTP/2. *)
 
 (** {1 Environment} *)
@@ -40,7 +40,7 @@ val create_server_state :
 val restore_persisted_sessions : Mcp_server.server_state -> unit
 val reconcile_active_agents_gauge : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
-val bootstrap_chain_state : Mcp_server.server_state -> unit
+val bootstrap_prompt_state : Mcp_server.server_state -> unit
 
 (** {1 Startup Tasks} *)
 

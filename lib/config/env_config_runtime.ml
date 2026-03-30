@@ -104,6 +104,27 @@ module Orchestrator = struct
     get_bool ~default:false "MASC_ORCHESTRATOR_ENABLED"
 end
 
+(** {1 Relay Configuration} *)
+
+module Relay = struct
+  let target_agent =
+    get_string ~default:"auto" "MASC_RELAY_TARGET_AGENT"
+end
+
+(** {1 MDAL Configuration} *)
+
+module Mdal = struct
+  let default_agent =
+    get_string ~default:"auto" "MASC_MDAL_AGENT"
+end
+
+(** {1 CLI Configuration} *)
+
+module Cli = struct
+  let default_agent =
+    get_string ~default:"auto" "MASC_CLI_AGENT"
+end
+
 (** {1 Spawn Configuration} *)
 
 module Spawn = struct

@@ -29,7 +29,7 @@ let test_default_config_agent_timeout () =
   check int "agent_timeout" 300 Orchestrator.default_config.agent_timeout_s
 
 let test_default_config_agent () =
-  check string "orchestrator_agent" "claude"
+  check string "orchestrator_agent" (Env_config_runtime.Orchestrator.agent_name)
     Orchestrator.default_config.orchestrator_agent
 
 let test_default_config_enabled () =

@@ -158,7 +158,7 @@ let make_legacy_state ?(loop_id = "legacy-mdal-loop")
         goal = { Bounded.path = "metric"; condition = Bounded.Gt 0.6 };
         target = "legacy loop";
         reference = None;
-        agent = "claude";
+        agent = "auto";
         max_iterations = 5;
         max_time_seconds = Some 60.0;
         stagnation_threshold = 0.01;

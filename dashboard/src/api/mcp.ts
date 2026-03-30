@@ -259,7 +259,11 @@ export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
     all.push(...page.tools)
     cursor = page.nextCursor
     pages++
-    if (pages >= MAX_TOOL_LIST_PAGES) break
+    if (pages >= MAX_TOOL_LIST_PAGES && cursor) {
+      throw new Error(
+        `tools/list: reached maximum pagination limit of ${MAX_TOOL_LIST_PAGES} pages while server indicated more pages (pagesFetched=${pages}, toolsCollected=${all.length}, lastCursor=${cursor})`
+      )
+    }
   } while (cursor)
   return all
 }

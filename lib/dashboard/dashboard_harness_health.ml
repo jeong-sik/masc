@@ -277,7 +277,9 @@ let read_keeper_metric_records ?since ?until (config : Room.config) keeper_name 
   match (since, until) with
   | Some _, _ | _, Some _ ->
       let since, until = date_bounds ?since ?until () in
-      Dated_jsonl.read_range store ~since ~until
+      let start_date = if since = "" then "2020-01-01" else since in
+      let end_date = if until = "" then "2099-12-31" else until in
+      Dated_jsonl.read_range store ~since:start_date ~until:end_date
   | None, None ->
       let dated = Dated_jsonl.read_recent store max_signal_scan in
       if dated <> [] then dated
@@ -298,6 +300,13 @@ let read_handoff_events ?since ?until (config : Room.config) =
     (fun (left : handoff_event) (right : handoff_event) ->
       Float.compare right.timestamp left.timestamp)
     events
+
+let has_any_handoff_events (config : Room.config) =
+  Keeper_types.keeper_names config
+  |> List.exists (fun keeper_name ->
+         read_keeper_metric_records config keeper_name
+         |> List.exists (fun json ->
+                Option.is_some (handoff_event_of_metrics_json json)))
 
 let empty_reason ~has_any ?since ?until () =
   let since, until = date_bounds ?since ?until () in
@@ -479,8 +488,10 @@ let json ~(config : Room.config) ?since ?until () =
     latest_by_timestamp handoff_timestamp handoff_events
   in
   let handoff_has_any =
-    if has_window then read_handoff_events config <> []
-    else handoff_events <> []
+    match handoff_events with
+    | _ :: _ -> true
+    | [] when has_window -> has_any_handoff_events config
+    | [] -> false
   in
   `Assoc
     [

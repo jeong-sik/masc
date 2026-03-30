@@ -174,6 +174,50 @@ let test_runtime_window_empty_reason () =
   check int "handoff filtered empty" 0
     Yojson.Safe.Util.(recent_handoffs |> member "recent_events" |> to_list |> List.length)
 
+let test_runtime_since_only_window_empty_reason () =
+  with_test_stores @@ fun config ->
+  ignore
+    (Harness.record_pre_compact ~keeper_name:"keeper-a" ~context_ratio:0.91
+       ~message_count:88 ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
+       ~model_family:"verifier" ~trigger:"ratio(0.91>=0.85)");
+  record_handoff_metric config ~next_generation:1
+    ~prev_trace_id:"trace-keeper-a"
+    ~new_trace_id:"trace-keeper-a-next";
+  let tomorrow = today_string ~offset_days:1 () in
+  let json = Harness.json ~config ~since:tomorrow () in
+  let pre_compact = require_assoc "pre_compact" json in
+  let recent_handoffs = require_assoc "recent_handoffs" json in
+  check string "pre empty reason (since only)" "window_empty"
+    Yojson.Safe.Util.(pre_compact |> member "empty_reason" |> to_string);
+  check string "handoff empty reason (since only)" "window_empty"
+    Yojson.Safe.Util.(recent_handoffs |> member "empty_reason" |> to_string);
+  check int "pre filtered empty (since only)" 0
+    Yojson.Safe.Util.(pre_compact |> member "recent_events" |> to_list |> List.length);
+  check int "handoff filtered empty (since only)" 0
+    Yojson.Safe.Util.(recent_handoffs |> member "recent_events" |> to_list |> List.length)
+
+let test_runtime_until_only_window_empty_reason () =
+  with_test_stores @@ fun config ->
+  ignore
+    (Harness.record_pre_compact ~keeper_name:"keeper-a" ~context_ratio:0.91
+       ~message_count:88 ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
+       ~model_family:"verifier" ~trigger:"ratio(0.91>=0.85)");
+  record_handoff_metric config ~next_generation:1
+    ~prev_trace_id:"trace-keeper-a"
+    ~new_trace_id:"trace-keeper-a-next";
+  let yesterday = today_string ~offset_days:(-1) () in
+  let json = Harness.json ~config ~until:yesterday () in
+  let pre_compact = require_assoc "pre_compact" json in
+  let recent_handoffs = require_assoc "recent_handoffs" json in
+  check string "pre empty reason (until only)" "window_empty"
+    Yojson.Safe.Util.(pre_compact |> member "empty_reason" |> to_string);
+  check string "handoff empty reason (until only)" "window_empty"
+    Yojson.Safe.Util.(recent_handoffs |> member "empty_reason" |> to_string);
+  check int "pre filtered empty (until only)" 0
+    Yojson.Safe.Util.(pre_compact |> member "recent_events" |> to_list |> List.length);
+  check int "handoff filtered empty (until only)" 0
+    Yojson.Safe.Util.(recent_handoffs |> member "recent_events" |> to_list |> List.length)
+
 let test_runtime_stale_status () =
   with_test_stores @@ fun config ->
   let stale_timestamp = Time_compat.now () -. (31. *. 60.) in
@@ -223,6 +267,10 @@ let () =
             test_runtime_signals_are_persisted;
           test_case "filtered windows explain empty runtime rails" `Quick
             test_runtime_window_empty_reason;
+          test_case "since-only windows stay stable" `Quick
+            test_runtime_since_only_window_empty_reason;
+          test_case "until-only windows stay stable" `Quick
+            test_runtime_until_only_window_empty_reason;
           test_case "stale runtime signals surface as stale" `Quick
             test_runtime_stale_status;
           test_case "fallback-heavy evaluator shows warning overview" `Quick

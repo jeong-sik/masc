@@ -139,6 +139,17 @@ module Local_runtime = struct
       Callers may request less, but never more than this cap. *)
   let max_tokens =
     get_int ~default:32768 "MASC_LLAMA_MAX_TOKENS"
+
+  (** Llama swarm model override (formerly in Chain module). *)
+  let llama_swarm_model_opt () =
+    Sys.getenv_opt "LLAMA_SWARM_MODEL" |> trim_opt
+
+  (** MASC MCP endpoint URL (formerly in Chain module).
+      Defaults to {base_url}/mcp. *)
+  let mcp_url () =
+    match Sys.getenv_opt "MASC_MCP_URL" |> trim_opt with
+    | Some url -> url
+    | None -> Env_config_core.masc_http_base_url () ^ "/mcp"
 end
 
 (** Backward-compatible alias so existing [Env_config.Llama] references
@@ -188,77 +199,6 @@ module Message = struct
       Oldest messages (by filename sort) are deleted when count exceeds this. *)
   let max_count =
     get_int ~default:200 "MASC_MESSAGE_MAX_COUNT"
-end
-
-(** {1 Chain Executor Configuration} *)
-
-module Chain = struct
-  (** Model used for evaluator/judge calls in chain execution. *)
-  let judge_model =
-    get_string ~default:"gemini" "MASC_CHAIN_JUDGE_MODEL"
-
-  (** Security limits for chain execution. *)
-  let max_depth = max 1 (get_int ~default:20 "MASC_CHAIN_MAX_DEPTH")
-  let max_concurrency = max 1 (get_int ~default:10 "MASC_CHAIN_MAX_CONCURRENCY")
-  let max_nodes = max 1 (get_int ~default:100 "MASC_CHAIN_MAX_NODES")
-  let max_fanout = max 1 (get_int ~default:20 "MASC_CHAIN_MAX_FANOUT")
-
-  (** Chain log level (e.g. "debug", "info"). *)
-  let log_level_opt () =
-    Sys.getenv_opt "MASC_CHAIN_LOG_LEVEL" |> trim_opt
-
-  (** Chain log format: "text" or "json". Default: "text". *)
-  let log_format () =
-    match Sys.getenv_opt "MASC_CHAIN_LOG_FORMAT" |> trim_opt with
-    | Some "json" -> "json"
-    | _ -> "text"
-
-  (** Source base path for chain file resolution. *)
-  let source_base_path_opt () =
-    Sys.getenv_opt "MASC_CHAIN_SOURCE_BASE_PATH" |> trim_opt
-
-  (** Orchestrator model for chain design. Default: "gemini:pro". *)
-  let orchestrator_model () =
-    Sys.getenv_opt "MASC_CHAIN_ORCHESTRATOR_MODEL" |> trim_opt
-    |> Option.value ~default:"gemini:pro"
-
-  (** History file path. Canonical env var; CHAIN_HISTORY_FILE as fallback. *)
-  let history_file_opt () =
-    match Sys.getenv_opt "MASC_CHAIN_HISTORY_FILE" |> trim_opt with
-    | Some _ as v -> v
-    | None -> Sys.getenv_opt "CHAIN_HISTORY_FILE" |> trim_opt
-
-  (** Run store path for chain execution logs. *)
-  let run_store_path_opt () =
-    Sys.getenv_opt "MASC_CHAIN_RUN_STORE_PATH" |> trim_opt
-
-  (** Whether chain run logging is enabled. Default: true. *)
-  let run_log_enabled () =
-    match Sys.getenv_opt "MASC_CHAIN_RUN_LOG" |> trim_opt with
-    | Some "0" | Some "false" | Some "no" -> false
-    | _ -> true
-
-  (** Chain run log file path override. *)
-  let run_log_path_opt () =
-    Sys.getenv_opt "MASC_CHAIN_RUN_LOG_PATH" |> trim_opt
-
-  (** Checkpoint directory for chain execution. *)
-  let checkpoint_dir_opt () =
-    Sys.getenv_opt "MASC_CHAIN_CHECKPOINT_DIR" |> trim_opt
-
-  (** MASC MCP endpoint URL. Defaults to {base_url}/mcp. *)
-  let mcp_url () =
-    match Sys.getenv_opt "MASC_MCP_URL" |> trim_opt with
-    | Some url -> url
-    | None -> Env_config_core.masc_http_base_url () ^ "/mcp"
-
-  (** Agent name for chain execution. Default: "local-worker". *)
-  let agent_name =
-    get_string ~default:"local-worker" "MASC_AGENT_NAME"
-
-  (** Llama swarm model override. *)
-  let llama_swarm_model_opt () =
-    Sys.getenv_opt "LLAMA_SWARM_MODEL" |> trim_opt
 end
 
 (** {1 Transport Configuration} *)

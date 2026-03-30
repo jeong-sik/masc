@@ -156,15 +156,11 @@ let to_json () : Yojson.Safe.t =
       "rate_burst", int_val Env_config_runtime.Rate_bucket.burst;
       "build_git_commit", str_opt build_git_commit_opt;
     ];
-    "chain", `Assoc [
-      "max_nodes", int_val Env_config_runtime.Chain.max_nodes;
-      "max_depth", int_val Env_config_runtime.Chain.max_depth;
-      "max_fanout", int_val Env_config_runtime.Chain.max_fanout;
-      "max_concurrency", int_val Env_config_runtime.Chain.max_concurrency;
+    "model_defaults", `Assoc [
       "default_cascade", str_opt Env_config_governance.Model_defaults.default_cascade_opt;
       "default_provider", str_opt Env_config_governance.Model_defaults.default_provider_opt;
       "default_model", str_opt Env_config_governance.Model_defaults.default_model_opt;
-      "llama_swarm_model", str_opt Env_config_runtime.Chain.llama_swarm_model_opt;
+      "llama_swarm_model", str_opt Env_config_runtime.Local_runtime.llama_swarm_model_opt;
     ];
     "dashboard", `Assoc [
       "fixtures_enabled", bool_val (Env_config_governance.Dashboard_config.fixtures_enabled ());

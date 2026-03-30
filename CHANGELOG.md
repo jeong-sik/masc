@@ -1,6 +1,28 @@
 # Changelog
 
 
+## [2.165.0] - 2026-03-30
+
+### Added
+- **Governance judge wiring** — dashboard reads real judge status (online, model, errors) instead of hardcoded values; judgment items surfaced in governance tab (#3823).
+- **Dashboard runtime controls** — config PATCH keys and runtime control panel (#3809).
+- **CDAL canonical serializers** — replace manual violation parsing with OAS serializers (#3796).
+- **Feature flag management** — ADR and COMMON-PITFALLS documentation patterns (#3803).
+
+### Changed
+- **Dead code removal** — 1,332 lines of orphaned tool schemas, tests, and config modules removed (#3788).
+- **Tool matrix dispatch** — fix dispatch regression and timeout handling (#3815).
+- **Bump script extended** — now updates ROADMAP.md, PRODUCT-OPERATING-PLAN.md, SPEC-INDEX.md to prevent version drift (#3821).
+- **Dashboard typecheck** — unblocked after CDAL refactor (#3811).
+- **Dashboard observability** — simplified code structure (#3794).
+- **Keeper direct chat** — fix persona drift (#3774).
+- **Ghost tool schemas** — 7 schemas with no dispatch wiring removed (#3792).
+- **Version truth** — shutdownKeeper import restored, version synced to 2.164.0 (#3812).
+
+### Removed
+- 7 orphaned test modules and their dune references.
+- `env_config_server.ml` and `env_config_dashboard.ml` (0 consumers).
+
 ## [2.164.0] - 2026-03-30
 
 ### Added

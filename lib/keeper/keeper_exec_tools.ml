@@ -29,7 +29,8 @@ let ensure_keeper_board_post_args ~author ~source = function
 
 let keeper_read_tool_names =
   [
-    "keeper_read";
+    (* "keeper_read" removed: dead alias for keeper_fs_read with no schema.
+       Dispatch still accepts it for backward compat (line ~366). *)
     "keeper_fs_read";
     "keeper_memory_search";
     "keeper_library_search";

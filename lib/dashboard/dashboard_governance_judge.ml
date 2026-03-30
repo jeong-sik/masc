@@ -71,6 +71,7 @@ let cache_ttl_sec () =
 let enabled () = Env_config.Dashboard_config.governance_judge_enabled
 
 let keeper_name = "governance-judge"
+let backoff_status = "Backoff: local slots saturated"
 
 let get_state base_path =
   with_outer_rw (fun () ->
@@ -361,7 +362,7 @@ let refresh_once ~sw ~net
           let was_online = st.judge_online in
           st.refreshing <- false;
           st.judge_online <- false;
-          st.last_error <- None;
+          st.last_error <- Some backoff_status;
           was_online)
     in
     if was_online then

@@ -23,6 +23,7 @@ type state = {
 }
 
 let keeper_name = "operator-judge"
+let backoff_status = "Backoff: local slots saturated"
 
 let states : (string, state) Hashtbl.t = Hashtbl.create 4
 
@@ -279,7 +280,7 @@ let refresh_once ~sw ~net
           let was_online = st.judge_online in
           st.refreshing <- false;
           st.judge_online <- false;
-          st.last_error <- None;
+          st.last_error <- Some backoff_status;
           was_online)
     in
     if was_online then

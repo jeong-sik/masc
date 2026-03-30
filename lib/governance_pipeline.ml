@@ -172,11 +172,9 @@ let has_empty_overwrite_payload input =
   |> List.exists (fun text -> String.trim text = "")
 
 let tool_names_of_input ~tool_name input =
-  let tool_names =
-    collect_string_list_values ~keys:[ "tool_names" ] input
-    |> List.sort_uniq String.compare
-  in
-  if tool_names = [] then [ tool_name ] else tool_names
+  let (_ : string) = tool_name in
+  collect_string_list_values ~keys:[ "tool_names" ] input
+  |> List.sort_uniq String.compare
 
 let classify_with_contract_risk ~tool_name ~input =
   match input with

@@ -359,6 +359,35 @@ let test_risk_invalid_delivery_contract_falls_back_to_heuristic () =
   Alcotest.(check string) "invalid contract falls back to heuristic"
     "high" (Gp.risk_level_to_string risk)
 
+let test_risk_contract_risk_empty_tool_names_uses_contract_only () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_team_session_step"
+      ~input:
+        (`Assoc
+          [
+            ( "delivery_contract",
+              `Assoc
+                [
+                  ("contract_id", `String "contract-risk-003");
+                  ("summary", `String "medium risk without explicit tools");
+                  ( "required_artifacts",
+                    `List [ `String "report.md"; `String "test.xml" ] );
+                  ("repair_budget", `Int 3);
+                ] );
+            ("tool_names", `List []);
+          ])
+  in
+  Alcotest.(check string) "empty tool_names keeps contract-derived medium risk"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_risk_contract_risk_non_object_input_falls_back_to_heuristic () =
+  let risk =
+    Gp.assess_risk ~tool_name:"masc_create_room"
+      ~input:(`List [ `String "delivery_contract"; `String "ignored" ])
+  in
+  Alcotest.(check string) "non-object input keeps heuristic risk"
+    "high" (Gp.risk_level_to_string risk)
+
 (* ── Governance Level Decision Tests ────────────────────────── *)
 
 let test_development_allows_all () =
@@ -695,6 +724,10 @@ let () =
         test_risk_contract_risk_medium_delivery_contract;
       Alcotest.test_case "contract risk: invalid contract falls back" `Quick
         test_risk_invalid_delivery_contract_falls_back_to_heuristic;
+      Alcotest.test_case "contract risk: empty tool_names uses contract only" `Quick
+        test_risk_contract_risk_empty_tool_names_uses_contract_only;
+      Alcotest.test_case "contract risk: non-object input falls back" `Quick
+        test_risk_contract_risk_non_object_input_falls_back_to_heuristic;
       Alcotest.test_case "case insensitive" `Quick test_case_insensitive_matching;
     ];
     "governance_levels", [

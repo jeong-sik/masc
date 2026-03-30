@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useState, useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
@@ -206,6 +206,11 @@ function visibilityLabel(vis: string): string | null {
     case 'public': return null
     default: return vis
   }
+}
+
+function visibilityBadgeColor(vis: string): string {
+  if (vis === 'internal') return 'bg-[rgba(168,85,247,0.12)] text-[#a855f7] border-[rgba(168,85,247,0.25)]'
+  return 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]'
 }
 
 async function loadPostDetail(postId: string) {
@@ -467,15 +472,11 @@ async function bulkDeleteSelected() {
   if (ids.length === 0) return
   if (!confirm(`${ids.length}개의 글을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return
   bulkDeleting.value = true
-  let deleted = 0
-  for (const id of ids) {
-    try {
-      await deleteBoardPost(id)
-      deleted += 1
-    } catch (err) {
-      console.warn('[board] bulk delete failed for', id, err instanceof Error ? err.message : err)
-    }
-  }
+  const results = await Promise.allSettled(ids.map(id => deleteBoardPost(id)))
+  const deleted = results.filter(r => r.status === 'fulfilled').length
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') console.warn('[board] bulk delete failed for', ids[i], r.reason)
+  })
   bulkDeleting.value = false
   selectedPostIds.value = new Set()
   showToast(`${deleted}/${ids.length}개 게시글을 삭제했습니다`, deleted === ids.length ? 'success' : 'error')
@@ -568,7 +569,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <!-- Category badges -->
           <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(kind)}">${kind === 'human' ? '사람' : kind}</span>
           ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${post.visibility === 'internal' ? 'bg-[rgba(168,85,247,0.12)] text-[#a855f7] border-[rgba(168,85,247,0.25)]' : 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]'}">${visibilityLabel(post.visibility)}</span>` : null}
+          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
 
           <!-- Delete button -->
           <button type="button"
@@ -704,7 +705,7 @@ function PostDetail({ post }: { post: BoardPost }) {
             ? html`
                 <div class="flex gap-1.5 flex-wrap">
                   ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-                  ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${post.visibility === 'internal' ? 'bg-[rgba(168,85,247,0.12)] text-[#a855f7] border-[rgba(168,85,247,0.25)]' : 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]'}">${visibilityLabel(post.visibility)}</span>` : null}
+                  ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
                   <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(boardPostKind(post))}">${boardPostKind(post) === 'human' ? '사람' : boardPostKind(post)}</span>
                   ${expiryChip(post)}
                 </div>
@@ -753,6 +754,7 @@ function PostDetail({ post }: { post: BoardPost }) {
 }
 
 export function Memory() {
+  useEffect(() => () => { selectedPostIds.value = new Set() }, [])
   const grouped = splitVisiblePosts(boardPosts.value)
   const posts = [...grouped.human, ...grouped.automation, ...grouped.system]
   const hint = filterHint(grouped)

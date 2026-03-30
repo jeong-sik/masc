@@ -19,7 +19,7 @@ import {
   sendKeeperThreadMessage,
 } from '../keeper-runtime'
 import { isVisibleDirectConversationEntry } from '../keeper-state'
-import { bootKeeper, shutdownKeeper } from '../api/keeper'
+import { bootKeeper } from '../api/keeper'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import { showToast } from './common/toast'
 import { signal } from '@preact/signals'
@@ -418,12 +418,7 @@ export function KeeperRuntimeActions({
           class=${shutdownBtn}
           onClick=${() => {
             keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: true }
-            void shutdownKeeper(keeper.name).then(res => {
-              if (res.ok) showToast(`${keeper.name} shut down`, 'success')
-              else showToast(res.error ?? 'Shutdown failed', 'error')
-            }).catch(err => {
-              showToast(err instanceof Error ? err.message : `Failed to shut down ${keeper.name}`, 'error')
-            }).finally(() => {
+            void shutdownKeeper(keeper.name).finally(() => {
               keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: false }
             })
           }}

@@ -183,31 +183,77 @@ let run_turn
   let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
+  (* Build BM25 tool index for progressive disclosure.
+     Essential tools are always available; others are retrieved
+     per-turn based on the goal/context. This prevents the LLM
+     from being overwhelmed by 50+ tools and improves selection. *)
+  let tool_index = Agent_sdk.Tool_index.of_tools keeper_tools in
+  let always_include_tools =
+    [ "keeper_time_now"; "keeper_context_status";
+      "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
+      "keeper_tasks_list"; "keeper_fs_read"; "keeper_shell_readonly";
+      "keeper_board_get"; "keeper_board_post";
+      "keeper_extend_turns" ]
+  in
   let base_hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
     ?trajectory_acc
     () in
-  (* Compose dynamic_context injection via extra_system_context.
-     The before_turn_params hook fires each turn and sets
-     extra_system_context, which OAS prepends as a User message
-     after context reduction (agent_turn.ml:66-75). *)
+  (* Compose dynamic_context injection + progressive tool disclosure
+     in a single before_turn_params hook.
+
+     Both modifications return AdjustParams, so they must be in the
+     same hook to avoid compose's outer-bypasses-inner semantics.
+
+     Progressive disclosure uses BM25 retrieval: each turn selects
+     the top-k tools most relevant to the current goal + context,
+     plus always_include essentials. This keeps the LLM focused. *)
+  let before_turn_hook : Agent_sdk.Hooks.hooks = {
+    Agent_sdk.Hooks.empty with
+    before_turn_params = Some (fun event ->
+      match event with
+      | Agent_sdk.Hooks.BeforeTurnParams { current_params; messages; _ } ->
+        (* 1. Dynamic context injection *)
+        let ctx =
+          if String.trim dynamic_context = "" then
+            current_params.extra_system_context
+          else
+            match current_params.extra_system_context with
+            | None -> Some dynamic_context
+            | Some existing -> Some (existing ^ "\n\n" ^ dynamic_context)
+        in
+        (* 2. Progressive tool disclosure via BM25 retrieval.
+           Extract context from last user message for relevance scoring. *)
+        let last_user_text =
+          List.fold_left (fun acc (m : Agent_sdk.Types.message) ->
+            match m.role with
+            | Agent_sdk.Types.User ->
+              Agent_sdk.Types.text_of_content m.content
+            | _ -> acc
+          ) "" messages
+        in
+        let query_text =
+          if String.trim last_user_text <> "" then last_user_text
+          else user_message
+        in
+        let retrieved_names =
+          Agent_sdk.Tool_index.retrieve_names tool_index query_text
+        in
+        let all_allowed =
+          List.sort_uniq String.compare
+            (always_include_tools @ retrieved_names)
+        in
+        let tool_filter =
+          Agent_sdk.Guardrails.AllowList all_allowed
+        in
+        Agent_sdk.Hooks.AdjustParams
+          { current_params with
+            extra_system_context = ctx;
+            tool_filter_override = Some tool_filter }
+      | _ -> Agent_sdk.Hooks.Continue)
+  } in
   let hooks =
-    if String.trim dynamic_context = "" then base_hooks
-    else
-      let inject_ctx : Agent_sdk.Hooks.hooks = {
-        Agent_sdk.Hooks.empty with
-        before_turn_params = Some (fun event ->
-          match event with
-          | Agent_sdk.Hooks.BeforeTurnParams { current_params; _ } ->
-            let ctx = match current_params.extra_system_context with
-              | None -> dynamic_context
-              | Some existing -> existing ^ "\n\n" ^ dynamic_context
-            in
-            Agent_sdk.Hooks.AdjustParams
-              { current_params with extra_system_context = Some ctx }
-          | _ -> Agent_sdk.Hooks.Continue)
-      } in
-      Agent_sdk.Hooks.compose ~outer:inject_ctx ~inner:base_hooks
+    Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks
   in
   let base_dir = Filename.concat config.base_path ".masc" in
   let memory =

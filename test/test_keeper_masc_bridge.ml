@@ -137,6 +137,50 @@ let test_schemas_match_names () =
         (List.mem s.name names))
     schemas
 
+(** Keeper_denied tools are excluded at injection time. *)
+let test_denied_tools_excluded_from_injection () =
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  let meta = make_meta () in
+  let names = KET.keeper_masc_tool_names meta in
+  (* Every tool in Keeper_denied surface must be absent *)
+  let denied = Masc_mcp.Tool_catalog.tools_for_surface
+    Masc_mcp.Tool_catalog.Keeper_denied in
+  List.iter (fun denied_name ->
+    Alcotest.(check bool)
+      (denied_name ^ " must not appear")
+      false (List.mem denied_name names)
+  ) denied
+
+(** is_keeper_denied returns true for denied tools, false for others. *)
+let test_is_keeper_denied () =
+  Alcotest.(check bool) "masc_room_delete is denied" true
+    (KET.is_keeper_denied "masc_room_delete");
+  Alcotest.(check bool) "masc_spawn is denied" true
+    (KET.is_keeper_denied "masc_spawn");
+  Alcotest.(check bool) "masc_status is not denied" false
+    (KET.is_keeper_denied "masc_status");
+  Alcotest.(check bool) "keeper_time_now is not denied" false
+    (KET.is_keeper_denied "keeper_time_now")
+
+(** Keeper_denied tools excluded from allowed_tool_names even without denylist. *)
+let test_denied_excluded_from_allowed_names () =
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  let meta = make_meta () in
+  let names = KET.keeper_allowed_tool_names meta in
+  let denied = Masc_mcp.Tool_catalog.tools_for_surface
+    Masc_mcp.Tool_catalog.Keeper_denied in
+  List.iter (fun denied_name ->
+    Alcotest.(check bool)
+      (denied_name ^ " must not appear in allowed_names")
+      false (List.mem denied_name names)
+  ) denied;
+  (* keeper_* tools are still present *)
+  Alcotest.(check bool) "keeper_time_now still present" true
+    (List.mem "keeper_time_now" names);
+  (* non-denied masc_* tools are still present *)
+  Alcotest.(check bool) "masc_status still present" true
+    (List.mem "masc_status" names)
+
 let () =
   Alcotest.run "Keeper masc bridge"
     [
@@ -174,5 +218,14 @@ let () =
       ( "consistency",
         [
           Alcotest.test_case "schemas match names" `Quick test_schemas_match_names;
+        ] );
+      ( "keeper_denied",
+        [
+          Alcotest.test_case "denied tools excluded from injection" `Quick
+            test_denied_tools_excluded_from_injection;
+          Alcotest.test_case "is_keeper_denied correctness" `Quick
+            test_is_keeper_denied;
+          Alcotest.test_case "denied excluded from allowed_names" `Quick
+            test_denied_excluded_from_allowed_names;
         ] );
     ]

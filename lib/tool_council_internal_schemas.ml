@@ -10,7 +10,10 @@
 let schemas : Types.tool_schema list = [
   {
     name = "masc_petition_submit";
-    description = "Submit a Governance V2 petition. Creates or merges a case, records requested action metadata, and files the item into the petition inbox.";
+    description = "Submit a governance petition to request an action that needs approval \
+(e.g., merge a PR, change a policy, resolve a dispute). Creates a case in the governance \
+system. Other agents can then submit briefs (masc_case_brief_submit) to support or oppose. \
+Returns case_id. Check ruling with masc_ruling_status.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -52,7 +55,9 @@ let schemas : Types.tool_schema list = [
   };
   {
     name = "masc_case_brief_submit";
-    description = "Add a support/oppose/neutral brief to a Governance V2 case. Brief submission can trigger a ruling and execution order.";
+    description = "Vote on a governance case by submitting a brief (support/oppose/neutral) \
+with reasoning. When enough briefs are collected, a ruling is automatically generated. \
+Use after reviewing a case with masc_case_status.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -80,7 +85,8 @@ let schemas : Types.tool_schema list = [
   };
   {
     name = "masc_cases";
-    description = "List Governance V2 cases. Use this instead of the legacy debate/session listing tools.";
+    description = "List governance cases. Returns case_id, title, status (open/ruled/executed), \
+and brief count for each case. Filter by status to find pending cases that need your brief.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -97,7 +103,9 @@ let schemas : Types.tool_schema list = [
   };
   {
     name = "masc_case_status";
-    description = "Read a single Governance V2 case bundle including petitions, briefs, ruling, and execution order.";
+    description = "Read full details of a governance case: petition text, all briefs submitted, \
+ruling (if decided), and execution order (if any). Use to understand a case before \
+submitting your brief with masc_case_brief_submit.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -125,7 +133,9 @@ let schemas : Types.tool_schema list = [
   };
   {
     name = "masc_execution_orders";
-    description = "List Governance V2 execution orders, inspect one case order, or confirm/deny a human gate.";
+    description = "List pending execution orders from governance rulings. If a high-risk order \
+requires human confirmation, you can confirm or deny it here. Without case_id, lists all \
+pending orders. With case_id, shows that specific order. Returns order status and action.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -143,7 +153,9 @@ let schemas : Types.tool_schema list = [
   };
   {
     name = "masc_governance_status";
-    description = "Get Governance V2 status (pending rulings, auto-executable cases, human-gated orders, executed cases).";
+    description = "Overview of the governance system: count of pending rulings, cases awaiting \
+briefs, human-gated orders needing confirmation, and recently executed decisions. \
+Use as a dashboard check to see if any governance action needs your attention.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -212,7 +224,9 @@ Pair with masc_execute to run the action after confirming the dry-run output.";
   };
   {
     name = "masc_governance_feed";
-    description = "Get a timeline of governance decisions, parameter changes, and human board posts.";
+    description = "Timeline of recent governance activity: decisions made, parameter changes, \
+and human board posts. Use to catch up on what happened while you were offline. \
+Filter by decisions (rulings only), human_only (board posts), or all.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -230,7 +244,9 @@ Pair with masc_execute to run the action after confirming the dry-run output.";
   };
   {
     name = "masc_runtime_params";
-    description = "List all governable runtime parameters with current values, defaults, and override status.";
+    description = "List all runtime parameters that can be changed via governance. \
+Returns param_key, current_value, default_value, risk_class (low/high), and \
+whether it is currently overridden. Use before masc_set_param to find valid keys.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -238,7 +254,10 @@ Pair with masc_execute to run the action after confirming the dry-run output.";
   };
   {
     name = "masc_set_param";
-    description = "Set a runtime parameter. Low-risk params apply immediately; high-risk params create a governance petition requiring approval.";
+    description = "Change a runtime parameter. Low-risk params (e.g., log_level) apply immediately. \
+High-risk params (e.g., autonomy settings) create a governance petition requiring council \
+approval. Returns status: applied or petition_created with case_id. \
+Use masc_runtime_params to list available keys and their risk class.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

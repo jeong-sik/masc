@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { EmptyState } from './common/empty-state'
 import { LoadingState } from './common/feedback-state'
 import { Card } from './common/card'
@@ -6,6 +7,7 @@ import { TimeAgo } from './common/time-ago'
 import { governanceToneClass } from '../lib/tone'
 import type { GovernanceTimelineEvent } from '../types'
 import type { RuntimeParamsSurface } from '../api'
+import { setRuntimeParam, clearRuntimeParam } from '../api/dashboard'
 import {
   governanceData,
   runtimeLoading,
@@ -16,6 +18,9 @@ import {
   activityKindLabel,
   formatParamValue,
 } from './governance-utils'
+
+const editingParam = signal<string | null>(null)
+const editValue = signal<string>('')
 
 export function ActivityRail() {
   const events = (governanceData.value?.activity ?? []).slice(0, 20)
@@ -121,17 +126,77 @@ export function RuntimeParamsPanel() {
                     </div>
                     <div class="text-[11px] text-text-muted mb-3">${surface.description}</div>
                     <div class="flex flex-col gap-1.5">
-                      ${surfaceParams.map(param => html`
+                      ${surfaceParams.map(param => {
+                        const isEditing = editingParam.value === param.key
+                        const meta = param.meta
+                        return html`
                         <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-white/3 ${param.has_override ? 'border border-warn/20' : ''}">
-                          <span class="text-xs font-mono text-text-muted">${param.key}</span>
-                          <span class="text-xs font-medium text-text-strong">
-                            ${formatParamValue(param.current)}
-                            ${param.has_override
-                              ? html`<span class="ml-1.5 text-[10px] text-warn font-bold">override</span>`
-                              : null}
-                          </span>
+                          <div class="flex flex-col gap-0.5">
+                            <span class="text-xs font-mono text-text-muted">${param.key}</span>
+                            ${meta?.description ? html`<span class="text-[10px] text-text-muted/60">${meta.description}</span>` : null}
+                          </div>
+                          <div class="flex items-center gap-2">
+                            ${isEditing ? html`
+                              <input type="number"
+                                class="w-20 py-0.5 px-2 rounded text-xs font-mono bg-[var(--white-5)] border border-[var(--white-10)] text-text-strong outline-none focus:border-accent/50"
+                                value=${editValue.value}
+                                min=${meta?.min_value ?? ''}
+                                max=${meta?.max_value ?? ''}
+                                onInput=${(e: Event) => { editValue.value = (e.target as HTMLInputElement).value }}
+                                onKeyDown=${(e: KeyboardEvent) => {
+                                  if (e.key === 'Enter') {
+                                    const val = meta?.value_type === 'float' ? parseFloat(editValue.value) : parseInt(editValue.value, 10)
+                                    if (!isNaN(val)) {
+                                      void setRuntimeParam(param.key, val).then(() => {
+                                        editingParam.value = null
+                                      })
+                                    }
+                                  } else if (e.key === 'Escape') {
+                                    editingParam.value = null
+                                  }
+                                }}
+                              />
+                              <button type="button"
+                                class="text-[10px] py-0.5 px-1.5 rounded bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer border-none"
+                                onClick=${() => {
+                                  const val = meta?.value_type === 'float' ? parseFloat(editValue.value) : parseInt(editValue.value, 10)
+                                  if (!isNaN(val)) {
+                                    void setRuntimeParam(param.key, val).then(() => {
+                                      editingParam.value = null
+                                    })
+                                  }
+                                }}
+                              >Apply</button>
+                              <button type="button"
+                                class="text-[10px] py-0.5 px-1.5 rounded bg-white/5 text-text-muted hover:bg-white/10 cursor-pointer border-none"
+                                onClick=${() => { editingParam.value = null }}
+                              >Cancel</button>
+                            ` : html`
+                              <span class="text-xs font-medium text-text-strong">
+                                ${formatParamValue(param.current)}
+                              </span>
+                              ${param.has_override ? html`
+                                <span class="text-[10px] text-warn font-bold">override</span>
+                                <button type="button"
+                                  class="text-[10px] py-0.5 px-1.5 rounded bg-white/5 text-text-muted hover:bg-white/10 cursor-pointer border-none"
+                                  onClick=${() => {
+                                    void clearRuntimeParam(param.key)
+                                  }}
+                                >Reset</button>
+                              ` : null}
+                              ${surface.risk !== 'high' ? html`
+                                <button type="button"
+                                  class="text-[10px] py-0.5 px-1.5 rounded bg-white/5 text-text-muted hover:bg-white/10 cursor-pointer border-none"
+                                  onClick=${() => {
+                                    editingParam.value = param.key
+                                    editValue.value = String(param.current)
+                                  }}
+                                >Edit</button>
+                              ` : null}
+                            `}
+                          </div>
                         </div>
-                      `)}
+                      `})}
                     </div>
                   </div>
                 `

@@ -250,11 +250,19 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
   })
 }
 
+export interface RuntimeParamMeta {
+  description: string
+  value_type: string
+  min_value?: number
+  max_value?: number
+}
+
 export interface RuntimeParam {
   key: string
   current: unknown
   default: unknown
   has_override: boolean
+  meta?: RuntimeParamMeta | null
 }
 
 export interface RuntimeParamsSurface {
@@ -271,6 +279,14 @@ export interface RuntimeParamsResponse {
 
 export function fetchRuntimeParams(): Promise<RuntimeParamsResponse> {
   return get('/api/v1/governance/params')
+}
+
+export function setRuntimeParam(paramKey: string, value: unknown, reason = ''): Promise<{ ok: boolean; message: string }> {
+  return post('/api/v1/governance/params/set', { param_key: paramKey, value, reason })
+}
+
+export function clearRuntimeParam(paramKey: string): Promise<{ ok: boolean; message: string }> {
+  return post('/api/v1/governance/params/clear', { param_key: paramKey })
 }
 
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {

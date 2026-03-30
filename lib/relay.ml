@@ -81,6 +81,9 @@ let get_calibration_info () =
     ("enabled", `Bool (Env_config_core.relay_calibration_enabled ()));
   ]
 
+(** Cached default registry — avoids re-allocation on every resolve call. *)
+let default_registry = Llm_provider.Provider_registry.default ()
+
 (** Resolve max context tokens from OAS Provider_registry / Capabilities (SSOT).
     Resolution order:
     1. Capabilities.for_model_id — per-model override (e.g. "claude-opus-4-6" -> 1M)
@@ -96,9 +99,8 @@ let resolve_max_context model =
   match from_caps with
   | Some n -> n
   | None ->
-    let registry = Llm_provider.Provider_registry.default () in
     (* Layer 2: exact provider name lookup (e.g. "claude" -> 200K) *)
-    (match Llm_provider.Provider_registry.find registry model with
+    (match Llm_provider.Provider_registry.find default_registry model with
      | Some entry -> entry.Llm_provider.Provider_registry.max_context
      | None ->
        (* Layer 3: extract base provider from hyphenated name
@@ -109,7 +111,7 @@ let resolve_max_context model =
          | _ -> ""
        in
        if base <> "" then
-         match Llm_provider.Provider_registry.find registry base with
+         match Llm_provider.Provider_registry.find default_registry base with
          | Some entry -> entry.Llm_provider.Provider_registry.max_context
          | None -> 100_000
        else 100_000)

@@ -35,6 +35,9 @@ let raw_schemas : tool_schema list =
 let all_schemas : tool_schema list = raw_schemas
 
 (** All schemas including config-dependent module schemas *)
+let find_tool name =
+  List.find_opt (fun (s : Types.tool_schema) -> s.name = name) all_schemas
+
 let all_schemas_extended =
   all_schemas
   @ Tool_schemas_control.schemas

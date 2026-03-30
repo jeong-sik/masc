@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # observability_smoke_supervisor.sh
 #
-# Verify trace_ref and provider_label in proof endpoint after a team-session.
+# Verify trace_ref and provider-related fields in proof/execution endpoints after a team-session.
 #
 # Prerequisites:
 #   - MASC server built: dune build --root . bin/main_eio.exe
-#   - jq, curl available
+#   - jq, curl, python3 available
 #
 # Environment variables:
 #   PORT                 - server port (auto-assigned if empty)
 #   BASE_PATH            - room base path (temp dir if empty)
-#   LLAMA_SWARM_MODEL    - model name for llama worker (auto-detected if single)
 #   MCP_URL              - override MCP endpoint (auto-derived from PORT)
 #   SERVER_EXE           - path to compiled server executable
 #   SKIP_SERVER_START    - set to 1 to use an existing server
@@ -35,10 +34,9 @@ SKIP_SERVER_START="${SKIP_SERVER_START:-0}"
 HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-60}"
 HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-30}"
 STOP_WAIT_SEC="${STOP_WAIT_SEC:-30}"
-LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-}"
 MCP_SESSION_ID="obs-smoke-supervisor"
 AGENT_NAME="obs-smoke-supervisor"
-TEAM_GOAL="Observability smoke: verify trace_ref and provider_label in proof endpoint"
+TEAM_GOAL="Observability smoke: verify trace_ref and provider info in proof endpoint"
 TEAM_SESSION_DURATION_SECONDS="${TEAM_SESSION_DURATION_SECONDS:-120}"
 MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http1.1}"
 
@@ -58,6 +56,11 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required"
+  exit 1
+fi
+
 if [ "$SKIP_SERVER_START" != "1" ] && [ ! -x "$SERVER_EXE" ]; then
   echo "SKIP: server executable not found: $SERVER_EXE"
   echo "build it first with: dune build --root . bin/main_eio.exe"
@@ -74,17 +77,6 @@ assert_no_api_key() {
     return 1
   fi
   echo "OK: no API key patterns found"
-  PASS_COUNT=$((PASS_COUNT + 1))
-}
-
-assert_not_null() {
-  local field_name="$1" value="$2"
-  if [ -z "$value" ] || [ "$value" = "null" ]; then
-    echo "FAIL: $field_name is null or empty"
-    FAIL_COUNT=$((FAIL_COUNT + 1))
-    return 1
-  fi
-  echo "OK: $field_name = $value"
   PASS_COUNT=$((PASS_COUNT + 1))
 }
 
@@ -194,28 +186,9 @@ if [ -z "$agent_nickname" ]; then
   exit 1
 fi
 
-# ── step 3: detect llama model ──
+# ── step 3: start team session with spawn ──
 
-printf '[3/6] detect llama model\n'
-llama_models_raw="$(call_tool 3 "masc_llama_models" '{}')"
-require_tool_success "$llama_models_raw"
-llama_models_result="$(printf '%s' "$llama_models_raw" | extract_tool_result)"
-
-if [ -z "$LLAMA_SWARM_MODEL" ]; then
-  single_model="$(printf '%s\n' "$llama_models_result" | jq -r 'if (.models | length) == 1 then .models[0] else "" end')"
-  if [ -n "$single_model" ]; then
-    LLAMA_SWARM_MODEL="$single_model"
-    printf '  auto-selected: %s\n' "$LLAMA_SWARM_MODEL"
-  else
-    echo "SKIP: LLAMA_SWARM_MODEL not set and multiple models available"
-    printf '%s\n' "$llama_models_result" | jq -r '.models[]?'
-    exit 0
-  fi
-fi
-
-# ── step 4: start team session with spawn ──
-
-printf '[4/6] start team session and spawn worker\n'
+printf '[3/5] start team session and spawn worker\n'
 start_raw="$(call_tool 4 "masc_team_session_start" "$(jq -cn \
   --arg goal "$TEAM_GOAL" \
   --arg agent "$agent_nickname" \
@@ -230,10 +203,9 @@ if [ -z "$TEAM_SESSION_ID" ]; then
   exit 1
 fi
 
-MODEL_SELECTION_NOTE="[model-selection] obs-smoke selected $LLAMA_SWARM_MODEL"
+MODEL_SELECTION_NOTE="[routing-note] obs-smoke canonical team-session spawn via worker_class/worker_size"
 spawn_raw="$(call_tool 5 "masc_team_session_step" "$(jq -cn \
   --arg s "$TEAM_SESSION_ID" \
-  --arg model "$LLAMA_SWARM_MODEL" \
   --arg note "$MODEL_SELECTION_NOTE" \
   '{session_id:$s,wait_mode:"blocking",spawn_batch:[{spawn_role:"obs-worker",worker_class:"executor",worker_size:"lg",spawn_selection_note:$note,spawn_prompt:"Reply with one line: observability smoke check complete.",spawn_timeout_seconds:90}]}')")"
 require_tool_success "$spawn_raw"
@@ -264,9 +236,9 @@ if [ "$session_status" = "running" ]; then
   done
 fi
 
-# ── step 5: query proof endpoint and assert observability fields ──
+# ── step 4: query proof endpoint and assert observability fields ──
 
-printf '[5/6] query proof endpoint and verify observability\n'
+printf '[4/5] query proof endpoint and verify observability\n'
 proof_json="$(curl -fsS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" \
   "http://127.0.0.1:${PORT}/api/v1/dashboard/proof?session_id=${TEAM_SESSION_ID}" 2>/dev/null || true)"
 
@@ -291,7 +263,14 @@ fi
 has_provider_info="$(printf '%s' "$proof_json" | jq -r '
   [.. | objects | select(.provider_name? != null or .resolved_model? != null or .provider_snapshot? != null)] | length > 0
 ' 2>/dev/null || echo "false")"
-assert_not_null "provider_info_in_proof" "$has_provider_info"
+if [ "$has_provider_info" = "true" ]; then
+  echo "OK: provider info found in proof data"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo "FAIL: provider info missing in proof data"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+  exit 1
+fi
 
 # Assert: no raw API key patterns in all preview fields
 all_previews="$(printf '%s' "$proof_json" | jq -r '
@@ -304,9 +283,9 @@ else
   PASS_COUNT=$((PASS_COUNT + 1))
 fi
 
-# ── step 6: verify execution endpoint has provider_label ──
+# ── step 5: verify execution endpoint ──
 
-printf '[6/6] verify execution endpoint\n'
+printf '[5/5] verify execution endpoint\n'
 execution_json="$(curl -fsS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" \
   "http://127.0.0.1:${PORT}/api/v1/dashboard/execution" 2>/dev/null || true)"
 
@@ -337,7 +316,6 @@ fi
 
 printf '\n[summary]\n'
 printf '  session_id: %s\n' "$TEAM_SESSION_ID"
-printf '  llama_model: %s\n' "$LLAMA_SWARM_MODEL"
 printf '  base_path: %s\n' "$BASE_PATH"
 printf '  log_file: %s\n' "$LOG_FILE"
 printf '  pass: %d\n' "$PASS_COUNT"

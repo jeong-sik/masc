@@ -77,20 +77,16 @@ let record_handoff_metric ?(timestamp = Time_compat.now ()) ?(keeper_name = "kee
       | Some value -> [ ("to_model", `String value) ]
       | None -> [])
   in
-  let metrics_path = Keeper_types.keeper_metrics_path config keeper_name in
-  let line =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("ts_unix", `Float timestamp);
-          ("name", `String keeper_name);
-          ("trace_id", `String trace_id);
-          ("generation", `Int generation);
-          ("handoff", `Assoc handoff_fields);
-        ])
-    ^ "\n"
-  in
-  Fs_compat.append_file metrics_path line
+  let metrics_store = Keeper_types.keeper_metrics_store config keeper_name in
+  Dated_jsonl.append metrics_store
+    (`Assoc
+      [
+        ("ts_unix", `Float timestamp);
+        ("name", `String keeper_name);
+        ("trace_id", `String trace_id);
+        ("generation", `Int generation);
+        ("handoff", `Assoc handoff_fields);
+      ])
 
 let require_assoc key json =
   Yojson.Safe.Util.(json |> member key)

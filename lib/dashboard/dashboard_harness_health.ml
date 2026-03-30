@@ -269,9 +269,6 @@ let handoff_event_json (event : handoff_event) =
       ("to_model", json_string_option event.to_model);
     ]
 
-let parse_json_line line =
-  try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-
 let read_keeper_metric_records ?since ?until (config : Room.config) keeper_name =
   let store = Keeper_types.keeper_metrics_store config keeper_name in
   match (since, until) with
@@ -280,14 +277,7 @@ let read_keeper_metric_records ?since ?until (config : Room.config) keeper_name 
       let start_date = if since = "" then "2020-01-01" else since in
       let end_date = if until = "" then "2099-12-31" else until in
       Dated_jsonl.read_range store ~since:start_date ~until:end_date
-  | None, None ->
-      let dated = Dated_jsonl.read_recent store max_signal_scan in
-      if dated <> [] then dated
-      else
-        let metrics_path = Keeper_types.keeper_metrics_path config keeper_name in
-        Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:200000
-          ~max_lines:max_signal_scan
-        |> List.filter_map parse_json_line
+  | None, None -> Dated_jsonl.read_recent store max_signal_scan
 
 let read_handoff_events ?since ?until (config : Room.config) =
   let events =

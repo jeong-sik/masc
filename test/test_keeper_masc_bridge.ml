@@ -353,6 +353,17 @@ let test_dashboard_add_allow_restricts_unrestricted () =
   | Masc_mcp.Keeper_types.Unrestricted ->
       Alcotest.fail "add_allow should restrict unrestricted access"
 
+let test_dashboard_add_allow_empty_keeps_unrestricted () =
+  let updated =
+    Masc_mcp.Server_routes_http_routes_dashboard.keeper_tools_add_allow
+      Masc_mcp.Keeper_types.Unrestricted
+      [ " "; "" ]
+  in
+  match updated with
+  | Masc_mcp.Keeper_types.Unrestricted -> ()
+  | Masc_mcp.Keeper_types.Restricted _ ->
+      Alcotest.fail "empty add_allow should not lock unrestricted keeper down"
+
 let () =
   Alcotest.run "Keeper masc bridge"
     [
@@ -420,5 +431,7 @@ let () =
             test_denied_excluded_from_allowed_names;
           Alcotest.test_case "dashboard add_allow restricts unrestricted" `Quick
             test_dashboard_add_allow_restricts_unrestricted;
+          Alcotest.test_case "dashboard add_allow empty keeps unrestricted" `Quick
+            test_dashboard_add_allow_empty_keeps_unrestricted;
         ] );
     ]

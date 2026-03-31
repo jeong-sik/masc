@@ -59,6 +59,7 @@ interface ProfileData {
 }
 
 const profileResource = createAsyncResource<ProfileData>()
+let profileLoadedName = ''
 const mentionText = signal('')
 const sendingMention = signal(false)
 
@@ -100,7 +101,10 @@ function workerBrief(name: string) {
 }
 
 function loadProfile(name: string): Promise<void> {
-  profileResource.reset()
+  if (profileLoadedName !== name) {
+    profileResource.reset()
+    profileLoadedName = name
+  }
   return profileResource.load(async () => {
     const [lines, timeline, relations] = await Promise.all([
       fetchRoomMessages(80),

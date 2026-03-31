@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
-import { signal, useSignalEffect } from '@preact/signals'
+import { signal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { fetchLogs } from '../api/dashboard.js'
 import type { LogEntry } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
@@ -212,7 +213,7 @@ function renderLogRow(entry: LogEntry) {
 }
 
 export function LogViewer() {
-  useSignalEffect(() => {
+  useEffect(() => {
     logResource.reset()
     void loadLogs('reset')
     if (!autoRefresh.value) return
@@ -220,7 +221,7 @@ export function LogViewer() {
       void loadLogs('delta')
     }, POLL_INTERVAL_MS)
     return () => clearInterval(id)
-  })
+  }, [levelFilter.value, moduleFilter.value, logLimit.value, autoRefresh.value])
 
   const s = logResource.state.value
   const logData = s.status === 'loaded' ? s.data : undefined

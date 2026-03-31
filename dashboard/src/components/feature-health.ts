@@ -6,6 +6,7 @@ import { get } from '../api/core'
 import { createAsyncResource, type AsyncResource } from '../lib/async-state'
 import { AsyncContainer } from './common/async-container'
 import { Card } from './common/card'
+import { StatCard } from './common/stat-card'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
 
@@ -90,16 +91,6 @@ function StatusPill({ status }: { status: FeatureStatus }) {
     <span class=${`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusChipClass(status)}`}>
       ${statusLabel(status)}
     </span>
-  `
-}
-
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
-  return html`
-    <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3 text-center">
-      <div class="text-2xl font-bold text-[var(--accent)]">${value}</div>
-      <div class="mt-1 text-xs text-[var(--text-muted)]">${label}</div>
-      ${sub ? html`<div class="mt-0.5 text-xs text-[var(--text-dim)]">${sub}</div>` : null}
-    </div>
   `
 }
 

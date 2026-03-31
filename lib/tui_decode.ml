@@ -141,9 +141,16 @@ let decode_task json =
   let* id = require_string_field json "id" in
   let* title = require_string_field json "title" in
   let* status = require_string_field json "status" in
-  let* priority = require_int_field json "priority" in
+  let* priority = optional_int json "priority" in
   let* claimed_by = optional_string json "claimed_by" in
-  Ok { id; title; status; priority; claimed_by }
+  Ok
+    {
+      id;
+      title;
+      status;
+      priority = Option.value priority ~default:3;
+      claimed_by;
+    }
 
 let decode_keeper ~filename json =
   let* k_goal = require_string_field json "goal" in

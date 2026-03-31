@@ -26,6 +26,18 @@ let test_decode_agent_missing_status_fails () =
   Alcotest.(check bool) "missing status rejected" true
     (Result.is_error (Tui_decode.decode_agent json))
 
+let test_decode_task_missing_priority_defaults () =
+  let json =
+    `Assoc [
+      ("id", `String "task-1");
+      ("title", `String "Tighten parser");
+      ("status", `String "todo");
+    ]
+  in
+  match Tui_decode.decode_task json with
+  | Ok task -> Alcotest.(check int) "default priority" 3 task.priority
+  | Error err -> Alcotest.fail err
+
 let test_parse_log_entry_success () =
   let line =
     Yojson.Safe.to_string
@@ -60,6 +72,43 @@ let test_parse_log_entry_missing_required_field_fails () =
   in
   Alcotest.(check bool) "missing context_tokens rejected" true
     (Result.is_error (Tui_decode.parse_log_entry line))
+
+let test_parse_log_entry_partial_usage_is_allowed () =
+  let line =
+    Yojson.Safe.to_string
+      (`Assoc [
+         ("ts", `String "2026-03-31T12:00:00Z");
+         ("channel", `String "hb");
+         ("context_ratio", `Float 0.55);
+         ("context_tokens", `Int 100);
+         ("context_max", `Int 200);
+         ("message_count", `Int 4);
+         ("usage", `Assoc [("input_tokens", `Int 10)]);
+       ])
+  in
+  match Tui_decode.parse_log_entry line with
+  | Ok entry ->
+      Alcotest.(check (option int)) "input tokens" (Some 10) entry.le_input_tokens;
+      Alcotest.(check (option int)) "missing output tokens" None entry.le_output_tokens
+  | Error err -> Alcotest.fail err
+
+let test_parse_log_entry_missing_usage_is_allowed () =
+  let line =
+    Yojson.Safe.to_string
+      (`Assoc [
+         ("ts", `String "2026-03-31T12:00:00Z");
+         ("channel", `String "hb");
+         ("context_ratio", `Float 0.55);
+         ("context_tokens", `Int 100);
+         ("context_max", `Int 200);
+         ("message_count", `Int 4);
+       ])
+  in
+  match Tui_decode.parse_log_entry line with
+  | Ok entry ->
+      Alcotest.(check (option int)) "missing input tokens" None entry.le_input_tokens;
+      Alcotest.(check (option int)) "missing output tokens" None entry.le_output_tokens
+  | Error err -> Alcotest.fail err
 
 let test_parse_keeper_chat_response_sse_delta () =
   let response =
@@ -116,11 +165,20 @@ let () =
         Alcotest.test_case "missing status fails" `Quick
           test_decode_agent_missing_status_fails;
       ] );
+    ( "decode_task",
+      [
+        Alcotest.test_case "missing priority defaults" `Quick
+          test_decode_task_missing_priority_defaults;
+      ] );
     ( "parse_log_entry",
       [
         Alcotest.test_case "success" `Quick test_parse_log_entry_success;
         Alcotest.test_case "missing required field fails" `Quick
           test_parse_log_entry_missing_required_field_fails;
+        Alcotest.test_case "partial usage is allowed" `Quick
+          test_parse_log_entry_partial_usage_is_allowed;
+        Alcotest.test_case "missing usage is allowed" `Quick
+          test_parse_log_entry_missing_usage_is_allowed;
       ] );
     ( "parse_keeper_chat_response",
       [

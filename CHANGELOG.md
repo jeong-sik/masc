@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.195.0] - 2026-03-31
+
+### Changed
+- **Dashboard harness labels** — replace opaque English jargon with descriptive Korean text (#4278).
+
+### Fixed
+- **QUICK-START docs** — restore MASC_BASE_PATH auto-resolve sentence (#4277).
+- **Keeper config lookup** — centralize resolve_config with scoped lookup first (#4274).
+- **Auth mutation gate** — require auth for HTTP mutations, secure token handling (#4272).
+- **Code tool path validation** — canonicalize paths in code tool validation (#4264).
+
 ## [2.194.0] - 2026-03-31
 
 ### Added

@@ -36,7 +36,7 @@ let test_shard_filesystem_exists () =
     let names = List.map (fun (t : Types.tool_schema) -> t.name) s.tools in
     Alcotest.(check bool) "contains fs_read" true
       (List.mem "keeper_fs_read" names);
-    Alcotest.(check bool) "excludes fs_edit" false
+    Alcotest.(check bool) "contains fs_edit" true
       (List.mem "keeper_fs_edit" names)
   | None -> Alcotest.fail "filesystem shard not found"
 

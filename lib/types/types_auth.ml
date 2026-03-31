@@ -262,7 +262,7 @@ let default_auth_config = {
 let auth_config_to_yojson c =
   `Assoc [
     ("enabled", `Bool c.enabled);
-    ("room_secret_hash", match c.room_secret_hash with Some h -> `String h | None -> `Null);
+    ("room_secret_hash", Json_util.string_opt_to_json c.room_secret_hash);
     ("require_token", `Bool c.require_token);
     ("default_role", agent_role_to_yojson c.default_role);
     ("token_expiry_hours", `Int c.token_expiry_hours);

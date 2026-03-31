@@ -195,7 +195,7 @@ and pattern_to_json (p : pattern) : Yojson.Safe.t =
     ("success_rate", `Float p.success_rate);
     ("usage_count", `Int p.usage_count);
     ("last_used", `Float p.last_used);
-    ("evolved_from", match p.evolved_from with Some e -> `String e | None -> `Null);
+    ("evolved_from", Json_util.string_opt_to_json p.evolved_from);
     ("effectiveness_used", `Int p.effectiveness_used);
     ("effectiveness_unused", `Int p.effectiveness_unused);
     ("effectiveness_last_check", `Float p.effectiveness_last_check);

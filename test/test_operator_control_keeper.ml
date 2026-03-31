@@ -141,7 +141,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
       | Some (true, _) -> ()   (* Entry deactivated (desired=false): current behavior *)
       | None -> Alcotest.fail "missing keeper status dispatch");
       let ok, body =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_persistent_agent_status"
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
           ~args:
             (`Assoc
               [

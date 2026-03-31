@@ -8,9 +8,7 @@
 let cycle_record_json (r : Autoresearch_types.cycle_record) : Yojson.Safe.t =
   Autoresearch_serde.cycle_to_yojson r
 
-let updated_at_json = function
-  | Some ts -> `Float ts
-  | None -> `Null
+let updated_at_json = Json_util.float_opt_to_json
 
 let loop_summary_json (base_path : string)
     (state : Autoresearch_types.loop_state) : Yojson.Safe.t =
@@ -48,24 +46,20 @@ let loop_summary_json (base_path : string)
       ("workdir", `String state.workdir);
       ("source_workdir", `String state.source_workdir);
       ( "program_note",
-        match state.program_note with Some v -> `String v | None -> `Null );
+        Json_util.string_opt_to_json state.program_note );
       ("warnings", `List (List.map (fun v -> `String v) state.warnings));
       ("insights", `List insights);
       ("recent_cycles", `List recent_cycles);
       ( "error",
-        match state.error_message with Some e -> `String e | None -> `Null );
+        Json_util.string_opt_to_json state.error_message );
       ( "session_id",
-        match link with Some l -> `String l.session_id | None -> `Null );
+        Json_util.string_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.session_id) link) );
       ( "operation_id",
-        match link with Some l -> (
-          match l.operation_id with Some value -> `String value | None -> `Null)
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.bind link (fun (l : Autoresearch_types.swarm_link) -> l.operation_id)) );
       ( "linked_at",
-        match link with Some l -> `Float l.linked_at | None -> `Null );
+        Json_util.float_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.linked_at) link) );
       ( "queued_hypothesis",
-        match state.queued_hypothesis with
-        | Some v -> `String v
-        | None -> `Null );
+        Json_util.string_opt_to_json state.queued_hypothesis );
     ]
 
 let persisted_to_loop_summary_json (base_path : string)
@@ -94,24 +88,20 @@ let persisted_to_loop_summary_json (base_path : string)
       ("workdir", `String p.workdir);
       ("source_workdir", `String p.source_workdir);
       ( "program_note",
-        match p.program_note with Some v -> `String v | None -> `Null );
+        Json_util.string_opt_to_json p.program_note );
       ("warnings", `List (List.map (fun v -> `String v) p.warnings));
       ("insights", `List []);
       ("recent_cycles", `List []);
       ( "error",
-        match p.error_message with Some e -> `String e | None -> `Null );
+        Json_util.string_opt_to_json p.error_message );
       ( "session_id",
-        match link with Some l -> `String l.session_id | None -> `Null );
+        Json_util.string_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.session_id) link) );
       ( "operation_id",
-        match link with Some l -> (
-          match l.operation_id with Some value -> `String value | None -> `Null)
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.bind link (fun (l : Autoresearch_types.swarm_link) -> l.operation_id)) );
       ( "linked_at",
-        match link with Some l -> `Float l.linked_at | None -> `Null );
+        Json_util.float_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.linked_at) link) );
       ( "queued_hypothesis",
-        match p.queued_hypothesis with
-        | Some v -> `String v
-        | None -> `Null );
+        Json_util.string_opt_to_json p.queued_hypothesis );
     ]
 
 (** Sort key: live loops first, then running loops, then most recently updated. *)

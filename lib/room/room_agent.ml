@@ -27,7 +27,7 @@ let get_agents_status config =
               ("name", `String agent.name);
               ("status", `String status);
               ("is_zombie", `Bool is_zombie);
-              ("current_task", match agent.current_task with Some t -> `String t | None -> `Null);
+              ("current_task", Json_util.string_opt_to_json agent.current_task);
               ("last_seen", `String agent.last_seen);
               ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
             ] :: !agents

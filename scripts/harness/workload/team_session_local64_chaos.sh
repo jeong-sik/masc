@@ -2,9 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8945/mcp}"
+MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http1.1}"
 COORD_AGENT="${COORD_AGENT:-team-session-local64-chaos}"
 WAVE1_WORKER_COUNT="${WAVE1_WORKER_COUNT:-8}"
 WAVE2_WORKER_COUNT="${WAVE2_WORKER_COUNT:-12}"
@@ -47,26 +48,6 @@ SESSION_ID=""
 VICTIM_RUNTIME_ID=""
 VICTIM_PORT=""
 
-jsonrpc_call() {
-  local id="$1"
-  local method="$2"
-  local params="$3"
-  local raw
-  raw="$(curl -sS --http2-prior-knowledge --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -H "mcp-session-id: $MCP_SESSION_ID" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"$method\",\"params\":$params}")"
-  jsonrpc_normalize_response "$raw" "$id"
-}
-
-call_tool() {
-  local id="$1"
-  local tool_name="$2"
-  local args_json="$3"
-  jsonrpc_call "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}"
-}
-
 runtime_verify_result() {
   local runtime_pool="${1:-}"
   local args
@@ -79,51 +60,18 @@ runtime_verify_result() {
       '
   )"
   local payload
-  payload="$(call_tool 92898 "masc_runtime_verify" "$args")"
-  require_tool_success "$payload"
-  printf '%s' "$payload" | extract_result
-}
-
-extract_text() {
-  jq -r 'try (.result.content[0].text) catch empty'
-}
-
-extract_result() {
-  jq -c 'try (.result.content[0].text | fromjson | if has("result") and .result != null then .result else . end) catch empty'
-}
-
-extract_is_error() {
-  jq -r 'try (.result.isError) catch "true"'
-}
-
-require_json() {
-  local payload="$1"
-  if ! printf '%s' "$payload" | jq -e . >/dev/null 2>&1; then
-    echo "FAIL: invalid payload"
-    printf '%s\n' "$payload"
-    exit 1
-  fi
-}
-
-require_tool_success() {
-  local payload="$1"
-  require_json "$payload"
-  local is_error
-  is_error="$(printf '%s' "$payload" | extract_is_error)"
-  if [ "$is_error" = "true" ]; then
-    echo "FAIL: tool returned isError=true"
-    printf '%s\n' "$payload" | extract_text
-    exit 1
-  fi
+  payload="$(mcp_call_tool 92898 "masc_runtime_verify" "$args")"
+  mcp_require_tool_ok "$payload"
+  printf '%s' "$payload" | mcp_extract_result
 }
 
 cleanup() {
   if [ -n "$SESSION_ID" ]; then
-    call_tool 92981 "masc_team_session_stop" \
+    mcp_call_tool 92981 "masc_team_session_stop" \
       "{\"session_id\":\"$SESSION_ID\",\"reason\":\"local64_chaos_cleanup\",\"generate_report\":false}" \
       >/dev/null 2>&1 || true
   fi
-  call_tool 92982 "masc_leave" "{\"agent_name\":\"$COORD_AGENT\"}" >/dev/null 2>&1 || true
+  mcp_call_tool 92982 "masc_leave" "{\"agent_name\":\"$COORD_AGENT\"}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -212,7 +160,7 @@ run_spawn_wave() {
   spawn_batch_json="$(build_spawn_batch "$SESSION_ID" "$worker_count" "$LLAMA_SWARM_MODEL" "$phase")"
   step_args="$(jq -cn --arg s "$SESSION_ID" --arg a "$COORD_AGENT" --argjson batch "$spawn_batch_json" --argjson timeout "$SPAWN_TIMEOUT_SEC" \
     '{session_id:$s,actor:$a,spawn_batch:$batch,spawn_timeout_seconds:$timeout}')"
-  call_tool "$call_id" "masc_team_session_step" "$step_args"
+  mcp_call_tool "$call_id" "masc_team_session_step" "$step_args"
 }
 
 wait_for_runtime_down() {
@@ -231,17 +179,17 @@ wait_for_runtime_down() {
 }
 
 echo "[1/10] init + join coordinator"
-init_raw="$(call_tool 92901 "masc_init" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a}')")"
-require_tool_success "$init_raw"
-join_raw="$(call_tool 92902 "masc_join" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a,capabilities:["team-session","local64","operator","chaos"]}')")"
-require_tool_success "$join_raw"
+init_raw="$(mcp_call_tool 92901 "masc_init" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a}')")"
+mcp_require_tool_ok "$init_raw"
+join_raw="$(mcp_call_tool 92902 "masc_join" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a,capabilities:["team-session","local64","operator","chaos"]}')")"
+mcp_require_tool_ok "$join_raw"
 
 echo "[2/10] start local64 chaos session"
 start_args="$(jq -cn --arg goal "$GOAL" --argjson duration "$SESSION_DURATION_SEC" \
   '{goal:$goal,duration_seconds:$duration,checkpoint_interval_sec:20,min_agents:1,orchestration_mode:"assist",communication_mode:"hybrid",scale_profile:"local64",fallback_policy:"strict_local_only",instruction_profile:"strict",alert_channel:"both",report_formats:["markdown","json"],agents:["team-session-local64-chaos"]}')"
-start_raw="$(call_tool 92903 "masc_team_session_start" "$start_args")"
-require_tool_success "$start_raw"
-SESSION_ID="$(printf '%s' "$start_raw" | extract_result | jq -r '.session_id // empty')"
+start_raw="$(mcp_call_tool 92903 "masc_team_session_start" "$start_args")"
+mcp_require_tool_ok "$start_raw"
+SESSION_ID="$(printf '%s' "$start_raw" | mcp_extract_result | jq -r '.session_id // empty')"
 if [ -z "$SESSION_ID" ]; then
   echo "FAIL: session_id missing"
   printf '%s\n' "$start_raw"
@@ -250,9 +198,9 @@ fi
 echo "session_id=$SESSION_ID"
 
 echo "[3/10] inspect runtime pool and pick victim"
-runtime_raw="$(call_tool 92904 "masc_llama_runtime_status" '{"include_models":true}')"
-require_tool_success "$runtime_raw"
-runtime_result="$(printf '%s' "$runtime_raw" | extract_result)"
+runtime_raw="$(mcp_call_tool 92904 "masc_llama_runtime_status" '{"include_models":true}')"
+mcp_require_tool_ok "$runtime_raw"
+runtime_result="$(printf '%s' "$runtime_raw" | mcp_extract_result)"
 if ! printf '%s' "$runtime_result" | jq -e '.runtime_count >= 2' >/dev/null; then
   echo "FAIL: chaos requires at least 2 local runtimes"
   printf '%s\n' "$runtime_result"
@@ -269,11 +217,11 @@ echo "victim_runtime=${VICTIM_RUNTIME_ID} port=${VICTIM_PORT}"
 
 echo "[4/10] wave1 baseline (spawn_timeout=${SPAWN_TIMEOUT_SEC}s http_timeout=${HTTP_TIMEOUT_SEC}s max_wave_workers=${max_wave_workers})"
 wave1_raw="$(run_spawn_wave 92905 "$WAVE1_WORKER_COUNT" "wave1")"
-require_tool_success "$wave1_raw"
-wave1_success="$(printf '%s' "$wave1_raw" | extract_result | jq -r '.spawn.results | map(select(.success == true)) | length')"
+mcp_require_tool_ok "$wave1_raw"
+wave1_success="$(printf '%s' "$wave1_raw" | mcp_extract_result | jq -r '.spawn.results | map(select(.success == true)) | length')"
 if [ "$wave1_success" -lt "$WAVE1_WORKER_COUNT" ]; then
   echo "FAIL: baseline wave succeeded only $wave1_success/$WAVE1_WORKER_COUNT"
-  printf '%s\n' "$wave1_raw" | extract_result
+  printf '%s\n' "$wave1_raw" | mcp_extract_result
   exit 1
 fi
 sleep "$WAIT_AFTER_SPAWN_SEC"
@@ -292,8 +240,8 @@ fi
 
 echo "[6/10] wave2 after dropout"
 wave2_raw="$(run_spawn_wave 92906 "$WAVE2_WORKER_COUNT" "wave2")"
-require_tool_success "$wave2_raw"
-wave2_result="$(printf '%s' "$wave2_raw" | extract_result)"
+mcp_require_tool_ok "$wave2_raw"
+wave2_result="$(printf '%s' "$wave2_raw" | mcp_extract_result)"
 wave2_success="$(printf '%s' "$wave2_result" | jq -r '.spawn.results | map(select(.success == true)) | length')"
 wave2_failure="$(printf '%s' "$wave2_result" | jq -r '.spawn.results | map(select(.success != true)) | length')"
 wave2_victim_assignments="$(printf '%s' "$wave2_result" | jq -r --arg victim "$VICTIM_RUNTIME_ID" '.spawn.results | map(select(.assigned_runtime == $victim)) | length')"
@@ -305,10 +253,10 @@ fi
 sleep "$WAIT_AFTER_SPAWN_SEC"
 
 echo "[7/10] verify cooldown after failures"
-post_failure_runtime_raw="$(call_tool 92907 "masc_llama_runtime_status" '{"include_models":true}')"
-require_tool_success "$post_failure_runtime_raw"
-require_json "$post_failure_runtime_raw"
-post_failure_runtime_result="$(printf '%s' "$post_failure_runtime_raw" | extract_result)"
+post_failure_runtime_raw="$(mcp_call_tool 92907 "masc_llama_runtime_status" '{"include_models":true}')"
+mcp_require_tool_ok "$post_failure_runtime_raw"
+mcp_require_json "$post_failure_runtime_raw"
+post_failure_runtime_result="$(printf '%s' "$post_failure_runtime_raw" | mcp_extract_result)"
 if ! printf '%s' "$post_failure_runtime_result" | jq -e --arg victim "$VICTIM_RUNTIME_ID" '
   .healthy_runtime_count >= 1
   and (.runtimes | map(select(.id == $victim and (.failure_streak >= 3) and (.cooldown_until != null))) | length == 1)
@@ -320,8 +268,8 @@ fi
 
 echo "[8/10] wave3 reroute on surviving runtime"
 wave3_raw="$(run_spawn_wave 92908 "$WAVE3_WORKER_COUNT" "wave3")"
-require_tool_success "$wave3_raw"
-wave3_result="$(printf '%s' "$wave3_raw" | extract_result)"
+mcp_require_tool_ok "$wave3_raw"
+wave3_result="$(printf '%s' "$wave3_raw" | mcp_extract_result)"
 wave3_success="$(printf '%s' "$wave3_result" | jq -r '.spawn.results | map(select(.success == true)) | length')"
 wave3_victim_assignments="$(printf '%s' "$wave3_result" | jq -r --arg victim "$VICTIM_RUNTIME_ID" '.spawn.results | map(select(.assigned_runtime == $victim)) | length')"
 if [ "$wave3_success" -lt "$WAVE3_WORKER_COUNT" ] || [ "$wave3_victim_assignments" -ne 0 ]; then
@@ -332,20 +280,20 @@ fi
 sleep "$WAIT_AFTER_SPAWN_SEC"
 
 echo "[9/10] verify operator digest"
-digest_raw="$(call_tool 92909 "masc_operator_digest" '{"target_type":"room"}')"
-require_tool_success "$digest_raw"
-if ! printf '%s' "$digest_raw" | extract_result | jq -e '.runtime_pools.local64 >= 1 and .local_runtime != null' >/dev/null; then
+digest_raw="$(mcp_call_tool 92909 "masc_operator_digest" '{"target_type":"room"}')"
+mcp_require_tool_ok "$digest_raw"
+if ! printf '%s' "$digest_raw" | mcp_extract_result | jq -e '.runtime_pools.local64 >= 1 and .local_runtime != null' >/dev/null; then
   echo "FAIL: operator digest did not expose local64 runtime state after chaos"
-  printf '%s\n' "$digest_raw" | extract_result
+  printf '%s\n' "$digest_raw" | mcp_extract_result
   exit 1
 fi
 
 echo "[10/10] benchmark surviving runtime"
-bench_raw="$(call_tool 92910 "masc_llama_runtime_bench" '{"parallelism":4,"rounds":1,"runtime_pool":"local64"}')"
-require_tool_success "$bench_raw"
-if ! printf '%s' "$bench_raw" | extract_result | jq -e '.total_requests >= 1 and .success_count >= 1' >/dev/null; then
+bench_raw="$(mcp_call_tool 92910 "masc_llama_runtime_bench" '{"parallelism":4,"rounds":1,"runtime_pool":"local64"}')"
+mcp_require_tool_ok "$bench_raw"
+if ! printf '%s' "$bench_raw" | mcp_extract_result | jq -e '.total_requests >= 1 and .success_count >= 1' >/dev/null; then
   echo "FAIL: bench did not succeed after runtime dropout"
-  printf '%s\n' "$bench_raw" | extract_result
+  printf '%s\n' "$bench_raw" | mcp_extract_result
   exit 1
 fi
 

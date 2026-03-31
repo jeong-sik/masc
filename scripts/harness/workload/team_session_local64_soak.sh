@@ -3,9 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SMOKE_SCRIPT="$ROOT_DIR/scripts/harness/workload/team_session_local64_smoke.sh"
-source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8945/mcp}"
+MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http1.1}"
 COORD_AGENT="${COORD_AGENT:-team-session-local64-soak}"
 WORKER_COUNT="${WORKER_COUNT:-8}"
 ROUNDS="${ROUNDS:-10}"
@@ -27,77 +28,25 @@ fi
 
 mkdir -p "$(dirname "$METRICS_FILE")"
 
-jsonrpc_call() {
-  local id="$1"
-  local method="$2"
-  local params="$3"
-  local raw
-  raw="$(curl -sS --http2-prior-knowledge --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"$method\",\"params\":$params}")"
-  jsonrpc_normalize_response "$raw" "$id"
-}
-
-call_tool() {
-  local id="$1"
-  local tool_name="$2"
-  local args_json="$3"
-  jsonrpc_call "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}"
-}
-
-extract_text() {
-  jq -r 'try (.result.content[0].text) catch empty'
-}
-
-extract_result() {
-  jq -c 'try (.result.content[0].text | fromjson | if has("result") and .result != null then .result else . end) catch empty'
-}
-
-extract_is_error() {
-  jq -r 'try (.result.isError) catch "true"'
-}
-
-require_json() {
-  local payload="$1"
-  if ! printf '%s' "$payload" | jq -e . >/dev/null 2>&1; then
-    echo "FAIL: invalid payload"
-    printf '%s\n' "$payload"
-    exit 1
-  fi
-}
-
-require_tool_success() {
-  local payload="$1"
-  require_json "$payload"
-  local is_error
-  is_error="$(printf '%s' "$payload" | extract_is_error)"
-  if [ "$is_error" = "true" ]; then
-    echo "FAIL: tool returned isError=true"
-    printf '%s\n' "$payload" | extract_text
-    exit 1
-  fi
-}
-
 sample_running_session_count() {
   local raw
-  raw="$(call_tool 92001 "masc_team_session_list" '{"status":"running","limit":200}')"
-  require_tool_success "$raw"
-  printf '%s' "$raw" | extract_result | jq -r '.count // 0'
+  raw="$(mcp_call_tool 92001 "masc_team_session_list" '{"status":"running","limit":200}')"
+  mcp_require_tool_ok "$raw"
+  printf '%s' "$raw" | mcp_extract_result | jq -r '.count // 0'
 }
 
 sample_allocated_slots() {
   local raw
-  raw="$(call_tool 92002 "masc_llama_runtime_status" '{"include_models":false}')"
-  require_tool_success "$raw"
-  printf '%s' "$raw" | extract_result | jq -r '.allocated_slots // 0'
+  raw="$(mcp_call_tool 92002 "masc_llama_runtime_status" '{"include_models":false}')"
+  mcp_require_tool_ok "$raw"
+  printf '%s' "$raw" | mcp_extract_result | jq -r '.allocated_slots // 0'
 }
 
 sample_zombie_cleanup_text() {
   local raw
-  raw="$(call_tool 92003 "masc_cleanup_zombies" '{}')"
-  require_tool_success "$raw"
-  printf '%s' "$raw" | extract_text
+  raw="$(mcp_call_tool 92003 "masc_cleanup_zombies" '{}')"
+  mcp_require_tool_ok "$raw"
+  printf '%s' "$raw" | mcp_extract_text
 }
 
 sample_rss_kb() {

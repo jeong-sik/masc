@@ -3,10 +3,12 @@ set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 SERVER_EXE="${SERVER_EXE:-${ROOT_DIR}/_build/default/bin/main_eio.exe}"
 HTTP_TIMEOUT_SEC="${HTTP_TIMEOUT_SEC:-120}"
+MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http1.1}"
+MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http1.1}"
 STOP_WAIT_SEC="${STOP_WAIT_SEC:-60}"
 LLAMA_SWARM_MODEL="${LLAMA_SWARM_MODEL:-qwen3.5-35b-a3b-ud-q8-xl}"
 SMOKE_AGENT="${SMOKE_AGENT:-coding-smoke-supervisor}"
@@ -48,72 +50,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-require_json() {
-  printf '%s' "$1" | jq -e . >/dev/null
-}
-
-extract_response_error() {
-  jq -r 'if (.error | type) == "object" and (.error.message | type) == "string" then .error.message else empty end'
-}
-
-extract_is_error() {
-  jq -r 'try (.result.isError) catch "false"'
-}
-
-extract_tool_result() {
-  jq -c 'try (.result.content[0].text | fromjson | if has("result") and .result != null then .result else . end) catch empty'
-}
-
-require_success_response() {
-  local payload="$1"
-  require_json "$payload"
-  local err
-  err="$(printf '%s' "$payload" | extract_response_error)"
-  if [ -n "$err" ]; then
-    echo "FAIL: JSON-RPC error: $err"
-    printf '%s\n' "$payload"
-    exit 1
-  fi
-}
-
-require_tool_success() {
-  local payload="$1"
-  require_success_response "$payload"
-  local is_error
-  is_error="$(printf '%s' "$payload" | extract_is_error)"
-  if [ "$is_error" = "true" ]; then
-    echo "FAIL: tool returned isError=true"
-    printf '%s\n' "$payload" | jq -r '.result.content[0].text'
-    exit 1
-  fi
-}
-
-jsonrpc_call() {
-  local session_id="$1"
-  local id="$2"
-  local method="$3"
-  local params="$4"
-  local body_file
-  body_file="$(mktemp "${TMPDIR:-/tmp}/coding-worker-jsonrpc.XXXXXX")"
-  printf '{"jsonrpc":"2.0","id":%s,"method":"%s","params":%s}' "$id" "$method" "$params" >"$body_file"
-  local response
-  response="$(curl -sS --http2-prior-knowledge --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -H "Mcp-Session-Id: $session_id" \
-    --data-binary "@$body_file")"
-  rm -f "$body_file"
-  jsonrpc_normalize_response "$response" "$id"
-}
-
-call_tool() {
-  local session_id="$1"
-  local id="$2"
-  local tool_name="$3"
-  local args_json="$4"
-  jsonrpc_call "$session_id" "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}"
-}
-
 wait_for_health() {
   local deadline=$(( $(date +%s) + 20 ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
@@ -142,9 +78,9 @@ start_server() {
 
 bootstrap_room() {
   local session_id="$1"
-  require_tool_success "$(call_tool "$session_id" 1 "masc_init" "$(jq -cn --arg a "$SMOKE_AGENT" '{agent_name:$a}')")"
-  require_tool_success "$(call_tool "$session_id" 2 "masc_switch_mode" '{"mode":"full"}')"
-  require_tool_success "$(call_tool "$session_id" 3 "masc_join" "$(jq -cn --arg a "$SMOKE_AGENT" '{agent_name:$a,capabilities:["python","bash","worker"]}')")"
+  mcp_require_tool_ok "$(mcp_call_tool 1 "masc_init" "$(jq -cn --arg a "$SMOKE_AGENT" '{agent_name:$a}')")"
+  mcp_require_tool_ok "$(mcp_call_tool 2 "masc_switch_mode" '{"mode":"full"}')"
+  mcp_require_tool_ok "$(mcp_call_tool 3 "masc_join" "$(jq -cn --arg a "$SMOKE_AGENT" '{agent_name:$a,capabilities:["python","bash","worker"]}')")"
 }
 
 start_team_session() {
@@ -152,12 +88,12 @@ start_team_session() {
   local goal="$2"
   local execution_scope="$3"
   local raw
-  raw="$(call_tool "$session_id" 4 "masc_team_session_start" "$(jq -cn \
+  raw="$(mcp_call_tool 4 "masc_team_session_start" "$(jq -cn \
     --arg goal "$goal" \
     --arg scope "$execution_scope" \
     '{goal:$goal,duration_seconds:180,checkpoint_interval_sec:15,orchestration_mode:"assist",communication_mode:"broadcast",execution_scope:$scope,fallback_policy:"cascade_then_task",instruction_profile:"strict",min_agents:1,agents:[]}' )")"
-  require_tool_success "$raw"
-  printf '%s' "$raw" | extract_tool_result | jq -r '.session_id // empty'
+  mcp_require_tool_ok "$raw"
+  printf '%s' "$raw" | mcp_extract_result | jq -r '.session_id // empty'
 }
 
 wait_until_terminal() {
@@ -166,9 +102,9 @@ wait_until_terminal() {
   local deadline=$(( $(date +%s) + STOP_WAIT_SEC ))
   while :; do
     local raw status
-    raw="$(call_tool "$client_session_id" 90 "masc_team_session_status" "$(jq -cn --arg s "$team_session_id" '{session_id:$s}')")"
-    require_tool_success "$raw"
-    status="$(printf '%s' "$raw" | extract_tool_result | jq -r '.session.status // empty')"
+    raw="$(mcp_call_tool 90 "masc_team_session_status" "$(jq -cn --arg s "$team_session_id" '{session_id:$s}')")"
+    mcp_require_tool_ok "$raw"
+    status="$(printf '%s' "$raw" | mcp_extract_result | jq -r '.session.status // empty')"
     if [ "$status" != "running" ]; then
       return 0
     fi
@@ -189,9 +125,9 @@ wait_for_worker_run_event() {
   local deadline=$(( $(date +%s) + STOP_WAIT_SEC ))
   while :; do
     local raw events_json match
-    raw="$(call_tool "$client_session_id" 91 "masc_team_session_events" "$(jq -cn --arg s "$team_session_id" --arg ev "$expected_event" '{session_id:$s,event_types:[$ev],limit:200}')")"
-    require_tool_success "$raw"
-    events_json="$(printf '%s' "$raw" | extract_tool_result)"
+    raw="$(mcp_call_tool 91 "masc_team_session_events" "$(jq -cn --arg s "$team_session_id" --arg ev "$expected_event" '{session_id:$s,event_types:[$ev],limit:200}')")"
+    mcp_require_tool_ok "$raw"
+    events_json="$(printf '%s' "$raw" | mcp_extract_result)"
     match="$(printf '%s' "$events_json" | jq -c --arg id "$worker_run_id" '.events[]? | select(.detail.worker_run_id? == $id) | .detail' | tail -n1)"
     if [ -n "$match" ]; then
       printf '%s' "$match"
@@ -211,9 +147,9 @@ verify_worker_run_trace() {
   local team_session_id="$2"
   local worker_run_id="$3"
   local raw result
-  raw="$(call_tool "$client_session_id" 92 "masc_team_session_verify_trace" "$(jq -cn --arg s "$team_session_id" --arg r "$worker_run_id" '{session_id:$s,worker_run_id:$r}')")"
-  require_tool_success "$raw"
-  result="$(printf '%s' "$raw" | extract_tool_result)"
+  raw="$(mcp_call_tool 92 "masc_team_session_verify_trace" "$(jq -cn --arg s "$team_session_id" --arg r "$worker_run_id" '{session_id:$s,worker_run_id:$r}')")"
+  mcp_require_tool_ok "$raw"
+  result="$(printf '%s' "$raw" | mcp_extract_result)"
   printf '%s' "$result"
 }
 
@@ -288,13 +224,13 @@ Reply with exactly one short line describing the applied fix.
 Do not call masc_team_session_step yourself.
 EOF
 )"
-  raw="$(call_tool "fixture-client" 10 "masc_team_session_step" "$(jq -cn \
+  raw="$(mcp_call_tool 10 "masc_team_session_step" "$(jq -cn \
     --arg s "$team_session_id" \
     --arg prompt "$inspect_prompt" \
     --arg wait_mode "$TEAM_STEP_WAIT_MODE" \
     '{session_id:$s,spawn_role:"coder",worker_class:"executor",worker_size:"lg",execution_scope:"limited_code_change",wait_mode:$wait_mode,spawn_prompt:$prompt}')")"
-  require_tool_success "$raw"
-  result="$(printf '%s' "$raw" | extract_tool_result)"
+  mcp_require_tool_ok "$raw"
+  result="$(printf '%s' "$raw" | mcp_extract_result)"
   spawn="$(printf '%s' "$result" | jq -c '.spawn')"
   if [ "$TEAM_STEP_WAIT_MODE" = "background" ]; then
     local fixture_spawn_run_id fixture_spawn_detail fixture_spawn_verify
@@ -311,13 +247,13 @@ EOF
     printf '%s' "$spawn" | jq -e '.tool_call_count > 0' >/dev/null
     printf '%s' "$spawn" | jq -e '(.tool_names | index("file_read")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
   fi
-  delegate_raw="$(call_tool "fixture-client" 10 "masc_team_session_step" "$(jq -cn \
+  delegate_raw="$(mcp_call_tool 10 "masc_team_session_step" "$(jq -cn \
     --arg s "$team_session_id" \
     --arg prompt "$write_prompt" \
     --arg wait_mode "$TEAM_STEP_WAIT_MODE" \
     '{session_id:$s,target_agent:"coder",wait_mode:$wait_mode,delegate_prompt:$prompt}')")"
-  require_tool_success "$delegate_raw"
-  delegate_json="$(printf '%s' "$delegate_raw" | extract_tool_result | jq -c '.delegate')"
+  mcp_require_tool_ok "$delegate_raw"
+  delegate_json="$(printf '%s' "$delegate_raw" | mcp_extract_result | jq -c '.delegate')"
   if [ "$TEAM_STEP_WAIT_MODE" = "background" ]; then
     local fixture_delegate_run_id fixture_delegate_detail fixture_delegate_verify
     printf '%s' "$delegate_json" | jq -e '.status == "accepted"' >/dev/null
@@ -337,12 +273,12 @@ EOF
     echo "FAIL: fixture repo calc.py was not patched to return 5"
     exit 1
   fi
-  require_tool_success "$(call_tool "fixture-client" 11 "masc_team_session_stop" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,reason:"fixture_done",generate_report:true}')")"
+  mcp_require_tool_ok "$(mcp_call_tool 11 "masc_team_session_stop" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,reason:"fixture_done",generate_report:true}')")"
   wait_until_terminal "fixture-client" "$team_session_id"
   local prove_raw prove_result
-  prove_raw="$(call_tool "fixture-client" 12 "masc_team_session_prove" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,generate_report_if_missing:true}')")"
-  require_tool_success "$prove_raw"
-  prove_result="$(printf '%s' "$prove_raw" | extract_tool_result)"
+  prove_raw="$(mcp_call_tool 12 "masc_team_session_prove" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,generate_report_if_missing:true}')")"
+  mcp_require_tool_ok "$prove_raw"
+  prove_result="$(printf '%s' "$prove_raw" | mcp_extract_result)"
   printf '%s' "$prove_result" | jq -e '.proof.evidence.spawn_tool_call_count > 0' >/dev/null
   printf '%s' "$prove_result" | jq -e '(.proof.evidence.spawn_tool_names | index("file_write")) != null' >/dev/null
   printf '%s' "$prove_result" | jq -e '.proof.evidence.write_capable_spawn_count >= 1' >/dev/null
@@ -384,7 +320,7 @@ Reply with exactly one short line describing the applied patch.
 Do not call masc_team_session_step yourself.
 EOF
 )"
-  raw="$(call_tool "repo-client" 20 "masc_team_session_step" "$(jq -cn \
+  raw="$(mcp_call_tool 20 "masc_team_session_step" "$(jq -cn \
     --arg s "$team_session_id" \
     --arg planner "$planner_prompt" \
     --arg implementer "$implementer_prompt" \
@@ -393,8 +329,8 @@ EOF
       {spawn_role:"planner",worker_class:"manager",worker_size:"xlg",execution_scope:"observe_only",wait_mode:$wait_mode,spawn_prompt:$planner},
       {spawn_role:"implementer",worker_class:"executor",worker_size:"lg",execution_scope:"limited_code_change",wait_mode:$wait_mode,spawn_prompt:$implementer}
     ]}')")"
-  require_tool_success "$raw"
-  result="$(printf '%s' "$raw" | extract_tool_result)"
+  mcp_require_tool_ok "$raw"
+  result="$(printf '%s' "$raw" | mcp_extract_result)"
   printf '%s' "$result" | jq -e '.spawn.mode == "batch" and .spawn.count == 2 and (.spawn.results | length) == 2' >/dev/null
   if [ "$TEAM_STEP_WAIT_MODE" = "background" ]; then
     local planner_run_id implementer_run_id planner_detail implementer_detail planner_verify implementer_verify
@@ -415,13 +351,13 @@ EOF
     printf '%s' "$result" | jq -e '[.spawn.results[] | .execution_scope] | index("limited_code_change") != null' >/dev/null
     printf '%s' "$result" | jq -e '[.spawn.results[] | .tool_names[]?] | index("file_read") != null and index("shell_exec") != null' >/dev/null
   fi
-  delegate_raw="$(call_tool "repo-client" 21 "masc_team_session_step" "$(jq -cn \
+  delegate_raw="$(mcp_call_tool 21 "masc_team_session_step" "$(jq -cn \
     --arg s "$team_session_id" \
     --arg prompt "$implementer_write_prompt" \
     --arg wait_mode "$TEAM_STEP_WAIT_MODE" \
     '{session_id:$s,target_agent:"implementer",wait_mode:$wait_mode,delegate_prompt:$prompt}')")"
-  require_tool_success "$delegate_raw"
-  delegate_json="$(printf '%s' "$delegate_raw" | extract_tool_result | jq -c '.delegate')"
+  mcp_require_tool_ok "$delegate_raw"
+  delegate_json="$(printf '%s' "$delegate_raw" | mcp_extract_result | jq -c '.delegate')"
   if [ "$TEAM_STEP_WAIT_MODE" = "background" ]; then
     local repo_delegate_run_id repo_delegate_detail repo_delegate_verify
     printf '%s' "$delegate_json" | jq -e '.status == "accepted"' >/dev/null
@@ -435,7 +371,7 @@ EOF
     printf '%s' "$delegate_json" | jq -e '.tool_call_count > 0' >/dev/null
     printf '%s' "$delegate_json" | jq -e '(.tool_names | index("file_write")) != null and (.tool_names | index("shell_exec")) != null' >/dev/null
   fi
-  require_tool_success "$(call_tool "repo-client" 21 "masc_team_session_step" "$(jq -cn \
+  mcp_require_tool_ok "$(mcp_call_tool 21 "masc_team_session_step" "$(jq -cn \
     --arg s "$team_session_id" \
     --arg message "planner inspected the smoke target and implementer patched calc.py; verification passed" \
     '{session_id:$s,turn_kind:"note",message:$message}')")"
@@ -444,12 +380,12 @@ EOF
     echo "FAIL: real repo smoke calc.py was not patched to return 5"
     exit 1
   fi
-  require_tool_success "$(call_tool "repo-client" 22 "masc_team_session_stop" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,reason:"repo_done",generate_report:true}')")"
+  mcp_require_tool_ok "$(mcp_call_tool 22 "masc_team_session_stop" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,reason:"repo_done",generate_report:true}')")"
   wait_until_terminal "repo-client" "$team_session_id"
   local prove_raw prove_result
-  prove_raw="$(call_tool "repo-client" 23 "masc_team_session_prove" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,generate_report_if_missing:true}')")"
-  require_tool_success "$prove_raw"
-  prove_result="$(printf '%s' "$prove_raw" | extract_tool_result)"
+  prove_raw="$(mcp_call_tool 23 "masc_team_session_prove" "$(jq -cn --arg s "$team_session_id" '{session_id:$s,generate_report_if_missing:true}')")"
+  mcp_require_tool_ok "$prove_raw"
+  prove_result="$(printf '%s' "$prove_raw" | mcp_extract_result)"
   printf '%s' "$prove_result" | jq -e '.proof.verdict == "proved"' >/dev/null
   printf '%s' "$prove_result" | jq -e '.proof.evidence.unique_turn_actors_count >= 3' >/dev/null
   printf '%s' "$prove_result" | jq -e '.proof.evidence.spawn_success_count >= 2' >/dev/null

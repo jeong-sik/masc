@@ -142,8 +142,11 @@ export function handleHarnessSSE(): void {
   const evt = lastEvent.value
   if (!evt) return
   const type = evt.type ?? ''
-  const payload = (evt as unknown as { payload?: Record<string, unknown> }).payload
-  if (!payload) return
+  const rawPayload = (evt as unknown as { payload?: Record<string, unknown> }).payload
+  const payload: Record<string, unknown> =
+    rawPayload && typeof rawPayload === 'object'
+      ? rawPayload
+      : (evt as unknown as Record<string, unknown>)
 
   if (type === 'oas:masc:harness:verdict_recorded') {
     const nextItem: HarnessVerdictItem = {
@@ -223,17 +226,27 @@ export function handleHarnessSSE(): void {
     scheduleHarnessReload()
   }
 
-  if (type === 'oas:masc:harness:handoff') {
+  if (
+    type === 'oas:masc:harness:handoff'
+    || type === 'keeper_handoff'
+    || type === 'masc/keeper_handoff'
+  ) {
     const nextItem: HandoffEvent = {
       timestamp:
         typeof payload.timestamp === 'number'
           ? payload.timestamp
+          : typeof payload.ts_unix === 'number'
+            ? payload.ts_unix
           : Date.now() / 1000,
-      keeper_name: String(payload.keeper_name ?? ''),
-      trace_id: String(payload.trace_id ?? ''),
-      generation: Number(payload.generation ?? 0),
+      keeper_name: String(payload.keeper_name ?? payload.name ?? ''),
+      trace_id: String(payload.trace_id ?? payload.new_trace_id ?? ''),
+      generation: Number(payload.generation ?? payload.from_generation ?? 0),
       next_generation:
-        payload.next_generation == null ? null : Number(payload.next_generation),
+        payload.next_generation != null
+          ? Number(payload.next_generation)
+          : payload.to_generation != null
+            ? Number(payload.to_generation)
+            : null,
       prev_trace_id:
         payload.prev_trace_id == null ? null : String(payload.prev_trace_id),
       new_trace_id:

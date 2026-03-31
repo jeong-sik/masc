@@ -139,7 +139,7 @@ export function PerfSnapshotPanel() {
 
       ${data?.status === 'empty'
         ? html`<div class="rounded-xl border border-card-border/35 bg-black/10 px-3 py-3 text-[12px] text-[var(--text-muted)]">
-            benchmark artifact가 아직 없습니다. `benchmark.sh`를 한 번 돌리면 latest summary와 baseline diff가 여기에 나타납니다.
+            benchmark artifact가 아직 없습니다. <code>benchmark.sh</code>를 한 번 돌리면 latest summary와 baseline diff가 여기에 나타납니다.
           </div>`
         : null}
 

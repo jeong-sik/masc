@@ -6,13 +6,33 @@
 let existing_dir path =
   Sys.file_exists path && Sys.is_directory path
 
-let prompt_markdown_dir_candidates ~workspace_path:_ ~base_path:_ =
-  [ Config_dir_resolver.prompts_dir () ]
+let dedupe_preserving_order items =
+  let seen = Hashtbl.create (List.length items) in
+  List.filter
+    (fun item ->
+      if Hashtbl.mem seen item then
+        false
+      else (
+        Hashtbl.add seen item ();
+        true))
+    items
+
+let prompt_markdown_dir_candidates ~workspace_path ~base_path =
+  dedupe_preserving_order
+    [
+      Filename.concat workspace_path "config/prompts";
+      Filename.concat base_path "config/prompts";
+      Filename.concat (Sys.getcwd ()) "config/prompts";
+      Config_dir_resolver.prompts_dir ();
+    ]
 
 let resolve_prompt_markdown_dir ~workspace_path ~base_path =
-  ignore workspace_path;
-  ignore base_path;
-  Config_dir_resolver.prompts_dir ()
+  match
+    List.find_opt existing_dir
+      (prompt_markdown_dir_candidates ~workspace_path ~base_path)
+  with
+  | Some dir -> dir
+  | None -> Config_dir_resolver.prompts_dir ()
 
 let bootstrapped_signature : (string * string) option ref = ref None
 

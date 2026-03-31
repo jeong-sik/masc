@@ -93,6 +93,6 @@ let oas_tool_of_masc ~name ~description ~input_schema
     to_oas_tool_result (success, msg)
   in
   let descriptor : Agent_sdk.Tool.descriptor =
-    { kind = None; mutation_class = None; shell = None; notes = []; examples = [] }
+    { kind = None; shell = None; notes = []; examples = [] }
   in
   Agent_sdk.Tool.create ~descriptor ~name ~description ~parameters oas_handler

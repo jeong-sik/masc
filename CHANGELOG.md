@@ -1,6 +1,22 @@
 # Changelog
 
 
+## [2.189.0] - 2026-03-31
+
+### Added
+- **Dashboard feature flags nav** — expose ghost FeatureHealth widget in lab navigation (#4146).
+- **Dashboard tab visit counter** — localStorage-based tab/section visit metrics (#4150).
+- **Transport health on config page** — TransportHealthPanel added to Lab > Config (#4149).
+
+### Changed
+- **Dashboard widget dedup** — remove duplicate connection status and counter chips from sidebar and live monitor (#4147, #4148).
+
+### Fixed
+- **Keeper tool_access validation** — validate tool_access.tools field type (#4165).
+- **Keeper JSON envelope** — embed change_block inside JSON envelope (#4161).
+- **TUI legacy decode** — make legacy keeper fields optional in decode_keeper (#4158).
+- **Harness script migration** — migrate last two scripts off direct jsonrpc_sse (#4162).
+
 ## [2.188.0] - 2026-03-31
 
 ### Added

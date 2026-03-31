@@ -40,9 +40,31 @@ let is_binary_file path =
 (* Security: Check file size limit (500KB) *)
 let max_file_size = 500 * 1024
 
-(* Security: Validate path is within git root *)
+(* Security: Normalize path by resolving . and .. segments.
+   Returns a clean absolute path with no traversal components. *)
+let normalize_path path =
+  let parts = String.split_on_char '/' path in
+  let is_absolute = String.length path > 0 && path.[0] = '/' in
+  let rec resolve acc = function
+    | [] -> List.rev acc
+    | ("." | "") :: rest -> resolve acc rest
+    | ".." :: rest ->
+      (match acc with
+       | [] -> resolve [] rest
+       | _ :: tl -> resolve tl rest)
+    | seg :: rest -> resolve (seg :: acc) rest
+  in
+  let resolved = resolve [] parts in
+  let joined = String.concat "/" resolved in
+  if is_absolute then "/" ^ joined else joined
+
+(* Security: Validate path is within git root.
+   Uses canonical path resolution to prevent .. traversal attacks. *)
 let validate_path config path =
   try
+    if String.contains path '\x00' then
+      Error (IoError "Path contains null byte")
+    else
     let git_root = match Room_git.git_root ~base_path:config.Room.base_path with
       | None -> raise (Invalid_argument "Not in a git repository")
       | Some root -> root
@@ -53,9 +75,11 @@ let validate_path config path =
       else
         path
     in
-    (* Simple path traversal check *)
-    if String.starts_with ~prefix:git_root absolute_path then
-      Ok absolute_path
+    let canonical = normalize_path absolute_path in
+    let canonical_root = normalize_path git_root in
+    if String.starts_with ~prefix:(canonical_root ^ "/") canonical
+       || String.equal canonical canonical_root then
+      Ok canonical
     else
       Error (IoError "Path traversal detected: access outside git root")
   with

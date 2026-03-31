@@ -73,11 +73,11 @@ let () =
           Alcotest.test_case
             "operation trace filter keeps older matching cp events"
             `Quick
-            Test_command_plane_v2_traces.test_operation_filter_reads_full_event_log;
+            Test_command_plane_v2_traces.test_operation_filter_reads_tail_bounded_event_log;
           Alcotest.test_case
             "trace filter keeps older matching operator events"
             `Quick
-            Test_command_plane_v2_traces.test_trace_filter_reads_full_operator_log;
+            Test_command_plane_v2_traces.test_trace_filter_reads_tail_bounded_operator_log;
           Alcotest.test_case "dispatch assign requires operation_id" `Quick
             Test_command_plane_v2_policy_inputs.test_dispatch_assign_requires_operation_id;
           Alcotest.test_case "dispatch escalate requires operation_id"

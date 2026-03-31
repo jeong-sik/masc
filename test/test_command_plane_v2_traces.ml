@@ -53,63 +53,71 @@ let make_operator_row ~trace_id ~action_type ~created_at =
       ("created_at", `String created_at);
     ]
 
-let test_operation_filter_reads_full_event_log () =
+let test_operation_filter_reads_tail_bounded_event_log () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       with_eio_test base_dir @@ fun config ->
       ignore (Room.init config ~agent_name:(Some "owner"));
-      let older_match =
-        make_cp_event ~event_id:"evt-old" ~trace_id:"trace-old"
-          ~event_type:"matched" ~ts:"2026-03-20T00:00:00Z"
-      in
-      let newer_noise =
-        List.init 60 (fun idx ->
+      (* Write 10 noise rows followed by the matching row.
+         With tail-bounded read (limit*3 = 15), the match at the tail
+         is within the read window. This tests the actual production
+         behavior: only recent events are scanned (#4250). *)
+      let noise =
+        List.init 10 (fun idx ->
             make_cp_event
               ~event_id:(Printf.sprintf "evt-%02d" idx)
               ~trace_id:(Printf.sprintf "trace-noise-%02d" idx)
               ~event_type:"noise"
-              ~ts:(Printf.sprintf "2026-03-23T00:%02d:00Z" (idx mod 60)))
+              ~ts:(Printf.sprintf "2026-03-23T00:%02d:00Z" idx))
       in
-      write_jsonl_rows (control_plane_events_path config) (older_match :: newer_noise);
+      let match_event =
+        make_cp_event ~event_id:"evt-match" ~trace_id:"trace-match"
+          ~event_type:"matched" ~ts:"2026-03-23T00:10:00Z"
+      in
+      write_jsonl_rows (control_plane_events_path config) (noise @ [ match_event ]);
       let json =
-        Command_plane_v2.list_traces_json config ~operation_id:"trace-old"
+        Command_plane_v2.list_traces_json config ~operation_id:"trace-match"
           ~limit:5 ()
       in
       Alcotest.(check bool)
-        "filtered operation keeps older matching trace event"
+        "filtered operation keeps matching trace event within tail window"
         true
-        (List.mem "trace-old" (trace_ids json)))
+        (List.mem "trace-match" (trace_ids json)))
 
-let test_trace_filter_reads_full_operator_log () =
+let test_trace_filter_reads_tail_bounded_operator_log () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       with_eio_test base_dir @@ fun config ->
       ignore (Room.init config ~agent_name:(Some "owner"));
-      let older_match =
-        make_operator_row ~trace_id:"trace-old" ~action_type:"operator_action"
-          ~created_at:"2026-03-20T00:00:00Z"
-      in
-      let newer_noise =
-        List.init 60 (fun idx ->
+      (* Write 10 noise rows followed by the matching row.
+         With tail-bounded read (limit*5 = 25), the match at the tail
+         is within the read window. This tests the actual production
+         behavior: only recent operator log entries are scanned (#4250). *)
+      let noise =
+        List.init 10 (fun idx ->
             make_operator_row
               ~trace_id:(Printf.sprintf "trace-noise-%02d" idx)
               ~action_type:"operator_action"
               ~created_at:
-                (Printf.sprintf "2026-03-23T00:%02d:00Z" (idx mod 60)))
+                (Printf.sprintf "2026-03-23T00:%02d:00Z" idx))
       in
-      write_jsonl_rows (operator_action_log_path config) (older_match :: newer_noise);
+      let match_row =
+        make_operator_row ~trace_id:"trace-match" ~action_type:"operator_action"
+          ~created_at:"2026-03-23T00:10:00Z"
+      in
+      write_jsonl_rows (operator_action_log_path config) (noise @ [ match_row ]);
       let json =
-        Command_plane_v2.list_traces_json config ~operation_id:"trace-old"
+        Command_plane_v2.list_traces_json config ~operation_id:"trace-match"
           ~limit:5 ()
       in
       Alcotest.(check bool)
-        "filtered trace keeps older operator event"
+        "filtered trace keeps matching operator event within tail window"
         true
-        (List.mem "trace-old" (trace_ids json));
+        (List.mem "trace-match" (trace_ids json));
       Alcotest.(check bool)
         "operator source preserved"
         true

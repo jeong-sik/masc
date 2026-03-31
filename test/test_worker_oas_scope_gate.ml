@@ -11,6 +11,8 @@ let test_observe_only_denies_masc_mutating () =
   let mutating_tools =
     [ "masc_worktree_create"; "masc_worktree_remove";
       "masc_add_task"; "masc_transition";
+      "masc_complete_task";  (* alias of masc_transition *)
+      "masc_set_current_task";  (* alias of masc_plan_set_task *)
       "masc_operator_action"; "masc_room_delete" ]
   in
   List.iter (fun tool ->

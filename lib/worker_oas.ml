@@ -141,12 +141,16 @@ let code_mutation_denied_tools =
     "masc_code_shell"; "masc_code_git" ]
 
 (* MASC state-mutating tools denied in observe_only scope.
-   Observe_only workers should only read coordination state, not modify it. *)
+   Observe_only workers should only read coordination state, not modify it.
+   Includes SDK aliases (masc_set_current_task, masc_complete_task) to
+   prevent bypass via alias routing. *)
 let masc_mutating_denied_tools =
   [ "masc_add_task"; "masc_claim_next"; "masc_transition";
+    "masc_complete_task";  (* alias of masc_transition *)
     "masc_worktree_create"; "masc_worktree_remove";
     "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
     "masc_plan_set_task"; "masc_plan_clear_task";
+    "masc_set_current_task";  (* alias of masc_plan_set_task *)
     "masc_operator_action"; "masc_operator_confirm";
     "masc_room_delete"; "masc_admin_cleanup"; "masc_admin_reset";
     "masc_gc_force"; "masc_spawn"; "masc_force_leave";

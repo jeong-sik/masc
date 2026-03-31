@@ -57,7 +57,7 @@ let state_health_counters () =
     ("state_update_failures", `Int failures);
     ("failure_rate",
       `Float (if attempts = 0 then 0.0
-              else float_of_int failures /. float_of_int (max 1 attempts)));
+              else float_of_int failures /. float_of_int attempts));
   ]
 
 (** {1 Helpers} *)

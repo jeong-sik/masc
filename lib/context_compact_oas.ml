@@ -260,7 +260,7 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
 let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
   | PruneToolOutputs ->
-    Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 }
+    Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 1500 }
   | MergeContiguous ->
     Agent_sdk.Context_reducer.Merge_contiguous
   | DropLowImportance ->

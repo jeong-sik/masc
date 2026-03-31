@@ -210,6 +210,13 @@ mcp_jsonrpc_call() {
     read -r -a extra_args <<< "${MCP_CURL_EXTRA_ARGS}"
   fi
 
+  # Track cumulative latency across retries so MCP_LAST_TIME_TOTAL
+  # reports wall-clock time including retry delays, not just the last
+  # curl attempt.  See #4164.
+  local _accumulated_time="0"
+  local _wall_start
+  _wall_start="$(date +%s.%N 2>/dev/null || date +%s)"
+
   while :; do
     local body_file stderr_file resp_file
     body_file="$(mcp_mktemp_file "masc-jsonrpc-body" ".json")"
@@ -240,14 +247,22 @@ mcp_jsonrpc_call() {
     cmd+=( --data-binary "@$body_file" )
 
     set +e
-    MCP_LAST_TIME_TOTAL="$("${cmd[@]}" 2>"$stderr_file")"
+    local _attempt_time
+    _attempt_time="$("${cmd[@]}" 2>"$stderr_file")"
     status=$?
     set -e
+    # Accumulate per-attempt curl time_total
+    _accumulated_time="$(awk "BEGIN{printf \"%.6f\", $_accumulated_time + $_attempt_time}")"
+
     stderr_text="$(cat "$stderr_file" 2>/dev/null || true)"
     raw="$(cat "$resp_file" 2>/dev/null || true)"
     rm -f "$body_file" "$stderr_file" "$resp_file"
 
     if [[ "$status" -eq 0 ]]; then
+      # Report wall-clock total (includes retry delays)
+      local _wall_end
+      _wall_end="$(date +%s.%N 2>/dev/null || date +%s)"
+      MCP_LAST_TIME_TOTAL="$(awk "BEGIN{printf \"%.6f\", $_wall_end - $_wall_start}")"
       jsonrpc_normalize_response "$raw" "$id"
       return 0
     fi
@@ -265,6 +280,11 @@ mcp_jsonrpc_call() {
         ;;
     esac
   done
+
+  # On failure, report wall-clock total including retries
+  local _wall_end
+  _wall_end="$(date +%s.%N 2>/dev/null || date +%s)"
+  MCP_LAST_TIME_TOTAL="$(awk "BEGIN{printf \"%.6f\", $_wall_end - $_wall_start}")"
 
   _mcp_build_transport_error \
     "curl failed after ${attempt}/${max_attempts} attempts" \

@@ -97,7 +97,6 @@ type loop_state = {
   start_time : float;
   mutable updated_at : float;
   mutable stopped_at : float option;
-  state_post_id : string;
   execution_mode : execution_mode;
   worker_engine : worker_engine option;
   worker_model : string option;

@@ -178,7 +178,6 @@ let make_legacy_state ?(loop_id = "legacy-mdal-loop")
     start_time = now -. 10.0;
     updated_at = now;
     stopped_at = None;
-    state_post_id = "legacy-post";
     execution_mode = `Manual_only;
     worker_engine = None;
     worker_model = None;

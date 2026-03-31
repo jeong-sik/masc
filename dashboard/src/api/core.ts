@@ -7,7 +7,7 @@ import type {
   OperatorDigest,
   OperatorSnapshot,
 } from '../types'
-import { resolveDashboardActorName } from '../lib/dashboard-actor'
+import { resolveDashboardActorName, sanitizeDashboardActorName } from '../lib/dashboard-actor'
 
 // --- Auth ---
 
@@ -114,7 +114,10 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
 }
 
 export function defaultBoardVoter(): string {
-  return resolveDashboardActorName() || 'dashboard-user'
+  const params = getQueryParams()
+  return sanitizeDashboardActorName(params.get('agent'))
+    || sanitizeDashboardActorName(params.get('agent_name'))
+    || 'dashboard-user'
 }
 
 // --- Generic fetcher ---

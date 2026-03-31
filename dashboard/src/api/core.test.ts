@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { post } from './core'
+import { defaultBoardVoter, post } from './core'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -30,5 +30,12 @@ describe('post', () => {
     const actorHeader = headers['X-MASC-Agent'] ?? headers['x-masc-agent']
     expect(actorHeader).toBe('dashboard-eager-manta')
     expect(actorHeader).not.toContain('%')
+  })
+
+  it('keeps board voter resolution scoped to query params', () => {
+    window.localStorage?.setItem?.('masc_dashboard_agent_name', 'stored-agent')
+    window.history.replaceState({}, '', '/')
+
+    expect(defaultBoardVoter()).toBe('dashboard-user')
   })
 })

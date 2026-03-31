@@ -9,6 +9,8 @@
 : "${HARNESS_LOG_FILE:=}"
 : "${HARNESS_LOG_TAIL_LINES:=120}"
 : "${MCP_CURL_EXTRA_ARGS:=}"
+: "${MCP_PROTOCOL_VERSION:=}"
+MCP_LAST_TIME_TOTAL=""
 
 _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/harness/jsonrpc_sse.sh
@@ -187,6 +189,7 @@ mcp_jsonrpc_call() {
 
   local request_body
   if ! request_body="$(_mcp_build_request_body "$id" "$method" "$params_json" 2>/dev/null)"; then
+    MCP_LAST_TIME_TOTAL=""
     _mcp_build_transport_error \
       "failed to build JSON-RPC request" \
       "$endpoint" \
@@ -208,19 +211,25 @@ mcp_jsonrpc_call() {
   fi
 
   while :; do
-    local body_file stderr_file
+    local body_file stderr_file resp_file
     body_file="$(mcp_mktemp_file "masc-jsonrpc-body" ".json")"
     stderr_file="$(mcp_mktemp_file "masc-jsonrpc-stderr" ".log")"
+    resp_file="$(mcp_mktemp_file "masc-jsonrpc-resp" ".json")"
     printf '%s' "$request_body" >"$body_file"
 
     local -a cmd=(
       curl -sS --max-time "$timeout_sec"
       -X POST "$endpoint"
+      -o "$resp_file"
+      -w '%{time_total}'
       -H 'Content-Type: application/json'
       -H 'Accept: application/json, text/event-stream'
     )
     if [[ -n "$session_id" ]]; then
       cmd+=( -H "Mcp-Session-Id: $session_id" )
+    fi
+    if [[ -n "${MCP_PROTOCOL_VERSION:-}" ]]; then
+      cmd+=( -H "Mcp-Protocol-Version: $MCP_PROTOCOL_VERSION" )
     fi
     if [[ -n "$token" ]]; then
       cmd+=( -H "Authorization: Bearer $token" )
@@ -231,11 +240,12 @@ mcp_jsonrpc_call() {
     cmd+=( --data-binary "@$body_file" )
 
     set +e
-    raw="$("${cmd[@]}" 2>"$stderr_file")"
+    MCP_LAST_TIME_TOTAL="$("${cmd[@]}" 2>"$stderr_file")"
     status=$?
     set -e
     stderr_text="$(cat "$stderr_file" 2>/dev/null || true)"
-    rm -f "$body_file" "$stderr_file"
+    raw="$(cat "$resp_file" 2>/dev/null || true)"
+    rm -f "$body_file" "$stderr_file" "$resp_file"
 
     if [[ "$status" -eq 0 ]]; then
       jsonrpc_normalize_response "$raw" "$id"

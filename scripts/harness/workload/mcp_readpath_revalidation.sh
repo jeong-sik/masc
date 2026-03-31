@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-source "$REPO_ROOT/scripts/harness/jsonrpc_sse.sh"
+source "$REPO_ROOT/scripts/harness/lib/mcp_jsonrpc.sh"
 source "$REPO_ROOT/scripts/harness/lib/server_bootstrap.sh"
 
 RUN_ID="${RUN_ID:-mcp-readpath-$(date +%Y%m%d_%H%M%S)-$$}"
@@ -180,30 +180,24 @@ call_tool() {
   local request_id="$4"
   local tool_name="$5"
   local args_json="$6"
-  local headers_file body_file raw response
-  local -a curl_headers
 
-  headers_file="$(harness_mktemp_file mcp-call .headers)"
-  body_file="$(harness_mktemp_file mcp-call .body)"
-  curl_headers=(
-    -H 'Content-Type: application/json'
-    -H 'Accept: application/json, text/event-stream'
-    -H "Mcp-Session-Id: $session_id"
-  )
-  if [[ -n "$protocol_version" ]]; then
-    curl_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
+  local saved_timeout="${HTTP_TIMEOUT_SEC:-}" saved_proto="${MCP_PROTOCOL_VERSION:-}"
+  HTTP_TIMEOUT_SEC="$TOOL_TIMEOUT_SEC"
+  MCP_PROTOCOL_VERSION="$protocol_version"
+  local response
+  response="$(mcp_call_tool "$request_id" "$tool_name" "$args_json" "$session_id" "" "$mcp_url")"
+  HTTP_TIMEOUT_SEC="${saved_timeout:-$CURL_TIMEOUT_SEC}"
+  MCP_PROTOCOL_VERSION="$saved_proto"
+
+  LAST_TIME_TOTAL="$MCP_LAST_TIME_TOTAL"
+  LAST_RESPONSE="$response"
+
+  if printf '%s' "$response" | jq -e '._harness_error? != null' >/dev/null 2>&1; then
+    LAST_TEXT=""
+    LAST_ERROR="$(printf '%s' "$response" | jq -r '._harness_error.message // "transport error"')"
+    return 1
   fi
 
-  LAST_TIME_TOTAL="$(
-    curl -sS --max-time "$TOOL_TIMEOUT_SEC" -D "$headers_file" -o "$body_file" \
-      -w '%{time_total}' \
-      -X POST "$mcp_url" \
-      "${curl_headers[@]}" \
-      -d "{\"jsonrpc\":\"2.0\",\"id\":${request_id},\"method\":\"tools/call\",\"params\":{\"name\":\"${tool_name}\",\"arguments\":${args_json}}}"
-  )"
-  raw="$(cat "$body_file")"
-  response="$(jsonrpc_normalize_response "$raw" "$request_id")"
-  LAST_RESPONSE="$response"
   LAST_TEXT="$(printf '%s' "$response" | jq -r '[.result.content[]? | select(.type == "text") | .text] | join("\n")' 2>/dev/null || true)"
   LAST_ERROR="$(printf '%s' "$response" | jq -r '
     if .error?.message then .error.message
@@ -211,7 +205,6 @@ call_tool() {
       ([.result.content[]? | select(.type == "text") | .text] | join(" "))
     else "" end
   ' 2>/dev/null || true)"
-  rm -f "$headers_file" "$body_file"
   [[ -z "$LAST_ERROR" ]]
 }
 

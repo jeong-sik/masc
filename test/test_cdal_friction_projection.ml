@@ -40,6 +40,7 @@ let make_proof
     result_status = Completed;
     started_at = 1000.0;
     ended_at = 1001.0;
+    scope = None;
   }
 
 let setup_store () =
@@ -368,6 +369,143 @@ let test_path_traversal_rejected () =
     Alcotest.fail (Printf.sprintf "should reject, got Ok: %s" path)
 
 (* ================================================================ *)
+(* Cross-run window tests                                            *)
+(* ================================================================ *)
+
+let make_proof_with_scope
+    ?(run_id = "cr-001")
+    ?(raw_evidence_refs = [])
+    ?(ended_at = 1001.0)
+    ?(scope = None)
+    () : Agent_sdk.Cdal_proof.t =
+  {
+    schema_version = Agent_sdk.Cdal_proof.schema_version_current;
+    run_id;
+    contract_id = "md5:test";
+    requested_execution_mode = Execute;
+    effective_execution_mode = Execute;
+    mode_decision_source = "passthrough";
+    risk_class = Agent_sdk.Risk_class.Low;
+    provider_snapshot = {
+      provider_name = "test"; model_id = "test-model"; api_version = None;
+    };
+    capability_snapshot = {
+      tools = ["read"]; mcp_servers = []; max_turns = 10;
+      max_tokens = Some 4096; thinking_enabled = None;
+    };
+    tool_trace_refs = [];
+    raw_evidence_refs;
+    checkpoint_ref = None;
+    result_status = Completed;
+    started_at = ended_at -. 1.0;
+    ended_at;
+    scope;
+  }
+
+let test_project_window_single_run () =
+  let store, _dir = setup_store () in
+  let run_id = "cr-single-001" in
+  let ref_ = make_ref ~run_id in
+  let violations = `List [
+    make_violation ~tool_name:"fs_edit"
+      ~violation_kind:"mutating_in_diagnose"
+      ~effective_mode:"diagnose";
+  ] in
+  write_violations_file store ~run_id violations;
+  let proof = make_proof_with_scope ~run_id ~raw_evidence_refs:[ref_] () in
+  match CFP.project_window ~store ~window:CFP.Single_run [proof] with
+  | None -> Alcotest.fail "expected Some"
+  | Some fp ->
+    Alcotest.(check string) "window" "single_run" fp.window;
+    Alcotest.(check int) "blocked" 1 fp.blocked_attempt_count
+
+let test_project_window_last_n_runs () =
+  let store, _dir = setup_store () in
+  (* 3 runs, each with 2 violations of the same type *)
+  let proofs = List.init 3 (fun i ->
+    let run_id = Printf.sprintf "cr-last-%d" i in
+    let ref_ = make_ref ~run_id in
+    let violations = `List [
+      make_violation ~tool_name:"fs_edit"
+        ~violation_kind:"mutating_in_diagnose"
+        ~effective_mode:"diagnose";
+      make_violation ~tool_name:"fs_edit"
+        ~violation_kind:"mutating_in_diagnose"
+        ~effective_mode:"diagnose";
+    ] in
+    write_violations_file store ~run_id violations;
+    make_proof_with_scope ~run_id ~raw_evidence_refs:[ref_]
+      ~ended_at:(1000.0 +. Float.of_int i) ()
+  ) in
+  match CFP.project_window ~store
+          ~window:(CFP.Last_n_runs 3) proofs with
+  | None -> Alcotest.fail "expected Some for cross-run"
+  | Some fp ->
+    Alcotest.(check string) "window" "last_3_runs" fp.window;
+    Alcotest.(check int) "3 run ids" 3 (List.length fp.based_on_run_ids);
+    (* 3 runs x 2 violations = 6 total, all same group *)
+    Alcotest.(check int) "blocked_attempt_count" 6 fp.blocked_attempt_count;
+    Alcotest.(check int) "1 merged group" 1
+      (List.length fp.blocked_attempt_groups)
+
+let test_project_window_tripwire_cross_run () =
+  let store, _dir = setup_store () in
+  (* 5 runs, each with 2 violations — total 10, threshold 5 should trip *)
+  let proofs = List.init 5 (fun i ->
+    let run_id = Printf.sprintf "cr-tw-%d" i in
+    let ref_ = make_ref ~run_id in
+    let violations = `List [
+      make_violation ~tool_name:"fs_edit"
+        ~violation_kind:"mutating_in_diagnose"
+        ~effective_mode:"diagnose";
+      make_violation ~tool_name:"fs_edit"
+        ~violation_kind:"mutating_in_diagnose"
+        ~effective_mode:"diagnose";
+    ] in
+    write_violations_file store ~run_id violations;
+    make_proof_with_scope ~run_id ~raw_evidence_refs:[ref_]
+      ~ended_at:(1000.0 +. Float.of_int i) ()
+  ) in
+  match CFP.project_window ~store
+          ~window:(CFP.Last_n_runs 5)
+          ~tripwire_threshold:5 proofs with
+  | None -> Alcotest.fail "expected Some"
+  | Some fp ->
+    Alcotest.(check bool) "tripwire fires" true
+      (List.length fp.review_tripwires > 0);
+    Alcotest.(check int) "10 total" 10 fp.blocked_attempt_count
+
+let test_project_window_empty () =
+  let store, _dir = setup_store () in
+  match CFP.project_window ~store ~window:(CFP.Last_n_runs 3) [] with
+  | None -> ()
+  | Some _ -> Alcotest.fail "expected None for empty proofs"
+
+let test_basis_hash_deterministic () =
+  let h1 = CFP.compute_window_basis_hash
+    ~window:(CFP.Last_n_runs 3) ~run_ids:["a"; "b"; "c"] in
+  let h2 = CFP.compute_window_basis_hash
+    ~window:(CFP.Last_n_runs 3) ~run_ids:["c"; "a"; "b"] in
+  Alcotest.(check string) "same hash regardless of order" h1 h2
+
+let test_basis_hash_changes_with_window () =
+  let h1 = CFP.compute_window_basis_hash
+    ~window:(CFP.Last_n_runs 3) ~run_ids:["a"] in
+  let h2 = CFP.compute_window_basis_hash
+    ~window:(CFP.Last_n_runs 5) ~run_ids:["a"] in
+  Alcotest.(check bool) "different window = different hash" true (h1 <> h2)
+
+let test_window_to_string () =
+  Alcotest.(check string) "single" "single_run"
+    (CFP.window_to_string CFP.Single_run);
+  Alcotest.(check string) "last 5" "last_5_runs"
+    (CFP.window_to_string (CFP.Last_n_runs 5));
+  Alcotest.(check string) "session" "session:abc"
+    (CFP.window_to_string (CFP.Session "abc"));
+  Alcotest.(check string) "rolling" "rolling_3600s"
+    (CFP.window_to_string (CFP.Rolling_seconds 3600.0))
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -398,5 +536,21 @@ let () =
          test_tripwire_below_threshold;
        Alcotest.test_case "path traversal rejected" `Quick
          test_path_traversal_rejected;
+     ]);
+    ("cross_run", [
+       Alcotest.test_case "single run via project_window" `Quick
+         test_project_window_single_run;
+       Alcotest.test_case "last_n_runs aggregation" `Quick
+         test_project_window_last_n_runs;
+       Alcotest.test_case "cross-run tripwire" `Quick
+         test_project_window_tripwire_cross_run;
+       Alcotest.test_case "empty proofs" `Quick
+         test_project_window_empty;
+       Alcotest.test_case "basis hash deterministic" `Quick
+         test_basis_hash_deterministic;
+       Alcotest.test_case "basis hash changes with window" `Quick
+         test_basis_hash_changes_with_window;
+       Alcotest.test_case "window_to_string" `Quick
+         test_window_to_string;
      ]);
   ]

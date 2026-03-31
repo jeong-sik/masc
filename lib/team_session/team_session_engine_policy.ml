@@ -145,6 +145,61 @@ let maybe_add_fallback_task ~(config : Room.config)
       updated_at_iso = now_iso ();
     }
 
+(** Classify task decomposability from planned workers.
+    Returns (classification, human-readable reason). *)
+let classify_decomposability
+    ~(orchestration_mode : Team_session_types.orchestration_mode)
+    ~(planned_workers : Team_session_types.planned_worker list) :
+    Team_session_types.decomposability * string =
+  (* Manual mode: user explicitly configured workers, skip gate *)
+  if orchestration_mode = Team_session_types.Manual then
+    (Team_session_types.Decomposability_high, "manual orchestration — gate skipped")
+  else
+    let n = List.length planned_workers in
+    if n <= 1 then
+      (Team_session_types.Decomposability_low,
+       Printf.sprintf "single planned worker (n=%d)" n)
+    else
+      let classes =
+        List.filter_map
+          (fun (pw : Team_session_types.planned_worker) -> pw.worker_class)
+          planned_workers
+      in
+      let profiles =
+        List.filter_map
+          (fun (pw : Team_session_types.planned_worker) -> pw.task_profile)
+          planned_workers
+      in
+      (* Manager + Executor only → sequential dependency chain *)
+      let only_manager_executor =
+        classes <> [] &&
+        List.for_all
+          (fun c ->
+            c = Team_session_types.Worker_manager
+            || c = Team_session_types.Worker_executor)
+          classes
+      in
+      (* High-coupling profiles: synthesize, decide *)
+      let has_high_coupling =
+        List.exists
+          (fun p ->
+            p = Team_session_types.Profile_synthesize
+            || p = Team_session_types.Profile_decide)
+          profiles
+      in
+      if only_manager_executor then
+        (Team_session_types.Decomposability_low,
+         "all workers are manager/executor — sequential dependency")
+      else if has_high_coupling && n <= 2 then
+        (Team_session_types.Decomposability_low,
+         "high-coupling profiles (synthesize/decide) with few workers")
+      else if has_high_coupling then
+        (Team_session_types.Decomposability_medium,
+         "high-coupling profiles present but sufficient worker count")
+      else
+        (Team_session_types.Decomposability_high,
+         Printf.sprintf "independent subtasks (n=%d)" n)
+
 let apply_runtime_policy ~(config : Room.config)
     (session : Team_session_types.session) : Team_session_types.session =
   let session =

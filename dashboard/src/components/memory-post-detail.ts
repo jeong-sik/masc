@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
@@ -173,9 +173,11 @@ function CommentForm({ postId }: { postId: string }) {
 
 // ── Post detail view ───────────────────────────────────────────────
 export function PostDetail({ post }: { post: BoardPost }) {
-  if (detailPostId.value !== post.id && !detailLoading.value) {
-    loadPostDetail(post.id)
-  }
+  useEffect(() => {
+    if (detailPostId.value !== post.id) {
+      loadPostDetail(post.id)
+    }
+  }, [post.id])
 
   const handleVote = async (dir: 'up' | 'down') => {
     try {

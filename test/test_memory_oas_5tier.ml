@@ -380,13 +380,6 @@ let test_jsonl_backend_uses_explicit_base_dir () =
   Alcotest.(check bool) "writes under explicit base_dir" true (Sys.file_exists expected_path);
   cleanup_tmp_dir dir
 
-let test_seed_memory_bank_legacy_noop () =
-  let dir = setup_tmp_dir () in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-bank" () in
-  let count = Memory_oas_bridge.seed_memory_bank ~memory ~agent_name:"test-bank" ~limit:10 in
-  Alcotest.(check int) "seed_memory_bank returns 0" 0 count;
-  cleanup_tmp_dir dir
-
 let test_seed_episodes_loads_recent_jsonl () =
   let dir = setup_tmp_dir () in
   let first =
@@ -523,8 +516,6 @@ let () =
       Alcotest.test_case "query returns empty" `Quick test_jsonl_backend_query;
       Alcotest.test_case "uses explicit base_dir" `Quick
         test_jsonl_backend_uses_explicit_base_dir;
-      Alcotest.test_case "seed_memory_bank legacy noop" `Quick
-        test_seed_memory_bank_legacy_noop;
       Alcotest.test_case "seed_episodes loads recent jsonl" `Quick
         test_seed_episodes_loads_recent_jsonl;
       Alcotest.test_case "seed_episodes respects limit" `Quick

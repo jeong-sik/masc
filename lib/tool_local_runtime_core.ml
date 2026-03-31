@@ -33,20 +33,14 @@ let json_error message =
 let json_ok fields =
   Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
 
-let int_opt_to_json = function Some value -> `Int value | None -> `Null
-let string_opt_to_json = function Some value -> `String value | None -> `Null
-let float_opt_to_json = function Some value -> `Float value | None -> `Null
+let int_opt_to_json = Json_util.int_opt_to_json
+let string_opt_to_json = Json_util.string_opt_to_json
+let float_opt_to_json = Json_util.float_opt_to_json
 
 let parse_int_opt value =
   try Some (int_of_string (String.trim value)) with Failure _ -> None
 
-let unique_preserve_order items =
-  let rec loop seen = function
-    | [] -> List.rev seen
-    | x :: xs ->
-        if List.mem x seen then loop seen xs else loop (x :: seen) xs
-  in
-  loop [] items
+let unique_preserve_order = Json_util.dedupe_keep_order
 
 let split_ws text =
   text

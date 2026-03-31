@@ -7,16 +7,7 @@
 
 open Types
 
-let unique_preserve_order items =
-  let rec loop seen rev_items = function
-    | [] -> List.rev rev_items
-    | x :: xs ->
-        if List.mem x seen then
-          loop seen rev_items xs
-        else
-          loop (x :: seen) (x :: rev_items) xs
-  in
-  loop [] [] items
+let unique_preserve_order = Json_util.dedupe_keep_order
 
 let dedupe_schemas (schemas : Types.tool_schema list) =
   let seen = Hashtbl.create (List.length schemas) in

@@ -2,6 +2,9 @@
 
 open Alcotest
 
+let yojson = testable (fun fmt v -> Format.pp_print_string fmt (Yojson.Safe.to_string v))
+  (fun a b -> Yojson.Safe.equal a b)
+
 (* ================================================================
    Test data
    ================================================================ *)
@@ -352,5 +355,39 @@ let () =
       test_case "get_int" `Quick test_empty_obj_get_int;
       test_case "get_float" `Quick test_empty_obj_get_float;
       test_case "get_bool" `Quick test_empty_obj_get_bool;
+    ];
+    "option_to_yojson", [
+      test_case "some" `Quick (fun () ->
+        let result = Json_util.option_to_yojson (fun s -> `String s) (Some "x") in
+        check yojson "Some wraps" (`String "x") result);
+      test_case "none" `Quick (fun () ->
+        let result = Json_util.option_to_yojson (fun s -> `String s) None in
+        check yojson "None -> Null" `Null result);
+    ];
+    "int_opt_to_json", [
+      test_case "some" `Quick (fun () ->
+        check yojson "Some 42" (`Int 42) (Json_util.int_opt_to_json (Some 42)));
+      test_case "none" `Quick (fun () ->
+        check yojson "None" `Null (Json_util.int_opt_to_json None));
+    ];
+    "string_opt_to_json", [
+      test_case "some" `Quick (fun () ->
+        check yojson "Some s" (`String "hi") (Json_util.string_opt_to_json (Some "hi")));
+      test_case "none" `Quick (fun () ->
+        check yojson "None" `Null (Json_util.string_opt_to_json None));
+    ];
+    "float_opt_to_json", [
+      test_case "some" `Quick (fun () ->
+        check yojson "Some f" (`Float 3.14) (Json_util.float_opt_to_json (Some 3.14)));
+      test_case "none" `Quick (fun () ->
+        check yojson "None" `Null (Json_util.float_opt_to_json None));
+    ];
+    "bool_opt_to_json", [
+      test_case "some true" `Quick (fun () ->
+        check yojson "Some true" (`Bool true) (Json_util.bool_opt_to_json (Some true)));
+      test_case "some false" `Quick (fun () ->
+        check yojson "Some false" (`Bool false) (Json_util.bool_opt_to_json (Some false)));
+      test_case "none" `Quick (fun () ->
+        check yojson "None" `Null (Json_util.bool_opt_to_json None));
     ];
   ]

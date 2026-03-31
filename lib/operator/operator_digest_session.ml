@@ -464,7 +464,7 @@ let session_recommendations ~(session : Team_session_types.session)
                      severity = item.severity;
                      reason = item.summary;
                    suggested_payload =
-                       spawn_batch_stub_of_cards no_turn_worker_cards;
+                       spawn_batch_template_of_cards no_turn_worker_cards;
                    }
            | "local64_role_gap" ->
 	               let missing_roles =

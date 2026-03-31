@@ -95,15 +95,11 @@ val metadata_to_fields : string -> (string * Yojson.Safe.t) list
 val public_contract_fields : string -> (string * Yojson.Safe.t) list
 (** Minimal metadata for public contract responses. *)
 
-(** {1 Hidden placeholder tools} *)
-
 val explicit_metadata : (string * metadata) list
 (** Explicitly configured tool metadata entries (for test verification). *)
 
 val deprecated_tool_entries : (string * metadata) list
 (** Precomputed subset of [explicit_metadata] where lifecycle = Deprecated. *)
-
-val hidden_placeholder_tools : unit -> string list
 
 val implementation_allows_public_visibility : implementation_status -> bool
 (** [true] when an implementation status permits public surface listing. *)

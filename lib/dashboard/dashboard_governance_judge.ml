@@ -61,7 +61,7 @@ let iso_of_unix = Dashboard_utils.iso_of_unix
 let parse_iso_opt = Dashboard_utils.parse_iso_opt
 
 let now_iso () = Types.now_iso ()
-let option_to_yojson f = function Some value -> f value | None -> `Null
+let option_to_yojson = Json_util.option_to_yojson
 
 let interval_sec () = Env_config.Dashboard_config.governance_judge_interval_sec
 

@@ -267,6 +267,33 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
       ("judge_online", `Bool false);
     ], false)
 
+let slot_monitoring_json () : Yojson.Safe.t =
+  try
+    let idle = Discovery_cache.idle_slot_count () in
+    let busy = Discovery_cache.busy_slot_count () in
+    let total = idle + busy in
+    let endpoints = Discovery_cache.get_cached_or_refresh () in
+    `Assoc [
+      ("idle", `Int idle);
+      ("busy", `Int busy);
+      ("total", `Int total);
+      ("utilization",
+        `Float (if total > 0
+                then float_of_int busy /. float_of_int total
+                else 0.0));
+      ("cache_age_s", `Float (Discovery_cache.cache_age_seconds ()));
+      ("endpoints", `List (List.map Discovery_cache.endpoint_to_json endpoints));
+    ]
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ ->
+    `Assoc [
+      ("idle", `Int 0); ("busy", `Int 0); ("total", `Int 0);
+      ("utilization", `Float 0.0);
+      ("cache_age_s", `Float 0.0);
+      ("endpoints", `List []);
+    ]
+
 let executor_outcomes_json (config : Room.config) : Yojson.Safe.t =
   try
     let since = Time_compat.now () -. 86400.0 in

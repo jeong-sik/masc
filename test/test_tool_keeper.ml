@@ -704,143 +704,9 @@ let test_keeper_fs_edit_enforces_allowed_paths_and_modes () =
       check bool "fs_edit invalid mode rejected" true
         (contains_substring invalid_mode_error "unsupported_mode:invalid"))
 
-let test_keeper_and_persistent_agent_lists_split () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_dir)
-    (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
-      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
-      in
-      let dispatch name args =
-        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-        | Some result -> result
-        | None -> fail ("missing dispatch for " ^ name)
-      in
-      Fun.protect
-        ~finally:(fun () ->
-          Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
-          Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo")
-        (fun () ->
-          let ok, keeper_up_body =
-            dispatch "masc_keeper_up"
-              (`Assoc
-                [
-                  ("name", `String "keeper-demo");
-                  ("goal", `String "Stay available");
-                  ("proactive_enabled", `Bool false);
-                ])
-          in
-          if not ok then fail keeper_up_body;
-          check bool "keeper up" true ok;
-          let ok, persistent_up_body =
-            dispatch "masc_persistent_agent_up"
-              (`Assoc
-                [
-                  ("name", `String "persistent-demo");
-                  ("goal", `String "Stay on demand");
-                  ("proactive_enabled", `Bool false);
-                ])
-          in
-          if not ok then fail persistent_up_body;
-          check bool "persistent agent up" true ok;
-          Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
-          Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
-          let ok, keeper_body =
-            dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool false) ])
-          in
-          check bool "keeper list ok" true ok;
-          let keeper_json = Yojson.Safe.from_string keeper_body in
-          check bool "keeper listed" true
-            Yojson.Safe.Util.(
-              keeper_json |> member "keepers" |> to_list
-              |> List.exists (( = ) (`String "keeper-demo")));
-          check bool "second keeper also visible" true
-            Yojson.Safe.Util.(
-              keeper_json |> member "keepers" |> to_list
-              |> List.exists (( = ) (`String "persistent-demo")));
-          let ok, persistent_body =
-            dispatch "masc_persistent_agent_list" (`Assoc [ ("detailed", `Bool false) ])
-          in
-          check bool "persistent list ok" true ok;
-          let persistent_json = Yojson.Safe.from_string persistent_body in
-          check bool "persistent listed" true
-            Yojson.Safe.Util.(
-              persistent_json |> member "persistent_agents" |> to_list
-              |> List.exists (( = ) (`String "persistent-demo")))))
-
-let test_keeper_and_persistent_detailed_lists_annotate_runtime_class () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
-      Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
-      rm_rf base_dir)
-    (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
-      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
-      in
-      let dispatch name args =
-        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-        | Some result -> result
-        | None -> fail ("missing dispatch for " ^ name)
-      in
-      let ok, _ =
-        dispatch "masc_keeper_up"
-          (`Assoc
-            [
-              ("name", `String "keeper-demo");
-              ("goal", `String "Stay available");
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "keeper up ok" true ok;
-      let ok, _ =
-        dispatch "masc_persistent_agent_up"
-          (`Assoc
-            [
-              ("name", `String "persistent-demo");
-              ("goal", `String "Stay on demand");
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "persistent up ok" true ok;
-      let ok, keeper_body =
-        dispatch "masc_keeper_list" (`Assoc [ ("detailed", `Bool true) ])
-      in
-      check bool "keeper detailed list ok" true ok;
-      let keeper_json = parse_json_exn keeper_body in
-      let keeper_row =
-        Yojson.Safe.Util.(
-          keeper_json |> member "keepers" |> to_list
-          |> List.find (fun row -> member "meta" row |> member "name" = `String "keeper-demo"))
-      in
-      check string "keeper runtime_class" "keeper"
-        Yojson.Safe.Util.(keeper_row |> member "runtime_class" |> to_string);
-      check bool "keeper omits desired_keepalive" true
-        Yojson.Safe.Util.(keeper_row |> member "desired_keepalive" = `Null);
-      let ok, persistent_body =
-        dispatch "masc_persistent_agent_list" (`Assoc [ ("detailed", `Bool true) ])
-      in
-      check bool "persistent detailed list ok" true ok;
-      let persistent_json = parse_json_exn persistent_body in
-      let persistent_row =
-        Yojson.Safe.Util.(
-          persistent_json |> member "persistent_agents" |> to_list
-          |> List.find (fun row -> member "meta" row |> member "name" = `String "persistent-demo"))
-      in
-      check string "persistent runtime_class" "keeper"
-        Yojson.Safe.Util.(persistent_row |> member "runtime_class" |> to_string);
-      check bool "persistent omits desired_keepalive" true
-        Yojson.Safe.Util.(persistent_row |> member "desired_keepalive" = `Null))
+(* test_keeper_and_persistent_agent_lists_split and
+   test_keeper_and_persistent_detailed_lists_annotate_runtime_class removed:
+   persistent_agent_* dispatch aliases deleted. *)
 
 let test_keeper_list_items_expose_runtime_config_summary () =
   Eio_main.run @@ fun env ->
@@ -1011,45 +877,8 @@ let test_keeper_msg_missing_keeper_fails_without_bootstrap () =
          | Ok (Some _) -> true
          | _ -> false))
 
-let test_persistent_agent_msg_rejects_missing_message () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
-      rm_rf base_dir)
-    (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
-      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
-        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
-      in
-      let dispatch name args =
-        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-        | Some result -> result
-        | None -> fail ("missing dispatch for " ^ name)
-      in
-      let ok, _ =
-        dispatch "masc_persistent_agent_up"
-          (`Assoc
-            [
-              ("name", `String "persistent-demo");
-              ("goal", `String "Stay on demand");
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "persistent up ok" true ok;
-      let ok, body =
-        dispatch "masc_persistent_agent_msg"
-          (`Assoc [ ("name", `String "persistent-demo") ])
-      in
-      check bool "missing message rejected" false ok;
-      check bool "error mentions message" true
-        (contains_substring body "message is required"))
-
-(* test_persistent_agent_create_from_persona_and_status removed:
-   persona concept deleted. *)
+(* test_persistent_agent_msg_rejects_missing_message removed:
+   persistent_agent_* dispatch aliases deleted. *)
 
 let test_keeper_dispatch_auxiliary_surfaces_smoke () =
   Eio_main.run @@ fun env ->
@@ -1058,7 +887,6 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
   Fun.protect
     ~finally:(fun () ->
       Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
-      Masc_mcp.Keeper_keepalive.stop_keepalive "persistent-demo";
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -1081,16 +909,6 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
             ])
       in
       check bool "keeper up ok" true ok;
-      let ok, _ =
-        dispatch "masc_persistent_agent_up"
-          (`Assoc
-            [
-              ("name", `String "persistent-demo");
-              ("goal", `String "Stay on demand");
-              ("proactive_enabled", `Bool false);
-            ])
-      in
-      check bool "persistent up ok" true ok;
       let ok, trajectory_body =
         dispatch "masc_keeper_trajectory"
           (`Assoc [ ("name", `String "keeper-demo"); ("limit", `Int 5) ])
@@ -1102,39 +920,6 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
       in
       check bool "keeper eval ok" true ok;
       check bool "eval body non-empty" true (String.length eval_body > 0);
-      (match
-         Masc_mcp.Tool_keeper.dispatch keeper_ctx
-           ~name:"masc_persistent_agent_model_set"
-           ~args:
-             (`Assoc
-               [
-                 ("name", `String "persistent-demo");
-                 ("model", `String "custom:alt-model");
-               ])
-       with
-      | None -> ()
-      | Some _ -> fail "masc_persistent_agent_model_set should be removed");
-      let ok, persistent_status_body =
-        dispatch "masc_persistent_agent_status"
-          (`Assoc
-            [
-              (* The persistent-agent alias should still surface keeper metadata
-                 when querying an always-on keeper through the persistent wrapper. *)
-              ("name", `String "keeper-demo");
-              ("fast", `Bool true);
-              ("include_context", `Bool false);
-              ("include_metrics_overview", `Bool false);
-              ("include_memory_bank", `Bool false);
-              ("include_history_tail", `Bool false);
-              ("include_compaction_history", `Bool false);
-            ])
-      in
-      check bool "persistent alias status ok" true ok;
-      let persistent_status_json = parse_json_exn persistent_status_body in
-      check string "persistent alias runtime_class" "keeper"
-        Yojson.Safe.Util.(persistent_status_json |> member "runtime_class" |> to_string);
-      check bool "persistent alias omits desired_keepalive" true
-        Yojson.Safe.Util.(persistent_status_json |> member "desired_keepalive" = `Null);
       let ok, _ =
         dispatch "masc_keeper_down" (`Assoc [ ("name", `String "keeper-demo") ])
       in
@@ -2114,18 +1899,12 @@ let () =
            test_keeper_up_rejects_removed_runtime_args;
          test_case "keeper msg rejects removed runtime args" `Quick
            test_keeper_msg_rejects_removed_runtime_args;
-         test_case "keeper and persistent lists split" `Quick
-           test_keeper_and_persistent_agent_lists_split;
-         test_case "keeper and persistent detailed lists annotate runtime class" `Quick
-           test_keeper_and_persistent_detailed_lists_annotate_runtime_class;
          test_case "keeper list items expose runtime config summary" `Quick
            test_keeper_list_items_expose_runtime_config_summary;
          test_case "keepalive gap reports not_running instead of disabled" `Quick
            test_keepalive_gap_reports_not_running_instead_of_disabled;
          test_case "keeper msg missing keeper fails without bootstrap" `Quick
            test_keeper_msg_missing_keeper_fails_without_bootstrap;
-         test_case "persistent agent msg rejects missing message" `Quick
-           test_persistent_agent_msg_rejects_missing_message;
          test_case "keeper dispatch auxiliary surfaces smoke" `Quick
            test_keeper_dispatch_auxiliary_surfaces_smoke;
          test_case "keeper status detailed reads metrics/history/memory" `Quick

@@ -183,6 +183,7 @@ let make_tools
               prior_fails in
             (false, normalize_tool_result ~success:false msg)
           end else
+            let t0 = Time_compat.now () in
             try
               let result =
                 Keeper_exec_tools.execute_keeper_tool_call
@@ -190,10 +191,13 @@ let make_tools
                   ~name:td.name ~input
               in
               let is_failure = keeper_tool_result_is_failure result in
+              let duration_ms =
+                int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
               if is_failure then begin
                 let count = prior_fails + 1 in
                 Hashtbl.replace failure_counts key count;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
+                !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
                 Log.Keeper.warn
                   "tool %s returned error result (%d/%d) for same args"
                   td.name count max_consecutive_failures;
@@ -201,6 +205,7 @@ let make_tools
               end else begin
                 Hashtbl.remove failure_counts key;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
+                !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:true ~duration_ms;
                 (* PR#814 Gap 1: Capture git status delta after successful tool execution.
                    If the working tree changed, log it so the keeper is aware of
                    file-system side effects from its tool calls. *)
@@ -232,9 +237,12 @@ let make_tools
                 (true, final_result)
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+              let duration_ms =
+                int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
               let count = prior_fails + 1 in
               Hashtbl.replace failure_counts key count;
               Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
+              !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
               let msg = Printf.sprintf "tool %s failed (%d/%d): %s"
                 td.name count max_consecutive_failures
                 (Printexc.to_string exn) in

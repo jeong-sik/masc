@@ -401,7 +401,7 @@ let execute_keeper_tool_call
                     ("truncated", `Bool truncated);
                     ("content", `String body);
                   ])))
-  | "keeper_fs_edit" | "keeper_edit" ->
+  | "keeper_fs_edit" ->
       let path = Safe_ops.json_string ~default:"" "path" args in
       let content = Safe_ops.json_string ~default:"" "content" args in
       let mode =
@@ -812,6 +812,8 @@ let execute_keeper_tool_call
       let result = Room.claim_next config ~agent_name:meta.agent_name in
       Yojson.Safe.to_string (`Assoc [ ("result", `String result) ])
   | "keeper_task_done" ->
+      (* Uses force_done intentionally: keepers may close tasks from
+         agents who left the room. Regular agent completion uses masc_done. *)
       let task_id =
         Safe_ops.json_string ~default:"" "task_id" args |> String.trim
       in
@@ -902,21 +904,15 @@ let execute_keeper_tool_call
       | Some err ->
           Yojson.Safe.to_string (`Assoc [ ("error", `String err) ])
       | None ->
-      let t0 = Time_compat.now () in
       let result = Tool_dispatch.dispatch ~name ~args in
-      let duration_ms =
-        int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
-      let success, msg = match result with
-        | Some (true, msg) -> true, msg
+      (match result with
+        | Some (true, msg) -> msg
         | Some (false, msg) ->
-            false, Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+            Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
         | None ->
-            false, Yojson.Safe.to_string
+            Yojson.Safe.to_string
               (`Assoc [ ("error", `String "unregistered_masc_tool");
-                        ("tool", `String name) ])
-      in
-      !on_keeper_tool_call ~tool_name:name ~success ~duration_ms;
-      msg)
+                        ("tool", `String name) ])))
   | other ->
       Yojson.Safe.to_string
         (`Assoc [ ("error", `String "unknown_tool"); ("tool", `String other) ])

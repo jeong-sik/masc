@@ -85,7 +85,12 @@ let test_dashboard_tools_projection () =
           check string "lifecycle surfaced" "active"
             (row |> member "lifecycle" |> to_string);
           check bool "direct call flag surfaced" true
-            (row |> member "direct_call_allowed" |> to_bool))
+            (row |> member "direct_call_allowed" |> to_bool);
+          check bool "hidden tool not mislabeled public_mcp" false
+            (row |> member "surfaces" |> to_list
+             |> List.exists (function
+                  | `String "public_mcp" -> true
+                  | _ -> false)))
 
 let () =
   run "dashboard_tools"

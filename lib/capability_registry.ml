@@ -348,10 +348,17 @@ let all_capabilities_from (public_tool_source_schemas : Types.tool_schema list) 
 
 let surface_tool_schemas_from (public_tool_source_schemas : Types.tool_schema list)
     surface : Types.tool_schema list =
-  all_projection_seeds_from public_tool_source_schemas
-  |> List.filter (fun (seed : capability_seed) -> seed.projection.surface = surface)
-  |> List.map (fun (seed : capability_seed) -> projection_to_schema seed.projection)
-  |> dedupe_schemas
+  match surface with
+  | Public_mcp ->
+      public_tool_source_schemas
+      |> List.filter (fun (schema : Types.tool_schema) ->
+             Tool_catalog.is_public_mcp schema.name)
+      |> dedupe_schemas
+  | _ ->
+      all_projection_seeds_from public_tool_source_schemas
+      |> List.filter (fun (seed : capability_seed) -> seed.projection.surface = surface)
+      |> List.map (fun (seed : capability_seed) -> projection_to_schema seed.projection)
+      |> dedupe_schemas
 
 let surface_tool_names_from (public_tool_source_schemas : Types.tool_schema list)
     surface : string list =

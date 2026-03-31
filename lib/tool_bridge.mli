@@ -35,6 +35,7 @@ val oas_tool_of_masc :
   name:string ->
   description:string ->
   input_schema:Yojson.Safe.t ->
+  ?mutation_class:string ->
   (Yojson.Safe.t -> bool * string) ->
   Agent_sdk.Tool.t
 (** Create an OAS [Tool.t] from a MASC tool name, description,

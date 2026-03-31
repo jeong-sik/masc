@@ -67,14 +67,17 @@ let infer_keeper_execution_mode ~(scope_kind : string) : Oas.Execution_mode.t =
 
 let infer_keeper_allowed_mutations ~(execution_scope : string)
     ~(allowed_paths : string list) =
-  ignore execution_scope;
   ignore allowed_paths;
-  (* Keeper tools handle their own access control via allowlist/denylist
-     in keeper_hooks_oas.ml and keeper_exec_tools.ml.  Setting
-     "workspace_only" here caused mode_enforcer to block all keeper_*
-     and masc_* tools as External_Effect — false positives since these
-     are internal MASC operations, not external effects. *)
-  []
+  match String.lowercase_ascii execution_scope with
+  | "observe_only" ->
+    (* observe_only keepers should not mutate — preserve CDAL enforcement. *)
+    [ "workspace_only" ]
+  | _ ->
+    (* Standard keepers handle their own tool access control via
+       keeper_hooks_oas.ml deny list and keeper_exec_tools.ml
+       allowlist/denylist.  "workspace_only" here caused mode_enforcer
+       to block keeper_*/masc_* tools misclassified as External_Effect. *)
+    []
 
 let build_keeper_eval_criteria ~keeper_name ~(goal : string) =
   `Assoc [ ("keeper_name", `String keeper_name); ("goal", `String goal) ]

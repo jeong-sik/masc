@@ -420,4 +420,24 @@ let () =
       test_case "keeper_read not in catalog" `Quick test_keeper_read_not_in_catalog;
       test_case "keeper_read not in allowed" `Quick test_keeper_read_not_in_allowed;
     ]);
+    (* Merged from test_keeper_deny_list_coverage.ml *)
+    ("deny_list", [
+      test_case "dangerous tools denied" `Quick (fun () ->
+        let dl = Keeper_hooks_oas.keeper_denied_tools in
+        List.iter (fun name ->
+          check bool (name ^ " denied") true (List.mem name dl))
+          [ "masc_room_delete"; "masc_spawn"; "masc_force_leave";
+            "masc_config_set"; "masc_neo4j_query"; "masc_pg_query";
+            "masc_operator_action"; "masc_operator_confirm"; "masc_execute" ]);
+      test_case "safe tools not denied" `Quick (fun () ->
+        let dl = Keeper_hooks_oas.keeper_denied_tools in
+        List.iter (fun name ->
+          check bool (name ^ " allowed") false (List.mem name dl))
+          [ "keeper_board_post"; "masc_broadcast"; "masc_status";
+            "masc_tasks"; "keeper_bash" ]);
+      test_case "deny list reasonable size" `Quick (fun () ->
+        let n = List.length Keeper_hooks_oas.keeper_denied_tools in
+        check bool "non-empty" true (n > 0);
+        check bool "5-30 range" true (n >= 5 && n <= 30));
+    ]);
   ]

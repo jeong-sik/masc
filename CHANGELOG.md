@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.194.0] - 2026-03-31
+
+### Added
+- **Keeper hot-reload surface** — snapshot_sec, work_as_hb, smart_hb, ring_size runtime params (#4257, #3903).
+- **Local-dev launcher** — dir-local launcher with config fallback (#4251).
+
+### Fixed
+- **Scheduler backoff** — re-raise Eio.Cancel.Cancelled in slot backoff + logging (#4255).
+- **Event linkage** — review follow-ups for proof event linkage (#4252).
+
 ## [2.193.0] - 2026-03-31
 
 ### Added

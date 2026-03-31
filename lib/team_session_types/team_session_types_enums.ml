@@ -105,6 +105,11 @@ type risk_level =
   | Risk_medium
   | Risk_high
 
+type decomposability =
+  | Decomposability_high
+  | Decomposability_medium
+  | Decomposability_low
+
 type capsule_mode =
   | Capsule_fresh
   | Capsule_inherit
@@ -520,3 +525,13 @@ let control_domain_of_string = function
   | "runtime" -> Some Domain_runtime
   | "meta" -> Some Domain_meta
   | _ -> None
+
+let decomposability_to_string = function
+  | Decomposability_high -> "high"
+  | Decomposability_medium -> "medium"
+  | Decomposability_low -> "low"
+
+let decomposability_of_string = function
+  | "high" -> Decomposability_high
+  | "low" -> Decomposability_low
+  | _ -> Decomposability_medium

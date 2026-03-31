@@ -461,3 +461,73 @@ let test_delegate_rejects_not_ready_worker_with_guidance () =
   Alcotest.(check bool) "mentions not ready guidance" true
     (String.length message > 0 && contains 0);
   cleanup_dir base_dir
+
+(* ── single-agent fallback gate (#3651) tests ─────────────── *)
+
+let make_pw ?(worker_class : Team_session_types.worker_class option)
+    ?(task_profile : Team_session_types.task_profile option)
+    (name : string) : Team_session_types.planned_worker =
+  { spawn_agent = name; runtime_actor = None; spawn_role = None;
+    spawn_model = None; execution_scope = None; thinking_enabled = None;
+    thinking_budget = None; max_turns = None; timeout_seconds = None;
+    worker_class; parent_actor = None; capsule_mode = None;
+    runtime_pool = None; lane_id = None; controller_level = None;
+    control_domain = None; supervisor_actor = None; model_tier = None;
+    task_profile; risk_level = None; routing_confidence = None;
+    routing_reason = None; routing_escalated = false }
+
+let test_decomposability_single_worker () =
+  let pw = make_pw "solo" in
+  let decomp, _reason =
+    Team_session_engine_policy.classify_decomposability
+      ~orchestration_mode:Team_session_types.Auto
+      ~planned_workers:[pw]
+  in
+  Alcotest.(check string) "single worker → low"
+    "low" (Team_session_types.decomposability_to_string decomp)
+
+let test_decomposability_manager_executor_only () =
+  let pw1 = make_pw ~worker_class:Worker_manager "mgr" in
+  let pw2 = make_pw ~worker_class:Worker_executor "exec" in
+  let decomp, _reason =
+    Team_session_engine_policy.classify_decomposability
+      ~orchestration_mode:Team_session_types.Auto
+      ~planned_workers:[pw1; pw2]
+  in
+  Alcotest.(check string) "manager+executor → low"
+    "low" (Team_session_types.decomposability_to_string decomp)
+
+let test_decomposability_independent_workers () =
+  let pw1 = make_pw ~worker_class:Worker_scout "scout1" in
+  let pw2 = make_pw ~worker_class:Worker_librarian "lib1" in
+  let pw3 = make_pw ~worker_class:Worker_scout "scout2" in
+  let decomp, _reason =
+    Team_session_engine_policy.classify_decomposability
+      ~orchestration_mode:Team_session_types.Auto
+      ~planned_workers:[pw1; pw2; pw3]
+  in
+  Alcotest.(check string) "diverse workers → high"
+    "high" (Team_session_types.decomposability_to_string decomp)
+
+let test_decomposability_manual_skips_gate () =
+  let pw = make_pw "solo" in
+  let decomp, reason =
+    Team_session_engine_policy.classify_decomposability
+      ~orchestration_mode:Team_session_types.Manual
+      ~planned_workers:[pw]
+  in
+  Alcotest.(check string) "manual → high (gate skipped)"
+    "high" (Team_session_types.decomposability_to_string decomp);
+  Alcotest.(check bool) "reason mentions manual" true
+    (String.length reason > 0)
+
+let test_decomposability_synthesize_few_workers () =
+  let pw1 = make_pw ~task_profile:Profile_synthesize "synth" in
+  let pw2 = make_pw ~task_profile:Profile_extract "extract" in
+  let decomp, _reason =
+    Team_session_engine_policy.classify_decomposability
+      ~orchestration_mode:Team_session_types.Auto
+      ~planned_workers:[pw1; pw2]
+  in
+  Alcotest.(check string) "synthesize + 2 workers → low"
+    "low" (Team_session_types.decomposability_to_string decomp)

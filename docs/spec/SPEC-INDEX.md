@@ -114,7 +114,7 @@ graph TB
 ### Cross-Reference Format
 
 - Spec 간: `./NN-filename.md#section-anchor`
-- 코드: `lib/<module-name>.ml:L123`
+- 코드: `lib/<module_name>.ml:L123`
 - Invariant: `INV-ROOM-001`
 - 외부 문서: `docs/<document-name>.md`
 

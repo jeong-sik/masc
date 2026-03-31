@@ -188,7 +188,8 @@ let classify_with_contract_risk ~tool_name ~input =
           let tool_names = tool_names_of_input ~tool_name input in
           Some
             (risk_level_of_contract_risk
-               (Contract_risk.of_delivery_contract ~delivery_contract ~tool_names))
+               (Contract_risk.of_delivery_contract ~execution_scope:None
+                  ~delivery_contract ~tool_names))
       | None -> None)
   | _ -> None
 

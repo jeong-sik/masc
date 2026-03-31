@@ -263,6 +263,7 @@ let test_team_worker_spawn_batch_requires_confirm_then_executes () =
                               ("spawn_timeout_seconds", `Int 1);
                             ];
                         ] );
+                    ("wait_mode", `String "blocking");
                   ] );
             ])
       in

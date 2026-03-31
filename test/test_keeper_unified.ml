@@ -659,6 +659,22 @@ let test_tool_usage_delta_uses_registry_counts () =
     [ "keeper_fs_read"; "keeper_voice_agent"; "keeper_voice_agent" ]
     (KAR.tool_usage_delta ~before ~after)
 
+let test_tool_usage_delta_ignores_removed_tools () =
+  let before =
+    [
+      ("keeper_board_post", 2);
+      ("keeper_voice_agent", 1);
+    ]
+  in
+  let after =
+    [
+      ("keeper_board_post", 2);
+    ]
+  in
+  check (list string) "no phantom tools when counts drop"
+    []
+    (KAR.tool_usage_delta ~before ~after)
+
 let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
   let merged =
     KAR.merge_reported_and_observed_tool_names
@@ -891,6 +907,8 @@ let () =
             test_normalize_response_text_empty_without_tools_errors;
           test_case "tool usage delta uses registry counts" `Quick
             test_tool_usage_delta_uses_registry_counts;
+          test_case "tool usage delta ignores removed tools" `Quick
+            test_tool_usage_delta_ignores_removed_tools;
           test_case "merge observed and synthetic tool names" `Quick
             test_merge_reported_and_observed_tool_names_preserves_synthetic_tools;
           test_case "social model silences skip-only turn" `Quick

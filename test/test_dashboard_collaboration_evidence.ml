@@ -189,6 +189,73 @@ let test_collaboration_evidence_tracks_unlinked_room_noise () =
       check bool "linkage gaps populated" true
         ((linkage |> member "gaps" |> to_list) <> []))
 
+let test_recent_unlinked_activity_preserves_chronological_order () =
+  with_eio @@ fun _env ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "tester"));
+      let started_at = Time_compat.now () -. 60.0 in
+      let planned_end_at = started_at +. 600.0 in
+      let session =
+        make_manual_session config ~goal:"recent unlinked ordering"
+          ~created_by:"tester" ~agent_names:[ "alice"; "bob" ] ~min_agents:1
+          ~checkpoint_interval_sec:30 ~started_at ~planned_end_at
+          ~fallback_policy:Team_session_types.Fallback_cascade_then_task
+          ~model_cascade:[ "glm:auto" ]
+      in
+      List.iter
+        (fun index ->
+          ignore
+            (Activity_graph.emit config ~room_id:session.room_id
+               ~kind:"message.broadcast"
+               ~actor:(Activity_graph.entity ~kind:"agent" "system")
+               ~payload:
+                 (`Assoc
+                   [
+                     ("content", `String (Printf.sprintf "unlinked-%d" index));
+                   ])
+               ~tags:[ "message"; "broadcast" ] ()))
+        [ 1; 2; 3; 4; 5; 6; 7; 8 ];
+      let json =
+        Dashboard_collaboration_evidence.json ~session_id:session.session_id
+          ~config ()
+      in
+      let summaries =
+        json |> U.member "recent_unlinked_activity" |> U.to_list
+        |> List.map (fun item -> item |> U.member "summary" |> U.to_string)
+      in
+      check (list string) "keeps most recent six in order"
+        [ "unlinked-3"; "unlinked-4"; "unlinked-5"; "unlinked-6"; "unlinked-7";
+          "unlinked-8" ]
+        summaries)
+
+let test_emit_message_activity_normalizes_evidence_refs () =
+  with_eio @@ fun _env ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "tester"));
+      Room_state.emit_message_activity config ~from_agent:"alice"
+        ~content:"normalized evidence refs" ~mention:None
+        ~evidence_refs:[ " trace:abc "; ""; "trace:abc"; " proof:xyz " ] ();
+      let payload =
+        Activity_graph.list_events config ~room_id:"default" ~after_seq:0
+          ~limit:20 ()
+        |> List.find (fun (event : Activity_graph.event) ->
+               String.equal event.kind "message.broadcast"
+               && U.member "content" event.payload
+                  = `String "normalized evidence refs")
+        |> fun (event : Activity_graph.event) -> event.payload
+      in
+      check (list string) "evidence refs normalized"
+        [ "trace:abc"; "proof:xyz" ]
+        (payload |> U.member "evidence_refs" |> U.to_list |> List.map U.to_string))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -203,5 +270,9 @@ let () =
             test_append_event_injects_linkage_metadata;
           test_case "tracks unlinked room noise" `Quick
             test_collaboration_evidence_tracks_unlinked_room_noise;
+          test_case "recent unlinked activity preserves order" `Quick
+            test_recent_unlinked_activity_preserves_chronological_order;
+          test_case "emit message activity normalizes evidence refs" `Quick
+            test_emit_message_activity_normalizes_evidence_refs;
         ] );
     ]

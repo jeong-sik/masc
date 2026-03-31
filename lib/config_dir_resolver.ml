@@ -1,5 +1,6 @@
 type source =
   | Env
+  | Local_masc
   | Home_masc
   | Invalid_env
   | Exe_relative
@@ -32,6 +33,7 @@ type resolution = {
 type inputs = {
   cwd : string;
   executable_name : string;
+  env_base_path : string option;
   env_config_dir : string option;
   env_personas_dir : string option;
   env_home : string option;
@@ -52,6 +54,7 @@ let absolute_path_from ~cwd path =
 
 let source_to_string = function
   | Env -> "env"
+  | Local_masc -> "local_masc"
   | Home_masc -> "home_masc"
   | Invalid_env -> "invalid_env"
   | Exe_relative -> "exe_relative"
@@ -120,6 +123,14 @@ let path_from_home_masc (inputs : inputs) =
       let candidate = Filename.concat home ".masc/config" in
       if config_signature_exists candidate then Some candidate else None
 
+let path_from_local_masc (inputs : inputs) =
+  match trim_opt inputs.env_base_path with
+  | None -> None
+  | Some base_path ->
+      let base_path = absolute_path_from ~cwd:inputs.cwd base_path in
+      let candidate = Filename.concat (Filename.concat base_path ".masc") "config" in
+      if config_signature_exists candidate then Some candidate else None
+
 let legacy_me_root_candidates (inputs : inputs) =
   [ inputs.env_me_root; inputs.env_workspace_root; inputs.env_dune_sourceroot ]
   |> List.filter_map trim_opt
@@ -149,28 +160,31 @@ let config_root_resolution (inputs : inputs) =
           [ Printf.sprintf
               "MASC_CONFIG_DIR is set but does not point to a directory: %s"
               path ] )
-  | None -> (
-      match path_from_home_masc inputs with
-      | Some path -> ({ path; exists = true; source = Home_masc }, [])
-      | None -> (
-      match path_from_cwd inputs.cwd with
-      | Some path -> ({ path; exists = true; source = Cwd }, [])
-      | None -> (
-          match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
-          | Some path -> ({ path; exists = true; source = Exe_relative }, [])
-          | None -> (
-              match path_from_legacy_me_root inputs with
-              | Some path ->
-                  ( { path; exists = true; source = Legacy_me_root },
-                    [ Printf.sprintf
-                        "Using legacy config fallback from ME_ROOT-style path: %s"
-                        path ] )
+  | None ->
+      match path_from_local_masc inputs with
+      | Some path -> ({ path; exists = true; source = Local_masc }, [])
+      | None ->
+          match path_from_home_masc inputs with
+          | Some path -> ({ path; exists = true; source = Home_masc }, [])
+          | None ->
+              match path_from_cwd inputs.cwd with
+              | Some path -> ({ path; exists = true; source = Cwd }, [])
               | None ->
-                  let path = default_missing_root inputs in
-                  ( { path; exists = false; source = Missing },
-                    [ Printf.sprintf
-                        "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
-                        path ] ) ) ) ))
+                  match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
+                  | Some path -> ({ path; exists = true; source = Exe_relative }, [])
+                  | None ->
+                      match path_from_legacy_me_root inputs with
+                      | Some path ->
+                          ( { path; exists = true; source = Legacy_me_root },
+                            [ Printf.sprintf
+                                "Using legacy config fallback from ME_ROOT-style path: %s"
+                                path ] )
+                      | None ->
+                          let path = default_missing_root inputs in
+                          ( { path; exists = false; source = Missing },
+                            [ Printf.sprintf
+                                "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
+                                path ] )
 
 let child_item (root : path_item) name =
   let path = Filename.concat root.path name in
@@ -198,6 +212,7 @@ let inputs_from_env () =
   {
     cwd = Sys.getcwd ();
     executable_name = Sys.executable_name;
+    env_base_path = Env_config_core.base_path_opt ();
     env_config_dir = Env_config_core.config_dir_opt ();
     env_personas_dir = Env_config_core.personas_dir_opt ();
     env_home = Sys.getenv_opt "HOME";
@@ -225,7 +240,7 @@ let resolve_with inputs =
     match config_root.source with
     | Invalid_env -> Invalid_env_status
     | Missing -> Missing_status
-    | Env | Home_masc | Exe_relative | Cwd | Legacy_me_root ->
+    | Env | Local_masc | Home_masc | Exe_relative | Cwd | Legacy_me_root ->
         if warnings = [] then Ready else Warn
   in
   { status; warnings; config_root; cascade; prompts; keepers; personas }

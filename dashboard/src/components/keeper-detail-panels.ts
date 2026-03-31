@@ -4,7 +4,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { formatPct } from '../lib/format-number'
+import { formatPct, formatTokens } from '../lib/format-number'
 import { TextInput } from './common/input'
 import type { Keeper, KeeperMetricPoint } from '../types'
 
@@ -20,13 +20,6 @@ function ctxColor(pct: number): string {
 }
 
 // ── Utility functions ────────────────────────────────────
-
-export function formatTokens(n: number | undefined): string {
-  if (!n) return '-'
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
-}
 
 export function autonomyHint(count: number | undefined, proactiveEnabled: boolean | undefined): string | undefined {
   if ((count ?? 0) === 0) return proactiveEnabled ? '활성 · 미발동' : '자율 비활성'

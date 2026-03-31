@@ -15,21 +15,20 @@ scripts/opam-pin-external-deps.sh
 opam install . --deps-only
 dune build --root .
 
-./start-masc-mcp.sh --http
-PORT="$(./start-masc-mcp.sh --print-port)"  # query the effective port for this checkout
+scripts/run-local.sh --target-dir "$PWD"
+PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"
 ```
 
 기본 포트:
 
-- repo root checkout: `8935`
-- git worktree checkout: `9100-9999` 범위에서 checkout path 기준 자동 파생
+- local-dev target: `9100-9999` 범위에서 target path 기준 자동 파생
 - 기본 bind host: `127.0.0.1`
 
 메모:
 
-- 현재 checkout의 기본 포트 확인: `./start-masc-mcp.sh --print-port`
-- worktree에서 `--port`를 생략하면 script가 worktree별 기본 포트를 자동 선택한다.
-- `--print-port`는 현재 checkout의 기본 포트 조회용이다. 서버 시작은 보통 `./start-masc-mcp.sh --http`로 충분하다.
+- target 기준 기본 포트 확인: `scripts/run-local.sh --print-port --target-dir /path/to/project`
+- `scripts/run-local.sh`는 `<target>/.masc/`를 data/config/personas 기본 루트로 사용한다.
+- shared repo/full-runtime을 올릴 때만 `./start-masc-mcp.sh --http`를 쓴다.
 
 ## 2. Health Check
 
@@ -66,7 +65,7 @@ HTTP가 canonical public path다. 템플릿 전체는 `docs/MCP-TEMPLATE.md`를 
 }
 ```
 
-worktree에서는 `8935` 대신 `./start-masc-mcp.sh --print-port` 출력값으로 바꾼다.
+dir-local local-dev에서는 `8935` 대신 `scripts/run-local.sh --print-port --target-dir ...` 출력값으로 바꾼다.
 
 ## 4. 첫 Workflow
 
@@ -138,9 +137,9 @@ masc_keeper_up(name: "sangsu")
 전제조건:
 - `PERSONAS_ROOT/<name>/profile.json`이 존재해야 한다 (또는 `CONFIG_ROOT/keepers/<name>.toml`)
 - `PERSONAS_ROOT`는 `MASC_PERSONAS_DIR` 우선, 없으면 resolved `CONFIG_ROOT/personas`를 사용한다.
-- `start-masc-mcp.sh`는 worktree에서 실행해도 기본적으로 git repo root를 `MASC_BASE_PATH`로 자동 해석한다.
-- shared keeper 상태 대신 별도 `.masc/`를 쓰고 싶을 때만 `--base-path`를 명시적으로 덮어쓴다.
-- repo-managed config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `~/.masc/config`를 먼저 보고, 없을 때만 repo `config/` 자동 탐색을 사용한다.
+- `scripts/run-local.sh`는 `<target>/.masc/`를 기본 runtime root로 사용하고, `<target>/.masc/config`를 먼저 본다.
+- shared keeper 상태를 봐야 할 때만 `./start-masc-mcp.sh --http` 또는 explicit `--base-path`를 사용한다.
+- repo-managed config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `<MASC_BASE_PATH>/.masc/config`, 그 다음 `~/.masc/config`, 마지막으로 repo `config/` 자동 탐색을 사용한다.
 - `MASC_PERSONAS_DIR` 환경변수로 persona만 repo 밖 경로로 분리할 수 있다.
 
 공유 config/persona를 repo 밖에 두고 실행하는 예시:

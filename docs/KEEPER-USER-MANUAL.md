@@ -618,7 +618,7 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는 `docs/
 
 별도 keepalive 등록 레지스트리는 없다. keeper의 선언과 런타임 상태는 `.masc/perpetual-keepers/<name>.json`에 함께 저장되고, keeper는 durable always-on으로 취급된다. 멈춤은 설정값이 아니라 `paused` 또는 `keeper_down` 상태 전이로 표현한다.
 
-repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `~/.masc/config`를 먼저 본 뒤 repo `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다. 즉 웹/대시보드는 파일을 직접 읽지 않고, 서버가 해석한 config root와 persona root를 사용한다.
+repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `<MASC_BASE_PATH>/.masc/config`, 그 다음 `~/.masc/config`, 마지막으로 repo `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다. 즉 웹/대시보드는 파일을 직접 읽지 않고, 서버가 해석한 config root와 persona root를 사용한다.
 
 ### 8.2 Template 변경 반영
 
@@ -633,13 +633,13 @@ masc_keeper_up(name: "sangsu")
 
 ### 8.3 base-path 주의사항
 
-`--base-path` CLI 인자가 `.masc/` 디렉토리 위치를 결정한다. `start-masc-mcp.sh`를 쓰면 worktree에서도 기본적으로 git repo root를 자동 해석한다.
+`--base-path` CLI 인자가 `.masc/` 디렉토리 위치를 결정한다. `scripts/run-local.sh`는 `<target>/.masc/`를 기본값으로 쓰고, `start-masc-mcp.sh`는 shared/full-runtime 경로로 유지된다.
 
-공유 keeper 상태가 보이지 않는 흔한 경우는 worktree 실행 자체가 아니라, `--base-path`를 별도 경로로 명시했거나 raw executable을 custom base path로 직접 띄운 경우다.
+dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이다. 공유 keeper 상태가 필요하면 shared/full-runtime 경로를 사용해야 한다.
 
-해결: 기본 start script를 그대로 쓰거나, shared `.masc/`를 봐야 할 때만 `--base-path`를 main repo root로 명시 지정한다.
+해결: dir-local 개발은 `scripts/run-local.sh --target-dir <dir>`를 사용하고, shared `.masc/`를 봐야 할 때만 `./start-masc-mcp.sh --http` 또는 explicit `--base-path`를 사용한다.
 
-이 값은 `.masc/` data root만 바꾼다. `config/cascade.json`, `config/prompts`, `config/keepers`, `config/personas` 같은 repo-managed config는 `MASC_CONFIG_DIR` 계약으로 별도 해석된다.
+이 값은 `.masc/` data root를 결정하고, explicit `MASC_CONFIG_DIR`가 없을 때는 `<MASC_BASE_PATH>/.masc/config`를 repo-managed config의 첫 fallback으로도 사용한다.
 
 ### 8.4 모델 실행
 

@@ -49,6 +49,30 @@ mkdir -p "$RESULTS_DIR"
 log() { printf '[BENCH] %s\n' "$1"; }
 error() { printf '[ERROR] %s\n' "$1" >&2; }
 
+require_nonnegative_int() {
+  local name="$1"
+  local value="$2"
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    error "${name} must be a non-negative integer: ${value}"
+    exit 1
+  fi
+}
+
+require_positive_int() {
+  local name="$1"
+  local value="$2"
+  require_nonnegative_int "$name" "$value"
+  if (( value < 1 )); then
+    error "${name} must be >= 1: ${value}"
+    exit 1
+  fi
+}
+
+require_positive_int "ITERATIONS" "$ITERATIONS"
+require_nonnegative_int "BENCH_WARMUP_ITERATIONS" "$BENCH_WARMUP_ITERATIONS"
+require_nonnegative_int "BENCH_SESSION_WARMUP_ITERATIONS" "$BENCH_SESSION_WARMUP_ITERATIONS"
+require_positive_int "BENCH_COMPARE_MAX_ROWS" "$BENCH_COMPARE_MAX_ROWS"
+
 ms_from_seconds() {
   awk -v seconds="${1:-0}" 'BEGIN { printf "%.0f", seconds * 1000 }'
 }

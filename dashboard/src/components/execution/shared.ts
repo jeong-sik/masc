@@ -4,7 +4,7 @@ import { ActionButton } from '../common/button'
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { navigate } from '../../router'
-import { keepers } from '../../store'
+import { findKeeper } from '../../lib/keeper-utils'
 import {
   createExecutionWorkflowContext,
   workflowInterveneParams,
@@ -45,10 +45,7 @@ export function queueKindLabel(kind: DashboardExecutionQueueItem['kind']): strin
   return kind === 'session' ? '세션' : '작전'
 }
 
-export function findKeeper(name?: string | null): Keeper | null {
-  if (!name) return null
-  return keepers.value.find(keeper => keeper.name === name || keeper.agent_name === name) ?? null
-}
+export { findKeeper }
 
 /** Build a minimal Keeper from a continuity brief when the full Keeper object is not in the store.
  *  This prevents silent click failures on keeper cards. */

@@ -32,6 +32,28 @@ export CURL_RETRY_DELAY_SEC
 # shellcheck source=scripts/harness/lib/mcp_jsonrpc.sh
 source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
+require_nonnegative_int() {
+  local name="$1"
+  local value="$2"
+  if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+    echo "[ERROR] ${name} must be a non-negative integer: ${value}" >&2
+    exit 1
+  fi
+}
+
+require_positive_int() {
+  local name="$1"
+  local value="$2"
+  require_nonnegative_int "$name" "$value"
+  if (( value < 1 )); then
+    echo "[ERROR] ${name} must be >= 1: ${value}" >&2
+    exit 1
+  fi
+}
+
+require_positive_int "BENCH_ITERATIONS" "$BENCH_ITERATIONS"
+require_nonnegative_int "BENCH_WARMUP_ITERATIONS" "$BENCH_WARMUP_ITERATIONS"
+
 ms_from_seconds() {
   awk -v seconds="${1:-0}" 'BEGIN { printf "%.0f", seconds * 1000 }'
 }

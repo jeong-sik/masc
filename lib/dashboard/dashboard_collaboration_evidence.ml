@@ -149,15 +149,13 @@ let explicit_link_reason
           | _ -> None))
 
 let partition_activity_events selected_session events =
-  List.fold_left
-    (fun (linked, unlinked) (event : Activity_graph.event) ->
-      match selected_session with
-      | Some session -> (
-          match explicit_link_reason session event with
-          | Some _ -> (event :: linked, unlinked)
-          | None -> (linked, event :: unlinked))
-      | None -> (linked, event :: unlinked))
-    ([], []) events
+  match selected_session with
+  | Some session ->
+      List.partition
+        (fun (event : Activity_graph.event) ->
+          Option.is_some (explicit_link_reason session event))
+        events
+  | None -> ([], events)
 
 let count_activity_kind kind events =
   List.length

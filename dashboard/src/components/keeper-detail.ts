@@ -3,6 +3,7 @@
 // Redesigned: professional dashboard-grade layout with Tailwind inline styles.
 
 import { html } from 'htm/preact'
+import { isOfflineStatus } from '../lib/status-utils'
 import { signal } from '@preact/signals'
 import { useRef } from 'preact/hooks'
 import { currentDashboardActor, runOperatorAction } from '../api'
@@ -108,7 +109,7 @@ function KeeperStatusPill({ status }: { status: string }) {
 // ── Comms Panel ──────────────────────────────────────────
 
 function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
-  const isOffline = keeper.status === 'offline' || keeper.status === 'inactive'
+  const isOffline = isOfflineStatus(keeper.status)
 
   return html`
     <div class="border-t border-[var(--border-slate-12)] pt-5">

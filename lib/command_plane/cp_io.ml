@@ -226,13 +226,15 @@ let read_jsonl_tail_lines path ~max_lines =
           in
           take_last_lines chunks max_lines)
 
-let read_events config =
+let read_events ?(max_lines = 500) config =
   ensure_dirs config;
   if not (Room_utils.path_exists config (events_path config)) then
     []
   else
-    Fs_compat.load_file (events_path config)
-    |> String.split_on_char '\n'
+    (* Tail-bounded read to avoid full-file stalls (#4250).
+       Previous implementation used load_file which could stall for minutes
+       on large event logs. *)
+    read_jsonl_tail_lines (events_path config) ~max_lines
     |> List.filter_map (fun line ->
            let trimmed = String.trim line in
            if trimmed = "" then None

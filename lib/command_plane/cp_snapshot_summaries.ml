@@ -566,8 +566,10 @@ let recent_operator_trace_events config ?trace_id limit =
          read_jsonl_tail_lines (operator_action_log_path config)
            ~max_lines:(limit * 3)
      | Some _ ->
-         Fs_compat.load_file (operator_action_log_path config)
-         |> String.split_on_char '\n')
+         (* Tail-bounded read to avoid stalling on large operator logs (#4250).
+            Overfetch 5x to increase hit rate for trace_id filtering. *)
+         read_jsonl_tail_lines (operator_action_log_path config)
+           ~max_lines:(limit * 5))
     |> List.filter_map (fun line ->
            let trimmed = String.trim line in
            if trimmed = "" then None
@@ -641,7 +643,7 @@ let list_traces_json config ?operation_id ?(limit = 25) () =
   let events =
     (match operation_id with
      | None -> read_recent_events config ~limit:(max limit 50)
-     | Some _ -> read_events config)
+     | Some _ -> read_events ~max_lines:(limit * 3) config)
     |> List.filter (fun (event : event_record) ->
            match operation_id with
            | None -> true

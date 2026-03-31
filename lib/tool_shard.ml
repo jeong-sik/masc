@@ -145,18 +145,6 @@ Use when looking for specific topics, past discussions, or related prior work.";
       ("required", `List [`String "query"]);
     ];
   };
-  {
-    name = "keeper_board_delete";
-    description = "Delete a board post and its associated comments and votes. \
-Use for cleanup of stale, test, or expired posts.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("post_id", `Assoc [("type", `String "string"); ("description", `String "ID of the post to delete")]);
-      ]);
-      ("required", `List [`String "post_id"]);
-    ];
-  };
 ]
 
 let select_named_schemas (names : string list) (schemas : Types.tool_schema list) :

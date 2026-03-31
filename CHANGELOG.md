@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [2.199.0] - 2026-03-31
+
+### Added
+- **Tool_spec module** — unified registration with compile-time safety (#4314).
+- **Keeper persona fold** — soul_profile-aware compaction (#4321).
+
+### Changed
+- **Keeper tool presets** — replace mode/tier policy with presets (#4263).
+- **Team-context projections** — OAS boundary typed projections (#4287).
+
+### Fixed
+- **Dashboard review followup** — type narrowing, mention count, top-N validation (#4322).
+
 ## [2.198.0] - 2026-03-31
 
 ### Changed

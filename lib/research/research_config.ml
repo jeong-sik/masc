@@ -43,7 +43,7 @@ let default ?(repo = default_repo_config ()) () : t =
     cascade_defaults = ["llama:auto"];
     timeout_sec = 120;
     max_tokens = 8192;  (* research-specific: larger budget for code analysis *)
-    temperature = 0.7;  (* TODO: resolve from cascade config "research" profile *)
+    temperature = 0.7;  (* fallback; tool_research.ml resolves from cascade config *)
     system_prompt =
       "You are a code improvement researcher for an OCaml codebase (MASC MCP server). \
        Propose ONE focused, small change per experiment. Prioritize: \

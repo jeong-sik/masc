@@ -8,6 +8,7 @@
 module OT = Opentelemetry
 
 let initialized = ref false
+let exporter_active = ref false
 
 let init () =
   if Otel_config.enabled && not !initialized then begin
@@ -22,25 +23,43 @@ let init () =
     metrics, and logs to the configured OTLP collector via HTTP/protobuf.
     Internally forks a 500ms tick fiber under [sw] for periodic batch flush.
     No-op when [MASC_OTEL_ENABLED] is not set. *)
-let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =
-  if Otel_config.enabled then begin
+let is_exporter_active () = !exporter_active
+
+let setup_exporter_with ?(enabled = Otel_config.enabled) ~endpoint ~setup () =
+  if enabled then begin
     init ();
-    let config =
-      Opentelemetry_client_cohttp_eio.Config.make
-        ~url:Otel_config.endpoint ()
-    in
-    Opentelemetry_client_cohttp_eio.setup ~sw ~config env;
-    Log.info ~ctx:"otel" "OTLP exporter started → %s" Otel_config.endpoint
+    try
+      setup ();
+      exporter_active := true;
+      Log.info ~ctx:"otel" "OTLP exporter started -> %s" endpoint
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        exporter_active := false;
+        Log.warn ~ctx:"otel"
+          "OTLP exporter unavailable, continuing without export (%s): %s"
+          endpoint (Printexc.to_string exn)
   end
+
+let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =
+  let endpoint = Otel_config.endpoint in
+  let setup () =
+    let config =
+      Opentelemetry_client_cohttp_eio.Config.make ~url:endpoint ()
+    in
+    Opentelemetry_client_cohttp_eio.setup ~sw ~config env
+  in
+  setup_exporter_with ~endpoint ~setup ()
 
 (** Flush pending spans and remove the OTLP backend.
     Safe to call when disabled (no-op). *)
-let shutdown () =
-  if Otel_config.enabled && !initialized then begin
+let shutdown ?(enabled = Otel_config.enabled) () =
+  if enabled && !exporter_active then begin
     Opentelemetry_client_cohttp_eio.remove_backend ();
-    initialized := false;
     Log.info ~ctx:"otel" "OTLP exporter stopped"
-  end
+  end;
+  exporter_active := false;
+  initialized := false
 
 (** Wrap a function in an OTel span. No-op when disabled.
     Returns the result of [f]. *)

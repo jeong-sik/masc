@@ -375,7 +375,7 @@ let comment_to_yojson (c : comment) : Yojson.Safe.t =
   `Assoc [
     ("id", `String (Comment_id.to_string c.id));
     ("post_id", `String (Post_id.to_string c.post_id));
-    ("parent_id", match c.parent_id with Some p -> `String (Comment_id.to_string p) | None -> `Null);
+    ("parent_id", Json_util.string_opt_to_json (Option.map Comment_id.to_string c.parent_id));
     ("author", `String (Agent_id.to_string c.author));
     ("content", `String c.content);
     ("created_at", `Float c.created_at);

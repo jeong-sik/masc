@@ -82,16 +82,10 @@ let profile_to_json (profile : Mdal.profile) =
       ("metric_fn", `String profile.metric_fn);
       ("goal", goal_to_json profile.goal);
       ("target", `String profile.target);
-      ( "reference",
-        match profile.reference with
-        | Some reference -> `String reference
-        | None -> `Null );
+      ("reference", Json_util.string_opt_to_json profile.reference);
       ("agent", `String profile.agent);
       ("max_iterations", `Int profile.max_iterations);
-      ( "max_time_seconds",
-        match profile.max_time_seconds with
-        | Some seconds -> `Float seconds
-        | None -> `Null );
+      ("max_time_seconds", Json_util.float_opt_to_json profile.max_time_seconds);
       ("stagnation_threshold", `Float profile.stagnation_threshold);
       ("stagnation_count", `Int profile.stagnation_count);
       ("heuristics", `String profile.heuristics);
@@ -146,7 +140,7 @@ let iteration_to_json (record : Mdal.iteration_record) =
       ("failed_attempts", `String record.failed_attempts);
       ("next_suggestion", `String record.next_suggestion);
       ("elapsed_ms", `Int record.elapsed_ms);
-      ("cost_usd", match record.cost_usd with Some cost -> `Float cost | None -> `Null);
+      ("cost_usd", Json_util.float_opt_to_json record.cost_usd);
       ("evidence", evidence_json);
     ]
 
@@ -194,25 +188,22 @@ let loop_to_json (state : Mdal.loop_state) =
       ("profile", profile_to_json state.profile);
       ("strict_mode", `Bool state.strict_mode);
       ("status", `String (Mdal.status_to_string state.status));
-      ("error_message", match state.error_message with Some msg -> `String msg | None -> `Null);
-      ("stop_reason", match state.stop_reason with Some reason -> `String reason | None -> `Null);
+      ("error_message", Json_util.string_opt_to_json state.error_message);
+      ("stop_reason", Json_util.string_opt_to_json state.stop_reason);
       ("current_iteration", `Int state.current_iteration);
       ("history", `List (List.map iteration_to_json state.history));
       ("stagnation_streak", `Int state.stagnation_streak);
       ("baseline_metric", `Float state.baseline_metric);
       ("start_time", `Float state.start_time);
       ("updated_at", `Float state.updated_at);
-      ("stopped_at", match state.stopped_at with Some ts -> `Float ts | None -> `Null);
+      ("stopped_at", Json_util.float_opt_to_json state.stopped_at);
       ("state_post_id", `String state.state_post_id);
       ("execution_mode", `String (Mdal.execution_mode_to_string state.execution_mode));
       ("worker_engine",
-       match state.worker_engine with
-       | Some engine -> `String (Mdal.worker_engine_to_string engine)
-       | None -> `Null);
-      ("worker_model",
-       match state.worker_model with
-       | Some model -> `String model
-       | None -> `Null);
+       Json_util.option_to_yojson
+         (fun engine -> `String (Mdal.worker_engine_to_string engine))
+         state.worker_engine);
+      ("worker_model", Json_util.string_opt_to_json state.worker_model);
     ]
 
 let loop_of_json json =

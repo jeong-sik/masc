@@ -63,7 +63,10 @@ let summary_report () : Yojson.Safe.t =
   let distinct = Tool_registry.distinct_tools_called () in
   let top_20 = Tool_registry.get_top_n 20 in
   let all_names = Config.all_tool_names () in
-  let never_called = Tool_registry.get_never_called all_names in
+  let visible_names =
+    List.filter (fun name -> Tool_catalog.is_visible name) all_names
+  in
+  let never_called = Tool_registry.get_never_called visible_names in
   let essential_count = Tool_catalog.tier_tool_count Tool_catalog.Essential in
   let standard_count = Tool_catalog.tier_tool_count Tool_catalog.Standard in
   let full_count = List.length all_names in

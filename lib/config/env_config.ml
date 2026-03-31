@@ -84,9 +84,9 @@ let to_json () : Yojson.Safe.t =
     if String.length s <= 4 then "***"
     else String.sub s 0 (min 4 (String.length s)) ^ "***"
   in
-  let mask_opt f = match f () with Some v -> `String (mask v) | None -> `Null in
+  let mask_opt f = Json_util.option_to_yojson (fun v -> `String (mask v)) (f ()) in
   let str s = `String s in
-  let str_opt f = match f () with Some v -> `String v | None -> `Null in
+  let str_opt f = Json_util.string_opt_to_json (f ()) in
   let int_val i = `Int i in
   let float_val f = `Float f in
   let bool_val b = `Bool b in

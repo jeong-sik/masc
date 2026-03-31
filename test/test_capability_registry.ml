@@ -46,7 +46,6 @@ let test_local_worker_projection_exposes_internal_and_auditable_tools () =
       ~names:
         [
           "masc_heartbeat";
-          "keeper_search";
           "masc_code_search";
           "masc_run_plan";
         ]
@@ -58,7 +57,6 @@ let test_local_worker_projection_exposes_internal_and_auditable_tools () =
         List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
       in
       check bool "heartbeat" true (List.mem "masc_heartbeat" names);
-      check bool "keeper_search" true (List.mem "keeper_search" names);
       check bool "masc_code_search" true (List.mem "masc_code_search" names);
       check bool "masc_run_plan" true (List.mem "masc_run_plan" names)
 
@@ -81,13 +79,12 @@ let test_privileged_keeper_surface_is_split () =
     (List.mem "keeper_board_post"
        Lib.Capability_registry.keeper_privileged_tool_names)
 
-let test_mdal_auditable_tools_do_not_include_keeper_search () =
+let test_mdal_auditable_tools_stay_curated () =
   let names = Lib.Capability_registry.mdal_auditable_tool_names in
   check bool "contains masc_code_search" true
     (List.mem "masc_code_search" names);
   check bool "contains masc_run_plan" true
-    (List.mem "masc_run_plan" names);
-  check bool "omits keeper_search" false (List.mem "keeper_search" names)
+    (List.mem "masc_run_plan" names)
 
 let () =
   Alcotest.run "capability_registry"
@@ -110,6 +107,6 @@ let () =
           test_case "privileged keeper surface is split" `Quick
             test_privileged_keeper_surface_is_split;
           test_case "mdal auditable tools stay curated" `Quick
-            test_mdal_auditable_tools_do_not_include_keeper_search;
+            test_mdal_auditable_tools_stay_curated;
         ] );
     ]

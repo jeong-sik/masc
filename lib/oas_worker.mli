@@ -130,6 +130,7 @@ val run_model_with_masc_tools :
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
   ?enable_thinking:bool ->
+  ?contract:Oas.Risk_contract.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->

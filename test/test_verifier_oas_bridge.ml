@@ -288,6 +288,27 @@ let test_observe_only_roundtrip () =
   Alcotest.(check (option int)) "Observe_only max_calls = 30"
     (Some 30) g.max_tool_calls_per_turn
 
+let test_observe_only_denies_mutating_masc_tools () =
+  let gate =
+    Worker_oas.gate_config_of_execution_scope
+      Team_session_types.Observe_only
+  in
+  List.iter
+    (fun name ->
+      Alcotest.(check bool) (name ^ " denied in observe_only") true
+        (List.mem name gate.denied_tools))
+    [
+      "masc_worktree_create";
+      "masc_worktree_remove";
+      "masc_run_init";
+      "masc_run_plan";
+      "masc_run_log";
+      "masc_run_deliverable";
+      "masc_board_post";
+      "masc_board_comment";
+      "masc_board_vote";
+    ]
+
 let test_limited_code_change_roundtrip () =
   let gate =
     Worker_oas.gate_config_of_execution_scope
@@ -369,6 +390,8 @@ let () =
     ("execution_scope roundtrip", [
       Alcotest.test_case "Observe_only -> DenyList" `Quick
         test_observe_only_roundtrip;
+      Alcotest.test_case "Observe_only denies mutating masc tools" `Quick
+        test_observe_only_denies_mutating_masc_tools;
       Alcotest.test_case "Limited -> DenyList" `Quick
         test_limited_code_change_roundtrip;
       Alcotest.test_case "Autonomous -> AllowAll" `Quick

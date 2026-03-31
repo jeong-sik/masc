@@ -290,7 +290,7 @@ let test_dashboard_mission_projection () =
         ~agent:"llama-local-alpha"
         ~goal:"Inspect board state with allowed MCP tools."
         ~context:"fixture context"
-        ~allowed_tools:[ "masc_board_get"; "masc_board_vote"; "keeper_search" ]
+        ~allowed_tools:[ "masc_board_get"; "masc_board_vote"; "keeper_board_list" ]
         ();
       ignore
         (Lib.A2a_tools.submit_heartbeat_result

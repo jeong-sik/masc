@@ -56,7 +56,7 @@ let task_json (task : Types.task) =
       ("description", `String task.description);
       ("status", `String (Types.string_of_task_status task.task_status));
       ("priority", `Int task.priority);
-      ("assignee", (match task_assignee task with Some value -> `String value | None -> `Null));
+      ("assignee", Json_util.string_opt_to_json (task_assignee task));
       ("created_at", `String task.created_at);
     ]
 

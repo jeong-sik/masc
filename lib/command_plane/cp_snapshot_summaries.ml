@@ -172,16 +172,14 @@ let swarm_proof_json config =
       ?final_markers () =
     `Assoc
       [
-        ("expected", Option.value ~default:`Null (Option.map (fun v -> `Int v) expected));
-        ("joined", Option.value ~default:`Null (Option.map (fun v -> `Int v) joined));
+        ("expected", Json_util.int_opt_to_json expected);
+        ("joined", Json_util.int_opt_to_json joined);
         ( "current_task_bound",
-          Option.value ~default:`Null
-            (Option.map (fun v -> `Int v) current_task_bound) );
+          Json_util.int_opt_to_json current_task_bound );
         ( "fresh_heartbeats",
-          Option.value ~default:`Null
-            (Option.map (fun v -> `Int v) fresh_heartbeats) );
-        ("done", Option.value ~default:`Null (Option.map (fun v -> `Int v) done_workers));
-        ("final", Option.value ~default:`Null (Option.map (fun v -> `Int v) final_markers));
+          Json_util.int_opt_to_json fresh_heartbeats );
+        ("done", Json_util.int_opt_to_json done_workers);
+        ("final", Json_util.int_opt_to_json final_markers);
       ]
   in
   let expected_dir = swarm_live_dir config in
@@ -210,13 +208,9 @@ let swarm_proof_json config =
                 | `Bool value -> `Bool value
                 | _ -> `Null );
               ( "peak_hot_slots",
-                match Option.bind slot_metrics (fun metrics -> metrics.peak_hot_slots) with
-                | Some value -> `Int value
-                | None -> `Null );
+                Json_util.int_opt_to_json (Option.bind slot_metrics (fun metrics -> metrics.peak_hot_slots)) );
               ( "ctx_per_slot",
-                match Option.bind slot_metrics (fun metrics -> metrics.ctx_per_slot) with
-                | Some value -> `Int value
-                | None -> `Null );
+                Json_util.int_opt_to_json (Option.bind slot_metrics (fun metrics -> metrics.ctx_per_slot)) );
               ( "workers",
                 workers_json
                   ?expected:(option_or_else (int_member summary_json "expected_workers")
@@ -271,13 +265,9 @@ let swarm_proof_json config =
                     | None -> `String (iso_of_unix slot_artifact.captured_at) );
                   ("pass", `Null);
                   ( "peak_hot_slots",
-                    match metrics.peak_hot_slots with
-                    | Some value -> `Int value
-                    | None -> `Null );
+                    Json_util.int_opt_to_json metrics.peak_hot_slots );
                   ( "ctx_per_slot",
-                    match metrics.ctx_per_slot with
-                    | Some value -> `Int value
-                    | None -> `Null );
+                    Json_util.int_opt_to_json metrics.ctx_per_slot );
                   ("workers", workers_json ());
                   ("expected_artifact_dir", `String slot_artifact.run_dir);
                   ("artifact_ref", `String slot_artifact.path);
@@ -600,7 +590,7 @@ let recent_operator_trace_events config ?trace_id limit =
                          ("event_type", `String (get_string_default row "action_type" "operator_action"));
                          ("operation_id", `Null);
                          ("unit_id", `Null);
-                         ("actor", match get_string_opt row "actor" with Some value -> `String value | None -> `Null);
+                         ("actor", Json_util.string_opt_to_json (get_string_opt row "actor"));
                          ("source", `String "operator");
                          ("timestamp", `String (get_string_default row "created_at" (Types.now_iso ())));
                          ("detail", row);
@@ -672,9 +662,9 @@ let list_traces_json config ?operation_id ?(limit = 25) () =
                ("event_id", `String event.event_id);
                ("trace_id", `String event.trace_id);
                ("event_type", `String event.event_type);
-               ("operation_id", match event.operation_id with Some value -> `String value | None -> `Null);
-               ("unit_id", match event.unit_id with Some value -> `String value | None -> `Null);
-               ("actor", match event.actor with Some value -> `String value | None -> `Null);
+               ("operation_id", Json_util.string_opt_to_json event.operation_id);
+               ("unit_id", Json_util.string_opt_to_json event.unit_id);
+               ("actor", Json_util.string_opt_to_json event.actor);
                ("source", `String event.source);
                ("timestamp", `String event.ts);
                ("detail", event.detail);

@@ -1,17 +1,45 @@
 # Changelog
 
 
+## [2.190.0] - 2026-03-31
+
+### Added
+- **Keeper lossy fold compaction** — structured fold stubs preserving task/outcome/artifact counts (#4183).
+- **Keeper delta checkpoint** — shadow-apply, sidecar write, 6 Prometheus metrics (#4181).
+- **CDAL cross-run window projection** — proof window aggregation + spec alignment (#4176).
+- **Dashboard agent/keeper detail UX overhaul** — redesigned detail pages (#4196).
+- **masc_status visibility improvements** — worktree status, agent zombies, current task (#4177).
+- **Team-session zero-tool guard** — reject completion without tool use in code-change scopes (#4180).
+
+### Changed
+- **Dead tool cleanup** — remove dead schemas, tombstones, and legacy aliases (#4188).
+- **Dashboard internal tools hidden** — hide internal tools by default in Lab/Tools (#4182).
+- **Team-session observe-only scope** — scope local worker tools for observe-only (#4175).
+- **Warning suppressors removed** — unjustified warning suppressors across 13 modules (#4194).
+
+### Fixed
+- **Cdal_proof.scope test breakage** — remove stale scope field from 6 test files (#4199).
+- **OCaml runtime hardening** — harden preconditions and test seams (#4141).
+- **Doc truth fixes** — review follow-up version truth corrections (#4187, #4178).
+
 ## [2.189.0] - 2026-03-31
 
 ### Added
+- **Telemetry executor tracking** — track executor decision outcomes in telemetry (#4174).
+- **Room state health counters** — expose state_update_attempts/failures in dashboard monitoring (#4173).
+- **Keeper Korean keyword aliases** — add Korean aliases for BM25 tool retrieval (#4171).
 - **Dashboard feature flags nav** — expose ghost FeatureHealth widget in lab navigation (#4146).
 - **Dashboard tab visit counter** — localStorage-based tab/section visit metrics (#4150).
 - **Transport health on config page** — TransportHealthPanel added to Lab > Config (#4149).
 
 ### Changed
+- **CI boundary ratchet guard** — add MASC/OAS boundary lint guard (#4167).
+- **OCaml runtime hardening** — harden preconditions and test seams (#4141).
 - **Dashboard widget dedup** — remove duplicate connection status and counter chips from sidebar and live monitor (#4147, #4148).
 
 ### Fixed
+- **Team-session scope gate** — deny MASC mutating tools in Observe_only scope (#4168).
+- **Harness latency accumulation** — accumulate MCP_LAST_TIME_TOTAL across retries (#4170).
 - **Keeper tool_access validation** — validate tool_access.tools field type (#4165).
 - **Keeper JSON envelope** — embed change_block inside JSON envelope (#4161).
 - **TUI legacy decode** — make legacy keeper fields optional in decode_keeper (#4158).

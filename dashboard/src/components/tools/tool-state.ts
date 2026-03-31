@@ -17,7 +17,7 @@ export const searchQuery = signal('')
 export const categoryFilter = signal('all')
 export const enabledOnly = signal(false)
 export const directOnly = signal(false)
-export const showHidden = signal(true)
+export const showHidden = signal(false)
 export const showDeprecated = signal(true)
 
 export type SurfaceFilter = 'all' | 'public_mcp' | 'agent' | 'keeper' | 'internal'

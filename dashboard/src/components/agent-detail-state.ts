@@ -89,12 +89,17 @@ export function workerBriefForAgent(agentName: string | null) {
   return executionWorkerSupportBriefs.value.find(w => w.name === agentName) ?? null
 }
 
-export function agentJournalEntries(agentName: string | null): JournalEntry[] {
-  if (!agentName) return []
+/** Collect lowercase name variants for an agent (including keeper aliases). */
+function agentMatchNames(agentName: string): string[] {
   const keeper = keeperForAgent(agentName)
-  const names = [agentName, keeper?.name, keeper?.agent_name]
+  return [agentName, keeper?.name, keeper?.agent_name]
     .filter((n): n is string => n != null && n !== '')
     .map(n => n.toLowerCase())
+}
+
+export function agentJournalEntries(agentName: string | null): JournalEntry[] {
+  if (!agentName) return []
+  const names = agentMatchNames(agentName)
 
   return journal.value
     .filter((entry: JournalEntry) => {
@@ -156,10 +161,7 @@ export async function refreshAgentDetail(): Promise<void> {
         .catch(() => null),
     ])
 
-    const keeper = keeperForAgent(agentName)
-    const matchNames = [agentName, keeper?.name, keeper?.agent_name]
-      .filter((n): n is string => n != null && n !== '')
-      .map(n => n.toLowerCase())
+    const matchNames = agentMatchNames(agentName)
 
     roomActivity.value = lines
       .filter(line => {

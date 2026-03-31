@@ -13,7 +13,7 @@ import { EmptyState } from './common/empty-state'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { StatGrid } from './common/stat-tile'
-import { formatTokens } from './keeper-detail-panels'
+import { autonomyHint, formatTokens } from './keeper-detail-panels'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
   agents,
@@ -287,7 +287,7 @@ function CharacterPlate({ name }: { name: string }) {
             { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : 'N/A', hint: keeper.context_tokens != null && keeper.context_max != null ? `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}` : undefined, variant: 'gold' },
             { label: '세대', value: generation ?? 0, variant: 'gold' },
             { label: '턴', value: keeper.turn_count ?? 0, variant: 'gold' },
-            { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, hint: (keeper.autonomous_turn_count ?? 0) === 0 ? (keeper.proactive_enabled ? '활성 · 미발동' : '자율 비활성') : undefined, variant: 'gold' },
+            { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, hint: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled), variant: 'gold' },
           ]} />
         ` : html`
           <${StatGrid} cols=${4} items=${[

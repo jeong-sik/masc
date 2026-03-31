@@ -33,7 +33,6 @@ export function resolveUnifiedStatus(
       description: signal === 'live'
         ? '프로세스 오프라인 (미션 신호는 최근 수신됨)'
         : '프로세스 오프라인',
-
     }
   }
 
@@ -46,7 +45,6 @@ export function resolveUnifiedStatus(
       canonical: primary,
       label: statusLabel(primary),
       description: desc,
-
     }
   }
 
@@ -58,7 +56,6 @@ export function resolveUnifiedStatus(
       description: signal === 'live'
         ? '대기 중 (미션 신호 수신 중)'
         : '대기 중',
-
     }
   }
 
@@ -68,7 +65,6 @@ export function resolveUnifiedStatus(
       canonical: primary,
       label: statusLabel(primary),
       description: primary === 'compacting' ? '컨텍스트 압축 중' : '핸드오프 진행 중',
-
     }
   }
 

@@ -28,6 +28,11 @@ export function formatTokens(n: number | undefined): string {
   return String(n)
 }
 
+export function autonomyHint(count: number | undefined, proactiveEnabled: boolean | undefined): string | undefined {
+  if ((count ?? 0) === 0) return proactiveEnabled ? '활성 · 미발동' : '자율 비활성'
+  return undefined
+}
+
 
 // ── KPI Card ─────────────────────────────────────────────
 
@@ -177,12 +182,12 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
         <${KpiCard}
           label="Auto Actions"
           value=${keeper.autonomous_action_count ?? 0}
-          hint=${(keeper.autonomous_action_count ?? 0) === 0 ? (keeper.proactive_enabled ? '활성 · 미발동' : '자율 비활성') : '자율 행동 횟수'}
+          hint=${autonomyHint(keeper.autonomous_action_count, keeper.proactive_enabled) ?? '자율 행동 횟수'}
         />
         <${KpiCard}
           label="Auto Turns"
           value=${keeper.autonomous_turn_count ?? 0}
-          hint=${keeper.autonomous_text_turn_count != null ? `텍스트 ${keeper.autonomous_text_turn_count} / 도구 ${keeper.autonomous_tool_turn_count ?? 0}` : (keeper.autonomous_turn_count ?? 0) === 0 ? '미발동' : undefined}
+          hint=${keeper.autonomous_text_turn_count != null ? `텍스트 ${keeper.autonomous_text_turn_count} / 도구 ${keeper.autonomous_tool_turn_count ?? 0}` : autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) ?? '미발동'}
         />
         <${KpiCard}
           label="Board React"

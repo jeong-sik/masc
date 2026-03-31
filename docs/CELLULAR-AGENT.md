@@ -118,18 +118,8 @@ Read a handoff in markdown form for human inspection or prompt injection.
 }
 ```
 
-### `masc_handover_claim_and_spawn`
-
-Claim a handoff and start the successor runtime in one step.
-
-```json
-{
-  "handover_id": "handover-abc123",
-  "agent_name": "gemini",
-  "additional_instructions": "Prioritize security",
-  "timeout_seconds": 600
-}
-```
+Claiming a handoff no longer auto-spawns a successor runtime.
+Use `masc_handover_claim`, inspect with `masc_handover_get` if needed, then start the successor through the runtime or orchestration surface you already use.
 
 ## Typical Flow
 

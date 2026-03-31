@@ -197,7 +197,6 @@ Client Request
 | `masc_handover_list` | List pending handovers |
 | `masc_handover_claim` | Claim a handover |
 | `masc_handover_get` | Get the capsule as a markdown prompt |
-| `masc_handover_claim_and_spawn` | Claim + spawn successor in one step |
 | `masc_verify_handoff` | Verify handoff context integrity |
 
 #### Execution Memory (Run Tracking)

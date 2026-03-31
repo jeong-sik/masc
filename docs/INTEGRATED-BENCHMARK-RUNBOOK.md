@@ -89,7 +89,7 @@ wrapper는 phase별 log와 summary JSON을 남긴다.
   - `depends_on_operation_ids`, readiness gating, assigned unit, detachment delta를 먼저 본다.
 - `local64` fail
   - runtime substrate 또는 session visibility 문제일 가능성이 높다.
-  - `masc_llama_runtime_status`, `masc_team_session_status`, `masc_operator_digest`를 먼저 본다.
+  - `masc_local_runtime_status`, `masc_team_session_status`, `masc_operator_digest`를 먼저 본다.
 
 ## Recommended Progression
 

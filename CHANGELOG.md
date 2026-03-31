@@ -1,6 +1,25 @@
 # Changelog
 
 
+## [2.190.0] - 2026-03-31
+
+### Added
+- **CDAL cross-run window projection** — aggregate friction signals across last N runs, sessions, and rolling windows with deterministic basis hashing (#4176).
+- **Keeper delta checkpoint shadow metrics** — shadow-apply checkpoint deltas and export match/mismatch Prometheus counters before enabling read-path restore (#4181).
+- **Dashboard agent and keeper detail refresh** — unify status resolution, add journal stream/autonomy hints, and tighten page-level spacing and context visibility (#4196).
+
+### Changed
+- **Keeper compaction fold strategy** — replace first-sentence compaction stubs with lossy fold summaries that preserve task, outcome, and tool artifact counts (#4183).
+- **Room and operator visibility** — improve `masc_status` visibility and hide internal tools by default in Lab/Tools while keeping public/internal/deprecated breakdowns (#4177, #4182).
+
+### Fixed
+- **Team-session proof gates** — scope observe-only local worker tools and reject code-change workers that report success without tool evidence (#4175, #4180).
+- **Runtime and release truth hardening** — tighten OCaml preconditions, stabilize test seams, and harden version-truth checks around generated metadata (#4141, #4178, #4187).
+- **Boundary and proof safety** — add the MASC/OAS boundary ratchet guard and align CDAL proof-shape tests with the current schema (#4167, #4199).
+
+### Removed
+- **Legacy aliases and tombstones** — remove dead tool schemas, stale handover/tombstone handlers, and legacy `masc_persistent_agent_*` / `masc_llama_*` compatibility aliases (#4188).
+
 ## [2.189.0] - 2026-03-31
 
 ### Added

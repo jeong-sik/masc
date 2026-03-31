@@ -138,7 +138,7 @@ The recommended Team Session shape is fixed for v1.
 
 For llama workers, the supervisor should make model choice explicit and attributable:
 
-1. call `masc_llama_models`
+1. call `masc_local_runtime_models`
 2. pick one inventory item deliberately
 3. record a session note describing the chosen model and why
 4. pass the same note to each worker with `spawn_selection_note`
@@ -235,7 +235,7 @@ What it does:
 
 1. starts a local server
 2. bootstraps supervisor auth
-3. reads the llama inventory through `masc_llama_models`
+3. reads the llama inventory through `masc_local_runtime_models`
 4. validates an explicit `LLAMA_SWARM_MODEL`
 5. starts a real team session
 6. spawns a full llama worker team (`planner`, `implementer-a`, `implementer-b`)
@@ -249,7 +249,7 @@ Run it against a real local llama team:
 
 ```bash
 LLAMA_SERVER_URL=http://127.0.0.1:8085 \
-LLAMA_SWARM_MODEL=<exact-model-id-from-masc_llama_models> \
+LLAMA_SWARM_MODEL=<exact-model-id-from-masc_local_runtime_models> \
 ./scripts/harness_supervisor_team_session.sh
 ```
 
@@ -257,7 +257,7 @@ For same-box shard-pool validation, precompute the runtime pool env and run the 
 
 ```bash
 export LLM_ENDPOINTS="$(./scripts/llama-runtime-pool.sh print-env --target-shards 6)"
-LLAMA_SWARM_MODEL=<exact-model-id-from-masc_llama_models> \
+LLAMA_SWARM_MODEL=<exact-model-id-from-masc_local_runtime_models> \
 ./scripts/harness_team_session_local64_smoke.sh
 ```
 

@@ -48,7 +48,7 @@
 
 기본 model policy:
 
-1. `masc_llama_models`
+1. `masc_local_runtime_models`
 2. explicit model 선택
 3. session note에 선택 근거 기록
 4. 같은 note를 `spawn_selection_note`로 각 worker에 전달
@@ -59,7 +59,7 @@
    - repo-root room semantics를 먼저 맞춘다.
 2. `masc_join`
    - supervisor identity를 room에 등록한다.
-3. `masc_llama_models`
+3. `masc_local_runtime_models`
    - local `llama.cpp` inventory를 읽는다.
 4. explicit model 선택
    - `LLAMA_SWARM_MODEL=<exact-id>`
@@ -128,7 +128,7 @@ Karpathy-style raw `masc_autoresearch_*` loop는 그대로 유지하되, swarm c
 
 ```bash
 LLAMA_SERVER_URL=http://127.0.0.1:8085 \
-LLAMA_SWARM_MODEL=<exact-model-id-from-masc_llama_models> \
+LLAMA_SWARM_MODEL=<exact-model-id-from-masc_local_runtime_models> \
 HTTP_TIMEOUT_SEC=120 \
 ./scripts/harness_swarm_delivery.sh
 ```
@@ -136,7 +136,7 @@ HTTP_TIMEOUT_SEC=120 \
 local64 shard-pool smoke:
 
 ```bash
-LLAMA_SWARM_MODEL=<exact-model-id-from-masc_llama_models> \
+LLAMA_SWARM_MODEL=<exact-model-id-from-masc_local_runtime_models> \
 LOCAL64_POOL_TARGET_SHARDS=6 \
 ./scripts/harness_team_session_local64_smoke.sh
 ```

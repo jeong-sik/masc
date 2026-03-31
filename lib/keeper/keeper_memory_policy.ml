@@ -279,6 +279,8 @@ let interesting_alert_result_to_json (r : interesting_alert_result) : Yojson.Saf
 type keeper_state_snapshot = {
   goal: string option;
   progress: string option;
+  done_summary: string option;
+  next_summary: string option;
   next_items: string list;
   decisions: string list;
   open_questions: string list;
@@ -288,6 +290,8 @@ type keeper_state_snapshot = {
 let empty_keeper_state_snapshot = {
   goal = None;
   progress = None;
+  done_summary = None;
+  next_summary = None;
   next_items = [];
   decisions = [];
   open_questions = [];
@@ -384,9 +388,21 @@ let parse_state_snapshot_from_reply (reply : string) : keeper_state_snapshot opt
             match strip_prefix_ci ~prefix:"Goal:" line with
             | Some v -> { acc with goal = trim_nonempty v }
             | None ->
+                (match strip_prefix_ci ~prefix:"DONE:" line with
+                | Some v -> { acc with done_summary = trim_nonempty v;
+                                       progress = (match acc.progress with
+                                                   | None -> trim_nonempty v
+                                                   | existing -> existing) }
+                | None ->
                 (match strip_prefix_ci ~prefix:"Progress:" line with
                 | Some v -> { acc with progress = trim_nonempty v }
                 | None ->
+                    (match strip_prefix_ci ~prefix:"NEXT:" line with
+                    | Some v -> { acc with next_summary = trim_nonempty v;
+                                           next_items = (match acc.next_items with
+                                                         | [] -> split_state_items v
+                                                         | existing -> existing) }
+                    | None ->
                     (match strip_prefix_ci ~prefix:"Next:" line with
                     | Some v -> { acc with next_items = split_state_items v }
                     | None ->
@@ -402,7 +418,7 @@ let parse_state_snapshot_from_reply (reply : string) : keeper_state_snapshot opt
                                  with
                                 | Some v ->
                                     { acc with constraints = split_state_items v }
-                                | None -> acc))))))
+                                | None -> acc))))))))
           empty_keeper_state_snapshot lines
       in
       if snapshot.goal = None
@@ -432,10 +448,19 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
         "Goal";
       maybe_line
         (fun () ->
-           match snapshot.progress with
+           match snapshot.done_summary with
+           | Some v when String.trim v <> "" -> Some (String.trim v)
+           | _ ->
+             match snapshot.progress with
+             | Some v when String.trim v <> "" -> Some (String.trim v)
+             | _ -> None)
+        "Done";
+      maybe_line
+        (fun () ->
+           match snapshot.next_summary with
            | Some v when String.trim v <> "" -> Some (String.trim v)
            | _ -> None)
-        "Progress";
+        "Next plan";
       maybe_line
         (fun () ->
            match snapshot.next_items with
@@ -469,6 +494,8 @@ let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Sa
   `Assoc [
     ("goal", Json_util.string_opt_to_json snapshot.goal);
     ("progress", Json_util.string_opt_to_json snapshot.progress);
+    ("done_summary", Json_util.string_opt_to_json snapshot.done_summary);
+    ("next_summary", Json_util.string_opt_to_json snapshot.next_summary);
     ("next_items", `List (List.map (fun s -> `String s) snapshot.next_items));
     ("decisions", `List (List.map (fun s -> `String s) snapshot.decisions));
     ("open_questions", `List (List.map (fun s -> `String s) snapshot.open_questions));
@@ -665,6 +692,10 @@ let synthesize_state_from_run_result
   in
   { goal = (let g = String.trim goal in if g = "" then None else Some g);
     progress;
+    done_summary = progress;
+    next_summary = (match next_items with
+                    | [] -> None
+                    | items -> Some (String.concat "; " items));
     next_items;
     decisions;
     open_questions = [];
@@ -675,13 +706,21 @@ let synthesize_state_from_run_result
 let render_state_block (snapshot : keeper_state_snapshot) : string =
   let buf = Buffer.create 256 in
   Buffer.add_string buf "[STATE]\n";
+  (match snapshot.done_summary with
+   | Some d when String.trim d <> "" ->
+     Buffer.add_string buf (Printf.sprintf "DONE: %s\n" d)
+   | _ ->
+     (match snapshot.progress with
+      | Some p when String.trim p <> "" ->
+        Buffer.add_string buf (Printf.sprintf "DONE: %s\n" p)
+      | _ -> ()));
+  (match snapshot.next_summary with
+   | Some n when String.trim n <> "" ->
+     Buffer.add_string buf (Printf.sprintf "NEXT: %s\n" n)
+   | _ -> ());
   (match snapshot.goal with
    | Some g when String.trim g <> "" ->
      Buffer.add_string buf (Printf.sprintf "Goal: %s\n" g)
-   | _ -> ());
-  (match snapshot.progress with
-   | Some p when String.trim p <> "" ->
-     Buffer.add_string buf (Printf.sprintf "Progress: %s\n" p)
    | _ -> ());
   (match snapshot.next_items with
    | [] -> ()

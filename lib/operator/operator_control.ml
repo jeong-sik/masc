@@ -313,20 +313,26 @@ let execute_team_action (ctx : 'a context) (request : action_request) =
       in
       let* wait_mode =
         match get_string_opt request.payload "wait_mode" with
-        | None -> Ok "blocking"
-        | Some ("background" | "blocking" as v) -> Ok v
+        | None -> Ok None
+        | Some ("background" | "blocking" as v) -> Ok (Some v)
         | Some other ->
             Error (Printf.sprintf
               "payload.wait_mode must be \"background\" or \"blocking\", got %S" other)
       in
       let args =
-        `Assoc
+        let base_fields =
           [
             ("session_id", `String session_id);
             ("actor", `String request.actor);
-            ("wait_mode", `String wait_mode);
             ("spawn_batch", spawn_batch);
           ]
+        in
+        let fields =
+          match wait_mode with
+          | Some value -> ("wait_mode", `String value) :: base_fields
+          | None -> base_fields
+        in
+        `Assoc fields
       in
       let* result_json =
         dispatch_team_session_json_as ctx ~session_id ~requested_actor:request.actor

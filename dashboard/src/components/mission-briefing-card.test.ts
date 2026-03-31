@@ -168,6 +168,80 @@ describe('MissionBriefingCard', () => {
     })
   }, 20000)
 
+  it('falls back to available keepers and returns null when none are usable', async () => {
+    const { resolveLiveJudgeTarget } = await loadMissionBriefingCard()
+
+    const fallbackTarget = resolveLiveJudgeTarget(
+      {
+        ...sampleOperatorSnapshot(),
+        operator_judge_runtime: {
+          ...sampleOperatorSnapshot().operator_judge_runtime,
+          keeper_name: '',
+        },
+        keepers: [],
+      },
+      [
+        {
+          name: 'fallback-keeper',
+          status: 'running',
+          model: 'glm-fallback',
+        } as never,
+      ],
+    )
+
+    expect(fallbackTarget).toEqual({
+      name: 'fallback-keeper',
+      model: 'glm-fallback',
+      source: 'keeper',
+      online: true,
+    })
+
+    const unavailableTarget = resolveLiveJudgeTarget(
+      {
+        ...sampleOperatorSnapshot(),
+        operator_judge_runtime: null,
+        keepers: [
+          {
+            name: 'offline-keeper',
+            status: 'offline',
+            model: 'glm-offline',
+          },
+        ],
+      } as unknown as OperatorSnapshot,
+      [],
+    )
+
+    expect(unavailableTarget).toBeNull()
+  }, 20000)
+
+  it('builds a safe situation report even when mission facts are sparse', async () => {
+    const { buildLiveJudgeSituationReport } = await loadMissionBriefingCard()
+    const report = buildLiveJudgeSituationReport({
+      mission: {
+        ...sampleMission(),
+        sessions: [],
+        attention_queue: [],
+        summary: {
+          ...sampleMission().summary,
+          current_room: null,
+          room_health: 'unknown',
+        },
+      } as unknown as DashboardMissionResponse,
+      briefing: null,
+      target: {
+        name: 'live-judge',
+        model: 'glm-5',
+        source: 'judge_runtime',
+        online: true,
+      },
+    })
+
+    expect(report).toContain('[상황 보고] live-judge · glm-5')
+    expect(report).toContain('- room: default')
+    expect(report).toContain('- sessions: 0, attention: 0, blockers: 0')
+    expect(report).toContain('live 판단을 해 주세요.')
+  }, 20000)
+
   it('opens intervene with a prefilled live judgment report', async () => {
     const navigateMock = vi.fn()
     const {

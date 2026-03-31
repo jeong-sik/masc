@@ -433,14 +433,18 @@ bench_a2a() {
 bench_runtime() {
   local runtime_notes
   local i
+  local runtime_status_samples=()
 
   warmup_tool_calls "masc_local_runtime_status" '{}' "$BENCH_WARMUP_ITERATIONS"
-  bench_call_tool "masc_local_runtime_status" '{}' >/dev/null
-  runtime_notes="$(
-    printf '%s' "$BENCH_LAST_PAYLOAD" | mcp_extract_result |
-      jq -r '"configured_capacity=" + ((.configured_capacity // 0) | tostring) + ";healthy_runtime_count=" + ((.healthy_runtime_count // 0) | tostring)'
-  )"
-  append_row "oas_runtime_status" "$runtime_notes" "$BENCH_LAST_MS"
+  for ((i = 0; i < ITERATIONS; i += 1)); do
+    bench_call_tool "masc_local_runtime_status" '{}' >/dev/null
+    runtime_notes="$(
+      printf '%s' "$BENCH_LAST_PAYLOAD" | mcp_extract_result |
+        jq -r '"configured_capacity=" + ((.configured_capacity // 0) | tostring) + ";healthy_runtime_count=" + ((.healthy_runtime_count // 0) | tostring)'
+    )"
+    runtime_status_samples+=("$BENCH_LAST_MS")
+  done
+  append_row "oas_runtime_status" "$runtime_notes" "${runtime_status_samples[@]}"
 
   local runtime_samples=()
   for ((i = 0; i < BENCH_WARMUP_ITERATIONS; i += 1)); do

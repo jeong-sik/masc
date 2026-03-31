@@ -93,7 +93,7 @@ function metricDetail(row?: DashboardPerfRow | null): string | null {
 
 export function PerfSnapshotPanel() {
   useEffect(() => {
-    if (!perfSnapshot.value && !loading.value) {
+    if (!loading.value) {
       void refreshPerfSnapshot()
     }
   }, [])

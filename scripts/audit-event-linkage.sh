@@ -73,6 +73,9 @@ fi
 if [[ "${event_rows_missing_operation}" -gt 0 ]]; then
   gaps_text="${gaps_text}session events missing detail.operation_id: ${event_rows_missing_operation}"$'\n'
 fi
+if [[ "${event_rows_missing_worker}" -gt 0 ]]; then
+  gaps_text="${gaps_text}session events missing detail.worker_run_id: ${event_rows_missing_worker}"$'\n'
+fi
 if [[ "${worker_meta_missing_session}" -gt 0 ]]; then
   gaps_text="${gaps_text}worker meta missing session_id: ${worker_meta_missing_session}"$'\n'
 fi

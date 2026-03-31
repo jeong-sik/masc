@@ -34,6 +34,17 @@ let non_empty_string_opt = function
       if value = "" then None else Some value
   | None -> None
 
+let normalized_string_list values =
+  let seen = Hashtbl.create (List.length values) in
+  values
+  |> List.filter_map (fun value -> non_empty_string_opt (Some value))
+  |> List.filter (fun value ->
+         if Hashtbl.mem seen value then
+           false
+         else (
+           Hashtbl.add seen value ();
+           true))
+
 let recover_active_agent_name = function
   | `String name -> non_empty_string_opt (Some name)
   | `Assoc _ as json ->
@@ -184,6 +195,7 @@ let activity_room_id config =
 
 let emit_message_activity config ~from_agent ~content ~mention
     ?session_id ?operation_id ?worker_run_id ?(evidence_refs = []) () =
+  let evidence_refs = normalized_string_list evidence_refs in
   let payload =
     `Assoc
       [

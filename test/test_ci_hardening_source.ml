@@ -486,30 +486,15 @@ let test_oas_worker_capability_threading_contracts () =
        "?raw_trace ~proof_ref ?contract ~sw")
 
 let test_team_session_spawn_tool_contracts () =
-  check bool "team session spawn uses explicit masc tools path" true
+  check bool "team session spawn uses Worker_runtime.run_worker" true
     (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
-       "Oas_worker.run_model_with_masc_tools");
+       "Worker_runtime.run_worker");
   check bool "team session spawn branches on local spawn agents" true
     (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
        "if deps.is_local_spawn_agent prepared.spec.spawn_agent then");
-  check bool "team session spawn keeps non-local model-only path" true
+  check bool "team session spawn passes allowed_tools" true
     (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
-       {|Oas_worker.run_model_by_label
-                          ~model_label:prepared.runtime_model_label
-                          ~goal:prepared.spec.spawn_prompt
-                          ~system_prompt:(Printf.sprintf
-                            "You are agent '%s'. Execute the task and return a clear result."
-                             prepared.spec.spawn_agent)
-                          ~max_turns
-                          ~temperature:(Safe_ops.get_env_float_logged
-                            "MASC_SPAWN_TEMPERATURE" ~default:0.3)
-                          ~max_tokens:(Safe_ops.get_env_int_logged
-                            "MASC_SPAWN_MAX_TOKENS" ~default:4096)
-                          ~priority:Llm_provider.Request_priority.Interactive
-                          ?contract ?net:ctx.net ~sw:ctx.sw|});
-  check bool "team session spawn contract uses scoped tool names" true
-    (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
-       "supported_local_worker_tool_names_for_scope");
+       "~allowed_tools:local_worker_tool_names");
   check bool "team session bridge exposes scoped local worker tools" true
     (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
        "supported_local_worker_tool_names_for_scope")

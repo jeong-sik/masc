@@ -182,7 +182,8 @@ let activity_room_id config =
   | Default -> "default"
   | Named id -> id
 
-let emit_message_activity config ~from_agent ~content ~mention =
+let emit_message_activity config ~from_agent ~content ~mention
+    ?session_id ?operation_id ?worker_run_id ?(evidence_refs = []) () =
   let payload =
     `Assoc
       [
@@ -191,6 +192,20 @@ let emit_message_activity config ~from_agent ~content ~mention =
           match mention with
           | Some value -> `String value
           | None -> `Null );
+        ( "session_id",
+          match session_id with
+          | Some value when String.trim value <> "" -> `String value
+          | _ -> `Null );
+        ( "operation_id",
+          match operation_id with
+          | Some value when String.trim value <> "" -> `String value
+          | _ -> `Null );
+        ( "worker_run_id",
+          match worker_run_id with
+          | Some value when String.trim value <> "" -> `String value
+          | _ -> `Null );
+        ( "evidence_refs",
+          `List (List.map (fun value -> `String value) evidence_refs) );
       ]
   in
   let actor = Room_hooks.{ kind = "agent"; id = from_agent } in
@@ -435,7 +450,7 @@ let broadcast config ~from_agent ~content =
    | Ok _ -> ()
    | Error e -> Log.Misc.error "broadcast publish failed for %s: %s" room_id (Backend_types.show_error e));
   emit_message_activity config ~from_agent:safe_agent ~content:safe_content
-    ~mention;
+    ~mention ();
   Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
 
 (* ============================================ *)

@@ -39,6 +39,9 @@ let proof_result_status_to_string = function
   | Oas.Cdal_proof.Timed_out -> "timed_out"
   | Oas.Cdal_proof.Cancelled -> "cancelled"
 
+let json_string_list values =
+  `List (List.map (fun value -> `String value) values)
+
 let proof_summary_fields ~(worker_run_id : string)
     ?(proof : Oas.Cdal_proof.t option) () =
   let null_fields =
@@ -67,6 +70,11 @@ let proof_summary_fields ~(worker_run_id : string)
                    proof.effective_execution_mode) );
             ( "proof_evidence_count",
               `Int (List.length proof.raw_evidence_refs) );
+            ("tool_trace_refs", json_string_list proof.tool_trace_refs);
+            ("raw_evidence_refs", json_string_list proof.raw_evidence_refs);
+            ( "checkpoint_ref",
+              Option.fold ~none:`Null ~some:(fun value -> `String value)
+                proof.checkpoint_ref );
           ]
       | Error msg ->
           Log.Misc.warn

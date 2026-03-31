@@ -171,14 +171,23 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
       let kind =
         Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
       in
-      let tools = Safe_ops.json_string_list "tools" access_json in
-      match kind with
-      | Some "unrestricted" -> Ok Unrestricted
-      | Some "restricted" ->
-          Ok (normalize_tool_access (Restricted tools))
-      | Some other ->
-          Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
-      | None -> Error "keeper tool_access.kind required")
+      let tools =
+        match Yojson.Safe.Util.member "tools" access_json with
+        | `List l ->
+            Ok (List.filter_map (fun v -> match v with `String s -> Some s | _ -> None) l)
+        | `Null -> Ok []
+        | _ -> Error "tool_access.tools must be an array or null"
+      in
+      match tools with
+      | Error msg -> Error msg
+      | Ok tools -> (
+          match kind with
+          | Some "unrestricted" -> Ok Unrestricted
+          | Some "restricted" ->
+              Ok (normalize_tool_access (Restricted tools))
+          | Some other ->
+              Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
+          | None -> Error "keeper tool_access.kind required"))
   | _ -> Error "keeper tool_access must be an object"
 
 (* -- Updater helpers for nested record updates -- *)

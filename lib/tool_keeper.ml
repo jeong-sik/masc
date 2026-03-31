@@ -414,49 +414,6 @@ let handle_keeper_list ctx args : tool_result =
   in
   (true, body)
 
-let handle_persistent_agent_list ctx args : tool_result =
-  let limit = max 0 (get_int args "limit" 50) in
-  let detailed = get_bool args "detailed" false in
-  let names = keeper_names ctx.config |> take limit in
-  if not detailed then
-    let json =
-      `Assoc
-        [
-          ("count", `Int (List.length names));
-          ("persistent_agents", `List (List.map (fun name -> `String name) names));
-        ]
-    in
-    (true, Yojson.Safe.pretty_to_string json)
-  else
-    let rows = keeper_rows_json ctx names
-    in
-    let json =
-      `Assoc
-        [
-          ("count", `Int (List.length rows));
-          ("persistent_agents", `List rows);
-        ]
-    in
-    (true, Yojson.Safe.pretty_to_string json)
-
-let handle_persistent_agent_up ctx args : tool_result =
-  handle_keeper_up ctx args
-
-let handle_persistent_agent_status ctx args : tool_result =
-  handle_keeper_status ctx args
-
-let handle_persistent_agent_msg ctx args : tool_result =
-  handle_keeper_msg ctx args
-
-let handle_persistent_agent_repair ctx args : tool_result =
-  handle_keeper_repair ctx args
-
-let handle_persistent_agent_down ctx args : tool_result =
-  handle_keeper_down ctx args
-
-let handle_persistent_agent_create_from_persona ctx args : tool_result =
-  handle_keeper_create_from_persona ctx args
-
 (* ================================================================ *)
 (* Recurring loop tools (#3190)                                      *)
 (* ================================================================ *)
@@ -499,7 +456,7 @@ let handle_keeper_remove_loop _ctx (args : Yojson.Safe.t) : tool_result =
 
 let should_bootstrap_existing_keepalives name args =
   match name with
-  | "masc_keeper_msg" | "masc_persistent_agent_msg" ->
+  | "masc_keeper_msg" ->
       String.trim (get_string args "message" "") <> ""
   | _ -> false
 
@@ -523,28 +480,12 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_repair" -> Some (handle_keeper_repair ctx args)
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
-  | "masc_keeper_autonomy" | "masc_keeper_goals" ->
-      Some (false, Printf.sprintf "%s has been removed" name)
   | "masc_keeper_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)
   | "masc_keeper_eval" -> Some (Status.handle_keeper_eval ctx args)
-  | "masc_persistent_agent_create_from_persona" ->
-      Some (handle_persistent_agent_create_from_persona ctx args)
-  | "masc_persistent_agent_up" -> Some (handle_persistent_agent_up ctx args)
-  | "masc_persistent_agent_status" -> Some (handle_persistent_agent_status ctx args)
-  | "masc_persistent_agent_msg" -> Some (handle_persistent_agent_msg ctx args)
-  | "masc_persistent_agent_repair" ->
-      Some (handle_persistent_agent_repair ctx args)
-  | "masc_persistent_agent_down" -> Some (handle_persistent_agent_down ctx args)
-  | "masc_persistent_agent_list" -> Some (handle_persistent_agent_list ctx args)
-  | "masc_persistent_agent_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)
-  | "masc_persistent_agent_eval" -> Some (Status.handle_keeper_eval ctx args)
   (* Recurring loops (#3190) *)
   | "masc_keeper_add_loop" -> Some (handle_keeper_add_loop ctx args)
   | "masc_keeper_list_loops" -> Some (handle_keeper_list_loops ctx args)
   | "masc_keeper_remove_loop" -> Some (handle_keeper_remove_loop ctx args)
-  | "masc_persistent_agent_add_loop" -> Some (handle_keeper_add_loop ctx args)
-  | "masc_persistent_agent_list_loops" -> Some (handle_keeper_list_loops ctx args)
-  | "masc_persistent_agent_remove_loop" -> Some (handle_keeper_remove_loop ctx args)
   (* Housekeeping: keepers maintain their own world *)
   | "masc_housekeep_scan" | "masc_housekeep_delete" | "masc_housekeep_prune" ->
       Tool_housekeep.dispatch ctx.config ~name ~args

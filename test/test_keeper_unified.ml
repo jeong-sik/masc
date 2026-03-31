@@ -852,6 +852,32 @@ let test_render_inline_skip_reason_destructive () =
   check bool "code" true (str_contains result "code=destructive_guard");
   check bool "pattern encoded" true (str_contains result "pattern%3D")
 
+let test_render_inline_escape_edge_cases () =
+  (* Empty reason text *)
+  let empty = HK.render_inline_skip_reason
+    ~tool_name:"t" ~reason_code:"c" ~reason_text:"" in
+  check bool "empty reason" true (str_contains empty "reason=");
+  (* Percent sign in reason *)
+  let pct = HK.render_inline_skip_reason
+    ~tool_name:"t" ~reason_code:"c" ~reason_text:"CPU at 90%" in
+  check bool "percent encoded" true (str_contains pct "90%25")
+
+let test_render_inline_with_replacement () =
+  (* keeper_board_post has replacement=masc_board_post in Tool_catalog *)
+  let result = HK.render_inline_skip_reason
+    ~tool_name:"keeper_board_post"
+    ~reason_code:"keeper_deny"
+    ~reason_text:"denied"
+  in
+  check bool "has replacement" true (str_contains result "replacement=")
+
+let test_consume_skip_reason_none_after_override () =
+  (* After Override migration, no record_skip_reason is called,
+     so consume_skip_reason should return None *)
+  HK.clear_skip_reason "test-keeper";
+  let result = HK.consume_skip_reason "test-keeper" in
+  check bool "returns None" true (result = None)
+
 let test_normalize_override_passthrough () =
   let override_text =
     "[tool_skipped] tool=keeper_bash source=keeper_hook code=keeper_deny \
@@ -945,5 +971,11 @@ let () =
             test_render_inline_skip_reason_destructive;
           test_case "normalize override passthrough" `Quick
             test_normalize_override_passthrough;
+          test_case "escape edge cases" `Quick
+            test_render_inline_escape_edge_cases;
+          test_case "render_inline with replacement" `Quick
+            test_render_inline_with_replacement;
+          test_case "consume_skip_reason None after Override" `Quick
+            test_consume_skip_reason_none_after_override;
         ] );
     ]

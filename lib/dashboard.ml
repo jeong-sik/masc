@@ -146,6 +146,25 @@ let add_group label lines empty_msg =
   else
     (label ^ ":") :: List.map (fun line -> "  " ^ line) lines
 
+let normalize_worktree_branch branch =
+  let branch = String.trim branch in
+  let prefix = "refs/heads/" in
+  if String.length branch >= String.length prefix
+     && String.sub branch 0 (String.length prefix) = prefix then
+    String.sub branch (String.length prefix)
+      (String.length branch - String.length prefix)
+  else
+    branch
+
+let worktree_path_of_json item =
+  let module U = Yojson.Safe.Util in
+  match item |> U.member "path" with
+  | `String path when String.trim path <> "" -> Some path
+  | _ ->
+      (match item |> U.member "worktree" with
+       | `String path when String.trim path <> "" -> Some path
+       | _ -> None)
+
 let parse_worktrees (json : Yojson.Safe.t) : (string * string) list =
   let module U = Yojson.Safe.Util in
   match json |> U.member "worktrees" with
@@ -154,14 +173,16 @@ let parse_worktrees (json : Yojson.Safe.t) : (string * string) list =
         (fun item ->
           match item with
           | `Assoc _ ->
-              (try
-                 let worktree = item |> U.member "worktree" |> U.to_string in
-                 let branch = item |> U.member "branch" |> U.to_string in
-                 if String.length branch > 0 && not (String.equal branch "HEAD") then
+              let branch =
+                match item |> U.member "branch" with
+                | `String raw_branch -> Some (normalize_worktree_branch raw_branch)
+                | _ -> None
+              in
+              (match worktree_path_of_json item, branch with
+               | Some worktree, Some branch
+                 when String.length branch > 0 && not (String.equal branch "HEAD") ->
                    Some (branch, worktree)
-                 else
-                   None
-               with Yojson.Safe.Util.Type_error _ -> None)
+               | _ -> None)
           | _ -> None)
         items
   | `Null -> []

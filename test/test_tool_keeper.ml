@@ -1,5 +1,12 @@
 open Alcotest
 
+(* Unique keeper name per test to prevent registry state races.
+   Global mutable counter — single domain, no mutex needed. *)
+let _keeper_name_counter = Atomic.make 0
+let unique_keeper_name () =
+  let n = Atomic.fetch_and_add _keeper_name_counter 1 in
+  Printf.sprintf "keeper-test-%d-%d" (Unix.getpid ()) n
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -712,9 +719,10 @@ let test_keeper_list_items_expose_runtime_config_summary () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
+  let kname = unique_keeper_name () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
+      Masc_mcp.Keeper_keepalive.stop_keepalive kname;
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -737,7 +745,7 @@ let test_keeper_list_items_expose_runtime_config_summary () =
         dispatch "masc_keeper_up"
           (`Assoc
             [
-              ("name", `String "keeper-demo");
+              ("name", `String kname);
               ("goal", `String "Stay available");
               ("room_scope", `String "all");
               ("scope_kind", `String "global");
@@ -753,7 +761,7 @@ let test_keeper_list_items_expose_runtime_config_summary () =
       let row =
         Yojson.Safe.Util.(
           json |> member "items" |> to_list
-          |> List.find (fun item -> member "name" item = `String "keeper-demo"))
+          |> List.find (fun item -> member "name" item = `String kname))
       in
       check string "runtime class" "keeper"
         Yojson.Safe.Util.(row |> member "runtime_class" |> to_string);
@@ -776,9 +784,10 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
+  let kname = unique_keeper_name () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
+      Masc_mcp.Keeper_keepalive.stop_keepalive kname;
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -801,18 +810,18 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
         dispatch "masc_keeper_up"
           (`Assoc
             [
-              ("name", `String "keeper-demo");
+              ("name", `String kname);
               ("goal", `String "Stay available");
               ("proactive_enabled", `Bool true);
             ])
       in
       if not ok then fail up_body;
-      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
+      Masc_mcp.Keeper_keepalive.stop_keepalive kname;
       let ok, body =
         dispatch "masc_keeper_status"
           (`Assoc
             [
-              ("name", `String "keeper-demo");
+              ("name", `String kname);
               ("include_history_tail", `Bool false);
               ("include_compaction_history", `Bool false);
               ("include_context", `Bool false);
@@ -830,11 +839,11 @@ let test_keepalive_gap_reports_not_running_instead_of_disabled () =
         Yojson.Safe.Util.(
           json |> member "runtime" |> member "registry_state" |> to_string);
       let ok, _ =
-        dispatch "masc_keeper_down" (`Assoc [ ("name", `String "keeper-demo") ])
+        dispatch "masc_keeper_down" (`Assoc [ ("name", `String kname) ])
       in
       check bool "keeper down ok" true ok;
       let entry =
-        match Masc_mcp.Keeper_registry.get ~base_path:config.base_path "keeper-demo" with
+        match Masc_mcp.Keeper_registry.get ~base_path:config.base_path kname with
         | Some entry -> entry
         | None -> fail "missing registry entry after keeper_down"
       in
@@ -884,9 +893,10 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
+  let kname = unique_keeper_name () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive "keeper-demo";
+      Masc_mcp.Keeper_keepalive.stop_keepalive kname;
       rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
@@ -903,7 +913,7 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
         dispatch "masc_keeper_up"
           (`Assoc
             [
-              ("name", `String "keeper-demo");
+              ("name", `String kname);
               ("goal", `String "Stay available");
               ("proactive_enabled", `Bool false);
             ])
@@ -911,21 +921,21 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
       check bool "keeper up ok" true ok;
       let ok, trajectory_body =
         dispatch "masc_keeper_trajectory"
-          (`Assoc [ ("name", `String "keeper-demo"); ("limit", `Int 5) ])
+          (`Assoc [ ("name", `String kname); ("limit", `Int 5) ])
       in
       check bool "keeper trajectory ok" true ok;
       check bool "trajectory body non-empty" true (String.length trajectory_body > 0);
       let ok, eval_body =
-        dispatch "masc_keeper_eval" (`Assoc [ ("name", `String "keeper-demo") ])
+        dispatch "masc_keeper_eval" (`Assoc [ ("name", `String kname) ])
       in
       check bool "keeper eval ok" true ok;
       check bool "eval body non-empty" true (String.length eval_body > 0);
       let ok, _ =
-        dispatch "masc_keeper_down" (`Assoc [ ("name", `String "keeper-demo") ])
+        dispatch "masc_keeper_down" (`Assoc [ ("name", `String kname) ])
       in
       check bool "keeper down ok" true ok;
       check bool "keeper meta retained and paused after down" true
-        (match Masc_mcp.Keeper_types.read_meta config "keeper-demo" with
+        (match Masc_mcp.Keeper_types.read_meta config kname with
          | Ok (Some meta) -> meta.paused
          | _ -> false))
 

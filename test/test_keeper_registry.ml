@@ -327,6 +327,57 @@ let test_find_by_agent_name () =
   check bool "not found returns None" true
     (Option.is_none (R.find_by_agent_name "agent-nonexistent"))
 
+(* ── resolve_config tests ────────────────────────────────── *)
+
+module Room_setup = Room_utils_backend_setup
+
+(** Minimal in-memory config for testing resolve_config.
+    Only base_path matters; backend is a throwaway Memory instance. *)
+let make_test_config base_path : Room_setup.config =
+  let backend_config : Backend_types.config = {
+    backend_type = Backend_types.Memory;
+    base_path;
+    postgres_url = None;
+    node_id = "test";
+    cluster_name = "test";
+    pubsub_max_messages = 100;
+  } in
+  {
+    base_path;
+    workspace_path = base_path;
+    lock_expiry_minutes = 2;
+    backend_config;
+    backend = Room_setup.Memory (Backend.Memory.create ());
+    scope = Room_setup.Default;
+  }
+
+let test_resolve_config_scoped_hit () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "rc1" (make_meta "rc1") in
+  let config = make_test_config bp in
+  let resolved = R.resolve_config config "rc1" in
+  check string "scoped hit keeps base_path" bp resolved.base_path
+
+let test_resolve_config_cross_base_path () =
+  R.clear ();
+  let bp2 = "/tmp/other" in
+  let _entry = R.register ~base_path:bp2 "rc2" (make_meta "rc2") in
+  let config = make_test_config bp in
+  let resolved = R.resolve_config config "rc2" in
+  check string "cross-base_path resolves" bp2 resolved.base_path
+
+let test_resolve_config_not_found () =
+  R.clear ();
+  let config = make_test_config bp in
+  let resolved = R.resolve_config config "nonexistent" in
+  check string "unknown keeper keeps original" bp resolved.base_path
+
+let test_resolve_config_empty_name () =
+  R.clear ();
+  let config = make_test_config bp in
+  let resolved = R.resolve_config config "" in
+  check string "empty name keeps original" bp resolved.base_path
+
 (* ── Directive processing tests ─────────────────────────── *)
 
 module KK = Masc_mcp.Keeper_keepalive
@@ -417,6 +468,13 @@ let () =
       ( "agent_name_lookup",
         [
           eio_test "find_by_agent_name" test_find_by_agent_name;
+        ] );
+      ( "resolve_config",
+        [
+          eio_test "scoped hit" test_resolve_config_scoped_hit;
+          eio_test "cross base_path" test_resolve_config_cross_base_path;
+          eio_test "not found" test_resolve_config_not_found;
+          eio_test "empty name" test_resolve_config_empty_name;
         ] );
       ( "directives",
         [

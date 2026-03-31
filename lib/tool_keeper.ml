@@ -379,10 +379,6 @@ let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();
   Turn.handle_keeper_down ctx args
 
-let keeper_rows_json ctx names =
-  names
-  |> List.filter_map (keeper_list_row_json ~runtime_class:"keeper" ctx.config)
-
 let handle_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
@@ -390,11 +386,23 @@ let handle_keeper_list ctx args : tool_result =
   let body =
     cached_text_by_key _keeper_list_cache ~key:cache_key
       ~ttl_s:(keeper_list_cache_ttl_s ()) (fun () ->
-        let names =
-          keeper_names ctx.config
+        (* Use registry as source of truth for live keepers.
+           Each entry carries its own base_path so cross-base_path
+           keepers are listed correctly. *)
+        let entries =
+          Keeper_registry.all ()
+          |> List.sort (fun (a : Keeper_registry.registry_entry)
+                            (b : Keeper_registry.registry_entry) ->
+               String.compare a.name b.name)
           |> take limit
         in
-        let rows = keeper_rows_json ctx names in
+        let names = List.map (fun (e : Keeper_registry.registry_entry) -> e.name) entries in
+        let rows =
+          entries
+          |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
+               let config = { ctx.config with base_path = e.base_path } in
+               keeper_list_row_json ~runtime_class:"keeper" config e.name)
+        in
         let json =
           if not detailed then
             `Assoc
@@ -467,23 +475,21 @@ let maybe_bootstrap_existing_keepalives ctx ~name ~args =
        Log.Keeper.error "start_existing_keepalives failed: %s"
          (Printexc.to_string exn))
 
-(** Resolve base_path from keeper registry.  Dashboard/external sessions may
-    use a different base_path than the target keeper.  Skipped for creation
-    tools where the caller's base_path is authoritative. *)
-let resolve_keeper_base_path ctx ~name args =
+(** Resolve context base_path via central Keeper_registry.resolve_config.
+    Skipped for creation tools where the caller's base_path is authoritative. *)
+let resolve_ctx ctx ~name args =
   match name with
   | "masc_keeper_up" | "masc_keeper_create_from_persona" | "masc_persona_list" -> ctx
   | _ ->
     let keeper_name = get_string args "name" "" in
-    if keeper_name = "" then ctx
-    else match Keeper_registry.find_by_name keeper_name with
-    | Some entry when entry.base_path <> ctx.config.base_path ->
-        { ctx with config = { ctx.config with base_path = entry.base_path } }
-    | _ -> ctx
+    let config = Keeper_registry.resolve_config ctx.config keeper_name in
+    if config == ctx.config then ctx
+    else { ctx with config }
 
 let dispatch ctx ~name ~args : tool_result option =
+  (* Resolve base_path first so bootstrap runs in the correct scope. *)
+  let ctx = resolve_ctx ctx ~name args in
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
-  let ctx = resolve_keeper_base_path ctx ~name args in
   match name with
   | "masc_persona_list" -> Some (Persona.handle_persona_list ctx args)
   | "masc_keeper_create_from_persona" -> Some (handle_keeper_create_from_persona ctx args)
@@ -508,8 +514,8 @@ let dispatch ctx ~name ~args : tool_result option =
     Returns None for all other tool names.
     Called from server_routes_http_keeper_stream. *)
 let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
+  let ctx = resolve_ctx ctx ~name args in
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
-  let ctx = resolve_keeper_base_path ctx ~name args in
   match name with
   | "masc_keeper_msg" ->
       Some (handle_keeper_msg_stream ~on_text_delta ctx args)

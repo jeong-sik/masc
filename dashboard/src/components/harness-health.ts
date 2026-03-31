@@ -326,7 +326,12 @@ function activeRail(data: HarnessHealthData): HarnessRailKey | null {
 }
 
 function escapeMermaidLabel(value: string): string {
-  return value.replace(/"/g, '\'')
+  return value
+    .replace(/"/g, '\'')
+    .replace(/[\[\]{}()|#;]/g, ' ')
+    .replace(/\n+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
 }
 
 function flowNodeLabel(title: string, status: RailStatus, detail: string, freshness: string): string {

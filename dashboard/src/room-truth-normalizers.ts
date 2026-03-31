@@ -20,6 +20,9 @@ function normalizeServerStatus(raw: unknown): ServerStatus | null {
   return {
     room: asString(raw.room) ?? asString(raw.current_room),
     room_base_path: asString(raw.room_base_path),
+    coordination_root: asString(raw.coordination_root),
+    workspace_path: asString(raw.workspace_path),
+    workspace_differs: asBoolean(raw.workspace_differs),
     cluster: asString(raw.cluster),
     project: asString(raw.project),
     paused: asBoolean(raw.paused),

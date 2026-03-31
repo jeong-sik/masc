@@ -22,6 +22,9 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
     [
       ("room", `String current_room);
       ("room_base_path", `String config.base_path);
+      ("coordination_root", `String config.base_path);
+      ("workspace_path", `String config.workspace_path);
+      ("workspace_differs", `Bool (config.workspace_path <> config.base_path));
       ("cluster", `String (Env_config_core.cluster_name ()));
       ("project", `String project);
       ("current_room", `String current_room);

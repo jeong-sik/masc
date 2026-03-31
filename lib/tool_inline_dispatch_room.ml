@@ -219,12 +219,16 @@ let handle_set_room (ctx : context) : result option =
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Gc.warn "set_room GC failed: %s" (Printexc.to_string exn));
       let status = if Room.is_initialized rc then "ok" else "(not initialized)" in
-      let workspace_note =
+      let root_note =
         if rc.workspace_path <> rc.base_path then
-          Printf.sprintf "\n   workspace: %s (worktree)" rc.workspace_path
-        else ""
+          Printf.sprintf
+            "MASC room set.\n   coordination root: %s\n   workspace: %s\n   .masc/ status: %s"
+            rc.base_path rc.workspace_path status
+        else
+          Printf.sprintf "MASC room set to: %s\n   .masc/ status: %s"
+            rc.base_path status
       in
-      Some (true, Printf.sprintf "MASC room set to: %s\n   .masc/ status: %s%s" rc.base_path status workspace_note)
+      Some (true, root_note)
     end
 
 (** masc_join — join a MASC room *)

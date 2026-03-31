@@ -175,8 +175,45 @@ let test_dashboard_shell_current_room_status () =
         (status |> member "room" |> to_string);
       check string "shell current_room exposed" "focus-room"
         (status |> member "current_room" |> to_string);
+      check string "shell coordination root surfaced" dir
+        (status |> member "coordination_root" |> to_string);
+      check string "shell workspace path surfaced" dir
+        (status |> member "workspace_path" |> to_string);
+      check bool "shell workspace differs false when same root" false
+        (status |> member "workspace_differs" |> to_bool);
       check string "shell diagnostics surface" "shell"
         (json |> member "projection_diagnostics" |> member "surface" |> to_string))
+
+let test_dashboard_shell_surfaces_workspace_when_different () =
+  let dir = test_dir () in
+  let worktrees_dir = Filename.concat dir ".worktrees" in
+  let workspace = Filename.concat worktrees_dir "demo" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Unix.mkdir worktrees_dir 0o755;
+      Unix.mkdir workspace 0o755;
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config =
+        { (Room_utils.default_config dir) with workspace_path = workspace }
+      in
+      ignore (Lib.Room.init config ~agent_name:None);
+      let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
+      let open Yojson.Safe.Util in
+      let status = json |> member "status" in
+      check string "shell coordination root remains base path" dir
+        (status |> member "coordination_root" |> to_string);
+      check string "shell workspace path uses input path" workspace
+        (status |> member "workspace_path" |> to_string);
+      check bool "shell workspace differs true when worktree input" true
+        (status |> member "workspace_differs" |> to_bool);
+      check string "diagnostics coordination root surfaced" dir
+        (json |> member "projection_diagnostics" |> member "coordination_root"
+         |> to_string);
+      check string "diagnostics workspace path surfaced" workspace
+        (json |> member "projection_diagnostics" |> member "workspace_path"
+         |> to_string))
 
 let create_keeper env sw config name =
   let ctx : _ Lib.Tool_keeper.context =
@@ -299,6 +336,8 @@ let () =
             test_dashboard_execution_current_room_status;
           Alcotest.test_case "shell follows current room" `Quick
             test_dashboard_shell_current_room_status;
+          Alcotest.test_case "shell surfaces workspace separately" `Quick
+            test_dashboard_shell_surfaces_workspace_when_different;
           Alcotest.test_case "shell counts keepers cheaply" `Quick
             test_dashboard_shell_counts_keepers;
           Alcotest.test_case "shell excludes keeper agents from general count" `Quick

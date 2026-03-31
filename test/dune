@@ -77,6 +77,7 @@
         test_keeper_prompt_metrics
         test_cache_metrics_wiring
         test_tool_surface_ssot
+        test_keeper_retrieval_quality
         test_observability_redact
         test_worker_oas_scope_gate
         test_keeper_delta_activation
@@ -129,6 +130,7 @@
           test_keeper_prompt_metrics
           test_cache_metrics_wiring
           test_tool_surface_ssot
+          test_keeper_retrieval_quality
           test_observability_redact
           test_worker_oas_scope_gate
           test_keeper_delta_activation

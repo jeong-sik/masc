@@ -1,6 +1,15 @@
 # Changelog
 
 
+## [2.187.0] - 2026-03-31
+
+### Added
+- **Tool skip Override** — surface tool skip reasons to LLM via Override (#4127).
+- **Health baseline** — tighten to match actual counts (#4125).
+
+### Changed
+- **Dashboard HTTP facade split** — extract room_truth, runtime_info modules (-76 lines) (#4069).
+
 ## [2.186.0] - 2026-03-31
 
 ### Fixed

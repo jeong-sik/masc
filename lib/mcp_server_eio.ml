@@ -67,91 +67,30 @@ type mcp_session_record = Mcp_server_eio_governance.mcp_session_record = {
 let mcp_session_to_json = Mcp_server_eio_governance.mcp_session_to_json
 let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
 
-(** {1 Tool Lists} *)
+(** {1 Tool Lists — inline sub-library tools only}
 
-let read_only_tools =
-  ["masc_status"; "masc_tasks"; "masc_who"; "masc_agents";
-   "masc_messages"; "masc_task_history"; "masc_votes"; "masc_vote_status";
-   "masc_transport_status"; "masc_websocket_discovery";
-   "masc_worktree_list"; "masc_pending_interrupts";
-   "masc_portal_status";
-   "masc_verify_handoff"; "masc_tool_help";
-   "masc_team_session_status"; "masc_team_session_report";
-   "masc_team_session_list"; "masc_team_session_compare";
-   "masc_team_session_events"; "masc_team_session_prove";
-   "masc_operator_snapshot"; "masc_operator_digest";
-   "masc_surface_audit"; "masc_collaboration_evidence";
-   "masc_improve_loop_status"]
+    Most tools register read_only/requires_join via Tool_spec.register
+    in their own modules. These lists cover only tools from
+    Tool_schemas_inline (lib/tool_schemas/ sub-library) which cannot
+    depend on Tool_spec. *)
 
-let requires_join_tools = [
-  "masc_add_task"; "masc_claim_next"; "masc_transition";
-  "masc_broadcast"; "masc_listen"; "masc_heartbeat";
-  "masc_plan_set_task"; "masc_plan_clear_task";
-  "masc_worktree_create"; "masc_worktree_remove";
-  "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
-  "masc_vote_cast"; "masc_vote_revoke";
-  "masc_register_capabilities"; "masc_suspend"; "masc_leave";
-  "masc_operator_action"; "masc_operator_confirm";
-  "masc_improve_loop_start"; "masc_improve_loop_pause";
-  "masc_improve_loop_resume"; "masc_improve_loop_tick";
-]
+let read_only_tools_inline =
+  ["masc_status"; "masc_who"; "masc_messages";
+   "masc_votes"; "masc_vote_status"; "masc_pending_interrupts"]
 
-let () = Tool_dispatch.init_read_only_set read_only_tools
-let () = Tool_dispatch.init_requires_join_set requires_join_tools
+let requires_join_tools_inline =
+  ["masc_broadcast"; "masc_listen"; "masc_leave";
+   "masc_vote_cast"; "masc_vote_revoke"]
 
-(* Fix 1: Populate tag registry once at module load time.
-   Maps tool names to module tags for O(1) dispatch. *)
+let () = Tool_dispatch.init_read_only_set read_only_tools_inline
+let () = Tool_dispatch.init_requires_join_set requires_join_tools_inline
+
+(* Tag registry initialization.
+   Most modules register via Tool_spec.register at module load time.
+   Only Tool_schemas_inline (sub-library) and gap-fill registrations remain here. *)
 let () =
   let open Tool_dispatch in
-  (* Tool_plan: migrated to Tool_spec.register *)
-  (* Tool_operator: migrated to Tool_spec.register *)
-  (* Tool_command_plane: migrated to Tool_spec.register *)
-  (* Tool_local_runtime: migrated to Tool_spec.register *)
-  (* Tool_team_session: migrated to Tool_spec.register *)
-  (* Tool_voice: migrated to Tool_spec.register *)
-  (* Tool_portal: migrated to Tool_spec.register *)
-  (* Tool_worktree: migrated to Tool_spec.register *)
-  (* Tool_auth: migrated to Tool_spec.register *)
-  (* Tool_audit: migrated to Tool_spec.register *)
-  (* Tool_cost: migrated to Tool_spec.register (tool_cost.ml) *)
-  (* Tool_encryption: migrated to Tool_spec.register *)
-  (* Tool_schemas_fire_task: migrated to Tool_spec.register *)
-  (* Tool_agent: migrated to Tool_spec.register *)
-  (* Tool_room: migrated to Tool_spec.register *)
-  (* Tool_agent_timeline: migrated to Tool_spec.register *)
-  (* Tool_keeper: migrated to Tool_spec.register *)
-  (* Tool_mdal: migrated to Tool_spec.register *)
-  (* Tool_repair_loop: migrated to Tool_spec.register *)
-  (* Tool_improve_loop: migrated to Tool_spec.register *)
-  (* Tool_autoresearch: migrated to Tool_spec.register *)
-  (* Tool_research: migrated to Tool_spec.register *)
-  (* God Schema decomposition: register modules that now own their schemas *)
-  (* Tool_task: migrated to Tool_spec.register *)
-  (* Tool_control: migrated to Tool_spec.register *)
-  (* Tool_suspend: migrated to Tool_spec.register *)
-  (* Tool_council_oas: migrated to Tool_spec.register *)
-  (* Tool_relay: migrated to Tool_spec.register *)
-  (* Tool_handover: migrated to Tool_spec.register *)
-  (* Tool_hat: migrated to Tool_spec.register *)
-  (* Tool_cache: migrated to Tool_spec.register (tool_cache.ml) *)
-  (* Tool_model_catalog: migrated to Tool_spec.register (tool_model_catalog.ml) *)
-  (* Tool_rate_limit: migrated to Tool_spec.register *)
-  (* Tool_run: migrated to Tool_spec.register (tool_run.ml) *)
-  (* Tool_tempo: migrated to Tool_spec.register *)
-  (* Tool_goals: migrated to Tool_spec.register *)
-  (* Tool_compact: migrated to Tool_spec.register (tool_compact.ml) *)
-  register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline; (* sub-library: cannot access Tool_spec *)
-  (* Monolithic schema decomposition: modules that now export their own schemas *)
-  (* Tool_code: migrated to Tool_spec.register *)
-  (* Tool_code_write: migrated to Tool_spec.register *)
-  (* Tool_library: migrated to Tool_spec.register *)
-  (* Tool_a2a: migrated to Tool_spec.register *)
-  (* Tool_heartbeat: migrated to Tool_spec.register *)
-  (* Tool_misc: migrated to Tool_spec.register *)
-  (* Fix 2: Register modules that lack schema exports.
-     Tool_tag_init uses register_name_tag for remaining modules
-     that still rely on name-based registration. Called AFTER schema-based
-     registrations so it fills gaps without overwriting correct mappings. *)
+  register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
   Tool_tag_init.register_all ();
   Tool_board.register ();
   mark_tag_registry_initialized ();

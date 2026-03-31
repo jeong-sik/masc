@@ -147,7 +147,7 @@ call_mcp_tool() {
   local saved_timeout="${HTTP_TIMEOUT_SEC:-}"
   HTTP_TIMEOUT_SEC="$timeout_sec"
   LAST_TOOL_RAW="$(mcp_call_tool "$req_id" "$tool_name" "$args_json")"
-  HTTP_TIMEOUT_SEC="${saved_timeout:-$CURL_TIMEOUT_SEC}"
+  HTTP_TIMEOUT_SEC="$saved_timeout"
 
   if printf '%s' "$LAST_TOOL_RAW" | jq -e '._harness_error? != null' >/dev/null 2>&1; then
     LAST_TOOL_ERROR="$(printf '%s' "$LAST_TOOL_RAW" | jq -r '._harness_error.message // "transport error"')"

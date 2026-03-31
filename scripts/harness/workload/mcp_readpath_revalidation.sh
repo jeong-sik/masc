@@ -186,7 +186,7 @@ call_tool() {
   MCP_PROTOCOL_VERSION="$protocol_version"
   local response
   response="$(mcp_call_tool "$request_id" "$tool_name" "$args_json" "$session_id" "" "$mcp_url")"
-  HTTP_TIMEOUT_SEC="${saved_timeout:-$CURL_TIMEOUT_SEC}"
+  HTTP_TIMEOUT_SEC="$saved_timeout"
   MCP_PROTOCOL_VERSION="$saved_proto"
 
   LAST_TIME_TOTAL="$MCP_LAST_TIME_TOTAL"

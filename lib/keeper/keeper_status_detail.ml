@@ -18,7 +18,16 @@ let handle_keeper_status ctx args : tool_result =
   if not (validate_name name) then
     (false, "❌ invalid keeper name")
   else
-    match read_meta ctx.config name with
+    (* Resolve base_path from registry to handle cross-workspace keepers.
+       The server config may use a different base_path than the keeper was
+       registered with (e.g. server=masc-mcp, keeper=~/me). *)
+    let config =
+      match Keeper_registry.find_by_name name with
+      | Some entry when entry.base_path <> ctx.config.base_path ->
+        { ctx.config with base_path = entry.base_path }
+      | _ -> ctx.config
+    in
+    match read_meta config name with
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
     | Ok (Some m) ->
@@ -38,7 +47,7 @@ let handle_keeper_status ctx args : tool_result =
       in
       let models = Oas_model_resolve.models_of_cascade_name m.cascade_name in
       let primary_max_context = Oas_model_resolve.resolve_primary_max_context models in
-      let base_dir = session_base_dir ctx.config in
+      let base_dir = session_base_dir config in
          let ctx_opt =
            if include_context then
              let (_session, ctx_opt) =
@@ -70,8 +79,8 @@ let handle_keeper_status ctx args : tool_result =
                  ("message_count", `Int (List.length c.messages));
                ]
          in
-         let keepalive_running = runtime_keepalive_running ctx.config m in
-         let agent_status = parse_agent_status ctx.config ~agent_name:m.agent_name in
+         let keepalive_running = runtime_keepalive_running config m in
+         let agent_status = parse_agent_status config ~agent_name:m.agent_name in
          let now_ts = Time_compat.now () in
          let created_ts =
            Resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
@@ -111,11 +120,11 @@ let handle_keeper_status ctx args : tool_result =
              ])
          ) models) in
 
-         let metrics_store = keeper_metrics_store ctx.config m.name in
-         let metrics_path = keeper_metrics_path ctx.config m.name in
-         let memory_bank_path = keeper_memory_bank_path ctx.config m.name in
-         let session_dir = keeper_session_dir ctx.config m.runtime.trace_id in
-         let history_path = keeper_history_path ctx.config m.runtime.trace_id in
+         let metrics_store = keeper_metrics_store config m.name in
+         let metrics_path = keeper_metrics_path config m.name in
+         let memory_bank_path = keeper_memory_bank_path config m.name in
+         let session_dir = keeper_session_dir config m.runtime.trace_id in
+         let history_path = keeper_history_path config m.runtime.trace_id in
 
          let metrics_tail =
            let lines =
@@ -188,7 +197,7 @@ let handle_keeper_status ctx args : tool_result =
          let memory_bank_summary =
            if include_memory_bank then
              read_keeper_memory_summary
-               ctx.config
+               config
                ~name:m.name
                ~max_bytes:tail_bytes
                ~max_lines:(max (tail_turns * 10) 400)
@@ -373,7 +382,7 @@ let handle_keeper_status ctx args : tool_result =
         in
         let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
         let tool_audit_snapshot =
-          match latest_tool_audit_snapshot_from_files ctx.config ~keeper_name:m.name with
+          match latest_tool_audit_snapshot_from_files config ~keeper_name:m.name with
           | Some snapshot ->
               {
                 snapshot with
@@ -507,13 +516,13 @@ let handle_keeper_status ctx args : tool_result =
            ]);
            ("active_team_session_id",
              Json_util.string_opt_to_json m.active_team_session_id);
-           ("team_session_state", team_session_state_json ctx.config m);
+           ("team_session_state", team_session_state_json config m);
            ("last_team_session_started_at",
              if String.trim m.last_team_session_started_at = "" then `Null
              else `String m.last_team_session_started_at);
            ("team_session_start_count_total",
              `Int m.team_session_start_count_total);
-           ("team_session_bridge", team_session_bridge_json ctx.config m);
+           ("team_session_bridge", team_session_bridge_json config m);
            ("compaction_policy", `Assoc [
              ("profile", `String m.compaction.profile);
              ("ratio_gate", `Float compact_ratio_gate);
@@ -530,9 +539,9 @@ let handle_keeper_status ctx args : tool_result =
              ("include_compaction_history", `Bool include_compaction_history);
            ]);
            ("models_resolved", models_resolved);
-           ("runtime", runtime_surface_json ctx.config m);
+           ("runtime", runtime_surface_json config m);
            ("coordination", coordination_surface_json m);
-           ("sources", source_provenance_json ctx.config m);
+           ("sources", source_provenance_json config m);
            ("context", ctx_stats);
            ("skill_route", Json_util.option_to_yojson Fun.id last_skill_route);
            ("metrics_overview", metrics_summary_to_json metrics_overview);
@@ -550,14 +559,14 @@ let handle_keeper_status ctx args : tool_result =
            ("compaction_history_tail", fst compaction_history_tail);
            ("compaction_history_count", `Int (snd compaction_history_tail));
            ("storage_paths", `Assoc [
-             ("meta", `String (keeper_meta_path ctx.config m.name));
+             ("meta", `String (keeper_meta_path config m.name));
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
              ("metrics_single_file", `String metrics_path);
              ("memory_bank", `String memory_bank_path);
-             ("decisions", `String (keeper_decision_log_path ctx.config m.name));
-             ("policy", `String (keeper_policy_log_path ctx.config m.name));
-             ("feedback", `String (keeper_feedback_log_path ctx.config m.name));
-             ("dataset_export", `String (keeper_dataset_export_path ctx.config m.name));
+             ("decisions", `String (keeper_decision_log_path config m.name));
+             ("policy", `String (keeper_policy_log_path config m.name));
+             ("feedback", `String (keeper_feedback_log_path config m.name));
+             ("dataset_export", `String (keeper_dataset_export_path config m.name));
              ("session_dir", `String session_dir);
              ("history", `String history_path);
            ]);

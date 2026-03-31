@@ -1,0 +1,163 @@
+(** Diagnose runtime base-path mismatches that can make two [.masc] roots
+    look simultaneously authoritative to operators. *)
+
+type t = {
+  process_cwd : string;
+  input_base_path : string option;
+  effective_base_path : string;
+  effective_masc_root : string;
+  env_masc_base_path : string option;
+  env_me_root : string option;
+  cwd_masc_root : string;
+  cwd_has_masc_dir : bool;
+  effective_has_masc_dir : bool;
+  roots_diverge : bool;
+  dual_masc_roots : bool;
+  fail_fast_enabled : bool;
+  warning : string option;
+}
+
+let trim_opt = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let strip_trailing_slashes path =
+  let rec loop idx =
+    if idx <= 1 then String.sub path 0 idx
+    else if path.[idx - 1] = '/' then loop (idx - 1)
+    else String.sub path 0 idx
+  in
+  if path = "" then "."
+  else loop (String.length path)
+
+let normalize_path ~cwd path =
+  let base = strip_trailing_slashes (String.trim path) in
+  let absolute =
+    if Filename.is_relative base then Filename.concat cwd base else base
+  in
+  try Unix.realpath absolute with
+  | Unix.Unix_error _ -> absolute
+
+let dir_exists path =
+  Sys.file_exists path && Sys.is_directory path
+
+let fail_fast_env_enabled () =
+  match Sys.getenv_opt "MASC_BASE_PATH_STRICT" with
+  | Some raw -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "1" | "true" | "yes" -> true
+      | _ -> false)
+  | None -> false
+
+let detect ?cwd ?env_masc_base_path ?env_me_root ?strict ?input_base_path
+    ~effective_base_path ~effective_masc_root () =
+  let cwd =
+    match cwd with
+    | Some path -> path
+    | None -> Sys.getcwd ()
+  in
+  let cwd_norm = normalize_path ~cwd cwd in
+  let effective_base_norm = normalize_path ~cwd effective_base_path in
+  let effective_masc_norm = normalize_path ~cwd effective_masc_root in
+  let cwd_masc_root = normalize_path ~cwd (Filename.concat cwd_norm ".masc") in
+  let cwd_has_masc_dir = dir_exists cwd_masc_root in
+  let effective_has_masc_dir = dir_exists effective_masc_norm in
+  let roots_diverge = not (String.equal cwd_norm effective_base_norm) in
+  let dual_masc_roots =
+    roots_diverge
+    && cwd_has_masc_dir
+    && effective_has_masc_dir
+    && not (String.equal cwd_masc_root effective_masc_norm)
+  in
+  let fail_fast_enabled =
+    match strict with
+    | Some enabled -> enabled
+    | None -> fail_fast_env_enabled ()
+  in
+  let warning =
+    if dual_masc_roots then
+      Some
+        (Printf.sprintf
+           "process cwd (%s) differs from effective base path (%s) and both .masc roots exist (%s vs %s); operator surfaces may inspect stale state"
+           cwd_norm effective_base_norm cwd_masc_root effective_masc_norm)
+    else
+      None
+  in
+  {
+    process_cwd = cwd_norm;
+    input_base_path;
+    effective_base_path = effective_base_norm;
+    effective_masc_root = effective_masc_norm;
+    env_masc_base_path = trim_opt env_masc_base_path;
+    env_me_root = trim_opt env_me_root;
+    cwd_masc_root;
+    cwd_has_masc_dir;
+    effective_has_masc_dir;
+    roots_diverge;
+    dual_masc_roots;
+    fail_fast_enabled;
+    warning;
+  }
+
+let strict_violation (diag : t) =
+  diag.fail_fast_enabled && diag.dual_masc_roots
+
+let startup_lines (diag : t) =
+  let lines =
+    [
+      Some (Printf.sprintf "   Process cwd: %s" diag.process_cwd);
+      (match diag.input_base_path with
+       | Some path when not (String.equal path diag.effective_base_path) ->
+           Some (Printf.sprintf "   Base path (input): %s" path)
+       | _ -> None);
+      (match diag.env_masc_base_path with
+       | Some path -> Some (Printf.sprintf "   MASC_BASE_PATH(env): %s" path)
+       | None -> None);
+      (match diag.env_me_root with
+       | Some path -> Some (Printf.sprintf "   ME_ROOT(env): %s" path)
+       | None -> None);
+      (match diag.warning with
+       | Some message -> Some (Printf.sprintf "   Path warning: %s" message)
+       | None -> None);
+      (if diag.fail_fast_enabled then
+         Some "   Path strict mode: enabled"
+       else
+         None);
+    ]
+  in
+  List.filter_map (fun line -> line) lines
+
+let log_startup_warning (diag : t) =
+  match diag.warning with
+  | Some message ->
+      Log.Server.warn "%s%s" message
+        (if diag.fail_fast_enabled then " (strict mode enabled)" else "")
+  | None -> ()
+
+let option_field name = function
+  | Some value -> Some (name, `String value)
+  | None -> None
+
+let to_yojson (diag : t) =
+  `Assoc
+    ([
+       ("cwd", `String diag.process_cwd);
+       ("effective_base_path", `String diag.effective_base_path);
+       ("effective_masc_root", `String diag.effective_masc_root);
+       ("cwd_masc_root", `String diag.cwd_masc_root);
+       ("cwd_has_masc_dir", `Bool diag.cwd_has_masc_dir);
+       ("effective_has_masc_dir", `Bool diag.effective_has_masc_dir);
+       ("roots_diverge", `Bool diag.roots_diverge);
+       ("dual_masc_roots", `Bool diag.dual_masc_roots);
+       ("fail_fast_enabled", `Bool diag.fail_fast_enabled);
+       ("strict_violation", `Bool (strict_violation diag));
+     ]
+    @ List.filter_map (fun item -> item)
+        [
+          option_field "input_base_path" diag.input_base_path;
+          option_field "env_masc_base_path" diag.env_masc_base_path;
+          option_field "env_me_root" diag.env_me_root;
+          option_field "warning" diag.warning;
+        ])

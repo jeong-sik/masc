@@ -29,13 +29,15 @@ let listen_socket ~sw ~net (config : Http.config) =
   Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.max_connections addr
 
 let print_startup_banner ~(config : Http.config) ~resolved_base ~base_path
-    ~masc_dir =
+    ~masc_dir ~path_diagnostics =
   Printf.printf "MASC MCP Server listening on http://%s:%d\n%!" config.host
     config.port;
   Printf.printf "   Base path: %s\n%!" resolved_base;
   if resolved_base <> base_path then
     Printf.printf "   Base path (input): %s\n%!" base_path;
   Printf.printf "   MASC dir: %s\n%!" masc_dir;
+  List.iter (fun line -> Printf.printf "%s\n%!" line)
+    (Server_base_path_diagnostics.startup_lines path_diagnostics);
   Printf.printf "   GET  /mcp → SSE stream (notifications)\n%!";
   Printf.printf
     "   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)\n\

@@ -59,6 +59,15 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   in
   state
 
+let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) =
+  Server_base_path_diagnostics.detect
+    ?input_base_path
+    ?env_masc_base_path:(Env_config_core.base_path_opt ())
+    ?env_me_root:(Env_config_core.me_root_opt ())
+    ~effective_base_path:state.room_config.base_path
+    ~effective_masc_root:(Room.masc_root_dir state.room_config)
+    ()
+
 let restore_persisted_sessions (state : Mcp_server.server_state) =
   Session.restore_from_disk state.session_registry
     ~agents_path:(Room.agents_dir state.room_config)
@@ -342,6 +351,17 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let state =
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       in
+      let path_diagnostics =
+        runtime_path_diagnostics ~input_base_path:base_path state
+      in
+      Server_base_path_diagnostics.log_startup_warning path_diagnostics;
+      if Server_base_path_diagnostics.strict_violation path_diagnostics then begin
+        Log.Server.error "%s"
+          (Option.value path_diagnostics.warning
+             ~default:
+               "strict base-path guard triggered without a diagnostic warning");
+        exit 1
+      end;
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (PG pool) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
@@ -435,7 +455,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
-      Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
+      let path_diagnostics =
+        runtime_path_diagnostics ~input_base_path:base_path state
+      in
+      Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
+        ~masc_dir ~path_diagnostics;
       (* Create Executor_pool for CPU-heavy dashboard compute.
          Runs in separate OS domains, bypassing fiber contention. *)
       let exec_pool = Eio.Executor_pool.create ~sw ~domain_count:2 domain_mgr in

@@ -119,6 +119,7 @@
    server_bootstrap_http
    server_bootstrap_pg
    server_bootstrap_loops
+   server_base_path_diagnostics
    server_runtime_bootstrap
    server_startup_state
    server_startup_takeover

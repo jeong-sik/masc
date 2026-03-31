@@ -291,3 +291,20 @@ mcp_call_tool() {
 
   mcp_jsonrpc_call "$id" "tools/call" "$params_json" "$session_id" "$token" "$endpoint"
 }
+
+# Call tool and assert success. Returns the full payload on success.
+# Usage: payload="$(mcp_call_tool_checked <id> <tool> <args_json> [session_id] [token] [endpoint])"
+mcp_call_tool_checked() {
+  local payload
+  payload="$(mcp_call_tool "$@")"
+  mcp_require_tool_ok "$payload" "${2:-tool}_checked"
+  printf '%s' "$payload"
+}
+
+# Call tool, assert success, extract .result. Returns the parsed result object.
+# Usage: result="$(mcp_call_tool_result <id> <tool> <args_json> [session_id] [token] [endpoint])"
+mcp_call_tool_result() {
+  local payload
+  payload="$(mcp_call_tool_checked "$@")"
+  printf '%s' "$payload" | mcp_extract_result
+}

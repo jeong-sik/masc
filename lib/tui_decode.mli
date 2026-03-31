@@ -19,10 +19,10 @@ type keeper = {
   k_short_goal : string;
   k_soul_profile : string;
   k_generation : int;
-  k_active_model : string;
+  k_active_model : string option;
   k_models : string list;
   k_proactive_enabled : bool;
-  k_initiative_enabled : bool;
+  k_initiative_enabled : bool option;
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : float;

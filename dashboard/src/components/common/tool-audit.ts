@@ -1,4 +1,5 @@
 import type { Keeper } from '../../types'
+import { isOfflineStatus } from '../../lib/status-utils'
 import { navigate } from '../../router'
 
 export type ToolAuditEmptyState =
@@ -8,14 +9,10 @@ export type ToolAuditEmptyState =
   | 'not_applicable'
   | 'unlinked'
 
-function normalizeStatus(value: string | null | undefined): string {
-  return value?.trim().toLowerCase() ?? ''
-}
-
 export function linkedRuntimeState(keeper: Keeper | null | undefined): 'offline' | 'online' | 'unlinked' {
   if (!keeper) return 'unlinked'
   if (keeper.agent?.exists === false) return 'offline'
-  if (normalizeStatus(keeper.status) === 'offline' || normalizeStatus(keeper.status) === 'inactive') {
+  if (isOfflineStatus(keeper.status)) {
     return 'offline'
   }
   return 'online'

@@ -1,6 +1,7 @@
 // Live Monitor tab — derived signals and filter state
 
 import { signal, computed, type ReadonlySignal } from '@preact/signals'
+import { isOfflineStatus } from './lib/status-utils'
 import type { JournalEntry } from './types'
 import type { PipelineStage } from './types/core'
 import { journal } from './sse'
@@ -77,7 +78,7 @@ export const agentPulses: ReadonlySignal<AgentPulse[]> = computed(() => {
       } else {
         state = 'working'
       }
-    } else if (agent.status === 'offline' || agent.status === 'inactive') {
+    } else if (isOfflineStatus(agent.status)) {
       state = 'stale'
     }
 

@@ -312,7 +312,9 @@ let execute_team_action (ctx : 'a context) (request : action_request) =
         | _ -> Error "payload.spawn_batch is required"
       in
       let wait_mode =
-        get_string request.payload "wait_mode" "blocking"
+        match get_string_opt request.payload "wait_mode" with
+        | Some value -> value
+        | None -> "blocking"
       in
       let args =
         `Assoc

@@ -33,9 +33,8 @@ let handle_start ctx args : result =
   let agents = get_agent_names args "agents" in
   let operation_id = get_string_opt args "operation_id" in
   match team_session_start_env_result ctx with
-  | Error _ ->
-      error_result_typed ~code:Precondition_failed
-        "process_mgr not available for team session start"
+  | Error msg ->
+      error_result_typed ~code:Precondition_failed msg
   | Ok env -> (
       match
         Team_session_engine_eio.start_session ~sw:ctx.sw ~env

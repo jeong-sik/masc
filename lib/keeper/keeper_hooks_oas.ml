@@ -105,8 +105,7 @@ let emit_cost_event
   let path = Filename.concat masc_root "costs.jsonl" in
   let entry = `Assoc [
     ("agent", `String agent_name);
-    ("task_id",
-      (match task_id with Some t -> `String t | None -> `Null));
+    ("task_id", Json_util.string_opt_to_json task_id);
     ("model", `String model);
     ("input_tokens", `Int input_tokens);
     ("output_tokens", `Int output_tokens);

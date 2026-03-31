@@ -270,7 +270,7 @@ let eval_run_to_json (r : eval_run) : Yojson.Safe.t =
     ("total_cost_usd", `Float r.total_cost_usd);
     ("duration_ms", `Int r.duration_ms);
     ("outcome", Trajectory.outcome_to_json r.outcome);
-    ("error", (match r.error with None -> `Null | Some e -> `String e));
+    ("error", Json_util.string_opt_to_json r.error);
     ("scores", `List (List.map grader_result_to_json r.scores));
   ]
 

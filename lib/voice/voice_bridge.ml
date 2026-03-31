@@ -523,7 +523,7 @@ let start_voice_session ~sw ~clock ~net ~agent_id ?session_name () =
       [
         ("agent_id", `String agent_id);
         ("voice", `String voice);
-        ("session_name", match session_name with Some n -> `String n | None -> `Null);
+        ("session_name", Json_util.string_opt_to_json session_name);
       ]
   in
   match call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_start" ~arguments:args with
@@ -645,7 +645,7 @@ let start_conference ~sw ~clock ~net ~agent_ids ?conference_name () =
       [
         ("agent_ids", `List (List.map (fun id -> `String id) agent_ids));
         ("agent_voices", `List agent_voices_list);
-        ("conference_name", match conference_name with Some n -> `String n | None -> `Null);
+        ("conference_name", Json_util.string_opt_to_json conference_name);
       ]
   in
   match call_session_tool ~sw ~clock ~net ~tool_name:"conference_start" ~arguments:args with

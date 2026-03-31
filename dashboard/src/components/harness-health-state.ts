@@ -143,12 +143,13 @@ export function handleHarnessSSE(): void {
   if (!evt) return
   const type = evt.type ?? ''
   const rawPayload = (evt as unknown as { payload?: Record<string, unknown> }).payload
-  const payload: Record<string, unknown> =
+  const payload =
     rawPayload && typeof rawPayload === 'object'
       ? rawPayload
-      : (evt as unknown as Record<string, unknown>)
+      : null
 
   if (type === 'oas:masc:harness:verdict_recorded') {
+    if (!payload) return
     const nextItem: HarnessVerdictItem = {
       timestamp:
         typeof payload.timestamp === 'number'
@@ -184,6 +185,7 @@ export function handleHarnessSSE(): void {
   }
 
   if (type === 'oas:masc:harness:pre_compact') {
+    if (!payload) return
     const nextItem: PreCompactEvent = {
       timestamp:
         typeof payload.timestamp === 'number'
@@ -229,30 +231,31 @@ export function handleHarnessSSE(): void {
   if (
     type === 'oas:masc:harness:handoff'
     || type === 'keeper_handoff'
-    || type === 'masc/keeper_handoff'
   ) {
+    const handoffPayload: Record<string, unknown> =
+      payload ?? (evt as unknown as Record<string, unknown>)
     const nextItem: HandoffEvent = {
       timestamp:
-        typeof payload.timestamp === 'number'
-          ? payload.timestamp
-          : typeof payload.ts_unix === 'number'
-            ? payload.ts_unix
+        typeof handoffPayload.timestamp === 'number'
+          ? handoffPayload.timestamp
+          : typeof handoffPayload.ts_unix === 'number'
+            ? handoffPayload.ts_unix
           : Date.now() / 1000,
-      keeper_name: String(payload.keeper_name ?? payload.name ?? ''),
-      trace_id: String(payload.trace_id ?? payload.new_trace_id ?? ''),
-      generation: Number(payload.generation ?? payload.from_generation ?? 0),
+      keeper_name: String(handoffPayload.keeper_name ?? handoffPayload.name ?? ''),
+      trace_id: String(handoffPayload.trace_id ?? handoffPayload.new_trace_id ?? ''),
+      generation: Number(handoffPayload.generation ?? handoffPayload.from_generation ?? 0),
       next_generation:
-        payload.next_generation != null
-          ? Number(payload.next_generation)
-          : payload.to_generation != null
-            ? Number(payload.to_generation)
+        handoffPayload.next_generation != null
+          ? Number(handoffPayload.next_generation)
+          : handoffPayload.to_generation != null
+            ? Number(handoffPayload.to_generation)
             : null,
       prev_trace_id:
-        payload.prev_trace_id == null ? null : String(payload.prev_trace_id),
+        handoffPayload.prev_trace_id == null ? null : String(handoffPayload.prev_trace_id),
       new_trace_id:
-        payload.new_trace_id == null ? null : String(payload.new_trace_id),
+        handoffPayload.new_trace_id == null ? null : String(handoffPayload.new_trace_id),
       to_model:
-        payload.to_model == null ? null : String(payload.to_model),
+        handoffPayload.to_model == null ? null : String(handoffPayload.to_model),
     }
     updateHarnessData(data => ({
       ...data,

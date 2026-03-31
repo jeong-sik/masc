@@ -42,6 +42,17 @@ val supported_local_worker_tool_names : string list
 val supported_local_worker_tool_names_for_scope :
   Team_session_types.execution_scope option -> string list
 
+val tool_policy_of_session_result :
+  config:Room.config ->
+  Team_session_types.session ->
+  (Tool_access_policy.t, string) result
+
+val supported_local_worker_tool_names_for_session :
+  config:Room.config ->
+  execution_scope:Team_session_types.execution_scope option ->
+  Team_session_types.session ->
+  string list
+
 val supported_local_worker_tools :
   unit -> (Types.tool_schema list, string) result
 
@@ -49,7 +60,14 @@ val supported_local_worker_tools_for_scope :
   Team_session_types.execution_scope option ->
   (Types.tool_schema list, string) result
 
+val supported_local_worker_tools_for_session :
+  config:Room.config ->
+  execution_scope:Team_session_types.execution_scope option ->
+  Team_session_types.session ->
+  (Types.tool_schema list, string) result
+
 val dispatch_supported_tool :
+  tool_policy:Tool_access_policy.t ->
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   config:Room.config ->

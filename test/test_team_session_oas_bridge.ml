@@ -17,6 +17,16 @@ let execution_scope_testable =
         (Team_session_types.execution_scope_to_string scope))
     ( = )
 
+let has_substring s sub =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  let rec loop idx =
+    if idx + len_sub > len_s then false
+    else if String.sub s idx len_sub = sub then true
+    else loop (idx + 1)
+  in
+  loop 0
+
 (* ================================================================ *)
 (* Role mapping tests                                               *)
 (* ================================================================ *)
@@ -426,6 +436,100 @@ let test_supported_local_worker_tools_for_observe_only_resolve_subset () =
   Alcotest.(check bool) "scoped schemas block masc_run_log" false
     (List.mem "masc_run_log" names)
 
+let make_cp_backed_session ~tool_allowlist () =
+  let tmp = Filename.temp_dir "masc-test" "" in
+  let config = Room.default_config tmp in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  let now = Types.now_iso () in
+  let root : Command_plane_v2.unit_record =
+    {
+      unit_id = "company-runtime";
+      label = "Runtime Company";
+      kind = Command_plane_v2.Company;
+      parent_unit_id = None;
+      leader_id = Some "owner";
+      roster = [ "owner" ];
+      capability_profile = [];
+      policy = Command_plane_v2.default_policy Command_plane_v2.Company;
+      budget = Command_plane_v2.default_budget Command_plane_v2.Company;
+      source = "managed";
+      created_at = now;
+      updated_at = now;
+    }
+  in
+  let squad : Command_plane_v2.unit_record =
+    {
+      unit_id = "squad-cp-policy";
+      label = "CP Policy Squad";
+      kind = Command_plane_v2.Squad;
+      parent_unit_id = Some root.unit_id;
+      leader_id = Some "owner";
+      roster = [ "owner" ];
+      capability_profile = [];
+      policy =
+        {
+          (Command_plane_v2.default_policy Command_plane_v2.Squad) with
+          tool_allowlist;
+        };
+      budget = Command_plane_v2.default_budget Command_plane_v2.Squad;
+      source = "managed";
+      created_at = now;
+      updated_at = now;
+    }
+  in
+  let operation : Command_plane_v2.operation_record =
+    {
+      operation_id = "op-cp-tool-policy";
+      objective = "restrict team session tools";
+      intent_id = None;
+      assigned_unit_id = squad.unit_id;
+      policy_class = "execution";
+      budget_class = "standard";
+      workload_template = None;
+      workload_profile = "coding_task";
+      stage = Some "implement";
+      artifact_scope = [];
+      depends_on_operation_ids = [];
+      search_strategy = "legacy";
+      detachment_session_id = None;
+      trace_id = "trace-cp-tool-policy";
+      checkpoint_ref = None;
+      active_goal_ids = [];
+      note = None;
+      created_by = "owner";
+      source = "managed";
+      status = Command_plane_v2.Active;
+      created_at = now;
+      updated_at = now;
+    }
+  in
+  Command_plane_v2.write_units config [ squad; root ];
+  Command_plane_v2.write_operations config [ operation ];
+  let session =
+    { (make_session ()) with
+      execution_scope = Team_session_types.Limited_code_change;
+      operation_id = Some operation.operation_id;
+    }
+  in
+  (config, session)
+
+let test_supported_local_worker_tools_for_cp_session_filter_allowlist () =
+  Eio_main.run @@ fun _env ->
+  let config, session =
+    make_cp_backed_session ~tool_allowlist:[ "masc_status" ] ()
+  in
+  let names =
+    Team_session_oas_bridge.supported_local_worker_tool_names_for_session
+      ~config ~execution_scope:(Some Team_session_types.Limited_code_change)
+      session
+  in
+  Alcotest.(check bool) "cp allowlist keeps masc_status" true
+    (List.mem "masc_status" names);
+  Alcotest.(check bool) "cp allowlist removes masc_code_read" false
+    (List.mem "masc_code_read" names);
+  Alcotest.(check bool) "cp allowlist removes masc_run_init" false
+    (List.mem "masc_run_init" names)
+
 let test_effective_planned_worker_execution_scope_defaults_executor () =
   let worker =
     { (make_pw ()) with
@@ -479,6 +583,7 @@ let test_dispatch_supported_tool_status () =
   let ok, message =
     Team_session_oas_bridge.dispatch_supported_tool
       ~sw ~clock:(Eio.Stdenv.clock env) ~config
+      ~tool_policy:Tool_access_policy.allow_all
       ~name:"masc_status"
       ~args:(`Assoc [("agent_name", `String "worker-status")])
   in
@@ -495,12 +600,30 @@ let test_dispatch_supported_tool_heartbeat_autojoin () =
   let ok, _message =
     Team_session_oas_bridge.dispatch_supported_tool
       ~sw ~clock:(Eio.Stdenv.clock env) ~config
+      ~tool_policy:Tool_access_policy.allow_all
       ~name:"masc_heartbeat"
       ~args:(`Assoc [("agent_name", `String "worker-heartbeat")])
   in
   Alcotest.(check bool) "heartbeat dispatch succeeded" true ok;
   Alcotest.(check bool) "worker auto-joined" true
     (Room.is_agent_joined config ~agent_name:"worker-heartbeat")
+
+let test_dispatch_supported_tool_respects_cp_policy () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let tmp = Filename.temp_dir "masc-test" "" in
+  let config = Room.default_config tmp in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let tool_policy = Tool_access_policy.of_allowlist [ "masc_status" ] in
+  let ok, message =
+    Team_session_oas_bridge.dispatch_supported_tool ~sw
+      ~clock:(Eio.Stdenv.clock env) ~config ~tool_policy
+      ~name:"masc_board_post"
+      ~args:(`Assoc [ ("agent_name", `String "worker-policy") ])
+  in
+  Alcotest.(check bool) "dispatch blocked" false ok;
+  Alcotest.(check bool) "message mentions policy" true
+    (has_substring message "command-plane policy")
 
 let test_run_repair_loop_until_terminal_with_fake_dispatch () =
   let iterate_calls = ref 0 in
@@ -657,6 +780,8 @@ let () =
         test_supported_local_worker_tools_for_observe_only_filter_mutations;
       Alcotest.test_case "observe_only resolves scoped schemas" `Quick
         test_supported_local_worker_tools_for_observe_only_resolve_subset;
+      Alcotest.test_case "cp session allowlist filters scoped names" `Quick
+        test_supported_local_worker_tools_for_cp_session_filter_allowlist;
       Alcotest.test_case "executor default scope" `Quick
         test_effective_planned_worker_execution_scope_defaults_executor;
       Alcotest.test_case "non-executor default observe_only scope" `Quick
@@ -667,6 +792,8 @@ let () =
         test_dispatch_supported_tool_status;
       Alcotest.test_case "heartbeat autojoin" `Quick
         test_dispatch_supported_tool_heartbeat_autojoin;
+      Alcotest.test_case "dispatch respects cp policy" `Quick
+        test_dispatch_supported_tool_respects_cp_policy;
       Alcotest.test_case "repair loop wrapper iterates until terminal" `Quick
         test_run_repair_loop_until_terminal_with_fake_dispatch;
       Alcotest.test_case "repair loop wrapper guards runaway status" `Quick

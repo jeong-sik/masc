@@ -238,13 +238,28 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
        Running and accepts manual steps via masc_team_session_step. *)
     if session.planned_workers <> [] then
       Eio.Fiber.fork ~sw (fun () ->
+        let tool_policy_result =
+          Team_session_oas_bridge.tool_policy_of_session_result ~config session
+        in
         let result =
-          match Team_session_oas_bridge.supported_local_worker_tools () with
-          | Ok masc_tools ->
+          match
+            Team_session_oas_bridge.supported_local_worker_tools_for_session
+              ~config ~execution_scope:None session
+          with
+          | Ok masc_tools -> (
+              let dispatch =
+                match tool_policy_result with
+                | Ok tool_policy ->
+                    Team_session_oas_bridge.dispatch_supported_tool ~sw
+                      ~clock:env#clock ~config ~tool_policy
+                | Error _ ->
+                    Team_session_oas_bridge.dispatch_supported_tool ~sw
+                      ~clock:env#clock ~config
+                      ~tool_policy:Tool_access_policy.empty
+              in
             Team_session_swarm_runner.run_swarm ~sw ~env ~config
               ~session_id ~masc_tools
-              ~dispatch:(Team_session_oas_bridge.dispatch_supported_tool
-                ~sw ~clock:env#clock ~config)
+              ~dispatch)
           | Error reason -> Error reason
         in
         match result with
@@ -751,8 +766,10 @@ let recover_running_sessions ~sw ~(env : < clock : _ Eio.Time.clock ; process_mg
                   | Ok masc_tools ->
                     Team_session_swarm_runner.run_swarm ~sw ~env ~config
                       ~session_id:session.session_id ~masc_tools
-                      ~dispatch:(Team_session_oas_bridge.dispatch_supported_tool
-                        ~sw ~clock:env#clock ~config)
+                      ~dispatch:
+                        (Team_session_oas_bridge.dispatch_supported_tool ~sw
+                           ~clock:env#clock ~config
+                           ~tool_policy:Tool_access_policy.allow_all)
                   | Error reason -> Error reason
                 in
                 match result with

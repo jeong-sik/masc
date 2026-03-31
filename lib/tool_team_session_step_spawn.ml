@@ -78,6 +78,9 @@ let execute_spawn_pipeline
                    fail_all_prepared prepared_spawns ~error:msg;
                    Some (`Assoc [ ("error", `String msg) ])
                | Ok () ->
+                   let session_opt =
+                     Team_session_store.load_session ctx.config session_id
+                   in
                    let execute_spawn ~run_sw index prepared =
                     let start_time = Time_compat.now () in
                     let worker_name =
@@ -89,36 +92,15 @@ let execute_spawn_pipeline
                       deps.effective_execution_scope_of_spec prepared.spec
                     in
                     let local_worker_tool_names =
-                      let all_local_worker_tools =
-                        Team_session_oas_bridge.supported_local_worker_tool_names
-                      in
-                      match execution_scope with
-                      | Some Team_session_types.Observe_only ->
-                          let denied_observe_only_tools =
-                            [
-                              "masc_claim_next";
-                              "masc_transition";
-                              "masc_add_task";
-                              "masc_heartbeat";
-                              "masc_board_post";
-                              "masc_board_comment";
-                              "masc_board_vote";
-                              "masc_worktree_create";
-                              "masc_worktree_remove";
-                              "masc_run_init";
-                              "masc_run_plan";
-                              "masc_run_log";
-                              "masc_run_deliverable";
-                              "masc_repair_loop_start";
-                              "masc_repair_loop_iterate";
-                              "masc_repair_loop_stop";
-                            ]
-                          in
-                          List.filter
-                            (fun name ->
-                              not (List.mem name denied_observe_only_tools))
-                            all_local_worker_tools
-                      | _ -> all_local_worker_tools
+                      match session_opt with
+                      | Some session ->
+                          Team_session_oas_bridge
+                          .supported_local_worker_tool_names_for_session
+                            ~config:ctx.config ~execution_scope session
+                      | None ->
+                          Team_session_oas_bridge
+                          .supported_local_worker_tool_names_for_scope
+                            execution_scope
                     in
                     let local_shell_tool_names =
                       match execution_scope with

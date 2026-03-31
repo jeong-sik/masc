@@ -44,6 +44,43 @@ let supported_local_worker_tool_names_for_scope execution_scope =
   | None ->
       supported_local_worker_tool_names
 
+let tool_policy_result_of_operation ~(config : Room.config)
+    ~(operation_id : string) =
+  let operations = Command_plane_v2.read_operations config in
+  match Command_plane_v2.operation_by_id operations operation_id with
+  | None -> Error (Printf.sprintf "operation not found: %s" operation_id)
+  | Some operation ->
+      let (_, _, units, _) = Command_plane_v2.topology_units config in
+      match Command_plane_v2.lookup_unit units operation.assigned_unit_id with
+      | None ->
+          Error
+            (Printf.sprintf "assigned unit not found: %s"
+               operation.assigned_unit_id)
+      | Some unit ->
+          Ok (Command_plane_v2.tool_policy_of_envelope unit.policy)
+
+let tool_policy_of_session_result ~(config : Room.config)
+    (session : Team_session_types.session) =
+  match session.operation_id with
+  | None -> Ok Tool_access_policy.allow_all
+  | Some operation_id ->
+      tool_policy_result_of_operation ~config ~operation_id
+
+let filter_tool_candidates_by_policy candidates tool_policy =
+  candidates
+  |> List.filter (fun name -> Tool_access_policy.allows_name tool_policy name)
+
+let supported_local_worker_tool_names_for_session ~(config : Room.config)
+    ~(execution_scope : Team_session_types.execution_scope option)
+    (session : Team_session_types.session) =
+  let scoped_candidates =
+    supported_local_worker_tool_names_for_scope execution_scope
+  in
+  match tool_policy_of_session_result ~config session with
+  | Ok tool_policy ->
+      filter_tool_candidates_by_policy scoped_candidates tool_policy
+  | Error _ -> []
+
 let supported_local_worker_tools () =
   match
     Agent_tool_surfaces.local_worker_tool_schemas
@@ -67,6 +104,23 @@ let supported_local_worker_tools_for_scope execution_scope =
       Error
         (Printf.sprintf
            "team_session_oas_bridge: failed to resolve scoped worker tool schemas: %s"
+           msg)
+
+let supported_local_worker_tools_for_session ~(config : Room.config)
+    ~(execution_scope : Team_session_types.execution_scope option)
+    (session : Team_session_types.session) =
+  match
+    Agent_tool_surfaces.local_worker_tool_schemas
+      ~names:
+        (supported_local_worker_tool_names_for_session ~config ~execution_scope
+           session)
+      ()
+  with
+  | Ok schemas -> Ok schemas
+  | Error msg ->
+      Error
+        (Printf.sprintf
+           "team_session_oas_bridge: failed to resolve session-scoped worker tool schemas: %s"
            msg)
 
 let add_string_field_if_missing key value fields =
@@ -127,8 +181,15 @@ let ensure_agent_joined ~(config : Room.config) ~(agent_name : string) =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printexc.to_string exn)
 
-let dispatch_supported_tool ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
-    ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
+let dispatch_supported_tool ~(tool_policy : Tool_access_policy.t) ~sw
+    ~(clock : _ Eio.Time.clock) ~(config : Room.config) ~(name : string)
+    ~(args : Yojson.Safe.t) : bool * string =
+  if not (Tool_access_policy.allows_name tool_policy name) then
+    ( false,
+      Printf.sprintf
+        "team-session OAS runtime blocked tool '%s' by command-plane policy"
+        name )
+  else
   let agent_name =
     match string_field "agent_name" args with
     | Some agent_name -> agent_name
@@ -258,7 +319,8 @@ let run_repair_loop_until_terminal ~sw ~(clock : _ Eio.Time.clock)
     ~(config : Room.config) args =
   run_repair_loop_until_terminal_with
     ~dispatch_tool:(fun ~name ~args ->
-      dispatch_supported_tool ~sw ~clock ~config ~name ~args)
+      dispatch_supported_tool ~sw ~clock ~config
+        ~tool_policy:Tool_access_policy.allow_all ~name ~args)
     args
 
 let slot_aware_concurrency_cap ~entry_count ~selection_count ~all_discovered

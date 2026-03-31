@@ -178,10 +178,10 @@ let enforcement_summary_json () =
       `Assoc
         [
           ("surface", `String "unit.policy.tool_allowlist");
-          ("status", `String "advisory_only");
+          ("status", `String "enforced");
           ("reason",
            `String
-             "Stored in CPv2 topology/policy JSON but not wired into runtime tool dispatch on main.");
+             "Attached CPv2 team sessions and worker spawns filter discoverable tools and runtime dispatch through the unit tool policy.");
         ];
       `Assoc
         [
@@ -328,18 +328,6 @@ let handle_tool_admin_update ctx args =
           let warnings =
             let policy_json = U.member "policy" args in
             let items = ref [] in
-            if U.member "tool_allowlist" policy_json <> `Null then
-              items :=
-                `Assoc
-                  [
-                    ("field", `String "tool_allowlist");
-                    ("status", `String "advisory_only");
-                    ("enforcement", `String "none");
-                    ("reason",
-                     `String
-                       "Stored in CPv2 policy but not yet enforced by runtime tool dispatch.");
-                  ]
-                :: !items;
             if U.member "model_allowlist" policy_json <> `Null then
               items :=
                 `Assoc

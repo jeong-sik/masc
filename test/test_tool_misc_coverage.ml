@@ -387,7 +387,7 @@ let () = test "dispatch_tool_admin_update_unit_policy" (fun () ->
       let json = parse_json result in
       assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "unit_policy");
       let warnings = Yojson.Safe.Util.(json |> member "warnings" |> to_list) in
-      assert (List.length warnings = 2)
+      assert (List.length warnings = 1)
   | None -> failwith "dispatch returned None"
 )
 

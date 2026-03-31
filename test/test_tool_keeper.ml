@@ -131,11 +131,11 @@ let test_model_client_sanitize_messages_utf8_preserves_message_count () =
 let test_resolved_keeper_skill_route_marks_agent_judgment () =
   let fallback_route : Masc_mcp.Keeper_alerting.keeper_skill_route = {
     primary_skill = "masc-heartbeat";
-    secondary_skills = [ "masc-keeper-autonomy" ];
+    secondary_skills = [];
     reason = "fallback";
   } in
   let reply =
-    "SKILL: masc-keeper-autonomy (+masc-heartbeat)\nSKILL_REASON: agent-selected\nActual reply body"
+    "SKILL: masc-heartbeat\nSKILL_REASON: agent-selected\nActual reply body"
   in
   let resolved =
     Masc_mcp.Keeper_alerting.resolved_keeper_skill_route
@@ -145,12 +145,12 @@ let test_resolved_keeper_skill_route_marks_agent_judgment () =
   in
   check string "selection mode" "agent" resolved.selection_mode;
   check string "provenance" "judgment" resolved.provenance;
-  check string "primary skill" "masc-keeper-autonomy" resolved.route.primary_skill
+  check string "primary skill" "masc-heartbeat" resolved.route.primary_skill
 
 let test_resolved_keeper_skill_route_falls_back_when_agent_parse_missing () =
   let fallback_route : Masc_mcp.Keeper_alerting.keeper_skill_route = {
     primary_skill = "masc-heartbeat";
-    secondary_skills = [ "masc-keeper-autonomy" ];
+    secondary_skills = [];
     reason = "fallback";
   } in
   let resolved =
@@ -1091,24 +1091,6 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
             ])
       in
       check bool "persistent up ok" true ok;
-      let check_removed_tool label name args =
-        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
-        | Some (ok, body) ->
-            check bool (label ^ " reports failure") false ok;
-            check string (label ^ " returns removal message")
-              (name ^ " has been removed") body
-        | None -> fail (label ^ " should report removal explicitly")
-      in
-      check_removed_tool "keeper autonomy removed" "masc_keeper_autonomy"
-        (`Assoc [ ("name", `String "keeper-demo") ]);
-      check_removed_tool "keeper autonomy set removed" "masc_keeper_autonomy"
-        (`Assoc
-          [
-            ("name", `String "keeper-demo");
-            ("level", `String "L1_Reactive");
-          ]);
-      check_removed_tool "keeper goals removed" "masc_keeper_goals"
-        (`Assoc [ ("name", `String "keeper-demo") ]);
       let ok, trajectory_body =
         dispatch "masc_keeper_trajectory"
           (`Assoc [ ("name", `String "keeper-demo"); ("limit", `Int 5) ])

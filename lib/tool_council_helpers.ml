@@ -101,38 +101,23 @@ let resolve_target_id ?payload ~prefix (case_ : GV2.case_record)
 let parse_requested_action args =
   match member "requested_action" args with
   | `Null -> Ok None
-  | (`Assoc _ as value) ->
-      let action_type =
-        value |> member "action_type" |> to_string_option |> Option.value ~default:""
-        |> String.trim
-      in
-      if action_type = "" then
-        Error "requested_action.action_type is required"
-      else if
-        not
-          (List.mem
-             (String.lowercase_ascii action_type)
-             supported_execution_action_types)
-      then
-        Error
-          (Printf.sprintf
-             "unsupported requested_action.action_type: %s"
-             action_type)
-      else
-        let payload =
-          match value |> member "payload" with
-          | `Null -> None
-          | payload -> Some payload
-        in
-        Ok
-          (Some
-             ({
-                action_type;
-                target_type = value |> member "target_type" |> to_string_option;
-                target_id = value |> member "target_id" |> to_string_option;
-                payload;
-              }
-               : GV2.action_request))
+  | (`Assoc _ as value) -> (
+      match GV2.action_request_of_yojson value with
+      | Error msg -> Error ("requested_action: " ^ msg)
+      | Ok request ->
+          let action_type = String.trim request.GV2.action_type in
+          if
+            not
+              (List.mem
+                 (String.lowercase_ascii action_type)
+                 supported_execution_action_types)
+          then
+            Error
+              (Printf.sprintf
+                 "unsupported requested_action.action_type: %s"
+                 action_type)
+          else
+            Ok (Some { request with action_type }))
   | _ -> Error "requested_action must be an object"
 
 let high_risk_action_types =

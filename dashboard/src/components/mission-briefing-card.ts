@@ -122,7 +122,9 @@ export function resolveLiveJudgeTarget(
       name: runtimeKeeperName,
       model: runtime?.model_used ?? keeperModelLabel(matchedKeeper),
       source: 'judge_runtime',
-      online: runtime?.judge_online === true || !isUnavailableKeeperStatus(matchedKeeper?.status),
+      online:
+        runtime?.judge_online === true
+        || (matchedKeeper != null && isPreferredKeeperStatus(matchedKeeper.status)),
     }
   }
   const keeper = preferredKeeper(snapshot?.keepers ?? [], fallbackKeepers)

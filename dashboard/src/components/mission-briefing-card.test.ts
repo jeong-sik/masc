@@ -214,6 +214,29 @@ describe('MissionBriefingCard', () => {
     expect(unavailableTarget).toBeNull()
   }, 20000)
 
+  it('does not mark judge runtime online when runtime and keeper state are both unknown', async () => {
+    const { resolveLiveJudgeTarget } = await loadMissionBriefingCard()
+    const target = resolveLiveJudgeTarget(
+      {
+        ...sampleOperatorSnapshot(),
+        operator_judge_runtime: {
+          ...sampleOperatorSnapshot().operator_judge_runtime,
+          judge_online: false,
+          keeper_name: 'orphan-judge',
+        },
+        keepers: [],
+      },
+      [],
+    )
+
+    expect(target).toEqual({
+      name: 'orphan-judge',
+      model: 'glm-5',
+      source: 'judge_runtime',
+      online: false,
+    })
+  }, 20000)
+
   it('builds a safe situation report even when mission facts are sparse', async () => {
     const { buildLiveJudgeSituationReport } = await loadMissionBriefingCard()
     const report = buildLiveJudgeSituationReport({

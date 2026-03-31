@@ -40,7 +40,6 @@ let make_proof
     result_status = Completed;
     started_at = 1000.0;
     ended_at = 1001.0;
-    scope = None;
   }
 
 let setup_store () =
@@ -372,11 +371,10 @@ let test_path_traversal_rejected () =
 (* Cross-run window tests                                            *)
 (* ================================================================ *)
 
-let make_proof_with_scope
+let make_cross_run_proof
     ?(run_id = "cr-001")
     ?(raw_evidence_refs = [])
     ?(ended_at = 1001.0)
-    ?(scope = None)
     () : Agent_sdk.Cdal_proof.t =
   {
     schema_version = Agent_sdk.Cdal_proof.schema_version_current;
@@ -399,7 +397,6 @@ let make_proof_with_scope
     result_status = Completed;
     started_at = ended_at -. 1.0;
     ended_at;
-    scope;
   }
 
 let test_project_window_single_run () =
@@ -412,7 +409,7 @@ let test_project_window_single_run () =
       ~effective_mode:"diagnose";
   ] in
   write_violations_file store ~run_id violations;
-  let proof = make_proof_with_scope ~run_id ~raw_evidence_refs:[ref_] () in
+  let proof = make_cross_run_proof ~run_id ~raw_evidence_refs:[ref_] () in
   match CFP.project_window ~store ~window:CFP.Single_run [proof] with
   | None -> Alcotest.fail "expected Some"
   | Some fp ->
@@ -434,7 +431,7 @@ let test_project_window_last_n_runs () =
         ~effective_mode:"diagnose";
     ] in
     write_violations_file store ~run_id violations;
-    make_proof_with_scope ~run_id ~raw_evidence_refs:[ref_]
+    make_cross_run_proof ~run_id ~raw_evidence_refs:[ref_]
       ~ended_at:(1000.0 +. Float.of_int i) ()
   ) in
   match CFP.project_window ~store
@@ -463,7 +460,7 @@ let test_project_window_tripwire_cross_run () =
         ~effective_mode:"diagnose";
     ] in
     write_violations_file store ~run_id violations;
-    make_proof_with_scope ~run_id ~raw_evidence_refs:[ref_]
+    make_cross_run_proof ~run_id ~raw_evidence_refs:[ref_]
       ~ended_at:(1000.0 +. Float.of_int i) ()
   ) in
   match CFP.project_window ~store

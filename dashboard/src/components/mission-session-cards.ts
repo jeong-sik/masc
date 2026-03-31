@@ -8,6 +8,7 @@ import { ListItem } from './common/list-item'
 import { ActionBar, ActionBtn } from './common/action-bar'
 import { StatusChip } from './common/status-chip'
 import { openAgentDetail } from './agent-detail'
+import { SessionFlowCard } from './mission-session-flow'
 import type {
   DashboardMissionSessionCard,
   DashboardMissionSessionDetailResponse,
@@ -143,6 +144,10 @@ export function SessionDetailCard({
       </div>
 
       ${error ? html`<div class="grid gap-1.5">${error}</div>` : null}
+
+      <div class="mt-4">
+        <${SessionFlowCard} detail=${detail} />
+      </div>
 
       <div class="grid grid-cols-2 gap-5 mt-4">
         <div class="grid gap-3">

@@ -176,4 +176,37 @@ describe('createAsyncResource', () => {
     await resource.load(async () => 'recovered')
     expect(getData(resource.state.value)).toBe('recovered')
   })
+
+  it('reset while inflight discards the stale result', async () => {
+    const resource = createAsyncResource<string>()
+    let resolve: (v: string) => void
+    const p = resource.load(() => new Promise<string>(r => { resolve = r }))
+
+    expect(resource.state.value.status).toBe('loading')
+
+    resource.reset()
+    expect(resource.state.value.status).toBe('idle')
+
+    resolve!('stale')
+    await p
+
+    expect(resource.state.value.status).toBe('idle')
+  })
+
+  it('allows new load after reset cancels inflight', async () => {
+    const resource = createAsyncResource<string>()
+    let resolve: (v: string) => void
+    const p1 = resource.load(() => new Promise<string>(r => { resolve = r }))
+
+    resource.reset()
+    const p2 = resource.load(async () => 'fresh')
+    await p2
+
+    expect(getData(resource.state.value)).toBe('fresh')
+
+    resolve!('stale')
+    await p1
+
+    expect(getData(resource.state.value)).toBe('fresh')
+  })
 })

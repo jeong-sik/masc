@@ -1,9 +1,9 @@
 // Safety Harness panel — evaluator calibration and long-running runtime rails.
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { get } from '../api/core'
+import { createAsyncResource, loaded, type AsyncResource } from '../lib/async-state'
 import { lastEvent } from '../sse'
 import { navigate } from '../router'
 import { formatTimeAgo, formatTimestampKo } from '../lib/format-time'
@@ -95,10 +95,7 @@ interface HarnessHealthData {
 
 const HARNESS_RELOAD_DEBOUNCE_MS = 700
 
-const harnessData = signal<HarnessHealthData | null>(null)
-const harnessLoading = signal(false)
-const harnessError = signal<string | null>(null)
-let harnessRequest: Promise<void> | null = null
+const harness: AsyncResource<HarnessHealthData> = createAsyncResource()
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 
 function clearHarnessReloadTimer(): void {
@@ -115,30 +112,12 @@ function scheduleHarnessReload(): void {
   }, HARNESS_RELOAD_DEBOUNCE_MS)
 }
 export function resetHarnessHealthState(): void {
-  harnessData.value = null
-  harnessLoading.value = false
-  harnessError.value = null
-  harnessRequest = null
+  harness.reset()
   clearHarnessReloadTimer()
 }
-async function loadHarnessHealth(): Promise<void> {
-  if (harnessRequest) return harnessRequest
 
-  harnessLoading.value = true
-  harnessError.value = null
-  harnessRequest = (async () => {
-    try {
-      const data = await get<HarnessHealthData>('/api/v1/dashboard/harness-health')
-      harnessData.value = data
-    } catch (e) {
-      harnessError.value = e instanceof Error ? e.message : String(e)
-    } finally {
-      harnessLoading.value = false
-      harnessRequest = null
-    }
-  })()
-
-  return harnessRequest
+function loadHarnessHealth(): Promise<void> {
+  return harness.load(() => get<HarnessHealthData>('/api/v1/dashboard/harness-health'))
 }
 
 export async function refreshHarnessSurface(): Promise<void> {
@@ -158,9 +137,9 @@ function mergeRecent<T>(
 function updateHarnessData(
   update: (data: HarnessHealthData) => HarnessHealthData,
 ): void {
-  const current = harnessData.value
-  if (!current) return
-  harnessData.value = update(current)
+  const s = harness.state.value
+  if (s.status !== 'loaded') return
+  harness.state.value = loaded(update(s.data))
 }
 
 function statusLabel(status: RailStatus): string {
@@ -650,7 +629,8 @@ export function HarnessHealth() {
   }, [])
   useEffect(handleHarnessSSE, [lastEvent.value])
 
-  const data = harnessData.value
+  const s = harness.state.value
+  const data = s.status === 'loaded' ? s.data : undefined
   const cal = data?.calibration
   const rejectRate = cal && cal.total_verdicts > 0
     ? ((cal.reject_count / cal.total_verdicts) * 100).toFixed(1)
@@ -663,10 +643,10 @@ export function HarnessHealth() {
   return html`
     <div class="space-y-4">
       <${Card} title="Safety Harness" class="section">
-        ${harnessLoading.value && !data ? html`
+        ${s.status === 'loading' || s.status === 'idle' ? html`
           <div class="text-sm text-[var(--text-dim)]">로딩 중...</div>
-        ` : harnessError.value && !data ? html`
-          <div class="text-sm text-[var(--bad)]">${harnessError.value}</div>
+        ` : s.status === 'error' ? html`
+          <div class="text-sm text-[var(--bad)]">${s.message}</div>
         ` : !data ? html`
           <${EmptySignal} text="Harness 데이터가 없습니다." />
         ` : html`

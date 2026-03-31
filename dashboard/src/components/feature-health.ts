@@ -1,9 +1,10 @@
 // Feature Health panel — feature flag status and health monitoring.
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { get } from '../api/core'
+import { createAsyncResource, type AsyncResource } from '../lib/async-state'
+import { AsyncContainer } from './common/async-container'
 import { Card } from './common/card'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
@@ -42,36 +43,14 @@ interface FeatureHealthData {
   all_features: FeatureHealthItem[]
 }
 
-const featureHealthData = signal<FeatureHealthData | null>(null)
-const featureHealthLoading = signal(false)
-const featureHealthError = signal<string | null>(null)
-let featureHealthRequest: Promise<void> | null = null
+const featureHealth: AsyncResource<FeatureHealthData> = createAsyncResource()
 
 export function resetFeatureHealthState(): void {
-  featureHealthData.value = null
-  featureHealthLoading.value = false
-  featureHealthError.value = null
-  featureHealthRequest = null
+  featureHealth.reset()
 }
 
-async function loadFeatureHealth(): Promise<void> {
-  if (featureHealthRequest) return featureHealthRequest
-
-  featureHealthLoading.value = true
-  featureHealthError.value = null
-  featureHealthRequest = (async () => {
-    try {
-      const data = await get<FeatureHealthData>('/api/v1/dashboard/feature-health')
-      featureHealthData.value = data
-    } catch (e) {
-      featureHealthError.value = e instanceof Error ? e.message : String(e)
-    } finally {
-      featureHealthLoading.value = false
-      featureHealthRequest = null
-    }
-  })()
-
-  return featureHealthRequest
+function loadFeatureHealth(): Promise<void> {
+  return featureHealth.load(() => get<FeatureHealthData>('/api/v1/dashboard/feature-health'))
 }
 
 export async function refreshFeatureHealth(): Promise<void> {
@@ -120,14 +99,6 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
       <div class="text-2xl font-bold text-[var(--accent)]">${value}</div>
       <div class="mt-1 text-xs text-[var(--text-muted)]">${label}</div>
       ${sub ? html`<div class="mt-0.5 text-xs text-[var(--text-dim)]">${sub}</div>` : null}
-    </div>
-  `
-}
-
-function EmptySignal({ text }: { text: string }) {
-  return html`
-    <div class="rounded-lg border border-dashed border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--text-dim)]">
-      ${text}
     </div>
   `
 }
@@ -190,62 +161,59 @@ export function FeatureHealth() {
     void loadFeatureHealth()
   }, [])
 
-  const data = featureHealthData.value
-  const overview = data?.overview
-
   return html`
     <div class="space-y-4">
       <${Card} title="Feature Health" class="section">
-        ${featureHealthLoading.value && !data ? html`
-          <div class="text-sm text-[var(--text-dim)]">로딩 중...</div>
-        ` : featureHealthError.value && !data ? html`
-          <div class="text-sm text-[var(--bad)]">${featureHealthError.value}</div>
-        ` : !data ? html`
-          <${EmptySignal} text="Feature health 데이터가 없습니다." />
-        ` : html`
-          <div class="space-y-4">
-            <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] p-4">
-              <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div class="max-w-3xl">
-                  <div class="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Feature Flags Health</div>
-                  <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">
-                    ${overview?.enabled_count} / ${overview?.total_features} 기능 활성화
+        <${AsyncContainer}
+          state=${featureHealth.state}
+          loadingMessage="Feature health 데이터를 불러오는 중..."
+          emptyMessage="Feature health 데이터가 없습니다."
+          render=${(data: FeatureHealthData) => {
+            const overview = data.overview
+            return html`
+              <div class="space-y-4">
+                <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] p-4">
+                  <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div class="max-w-3xl">
+                      <div class="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Feature Flags Health</div>
+                      <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">
+                        ${overview.enabled_count} / ${overview.total_features} 기능 활성화
+                      </div>
+                      <div class="mt-2 text-sm leading-[1.7] text-[var(--text-body)]">
+                        시스템 기능 플래그 상태를 실시간으로 모니터링합니다.
+                        ${overview.overridden_count ? `${overview.overridden_count}개 플래그가 환경변수로 오버라이드되었습니다.` : ''}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      class="rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
+                      onClick=${() => { void loadFeatureHealth() }}
+                    >새로고침</button>
                   </div>
-                  <div class="mt-2 text-sm leading-[1.7] text-[var(--text-body)]">
-                    시스템 기능 플래그 상태를 실시간으로 모니터링합니다.
-                    ${overview?.overridden_count ? `${overview.overridden_count}개 플래그가 환경변수로 오버라이드되었습니다.` : ''}
+
+                  <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
+                    <${StatCard} label="총 기능" value=${overview.total_features} />
+                    <${StatCard} label="활성화" value=${overview.enabled_count} />
+                    <${StatCard} label="정상" value=${overview.healthy_count} />
+                    <${StatCard} label="실험적" value=${overview.warning_count} />
+                    <${StatCard} label="비활성" value=${overview.inactive_count} />
+                    <${StatCard} label="폐기 예정" value=${overview.deprecated_count} />
+                  </div>
+
+                  <div class="mt-4 text-xs text-[var(--text-dim)]">
+                    generated ${new Date(data.generated_at * 1000).toLocaleString('ko-KR')}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  class="rounded border border-[var(--white-8)] px-2.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
-                  onClick=${() => { void loadFeatureHealth() }}
-                >새로고침</button>
-              </div>
 
-              ${overview ? html`
-                <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
-                  <${StatCard} label="총 기능" value=${overview.total_features} />
-                  <${StatCard} label="활성화" value=${overview.enabled_count} />
-                  <${StatCard} label="정상" value=${overview.healthy_count} />
-                  <${StatCard} label="실험적" value=${overview.warning_count} />
-                  <${StatCard} label="비활성" value=${overview.inactive_count} />
-                  <${StatCard} label="폐기 예정" value=${overview.deprecated_count} />
+                <div class="space-y-3">
+                  ${Object.entries(data.features_by_category).map(([category, categoryData]) => html`
+                    <${CategorySection} category=${category} categoryData=${categoryData} />
+                  `)}
                 </div>
-              ` : null}
-
-              <div class="mt-4 text-xs text-[var(--text-dim)]">
-                generated ${new Date(data.generated_at * 1000).toLocaleString('ko-KR')}
               </div>
-            </div>
-
-            <div class="space-y-3">
-              ${Object.entries(data.features_by_category).map(([category, categoryData]) => html`
-                <${CategorySection} category=${category} categoryData=${categoryData} />
-              `)}
-            </div>
-          </div>
-        `}
+            `
+          }}
+        />
       <//>
     </div>
   `

@@ -350,6 +350,8 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
       let worker_runs = json |> U.member "worker_run_evidence" |> U.to_list in
       check int "worker run evidence count" 1 (List.length worker_runs);
       let worker = List.hd worker_runs in
+      check string "worker session id" session_id
+        (worker |> U.member "session_id" |> U.to_string);
       check string "worker run capability" "raw"
         (worker |> U.member "trace_capability" |> U.to_string);
       check bool "worker run validated" true
@@ -378,6 +380,51 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
         ((worker_proof |> U.member "proof_path") = `Null);
       check bool "worker proof evidence meta path hidden" true
         ((worker_proof |> U.member "meta_path") = `Null))
+
+let test_dashboard_proof_prefers_attached_session_operation_id () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Lib.Room.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
+      let session_id = "ts-proof-linked-operation" in
+      let session =
+        {
+          (sample_session (Unix.gettimeofday ()) session_id) with
+          operation_id = Some "op-proof-linked";
+        }
+      in
+      seed_session_artifacts ~session:(Some session) config session_id;
+      let cp_event : Lib.Command_plane_v2.event_record =
+        {
+          event_id = Lib.Command_plane_v2.next_event_id "trace";
+          trace_id = "trace-proof-linked";
+          event_type = "operation_progress";
+          operation_id = Some "op-proof-linked";
+          unit_id = None;
+          actor = Some "cp-agent";
+          source = "managed";
+          ts = "2026-03-11T09:00:01Z";
+          detail = `Assoc [ ("message", `String "linked cp event") ];
+        }
+      in
+      Lib.Command_plane_v2.append_event config cp_event;
+      let json = Lib.Dashboard_proof.json ~config ~session_id () in
+      check string "selected operation id" "op-proof-linked"
+        (json |> U.member "selection" |> U.member "selected_operation_id"
+       |> U.to_string);
+      check string "goal binding operation id" "op-proof-linked"
+        (json |> U.member "goal_binding" |> U.member "operation_id"
+       |> U.to_string);
+      let timeline = json |> U.member "timeline" |> U.to_list in
+      check bool "linked cp event included" true
+        (List.exists (fun item ->
+             item |> U.member "source" |> U.to_string = "command_plane"
+             && item |> U.member "operation_id" |> U.to_string
+                = "op-proof-linked") timeline))
 
 let test_team_session_proof_projects_worker_proof_metadata () =
   let dir = test_dir () in
@@ -624,6 +671,8 @@ let () =
           test_case "builds collaboration proof projection" `Quick test_dashboard_proof_projection;
           test_case "exposes validated worker run evidence" `Quick
             test_dashboard_proof_exposes_validated_worker_run_evidence;
+          test_case "prefers attached session operation id" `Quick
+            test_dashboard_proof_prefers_attached_session_operation_id;
           test_case "projects worker proof metadata into session proof" `Quick
             test_team_session_proof_projects_worker_proof_metadata;
           test_case "orders merged timeline chronologically" `Quick

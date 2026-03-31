@@ -319,6 +319,8 @@ export interface DashboardProofToolEvidence {
 
 export interface DashboardProofWorkerRunEvidence {
   worker_run_id: string
+  session_id?: string | null
+  operation_id?: string | null
   worker_name?: string | null
   status?: string | null
   mode?: string | null
@@ -342,6 +344,7 @@ export interface DashboardProofWorkerRunEvidence {
   stop_reason?: string | null
   failure_reason?: string | null
   error?: string | null
+  evidence_refs?: string[]
   ts_iso?: string | null
 }
 

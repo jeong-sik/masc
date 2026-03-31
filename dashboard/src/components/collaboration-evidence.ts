@@ -78,8 +78,20 @@ export function collaborationEvidenceSupportRows(
   ) {
     rows.push(`relation backend · ${data.relation_backend.source} · ${data.relation_backend.status}`)
   }
+  if (data.linkage.selected_operation_id) {
+    rows.push(`linked operation · ${data.linkage.selected_operation_id}`)
+  }
+  if (data.linkage.explicit_linked_activity_count > 0) {
+    rows.push(`linked room activity · ${data.linkage.explicit_linked_activity_count}`)
+  }
+  if (data.linkage.unlinked_activity_count > 0) {
+    rows.push(`unlinked room activity · ${data.linkage.unlinked_activity_count}`)
+  }
   if (data.counts.message_broadcast_count > 0) {
     rows.push(`message broadcast count · ${data.counts.message_broadcast_count}`)
+  }
+  for (const gap of data.linkage.gaps) {
+    rows.push(`linkage gap · ${gap}`)
   }
   return rows
 }
@@ -120,6 +132,21 @@ export function CollaborationEvidencePanel({
         key: `${item.ts_iso ?? 'na'}:${item.event_type}:${item.actor ?? 'na'}`,
         content: html`
           <span class="text-[var(--text-strong)]">${item.event_type}</span>
+          ${item.actor ? html` · ${item.actor}` : null}
+          ${item.summary ? html` · ${item.summary}` : null}
+        `,
+      })),
+    })
+  }
+
+  if (data && data.recent_unlinked_activity.length > 0) {
+    evidencePanels.push({
+      key: 'recent-unlinked',
+      title: '최근 미연결 room activity',
+      rows: data.recent_unlinked_activity.map(item => ({
+        key: `${item.ts_iso ?? 'na'}:${item.kind}:${item.actor ?? 'na'}`,
+        content: html`
+          <span class="text-[var(--text-strong)]">${item.kind}</span>
           ${item.actor ? html` · ${item.actor}` : null}
           ${item.summary ? html` · ${item.summary}` : null}
         `,

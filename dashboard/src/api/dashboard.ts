@@ -355,7 +355,16 @@ export interface DashboardCollaborationEvidenceResponse {
     mention_count: number
     board_interaction_count: number
     interaction_event_count: number
+    explicit_linked_activity_count: number
+    unlinked_activity_count: number
     unique_actor_count: number
+  }
+  linkage: {
+    policy: string
+    selected_operation_id: string | null
+    explicit_linked_activity_count: number
+    unlinked_activity_count: number
+    gaps: string[]
   }
   proof: {
     available: boolean
@@ -370,6 +379,12 @@ export interface DashboardCollaborationEvidenceResponse {
   recent_events: Array<{
     ts_iso: string | null
     event_type: string
+    actor: string | null
+    summary: string
+  }>
+  recent_unlinked_activity: Array<{
+    ts_iso: string | null
+    kind: string
     actor: string | null
     summary: string
   }>

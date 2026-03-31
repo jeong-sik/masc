@@ -94,9 +94,12 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
     | None -> 0
   in
   let operation_id =
-    match operation_id, session_id with
+    match operation_id, session with
     | Some value, _ -> Some value
-    | None, Some current -> Some ("detachment-" ^ current)
+    | None, Some current ->
+        option_or_else
+          (fun () -> Some ("detachment-" ^ current.session_id))
+          current.Team_session_types.operation_id
     | None, None -> None
   in
   let cp_backing =

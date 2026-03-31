@@ -198,6 +198,38 @@ let run_turn
      OAS Tool_index.build already supports group co-retrieval. *)
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with top_k = 20 } in
+  (* Korean keyword aliases for bilingual BM25 matching.
+     Tool descriptions are English; Korean users issue Korean queries.
+     Appending Korean keywords gives BM25 term overlap across languages.
+     Keys must match actual tool names from keeper_tools. *)
+  let korean_keywords = [
+    "keeper_board_post", "게시판 글 작성 올리기 포스트";
+    "keeper_board_get", "게시판 글 읽기 조회 확인";
+    "keeper_board_list", "게시판 목록 최근글";
+    "keeper_board_comment", "게시판 댓글 답글 코멘트";
+    "keeper_board_vote", "게시판 투표 추천 반대";
+    "keeper_fs_read", "파일 읽기 소스코드 설정";
+    "keeper_shell_readonly", "명령어 조회 검색 탐색";
+    "keeper_bash", "명령어 실행 쉘 빌드 테스트";
+    "keeper_github", "깃허브 이슈 풀리퀘스트 PR CI";
+    "keeper_memory_search", "기억 검색 대화 이전 메시지";
+    "keeper_library_search", "라이브러리 지식 문서 검색";
+    "keeper_library_read", "라이브러리 문서 읽기 지식";
+    "keeper_time_now", "시간 현재 타임스탬프";
+    "keeper_context_status", "컨텍스트 상태 토큰 사용량";
+    "keeper_broadcast", "브로드캐스트 알림 공지 전달";
+    "keeper_tasks_list", "태스크 목록 할일 백로그";
+    "keeper_tasks_audit", "태스크 감사 고아 방치";
+    "keeper_task_claim", "태스크 가져오기 할당";
+    "keeper_task_done", "태스크 완료 마감";
+    "keeper_task_force_release", "태스크 강제해제 반환";
+    "keeper_task_force_done", "태스크 강제완료";
+    "keeper_voice_speak", "음성 말하기 보이스";
+    "keeper_voice_agent", "음성 설정 보이스";
+    "keeper_voice_sessions", "음성 세션 목록";
+    "keeper_voice_session_start", "음성 세션 시작";
+    "keeper_voice_session_end", "음성 세션 종료";
+  ] in
   let tool_entries = List.map (fun (t : Agent_sdk.Tool.t) ->
     let name = t.schema.name in
     let group =
@@ -211,7 +243,11 @@ let run_turn
            || name = "keeper_bash" then Some "filesystem"
       else None
     in
-    Agent_sdk.Tool_index.{ name; description = t.schema.description; group }
+    let kr_kw = match List.assoc_opt name korean_keywords with
+      | Some kw -> " " ^ kw
+      | None -> ""
+    in
+    Agent_sdk.Tool_index.{ name; description = t.schema.description ^ kr_kw; group }
   ) keeper_tools in
   let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
   let always_include_tools =

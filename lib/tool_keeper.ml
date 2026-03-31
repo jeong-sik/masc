@@ -468,18 +468,22 @@ let maybe_bootstrap_existing_keepalives ctx ~name ~args =
          (Printexc.to_string exn))
 
 (** Resolve base_path from keeper registry.  Dashboard/external sessions may
-    use a different base_path than the target keeper. *)
-let resolve_keeper_base_path ctx args =
-  let keeper_name = get_string args "name" "" in
-  if keeper_name = "" then ctx
-  else match Keeper_registry.find_by_name keeper_name with
-  | Some entry when entry.base_path <> ctx.config.base_path ->
-      { ctx with config = { ctx.config with base_path = entry.base_path } }
-  | _ -> ctx
+    use a different base_path than the target keeper.  Skipped for creation
+    tools where the caller's base_path is authoritative. *)
+let resolve_keeper_base_path ctx ~name args =
+  match name with
+  | "masc_keeper_up" | "masc_keeper_create_from_persona" | "masc_persona_list" -> ctx
+  | _ ->
+    let keeper_name = get_string args "name" "" in
+    if keeper_name = "" then ctx
+    else match Keeper_registry.find_by_name keeper_name with
+    | Some entry when entry.base_path <> ctx.config.base_path ->
+        { ctx with config = { ctx.config with base_path = entry.base_path } }
+    | _ -> ctx
 
 let dispatch ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
-  let ctx = resolve_keeper_base_path ctx args in
+  let ctx = resolve_keeper_base_path ctx ~name args in
   match name with
   | "masc_persona_list" -> Some (Persona.handle_persona_list ctx args)
   | "masc_keeper_create_from_persona" -> Some (handle_keeper_create_from_persona ctx args)
@@ -505,7 +509,7 @@ let dispatch ctx ~name ~args : tool_result option =
     Called from server_routes_http_keeper_stream. *)
 let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
-  let ctx = resolve_keeper_base_path ctx args in
+  let ctx = resolve_keeper_base_path ctx ~name args in
   match name with
   | "masc_keeper_msg" ->
       Some (handle_keeper_msg_stream ~on_text_delta ctx args)

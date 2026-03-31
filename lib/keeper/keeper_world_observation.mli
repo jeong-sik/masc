@@ -54,6 +54,9 @@ type world_observation = {
   active_agent_count : int;
   (** Number of agents currently active in the room. *)
 
+  last_turn_budget : (int * int) option;
+  (** Previous generation's turn usage as [(used, total)], if available. *)
+
 }
 
 type board_signal_match = {

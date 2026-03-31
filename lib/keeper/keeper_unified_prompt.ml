@@ -170,6 +170,12 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
        (observation.context_ratio *. 100.0)
        observation.idle_seconds);
+  (* Turn budget from previous generation *)
+  (match observation.last_turn_budget with
+   | Some (used, total) when used > 0 ->
+     Buffer.add_string ubuf
+       (Printf.sprintf "- Previous turn budget: %d/%d used\n" used total)
+   | _ -> ());
   (* Economic pressure *)
   (match observation.economic_pressure with
    | Agent_economy.Normal -> ()

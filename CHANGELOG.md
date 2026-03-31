@@ -1,6 +1,22 @@
 # Changelog
 
 
+## [2.193.0] - 2026-03-31
+
+### Added
+- **Scheduler visibility** — slot visibility, autoresearch gate, judge exp backoff (#4248).
+- **Dashboard mission flow** — mission session flow graph (#4245).
+- **OAS boundary health check** — record OAS boundary health (#4236).
+
+### Changed
+- **Keeper lifecycle compaction** — wire lifecycle compaction and handoff (#4222).
+- **Keeper backend SSOT** — derive keeper_backend_tool_name from surfaces SSOT (#4244).
+- **Source guard alignment** — update for Worker_runtime spawn path (#4234).
+
+### Fixed
+- **Board tool dispatch** — register missing board tool aliases (stats, search, delete) (#4223, #4224).
+- **Harness-health SSE** — align test with oas:masc:harness:handoff event format (#4246).
+
 ## [2.192.0] - 2026-03-31
 
 ### Added

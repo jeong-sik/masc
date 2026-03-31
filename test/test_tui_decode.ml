@@ -38,6 +38,84 @@ let test_decode_task_missing_priority_defaults () =
   | Ok task -> Alcotest.(check int) "default priority" 3 task.priority
   | Error err -> Alcotest.fail err
 
+let keeper_json ?(models = `List [ `String "glm-5.1" ]) ?(last_turn_ts = `String "1700000000")
+    ?(active_model = Some (`String "glm-5.1"))
+    ?(initiative_enabled = Some (`Bool true)) () =
+  let optional_field key = function
+    | Some value -> [ (key, value) ]
+    | None -> []
+  in
+  `Assoc
+    ([
+       ("goal", `String "keep the system healthy");
+       ("short_goal", `String "stay responsive");
+       ("soul_profile", `String "balanced");
+       ("generation", `Int 2);
+       ("models", models);
+       ("proactive_enabled", `Bool true);
+       ("total_turns", `Int 4);
+       ("total_tokens", `Int 120);
+       ("total_cost_usd", `Float 0.42);
+       ("last_turn_ts", last_turn_ts);
+       ("compaction_count", `Int 1);
+       ("compaction_ratio_gate", `Float 0.8);
+       ("scope_kind", `String "global");
+       ("room_scope", `String "masc");
+       ("trigger_mode", `String "mention");
+       ("context_budget", `Int 32000);
+       ("handoff_threshold", `Float 0.85);
+       ("drift_enabled", `Bool true);
+       ("verify", `Bool true);
+       ("created_at", `String "2026-03-31T12:00:00Z");
+       ("updated_at", `String "2026-03-31T12:05:00Z");
+     ]
+    @ optional_field "active_model" active_model
+    @ optional_field "initiative_enabled" initiative_enabled)
+
+let test_decode_keeper_missing_legacy_fields_defaults_to_none () =
+  match
+    Tui_decode.decode_keeper ~filename:"keeper-main.json"
+      (keeper_json ~active_model:None ~initiative_enabled:None ())
+  with
+  | Ok keeper ->
+      Alcotest.(check string) "filename fallback" "keeper-main" keeper.k_name;
+      Alcotest.(check (option string)) "missing active_model" None
+        keeper.k_active_model;
+      Alcotest.(check (option bool)) "missing initiative_enabled" None
+        keeper.k_initiative_enabled
+  | Error err -> Alcotest.fail err
+
+let test_decode_keeper_numeric_last_turn_ts_truncates () =
+  match
+    Tui_decode.decode_keeper ~filename:"keeper-main.json"
+      (keeper_json ~last_turn_ts:(`Float 1700000000.9) ())
+  with
+  | Ok keeper ->
+      Alcotest.(check string) "float timestamp truncates" "1700000000"
+        keeper.k_last_turn_ts
+  | Error err -> Alcotest.fail err
+
+let test_decode_keeper_null_last_turn_ts_is_empty () =
+  match
+    Tui_decode.decode_keeper ~filename:"keeper-main.json"
+      (keeper_json ~last_turn_ts:`Null ())
+  with
+  | Ok keeper ->
+      Alcotest.(check string) "null timestamp becomes empty" "" keeper.k_last_turn_ts
+  | Error err -> Alcotest.fail err
+
+let test_decode_keeper_rejects_invalid_models_type () =
+  Alcotest.(check bool) "invalid models rejected" true
+    (Result.is_error
+       (Tui_decode.decode_keeper ~filename:"keeper-main.json"
+          (keeper_json ~models:(`String "glm-5.1") ())))
+
+let test_decode_keeper_rejects_non_string_model_items () =
+  Alcotest.(check bool) "non-string model entries rejected" true
+    (Result.is_error
+       (Tui_decode.decode_keeper ~filename:"keeper-main.json"
+          (keeper_json ~models:(`List [ `String "glm-5.1"; `Int 7 ]) ())))
+
 let test_parse_log_entry_success () =
   let line =
     Yojson.Safe.to_string
@@ -169,6 +247,19 @@ let () =
       [
         Alcotest.test_case "missing priority defaults" `Quick
           test_decode_task_missing_priority_defaults;
+      ] );
+    ( "decode_keeper",
+      [
+        Alcotest.test_case "missing legacy fields default to none" `Quick
+          test_decode_keeper_missing_legacy_fields_defaults_to_none;
+        Alcotest.test_case "numeric last_turn_ts truncates" `Quick
+          test_decode_keeper_numeric_last_turn_ts_truncates;
+        Alcotest.test_case "null last_turn_ts is empty" `Quick
+          test_decode_keeper_null_last_turn_ts_is_empty;
+        Alcotest.test_case "rejects invalid models type" `Quick
+          test_decode_keeper_rejects_invalid_models_type;
+        Alcotest.test_case "rejects non-string model items" `Quick
+          test_decode_keeper_rejects_non_string_model_items;
       ] );
     ( "parse_log_entry",
       [

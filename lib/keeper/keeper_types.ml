@@ -176,7 +176,7 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
         | `List l ->
             Ok (List.filter_map (fun v -> match v with `String s -> Some s | _ -> None) l)
         | `Null -> Ok []
-        | _ -> Error "tool_access.tools must be an array"
+        | _ -> Error "tool_access.tools must be an array or null"
       in
       match tools with
       | Error msg -> Error msg

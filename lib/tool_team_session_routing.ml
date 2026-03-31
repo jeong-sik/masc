@@ -87,6 +87,7 @@ type prepared_spawn = Tool_team_session_step.prepared_spawn = {
   runtime_model_label : string;
   runtime_lease : Local_runtime_pool.lease option;
   assigned_runtime : string option;
+  mutable lease_released : bool;
 }
 
 let trim_opt = function

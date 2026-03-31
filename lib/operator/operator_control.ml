@@ -313,7 +313,7 @@ let execute_team_action (ctx : 'a context) (request : action_request) =
       in
       let* wait_mode =
         match get_string_opt request.payload "wait_mode" with
-        | None -> Ok (Some "blocking")
+        | None -> Ok None
         | Some ("background" | "blocking" as v) -> Ok (Some v)
         | Some other ->
             Error (Printf.sprintf

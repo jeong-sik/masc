@@ -583,7 +583,8 @@ let planned_worker_to_entry_with_state
       let tool_names =
         List.map (fun (t : Types.tool_schema) -> t.name) scoped_masc_tools
       in
-      Contract_composer.compose ~delivery_contract:dc ~tool_names
+      Contract_composer.compose ~delivery_contract:dc
+        ~execution_scope:pw.execution_scope ~tool_names
     ) delivery_contract in
     match
       Oas_worker.run_named_with_masc_tools

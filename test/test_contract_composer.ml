@@ -24,7 +24,7 @@ let make_dc ?(acceptance_checks = ["tests pass"]) ?(required_artifacts = ["main.
 let test_compose_basic () =
   let dc = make_dc () in
   let tools = ["keeper_read"; "keeper_fs_edit"] in
-  let rc = CC.compose ~delivery_contract:dc ~tool_names:tools in
+  let rc = CC.compose ~execution_scope:None ~delivery_contract:dc ~tool_names:tools in
   check string "requested_mode Execute (budget > 0)"
     "execute"
     (EM.to_string rc.runtime_constraints.requested_execution_mode);
@@ -37,7 +37,7 @@ let test_compose_basic () =
 let test_compose_zero_budget () =
   let dc = make_dc ~repair_budget:0 () in
   let tools = ["keeper_read"] in
-  let rc = CC.compose ~delivery_contract:dc ~tool_names:tools in
+  let rc = CC.compose ~execution_scope:None ~delivery_contract:dc ~tool_names:tools in
   check string "requested_mode Draft (budget = 0)"
     "draft"
     (EM.to_string rc.runtime_constraints.requested_execution_mode)
@@ -45,7 +45,7 @@ let test_compose_zero_budget () =
 let test_compose_high_risk_review () =
   let dc = make_dc ~repair_budget:0 () in
   let tools = ["keeper_fs_edit"] in
-  let rc = CC.compose ~delivery_contract:dc ~tool_names:tools in
+  let rc = CC.compose ~execution_scope:None ~delivery_contract:dc ~tool_names:tools in
   check string "risk_class high"
     "high"
     (Agent_sdk.Risk_class.to_string rc.runtime_constraints.risk_class);
@@ -53,10 +53,22 @@ let test_compose_high_risk_review () =
     (Some "human_review")
     rc.runtime_constraints.review_requirement
 
+let test_compose_observe_only_shell_exec () =
+  let dc = make_dc () in
+  let rc =
+    CC.compose ~delivery_contract:dc ~tool_names:["shell_exec"]
+      ~execution_scope:(Some Team_session_types.Observe_only)
+  in
+  check string "observe_only shell_exec stays low"
+    "low"
+    (Agent_sdk.Risk_class.to_string rc.runtime_constraints.risk_class);
+  check (option string) "observe_only shell_exec does not require review"
+    None rc.runtime_constraints.review_requirement
+
 let test_eval_criteria_fields () =
   let dc = make_dc ~acceptance_checks:["lint"; "test"]
     ~required_artifacts:["a.ml"; "b.ml"] () in
-  let rc = CC.compose ~delivery_contract:dc ~tool_names:[] in
+  let rc = CC.compose ~execution_scope:None ~delivery_contract:dc ~tool_names:[] in
   let open Yojson.Safe.Util in
   let criteria = rc.eval_criteria in
   let success = criteria |> member "success_criteria" |> to_list
@@ -150,6 +162,8 @@ let () =
       "basic compose", `Quick, test_compose_basic;
       "zero budget → Draft", `Quick, test_compose_zero_budget;
       "high risk → review required", `Quick, test_compose_high_risk_review;
+      "observe_only shell_exec stays low", `Quick,
+      test_compose_observe_only_shell_exec;
       "eval_criteria fields", `Quick, test_eval_criteria_fields;
       "keeper bridge workspace", `Quick, test_keeper_bridge_compose_workspace;
       "keeper bridge read_only", `Quick, test_keeper_bridge_compose_read_only;

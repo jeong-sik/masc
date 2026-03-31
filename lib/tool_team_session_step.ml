@@ -90,6 +90,7 @@ let execute_delegate_pipeline
                 in
                 Option.map
                   (fun dc -> Contract_composer.compose ~delivery_contract:dc
+                    ~execution_scope
                     ~tool_names:[])
                   delivery_contract
               in

@@ -37,10 +37,12 @@ let requested_mode_of_repair_budget repair_budget =
   else Oas.Execution_mode.Draft
 
 let of_delivery_contract
+    ~execution_scope
     ~(delivery_contract : Team_session_types.delivery_contract)
     ~(tool_names : string list) : Oas.Risk_contract.t =
   let risk_class =
-    Contract_risk.of_delivery_contract ~delivery_contract ~tool_names
+    Contract_risk.of_delivery_contract ~execution_scope ~delivery_contract
+      ~tool_names
   in
   {
     Oas.Risk_contract.runtime_constraints =

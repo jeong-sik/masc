@@ -7,6 +7,7 @@ val is_workspace_mutating : string -> bool
 val allowed_mutations_of_tool_names : string list -> string list
 
 val of_delivery_contract :
+  execution_scope:Team_session_types.execution_scope option ->
   delivery_contract:Team_session_types.delivery_contract ->
   tool_names:string list ->
   Agent_sdk.Risk_contract.t

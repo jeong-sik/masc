@@ -7,6 +7,7 @@
     - tool set → allowed_mutations + risk_class *)
 
 val compose :
+  execution_scope:Team_session_types.execution_scope option ->
   delivery_contract:Team_session_types.delivery_contract ->
   tool_names:string list ->
   Agent_sdk.Risk_contract.t

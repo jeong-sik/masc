@@ -25,42 +25,6 @@ let destructive_check_tools =
 let keeper_denied_tools =
   Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
 
-type skip_reason = {
-  tool_name : string;
-  source : string;
-  reason_code : string;
-  reason_text : string;
-  skipped_at_unix : float;
-}
-
-let recent_skip_reasons : (string, skip_reason) Hashtbl.t = Hashtbl.create 16
-let recent_skip_reasons_mu = Eio.Mutex.create ()
-
-let with_skip_rw f = Eio_guard.with_mutex recent_skip_reasons_mu f
-
-let clear_skip_reason keeper_name =
-  with_skip_rw (fun () -> Hashtbl.remove recent_skip_reasons keeper_name)
-
-let record_skip_reason ~keeper_name ~tool_name ~source ~reason_code ~reason_text =
-  let reason =
-    {
-      tool_name;
-      source;
-      reason_code;
-      reason_text;
-      skipped_at_unix = Unix.gettimeofday ();
-    }
-  in
-  with_skip_rw (fun () -> Hashtbl.replace recent_skip_reasons keeper_name reason)
-
-let consume_skip_reason keeper_name =
-  with_skip_rw (fun () ->
-      match Hashtbl.find_opt recent_skip_reasons keeper_name with
-      | None -> None
-      | Some reason ->
-          Hashtbl.remove recent_skip_reasons keeper_name;
-          Some reason)
-
 (** Percent-encode field value for structured [tool_skipped] output.
     Matches [Keeper_agent_run.escape_field_value] encoding.
     Local copy to avoid circular dependency. *)

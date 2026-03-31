@@ -33,71 +33,14 @@ type run_result = {
   proof : Agent_sdk.Cdal_proof.t option;
 }
 
-let contains_casefold haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let hay_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec matches_at idx j =
-    if j = needle_len then true
-    else if String.get haystack (idx + j) <> String.get needle j then false
-    else matches_at idx (j + 1)
-  in
-  let rec search idx =
-    if idx + needle_len > hay_len then false
-    else if matches_at idx 0 then true
-    else search (idx + 1)
-  in
-  needle_len > 0 && search 0
-
-(* Percent-encode field values for structured key=value output.
-   Encodes separators and control characters to keep the output unambiguous. *)
-let escape_field_value (s : string) : string =
-  let buf = Buffer.create (String.length s * 3 / 2 + 1) in
-  String.iter
-    (fun ch ->
-      match ch with
-      | ' ' -> Buffer.add_string buf "%20"
-      | '=' -> Buffer.add_string buf "%3D"
-      | '\n' -> Buffer.add_string buf "%0A"
-      | '\r' -> Buffer.add_string buf "%0D"
-      | '\t' -> Buffer.add_string buf "%09"
-      | '%' -> Buffer.add_string buf "%25"
-      | _ -> Buffer.add_char buf ch)
-    s;
-  Buffer.contents buf
-
-let render_skip_reason_text (reason : Keeper_hooks_oas.skip_reason) : string =
-  let replacement_hint =
-    match (Tool_catalog.metadata reason.tool_name).Tool_catalog.replacement with
-    | Some replacement ->
-        Printf.sprintf " replacement=%s" (escape_field_value replacement)
-    | None -> ""
-  in
-  Printf.sprintf
-    "[tool_skipped] tool=%s source=%s code=%s reason=%s%s"
-    (escape_field_value reason.tool_name)
-    (escape_field_value reason.source)
-    (escape_field_value reason.reason_code)
-    (escape_field_value reason.reason_text)
-    replacement_hint
-
 let normalize_response_text
-    ?skip_reason
     ~(text : string)
     ~(tool_names : string list)
     () :
     (string, string) result =
   let trimmed = String.trim text in
-  if trimmed <> "" then
-    match skip_reason with
-    | Some reason when contains_casefold trimmed "skipped by hook" ->
-        Ok (render_skip_reason_text reason)
-    | _ -> Ok text
+  if trimmed <> "" then Ok text
   else
-    match skip_reason with
-    | Some reason -> Ok (render_skip_reason_text reason)
-    | None ->
     match tool_names with
     | [] -> Error "keeper turn completed with no textual reply"
     | _ ->
@@ -217,7 +160,6 @@ let run_turn
     Keeper_exec_context.set_system_prompt base_ctx
       ~system_prompt:base_system_prompt
   in
-  Keeper_hooks_oas.clear_skip_reason meta.name;
   (* 5. Build final turn system prompt via caller callback.
      Hard constraints stay in system_prompt; soft context is injected
      via OAS extra_system_context (prepended as User message after reduction). *)
@@ -341,10 +283,7 @@ let run_turn
     then Keeper_cdal_contract.of_keeper_meta meta
     else None
   in
-  Fun.protect
-    ~finally:(fun () -> Keeper_hooks_oas.clear_skip_reason meta.name)
-    (fun () ->
-      match
+  match
         Oas_worker.run_named
           ~cascade_name
           ~goal:user_message
@@ -399,8 +338,7 @@ let run_turn
             result.response.content
         in
         let usage = Keeper_exec_context.usage_of_response result.response in
-        let skip_reason = Keeper_hooks_oas.consume_skip_reason meta.name in
-        (match normalize_response_text ?skip_reason ~text ~tool_names () with
+        (match normalize_response_text ~text ~tool_names () with
          | Error e -> Error e
          | Ok response_text ->
              let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
@@ -463,4 +401,4 @@ let run_turn
            tools_used = tool_names;
            checkpoint = result.checkpoint;
            proof = result.proof;
-         }))
+         })

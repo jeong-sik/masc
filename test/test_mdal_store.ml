@@ -63,7 +63,6 @@ let dummy_state () : Mdal.loop_state =
     start_time = now -. 30.0;
     updated_at = now;
     stopped_at = None;
-    state_post_id = "post-123";
     execution_mode = `Manual_only;
     worker_engine = None;
     worker_model = None;

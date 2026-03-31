@@ -236,6 +236,26 @@ let test_room_init_bootstraps_keeper_runtime_dirs () =
       Alcotest.(check bool) "perpetual dir exists" true
         (Sys.file_exists perpetual_dir && Sys.is_directory perpetual_dir))
 
+let test_otel_exporter_setup_failure_is_soft () =
+  Otel_spans.shutdown ~enabled:true ();
+  let setup_called = ref false in
+  let raised =
+    try
+      Otel_spans.setup_exporter_with ~enabled:true
+        ~endpoint:"http://127.0.0.1:4318"
+        ~setup:(fun () ->
+          setup_called := true;
+          failwith "synthetic otel exporter failure")
+        ();
+      false
+    with _ -> true
+  in
+  Alcotest.(check bool) "setup invoked" true !setup_called;
+  Alcotest.(check bool) "failure does not escape" false raised;
+  Alcotest.(check bool) "exporter inactive after failure" false
+    (Otel_spans.is_exporter_active ());
+  Otel_spans.shutdown ~enabled:true ()
+
 let make_keeper_meta_json ?(name = "sangsu")
     ?(trace_id = "trace-sangsu-live")
     ?(updated_at = "2026-03-29T10:36:57Z") () =
@@ -478,6 +498,8 @@ let () =
             test_keeper_paths_use_cluster_root;
           Alcotest.test_case "room init bootstraps keeper runtime dirs" `Quick
             test_room_init_bootstraps_keeper_runtime_dirs;
+          Alcotest.test_case "otel exporter setup failure is soft" `Quick
+            test_otel_exporter_setup_failure_is_soft;
           Alcotest.test_case
             "legacy keeper migration promotes valid perpetual meta"
             `Quick test_migrate_legacy_keeper_dirs_promotes_valid_meta;

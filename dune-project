@@ -1,7 +1,7 @@
 (lang dune 3.17)
 
 (name masc_mcp)
-(version 2.196.0)
+(version 2.197.0)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -80,5 +80,4 @@
   (neo4j_bolt_eio (>= 0.4))
   ; OpenTelemetry observability + OTLP exporter
   (opentelemetry (>= 0.13))
-  (opentelemetry-client-cohttp-eio (>= 0.13))
   (ambient-context-eio (>= 0.2))))

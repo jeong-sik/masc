@@ -103,25 +103,41 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
     .filter((item): item is KeeperMetricPoint => item !== null)
 }
 
+// Top-N list keys that contain arrays of { tool/kind/model/..., count } objects
+const TOP_LIST_KEYS = new Set([
+  'top_tools', 'top_work_kinds', 'top_models', 'top_memory_kinds',
+  'top_drift_reasons', 'top_compaction_triggers', 'generation_equipment',
+])
+
 function normalizeMetricsWindow(raw: unknown): Keeper['metrics_window'] | undefined {
   if (!isRecord(raw)) return undefined
 
   const normalized: Keeper['metrics_window'] = {}
   for (const [key, value] of Object.entries(raw)) {
-    if (key === 'top_tools') {
+    // Top-N lists: array of objects with at least one string field
+    if (TOP_LIST_KEYS.has(key)) {
       if (!Array.isArray(value)) continue
-      const topTools = value.filter(item =>
-        isRecord(item)
-        && typeof item.tool === 'string'
-        && item.tool.trim() !== '',
-      )
-      if (topTools.length > 0) normalized.top_tools = topTools
+      const items = value.filter(item => isRecord(item))
+      if (items.length > 0) normalized[key] = items
       continue
     }
 
+    // Numbers (majority of fields)
     const numberValue = asNumber(value)
     if (numberValue != null) {
       normalized[key] = numberValue
+      continue
+    }
+
+    // Booleans (e.g. proactive_preview_similarity_warn)
+    if (typeof value === 'boolean') {
+      normalized[key] = value
+      continue
+    }
+
+    // Strings (e.g. primary_model, proactive_preview_similarity_method)
+    if (typeof value === 'string' && value.trim() !== '') {
+      normalized[key] = value
     }
   }
 

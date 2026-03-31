@@ -15,6 +15,7 @@ type snapshot_state = {
   status_map : (string * string) list;
   child_map : (string * unit_record list) list;
   unit_lookup : (string * unit_record) list;
+  tree_idx : Cp_tree_index.tree_index;
 }
 
 let count_operation_statuses operations =
@@ -104,6 +105,8 @@ let snapshot_state_of_sections ~config ~agents ~managed_units ~units ~source
   let status_map = agent_status_map agents in
   let child_map = children_map units in
   let unit_lookup = unit_map units in
+  let tree_idx = Cp_tree_index.build_tree_index ~units ~operations ~agents in
+  Cp_tree_index.bottom_up_aggregate tree_idx;
   {
     config;
     agents;
@@ -119,6 +122,7 @@ let snapshot_state_of_sections ~config ~agents ~managed_units ~units ~source
     status_map;
     child_map;
     unit_lookup;
+    tree_idx;
   }
 
 let build_snapshot_state ?sessions config =
@@ -217,27 +221,23 @@ let build_snapshot_state ?sessions config =
             ~source ~sessions ~intents ~operations ~detachments ~decisions)
 
 let topology_json_from_state (state : snapshot_state) =
-  let agents = state.agents in
+  let tree_idx = state.tree_idx in
   let units = state.units in
   let source = state.source in
-  let operations = state.operations in
-  let child_map = state.child_map in
-  let lookup = state.unit_lookup in
   let roots =
     units
     |> List.filter (fun (unit : unit_record) ->
            match unit.parent_unit_id with
            | None -> true
-           | Some parent_id -> lookup_unit units parent_id = None)
+           | Some parent_id ->
+               not (Hashtbl.mem tree_idx.Cp_tree_index.unit_tbl parent_id))
     |> List.sort (fun (a : unit_record) (b : unit_record) ->
            compare (kind_order a.kind, a.label) (kind_order b.kind, b.label))
   in
   let trees =
     roots
     |> List.filter_map (fun (unit : unit_record) ->
-           build_tree_json ~child_map ~unit_lookup:lookup
-             ~agent_statuses:(agent_status_map agents)
-             ~live_agents:(live_agent_names agents) ~operations unit.unit_id)
+           build_tree_json_indexed ~tree_idx unit.unit_id)
   in
   let summary = topology_summary_json_from_state state in
   `Assoc

@@ -178,7 +178,7 @@ let token_to_json (t : token) : Yojson.Safe.t =
   `Assoc [
     ("id", `String t.id);
     ("cancelled", `Bool t.cancelled);
-    ("reason", match t.reason with None -> `Null | Some r -> `String r);
+    ("reason", Json_util.string_opt_to_json t.reason);
     ("created_at", `Float t.created_at);
     ("callback_count", `Int (List.length t.callbacks));
   ]

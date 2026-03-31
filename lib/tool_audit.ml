@@ -41,7 +41,7 @@ let audit_event_to_json (e : audit_event) : Yojson.Safe.t =
     ("agent", `String e.agent);
     ("event_type", `String e.event_type);
     ("success", `Bool e.success);
-    ("detail", match e.detail with Some d -> `String d | None -> `Null);
+    ("detail", Json_util.string_opt_to_json e.detail);
     ("details", match e.details with Some json -> json | None -> `Null);
   ]
 
@@ -339,7 +339,7 @@ let handle_audit_trail ctx args =
   in
   let json = `Assoc [
     ("count", `Int (List.length limited));
-    ("trace_id_filter", match trace_id with Some t -> `String t | None -> `Null);
+    ("trace_id_filter", Json_util.string_opt_to_json trace_id);
     ("entries", `List (List.map Audit_log.entry_to_json limited));
   ] in
   (true, Yojson.Safe.pretty_to_string json)

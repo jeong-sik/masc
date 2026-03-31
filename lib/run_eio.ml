@@ -29,7 +29,7 @@ type log_entry = {
 let run_record_to_json (r : run_record) : Yojson.Safe.t =
   `Assoc [
     ("task_id", `String r.task_id);
-    ("agent_name", match r.agent_name with Some a -> `String a | None -> `Null);
+    ("agent_name", Json_util.string_opt_to_json r.agent_name);
     ("plan", `String r.plan);
     ("deliverable", `String r.deliverable);
     ("created_at", `String r.created_at);

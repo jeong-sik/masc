@@ -200,7 +200,7 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
         `Assoc
           [
             ("session_goal", `Null);
-            ("operation_id", match operation_id with Some value -> `String value | None -> `Null);
+            ("operation_id", Json_util.string_opt_to_json operation_id);
           ]
     | Some current ->
         `Assoc
@@ -208,7 +208,7 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
             ("session_id", `String current.session_id);
             ("session_goal", `String current.goal);
             ("status", `String (Team_session_types.status_to_string current.status));
-            ("operation_id", match operation_id with Some value -> `String value | None -> `Null);
+            ("operation_id", Json_util.string_opt_to_json operation_id);
             ("broadcast_count", `Int current.broadcast_count);
             ("portal_count", `Int current.portal_count);
             ("planned_workers", `Int (List.length current.planned_workers));
@@ -225,11 +225,11 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
              else
                (`Assoc
                   [
-                    ("actor", match Dashboard_proof_events.event_actor json with Some value -> `String value | None -> `Null);
-                    ("event_type", match string_field "event_type" json with Some value -> `String value | None -> `Null);
+                    ("actor", Json_util.string_opt_to_json (Dashboard_proof_events.event_actor json));
+                    ("event_type", Json_util.string_opt_to_json (string_field "event_type" json));
                     ("tool_names", `List (List.map (fun value -> `String value) (Dashboard_proof_events.event_tool_names json)));
                     ("summary", `String (Dashboard_proof_events.event_summary json));
-                    ("timestamp", match string_field "ts_iso" json with Some value -> `String value | None -> `Null);
+                    ("timestamp", Json_util.string_opt_to_json (string_field "ts_iso" json));
                   ])
                :: acc)
            []
@@ -244,8 +244,8 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
         Dashboard_proof_verdict.selection_json ~requested_session_id
           ~requested_operation_id ~session
           ~operation_id ~session_count:(List.length sessions) );
-      ("session_id", match session_id with Some value -> `String value | None -> `Null);
-      ("operation_id", match operation_id with Some value -> `String value | None -> `Null);
+      ("session_id", Json_util.string_opt_to_json session_id);
+      ("operation_id", Json_util.string_opt_to_json operation_id);
       ("proof_verdict", `String verdict);
       ( "summary",
         Dashboard_proof_verdict.session_summary_json session verdict ~planned_actor_count

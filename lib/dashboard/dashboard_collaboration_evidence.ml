@@ -415,8 +415,7 @@ let json ?session_id ?room_id ~(config : Room.config) () =
         `Assoc
           [
             ("available", `Bool proof_available);
-            ( "verdict",
-              match proof_verdict with Some value -> `String value | None -> `Null );
+            ("verdict", Json_util.string_opt_to_json proof_verdict);
           ] );
       ( "relation_backend",
         `Assoc

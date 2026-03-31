@@ -42,8 +42,7 @@ let entry_json (entry : surface_entry) =
       ("meets_main_gate", `Bool entry.meets_main_gate);
       ("proof_bar", `String "fixture+live_spotcheck");
       ("rationale", `String entry.rationale);
-      ( "route_hash",
-        match entry.route_hash with Some value -> `String value | None -> `Null );
+      ("route_hash", Json_util.string_opt_to_json entry.route_hash);
       ("verification_refs", `List (refs_json entry.refs));
     ]
 

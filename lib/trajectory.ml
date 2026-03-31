@@ -121,14 +121,13 @@ let entry_to_json ?(result_max_len = default_result_truncation) (e : tool_call_e
              `String (String.sub r 0 result_max_len ^ "...")
            else `String r));
     ("duration_ms", `Int e.duration_ms);
-    ("error", (match e.error with None -> `Null | Some e -> `String e));
+    ("error", Json_util.string_opt_to_json e.error);
     ("cost_usd", `Float e.cost_usd);
   ]
 
 let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
   `Assoc [
-    ("scenario_id",
-      (match t.scenario_id with None -> `Null | Some s -> `String s));
+    ("scenario_id", Json_util.string_opt_to_json t.scenario_id);
     ("keeper_name", `String t.keeper_name);
     ("trace_id", `String t.trace_id);
     ("generation", `Int t.generation);
@@ -138,8 +137,7 @@ let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
     ("total_turns", `Int t.total_turns);
     ("total_tool_calls", `Int t.total_tool_calls);
     ("outcome", outcome_to_json t.outcome);
-    ("task_id",
-      (match t.task_id with None -> `Null | Some s -> `String s));
+    ("task_id", Json_util.string_opt_to_json t.task_id);
     ("entries", `List (List.map entry_to_json t.entries));
   ]
 
@@ -181,8 +179,7 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     ("total_turns", `Int traj.total_turns);
     ("total_tool_calls", `Int traj.total_tool_calls);
     ("outcome", outcome_to_json traj.outcome);
-    ("task_id",
-      (match traj.task_id with None -> `Null | Some s -> `String s));
+    ("task_id", Json_util.string_opt_to_json traj.task_id);
     ("started_at", `Float traj.started_at);
     ("ended_at", `Float traj.ended_at);
   ] in

@@ -9,8 +9,8 @@ let persona_summary_to_json (persona : persona_summary) : Yojson.Safe.t =
     [
       ("persona_name", `String persona.persona_name);
       ("display_name", `String persona.display_name);
-      ("role", match persona.role with Some value -> `String value | None -> `Null);
-      ("trait", match persona.trait with Some value -> `String value | None -> `Null);
+      ("role", Json_util.string_opt_to_json persona.role);
+      ("trait", Json_util.string_opt_to_json persona.trait);
       ("profile_path", `String persona.profile_path);
       ("has_keeper_defaults", `Bool persona.has_keeper_defaults);
     ]

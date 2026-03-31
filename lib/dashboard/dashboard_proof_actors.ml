@@ -269,7 +269,7 @@ let actor_contributions_json contributions =
          `Assoc
            [
              ("actor", `String acc.actor);
-             ("role", match acc.role with Some value -> `String value | None -> `Null);
+             ("role", Json_util.string_opt_to_json acc.role);
              ("activity_state", `String (actor_activity_state acc));
              ("activity_detail", `String (actor_status_detail acc));
              ("observed_event_count", `Int acc.observed_event_count);
@@ -278,30 +278,12 @@ let actor_contributions_json contributions =
              ("tool_evidence_count", `Int acc.tool_evidence_count);
              ("interaction_count", `Int acc.interaction_count);
              ("mention_count", `Int acc.mention_count);
-             ( "recent_input_preview",
-               match acc.recent_input_preview with
-               | Some value -> `String value
-               | None -> `Null );
-             ( "recent_output_preview",
-               match acc.recent_output_preview with
-               | Some value -> `String value
-               | None -> `Null );
-             ( "recent_event_summary",
-               match acc.recent_event_summary with
-               | Some value -> `String value
-               | None -> `Null );
-             ( "requested_by",
-               match acc.requested_by with
-               | Some value -> `String value
-               | None -> `Null );
-             ( "recent_request_preview",
-               match acc.recent_request_preview with
-               | Some value -> `String value
-               | None -> `Null );
-             ( "recent_request_at",
-               match acc.recent_request_at with
-               | Some value -> `String value
-               | None -> `Null );
+             ( "recent_input_preview", Json_util.string_opt_to_json acc.recent_input_preview );
+             ( "recent_output_preview", Json_util.string_opt_to_json acc.recent_output_preview );
+             ( "recent_event_summary", Json_util.string_opt_to_json acc.recent_event_summary );
+             ( "requested_by", Json_util.string_opt_to_json acc.requested_by );
+             ( "recent_request_preview", Json_util.string_opt_to_json acc.recent_request_preview );
+             ( "recent_request_at", Json_util.string_opt_to_json acc.recent_request_at );
              ("recent_tool_names", `List (List.map (fun value -> `String value) acc.recent_tool_names));
-             ("last_active_at", match acc.last_active_at with Some value -> `String value | None -> `Null);
+             ("last_active_at", Json_util.string_opt_to_json acc.last_active_at);
            ])

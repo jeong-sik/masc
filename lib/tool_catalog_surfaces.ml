@@ -165,7 +165,7 @@ let local_worker_surface_tools =
 let session_min_surface_tools =
   [
     "masc_room_status"; "masc_list_tasks"; "masc_claim_next";
-    "masc_set_current_task"; "masc_complete_task"; "masc_add_task";
+    "masc_plan_set_task"; "masc_transition"; "masc_add_task";
     "masc_broadcast"; "masc_heartbeat";
   ]
 

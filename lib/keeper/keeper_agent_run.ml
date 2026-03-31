@@ -208,9 +208,6 @@ let run_turn
   let history_messages = ctx_work.messages in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
   Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
-  let checkpoint_sidecar =
-    Keeper_exec_context.checkpoint_sidecar_json ~generation ctx_work
-  in
   (* 7. Set up agent *)
   let ctx_ref = ref ctx_work in
   let agent_name = Printf.sprintf "keeper-%s" meta.name in
@@ -423,7 +420,6 @@ let run_turn
           ~agent_ref
           ?contract
           ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
-          ~working_context:checkpoint_sidecar
           ~priority:(Option.value priority ~default:Llm_provider.Request_priority.Interactive)
           ~cache_system_prompt:true
           ()

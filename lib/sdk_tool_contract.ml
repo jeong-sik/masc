@@ -9,6 +9,7 @@ type sdk_tool_binding = {
   description : string;
   input_schema : Yojson.Safe.t;
   arg_bindings : (string * arg_source) list;
+  discovery_hidden : bool;
 }
 
 let assoc_field name value = (name, value)
@@ -33,6 +34,7 @@ let sdk_bindings : sdk_tool_binding list =
       description = "List all tasks in the MASC room with status, assignee, and priority. Use after joining a room to find available work or check what others are doing.";
       input_schema = object_schema [];
       arg_bindings = [];
+      discovery_hidden = false;
     };
     {
       sdk_name = "masc_room_status";
@@ -40,6 +42,7 @@ let sdk_bindings : sdk_tool_binding list =
       description = "Get the current MASC room status including agents and tasks.";
       input_schema = object_schema [];
       arg_bindings = [];
+      discovery_hidden = false;
     };
     {
       sdk_name = "masc_autoresearch_swarm_start";
@@ -69,6 +72,7 @@ let sdk_bindings : sdk_tool_binding list =
           ("workdir", Input_field "workdir");
           ("program_note", Input_field "program_note");
         ];
+      discovery_hidden = false;
     };
     {
       sdk_name = "masc_repo_synthesis_swarm_start";
@@ -96,6 +100,7 @@ let sdk_bindings : sdk_tool_binding list =
           ("model", Input_field "model");
           ("baseline_label", Input_field "baseline_label");
         ];
+      discovery_hidden = false;
     };
     {
       sdk_name = "masc_add_task";
@@ -112,6 +117,7 @@ let sdk_bindings : sdk_tool_binding list =
           ("title", Input_field "title");
           ("description", Input_field "description");
         ];
+      discovery_hidden = false;
     };
     {
       sdk_name = "masc_batch_add_tasks";
@@ -131,6 +137,7 @@ let sdk_bindings : sdk_tool_binding list =
                 ] );
           ];
       arg_bindings = [ ("tasks", Input_field "tasks") ];
+      discovery_hidden = false;
     };
     {
       sdk_name = "masc_claim_task";
@@ -145,6 +152,7 @@ let sdk_bindings : sdk_tool_binding list =
           ("agent_name", Agent_name);
           ("task_id", Input_field "task_id");
         ];
+      discovery_hidden = true;
     };
     {
       sdk_name = "masc_claim_next";
@@ -152,6 +160,7 @@ let sdk_bindings : sdk_tool_binding list =
       description = "Claim the next available task automatically by priority order. Use when you are ready to work and any pending task is acceptable.";
       input_schema = object_schema [];
       arg_bindings = [ ("agent_name", Agent_name) ];
+      discovery_hidden = false;
     };
     {
       sdk_name = "masc_set_current_task";
@@ -166,6 +175,7 @@ let sdk_bindings : sdk_tool_binding list =
                  "The claimed task ID to bind as the current planning task");
           ];
       arg_bindings = [ ("task_id", Input_field "task_id") ];
+      discovery_hidden = true;
     };
     {
       sdk_name = "masc_complete_task";
@@ -183,6 +193,7 @@ let sdk_bindings : sdk_tool_binding list =
           ("agent_name", Agent_name);
           ("task_id", Input_field "task_id");
         ];
+      discovery_hidden = true;
     };
     {
       sdk_name = "masc_release_task";
@@ -198,6 +209,7 @@ let sdk_bindings : sdk_tool_binding list =
           ("agent_name", Agent_name);
           ("task_id", Input_field "task_id");
         ];
+      discovery_hidden = false;
     };
     {
       sdk_name = "masc_cancel_task";
@@ -217,6 +229,7 @@ let sdk_bindings : sdk_tool_binding list =
           ("task_id", Input_field "task_id");
           ("reason", Input_field "reason");
         ];
+      discovery_hidden = false;
     };
     {
       sdk_name = "masc_broadcast";
@@ -232,6 +245,7 @@ let sdk_bindings : sdk_tool_binding list =
           ("agent_name", Agent_name);
           ("message", Input_field "message");
         ];
+      discovery_hidden = false;
     };
     {
       sdk_name = "masc_heartbeat";
@@ -240,6 +254,7 @@ let sdk_bindings : sdk_tool_binding list =
         "Send an immediate heartbeat so this agent stays fresh in MASC visibility.";
       input_schema = object_schema [];
       arg_bindings = [ ("agent_name", Agent_name) ];
+      discovery_hidden = false;
     };
   ]
 
@@ -535,4 +550,4 @@ let sdk_tool_schemas : Types.tool_schema list =
         description = binding.description;
         input_schema = binding.input_schema;
       })
-    sdk_bindings
+    (List.filter (fun binding -> not binding.discovery_hidden) sdk_bindings)

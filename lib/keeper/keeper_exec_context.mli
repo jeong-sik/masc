@@ -29,10 +29,7 @@ val load_latest_checkpoint : session_context -> checkpoint option
 
 val log_keeper_exn : label:string -> exn -> unit
 
-val checkpoint_sidecar_json :
-  ?generation:int -> working_context -> Yojson.Safe.t
-
-val sidecar_max_tokens :
+val checkpoint_max_tokens :
   Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 val context_of_oas_checkpoint :
@@ -51,7 +48,7 @@ val save_oas_checkpoint :
   generation:int ->
   Agent_sdk.Checkpoint.t
 
-val sidecar_generation :
+val checkpoint_generation :
   Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 (** {1 Handoff Rollover} *)

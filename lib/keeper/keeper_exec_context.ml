@@ -41,38 +41,32 @@ let log_keeper_exn ~label exn =
   in
   Log.Keeper.info "%s%s: %s" tag label (Printexc.to_string exn)
 
-let checkpoint_sidecar_json ?(generation = 0) (ctx : working_context) :
-    Yojson.Safe.t =
-  `Assoc
-    [
-      ("kind", `String "keeper_working_context_v1");
-      ("max_tokens", `Int ctx.max_tokens);
-      ("generation", `Int generation);
-    ]
+let checkpoint_generation_key = "keeper_generation"
 
-let sidecar_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
+let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in
-  match cp.working_context with
-  | Some (`Assoc _ as sidecar) ->
-      sidecar |> member "max_tokens" |> to_int_option |> Option.value ~default:fallback
-  | _ -> fallback
+  match cp.max_total_tokens with
+  | Some value -> value
+  | None -> (
+      match cp.working_context with
+      | Some (`Assoc _ as sidecar) ->
+          sidecar |> member "max_tokens" |> to_int_option
+          |> Option.value ~default:fallback
+      | _ -> fallback)
 
 let context_of_oas_checkpoint
     (cp : Agent_sdk.Checkpoint.t)
     ~(primary_model_max_tokens : int) : working_context =
   let system_prompt = Option.value ~default:"" cp.system_prompt in
   let max_tokens =
-    sidecar_max_tokens cp ~fallback:primary_model_max_tokens
+    checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
   in
-  let token_count = count_tokens system_prompt cp.messages in
   sync_oas_context
     {
       system_prompt;
       messages = cp.messages;
-      token_count;
       max_tokens;
-      importance_scores = [];
-      oas_context = Agent_sdk.Context.copy cp.context;
+      context = Agent_sdk.Context.copy cp.context;
     }
 
 let context_of_legacy_checkpoint
@@ -95,6 +89,9 @@ let save_oas_checkpoint
     ~(ctx : working_context)
     ~(generation : int)
   : Agent_sdk.Checkpoint.t =
+  let checkpoint_context = Agent_sdk.Context.copy ctx.context in
+  Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
+    checkpoint_generation_key (`Int generation);
   let state =
     {
       Agent_sdk.Types.config =
@@ -113,23 +110,29 @@ let save_oas_checkpoint
   let checkpoint =
     Agent_sdk.Agent_checkpoint.build_checkpoint
       ~session_id:session.session_id
-      ~working_context:(checkpoint_sidecar_json ~generation ctx)
       ~state
       ~tools:Agent_sdk.Tool_set.empty
-      ~context:(Agent_sdk.Context.copy ctx.oas_context)
+      ~context:checkpoint_context
       ~mcp_clients:[]
       ()
   in
   Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint;
   checkpoint
 
-let sidecar_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
+let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in
-  match cp.working_context with
-  | Some (`Assoc _ as sidecar) ->
-      sidecar |> member "generation" |> to_int_option
-      |> Option.value ~default:fallback
-  | _ -> fallback
+  match
+    Agent_sdk.Context.get_scoped cp.context Agent_sdk.Context.Session
+      checkpoint_generation_key
+  with
+  | Some (`Int value) -> value
+  | Some (`Intlit raw) -> Option.value ~default:fallback (int_of_string_opt raw)
+  | _ -> (
+      match cp.working_context with
+      | Some (`Assoc _ as sidecar) ->
+          sidecar |> member "generation" |> to_int_option
+          |> Option.value ~default:fallback
+      | _ -> fallback)
 
 type handoff_rollover = {
   updated_meta : keeper_meta;
@@ -180,7 +183,7 @@ let maybe_rollover_oas_handoff
   | Some cp ->
       let ctx = context_of_oas_checkpoint cp ~primary_model_max_tokens in
       let current_generation =
-        sidecar_generation cp ~fallback:meta.runtime.generation
+        checkpoint_generation cp ~fallback:meta.runtime.generation
       in
       let base_meta =
         if current_generation = meta.runtime.generation then meta
@@ -197,9 +200,9 @@ let maybe_rollover_oas_handoff
           updated_meta = base_meta;
           handoff_json = None;
           context_ratio = ratio;
-          context_tokens = ctx.token_count;
+          context_tokens = token_count ctx;
           context_max = ctx.max_tokens;
-          message_count = List.length ctx.messages;
+          message_count = message_count ctx;
         }
       in
       if
@@ -311,8 +314,8 @@ let compact_if_needed
     (ctx : working_context) :
     working_context * string option * string =
   let ratio = context_ratio ctx in
-  let message_count = List.length ctx.messages in
-  let token_count = ctx.token_count in
+  let message_count = message_count ctx in
+  let token_count = token_count ctx in
   let ratio_gate, message_gate, token_gate = compaction_policy_of_keeper meta in
   let cooldown = Float.of_int meta.compaction.cooldown_sec in
   let last_reflection_ts = max meta.runtime.last_continuity_update_ts meta.runtime.proactive_rt.last_ts in
@@ -397,7 +400,7 @@ let compact_if_needed
       | exn ->
           Log.Harness.warn "[pre_compact] sse broadcast failed: %s"
             (Printexc.to_string exn));
-      let messages, token_count =
+      let messages =
           let msgs_after_compact, _ =
             Context_compact_oas.compact
               ~system_prompt:ctx.system_prompt
@@ -412,11 +415,11 @@ let compact_if_needed
           let token_count =
             Context_compact_oas.count_tokens ctx.system_prompt msgs_after_fold
           in
-          (msgs_after_fold, token_count)
+          let _ = token_count in
+          msgs_after_fold
         in
         let compacted_ctx =
-          sync_oas_context
-            { ctx with messages; token_count; importance_scores = [] }
+          sync_oas_context { ctx with messages }
         in
         (compacted_ctx, Some reason, "applied:" ^ reason)
 
@@ -482,7 +485,7 @@ let apply_post_turn_lifecycle
   | Some cp ->
       let ctx = context_of_oas_checkpoint cp ~primary_model_max_tokens in
       let current_generation =
-        sidecar_generation cp ~fallback:meta.runtime.generation
+        checkpoint_generation cp ~fallback:meta.runtime.generation
       in
       let base_meta =
         if current_generation = meta.runtime.generation then meta
@@ -491,14 +494,14 @@ let apply_post_turn_lifecycle
             (fun rt -> { rt with generation = current_generation })
             meta
       in
-      let before_tokens = ctx.token_count in
+      let before_tokens = token_count ctx in
       let compacted_ctx, trigger, decision =
         compact_if_needed ~meta:base_meta ~now_ts ctx
       in
       let compaction_applied =
         String.starts_with ~prefix:"applied:" decision
       in
-      let after_tokens = compacted_ctx.token_count in
+      let after_tokens = token_count compacted_ctx in
       let saved_tokens = max 0 (before_tokens - after_tokens) in
       let meta_after_compaction =
         map_runtime

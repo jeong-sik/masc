@@ -136,6 +136,7 @@ val now_iso : unit -> string
 
 val tool_access_allowlist : tool_access -> string list
 val tool_access_to_json : tool_access -> Yojson.Safe.t
+val tool_access_of_meta_json : Yojson.Safe.t -> (tool_access, string) result
 
 (** {1 Updater helpers for nested record updates} *)
 

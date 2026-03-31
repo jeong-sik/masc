@@ -440,4 +440,51 @@ let () =
         check bool "non-empty" true (n > 0);
         check bool "5-30 range" true (n >= 5 && n <= 30));
     ]);
+    ("tool_access_of_meta_json_validation", [
+      test_case "string tools field returns error" `Quick (fun () ->
+        let json = `Assoc [
+          ("kind", `String "restricted");
+          ("tools", `String "masc_status")
+        ] in
+        let outer = `Assoc [("tool_access", json)] in
+        match Keeper_types.tool_access_of_meta_json outer with
+        | Error msg ->
+            check bool "mentions array" true
+              (String.length msg > 0 &&
+               (try ignore (Str.search_forward (Str.regexp_string "array") msg 0); true
+                with Not_found -> false))
+        | Ok _ -> fail "expected Error for string tools field");
+      test_case "valid list tools parses ok" `Quick (fun () ->
+        let json = `Assoc [
+          ("kind", `String "restricted");
+          ("tools", `List [`String "masc_status"; `String "masc_broadcast"])
+        ] in
+        let outer = `Assoc [("tool_access", json)] in
+        match Keeper_types.tool_access_of_meta_json outer with
+        | Ok (Restricted tools) ->
+            check bool "has masc_status" true (List.mem "masc_status" tools);
+            check bool "has masc_broadcast" true (List.mem "masc_broadcast" tools)
+        | Ok Unrestricted -> fail "expected Restricted"
+        | Error msg -> fail ("unexpected error: " ^ msg));
+      test_case "null tools field defaults to empty" `Quick (fun () ->
+        let json = `Assoc [
+          ("kind", `String "restricted");
+          ("tools", `Null)
+        ] in
+        let outer = `Assoc [("tool_access", json)] in
+        match Keeper_types.tool_access_of_meta_json outer with
+        | Ok (Restricted tools) ->
+            check bool "empty list" true (List.length tools = 0)
+        | Ok Unrestricted -> fail "expected Restricted"
+        | Error msg -> fail ("unexpected error: " ^ msg));
+      test_case "integer tools field returns error" `Quick (fun () ->
+        let json = `Assoc [
+          ("kind", `String "restricted");
+          ("tools", `Int 42)
+        ] in
+        let outer = `Assoc [("tool_access", json)] in
+        match Keeper_types.tool_access_of_meta_json outer with
+        | Error _ -> ()
+        | Ok _ -> fail "expected Error for integer tools field");
+    ]);
   ]

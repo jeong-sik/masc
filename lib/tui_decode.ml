@@ -176,7 +176,13 @@ let decode_keeper ~filename json =
   let* k_verify = require_bool_field json "verify" in
   let* k_created_at = require_string_field json "created_at" in
   let* k_updated_at = require_string_field json "updated_at" in
-  let k_name = Option.value (get_string json "name") ~default:(Filename.chop_suffix filename ".json") in
+  let default_name =
+    if Filename.check_suffix filename ".json" then
+      Filename.chop_suffix filename ".json"
+    else
+      Filename.remove_extension filename
+  in
+  let k_name = Option.value (get_string json "name") ~default:default_name in
   Ok
     {
       k_name;

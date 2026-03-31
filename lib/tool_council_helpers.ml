@@ -102,22 +102,27 @@ let parse_requested_action args =
   match member "requested_action" args with
   | `Null -> Ok None
   | (`Assoc _ as value) -> (
-      match GV2.action_request_of_yojson value with
-      | Error msg -> Error ("requested_action: " ^ msg)
-      | Ok request ->
-          let action_type = String.trim request.GV2.action_type in
-          if
-            not
-              (List.mem
-                 (String.lowercase_ascii action_type)
-                 supported_execution_action_types)
-          then
-            Error
-              (Printf.sprintf
-                 "unsupported requested_action.action_type: %s"
-                 action_type)
-          else
-            Ok (Some { request with action_type }))
+      match member "action_type" value with
+      | `Null | `String "" ->
+          Error "requested_action.action_type is required"
+      | `String _ -> (
+          match GV2.action_request_of_yojson value with
+          | Error msg -> Error ("requested_action: " ^ msg)
+          | Ok request ->
+              let action_type = String.trim request.GV2.action_type in
+              if
+                not
+                  (List.mem
+                     (String.lowercase_ascii action_type)
+                     supported_execution_action_types)
+              then
+                Error
+                  (Printf.sprintf
+                     "unsupported requested_action.action_type: %s"
+                     action_type)
+              else
+                Ok (Some { request with action_type }))
+      | _ -> Error "requested_action.action_type must be a string")
   | _ -> Error "requested_action must be an object"
 
 let high_risk_action_types =

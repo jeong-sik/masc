@@ -69,7 +69,7 @@ if [ -z "$MCP_URL" ]; then
   MCP_URL="http://127.0.0.1:${PORT}/mcp"
 fi
 
-cleanup() { kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; }
+cleanup() { kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; }
 trap cleanup EXIT
 
 # ── step 1: start server ──

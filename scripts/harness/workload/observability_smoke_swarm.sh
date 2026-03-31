@@ -109,7 +109,7 @@ fi
 # ── step 2: bootstrap room ──
 
 printf '[2/5] initialize room and join agent\n'
-agent_nickname="$(obs_bootstrap_room "$MCP_URL" "$MCP_SESSION_ID" "$AGENT_NAME")"
+agent_nickname="$(obs_bootstrap_room "$MCP_URL" "$MCP_SESSION_ID" "$AGENT_NAME" '["supervisor","operator"]')"
 if [ -z "$agent_nickname" ]; then
   echo "FAIL: could not bootstrap room"
   exit 1

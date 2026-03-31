@@ -46,18 +46,6 @@ assert_max_length() {
   return 0
 }
 
-assert_not_null() {
-  local field_name="$1" value="$2"
-  if [ -z "$value" ] || [ "$value" = "null" ]; then
-    echo "FAIL: $field_name is null or empty"
-    FAIL_COUNT=$((FAIL_COUNT + 1))
-    return 1
-  fi
-  echo "  $field_name = $value"
-  PASS_COUNT=$((PASS_COUNT + 1))
-  return 0
-}
-
 assert_gte() {
   local actual="$1" expected="$2" label="${3:-value}"
   if [ "$actual" -ge "$expected" ] 2>/dev/null; then
@@ -115,15 +103,17 @@ obs_start_server() {
 }
 
 # Bootstrap room: init + join, returns nickname
+# Usage: obs_bootstrap_room <mcp_url> <session_id> <agent_name> [capabilities_json_array]
 obs_bootstrap_room() {
   local mcp_url="$1" session_id="$2" agent_name="$3"
+  local capabilities="${4:-[\"supervisor\",\"operator\",\"team-session\"]}"
   local init_raw join_raw nickname
 
   init_raw="$(mcp_call_tool 1 "masc_init" "$(jq -cn --arg a "$agent_name" '{agent_name:$a}')" "$session_id" "" "$mcp_url")"
   mcp_require_tool_ok "$init_raw" "masc_init" || return 1
 
   local join_args
-  join_args="$(jq -cn --arg name "$agent_name" '{agent_name: $name}')"
+  join_args="$(jq -cn --arg name "$agent_name" --argjson caps "$capabilities" '{agent_name: $name, capabilities: $caps}')"
   join_raw="$(mcp_call_tool 2 "masc_join" "$join_args" "$session_id" "" "$mcp_url")"
   mcp_require_tool_ok "$join_raw" "masc_join" || return 1
 

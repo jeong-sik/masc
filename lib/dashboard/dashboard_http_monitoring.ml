@@ -266,3 +266,32 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
       ("slo_breached", `Bool false);
       ("judge_online", `Bool false);
     ], false)
+
+let executor_outcomes_json (config : Room.config) : Yojson.Safe.t =
+  try
+    let since = Time_compat.now () -. 86400.0 in
+    let events = Telemetry_eio.read_events_since config ~since in
+    let total = ref 0 in
+    let successes = ref 0 in
+    List.iter (fun (r : Telemetry_eio.event_record) ->
+      match r.event with
+      | Telemetry_eio.Tool_called { tool_name; success; _ }
+        when String.length tool_name > 9
+          && String.sub tool_name 0 9 = "executor:" ->
+        incr total;
+        if success then incr successes
+      | _ -> ()
+    ) events;
+    `Assoc [
+      ("total_24h", `Int !total);
+      ("success_24h", `Int !successes);
+      ("failure_24h", `Int (!total - !successes));
+    ]
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ ->
+    `Assoc [
+      ("total_24h", `Int 0);
+      ("success_24h", `Int 0);
+      ("failure_24h", `Int 0);
+    ]

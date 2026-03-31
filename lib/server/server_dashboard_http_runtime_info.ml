@@ -24,6 +24,15 @@ let list_hd_opt = function
   | [] -> None
   | x :: _ -> Some x
 
+let path_descends_from ~root path =
+  String.equal path root || String.starts_with ~prefix:(root ^ "/") path
+
+let path_relative_to ~root path =
+  if String.equal path root then Some "."
+  else if String.starts_with ~prefix:(root ^ "/") path then
+    Some (String.sub path (String.length root + 1) (String.length path - String.length root - 1))
+  else None
+
 let git_rev_parse_short path =
   match trim_to_option path with
   | None -> None
@@ -277,38 +286,36 @@ let parse_benchmark_timestamp path =
       (String.sub base (String.length prefix)
          (String.length base - String.length prefix - String.length suffix))
 
-let rec worktree_results_dirs ~root ~depth =
-  if depth < 0 || not (Sys.file_exists root && Sys.is_directory root) then []
-  else
-    let entries =
-      try Sys.readdir root |> Array.to_list
-      with Sys_error _ -> []
-    in
-    let direct_hit =
-      if Filename.basename root = "results"
-         && Filename.basename (Filename.dirname root) = "benchmarks"
-      then [ root ]
-      else []
-    in
-    let child_hits =
-      entries
-      |> List.filter (fun entry -> entry <> "." && entry <> "..")
-      |> List.map (Filename.concat root)
-      |> List.filter (fun path -> Sys.file_exists path && Sys.is_directory path)
-      |> List.concat_map (fun path -> worktree_results_dirs ~root:path ~depth:(depth - 1))
-    in
-    direct_hit @ child_hits
+let current_worktree_results_dir (config : Room.config) =
+  let cwd = Sys.getcwd () in
+  let worktrees_root = Filename.concat config.base_path ".worktrees" in
+  if path_descends_from ~root:worktrees_root cwd then
+    Some (Filename.concat cwd "benchmarks/results")
+  else None
+
+let display_benchmark_path (config : Room.config) path =
+  match path_relative_to ~root:config.base_path path with
+  | Some relative -> relative
+  | None ->
+      let cwd = Sys.getcwd () in
+      if path_descends_from ~root:config.base_path cwd then
+        (match path_relative_to ~root:cwd path with
+         | Some relative -> relative
+         | None -> Filename.basename path)
+      else Filename.basename path
 
 let benchmark_results_dir_candidates (config : Room.config) =
   let env_dir = Sys.getenv_opt "MASC_BENCHMARK_RESULTS_DIR" in
-  let worktree_root = Filename.concat config.base_path ".worktrees" in
+  let scoped_dirs =
+    [
+      Option.value ~default:"" (current_worktree_results_dir config);
+      Filename.concat config.base_path "benchmarks/results";
+    ]
+  in
   dedupe_strings
-    ([
-       Option.value ~default:"" env_dir;
-       Filename.concat config.workspace_path "benchmarks/results";
-       Filename.concat config.base_path "benchmarks/results";
-     ]
-    @ worktree_results_dirs ~root:worktree_root ~depth:6)
+    (match trim_to_option (Option.value ~default:"" env_dir) with
+     | Some dir -> [ dir ]
+     | None -> scoped_dirs)
   |> List.filter (fun path -> Sys.file_exists path && Sys.is_directory path)
 
 let benchmark_result_files results_dir =
@@ -334,7 +341,8 @@ let latest_file_by_mtime files =
 
 let latest_benchmark_result_file (config : Room.config) =
   benchmark_results_dir_candidates config
-  |> List.find_map (fun results_dir -> latest_file_by_mtime (benchmark_result_files results_dir))
+  |> List.concat_map benchmark_result_files
+  |> latest_file_by_mtime
 
 let split_csv_row line =
   match String.split_on_char ',' line with
@@ -471,13 +479,19 @@ let baseline_file_for ~current_file ~meta =
       |> List.filter (fun path -> not (String.equal path current_file))
       |> latest_file_by_mtime
 
-let benchmark_source_json ~results_dir ~result_file ~meta_file ~baseline_file =
+let benchmark_source_json config ~results_dir ~result_file ~meta_file ~baseline_file =
   `Assoc
     [
-      ("results_dir", `String results_dir);
-      ("result_file", `String result_file);
-      ("meta_file", Option.fold ~none:`Null ~some:(fun path -> `String path) meta_file);
-      ("baseline_file", Option.fold ~none:`Null ~some:(fun path -> `String path) baseline_file);
+      ("results_dir", `String (display_benchmark_path config results_dir));
+      ("result_file", `String (display_benchmark_path config result_file));
+      ( "meta_file",
+        Option.fold ~none:`Null
+          ~some:(fun path -> `String (display_benchmark_path config path))
+          meta_file );
+      ( "baseline_file",
+        Option.fold ~none:`Null
+          ~some:(fun path -> `String (display_benchmark_path config path))
+          baseline_file );
     ]
 
 let latest_run_json ~result_file ~meta rows =
@@ -544,7 +558,10 @@ let dashboard_perf_http_json (config : Room.config) : Yojson.Safe.t =
           ("status", `String "empty");
           ("benchmarks", `List []);
           ("comparison", `Null);
-          ("candidate_dirs", `List (List.map (fun path -> `String path) (benchmark_results_dir_candidates config)));
+          ( "candidate_dirs",
+            `List
+              (benchmark_results_dir_candidates config
+              |> List.map (fun path -> `String (display_benchmark_path config path))) );
           ("message", `String "No benchmark artifacts found");
         ]
   | Some result_file ->
@@ -567,7 +584,9 @@ let dashboard_perf_http_json (config : Room.config) : Yojson.Safe.t =
         [
           ("generated_at", `String (Types.now_iso ()));
           ("status", `String "ok");
-          ("source", benchmark_source_json ~results_dir ~result_file ~meta_file ~baseline_file);
+          ( "source",
+            benchmark_source_json config ~results_dir ~result_file ~meta_file
+              ~baseline_file );
           ("latest_run", latest_run_json ~result_file ~meta rows);
           ( "highlights",
             `Assoc
@@ -592,7 +611,7 @@ let dashboard_perf_http_json (config : Room.config) : Yojson.Safe.t =
             | Some path ->
                 `Assoc
                   [
-                    ("baseline_file", `String path);
+                    ("baseline_file", `String (display_benchmark_path config path));
                     ("verdict_counts", verdict_counts_json comparison_rows);
                     ( "top_changes",
                       `List

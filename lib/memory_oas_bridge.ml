@@ -73,6 +73,8 @@ type episode_file_cache = {
 let episode_file_cache_tbl : (string, episode_file_cache) Hashtbl.t =
   Hashtbl.create 4
 
+let episode_cache_mu = Eio.Mutex.create ()
+
 let episode_ids_of episodes =
   let ids = Hashtbl.create (max 16 (List.length episodes)) in
   List.iter
@@ -80,7 +82,7 @@ let episode_ids_of episodes =
     episodes;
   ids
 
-let load_all_episodes_cached () =
+let load_all_episodes_cached_unlocked () =
   let path = Institution_eio.episodes_jsonl_path () in
   let stamp = file_stamp_opt path in
   match Hashtbl.find_opt episode_file_cache_tbl path with
@@ -90,6 +92,9 @@ let load_all_episodes_cached () =
       let cache = { stamp; episodes; ids = episode_ids_of episodes } in
       Hashtbl.replace episode_file_cache_tbl path cache;
       cache
+
+let load_all_episodes_cached () =
+  Eio_guard.with_mutex episode_cache_mu load_all_episodes_cached_unlocked
 
 let cached_recent_episodes ~limit =
   let cache = load_all_episodes_cached () in
@@ -104,12 +109,13 @@ let cached_recent_episodes ~limit =
     drop (total - limit) cache.episodes
 
 let note_episode_flush (episode : Institution_eio.episode) =
-  let path = Institution_eio.episodes_jsonl_path () in
-  let cache = load_all_episodes_cached () in
-  cache.episodes <- cache.episodes @ [episode];
-  Hashtbl.replace cache.ids episode.id ();
-  cache.stamp <- file_stamp_opt path;
-  Hashtbl.replace episode_file_cache_tbl path cache
+  Eio_guard.with_mutex episode_cache_mu (fun () ->
+    let path = Institution_eio.episodes_jsonl_path () in
+    let cache = load_all_episodes_cached_unlocked () in
+    cache.episodes <- cache.episodes @ [episode];
+    Hashtbl.replace cache.ids episode.id ();
+    cache.stamp <- file_stamp_opt path;
+    Hashtbl.replace episode_file_cache_tbl path cache)
 
 type procedure_file_cache = {
   mutable stamp : file_stamp option;
@@ -119,21 +125,25 @@ type procedure_file_cache = {
 let procedure_file_cache_tbl : (string, procedure_file_cache) Hashtbl.t =
   Hashtbl.create 16
 
+let procedure_cache_mu = Eio.Mutex.create ()
+
 let load_procedures_cached ~(agent_name : string) =
-  let path = Procedural_memory.procedures_path ~agent_name in
-  let stamp = file_stamp_opt path in
-  match Hashtbl.find_opt procedure_file_cache_tbl path with
-  | Some cache when cache.stamp = stamp -> cache.procedures
-  | _ ->
-      let procedures = Procedural_memory.load_procedures ~agent_name in
-      Hashtbl.replace procedure_file_cache_tbl path { stamp; procedures };
-      procedures
+  Eio_guard.with_mutex procedure_cache_mu (fun () ->
+    let path = Procedural_memory.procedures_path ~agent_name in
+    let stamp = file_stamp_opt path in
+    match Hashtbl.find_opt procedure_file_cache_tbl path with
+    | Some cache when cache.stamp = stamp -> cache.procedures
+    | _ ->
+        let procedures = Procedural_memory.load_procedures ~agent_name in
+        Hashtbl.replace procedure_file_cache_tbl path { stamp; procedures };
+        procedures)
 
 let store_procedures_cache ~(agent_name : string)
     (procedures : Procedural_memory.procedure list) =
-  let path = Procedural_memory.procedures_path ~agent_name in
-  let stamp = file_stamp_opt path in
-  Hashtbl.replace procedure_file_cache_tbl path { stamp; procedures }
+  Eio_guard.with_mutex procedure_cache_mu (fun () ->
+    let path = Procedural_memory.procedures_path ~agent_name in
+    let stamp = file_stamp_opt path in
+    Hashtbl.replace procedure_file_cache_tbl path { stamp; procedures })
 
 let top_procedures_cached ~(agent_name : string) ~(limit : int) =
   load_procedures_cached ~agent_name

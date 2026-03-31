@@ -47,9 +47,6 @@ let keeper_internal_tools =
     "keeper_voice_sessions";
     "keeper_voice_session_start";
     "keeper_voice_session_end";
-    "keeper_search";
-    "keeper_profile";
-    "keeper_research";
   ]
 
 let keeper_internal_set : (string, unit) Hashtbl.t =

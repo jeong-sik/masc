@@ -255,50 +255,6 @@ let local_worker_internal_schemas : Types.tool_schema list =
             ("required", `List [ `String "loop_id" ]);
           ];
     };
-    {
-      Types.name = "keeper_research";
-      description = "Research a topic using the MODEL and share findings with the board.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("topic", `Assoc [ ("type", `String "string") ]);
-                  ("agent_name", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "topic" ]);
-          ];
-    };
-    {
-      Types.name = "keeper_profile";
-      description = "Get an agent profile including recent board activity, stats, and interests. Use when reviewing an agent's contributions before collaboration or mentioning them.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc [ ("agent_name", `Assoc [ ("type", `String "string") ]) ] );
-            ("required", `List [ `String "agent_name" ]);
-          ];
-    };
-    {
-      Types.name = "keeper_search";
-      description = "Search board content (posts, comments, code snippets) and agents by keyword. Use when looking for prior discussions on a topic or finding agents with relevant expertise.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("query", `Assoc [ ("type", `String "string") ]);
-                  ("limit", `Assoc [ ("type", `String "integer") ]);
-                ] );
-            ("required", `List [ `String "query" ]);
-          ];
-    };
   ]
 
 let local_worker_code_schemas : Types.tool_schema list =

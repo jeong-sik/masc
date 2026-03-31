@@ -39,10 +39,10 @@ let handle_pause_status ctx args =
             ("room_id", `String room_id);
             ("status", `String "paused");
             ("paused", `Bool true);
-            ("paused_by", (match by with Some s -> `String s | None -> `Null));
+            ("paused_by", Json_util.string_opt_to_json by);
             ( "pause_reason",
-              match reason with Some s -> `String s | None -> `Null );
-            ("paused_at", (match at with Some s -> `String s | None -> `Null));
+              Json_util.string_opt_to_json reason );
+            ("paused_at", Json_util.string_opt_to_json at);
             ("message", `String "Room is paused");
           ]
     | None ->

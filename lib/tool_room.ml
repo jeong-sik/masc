@@ -81,10 +81,10 @@ let room_strategy_json config =
     [
       ("room_id", `String (Room.current_room_id config));
       ("search_strategy_default",
-       match state.search_strategy_default with Some v -> `String v | None -> `Null);
+       Json_util.string_opt_to_json state.search_strategy_default);
       ("speculation_enabled", `Bool state.speculation_enabled);
       ("speculation_budget",
-       match state.speculation_budget with Some v -> `Int v | None -> `Null);
+       Json_util.int_opt_to_json state.speculation_budget);
     ]
 
 (* Handlers *)

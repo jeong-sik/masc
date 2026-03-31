@@ -95,8 +95,7 @@ let verdict_record_to_json (r : verdict_record) : Yojson.Safe.t =
     ("verdict", `String r.verdict);
     ("gate", `String r.gate);
     ("evaluator_cascade", `String r.evaluator_cascade);
-    ("generator_cascade",
-     (match r.generator_cascade with Some s -> `String s | None -> `Null));
+    ("generator_cascade", Json_util.string_opt_to_json r.generator_cascade);
     ("timestamp", `Float r.timestamp);
   ] in
   let extra = match r.fallback_reason with

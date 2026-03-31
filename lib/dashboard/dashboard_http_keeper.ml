@@ -484,7 +484,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("models_resolved", models_resolved);
               ("primary_model", `String primary_model);
               ("active_model", `String active_model);
-              ("next_model_hint", match next_model_hint with Some s -> `String s | None -> `Null);
+              ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
               ("scope_kind", `String m.scope_kind);
               ("room_scope", `String m.room_scope);
               ("keepalive_running", `Bool keepalive_running);

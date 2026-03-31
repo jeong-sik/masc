@@ -226,7 +226,7 @@ let full_session_to_yojson (s : session) : Yojson.Safe.t =
       ("threshold", `Float s.threshold);
       ("state", voting_state_to_yojson s.state);
       ("created_at", `Float s.created_at);
-      ("closed_at", match s.closed_at with Some t -> `Float t | None -> `Null);
+      ("closed_at", Json_util.float_opt_to_json s.closed_at);
     ]
   in
   let with_context =

@@ -89,14 +89,25 @@ export function workerBriefForAgent(agentName: string | null) {
   return executionWorkerSupportBriefs.value.find(w => w.name === agentName) ?? null
 }
 
+/** Collect lowercase name variants for an agent (including keeper aliases). */
+function agentMatchNames(agentName: string): string[] {
+  const keeper = keeperForAgent(agentName)
+  return [agentName, keeper?.name, keeper?.agent_name]
+    .filter((n): n is string => n != null && n !== '')
+    .map(n => n.toLowerCase())
+}
+
 export function agentJournalEntries(agentName: string | null): JournalEntry[] {
   if (!agentName) return []
-  const nameLower = agentName.toLowerCase()
+  const names = agentMatchNames(agentName)
+
   return journal.value
     .filter((entry: JournalEntry) => {
       const text = entry.text.toLowerCase()
       const agent = entry.agent.toLowerCase()
-      return agent === nameLower || text.includes(nameLower) || text.includes(`@${nameLower}`)
+      return names.some(name =>
+        agent === name || text.includes(name) || text.includes(`@${name}`),
+      )
     })
     .slice(0, 15)
 }
@@ -150,8 +161,13 @@ export async function refreshAgentDetail(): Promise<void> {
         .catch(() => null),
     ])
 
+    const matchNames = agentMatchNames(agentName)
+
     roomActivity.value = lines
-      .filter(line => line.includes(agentName))
+      .filter(line => {
+        const lower = line.toLowerCase()
+        return matchNames.some(name => lower.includes(name))
+      })
       .slice(0, 20)
 
     agentTimeline.value = timelineResult

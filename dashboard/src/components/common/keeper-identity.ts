@@ -24,6 +24,6 @@ export function keeperIdentityHint(
   const keeper = keeperName?.trim()
   const runtime = runtimeAgentName(keeper, agentName)
   if (!keeper) return null
-  if (!runtime) return `keeper key · ${keeper}`
-  return `keeper key · ${keeper} · runtime agent · ${runtime}`
+  if (!runtime) return `키퍼 · ${keeper}`
+  return `키퍼 · ${keeper} · 런타임 · ${runtime}`
 }

@@ -35,8 +35,7 @@ let cycle_to_yojson (r : cycle_record) : Yojson.Safe.t =
     ("score_after", `Float r.score_after);
     ("delta", `Float r.delta);
     ("decision", `String (decision_to_string r.decision));
-    ("commit_hash", match r.commit_hash with
-      | Some h -> `String h | None -> `Null);
+    ("commit_hash", Json_util.string_opt_to_json r.commit_hash);
     ("elapsed_ms", `Int r.elapsed_ms);
     ("model_used", `String r.model_used);
     ("timestamp", `Float r.timestamp);
@@ -69,10 +68,7 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
     ("baseline", `Float s.baseline);
     ("best_score", `Float s.best_score);
     ("best_cycle", `Int s.best_cycle);
-    ( "queued_hypothesis",
-      match s.queued_hypothesis with
-      | Some value -> `String value
-      | None -> `Null );
+    ("queued_hypothesis", Json_util.string_opt_to_json s.queued_hypothesis);
     ("total_keeps", `Int s.total_keeps);
     ("total_discards", `Int s.total_discards);
     ("max_cycles", `Int s.max_cycles);
@@ -83,17 +79,12 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
     ("updated_at", `Float s.updated_at);
     ("history_count", `Int (List.length s.history));
     ("insights_count", `Int (List.length s.insights));
-    ( "program_note",
-      match s.program_note with
-      | Some value -> `String value
-      | None -> `Null );
+    ("program_note", Json_util.string_opt_to_json s.program_note);
     ("warnings", `List (List.map (fun value -> `String value) s.warnings));
     ("patience", `Int s.patience);
     ("consecutive_discards", `Int s.consecutive_discards);
-    ("build_verify_fn", match s.build_verify_fn with
-      | Some cmd -> `String cmd | None -> `Null);
-    ("error", match s.error_message with
-      | Some e -> `String e | None -> `Null);
+    ("build_verify_fn", Json_util.string_opt_to_json s.build_verify_fn);
+    ("error", Json_util.string_opt_to_json s.error_message);
   ]
 
 let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
@@ -154,13 +145,10 @@ let swarm_link_to_yojson (link : swarm_link) : Yojson.Safe.t =
     [
       ("loop_id", `String link.loop_id);
       ("session_id", `String link.session_id);
-      ( "operation_id",
-        match link.operation_id with Some value -> `String value | None -> `Null );
+      ("operation_id", Json_util.string_opt_to_json link.operation_id);
       ("target_file", `String link.target_file);
-      ( "program_note",
-        match link.program_note with Some value -> `String value | None -> `Null );
-      ( "created_by",
-        match link.created_by with Some value -> `String value | None -> `Null );
+      ("program_note", Json_util.string_opt_to_json link.program_note);
+      ("created_by", Json_util.string_opt_to_json link.created_by);
       ("linked_at", `Float link.linked_at);
     ]
 

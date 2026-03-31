@@ -32,6 +32,7 @@ import {
 } from './keeper-detail-runtime'
 import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
+import { AgentJournalStream } from './agent-detail-journal'
 import { KeeperTrajectoryTimeline } from './keeper-trajectory-timeline'
 import { DialogOverlay } from './common/dialog'
 import { CollapsibleSection } from './common/collapsible'
@@ -107,15 +108,23 @@ function KeeperStatusPill({ status }: { status: string }) {
 // ── Comms Panel ──────────────────────────────────────────
 
 function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
+  const isOffline = keeper.status === 'offline' || keeper.status === 'inactive'
+
   return html`
     <div class="border-t border-[var(--border-slate-12)] pt-5">
       <h3 class="m-0 mb-3 text-[13px] font-semibold text-[var(--text-strong)] uppercase tracking-[0.06em]">직접 통신</h3>
+
+      ${isOffline ? html`
+        <div class="px-4 py-3 rounded-xl border border-[var(--card-border)] bg-[rgba(90,100,120,0.08)] text-[13px] text-[var(--text-muted)]">
+          이 키퍼는 현재 비활동 상태입니다. Boot 후 메시지를 보낼 수 있습니다.
+        </div>
+      ` : null}
 
       <div class="flex flex-col gap-4">
         <div class="w-full">
           <${KeeperConversationPanel}
             keeperName=${keeper.name}
-            placeholder="이 키퍼에게 직접 프롬프트 전송"
+            placeholder=${isOffline ? '키퍼 오프라인 — Boot 필요' : '이 키퍼에게 직접 프롬프트 전송'}
           />
         </div>
 
@@ -386,6 +395,9 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
+
+        ${'' /* ── Live journal stream ── */}
+        <${AgentJournalStream} agentName=${keeper.name} />
 
         ${'' /* ── Detail sections grid ── */}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

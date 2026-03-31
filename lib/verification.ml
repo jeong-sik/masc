@@ -145,7 +145,7 @@ let request_to_yojson req =
     ("output", req.output);
     ("criteria", `List (List.map criterion_to_yojson req.criteria));
     ("worker", `String req.worker);
-    ("verifier", match req.verifier with Some v -> `String v | None -> `Null);
+    ("verifier", Json_util.string_opt_to_json req.verifier);
     ("created_at", `Float req.created_at);
     ("status", request_status_to_yojson req.status);
   ]

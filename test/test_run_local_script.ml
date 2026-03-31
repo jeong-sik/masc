@@ -274,6 +274,36 @@ let test_explicit_config_env_is_preserved_without_bootstrap () =
       check bool "target config not bootstrapped" false
         (Sys.file_exists (Filename.concat target ".masc/config/cascade.json")))
 
+let test_config_dir_set_personas_dir_unset_defaults_to_config_personas () =
+  with_temp_dir "run-local-script" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      let override_config = Filename.concat dir "my-config" in
+      mkdir_p target;
+      mkdir_p override_config;
+      let capture = Filename.concat dir "captured-env.txt" in
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_shell ~cwd:repo_root
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("MASC_CONFIG_DIR", override_config);
+            ]
+          ~unset_env:[ "MASC_PERSONAS_DIR" ]
+          (Printf.sprintf "%s --target-dir %s --port 9960"
+             (quote script) (quote target))
+      in
+      if code <> 0 then
+        failf "run-local with MASC_CONFIG_DIR only failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      let captured = read_file capture in
+      check bool "config dir uses explicit value" true
+        (contains_substring captured ("MASC_CONFIG_DIR=" ^ override_config));
+      check bool "personas dir defaults to config/personas" true
+        (contains_substring captured
+           ("MASC_PERSONAS_DIR=" ^ Filename.concat override_config "personas")))
+
 let () =
   run "run_local_script"
     [
@@ -289,5 +319,7 @@ let () =
             test_existing_target_config_is_not_overwritten;
           test_case "explicit config env is preserved without bootstrap" `Quick
             test_explicit_config_env_is_preserved_without_bootstrap;
+          test_case "config_dir set personas_dir unset defaults to config/personas" `Quick
+            test_config_dir_set_personas_dir_unset_defaults_to_config_personas;
         ] );
     ]

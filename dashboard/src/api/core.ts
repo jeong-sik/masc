@@ -10,9 +10,31 @@ import type {
 import { resolveDashboardActorName, sanitizeDashboardActorName } from '../lib/dashboard-actor'
 
 // --- Auth ---
+// Token is read from ?token= on first load, moved to sessionStorage,
+// then stripped from the URL to avoid exposure in history/logs.
 
 function getQueryParams(): URLSearchParams {
   return new URLSearchParams(window.location.search)
+}
+
+const TOKEN_STORAGE_KEY = 'masc_bearer_token'
+
+function initTokenFromUrl(): void {
+  const params = new URLSearchParams(window.location.search)
+  const urlToken = params.get('token')
+  if (urlToken) {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, urlToken)
+    params.delete('token')
+    const cleaned = params.toString()
+    const newUrl = window.location.pathname + (cleaned ? `?${cleaned}` : '') + window.location.hash
+    history.replaceState(null, '', newUrl)
+  }
+}
+
+initTokenFromUrl()
+
+function getStoredToken(): string | null {
+  return sessionStorage.getItem(TOKEN_STORAGE_KEY)
 }
 
 export function currentDashboardActor(): string {
@@ -24,9 +46,8 @@ type HeaderOptions = {
 }
 
 function authHeaders(options: HeaderOptions = {}): Record<string, string> {
-  const params = getQueryParams()
   const headers: Record<string, string> = {}
-  const token = params.get('token')
+  const token = getStoredToken()
   const agent = resolveDashboardActorName(window.location.search)
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (options.includeActor !== false && agent) {

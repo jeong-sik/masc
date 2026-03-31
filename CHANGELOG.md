@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [2.186.0] - 2026-03-31
+
+### Fixed
+- **Harness health dashboard** — align frontend schema with backend after #3883 mitosis removal (#4113).
+- **Research List.hd** — replace unsafe List.hd with pattern match in run_git (#4121).
+- **CDAL tool block** — remove restriction blocking keeper tool execution (#4104).
+- **Tool output prune** — raise keeper tool output prune limit from 500 to 1500 chars (#4114).
+
+### Changed
+- **Harness smoke scripts** — extract shared boilerplate from observability smoke scripts (#4095).
+- **Json_util** — consolidate duplicated JSON option helpers (#4112).
+
 ## [2.185.0] - 2026-03-31
 
 ### Fixed

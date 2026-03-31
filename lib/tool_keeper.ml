@@ -523,8 +523,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_repair" -> Some (handle_keeper_repair ctx args)
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
-  | "masc_keeper_autonomy" | "masc_keeper_goals" ->
-      Some (false, Printf.sprintf "%s has been removed" name)
   | "masc_keeper_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)
   | "masc_keeper_eval" -> Some (Status.handle_keeper_eval ctx args)
   | "masc_persistent_agent_create_from_persona" ->

@@ -125,13 +125,13 @@ let handle_runtime_bench _ctx args : result =
 let dispatch ctx ~name ~args : result option =
   match name with
   (* Canonical names *)
-  | "masc_local_runtime_models" | "masc_llama_models" ->
+  | "masc_local_runtime_models" ->
       Some (handle_models ctx)
-  | "masc_local_runtime_status" | "masc_llama_runtime_status" ->
+  | "masc_local_runtime_status" ->
       Some (handle_runtime_status ctx args)
   | "masc_runtime_verify" ->
       Some (handle_runtime_verify ctx args)
-  | "masc_local_runtime_bench" | "masc_llama_runtime_bench" ->
+  | "masc_local_runtime_bench" ->
       Some (handle_runtime_bench ctx args)
   | _ -> None
 

@@ -216,10 +216,7 @@ let keeper_auto_rule_eval_to_json (e : keeper_auto_rule_eval) : Yojson.Safe.t =
     ("compact", `Bool e.compact);
     ("handoff", `Bool e.handoff);
     ("guardrail_stop", `Bool e.guardrail_stop);
-    ("guardrail_reason",
-      match e.guardrail_reason with
-      | Some reason -> `String reason
-      | None -> `Null);
+    ("guardrail_reason", Json_util.string_opt_to_json e.guardrail_reason);
     ("reasons", `List (List.map (fun reason -> `String reason) e.reasons));
   ]
 
@@ -245,10 +242,7 @@ let keeper_reflection_payload_of_auto_rules (e : keeper_auto_rule_eval) : Yojson
     ("triggered", `Bool has_action);
     ("actions", `List (List.rev actions_rev));
     ("guardrail_stop", `Bool e.guardrail_stop);
-    ("guardrail_reason",
-      match e.guardrail_reason with
-      | Some reason -> `String reason
-      | None -> `Null);
+    ("guardrail_reason", Json_util.string_opt_to_json e.guardrail_reason);
     ("goal_drift", `Float e.goal_drift);
     ("repetition_risk", `Float e.repetition_risk);
     ("goal_alignment", `Float e.goal_alignment);
@@ -700,13 +694,13 @@ let memory_eval_to_json
   `Assoc [
     ("performed", `Bool e.performed);
     ("query_kind", `String e.query_kind);
-    ("expected_topic", match e.expected_topic with Some t -> `String t | None -> `Null);
+    ("expected_topic", Json_util.string_opt_to_json e.expected_topic);
     ("candidate_count", `Int e.candidate_count);
     ("initial_score", `Float e.initial_score);
     ("final_score", `Float e.final_score);
     ("threshold", `Float e.threshold);
     ("passed", `Bool e.passed);
-    ("best_match", match e.best_match with Some m -> `String m | None -> `Null);
+    ("best_match", Json_util.string_opt_to_json e.best_match);
     ("correction_applied", `Bool correction_applied);
     ("correction_success", `Bool correction_success);
     ("correction_skipped_budget", `Bool correction_skipped_budget);

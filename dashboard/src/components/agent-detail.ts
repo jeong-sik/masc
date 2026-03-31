@@ -7,6 +7,7 @@ import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
+import { resolveUnifiedStatus } from '../lib/unified-status'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { keeperIdentityHint } from './common/keeper-identity'
@@ -88,23 +89,12 @@ export function AgentDetailOverlay() {
   const lines = roomActivity.value
   const displayName = missionBrief?.display_name ?? keeper?.name ?? agentName
   const secondaryLabel = displayName !== agentName ? agentName : null
-  const headerStatus = agent?.status ?? missionBrief?.status ?? 'unknown'
+  const unified = resolveUnifiedStatus(keeper?.status, agent?.status, missionBrief?.signal_truth)
   const isArchivedParticipant = !agent && missionBrief?.is_live === false
   const lastSeenAt =
     agent?.last_seen
     ?? missionBrief?.last_activity_at
     ?? null
-  const signalTruth =
-    missionBrief?.signal_truth === 'live'
-      ? 'live'
-      : missionBrief?.signal_truth === 'stale'
-        ? 'stale'
-        : missionBrief?.signal_truth === 'archived'
-          ? 'archived'
-          : missionBrief?.signal_truth === 'unknown'
-            ? 'unknown'
-            : null
-  const evidenceSource = missionBrief?.evidence_source ?? null
   const agentEmoji = agent?.emoji ?? keeper?.emoji
   const rawKoreanName = agent?.koreanName ?? keeper?.koreanName
   // Don't show koreanName if it's actually an agent runtime name, not Korean text
@@ -125,9 +115,10 @@ export function AgentDetailOverlay() {
       onClose=${closeAgentDetail}
       initialFocusRef=${closeButtonRef}
       overlayClass="agent-detail-overlay fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
-      panelClass="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded-2xl border border-card-border bg-bg-1/95 backdrop-blur-2xl p-6 shadow-2xl shadow-black/50 ring-1 ring-white/5"
+      panelClass="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded-2xl border border-card-border bg-bg-1/95 backdrop-blur-2xl shadow-2xl shadow-black/50 ring-1 ring-white/5"
     >
-        <div class="flex justify-between items-start gap-4 mb-6">
+      <div class="p-6 flex flex-col gap-5">
+        <div class="flex justify-between items-start gap-4">
           <div class="flex flex-col gap-3 flex-1">
             <div class="flex items-center gap-4">
               ${agentEmoji ? html`<div class="size-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-3xl shadow-inner">${agentEmoji}</div>` : ''}
@@ -138,14 +129,13 @@ export function AgentDetailOverlay() {
                   ${showSecondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-white/5 px-2 py-0.5 rounded-md">${secondaryLabel}</span>` : ''}
                 </h2>
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
-                  <${StatusBadge} status=${headerStatus} />
+                  <${StatusBadge} status=${unified.canonical} />
+                  ${unified.description !== unified.label ? html`<span class="text-[10px] font-medium py-1 px-2 border border-white/10 bg-white/5 text-text-muted whitespace-nowrap rounded-md" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<span class="text-[10px] font-medium py-1 px-2 border border-accent/20 bg-accent/10 text-accent whitespace-nowrap rounded-md shadow-sm">archived session participant</span>` : null}
                   ${agent?.model ? html`<span class="font-mono text-[10px] font-medium bg-white/10 border border-white/5 px-2 py-1 rounded-md text-text-muted shadow-sm">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-text-dim italic">${missionBrief.archived_reason}</span>`
                     : null}
-                  ${signalTruth ? html`<span class="text-[10px] font-medium py-1 px-2 border border-accent/20 bg-accent/10 text-accent whitespace-nowrap rounded-md shadow-sm">signal · ${signalTruth}</span>` : null}
-                  ${evidenceSource ? html`<span class="text-[10px] font-medium py-1 px-2 border border-accent/20 bg-accent/10 text-accent whitespace-nowrap rounded-md shadow-sm">source · ${evidenceSource}</span>` : null}
                 </div>
               </div>
             </div>
@@ -188,15 +178,15 @@ export function AgentDetailOverlay() {
           </div>
         </div>
 
-        ${detailError.value ? html`<div class="p-4 mb-4 text-bad border border-bad/30 rounded-xl bg-bad/10 shadow-sm font-medium text-sm">${detailError.value}</div>` : null}
+        ${detailError.value ? html`<div class="p-4 text-bad border border-bad/30 rounded-xl bg-bad/10 shadow-sm font-medium text-sm">${detailError.value}</div>` : null}
 
         <${AgentSessionReport} agentName=${agentName} />
 
-        <${CollapsibleSection} title="활동 추적" class="mb-5" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">GitHub Agents 스타일</span>`}>
+        <${CollapsibleSection} title="활동 추적" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">GitHub Agents 스타일</span>`}>
           <${SessionTraceView} agentName=${agentName} isKeeper=${!!keeper} />
         <//>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <${Card} title="할당된 작업">
             ${ownedTasks.length === 0
               ? html`<div class="h-full min-h-[120px]"><${EmptyState} message="할당된 작업이 없습니다" compact /></div>`
@@ -205,7 +195,7 @@ export function AgentDetailOverlay() {
 
           <${Card} title="최근 활동">
             ${lines.length === 0
-              ? html`<div class="h-full min-h-[120px]"><${EmptyState} message="최근 활동 기록이 없습니다" compact /></div>`
+              ? html`<div class="h-full min-h-[120px]"><${EmptyState} message="최근 80개 room 메시지에서 이 에이전트 관련 항목 없음" compact /></div>`
               : html`<div class="max-h-[240px] overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-[12px] text-text-body leading-relaxed rounded-xl shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
           <//>
         </div>
@@ -263,6 +253,7 @@ export function AgentDetailOverlay() {
             </div>
           <//>
         </div>
+      </div>
     <//>
   `
 }

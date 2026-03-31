@@ -290,6 +290,11 @@ jobs:
           chmod +x scripts/check-feature-flag-consistency.sh
           scripts/check-feature-flag-consistency.sh
 
+      - name: Check MASC/OAS boundary ratchet
+        run: |
+          chmod +x scripts/check-boundary-guard.sh
+          scripts/check-boundary-guard.sh
+
       - name: Build with warnings as errors
         run: |
           opam exec -- dune build @install --force

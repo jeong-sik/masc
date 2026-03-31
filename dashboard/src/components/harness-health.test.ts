@@ -106,9 +106,19 @@ async function loadComponentWithApi(api: {
   vi.doMock('../router', () => ({
     navigate: api.navigate ?? vi.fn(),
   }))
+  vi.doMock('./common/mermaid-graph', () => ({
+    MermaidGraph: ({ source, fallbackText }: { source: string; fallbackText?: string }) => html`
+      <pre data-testid="mermaid-source">${source}</pre>
+      ${fallbackText ? html`<div data-testid="mermaid-fallback">${fallbackText}</div>` : null}
+    `,
+  }))
   const module = await import('./harness-health')
   module.resetHarnessHealthState()
   return module
+}
+
+function mermaidSource(container: HTMLDivElement): string {
+  return container.querySelector('[data-testid="mermaid-source"]')?.textContent ?? ''
 }
 
 describe('HarnessHealth', () => {
@@ -130,6 +140,7 @@ describe('HarnessHealth', () => {
     vi.doUnmock('../api/core')
     vi.doUnmock('../sse')
     vi.doUnmock('../router')
+    vi.doUnmock('./common/mermaid-graph')
   })
 
   it('renders the live harness hierarchy with shared theme tokens', async () => {
@@ -146,6 +157,7 @@ describe('HarnessHealth', () => {
 
     expect(get).toHaveBeenCalledWith('/api/v1/dashboard/harness-health')
     expect(container.textContent).toContain('Safety Harness')
+    expect(container.textContent).toContain('Harness Flow')
     expect(container.textContent).toContain('Can I Trust The Experiment Machinery?')
     expect(container.textContent).toContain('Judge of the Judge')
     expect(container.textContent).toContain('Continuity Pressure')
@@ -153,6 +165,9 @@ describe('HarnessHealth', () => {
     expect(container.textContent).toContain('오토리서치 열기')
     expect(container.textContent).toContain('Fallback 비율')
     expect(container.textContent).toContain('judge timeout')
+    expect(mermaidSource(container)).toContain('flowchart LR')
+    expect(mermaidSource(container)).toContain('verdict_recorded')
+    expect(mermaidSource(container)).toContain('debounced reload')
 
     const markup = container.innerHTML
     expect(markup).toContain('text-[var(--accent)]')
@@ -194,6 +209,56 @@ describe('HarnessHealth', () => {
 
     expect(container.textContent).toContain('transition-done')
     expect(get).toHaveBeenCalledTimes(1)
+
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    await flushUi()
+
+    expect(get).toHaveBeenCalledTimes(2)
+  })
+
+  it('derives a status-aware mermaid graph from harness data', async () => {
+    const module = await loadComponentWithApi({
+      get: vi.fn().mockResolvedValue(sampleResponse()),
+      lastEvent: { value: null },
+    })
+
+    const source = module.buildHarnessFlowMermaid(sampleResponse() as never)
+
+    expect(source).toContain('class evaluator warningRail;')
+    expect(source).toContain('class preCompact healthyRail;')
+    expect(source).toContain('class handoff healthyRail;')
+    expect(source).toContain('class evaluator activeRail;')
+    expect(source).toContain('keeper_handoff')
+    expect(source).toContain('/api/v1/dashboard/harness-health')
+  })
+
+  it('updates the handoff rail immediately on keeper_handoff SSE events', async () => {
+    const get = vi.fn<(path: string) => Promise<unknown>>()
+      .mockResolvedValue(sampleResponse())
+    const lastEvent = signal<unknown>(null)
+
+    const { HarnessHealth } = await loadComponentWithApi({
+      get,
+      lastEvent,
+    })
+
+    render(html`<${HarnessHealth} />`, container)
+    await flushUi()
+    expect(container.textContent).toContain('keeper-a')
+
+    lastEvent.value = {
+      type: 'keeper_handoff',
+      name: 'keeper-b',
+      ts_unix: 1711440900,
+      from_generation: 8,
+      to_generation: 9,
+      to_model: 'glm-5',
+    }
+    await flushUi()
+
+    expect(container.textContent).toContain('keeper-b')
+    expect(container.textContent).toContain('generation 8')
+    expect(mermaidSource(container)).toContain('class handoff activeRail;')
 
     await new Promise(resolve => setTimeout(resolve, 1000))
     await flushUi()

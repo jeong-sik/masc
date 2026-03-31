@@ -76,7 +76,26 @@ let test_dashboard_tools_projection () =
         |> List.find_opt (fun row ->
                row |> member "name" |> to_string = "masc_code_search")
       in
+      let public_tool =
+        inventory_rows
+        |> List.find_opt (fun row ->
+               row |> member "name" |> to_string = "masc_status")
+      in
       check bool "includes hidden tool" true (Option.is_some hidden_tool);
+      check bool "includes public tool" true (Option.is_some public_tool);
+      (match public_tool with
+      | None -> ()
+      | Some row ->
+          let public_surface_count =
+            row |> member "surfaces" |> to_list
+            |> List.fold_left
+                 (fun acc -> function
+                   | `String "public_mcp" -> acc + 1
+                   | _ -> acc)
+                 0
+          in
+          check bool "public tool tagged public_mcp" true (public_surface_count > 0);
+          check int "public_mcp not duplicated on public tool" 1 public_surface_count);
       match hidden_tool with
       | None -> ()
       | Some row ->
@@ -85,7 +104,12 @@ let test_dashboard_tools_projection () =
           check string "lifecycle surfaced" "active"
             (row |> member "lifecycle" |> to_string);
           check bool "direct call flag surfaced" true
-            (row |> member "direct_call_allowed" |> to_bool))
+            (row |> member "direct_call_allowed" |> to_bool);
+          check bool "hidden tool not mislabeled public_mcp" false
+            (row |> member "surfaces" |> to_list
+             |> List.exists (function
+                  | `String "public_mcp" -> true
+                  | _ -> false)))
 
 let () =
   run "dashboard_tools"

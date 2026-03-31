@@ -48,7 +48,7 @@ derive_port_for_path() {
 set_default_env() {
   local name="$1"
   local value="$2"
-  if [ "${!name+x}" != "x" ]; then
+  if [ -z "${!name:-}" ]; then
     export "$name=$value"
   fi
 }
@@ -63,7 +63,8 @@ binary_is_stale() {
   fi
   if find "$REPO_ROOT/bin" "$REPO_ROOT/lib" \
       -type f \( -name '*.ml' -o -name '*.mli' -o -name 'dune' \) \
-      -newer "$exe" 2>/dev/null | head -n 1 | grep -q .; then
+      -newer "$exe" -print -quit 2>/dev/null \
+    | grep -q .; then
     return 0
   fi
   return 1
@@ -153,8 +154,8 @@ fi
 bootstrap_local_config "$TARGET_DIR"
 build_dashboard_if_requested
 
-LOCAL_CONFIG_DIR="$TARGET_DIR/.masc/config"
-LOCAL_PERSONAS_DIR="$LOCAL_CONFIG_DIR/personas"
+LOCAL_CONFIG_DIR="${MASC_CONFIG_DIR:-$TARGET_DIR/.masc/config}"
+LOCAL_PERSONAS_DIR="${MASC_PERSONAS_DIR:-$LOCAL_CONFIG_DIR/personas}"
 EXE="$REPO_ROOT/_build/default/bin/main_eio.exe"
 
 if binary_is_stale "$EXE"; then

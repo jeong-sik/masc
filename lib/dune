@@ -504,6 +504,9 @@
    tool_autoresearch
    ;; Code Research Loop — tool_research adapter (core logic in masc_research library)
    tool_research
+   ;; godsplit-catalog: tool_catalog decomposition (private sub-modules)
+   tool_catalog_surfaces
+   tool_catalog_tiers
 )
 (private_modules
  dashboard_http_keeper_metrics
@@ -634,7 +637,10 @@
   tool_improve_loop_planner
   tool_improve_loop_executor
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
-  tool_schema_dsl)
+  tool_schema_dsl
+  ;; godsplit-catalog: tool_catalog decomposition
+  tool_catalog_surfaces
+  tool_catalog_tiers)
  (libraries
    mcp_protocol
    mcp_protocol.eio

@@ -782,6 +782,7 @@ let keeper_config_json (config : Room.config) (name : string)
          ("auto_team_session", auto_team_session_surface_json ());
          ("handoff", handoff);
          ("tools", tools_access);
+         ("hooks", Keeper_hooks_oas.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);
          ("coordination", coordination_surface_json m);
          ("sources", source_provenance_json config m);

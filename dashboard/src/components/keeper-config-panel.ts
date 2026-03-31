@@ -727,6 +727,31 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         </div>
       ` : null}
 
+      ${c.hooks ? html`
+        <${SectionHeader} title="훅 슬롯" />
+        ${Object.entries(c.hooks.slots).map(([name, slot]) => html`
+          <div class="flex items-start gap-2 py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 mb-1.5">
+            <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]' : 'bg-zinc-500'}"></span>
+            <div class="flex-1 min-w-0">
+              <div class="flex justify-between">
+                <span class="text-[12px] font-semibold text-text-strong">${name}</span>
+                <span class="text-[10px] text-text-muted">${slot.source}</span>
+              </div>
+              ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
+                <div class="flex flex-wrap gap-1 mt-1">
+                  ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
+                    <span class="text-[9px] px-1.5 py-0.5 rounded-md ${d.endsWith('_off') ? 'bg-zinc-700/50 text-zinc-400' : 'bg-accent/10 text-accent/80'}">${d}</span>
+                  `)}
+                </div>
+              ` : null}
+            </div>
+          </div>
+        `)}
+        <${ConfigRow} label="거부 목록 수" value=${String(c.hooks.deny_list_count)} />
+        <${ConfigRow} label="파괴 검사 도구" value=${c.hooks.destructive_check_tools.join(', ')} />
+        <${ConfigRow} label="비용 예산" value=${c.hooks.cost_budget.active ? '$' + (c.hooks.cost_budget.max_cost_usd ?? 0).toFixed(2) : '비활성'} />
+      ` : null}
+
       <${SectionHeader} title="마지막 호출 성능" />
       <${ConfigRow} label="총 입력 토큰" value=${formatTokens(c.metrics.total_input_tokens)} />
       <${ConfigRow} label="총 출력 토큰" value=${formatTokens(c.metrics.total_output_tokens)} />

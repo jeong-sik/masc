@@ -346,6 +346,23 @@ let test_path_empty_allowed_permits_all_within_root () =
     check bool "src ok with empty allowed" true (Result.is_ok r2))
 
 (* ============================================================
+   11. Dead alias removal (#4120)
+   ============================================================ *)
+
+let test_keeper_read_not_in_catalog () =
+  let internal = Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal in
+  check bool "keeper_read not in Keeper_internal surface" false
+    (List.mem "keeper_read" internal)
+
+let test_keeper_read_not_in_allowed () =
+  let meta = make_meta () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "keeper_read not in allowed_tool_names" false
+    (has_tool "keeper_read" tools);
+  check bool "keeper_fs_read is present" true
+    (has_tool "keeper_fs_read" tools)
+
+(* ============================================================
    Runner
    ============================================================ *)
 
@@ -398,5 +415,9 @@ let () =
       test_case "empty path rejected" `Quick test_path_empty_rejected;
       test_case "whitespace only rejected" `Quick test_path_whitespace_only_rejected;
       test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;
+    ]);
+    ("dead_alias_removal", [
+      test_case "keeper_read not in catalog" `Quick test_keeper_read_not_in_catalog;
+      test_case "keeper_read not in allowed" `Quick test_keeper_read_not_in_allowed;
     ]);
   ]

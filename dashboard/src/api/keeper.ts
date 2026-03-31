@@ -271,3 +271,42 @@ export function shutdownKeeper(name: string): Promise<KeeperLifecycleResponse> {
     `Failed to shut down ${name}`,
   )
 }
+
+// --- Tool allowlist/denylist editing ---
+
+export type ToolEditAction =
+  | 'set_allowlist'
+  | 'set_denylist'
+  | 'add_allow'
+  | 'remove_allow'
+  | 'add_deny'
+  | 'remove_deny'
+
+export interface ToolEditResponse {
+  ok: boolean
+  tool_allowlist: string[]
+  tool_denylist: string[]
+  active_masc_tool_count: number
+  total_active: number
+  error?: string
+}
+
+export async function editKeeperTools(
+  name: string,
+  action: ToolEditAction,
+  tools: string[],
+): Promise<ToolEditResponse> {
+  const resp = await fetch(
+    `/api/v1/keepers/${encodeURIComponent(name)}/tools`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, tools }),
+    },
+  )
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => resp.statusText)
+    throw new Error(`Tool edit failed (${resp.status}): ${text}`)
+  }
+  return resp.json() as Promise<ToolEditResponse>
+}

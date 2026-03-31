@@ -376,7 +376,7 @@ let test_snapshot_keeper_tool_audit_fallback () =
       Alcotest.(check bool) "allowed tool fallback present" true
         ((keeper |> member "allowed_tool_names" |> to_list) <> []);
       Alcotest.(check string) "tool audit source reflects failed turn evidence"
-        "keeper_decision_log"
+        "keeper_metrics"
         (keeper |> member "tool_audit_source" |> to_string);
       Alcotest.(check int) "tool audit count exposed as zero" 0
         (keeper |> member "latest_tool_call_count" |> to_int);

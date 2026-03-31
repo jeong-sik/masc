@@ -48,14 +48,23 @@ let get_registry_exn () =
   | Ok reg -> reg
   | Error msg -> raise (Registry_init_failed msg)
 
+(** MCP session to identity mapping for fast lookup *)
+let session_identity_map : (string, string) Hashtbl.t = Hashtbl.create 64
+
+(** Caches the final resolved agent_name per MCP session to skip
+    ~180 lines of identity resolution on 2nd+ calls. *)
+let resolved_names : (string, string) Hashtbl.t = Hashtbl.create 64
+
+let clear_session_caches () =
+  Hashtbl.clear session_identity_map;
+  Hashtbl.clear resolved_names
+
 (** Reset registry for testing *)
 let reset_for_testing () =
+  clear_session_caches ();
   global_registry := Some (Agent_identity.Registry.create ())
 
 (** {1 Identity Resolution} *)
-
-(** MCP session to identity mapping for fast lookup *)
-let session_identity_map : (string, string) Hashtbl.t = Hashtbl.create 64
 
 (** Get or create identity for an MCP request.
 
@@ -131,8 +140,6 @@ let get_by_session session_key =
 
     Caches the final resolved agent_name per MCP session to skip
     ~180 lines of identity resolution on 2nd+ calls. *)
-
-let resolved_names : (string, string) Hashtbl.t = Hashtbl.create 64
 
 let get_resolved_name sid =
   Hashtbl.find_opt resolved_names sid

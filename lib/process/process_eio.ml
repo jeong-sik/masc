@@ -24,6 +24,9 @@ let init ~cwd_default ~proc_mgr ~clock =
 
 let is_initialized () = Option.is_some !runtime_state
 
+let reset_for_testing () =
+  runtime_state := None
+
 let get_proc_mgr () =
   match !runtime_state with
   | Some runtime -> Ok runtime.proc_mgr

@@ -111,9 +111,11 @@ let default_mappings : action_mapping list =
           | None -> "unknown"
         in
         Error (Printf.sprintf
-          "deploy action not implemented for version %S — \
-           requires deployment pipeline integration" version));
-      describe = (fun _topic -> "deploy (not implemented)");
+          "deploy action unsupported for version %S — \
+           deployment pipeline integration is required" version));
+      describe =
+        (fun _topic ->
+          "deploy (unsupported: deployment pipeline integration required)");
       requires_unanimous = true;
       min_threshold = 1.0;
     };

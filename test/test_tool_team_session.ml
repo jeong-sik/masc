@@ -88,6 +88,10 @@ let () =
           Alcotest.test_case "prove-strong-requires-additional-evidence" `Quick
             Test_tool_team_session_misc.test_prove_strong_requires_additional_evidence;
           Alcotest.test_case "dispatch-unknown" `Quick Test_tool_team_session_misc.test_dispatch_unknown;
+          Alcotest.test_case "start-requires-process-mgr-when-runtime-unavailable"
+            `Quick
+            Test_tool_team_session_misc
+              .test_start_requires_process_mgr_when_runtime_unavailable;
           Alcotest.test_case "unauthorized-session-access" `Quick
             Test_tool_team_session_misc.test_unauthorized_session_access;
           Alcotest.test_case "final-done-delta-snapshot-stable" `Quick

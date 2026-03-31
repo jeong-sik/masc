@@ -26,3 +26,7 @@ val restore : base_path:string -> int
 val flush_now : unit -> unit
 (** [flush_now ()] immediately drains the write queue to disk.
     Intended for shutdown hooks and testing. *)
+
+val reset_for_testing : unit -> unit
+(** Clear cached store state and drop any queued records.
+    For test isolation only. *)

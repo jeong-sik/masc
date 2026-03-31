@@ -24,6 +24,31 @@ let json_error message =
 let json_ok fields =
   Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
 
+let team_session_process_mgr_result (ctx : _ context) =
+  match ctx.proc_mgr with
+  | Some process_mgr -> Ok process_mgr
+  | None -> Process_eio.get_proc_mgr ()
+
+let team_session_net_result (ctx : _ context) =
+  match ctx.net with
+  | Some net -> Ok net
+  | None -> (
+      match Eio_context.get_net_opt () with
+      | Some net -> Ok net
+      | None -> Error "team session start requires Eio net")
+
+let team_session_start_env_result (ctx : _ context) =
+  match team_session_process_mgr_result ctx, team_session_net_result ctx with
+  | Ok process_mgr, Ok net ->
+      Ok
+        (object
+          method clock = ctx.clock
+          method process_mgr = process_mgr
+          method net = net
+        end)
+  | Error message, _ -> Error message
+  | _, Error message -> Error message
+
 let parse_execution_scope args =
   match String.lowercase_ascii (get_string args "execution_scope" "limited_code_change") with
   | "observe_only" -> Team_session_types.Observe_only

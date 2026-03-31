@@ -13,6 +13,7 @@ val init :
   unit
 
 val is_initialized : unit -> bool
+val reset_for_testing : unit -> unit
 
 val get_proc_mgr : unit -> (Eio_unix.Process.mgr_ty Eio.Resource.t, string) result
 val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result

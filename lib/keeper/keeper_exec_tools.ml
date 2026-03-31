@@ -669,11 +669,20 @@ let execute_keeper_tool_call
                 then c else '_') meta.name))
       in
       let timeout_str = Printf.sprintf "%.0f" timeout_sec in
+      let play_tone freq =
+        try
+          ignore (Process_eio.run_argv_with_stdin_and_status
+            ~timeout_sec:2.0 ~stdin_content:""
+            [ "play"; "-qn"; "synth"; "0.15"; "sine";
+              Printf.sprintf "%.0f" freq ])
+        with _ -> ()
+      in
       let rec_argv =
         [ "rec"; "-q"; "-t"; "wav"; audio_file;
           "rate"; "16k"; "channels"; "1";
           "silence"; "1"; "0.5"; "1%"; "1"; "2.0"; "1%" ]
       in
+      play_tone 880.0;
       let record_result =
         try
           let status, _output =
@@ -689,6 +698,7 @@ let execute_keeper_tool_call
         with exn ->
           Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
       in
+      play_tone 440.0;
       let _ = timeout_str in
       (match record_result with
       | Error err ->

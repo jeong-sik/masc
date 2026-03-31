@@ -80,6 +80,8 @@ let () = test "dispatch_status_summary_and_cap" (fun () ->
   | Some (success, result) ->
       assert success;
       assert (str_contains result "tasks active=35 todo=35 claimed=0 in_progress=0");
+      assert (str_contains result "⚠️ Attention:");
+      assert (str_contains result "35 unclaimed task(s) are available right now.");
       assert (str_contains result "Summary: active=35, done=0, cancelled=0, total=35");
       assert (str_contains result "and 5 more active tasks")
   | None -> failwith "dispatch returned None"

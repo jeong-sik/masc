@@ -106,6 +106,47 @@ let status_worktree_active (ctx : context) =
       Log.Room.warn "worktree_active check failed: %s" (Printexc.to_string exn);
       false
 
+let safe_resolve_agent_name (ctx : context) ~joined =
+  if not joined then
+    ctx.agent_name
+  else
+    try Room.resolve_agent_name ctx.config ctx.agent_name
+    with
+    | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
+    | exn ->
+        Log.Room.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
+          (Printexc.to_string exn);
+        ctx.agent_name
+
+let safe_current_task (ctx : context) ~joined =
+  if not joined then
+    None
+  else
+    try Planning_eio.get_current_task ctx.config
+    with
+    | Sys_error _ | Yojson.Json_error _ -> None
+    | exn ->
+        Log.Room.warn "get_current_task failed for %s: %s" ctx.agent_name
+          (Printexc.to_string exn);
+        None
+
+let safe_get_agents (ctx : context) =
+  try Room.get_agents_raw ctx.config
+  with
+  | Sys_error _ | Yojson.Json_error _ -> []
+  | exn ->
+      Log.Room.warn "get_agents_raw failed: %s" (Printexc.to_string exn);
+      []
+
+let safe_is_zombie_agent ~agent_name last_seen =
+  try Room.is_zombie_agent ~agent_name last_seen
+  with
+  | Sys_error _ | Yojson.Json_error _ -> false
+  | exn ->
+      Log.Room.warn "is_zombie_agent failed for %s: %s" agent_name
+        (Printexc.to_string exn);
+      false
+
 let task_status_badge = function
   | Types.Todo -> ("📋", "todo")
   | Types.Claimed _ -> ("🟡", "claimed")
@@ -146,16 +187,11 @@ let status_summary_string (ctx : context) =
     try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name
     with Sys_error _ | Yojson.Json_error _ -> false
   in
-  let actual_name =
-    if joined then Room.resolve_agent_name ctx.config ctx.agent_name
-    else ctx.agent_name
-  in
+  let actual_name = safe_resolve_agent_name ctx ~joined in
   let matches_you assignee =
     String.equal assignee ctx.agent_name || String.equal assignee actual_name
   in
-  let current_task =
-    if joined then Planning_eio.get_current_task ctx.config else None
-  in
+  let current_task = safe_current_task ctx ~joined in
   let worktree_active = status_worktree_active ctx in
   let cluster_name =
     match ctx.config.backend_config.Backend_types.cluster_name with
@@ -163,7 +199,7 @@ let status_summary_string (ctx : context) =
     | name -> name
   in
   let agents =
-    Room.get_agents_raw ctx.config
+    safe_get_agents ctx
     |> List.sort (fun (a : Types.agent) (b : Types.agent) ->
            String.compare a.name b.name)
   in
@@ -172,7 +208,7 @@ let status_summary_string (ctx : context) =
   let zombie_count =
     List.fold_left
       (fun acc (agent : Types.agent) ->
-        if Room.is_zombie_agent ~agent_name:agent.name agent.last_seen then acc + 1
+        if safe_is_zombie_agent ~agent_name:agent.name agent.last_seen then acc + 1
         else acc)
       0 agents
   in
@@ -286,7 +322,7 @@ let status_summary_string (ctx : context) =
       List.iter
         (fun (agent : Types.agent) ->
           let is_zombie =
-            Room.is_zombie_agent ~agent_name:agent.name agent.last_seen
+            safe_is_zombie_agent ~agent_name:agent.name agent.last_seen
           in
           let icon = agent_status_icon ~is_zombie agent.status in
           let you_marker =

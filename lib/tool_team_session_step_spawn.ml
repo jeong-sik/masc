@@ -152,9 +152,29 @@ let execute_spawn_pipeline
                                  ~some:(fun (u : Agent_sdk.Types.api_usage) -> `Int u.output_tokens) usage);
                            ])
                          in
-                         ({ Spawn.success = true;
-                            output = text;
-                            exit_code = 0;
+                         let scope =
+                           deps.effective_execution_scope_of_spec prepared.spec
+                         in
+                         let requires_tools = match scope with
+                           | Some Team_session_types.Limited_code_change
+                           | Some Team_session_types.Autonomous -> true
+                           | _ -> false
+                         in
+                         let actual_success =
+                           if requires_tools && List.length tool_names = 0 then false
+                           else true
+                         in
+                         let output =
+                           if not actual_success then
+                             text ^ "\n[contract-violation] Worker completed without tool use in " ^
+                             (Option.fold ~none:"unknown"
+                                ~some:Team_session_types.execution_scope_to_string scope) ^
+                             " scope."
+                           else text
+                         in
+                         ({ Spawn.success = actual_success;
+                            output;
+                            exit_code = (if actual_success then 0 else 1);
                             elapsed_ms;
                             input_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.input_tokens) usage;
                             output_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.output_tokens) usage;

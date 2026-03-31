@@ -138,16 +138,23 @@ let rec find_git_root path =
     else find_git_root parent
   end
 
-(** Resolve base_path: if in worktree, use main repo's path for .masc/
-    This ensures all worktrees share the same MASC coordination space *)
+(** Resolve base_path: when MASC_BASE_PATH is explicitly set, use it
+    directly — git root detection only applies for worktree auto-resolution
+    when no explicit path is configured.  This prevents a sub-repo .git
+    (e.g. masc-mcp/) from hijacking the intended base path. *)
 let resolve_masc_base_path path =
-  match find_git_root path with
-  | Some git_root ->
-      Log.Room.info "MASC base resolved: %s → %s (git root)" path git_root;
-      git_root
-  | None ->
-      Log.Room.info "MASC base: %s (no git root found)" path;
+  match Env_config_core.base_path_opt () with
+  | Some explicit when explicit = path ->
+      Log.Room.info "MASC base: %s (explicit MASC_BASE_PATH)" path;
       path
+  | _ ->
+      match find_git_root path with
+      | Some git_root ->
+          Log.Room.info "MASC base resolved: %s → %s (git root)" path git_root;
+          git_root
+      | None ->
+          Log.Room.info "MASC base: %s (no git root found)" path;
+          path
 
 (* ============================================ *)
 (* Environment helpers                          *)

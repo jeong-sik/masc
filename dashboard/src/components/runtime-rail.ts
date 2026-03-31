@@ -48,16 +48,10 @@ export function SnapshotCard() {
 
   return html`
     <section class="grid gap-2 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.02))] p-2.5">
-      <div class="flex items-start justify-between gap-3">
-        <div>
-          <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">룸 펄스</div>
-          <div class="mt-0.5 text-[13px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">
-            ${liveConnected ? '라이브 관제실' : '신호 복구 중'}
-          </div>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <span class="size-[8px] rounded-full inline-block ${liveConnected ? 'bg-[var(--ok)] shadow-[0_0_9px_rgba(74,222,128,0.64)]' : 'bg-[var(--bad)] shadow-[0_0_9px_rgba(239,68,68,0.42)]'}"></span>
-          <span class="text-[10px] font-medium ${liveConnected ? 'text-[#92f3b4]' : 'text-[#ffb4bf]'}">${liveConnected ? 'connected' : 'offline'}</span>
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.68)]">룸 펄스</div>
+        <div class="mt-0.5 text-[13px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">
+          ${liveConnected ? '라이브 관제실' : '신호 복구 중'}
         </div>
       </div>
 

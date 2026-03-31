@@ -5,27 +5,15 @@ import { html } from 'htm/preact'
 import { PulseStrip } from './live/pulse-strip'
 import { ActivityStream } from './live/activity-stream'
 import { FocusSidebar } from './live/focus-sidebar'
-import { connected, eventCount } from '../sse'
-import { agents } from '../store'
 
 export function Live() {
-  const isConnected = connected.value
-
   return html`
     <div class="flex flex-col gap-5">
       <section class="monitor-surface-card monitor-surface-card-strong px-5 py-4">
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div class="flex flex-col gap-2">
           <div class="flex flex-col gap-2">
             <h2 class="m-0 text-[1.25rem] font-semibold text-[var(--text-strong)]">라이브 모니터</h2>
             <p class="m-0 text-[13px] leading-[1.55] text-[var(--text-body)]">실시간 이벤트 흐름과 활성 에이전트 상태를 한 화면에서 봅니다.</p>
-          </div>
-          <div class="flex flex-wrap gap-2 items-center text-[13px] text-[var(--text-muted)]">
-            <span class="inline-flex items-center gap-2 rounded-full border border-[var(--border-slate-12)] bg-[var(--white-3)] px-3 py-1.5">
-            <span class="live-stat-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
-            ${isConnected ? '연결됨' : '오프라인'}
-            </span>
-            <span class="inline-flex items-center rounded-full border border-[var(--border-slate-12)] bg-[var(--white-3)] px-3 py-1.5">에이전트 ${agents.value.length}</span>
-            <span class="inline-flex items-center rounded-full border border-[var(--border-slate-12)] bg-[var(--white-3)] px-3 py-1.5">이벤트 ${eventCount.value}</span>
           </div>
         </div>
       </section>

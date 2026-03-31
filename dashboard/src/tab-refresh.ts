@@ -103,7 +103,38 @@ const REFRESHERS: Record<RefreshTask, () => void> = {
   governance: () => { void refreshGovernanceSurface() },
 }
 
-export function refreshForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): void {
+// --- Tab visit counter (localStorage-persisted) ---
+
+const VISIT_COUNTER_KEY = 'masc_dashboard_tab_visits'
+
+function recordTabVisit(tab: string, section?: string): void {
+  try {
+    const raw = localStorage.getItem(VISIT_COUNTER_KEY)
+    const counts: Record<string, number> = raw ? JSON.parse(raw) : {}
+    const key = section ? `${tab}/${section}` : tab
+    counts[key] = (counts[key] ?? 0) + 1
+    localStorage.setItem(VISIT_COUNTER_KEY, JSON.stringify(counts))
+  } catch {
+    // localStorage unavailable or quota exceeded — skip silently
+  }
+}
+
+export function getTabVisitCounts(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(VISIT_COUNTER_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function refreshForRoute(
+  routeState: Pick<RouteState, 'tab' | 'params'>,
+  options?: { recordVisit?: boolean },
+): void {
+  if (options?.recordVisit === true) {
+    recordTabVisit(routeState.tab, routeState.params.section)
+  }
   refreshPlanForRoute(routeState).forEach(task => {
     REFRESHERS[task]()
   })

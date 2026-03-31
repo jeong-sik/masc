@@ -61,6 +61,45 @@ Defaults:
 
 If you bind to a non-loopback address such as `0.0.0.0`, treat that as a remote exposure path and configure auth first. See [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 
+## Local Development Guide
+
+If you run a single `masc-mcp` instance on one machine, the simplest local-dev path is:
+
+```bash
+cd /path/to/masc-mcp
+scripts/start-loopback.sh
+```
+
+This path is the easiest default when you want local MCP development plus transport testing on the same box.
+
+- shortcut script: `scripts/start-loopback.sh`
+- keep the server loopback-only with `--host 127.0.0.1`
+- keep the fixed default ports when you are not juggling multiple instances:
+  - HTTP / MCP: `127.0.0.1:8935`
+  - gRPC: `127.0.0.1:8936`
+  - WebSocket discovery: `http://127.0.0.1:8935/ws`
+  - standalone WebSocket: `ws://127.0.0.1:8937/`
+  - WebRTC signaling: `http://127.0.0.1:8935/webrtc/offer` and `/webrtc/answer`
+- prefer `./start-masc-mcp.sh --http` over `scripts/run-local.sh` when you want the shared/full-runtime transport surface; `run-local.sh` is for dir-local isolation and disables gRPC / WS / WebRTC by default
+
+Minimal smoke checks:
+
+```bash
+curl -sS http://127.0.0.1:8935/health
+curl -sS http://127.0.0.1:8935/ws
+grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
+MASC_HTTP_PORT=8935 MASC_GRPC_PORT=8936 MASC_WS_PORT=8937 MASC_TRANSPORT_AUTOSTART=0 bash scripts/harness/transport/verify_ws.sh
+MASC_HTTP_PORT=8935 MASC_GRPC_PORT=8936 MASC_WS_PORT=8937 MASC_TRANSPORT_AUTOSTART=0 bash scripts/harness/transport/verify_grpc_subscribe.sh
+MASC_HTTP_PORT=8935 MASC_GRPC_PORT=8936 MASC_WS_PORT=8937 MASC_TRANSPORT_AUTOSTART=0 bash scripts/harness/transport/verify_webrtc_signaling.sh
+```
+
+Things to watch:
+
+- do not bind `0.0.0.0` or `::` for routine local development; that moves you onto the remote-exposure path and auth requirements become stricter
+- do not point `MASC_HTTP_BASE_URL` at a public host when you only want local development
+- if you only need target-scoped `.masc/` isolation and do not need gRPC / WS / WebRTC, use `scripts/run-local.sh` instead
+- `scripts/start-loopback.sh` is just a thin wrapper over `./start-masc-mcp.sh --http --host 127.0.0.1 --port 8935`; pass extra args after it only when you intentionally want to override the defaults
+
 ## MCP Client Setup
 
 Local full-surface MCP example:

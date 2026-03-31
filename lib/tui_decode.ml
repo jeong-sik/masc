@@ -158,11 +158,17 @@ let decode_keeper ~filename json =
   let* k_soul_profile = require_string_field json "soul_profile" in
   let* k_generation = require_int_field json "generation" in
   let* k_active_model = optional_string json "active_model" in
-  let k_models =
+  let* k_models =
     match member "models" json with
+    | `Null -> Ok []
     | `List items ->
-        List.filter_map (function `String s -> Some s | _ -> None) items
-    | _ -> []
+        let rec collect acc = function
+          | [] -> Ok (List.rev acc)
+          | `String s :: rest -> collect (s :: acc) rest
+          | _ -> Error "field 'models' must be a list of strings"
+        in
+        collect [] items
+    | _ -> Error "field 'models' must be a list of strings or null"
   in
   let* k_proactive_enabled = require_bool_field json "proactive_enabled" in
   let* k_initiative_enabled = optional_bool json "initiative_enabled" in
@@ -172,7 +178,7 @@ let decode_keeper ~filename json =
   let* k_last_turn_ts =
     match member "last_turn_ts" json with
     | `String s -> Ok s
-    | `Float f -> Ok (Printf.sprintf "%.0f" f)
+    | `Float f -> Ok (string_of_int (int_of_float f))
     | `Int n -> Ok (string_of_int n)
     | `Null -> Ok ""
     | _ -> Error "field 'last_turn_ts' must be a string or number"

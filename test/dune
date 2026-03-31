@@ -213,7 +213,6 @@
         test_room_eio
         test_http_server_eio
         test_compression
-        test_compression_boundary
         test_pubsub_postgres
         test_fs_compat
         test_concurrency_stress
@@ -358,7 +357,6 @@
         test_room_eio
         test_http_server_eio
         test_compression
-        test_compression_boundary
         test_pubsub_postgres
         test_fs_compat
         test_concurrency_stress
@@ -600,6 +598,11 @@
  (modules test_operator_mcp_e2e)
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe))
+
+(test
+ (name test_compression_boundary)
+ (modules test_compression_boundary)
+ (libraries alcotest masc_backend masc_compression))
 
 ; ============================================================
 ; Special: Minimal dependency tests (CI scripts, governance)

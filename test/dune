@@ -257,6 +257,7 @@
         test_tool_goals_coverage
         test_proof_criteria
         test_tool_registration_consistency
+        test_tree_index
         test_tool_registry
         test_tool_dispatch
         test_tool_result
@@ -402,6 +403,7 @@
         test_tool_goals_coverage
         test_proof_criteria
         test_tool_registration_consistency
+        test_tree_index
         test_tool_registry
         test_tool_dispatch
         test_tool_result

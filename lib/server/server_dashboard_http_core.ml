@@ -339,8 +339,8 @@ let _operator_digest_cache =
 let _operator_refresh_interval_s =
   float_of_env_default
     "MASC_OPERATOR_REFRESH_INTERVAL_S"
-    ~default:10.0
-    ~min_v:2.0
+    ~default:30.0
+    ~min_v:5.0
     ~max_v:600.0
 
 let dashboard_active_or_recent_sessions_cached ~clock config =

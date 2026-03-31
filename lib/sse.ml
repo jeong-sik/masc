@@ -40,9 +40,12 @@ let max_clients = 200
 (** Per-client event stream capacity.
     Must be > 0 to avoid synchronous rendez-vous semantics
     (Eio.Stream.create 0 blocks add until a matching take).
-    1024 is large enough that broadcast never blocks; a slow client
-    that falls 1024 events behind is already broken. *)
-let stream_capacity = 1024
+    64 events at 3-10s intervals covers 3-10 minutes of buffering.
+    A client that falls this far behind should reconnect. *)
+let stream_capacity =
+  match Sys.getenv_opt "MASC_SSE_STREAM_CAPACITY" with
+  | Some s -> (try max 8 (min 1024 (int_of_string (String.trim s))) with Failure _ -> 64)
+  | None -> 64
 
 (** SSE client state.
     [event_stream] is the per-session mailbox.  [broadcast] pushes here;

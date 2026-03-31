@@ -52,6 +52,7 @@ type metadata = {
   readonly : bool option;
   destructive : bool option;
   idempotent : bool option;
+  required_permission : Types.permission option;
 }
 
 (* ================================================================ *)
@@ -70,6 +71,7 @@ let default_metadata =
     readonly = None;
     destructive = None;
     idempotent = None;
+    required_permission = None;
   }
 
 (* Runtime-readable like MASC_FULL_SURFACE so tests and local admin flows can
@@ -94,6 +96,7 @@ let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = fa
     readonly = None;
     destructive = None;
     idempotent = None;
+    required_permission = None;
   }
 
 let deprecated_default ?canonical_name ?replacement
@@ -109,6 +112,7 @@ let deprecated_default ?canonical_name ?replacement
     readonly = None;
     destructive = None;
     idempotent = None;
+    required_permission = None;
   }
 
 let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
@@ -124,6 +128,7 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     readonly = None;
     destructive = None;
     idempotent = None;
+    required_permission = None;
   }
 
 let with_semantic_flags ?readonly ?destructive ?idempotent meta =
@@ -424,9 +429,16 @@ let metadata_to_fields name =
     | Some replacement -> ("replacement", `String replacement) :: with_canonical
     | None -> with_canonical
   in
-  match meta.reason with
-  | Some reason -> ("reason", `String reason) :: with_replacement
-  | None -> with_replacement
+  let with_reason =
+    match meta.reason with
+    | Some reason -> ("reason", `String reason) :: with_replacement
+    | None -> with_replacement
+  in
+  match meta.required_permission with
+  | Some permission ->
+      ("requiredPermission", `String (Types.show_permission permission))
+      :: with_reason
+  | None -> with_reason
 
 let public_contract_fields name =
   let meta = metadata name in

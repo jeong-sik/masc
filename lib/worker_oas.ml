@@ -169,19 +169,42 @@ let local_model_gate =
     max_cost_usd = 1.00;
   }
 
+let tool_policy_of_execution_scope
+    (scope : Team_session_types.execution_scope) : Tool_access_policy.t =
+  match scope with
+  | Observe_only ->
+      {
+        Tool_access_policy.allow = Tool_access_policy.All;
+        deny =
+          Tool_access_policy.union
+            [
+              Tool_access_policy.Names destructive_denied_tools;
+              Tool_access_policy.Names code_mutation_denied_tools;
+              Tool_access_policy.Names masc_mutating_denied_tools;
+            ];
+      }
+  | Limited_code_change ->
+      {
+        Tool_access_policy.allow = Tool_access_policy.All;
+        deny = Tool_access_policy.Names destructive_denied_tools;
+      }
+  | Autonomous ->
+      Tool_access_policy.allow_all
+
 let gate_config_of_execution_scope
     (scope : Team_session_types.execution_scope) : Eval_gate.gate_config =
+  let tool_policy = tool_policy_of_execution_scope scope in
+  let denied_tools =
+    Tool_access_policy.resolve_selector tool_policy.deny
+  in
   match scope with
   | Observe_only ->
       { local_model_gate with
-        denied_tools =
-          destructive_denied_tools
-          @ code_mutation_denied_tools
-          @ masc_mutating_denied_tools;
+        denied_tools;
       }
   | Limited_code_change ->
       { local_model_gate with
-        denied_tools = destructive_denied_tools;
+        denied_tools;
       }
   | Autonomous ->
       { Eval_gate.default_config with

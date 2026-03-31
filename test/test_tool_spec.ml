@@ -29,6 +29,8 @@ let () =
             check bool "is_destructive default" false spec.is_destructive;
             check bool "is_idempotent default" false spec.is_idempotent;
             check bool "allow_direct_call default" false spec.allow_direct_call_when_hidden;
+            check bool "required_permission default" true
+              (Option.is_none spec.required_permission);
             check bool "canonical_name default" true (Option.is_none spec.canonical_name);
             check bool "replacement default" true (Option.is_none spec.replacement);
             check bool "reason default" true (Option.is_none spec.reason);
@@ -43,12 +45,15 @@ let () =
                 ~is_read_only:true
                 ~is_idempotent:true
                 ~visibility:Tool_catalog.Hidden
+                ~required_permission:Types.CanAdmin
                 ~reason:"hidden for test"
                 ~title:"Test Tool"
                 ()
             in
             check bool "is_read_only" true spec.is_read_only;
             check bool "is_idempotent" true spec.is_idempotent;
+            check bool "required_permission" true
+              (spec.required_permission = Some Types.CanAdmin);
             check bool "reason present" true (Option.is_some spec.reason);
             check bool "title present" true (Option.is_some spec.title));
         ] );
@@ -127,6 +132,7 @@ let () =
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
                 ~is_destructive:true
+                ~required_permission:Types.CanAdmin
                 ~visibility:Tool_catalog.Hidden
                 ~reason:"test hidden"
                 ()
@@ -134,6 +140,8 @@ let () =
             Tool_spec.register spec;
             let meta = Tool_catalog.metadata "__test_spec_catalog" in
             check bool "destructive" true (meta.destructive = Some true);
+            check bool "required_permission" true
+              (meta.required_permission = Some Types.CanAdmin);
             check bool "hidden" true (meta.visibility = Tool_catalog.Hidden);
             check bool "reason" true (meta.reason = Some "test hidden"));
           test_case "empty name rejected" `Quick (fun () ->

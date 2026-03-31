@@ -17,6 +17,9 @@ type policy_envelope = {
   frozen : bool;
 }
 
+let tool_policy_of_envelope (policy : policy_envelope) =
+  Tool_access_policy.of_allowlist policy.tool_allowlist
+
 type budget_envelope = {
   headcount_cap : int;
   active_operation_cap : int;

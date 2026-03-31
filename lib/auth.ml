@@ -244,8 +244,12 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
             else
               Error (Forbidden { agent = agent_name; action = show_permission permission })
 
+(** Tool_spec / Tool_catalog-declared permission, when present. *)
+let declared_permission_for_tool tool_name =
+  (Tool_catalog.metadata tool_name).required_permission
+
 (** Map MCP tool name to required permission *)
-let permission_for_tool = function
+let legacy_permission_for_tool = function
   | "masc_init" -> Some CanInit
   | "masc_reset" -> Some CanReset
   | "masc_join" -> Some CanJoin
@@ -329,6 +333,11 @@ let permission_for_tool = function
   | "masc_tool_admin_snapshot" -> Some CanReadState
   | "masc_tool_admin_update" -> Some CanAdmin
   | _ -> None
+
+let permission_for_tool tool_name =
+  match declared_permission_for_tool tool_name with
+  | Some _ as permission -> permission
+  | None -> legacy_permission_for_tool tool_name
 
 (** Strict tool auth mode:
     - 0/false: legacy fail-open for unknown tools

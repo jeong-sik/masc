@@ -206,11 +206,18 @@ let preset_allowlist = function
         @ select_existing_masc_tool_names keeper_core_masc_tool_names )
   | Full -> keeper_all_candidate_tool_names ()
 
-let resolved_allowlist (meta : keeper_meta) =
-  match meta.tool_access with
-  | Preset { preset; also_allow } ->
-      dedupe_tool_names (preset_allowlist preset @ also_allow)
-  | Custom allowlist -> dedupe_tool_names allowlist
+let tool_policy_of_meta (meta : keeper_meta) =
+  let allow =
+    match meta.tool_access with
+    | Preset { preset; also_allow } ->
+        Tool_access_policy.Names (preset_allowlist preset @ also_allow)
+    | Custom allowlist ->
+        Tool_access_policy.Names allowlist
+  in
+  {
+    Tool_access_policy.allow;
+    deny = Tool_access_policy.Names meta.tool_denylist;
+  }
 
 type tool_access_lookup = {
   candidate_names : string list;
@@ -228,12 +235,11 @@ let tool_access_lookup_of_meta (meta : keeper_meta) =
   let candidate_names = keeper_all_candidate_tool_names () in
   let candidate_set = tool_name_set candidate_names in
   let allow_names =
-    match meta.tool_access with
-    | Preset { preset = Full; _ } -> candidate_names
-    | _ ->
-        resolved_allowlist meta
-        |> List.filter (fun name -> Hashtbl.mem candidate_set name)
-        |> dedupe_tool_names
+    Tool_access_policy.resolve
+      ~candidates:candidate_names
+      (tool_policy_of_meta meta)
+    |> List.filter (fun name -> Hashtbl.mem candidate_set name)
+    |> dedupe_tool_names
   in
   {
     candidate_names;

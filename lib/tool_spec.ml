@@ -21,6 +21,7 @@ type t = {
   reason : string option;
   allow_direct_call_when_hidden : bool;
   title : string option;
+  required_permission : Types.permission option;
 }
 
 (* ================================================================ *)
@@ -44,12 +45,13 @@ let create
     ?reason
     ?(allow_direct_call_when_hidden = false)
     ?title
+    ?required_permission
     () =
   { name; description; module_tag; input_schema;
     is_read_only; requires_join; is_destructive; is_idempotent;
     visibility; lifecycle; implementation_status;
     canonical_name; replacement; reason;
-    allow_direct_call_when_hidden; title }
+    allow_direct_call_when_hidden; title; required_permission }
 
 (* ================================================================ *)
 (* Conversion                                                       *)
@@ -95,7 +97,8 @@ let register (spec : t) =
       allow_direct_call_when_hidden = spec.allow_direct_call_when_hidden;
       readonly = Some spec.is_read_only;
       destructive = Some spec.is_destructive;
-      idempotent = Some spec.is_idempotent }
+      idempotent = Some spec.is_idempotent;
+      required_permission = spec.required_permission }
 
 let register_all (specs : t list) =
   List.iter register specs

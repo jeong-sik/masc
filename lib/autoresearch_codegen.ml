@@ -97,10 +97,25 @@ let parse_model_code_response response =
     | Ok _ ->
       Result.error "MODEL response must be a JSON object"
 
+let has_background_capacity () =
+  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+  | Some sw, Some net -> (
+    try
+      let config_path = Oas_worker.default_config_path () in
+      let cap = Llm_provider.Cascade_config.local_capacity_for_selections
+          ~sw ~net ?config_path ["autoresearch"] in
+      not (cap.all_discovered && cap.endpoints_found > 0
+           && cap.process_available = 0 && cap.process_queue_length >= 2)
+    with _ -> true)
+  | _ -> true
+
 (** Generate code change via Cascade "autoresearch" profile.
     Returns Ok (hypothesis, new_code) or Error reason. *)
 let generate_code_change ~goal ~baseline ~history ~insights
     ~target_file ~file_content =
+  if not (has_background_capacity ()) then
+    Result.error "autoresearch: local slots saturated, skipping cycle"
+  else
   let prompt = build_code_change_prompt ~goal ~baseline ~history ~insights
     ~file_content ~target_file in
   match

@@ -408,9 +408,19 @@ let start ~sw ~clock ~net ~base_path
   in
   if should_start then
     Eio.Fiber.fork_daemon ~sw (fun () ->
+        let consecutive_backoffs = Atomic.make 0 in
         let rec loop () =
+          let was_backoff = should_backoff ~sw ~net in
           refresh_once ~sw ~net ~masc_tools ~dispatch ~base_path ~build_facts;
-          Eio.Time.sleep clock (float_of_int (interval_sec ()));
+          if was_backoff then Atomic.incr consecutive_backoffs
+          else Atomic.set consecutive_backoffs 0;
+          let base = float_of_int (interval_sec ()) in
+          let n = Atomic.get consecutive_backoffs in
+          let sleep_s =
+            if n = 0 then base
+            else min (base *. Float.pow 2.0 (float_of_int (min n 5))) 300.0
+          in
+          Eio.Time.sleep clock sleep_s;
           loop ()
         in
         loop ())

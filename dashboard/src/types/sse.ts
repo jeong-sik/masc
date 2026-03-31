@@ -35,7 +35,7 @@ export type SSEEventType =
   // Harness observability events (#3165)
   | 'oas:masc:harness:verdict_recorded'
   | 'oas:masc:harness:pre_compact'
-  | 'oas:masc:harness:dna_quality'
+  | 'oas:masc:harness:handoff'
   // Server-push snapshot events (proactive cache broadcasts)
   | 'room_truth_snapshot'
   | 'execution_snapshot'

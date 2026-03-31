@@ -244,8 +244,8 @@ let status_to_json (s : breaker_status) : Yojson.Safe.t =
     ("agent_id", `String s.agent_id);
     ("state", `String s.state_name);
     ("recent_failures", `Int s.recent_failures);
-    ("open_until", match s.open_until with Some t -> `Float t | None -> `Null);
-    ("open_reason", match s.open_reason with Some r -> `String r | None -> `Null);
+    ("open_until", Json_util.float_opt_to_json s.open_until);
+    ("open_reason", Json_util.string_opt_to_json s.open_reason);
   ]
 
 let list_all_breakers t =

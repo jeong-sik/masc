@@ -13,6 +13,37 @@ module Oas = Agent_sdk
 let supported_local_worker_tool_names =
   Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 
+let observe_only_blocked_local_worker_tool_names =
+  [
+    "masc_add_task";
+    "masc_claim_next";
+    "masc_transition";
+    "masc_board_post";
+    "masc_board_comment";
+    "masc_board_vote";
+    "masc_worktree_create";
+    "masc_worktree_remove";
+    "masc_run_init";
+    "masc_run_plan";
+    "masc_run_log";
+    "masc_run_deliverable";
+    "masc_repair_loop_start";
+    "masc_repair_loop_iterate";
+    "masc_repair_loop_stop";
+  ]
+
+let supported_local_worker_tool_names_for_scope execution_scope =
+  match execution_scope with
+  | Some Team_session_types.Observe_only ->
+      List.filter
+        (fun name ->
+          not (List.mem name observe_only_blocked_local_worker_tool_names))
+        supported_local_worker_tool_names
+  | Some Team_session_types.Limited_code_change
+  | Some Team_session_types.Autonomous
+  | None ->
+      supported_local_worker_tool_names
+
 let supported_local_worker_tools () =
   match
     Agent_tool_surfaces.local_worker_tool_schemas
@@ -23,6 +54,19 @@ let supported_local_worker_tools () =
       Error
         (Printf.sprintf
            "team_session_oas_bridge: failed to resolve worker tool schemas: %s"
+           msg)
+
+let supported_local_worker_tools_for_scope execution_scope =
+  match
+    Agent_tool_surfaces.local_worker_tool_schemas
+      ~names:(supported_local_worker_tool_names_for_scope execution_scope)
+      ()
+  with
+  | Ok schemas -> Ok schemas
+  | Error msg ->
+      Error
+        (Printf.sprintf
+           "team_session_oas_bridge: failed to resolve scoped worker tool schemas: %s"
            msg)
 
 let add_string_field_if_missing key value fields =
@@ -507,6 +551,15 @@ let planned_worker_to_entry_with_state
   let cascade_name = cascade_of_worker ~session_cascade pw in
   let max_turns = Option.value ~default:10 pw.max_turns in
   let telemetry_ref = ref Swarm.Swarm_types.empty_telemetry in
+  let scoped_tool_names =
+    supported_local_worker_tool_names_for_scope pw.execution_scope
+  in
+  let scoped_masc_tools =
+    List.filter
+      (fun (tool : Types.tool_schema) ->
+        List.mem tool.name scoped_tool_names)
+      masc_tools
+  in
   let system_prompt =
     Printf.sprintf "You are agent '%s' in a team session (room: %s). Your role: %s."
       name config.base_path
@@ -523,13 +576,16 @@ let planned_worker_to_entry_with_state
         ~args:(normalize_tool_args ~tool_name ~agent_name:name args)
     in
     let contract = Option.map (fun dc ->
-      let tool_names = List.map (fun (t : Types.tool_schema) -> t.name) masc_tools in
+      let tool_names =
+        List.map (fun (t : Types.tool_schema) -> t.name) scoped_masc_tools
+      in
       Contract_composer.compose ~delivery_contract:dc ~tool_names
     ) delivery_contract in
     match
       Oas_worker.run_named_with_masc_tools
         ~cascade_name ~goal:prompt ~system_prompt
-        ~masc_tools ~dispatch:dispatch_with_defaults ~max_turns
+        ~masc_tools:scoped_masc_tools ~dispatch:dispatch_with_defaults
+        ~max_turns
         ~temperature:(Cascade_inference.resolve_temperature
           ~cascade_name ~fallback:(fun () -> 0.3))
         ~max_tokens:(Cascade_inference.resolve_max_tokens

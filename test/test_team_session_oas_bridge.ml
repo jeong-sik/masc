@@ -371,6 +371,48 @@ let test_supported_local_worker_tools_present () =
   Alcotest.(check bool) "masc_repair_loop_start present" true
     (List.mem "masc_repair_loop_start" names)
 
+let test_supported_local_worker_tools_for_observe_only_filter_mutations () =
+  let names =
+    Team_session_oas_bridge.supported_local_worker_tool_names_for_scope
+      (Some Team_session_types.Observe_only)
+  in
+  Alcotest.(check bool) "observe_only keeps masc_status" true
+    (List.mem "masc_status" names);
+  Alcotest.(check bool) "observe_only keeps masc_code_read" true
+    (List.mem "masc_code_read" names);
+  Alcotest.(check bool) "observe_only keeps masc_worktree_list" true
+    (List.mem "masc_worktree_list" names);
+  Alcotest.(check bool) "observe_only blocks masc_worktree_create" false
+    (List.mem "masc_worktree_create" names);
+  Alcotest.(check bool) "observe_only blocks masc_worktree_remove" false
+    (List.mem "masc_worktree_remove" names);
+  Alcotest.(check bool) "observe_only blocks masc_run_init" false
+    (List.mem "masc_run_init" names);
+  Alcotest.(check bool) "observe_only blocks masc_board_post" false
+    (List.mem "masc_board_post" names)
+
+let test_supported_local_worker_tools_for_observe_only_resolve_subset () =
+  let schemas =
+    match
+      Team_session_oas_bridge.supported_local_worker_tools_for_scope
+        (Some Team_session_types.Observe_only)
+    with
+    | Ok schemas -> schemas
+    | Error message ->
+        Alcotest.failf "expected scoped schemas, got error: %s" message
+  in
+  let names =
+    List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
+  in
+  Alcotest.(check bool) "scoped schemas keep masc_status" true
+    (List.mem "masc_status" names);
+  Alcotest.(check bool) "scoped schemas keep masc_code_read" true
+    (List.mem "masc_code_read" names);
+  Alcotest.(check bool) "scoped schemas block masc_worktree_create" false
+    (List.mem "masc_worktree_create" names);
+  Alcotest.(check bool) "scoped schemas block masc_run_log" false
+    (List.mem "masc_run_log" names)
+
 let test_dispatch_supported_tool_status () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -554,6 +596,10 @@ let () =
     "supported_tools", [
       Alcotest.test_case "schemas present" `Quick
         test_supported_local_worker_tools_present;
+      Alcotest.test_case "observe_only filters mutating names" `Quick
+        test_supported_local_worker_tools_for_observe_only_filter_mutations;
+      Alcotest.test_case "observe_only resolves scoped schemas" `Quick
+        test_supported_local_worker_tools_for_observe_only_resolve_subset;
       Alcotest.test_case "status dispatch" `Quick
         test_dispatch_supported_tool_status;
       Alcotest.test_case "heartbeat autojoin" `Quick

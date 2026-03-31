@@ -45,7 +45,7 @@ let read_entry e =
   `Assoc [
     ("env", `String e.env_name);
     ("description", `String e.description);
-    ("value", match display_value with Some v -> `String v | None -> `Null);
+    ("value", Json_util.string_opt_to_json display_value);
     ("default", `String e.default_display);
     ("source", `String (if raw = None then "default" else "env"));
     ("sensitive", `Bool e.sensitive);
@@ -196,7 +196,7 @@ let server_meta () =
   in
   `Assoc [
     ("version", `String Version.version);
-    ("git_commit", match git_commit with Some c -> `String c | None -> `Null);
+    ("git_commit", Json_util.string_opt_to_json git_commit);
     ("ocaml_version", `String Sys.ocaml_version);
     ("uptime_seconds", `Float (Server_startup_state.elapsed_since_start ()));
     ("pid", `Int (Unix.getpid ()));

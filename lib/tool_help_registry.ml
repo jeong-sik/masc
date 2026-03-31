@@ -72,7 +72,6 @@ let help_doc_refs name =
     ]
   else if
     String.starts_with ~prefix:"masc_keeper_" name
-    || String.starts_with ~prefix:"masc_persistent_agent_" name
   then
     [ "docs/SUPERVISOR-MODE.md" ]
   else

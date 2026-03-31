@@ -204,7 +204,7 @@ let subscription_to_json (s : subscription) : Yojson.Safe.t =
     ("id", `String s.id);
     ("subscriber", `String s.subscriber);
     ("resource", `String (resource_type_to_string s.resource));
-    ("filter", match s.filter with None -> `Null | Some f -> `String f);
+    ("filter", Json_util.string_opt_to_json s.filter);
     ("created_at", `Float s.created_at);
   ]
 

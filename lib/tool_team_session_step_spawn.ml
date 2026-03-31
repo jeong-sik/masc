@@ -78,11 +78,172 @@ let execute_spawn_pipeline
                    fail_all_prepared prepared_spawns ~error:msg;
                    Some (`Assoc [ ("error", `String msg) ])
                | Ok () ->
+                   let execution_scope_of_prepared prepared =
+                     deps.effective_execution_scope_of_spec prepared.spec
+                   in
+                   let worker_backend_of_prepared prepared =
+                     if deps.is_local_spawn_agent prepared.spec.spawn_agent then
+                       Some "local"
+                     else None
+                   in
+                   let normalize_spawn_tool_args prepared ~tool_name
+                       (args : Yojson.Safe.t) =
+                     let add_string_field_if_missing key value fields =
+                       if String.trim value = "" || List.mem_assoc key fields then
+                         fields
+                       else
+                         (key, `String value) :: fields
+                     in
+                     match args with
+                     | `Assoc fields ->
+                         let fields =
+                           add_string_field_if_missing "agent_name"
+                             prepared.spec.spawn_agent fields
+                         in
+                         let fields =
+                           match tool_name with
+                           | "masc_board_post" | "masc_board_comment" ->
+                               add_string_field_if_missing "author"
+                                 prepared.spec.spawn_agent fields
+                           | "masc_board_vote" ->
+                               add_string_field_if_missing "voter"
+                                 prepared.spec.spawn_agent fields
+                           | _ -> fields
+                         in
+                         `Assoc fields
+                     | _ -> args
+                   in
+                   let record_spawn_exception index prepared ~started_at exn =
+                     let error = Printexc.to_string exn in
+                     let elapsed_ms =
+                       int_of_float
+                         ((Time_compat.now () -. started_at) *. 1000.0)
+                     in
+                     let output_preview = deps.truncate_for_event error in
+                     let worker_name =
+                       Option.value
+                         ~default:(Printf.sprintf "spawn-%d" index)
+                         prepared.runtime_actor_name
+                     in
+                     release_prepared_runtime prepared ~success:false ~error
+                       ~latency_ms:elapsed_ms ();
+                     persist_worker_run_snapshot
+                       ~worker_run_id:prepared.worker_run_id
+                       ~worker_name ~mode:"spawn" ~wait_mode
+                       ~status:`Failed
+                       ?execution_scope:(execution_scope_of_prepared prepared)
+                       ?requested_worker_class:prepared.spec.worker_class
+                       ?requested_worker_size:(deps.worker_size_of_spec prepared.spec)
+                       ?resolved_runtime:prepared.assigned_runtime
+                       ~resolved_model:prepared.runtime_model_label
+                       ?routing_reason:prepared.spec.routing_reason
+                       ~tool_names:[]
+                       ~tool_call_count:0
+                       ~success:false ~output_preview ~error
+                       ();
+                     append_spawn_event
+                       ~worker_run_id:prepared.worker_run_id
+                       ~spawn_agent:prepared.spec.spawn_agent
+                       ?runtime_actor:prepared.runtime_actor_name
+                       ?spawn_role:prepared.spec.spawn_role
+                       ?spawn_model:prepared.spec.spawn_model
+                       ?execution_scope:(execution_scope_of_prepared prepared)
+                       ?worker_class:prepared.spec.worker_class
+                       ?worker_size:(deps.worker_size_of_spec prepared.spec)
+                       ?worker_backend:(worker_backend_of_prepared prepared)
+                       ~wait_mode:
+                         (Team_session_types.wait_mode_to_string wait_mode)
+                       ?parent_actor:prepared.spec.parent_actor
+                       ?capsule_mode:prepared.spec.capsule_mode
+                       ?runtime_pool:prepared.spec.runtime_pool
+                       ?lane_id:prepared.spec.lane_id
+                       ?controller_level:
+                         (deps.inferred_controller_level_of_spec prepared.spec)
+                       ?control_domain:prepared.spec.control_domain
+                       ?supervisor_actor:prepared.spec.supervisor_actor
+                       ?model_tier:prepared.spec.model_tier
+                       ?task_profile:prepared.spec.task_profile
+                       ?risk_level:prepared.spec.risk_level
+                       ?routing_confidence:prepared.spec.routing_confidence
+                       ?routing_reason:prepared.spec.routing_reason
+                       ?assigned_runtime:prepared.assigned_runtime
+                       ?spawn_selection_note:
+                         prepared.spec.spawn_selection_note
+                       ~tool_names:[]
+                       ~tool_call_count:0
+                       ~success:false ~exit_code:1
+                       ~elapsed_ms ~output_preview ~error ();
+                     (match prepared.runtime_actor_name with
+                     | Some worker_actor ->
+                         ignore
+                           (deps.reconcile_failed_spawn_actor ctx.config
+                              session_id worker_actor)
+                     | None -> ());
+                     `Assoc
+                       [
+                         ("worker_run_id", `String prepared.worker_run_id);
+                         ( "runtime_actor",
+                           Option.fold ~none:`Null
+                             ~some:(fun s -> `String s)
+                             prepared.runtime_actor_name );
+                         ( "spawn_role",
+                           Option.fold ~none:`Null
+                             ~some:(fun s -> `String s)
+                             prepared.spec.spawn_role );
+                         ( "execution_scope",
+                           Option.fold ~none:`Null
+                             ~some:(fun scope ->
+                               `String
+                                 (Team_session_types.execution_scope_to_string
+                                    scope))
+                             (execution_scope_of_prepared prepared) );
+                         ( "worker_class",
+                           Option.fold ~none:`Null
+                             ~some:(fun kind ->
+                               `String
+                                 (Team_session_types.worker_class_to_string
+                                    kind))
+                             prepared.spec.worker_class );
+                         ( "worker_size",
+                           Option.fold ~none:`Null
+                             ~some:(fun size ->
+                               `String
+                                 (Team_session_types.worker_size_to_string
+                                    size))
+                             (deps.worker_size_of_spec prepared.spec) );
+                         ( "worker_backend",
+                           Option.fold ~none:`Null
+                             ~some:(fun value -> `String value)
+                             (worker_backend_of_prepared prepared) );
+                         ( "wait_mode",
+                           `String
+                             (Team_session_types.wait_mode_to_string wait_mode)
+                         );
+                         ("status", `String "failed");
+                         ( "resolved_runtime",
+                           Option.fold ~none:`Null
+                             ~some:(fun s -> `String s)
+                             prepared.assigned_runtime );
+                         ("resolved_model", `String prepared.runtime_model_label);
+                         ( "routing_reason",
+                           Option.fold ~none:`Null
+                             ~some:(fun s -> `String s)
+                             prepared.spec.routing_reason );
+                         ("tool_call_count", `Int 0);
+                         ("tool_names", `List []);
+                         ("success", `Bool false);
+                         ("elapsed_ms", `Int elapsed_ms);
+                         ("output_preview", `String output_preview);
+                       ]
+                   in
                    let execute_spawn index prepared =
                    (* Phase C-3a: Route spawn through OAS Agent.run via Oas_worker.
                        This replaces the old Spawn.spawn subprocess call, giving us
                        trace data, tool_names, and tool_call_count for free. *)
                     let start_time = Time_compat.now () in
+                    let execution_scope =
+                      execution_scope_of_prepared prepared
+                    in
                     let max_turns =
                       match prepared.spec.max_turns with
                       | Some n -> n | None -> 10
@@ -94,32 +255,84 @@ let execute_spawn_pipeline
                     let contract =
                       Option.map
                         (fun delivery_contract ->
-                          (* Spawn workers currently run without an attached
-                             MASC tool surface, so the composed contract uses
-                             the current runtime tool list: [] *)
+                          let tool_names =
+                            if deps.is_local_spawn_agent
+                                 prepared.spec.spawn_agent
+                            then
+                              Team_session_oas_bridge
+                              .supported_local_worker_tool_names_for_scope
+                                execution_scope
+                            else []
+                          in
                           Contract_composer.compose ~delivery_contract
-                            ~tool_names:[])
+                            ~tool_names)
                         delivery_contract
                     in
                     let oas_result =
-                      Oas_worker.run_model_by_label
-                        ~model_label:prepared.runtime_model_label
-                        ~goal:prepared.spec.spawn_prompt
-                        ~system_prompt:(Printf.sprintf
-                          "You are agent '%s'. Execute the task and return a clear result."
-                           prepared.spec.spawn_agent)
-                        ~max_turns
-                        ~temperature:(Safe_ops.get_env_float_logged
-                          "MASC_SPAWN_TEMPERATURE" ~default:0.3)
-                        ~max_tokens:(Safe_ops.get_env_int_logged
-                          "MASC_SPAWN_MAX_TOKENS" ~default:4096)
-                        ~priority:Llm_provider.Request_priority.Interactive
-                        ?contract
-                        ~sw:ctx.sw
-                        ()
+                      if deps.is_local_spawn_agent prepared.spec.spawn_agent then
+                        match
+                          Team_session_oas_bridge
+                          .supported_local_worker_tools_for_scope execution_scope
+                        with
+                        | Error msg ->
+                            Error
+                              (Printf.sprintf
+                                 "team session local worker tools unavailable: %s"
+                                 msg)
+                        | Ok masc_tools ->
+                            Oas_worker.run_model_with_masc_tools
+                              ~model_label:prepared.runtime_model_label
+                              ~goal:prepared.spec.spawn_prompt
+                              ~system_prompt:(Printf.sprintf
+                                "You are agent '%s'. Execute the task and return a clear result."
+                                 prepared.spec.spawn_agent)
+                              ~masc_tools
+                              ~dispatch:(fun ~name ~args ->
+                                Team_session_oas_bridge.dispatch_supported_tool
+                                  ~sw:ctx.sw ~clock:ctx.clock
+                                  ~config:ctx.config ~name
+                                  ~args:
+                                    (normalize_spawn_tool_args prepared
+                                       ~tool_name:name args))
+                              ~max_turns
+                              ~temperature:(Safe_ops.get_env_float_logged
+                                "MASC_SPAWN_TEMPERATURE" ~default:0.3)
+                              ~max_tokens:(Safe_ops.get_env_int_logged
+                                "MASC_SPAWN_MAX_TOKENS" ~default:4096)
+                              ~priority:
+                                Llm_provider.Request_priority.Interactive
+                              ?enable_thinking:prepared.spec.thinking_enabled
+                              ?contract ?net:ctx.net ~sw:ctx.sw
+                              ()
+                      else
+                        Oas_worker.run_model_by_label
+                          ~model_label:prepared.runtime_model_label
+                          ~goal:prepared.spec.spawn_prompt
+                          ~system_prompt:(Printf.sprintf
+                            "You are agent '%s'. Execute the task and return a clear result."
+                             prepared.spec.spawn_agent)
+                          ~max_turns
+                          ~temperature:(Safe_ops.get_env_float_logged
+                            "MASC_SPAWN_TEMPERATURE" ~default:0.3)
+                          ~max_tokens:(Safe_ops.get_env_int_logged
+                            "MASC_SPAWN_MAX_TOKENS" ~default:4096)
+                          ~priority:Llm_provider.Request_priority.Interactive
+                          ?contract ?net:ctx.net ~sw:ctx.sw
+                          ()
                     in
                      let elapsed_ms =
                        int_of_float ((Time_compat.now () -. start_time) *. 1000.0)
+                     in
+                     let resolved_model =
+                       match oas_result with
+                       | Ok result ->
+                           let model =
+                             String.trim
+                               (Oas_response.model_used result.response)
+                           in
+                           if model <> "" then model
+                           else prepared.runtime_model_label
+                       | Error _ -> prepared.runtime_model_label
                      in
                      let spawn_result, oas_trace_ref, oas_tool_names, oas_tool_call_count,
                          trace_summary_json, trace_validation_json =
@@ -141,7 +354,7 @@ let execute_spawn_pipeline
                            Some (`Assoc [
                              ("oas_session_id", `String result.session_id);
                              ("turns", `Int result.turns);
-                             ("model", `String prepared.runtime_model_label);
+                             ("model", `String resolved_model);
                              ("tool_names", `List (List.map (fun n -> `String n) tool_names));
                              ("tool_call_count", `Int (List.length tool_names));
                              ("input_tokens",
@@ -218,15 +431,10 @@ let execute_spawn_pipeline
                      let verification_outcome =
                        match oas_result with
                        | Ok result ->
-                           let model_used =
-                             if String.trim result.response.model <> "" then
-                               result.response.model
-                             else prepared.runtime_model_label
-                           in
                            let run_result : Worker_container_types.run_result =
                              {
                                output = spawn_result.output;
-                               model_used;
+                               model_used = resolved_model;
                                input_tokens = spawn_result.input_tokens;
                                output_tokens = spawn_result.output_tokens;
                                cost_usd = spawn_result.cost_usd;
@@ -282,12 +490,11 @@ let execute_spawn_pipeline
                        ~mode:"spawn" ~wait_mode
                        ~status:
                          (if spawn_result.success then `Completed else `Failed)
-                       ?execution_scope:
-                         (deps.effective_execution_scope_of_spec prepared.spec)
+                       ?execution_scope:execution_scope
                        ?requested_worker_class:prepared.spec.worker_class
                        ?requested_worker_size:(deps.worker_size_of_spec prepared.spec)
                        ?resolved_runtime:prepared.assigned_runtime
-                       ~resolved_model:prepared.runtime_model_label
+                       ~resolved_model
                        ?routing_reason:prepared.spec.routing_reason
                        ~tool_names:oas_tool_names
                        ~tool_call_count:oas_tool_call_count
@@ -310,11 +517,10 @@ let execute_spawn_pipeline
                        ?runtime_actor:prepared.runtime_actor_name
                        ?spawn_role:prepared.spec.spawn_role
                        ?spawn_model:prepared.spec.spawn_model
-                       ?execution_scope:
-                         (deps.effective_execution_scope_of_spec prepared.spec)
+                       ?execution_scope:execution_scope
                        ?worker_class:prepared.spec.worker_class
                        ?worker_size:(deps.worker_size_of_spec prepared.spec)
-                       ?worker_backend:(Some "oas")
+                       ?worker_backend:(worker_backend_of_prepared prepared)
                        ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
                        ~trace_capability:"raw"
                        ?parent_actor:prepared.spec.parent_actor
@@ -394,17 +600,17 @@ let execute_spawn_pipeline
                          ("worker_run_id", `String prepared.worker_run_id);
                          ("runtime_actor", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.runtime_actor_name);
                          ("spawn_role", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.spawn_role);
-                         ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) (deps.effective_execution_scope_of_spec prepared.spec));
+                         ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
                          ("thinking_enabled", Option.fold ~none:`Null ~some:(fun v -> `Bool v) prepared.spec.thinking_enabled);
                          ("max_turns", Option.fold ~none:`Null ~some:(fun n -> `Int n) prepared.spec.max_turns);
                          ("worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) prepared.spec.worker_class);
                          ("worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) (deps.worker_size_of_spec prepared.spec));
-                         ("worker_backend", if deps.is_local_spawn_agent prepared.spec.spawn_agent then `String "local" else `Null);
+                         ("worker_backend", Option.fold ~none:`Null ~some:(fun value -> `String value) (worker_backend_of_prepared prepared));
                          ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
                          ("status", `String "completed");
                          ("trace_capability", `String (if Option.is_some oas_trace_ref then "raw" else "summary_only"));
                          ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
-                         ("resolved_model", `String prepared.runtime_model_label);
+                         ("resolved_model", `String resolved_model);
                          ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
                          ("tool_call_count", `Int oas_tool_call_count);
                          ("tool_names", `List (List.map (fun name -> `String name) oas_tool_names));
@@ -420,13 +626,14 @@ let execute_spawn_pipeline
                          Option.value ~default:ctx.sw
                            (Eio_context.get_switch_opt ())
                        in
-                       List.iter
-                         (fun prepared ->
+                       List.iteri
+                         (fun index prepared ->
+                           let started_at = Time_compat.now () in
                            append_spawn_requested_event
                              ~worker_run_id:prepared.worker_run_id
                              prepared;
                            Eio.Fiber.fork ~sw:sw_bg (fun () ->
-                               try ignore (execute_spawn 0 prepared)
+                               try ignore (execute_spawn index prepared)
                                with
                                | Eio.Cancel.Cancelled _ as exn -> raise exn
                                | exn ->
@@ -434,7 +641,10 @@ let execute_spawn_pipeline
                                    "background spawn failed (worker_run_id=%s, agent=%s): %s"
                                    prepared.worker_run_id
                                    prepared.spec.spawn_agent
-                                   (Printexc.to_string exn)))
+                                   (Printexc.to_string exn);
+                                 ignore
+                                   (record_spawn_exception index prepared
+                                      ~started_at exn)))
                          prepared_spawns;
                        let accepted =
                          prepared_spawns

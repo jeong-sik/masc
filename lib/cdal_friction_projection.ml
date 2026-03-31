@@ -187,6 +187,108 @@ let evidence_gap_group_to_json (g : evidence_gap_group) : Yojson.Safe.t =
     ("reason", `String g.reason);
   ])
 
+(* ================================================================ *)
+(* Cross-run window support                                          *)
+(* ================================================================ *)
+
+type run_window =
+  | Single_run
+  | Last_n_runs of int
+  | Session of string
+  | Rolling_seconds of float
+
+let window_to_string = function
+  | Single_run -> "single_run"
+  | Last_n_runs n -> Printf.sprintf "last_%d_runs" n
+  | Session s -> Printf.sprintf "session:%s" s
+  | Rolling_seconds s -> Printf.sprintf "rolling_%.0fs" s
+
+let compute_window_basis_hash ~window ~run_ids =
+  let sorted_ids = List.sort String.compare run_ids in
+  let input =
+    window_to_string window ^ "|"
+    ^ String.concat "," sorted_ids
+    ^ "|friction_v1"
+  in
+  "md5:" ^ (Digest.string input |> Digest.to_hex)
+
+let merge_groups (all_groups : blocked_attempt_group list list)
+    : blocked_attempt_group list =
+  let module H = Hashtbl.Make(struct
+    type t = blocked_attempt_key
+    let equal a b = compare_key a b = 0
+    let hash k =
+      Hashtbl.hash (k.tool_name, k.violation_kind, k.effective_mode)
+  end) in
+  let tbl = H.create 32 in
+  List.iter (fun groups ->
+    List.iter (fun (g : blocked_attempt_group) ->
+      let prev = try H.find tbl g.key with Not_found -> 0 in
+      H.replace tbl g.key (prev + g.count)
+    ) groups
+  ) all_groups;
+  H.fold (fun key count acc -> { key; count } :: acc) tbl []
+  |> List.sort (fun a b -> compare_key a.key b.key)
+
+let project_single_run_groups
+    ~(store : Agent_sdk.Proof_store.config)
+    (proof : Agent_sdk.Cdal_proof.t)
+    : blocked_attempt_group list * int =
+  match find_violations_ref proof with
+  | None -> ([], 0)
+  | Some ref_ ->
+    match Proof_artifact_reader.read_json store ref_ with
+    | Error _ -> ([], 0)
+    | Ok json ->
+      match Violation_record.of_json_list json with
+      | Error _ | Ok [] -> ([], 0)
+      | Ok violations ->
+        let g = group_violations violations in
+        let c = List.fold_left
+          (fun acc (grp : blocked_attempt_group) -> acc + grp.count) 0 g in
+        (g, c)
+
+let project_window
+    ~(store : Agent_sdk.Proof_store.config)
+    ~(window : run_window)
+    ?(completeness_gaps : Cdal_types.completeness_gap list = [])
+    ?(tripwire_threshold = 3)
+    (proofs : Agent_sdk.Cdal_proof.t list)
+    : friction_projection option =
+  match window, proofs with
+  | Single_run, [proof] ->
+    project_single_run ~store ~completeness_gaps ~tripwire_threshold proof
+  | Single_run, _ ->
+    None  (* Single_run requires exactly one proof *)
+  | _, [] ->
+    None
+  | _, _ ->
+    let all_groups = List.map (fun proof ->
+      let groups, _ = project_single_run_groups ~store proof in
+      groups
+    ) proofs in
+    let merged = merge_groups all_groups in
+    let blocked_attempt_count =
+      List.fold_left (fun acc (g : blocked_attempt_group) -> acc + g.count) 0 merged in
+    let gap_groups = compute_gap_groups completeness_gaps in
+    if blocked_attempt_count = 0 && gap_groups = [] then None
+    else
+      let run_ids = List.map (fun (p : Agent_sdk.Cdal_proof.t) -> p.run_id) proofs in
+      Some {
+        window = window_to_string window;
+        based_on_run_ids = run_ids;
+        basis_hash = compute_window_basis_hash ~window ~run_ids;
+        blocked_attempt_count;
+        blocked_tool_counts = compute_tool_counts merged;
+        blocked_attempt_groups = merged;
+        evidence_gap_groups = gap_groups;
+        review_tripwires = compute_tripwires ~threshold:tripwire_threshold merged;
+      }
+
+(* ================================================================ *)
+(* JSON serialization                                                *)
+(* ================================================================ *)
+
 let to_json (fp : friction_projection) : Yojson.Safe.t =
   Yojson.Safe.sort (`Assoc [
     ("based_on_run_ids", `List (List.map (fun s -> `String s) fp.based_on_run_ids));

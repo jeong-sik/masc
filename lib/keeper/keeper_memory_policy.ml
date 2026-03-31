@@ -66,10 +66,7 @@ let keeper_policy_observation_to_json (obs : keeper_policy_observation) : Yojson
   `Assoc
     [
       ("source_kind", `String obs.source_kind);
-      ("room_id",
-        match obs.room_id with
-        | Some room_id -> `String room_id
-        | None -> `Null);
+      ("room_id", Json_util.string_opt_to_json obs.room_id);
       ("from_agent", `String obs.from_agent);
       ("message", `String obs.message);
       ("direct_mention", `Bool obs.direct_mention);
@@ -470,8 +467,8 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
 
 let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Safe.t =
   `Assoc [
-    ("goal", match snapshot.goal with Some s -> `String s | None -> `Null);
-    ("progress", match snapshot.progress with Some s -> `String s | None -> `Null);
+    ("goal", Json_util.string_opt_to_json snapshot.goal);
+    ("progress", Json_util.string_opt_to_json snapshot.progress);
     ("next_items", `List (List.map (fun s -> `String s) snapshot.next_items));
     ("decisions", `List (List.map (fun s -> `String s) snapshot.decisions));
     ("open_questions", `List (List.map (fun s -> `String s) snapshot.open_questions));

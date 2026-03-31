@@ -396,6 +396,7 @@ let run_with_masc_tools
     ~(config : config)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ?contract
     ?on_event
     (goal : string)
   : (run_result, string) result =
@@ -408,7 +409,7 @@ let run_with_masc_tools
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   let config = { config with tools = oas_tools @ config.tools } in
-  run ~sw ~net ~config ?on_event goal
+  run ~sw ~net ~config ?on_event ?contract goal
 
 (* ================================================================ *)
 (* Cascade profile defaults (moved from Cascade module)              *)
@@ -700,6 +701,7 @@ let run_model_with_masc_tools
     ?hooks
     ?memory
     ?enable_thinking
+    ?contract
     ?raw_trace
     ?on_event
     ?transport
@@ -723,5 +725,5 @@ let run_model_with_masc_tools
           ()
       in
       let config = { config with raw_trace; transport = transport_resolved; priority } in
-      run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event
+      run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
         goal

@@ -359,7 +359,5 @@ let handle_tool_admin_update ctx args =
               ]
           in
           (true, Yojson.Safe.pretty_to_string payload))
-  | "keeper_policy" | "persistent_agent_policy" ->
-      (false, "keeper_policy and persistent_agent_policy sections removed with policy_mode purge")
   | _ ->
       (false, "section must be one of: auth | unit_policy")

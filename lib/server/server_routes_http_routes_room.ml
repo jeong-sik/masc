@@ -112,10 +112,10 @@ module Keeper_stream = Server_routes_http_keeper_stream
            `Assoc [
              ("name", `String a.name);
              ("status", `String (Types.string_of_agent_status a.status));
-             ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
+             ("current_task", Json_util.string_opt_to_json a.current_task);
              ("emoji", `String profile.emoji);
              ("koreanName", `String profile.korean_name);
-             ("model", match profile.model with Some m -> `String m | None -> `Null);
+             ("model", Json_util.string_opt_to_json profile.model);
              ("traits", `List (List.map (fun t -> `String t) profile.traits));
              ("interests", `List (List.map (fun i -> `String i) profile.interests));
            ]

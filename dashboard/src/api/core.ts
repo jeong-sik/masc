@@ -13,6 +13,10 @@ import { resolveDashboardActorName, sanitizeDashboardActorName } from '../lib/da
 // Token is read from ?token= on first load, moved to sessionStorage,
 // then stripped from the URL to avoid exposure in history/logs.
 
+function getQueryParams(): URLSearchParams {
+  return new URLSearchParams(window.location.search)
+}
+
 const TOKEN_STORAGE_KEY = 'masc_bearer_token'
 
 function initTokenFromUrl(): void {

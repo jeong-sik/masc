@@ -7,7 +7,6 @@ import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { TimeAgo } from './common/time-ago'
 import { missionSnapshot } from '../mission-store'
-import { formatPct } from '../lib/format-number'
 import type { DashboardMissionKeeperBrief, Keeper } from '../types'
 import { serverStatus } from '../store'
 import { operatorSnapshot } from '../operator-store'
@@ -113,38 +112,118 @@ function ToolSection({ title, description, tools, fallback }: { title: string; d
 
 // ── Runtime Signals ──────────────────────────────────────
 
+// Helper: format a 0–1 ratio as percentage or '-'
+function fmtRate(v: unknown): string {
+  return typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '-'
+}
+
+// Helper: format a float with fixed decimals or '-'
+function fmtFixed(v: unknown, digits = 3): string {
+  return typeof v === 'number' ? v.toFixed(digits) : '-'
+}
+
+// Helper: format an integer count or '-'
+function fmtCount(v: unknown): string | number {
+  return typeof v === 'number' ? v : '-'
+}
+
+interface SignalGroup {
+  title: string
+  rows: Array<{ label: string; value: string | number }>
+}
+
 export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
   const mw = keeper.metrics_window
 
-  // Quality/rate metrics only — raw counts (handoffs, compactions, k2k, etc.)
+  // Quality/rate metrics only — raw counts (handoffs, compactions, turns)
   // are authoritative in KpiGrid to avoid duplication.
-  const rows: Array<{ label: string; value: string | number }> = [
-    { label: '자율 턴', value: keeper.autonomous_turn_count ?? '-' },
-    { label: '도구 턴', value: keeper.autonomous_tool_turn_count ?? '-' },
-    { label: '텍스트 턴', value: keeper.autonomous_text_turn_count ?? '-' },
-    { label: '게시판 반응', value: keeper.board_reactive_turn_count ?? '-' },
-    { label: '멘션 반응', value: keeper.mention_reactive_turn_count ?? '-' },
-    { label: 'No-op 턴', value: keeper.noop_turn_count ?? '-' },
-    { label: '모델 폴백', value: formatPct(typeof mw?.model_fallback_rate === 'number' ? mw.model_fallback_rate : undefined) },
-    { label: '프로액티브 폴백', value: formatPct(typeof mw?.proactive_fallback_rate === 'number' ? mw.proactive_fallback_rate : undefined) },
-    { label: '메모리 통과율', value: formatPct(typeof mw?.memory_pass_rate === 'number' ? mw.memory_pass_rate : undefined) },
-    { label: '프리뷰 유사도', value: typeof mw?.proactive_preview_similarity_avg === 'number' ? `${(mw.proactive_preview_similarity_avg * 100).toFixed(1)}%` : '-' },
-    { label: '메모리 평균 점수', value: typeof mw?.memory_avg_score === 'number' ? mw.memory_avg_score.toFixed(3) : '-' },
-    { label: '폴백 비율', value: typeof mw?.fallback_rate === 'number' ? `${(mw.fallback_rate * 100).toFixed(1)}%` : '-' },
+  const groups: SignalGroup[] = [
+    {
+      title: '폴백',
+      rows: [
+        { label: '전체 폴백', value: fmtRate(mw?.fallback_rate) },
+        { label: '모델 폴백', value: fmtRate(mw?.model_fallback_rate) },
+        { label: '프로액티브 폴백', value: fmtRate(mw?.proactive_fallback_rate) },
+      ],
+    },
+    {
+      title: '정렬 품질',
+      rows: [
+        { label: '목표 정렬', value: fmtFixed(mw?.goal_alignment_avg) },
+        { label: '응답 정렬', value: fmtFixed(mw?.response_alignment_avg) },
+        { label: '목표 드리프트', value: fmtFixed(mw?.goal_drift_avg) },
+        { label: '반복 위험', value: fmtFixed(mw?.repetition_risk_avg) },
+      ],
+    },
+    {
+      title: '자율 행동',
+      rows: [
+        { label: '자동 성찰 비율', value: fmtRate(mw?.auto_reflect_rate) },
+        { label: '자동 계획 비율', value: fmtRate(mw?.auto_plan_rate) },
+        { label: '자동 컴팩션 비율', value: fmtRate(mw?.auto_compact_rate) },
+        { label: '자동 핸드오프 비율', value: fmtRate(mw?.auto_handoff_rate) },
+        { label: '가드레일 정지', value: fmtCount(mw?.guardrail_stop_count) },
+        { label: '가드레일 비율', value: fmtRate(mw?.guardrail_stop_rate) },
+      ],
+    },
+    {
+      title: '드리프트 보정',
+      rows: [
+        { label: '보정 횟수', value: fmtCount(mw?.drift_applied_count) },
+        { label: '보정 비율', value: fmtRate(mw?.drift_applied_rate) },
+        { label: '개입 비중', value: fmtRate(mw?.intervention_share) },
+        { label: '턴당 개입', value: fmtFixed(mw?.intervention_per_turn, 2) },
+      ],
+    },
+    {
+      title: '메모리',
+      rows: [
+        { label: '메모리 통과율', value: fmtRate(mw?.memory_pass_rate) },
+        { label: '메모리 평균 점수', value: fmtFixed(mw?.memory_avg_score) },
+        { label: '메모리 교정', value: fmtCount(mw?.memory_corrections) },
+        { label: '교정 성공', value: fmtCount(mw?.memory_correction_success) },
+        { label: '날씨 통과율', value: fmtRate(mw?.memory_weather_pass_rate) },
+      ],
+    },
+    {
+      title: '메모리 컴팩션',
+      rows: [
+        { label: '드롭 비율', value: fmtRate(mw?.memory_compaction_drop_ratio) },
+        { label: '평균 드롭', value: fmtFixed(mw?.memory_compaction_drop_avg, 1) },
+        { label: '컴팩션 절감', value: fmtRate(mw?.compaction_saved_ratio) },
+        { label: '평균 절감 토큰', value: fmtFixed(mw?.avg_compaction_saved_tokens, 0) },
+      ],
+    },
+    {
+      title: '프리뷰 유사도',
+      rows: [
+        { label: '평균', value: fmtRate(mw?.proactive_preview_similarity_avg) },
+        { label: '최대', value: fmtRate(mw?.proactive_preview_similarity_max) },
+        { label: '경고', value: typeof mw?.proactive_preview_similarity_warn === 'boolean' ? (mw.proactive_preview_similarity_warn ? 'Y' : 'N') : '-' },
+      ],
+    },
   ]
 
-  const visibleRows = rows.filter(row =>
-    !(
-      row.value === '-'
-      || row.value === '\u2014'
-      || row.value === ''
-    ))
+  // Filter out groups where all rows are '-'
+  const visibleGroups = groups
+    .map(g => ({
+      ...g,
+      rows: g.rows.filter(r => r.value !== '-' && r.value !== '\u2014' && r.value !== ''),
+    }))
+    .filter(g => g.rows.length > 0)
 
-  if (visibleRows.length === 0) return null
+  if (visibleGroups.length === 0) return null
 
   return html`
-    <div class="flex flex-col gap-1.5">
-      ${visibleRows.map(r => html`<${SignalRow} label=${r.label} value=${r.value} />`)}
+    <div class="flex flex-col gap-3">
+      ${visibleGroups.map(g => html`
+        <div class="flex flex-col gap-1">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] px-1">${g.title}</span>
+          <div class="flex flex-col gap-1">
+            ${g.rows.map(r => html`<${SignalRow} label=${r.label} value=${r.value} />`)}
+          </div>
+        </div>
+      `)}
     </div>
   `
 }

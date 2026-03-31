@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.192.0] - 2026-03-31
+
+### Added
+- **Live Monitor clarity** — improve data clarity and keeper health strip (#4220).
+- **Live harness mermaid** — add live harness mermaid flow (#4195).
+- **Dashboard actor header** — fix dashboard actor header validation (#4225).
+
+### Fixed
+- **Team-session worker flow** — restore spawned worker runtime flow (#4092).
+
 ## [2.191.0] - 2026-03-31
 
 ### Added

@@ -76,6 +76,24 @@ let test_axes_assessment () =
     "Rc_medium"
     (match axes.recovery_cost with Rc_low -> "Rc_low" | Rc_medium -> "Rc_medium" | Rc_high -> "Rc_high")
 
+let test_shell_exec_is_external_effect () =
+  let dc = make_dc ~required_artifacts:["readme"] ~repair_budget:3 () in
+  let risk =
+    Masc_mcp.Contract_risk.of_delivery_contract ~delivery_contract:dc
+      ~tool_names:["shell_exec"]
+  in
+  check_risk "shell_exec raises risk to critical" Agent_sdk.Risk_class.Critical
+    risk
+
+let test_file_write_is_workspace_mutation () =
+  let dc = make_dc ~required_artifacts:["readme"] ~repair_budget:3 () in
+  let risk =
+    Masc_mcp.Contract_risk.of_delivery_contract ~delivery_contract:dc
+      ~tool_names:["file_write"]
+  in
+  check_risk "file_write raises risk to medium" Agent_sdk.Risk_class.Medium
+    risk
+
 let () =
   Eio_main.run @@ fun _env ->
   run "Contract_risk" [
@@ -86,5 +104,7 @@ let () =
       "critical risk (multi-axis max)", `Quick, test_critical_risk;
       "empty tools", `Quick, test_empty_tools;
       "axes assessment", `Quick, test_axes_assessment;
+      "shell_exec is external effect", `Quick, test_shell_exec_is_external_effect;
+      "file_write is workspace mutation", `Quick, test_file_write_is_workspace_mutation;
     ];
   ]

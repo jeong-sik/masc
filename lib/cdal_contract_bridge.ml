@@ -7,6 +7,7 @@ let workspace_mutating_tools =
     "keeper_write";
     "create_text_file";
     "edit_text_file";
+    "file_write";
   ]
 
 let is_workspace_mutating name =

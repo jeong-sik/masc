@@ -109,15 +109,33 @@ let default_worker_size_for_class = function
       Some Team_session_types.Worker_lg
   | None -> Some Team_session_types.Worker_lg
 
-let default_execution_scope_for_worker_class = function
-  | Some Team_session_types.Worker_executor ->
-      Some Team_session_types.Limited_code_change
-  | _ -> Some Team_session_types.Observe_only
-
 let effective_execution_scope_of_spec spec =
-  match spec.execution_scope with
-  | Some scope -> Some scope
-  | None -> default_execution_scope_for_worker_class spec.worker_class
+  Team_session_types.effective_execution_scope_of_planned_worker
+    {
+      Team_session_types.spawn_agent = spec.spawn_agent;
+      runtime_actor = None;
+      spawn_role = spec.spawn_role;
+      spawn_model = spec.spawn_model;
+      execution_scope = spec.execution_scope;
+      thinking_enabled = spec.thinking_enabled;
+      thinking_budget = spec.thinking_budget;
+      max_turns = spec.max_turns;
+      timeout_seconds = spec.timeout_seconds;
+      worker_class = spec.worker_class;
+      parent_actor = spec.parent_actor;
+      capsule_mode = spec.capsule_mode;
+      runtime_pool = spec.runtime_pool;
+      lane_id = spec.lane_id;
+      controller_level = spec.controller_level;
+      control_domain = spec.control_domain;
+      supervisor_actor = spec.supervisor_actor;
+      model_tier = spec.model_tier;
+      task_profile = spec.task_profile;
+      risk_level = spec.risk_level;
+      routing_confidence = spec.routing_confidence;
+      routing_reason = spec.routing_reason;
+      routing_escalated = spec.routing_escalated;
+    }
 
 let explicit_worker_size_of_spec (spec : spawn_spec) =
   match spec.worker_size with

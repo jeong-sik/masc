@@ -27,6 +27,15 @@ let infer_session_origin_kind ~created_by ~orchestration_mode =
   | Manual | Assist ->
       if creator_looks_system created_by then Origin_system else Origin_human
 
+let default_execution_scope_for_worker_class = function
+  | Some Worker_executor -> Some Limited_code_change
+  | _ -> Some Observe_only
+
+let effective_execution_scope_of_planned_worker (worker : planned_worker) =
+  match worker.execution_scope with
+  | Some scope -> Some scope
+  | None -> default_execution_scope_for_worker_class worker.worker_class
+
 let planned_worker_key (w : planned_worker) =
   match w.runtime_actor with
   | Some actor when String.trim actor <> "" -> "actor:" ^ String.trim actor

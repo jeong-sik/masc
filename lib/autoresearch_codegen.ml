@@ -106,16 +106,19 @@ let has_background_capacity () =
           ~sw ~net ?config_path ["autoresearch"] in
       not (cap.all_discovered && cap.endpoints_found > 0
            && cap.process_available = 0 && cap.process_queue_length >= 2)
-    with _ -> true)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> true)
   | _ -> true
 
 (** Generate code change via Cascade "autoresearch" profile.
     Returns Ok (hypothesis, new_code) or Error reason. *)
 let generate_code_change ~goal ~baseline ~history ~insights
     ~target_file ~file_content =
-  if not (has_background_capacity ()) then
+  if not (has_background_capacity ()) then begin
+    Eio.traceln "[autoresearch] backoff: local slots saturated, skipping cycle";
     Result.error "autoresearch: local slots saturated, skipping cycle"
-  else
+  end else
   let prompt = build_code_change_prompt ~goal ~baseline ~history ~insights
     ~file_content ~target_file in
   match

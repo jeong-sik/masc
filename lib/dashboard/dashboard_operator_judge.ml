@@ -351,6 +351,8 @@ let start ~sw ~clock ~net ~(config : Room.config)
             if n = 0 then base
             else min (base *. Float.pow 2.0 (float_of_int (min n 5))) 300.0
           in
+          if n > 0 then
+            Eio.traceln "[operator] backoff: sleeping %.0fs (consecutive=%d)" sleep_s n;
           Eio.Time.sleep clock sleep_s;
           loop ()
         in

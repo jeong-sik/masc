@@ -138,13 +138,7 @@ let rec find_git_root path =
     else find_git_root parent
   end
 
-let bool_env name =
-  match Sys.getenv_opt name with
-  | Some raw -> (
-      match String.lowercase_ascii (String.trim raw) with
-      | "1" | "true" | "yes" -> true
-      | _ -> false)
-  | None -> false
+let bool_env name = Env_config_core.get_bool ~default:false name
 
 let running_under_test_executable () =
   let executable =
@@ -170,10 +164,21 @@ let sync_test_base_path_env resolved_path =
         Log.Room.info "Synchronized MASC_BASE_PATH=%s for test executable %s"
           resolved_path (Filename.basename Sys.executable_name)
 
+let resolve_requested_base_path path =
+  match find_git_root path with
+  | Some git_root ->
+      Log.Room.info "MASC base resolved: %s → %s (git root)" path git_root;
+      git_root
+  | None ->
+      Log.Room.info "MASC base: %s (no git root found)" path;
+      path
+
 (** Resolve base_path: when MASC_BASE_PATH is explicitly set, use it
-    directly — git root detection only applies for worktree auto-resolution
-    when no explicit path is configured.  This prevents a sub-repo .git
-    (e.g. masc-mcp/) from hijacking the intended base path. *)
+    directly unless a test executable intentionally ignores an inherited
+    override. Git root detection applies for worktree auto-resolution when
+    no explicit path is configured, or when that inherited test override is
+    ignored. This prevents a sub-repo .git (e.g. masc-mcp/) from hijacking
+    the intended base path. *)
 let resolve_masc_base_path path =
   match Env_config_core.base_path_opt () with
   | Some explicit
@@ -182,18 +187,11 @@ let resolve_masc_base_path path =
       Log.Room.warn
         "Ignoring inherited MASC_BASE_PATH=%s for test executable %s; using requested base path %s"
         explicit (Filename.basename Sys.executable_name) path;
-      path
+      resolve_requested_base_path path
   | Some explicit ->
       Log.Room.info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
       explicit
-  | None ->
-      match find_git_root path with
-      | Some git_root ->
-          Log.Room.info "MASC base resolved: %s → %s (git root)" path git_root;
-          git_root
-      | None ->
-          Log.Room.info "MASC base: %s (no git root found)" path;
-          path
+  | None -> resolve_requested_base_path path
 
 (* ============================================ *)
 (* Environment helpers                          *)

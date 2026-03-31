@@ -385,6 +385,8 @@ let append_memory_notes_from_reply
           Keeper_memory_policy.goal =
             (if meta.goal <> "" then Some meta.goal else None);
           progress = None;
+          done_summary = None;
+          next_summary = None;
           next_items = [];
           decisions = [];
           open_questions = [];

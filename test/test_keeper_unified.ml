@@ -268,11 +268,11 @@ let test_prompt_mentions_extend_turns_guidance () =
          true
        with Not_found -> false
      in found);
-  check bool "mentions early extension guidance" true
+  check bool "mentions generation continuity" true
     (let found =
        try
          ignore
-           (Str.search_forward (Str.regexp_string "call extend_turns early") sys 0);
+           (Str.search_forward (Str.regexp_string "checkpoint survives across cycles") sys 0);
          true
        with Not_found -> false
      in found)

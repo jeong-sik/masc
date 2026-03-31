@@ -112,8 +112,10 @@ let note_episode_flush (episode : Institution_eio.episode) =
   Eio_guard.with_mutex episode_cache_mu (fun () ->
     let path = Institution_eio.episodes_jsonl_path () in
     let cache = load_all_episodes_cached_unlocked () in
-    cache.episodes <- cache.episodes @ [episode];
-    Hashtbl.replace cache.ids episode.id ();
+    if not (Hashtbl.mem cache.ids episode.id) then begin
+      cache.episodes <- cache.episodes @ [episode];
+      Hashtbl.replace cache.ids episode.id ();
+    end;
     cache.stamp <- file_stamp_opt path;
     Hashtbl.replace episode_file_cache_tbl path cache)
 

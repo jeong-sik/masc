@@ -556,6 +556,12 @@ let test_flush_episodes_appends_only_new_records () =
   let ids = List.map (fun (episode : Institution_eio.episode) -> episode.id) persisted in
   Alcotest.(check bool) "existing record preserved" true (List.mem existing.id ids);
   Alcotest.(check bool) "new record appended" true (List.mem "new-episode-id" ids);
+  let memory_reseed = Memory_oas_bridge.create_memory ~agent_name:"test-ep-flush" () in
+  let reseeded =
+    Memory_oas_bridge.seed_episodes ~memory:memory_reseed ~agent_name:"test-ep-flush"
+      ~limit:10
+  in
+  Alcotest.(check int) "reseed count stays deduped" 2 reseeded;
   cleanup_tmp_dir dir
 
 (* ================================================================ *)

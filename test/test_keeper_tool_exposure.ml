@@ -466,17 +466,15 @@ let () =
             check bool "has masc_broadcast" true (List.mem "masc_broadcast" tools)
         | Ok Unrestricted -> fail "expected Restricted"
         | Error msg -> fail ("unexpected error: " ^ msg));
-      test_case "null tools field defaults to empty" `Quick (fun () ->
+      test_case "null tools field returns error" `Quick (fun () ->
         let json = `Assoc [
           ("kind", `String "restricted");
           ("tools", `Null)
         ] in
         let outer = `Assoc [("tool_access", json)] in
         match Keeper_types.tool_access_of_meta_json outer with
-        | Ok (Restricted tools) ->
-            check bool "empty list" true (List.length tools = 0)
-        | Ok Unrestricted -> fail "expected Restricted"
-        | Error msg -> fail ("unexpected error: " ^ msg));
+        | Error _ -> ()
+        | Ok _ -> fail "expected Error for null tools field");
       test_case "integer tools field returns error" `Quick (fun () ->
         let json = `Assoc [
           ("kind", `String "restricted");
@@ -486,5 +484,14 @@ let () =
         match Keeper_types.tool_access_of_meta_json outer with
         | Error _ -> ()
         | Ok _ -> fail "expected Error for integer tools field");
+      test_case "non-string tool member returns error" `Quick (fun () ->
+        let json = `Assoc [
+          ("kind", `String "restricted");
+          ("tools", `List [`String "masc_status"; `Int 42])
+        ] in
+        let outer = `Assoc [("tool_access", json)] in
+        match Keeper_types.tool_access_of_meta_json outer with
+        | Error _ -> ()
+        | Ok _ -> fail "expected Error for non-string tools member");
     ]);
   ]

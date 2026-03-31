@@ -11,6 +11,27 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
+let dedupe_tool_names xs =
+  List.fold_left
+    (fun acc x -> if List.mem x acc then acc else x :: acc)
+    []
+    xs
+  |> List.rev
+
+let keeper_tools_add_allow tool_access tools =
+  match tool_access with
+  | Keeper_types.Unrestricted ->
+      Keeper_types.Restricted (dedupe_tool_names tools)
+  | Keeper_types.Restricted current ->
+      Keeper_types.Restricted (dedupe_tool_names (current @ tools))
+
+let keeper_tools_remove_allow tool_access tools =
+  match tool_access with
+  | Keeper_types.Unrestricted -> Keeper_types.Unrestricted
+  | Keeper_types.Restricted current ->
+      Keeper_types.Restricted
+        (List.filter (fun name -> not (List.mem name tools)) current)
+
 (** Handle POST /api/v1/keepers/:name/tools.
     Extracted so it can be called from any prefix_post handler that
     catches POST /api/v1/keepers/* requests. *)
@@ -39,43 +60,34 @@ let handle_keeper_tools_post state req reqd =
              let args = Yojson.Safe.from_string body_str in
              let action = Safe_ops.json_string ~default:"" "action" args in
              let tools = Safe_ops.json_string_list "tools" args in
-             let dedupe xs =
-               List.fold_left (fun acc x ->
-                 if List.mem x acc then acc else x :: acc) [] xs
-               |> List.rev in
              let allowlist_of_meta (meta : Keeper_types.keeper_meta) =
                Keeper_types.tool_access_allowlist meta.tool_access
-             in
-             let add_allow (meta : Keeper_types.keeper_meta) tools =
-               match meta.tool_access with
-               | Keeper_types.Unrestricted -> meta.tool_access
-               | Keeper_types.Restricted current ->
-                   Keeper_types.Restricted (dedupe (current @ tools))
-             in
-             let remove_allow (meta : Keeper_types.keeper_meta) tools =
-               match meta.tool_access with
-               | Keeper_types.Unrestricted -> meta.tool_access
-               | Keeper_types.Restricted current ->
-                   Keeper_types.Restricted
-                     (List.filter (fun n -> not (List.mem n tools)) current)
              in
              let updated_meta = match action with
                | "set_allowlist" ->
                    Ok { meta with
-                        tool_access = Keeper_types.Restricted (dedupe tools);
+                        tool_access = Keeper_types.Restricted (dedupe_tool_names tools);
                         updated_at = Keeper_types.now_iso () }
                | "set_unrestricted" ->
                    Ok { meta with
                         tool_access = Keeper_types.Unrestricted;
                         updated_at = Keeper_types.now_iso () }
                | "set_denylist" ->
-                   Ok { meta with tool_denylist = dedupe tools; updated_at = Keeper_types.now_iso () }
+                   Ok { meta with
+                        tool_denylist = dedupe_tool_names tools;
+                        updated_at = Keeper_types.now_iso () }
                | "add_allow" ->
-                   Ok { meta with tool_access = add_allow meta tools; updated_at = Keeper_types.now_iso () }
+                   Ok { meta with
+                        tool_access = keeper_tools_add_allow meta.tool_access tools;
+                        updated_at = Keeper_types.now_iso () }
                | "remove_allow" ->
-                   Ok { meta with tool_access = remove_allow meta tools; updated_at = Keeper_types.now_iso () }
+                   Ok { meta with
+                        tool_access = keeper_tools_remove_allow meta.tool_access tools;
+                        updated_at = Keeper_types.now_iso () }
                | "add_deny" ->
-                   Ok { meta with tool_denylist = dedupe (meta.tool_denylist @ tools); updated_at = Keeper_types.now_iso () }
+                   Ok { meta with
+                        tool_denylist = dedupe_tool_names (meta.tool_denylist @ tools);
+                        updated_at = Keeper_types.now_iso () }
                | "remove_deny" ->
                    Ok { meta with tool_denylist = List.filter (fun n -> not (List.mem n tools)) meta.tool_denylist; updated_at = Keeper_types.now_iso () }
                | "" -> Error "action required (set_allowlist|set_unrestricted|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
@@ -538,43 +550,35 @@ let add_routes ~sw ~clock router =
                       let args = Yojson.Safe.from_string body_str in
                       let action = Safe_ops.json_string ~default:"" "action" args in
                       let tools = Safe_ops.json_string_list "tools" args in
-                      let dedupe xs =
-                        List.fold_left (fun acc x ->
-                          if List.mem x acc then acc else x :: acc) [] xs
-                        |> List.rev in
                       let allowlist_of_meta (meta : Keeper_types.keeper_meta) =
                         Keeper_types.tool_access_allowlist meta.tool_access
-                      in
-                      let add_allow (meta : Keeper_types.keeper_meta) tools =
-                        match meta.tool_access with
-                        | Keeper_types.Unrestricted -> meta.tool_access
-                        | Keeper_types.Restricted current ->
-                            Keeper_types.Restricted (dedupe (current @ tools))
-                      in
-                      let remove_allow (meta : Keeper_types.keeper_meta) tools =
-                        match meta.tool_access with
-                        | Keeper_types.Unrestricted -> meta.tool_access
-                        | Keeper_types.Restricted current ->
-                            Keeper_types.Restricted
-                              (List.filter (fun n -> not (List.mem n tools)) current)
                       in
                       let updated_meta = match action with
                         | "set_allowlist" ->
                             Ok { meta with
-                                   tool_access = Keeper_types.Restricted (dedupe tools);
+                                   tool_access = Keeper_types.Restricted (dedupe_tool_names tools);
                                    updated_at = Keeper_types.now_iso () }
                         | "set_unrestricted" ->
                             Ok { meta with
                                    tool_access = Keeper_types.Unrestricted;
                                    updated_at = Keeper_types.now_iso () }
                         | "set_denylist" ->
-                            Ok { meta with tool_denylist = dedupe tools; updated_at = Keeper_types.now_iso () }
+                            Ok { meta with
+                                   tool_denylist = dedupe_tool_names tools;
+                                   updated_at = Keeper_types.now_iso () }
                         | "add_allow" ->
-                            Ok { meta with tool_access = add_allow meta tools; updated_at = Keeper_types.now_iso () }
+                            Ok { meta with
+                                   tool_access = keeper_tools_add_allow meta.tool_access tools;
+                                   updated_at = Keeper_types.now_iso () }
                         | "remove_allow" ->
-                            Ok { meta with tool_access = remove_allow meta tools; updated_at = Keeper_types.now_iso () }
+                            Ok { meta with
+                                   tool_access = keeper_tools_remove_allow meta.tool_access tools;
+                                   updated_at = Keeper_types.now_iso () }
                         | "add_deny" ->
-                            Ok { meta with tool_denylist = dedupe (meta.tool_denylist @ tools); updated_at = Keeper_types.now_iso () }
+                            Ok { meta with
+                                   tool_denylist =
+                                     dedupe_tool_names (meta.tool_denylist @ tools);
+                                   updated_at = Keeper_types.now_iso () }
                         | "remove_deny" ->
                             Ok { meta with tool_denylist = List.filter (fun n -> not (List.mem n tools)) meta.tool_denylist; updated_at = Keeper_types.now_iso () }
                         | "" -> Error "action required (set_allowlist|set_unrestricted|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
@@ -756,49 +760,33 @@ let add_routes ~sw ~clock router =
                       let args = Yojson.Safe.from_string body_str in
                       let action = Safe_ops.json_string ~default:"" "action" args in
                       let tools = Safe_ops.json_string_list "tools" args in
-                      let dedupe xs =
-                        List.fold_left (fun acc x ->
-                          if List.mem x acc then acc else x :: acc) [] xs
-                        |> List.rev
-                      in
                       let allowlist_of_meta (meta : Keeper_types.keeper_meta) =
                         Keeper_types.tool_access_allowlist meta.tool_access
-                      in
-                      let add_allow (meta : Keeper_types.keeper_meta) tools =
-                        match meta.tool_access with
-                        | Keeper_types.Unrestricted -> meta.tool_access
-                        | Keeper_types.Restricted current ->
-                            Keeper_types.Restricted (dedupe (current @ tools))
-                      in
-                      let remove_allow (meta : Keeper_types.keeper_meta) tools =
-                        match meta.tool_access with
-                        | Keeper_types.Unrestricted -> meta.tool_access
-                        | Keeper_types.Restricted current ->
-                            Keeper_types.Restricted
-                              (List.filter (fun n -> not (List.mem n tools)) current)
                       in
                       let updated_meta = match action with
                         | "set_allowlist" ->
                             Ok { meta with
-                                   tool_access = Keeper_types.Restricted (dedupe tools);
+                                   tool_access = Keeper_types.Restricted (dedupe_tool_names tools);
                                    updated_at = Keeper_types.now_iso () }
                         | "set_unrestricted" ->
                             Ok { meta with
                                    tool_access = Keeper_types.Unrestricted;
                                            updated_at = Keeper_types.now_iso () }
                         | "set_denylist" ->
-                            Ok { meta with tool_denylist = dedupe tools;
+                            Ok { meta with tool_denylist = dedupe_tool_names tools;
                                            updated_at = Keeper_types.now_iso () }
                         | "add_allow" ->
                             Ok { meta with
-                                   tool_access = add_allow meta tools;
+                                   tool_access = keeper_tools_add_allow meta.tool_access tools;
                                            updated_at = Keeper_types.now_iso () }
                         | "remove_allow" ->
                             Ok { meta with
-                                   tool_access = remove_allow meta tools;
+                                   tool_access = keeper_tools_remove_allow meta.tool_access tools;
                                            updated_at = Keeper_types.now_iso () }
                         | "add_deny" ->
-                            Ok { meta with tool_denylist = dedupe (meta.tool_denylist @ tools);
+                            Ok { meta with
+                                   tool_denylist =
+                                     dedupe_tool_names (meta.tool_denylist @ tools);
                                            updated_at = Keeper_types.now_iso () }
                         | "remove_deny" ->
                             Ok { meta with tool_denylist =

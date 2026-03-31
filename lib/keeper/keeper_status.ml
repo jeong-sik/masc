@@ -145,9 +145,9 @@ let handle_keeper_list ctx args : tool_result =
 	                  in
 	                  let reason = Safe_ops.json_string_opt "skill_reason" metrics in
 	                  `Assoc [
-	                    ("primary", match primary with Some s -> `String s | None -> `Null);
+	                    ("primary", Json_util.string_opt_to_json primary);
 	                    ("secondary", `List (List.map (fun s -> `String s) secondary));
-	                    ("reason", match reason with Some s -> `String s | None -> `Null);
+	                    ("reason", Json_util.string_opt_to_json reason);
                         ( "selection_mode",
                           `String
                             (Safe_ops.json_string_opt "skill_selection_mode" metrics
@@ -179,7 +179,7 @@ let handle_keeper_list ctx args : tool_result =
               ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
               ("keepalive_running", `Bool (runtime_keepalive_running ctx.config m));
               ("active_model", `String active_model);
-              ("next_model_hint", match next_model_hint with Some s -> `String s | None -> `Null);
+              ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
               ("keeper_age_s", `Float keeper_age_s);
               ("last_turn_ago_s", `Float last_turn_ago_s);
               ("last_proactive_ago_s", `Float last_proactive_ago_s);
@@ -236,9 +236,7 @@ let handle_keeper_list ctx args : tool_result =
               ("noop_turn_count", `Int m.runtime.noop_turn_count);
               ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
               ("active_team_session_id",
-                match m.active_team_session_id with
-                | Some session_id -> `String session_id
-                | None -> `Null);
+                Json_util.string_opt_to_json m.active_team_session_id);
               ("team_session_state", team_session_state_json ctx.config m);
               ("last_team_session_started_at",
                 if String.trim m.last_team_session_started_at = "" then `Null
@@ -248,13 +246,9 @@ let handle_keeper_list ctx args : tool_result =
               ("team_session_bridge", team_session_bridge_json ctx.config m);
               ("memory_note_count", `Int memory_bank_summary.total_notes);
               ("memory_top_kind",
-                match memory_bank_summary.top_kind with
-                | Some kind -> `String kind
-                | None -> `Null);
+                Json_util.string_opt_to_json memory_bank_summary.top_kind);
 	              ("memory_recent_note",
-	                match memory_recent_note with
-	                | Some text -> `String text
-	                | None -> `Null);
+	                Json_util.string_opt_to_json memory_recent_note);
 	              ("context", context_json);
 	              ("skill_route", skill_route_json);
 	              ("metrics_overview", metrics_summary_to_json metrics_overview);

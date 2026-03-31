@@ -623,26 +623,16 @@ let snapshot_to_yojson (snapshot : runtime_snapshot) =
     [
       ("id", `String snapshot.id);
       ("base_url", `String snapshot.base_url);
-      ( "model",
-        match snapshot.model with Some value -> `String value | None -> `Null );
+      ("model", Json_util.string_opt_to_json snapshot.model);
       ("max_concurrency", `Int snapshot.max_concurrency);
       ("active_slots", `Int snapshot.active_slots);
       ("queue_depth", `Int snapshot.queue_depth);
-      ( "latency_ema_ms",
-        match snapshot.latency_ema_ms with
-        | Some value -> `Float value
-        | None -> `Null );
+      ("latency_ema_ms", Json_util.float_opt_to_json snapshot.latency_ema_ms);
       ("failure_streak", `Int snapshot.failure_streak);
-      ( "cooldown_until",
-        match snapshot.cooldown_until with
-        | Some value -> `Float value
-        | None -> `Null );
-      ( "last_error",
-        match snapshot.last_error with
-        | Some value -> `String value
-        | None -> `Null );
+      ("cooldown_until", Json_util.float_opt_to_json snapshot.cooldown_until);
+      ("last_error", Json_util.string_opt_to_json snapshot.last_error);
       ("total_started", `Int snapshot.total_started);
       ("total_success", `Int snapshot.total_success);
       ("total_failure", `Int snapshot.total_failure);
-      ("port", match snapshot.port with Some value -> `Int value | None -> `Null);
+      ("port", Json_util.int_opt_to_json snapshot.port);
     ]

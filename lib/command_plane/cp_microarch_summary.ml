@@ -176,7 +176,7 @@ let search_fabric_json (rows : search_row list) =
     ("rework_rate", `Float rework_rate);
     ("artifact_scope_drift", `Float artifact_scope_drift);
     ("artifact_scope_active", `Int artifact_scope_active);
-    ("top_stage", match top_stage with Some stage -> `String stage | None -> `Null);
+    ("top_stage", Json_util.string_opt_to_json top_stage);
   ]
 
 let signals_json ~(pipeline : Yojson.Safe.t) ~(cache : Yojson.Safe.t)

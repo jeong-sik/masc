@@ -601,7 +601,7 @@ let summary_json ~strategy ~readiness ~(candidates : scored_candidate list)
         match readiness with
         | Ready -> `List []
         | Blocked blockers -> `List (List.map blocker_to_json blockers) );
-      ("selected_unit_id", match selected_unit_id with Some value -> `String value | None -> `Null);
+      ("selected_unit_id", Json_util.string_opt_to_json selected_unit_id);
       ("candidates", `List (List.map scored_candidate_to_json candidates));
     ]
 

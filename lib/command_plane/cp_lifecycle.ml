@@ -588,14 +588,11 @@ let start_operation config ~(actor : string) json =
         (`Assoc
           [
             ("objective", `String operation.objective);
-            ("intent_id", match operation.intent_id with Some value -> `String value | None -> `Null);
+            ("intent_id", Json_util.string_opt_to_json operation.intent_id);
             ("policy_class", `String operation.policy_class);
-            ( "workload_template",
-              match operation.workload_template with
-              | Some value -> `String value
-              | None -> `Null );
+            ("workload_template", Json_util.string_opt_to_json operation.workload_template);
             ("workload_profile", `String (operation_workload_profile operation));
-            ("stage", match operation.stage with Some value -> `String value | None -> `Null);
+            ("stage", Json_util.string_opt_to_json operation.stage);
             ("artifact_scope", json_list_of_strings operation.artifact_scope);
             ("search_strategy", `String operation.search_strategy);
           ]);
@@ -762,5 +759,5 @@ let dispatch_plan_json config json =
         | Cp_search_fabric.Blocked blockers ->
             `List (List.map Cp_search_fabric.blocker_to_json blockers) );
       ("recommended_units", `List recommended_units);
-      ("current_unit_id", match current_unit_id with Some value -> `String value | None -> `Null);
+      ("current_unit_id", Json_util.string_opt_to_json current_unit_id);
     ]

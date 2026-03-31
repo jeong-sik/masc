@@ -87,7 +87,7 @@ let handover_to_json (h : handover_record) : Yojson.Safe.t =
   `Assoc [
     ("id", `String h.id);
     ("from_agent", `String h.from_agent);
-    ("to_agent", match h.to_agent with Some a -> `String a | None -> `Null);
+    ("to_agent", Json_util.string_opt_to_json h.to_agent);
     ("task_id", `String h.task_id);
     ("session_id", `String h.session_id);
     ("current_goal", `String h.current_goal);

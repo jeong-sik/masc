@@ -65,8 +65,7 @@ let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Sa
                 ("status", `String (Types.string_of_agent_status agent.status));
                 ( "capabilities",
                   `List (List.map (fun s -> `String s) agent.capabilities) );
-                ( "current_task",
-                  match agent.current_task with None -> `Null | Some t -> `String t );
+                ( "current_task", Json_util.string_opt_to_json agent.current_task );
                 ("joined_at", `String agent.joined_at);
                 ("last_seen", `String agent.last_seen);
                 ("age_s", `Float age_s);
@@ -441,15 +440,12 @@ let keeper_diagnostic_json
     keeper_reply_snapshot_of_history history_items
   in
   let last_error =
-    match keeper_error_hint ~agent_status ~meta with
-    | Some reason -> `String reason
-    | None -> `Null
+    Json_util.string_opt_to_json (keeper_error_hint ~agent_status ~meta)
   in
   `Assoc
     [
       ("health_state", `String health_state);
-      ( "quiet_reason",
-        match quiet_reason with Some reason -> `String reason | None -> `Null );
+      ( "quiet_reason", Json_util.string_opt_to_json quiet_reason );
       ("next_action_path", `String next_action_path);
       ("recoverable", `Bool (String.equal next_action_path "recover"));
       ("summary", `String (keeper_diagnostic_summary ~health_state ~quiet_reason));

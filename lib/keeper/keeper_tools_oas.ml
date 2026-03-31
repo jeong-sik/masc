@@ -93,8 +93,9 @@ let keeper_tool_result_is_failure (result : string) : bool =
     making it hard for the LLM to parse success/failure reliably.
 
     After normalization, all results follow:
-    - Success: [{"ok": true, "result": <original_json_or_string>}]
-    - Failure: [{"ok": false, "error": <message>, "detail": <original_json>}]
+    - Success: {"ok": true, "result": <original_json_or_string>}
+    - Success with changes: {"ok": true, "result": ..., "changes": <delta>}
+    - Failure: {"ok": false, "error": <message>, "detail": <original_json|null>}
 
     The [success] flag comes from [keeper_tool_result_is_failure], which
     already handles all legacy schema variants. *)
@@ -141,6 +142,7 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
       Yojson.Safe.to_string (`Assoc [
         ("ok", `Bool false);
         ("error", `String raw);
+        ("detail", `Null);
       ])
 
 let make_tools
@@ -202,14 +204,32 @@ let make_tools
                 (* PR#814 Gap 1: Capture git status delta after successful tool execution.
                    If the working tree changed, log it so the keeper is aware of
                    file-system side effects from its tool calls. *)
-                let base_result = normalize_tool_result ~success:true result in
-                (match Worktree_live_context.capture_change_block
-                         ~base_path:config.base_path ~actor_key:meta.name with
-                 | Some change_block ->
+                let change_block =
+                  Worktree_live_context.capture_change_block
+                    ~base_path:config.base_path ~actor_key:meta.name
+                in
+                (match change_block with
+                 | Some _cb ->
                      Log.Keeper.info "post-tool git delta detected for %s after %s"
-                       meta.name td.name;
-                     (true, base_result ^ "\n" ^ change_block)
-                 | None -> (true, base_result))
+                       meta.name td.name
+                 | None -> ());
+                let normalized = normalize_tool_result ~success:true result in
+                let final_result =
+                  match change_block with
+                  | None -> normalized
+                  | Some cb ->
+                    (* Inject changes field into the normalized JSON envelope
+                       to preserve valid JSON structure. *)
+                    (try
+                       let json = Yojson.Safe.from_string normalized in
+                       match json with
+                       | `Assoc fields ->
+                         Yojson.Safe.to_string
+                           (`Assoc (fields @ [("changes", `String cb)]))
+                       | _ -> normalized
+                     with Yojson.Json_error _ -> normalized)
+                in
+                (true, final_result)
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               let count = prior_fails + 1 in

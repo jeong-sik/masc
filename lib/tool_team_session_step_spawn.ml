@@ -317,7 +317,6 @@ let execute_spawn_pipeline
                           ~max_tokens:(Safe_ops.get_env_int_logged
                             "MASC_SPAWN_MAX_TOKENS" ~default:4096)
                           ~priority:Llm_provider.Request_priority.Interactive
-                          ?enable_thinking:prepared.spec.thinking_enabled
                           ?contract ?net:ctx.net ~sw:ctx.sw
                           ()
                     in

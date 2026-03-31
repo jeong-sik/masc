@@ -34,6 +34,7 @@
    cp_paths
    cp_serde
    cp_io
+   cp_tree_index
    cp_unit
    cp_unit_projection
    cp_snapshot

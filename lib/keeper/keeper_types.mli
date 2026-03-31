@@ -176,7 +176,7 @@ val keeper_names : Room.config -> string list
 val keepalive_keeper_names : Room.config -> string list
 val persistent_agent_names : Room.config -> string list
 val fresher_meta : Room.config -> keeper_meta -> keeper_meta
-val write_meta : Room.config -> keeper_meta -> (unit, string) result
+val write_meta : ?force:bool -> Room.config -> keeper_meta -> (unit, string) result
 val read_meta : Room.config -> string -> (keeper_meta option, string) result
 
 (** {1 Re-exports from Keeper_types_support} *)

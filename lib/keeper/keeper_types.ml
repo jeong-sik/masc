@@ -768,8 +768,8 @@ let fresher_meta config (meta : keeper_meta) : keeper_meta =
       if existing_ts > incoming_ts then existing else meta
   | Ok None | Error _ -> meta
 
-let write_meta config (m : keeper_meta) : (unit, string) result =
-  let persisted = fresher_meta config m in
+let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result =
+  let persisted = if force then m else fresher_meta config m in
   let path = keeper_meta_path config persisted.name in
   let json = meta_to_json persisted in
   try

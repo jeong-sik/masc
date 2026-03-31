@@ -54,5 +54,8 @@ val run_argv_with_stdin_and_status :
     Uses spawn + await to get exit status without raising.
     @param timeout_sec Timeout in seconds (default: 60.0)
     @param env Optional environment (Unix-style ["K=V"; ...]).
+    @param cwd Override working directory for the spawned process.
+           Absolute paths replace the default cwd; relative paths append to it.
+           Ignored when falling back to Unix process execution.
     @since 2.45.0 *)
-val run_argv_with_status : ?timeout_sec:float -> ?env:string array -> string list -> (Unix.process_status * string)
+val run_argv_with_status : ?timeout_sec:float -> ?env:string array -> ?cwd:string -> string list -> (Unix.process_status * string)

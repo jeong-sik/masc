@@ -286,20 +286,24 @@ let run_argv_with_stdin_and_status
                 (Printexc.to_string exn);
               (Unix.WEXITED 1, ""))
 
-let run_argv_with_status ?(timeout_sec = 60.0) ?env (argv : string list) : Unix.process_status * string =
+let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) : Unix.process_status * string =
   if not (is_initialized ()) then run_unix_argv_with_status_fallback ?env argv
   else
     match get_proc_mgr (), get_clock (), get_cwd_default () with
     | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
         run_unix_argv_with_status_fallback ?env argv
-    | Ok pm, Ok clk, Ok cwd ->
+    | Ok pm, Ok clk, Ok default_cwd ->
+        let effective_cwd = match cwd with
+          | None -> default_cwd
+          | Some dir -> Eio.Path.(default_cwd / dir)
+        in
         let buf = Buffer.create 1024 in
         let label = String.concat " " (List.map Filename.quote argv) in
         try
           Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
               Eio.Switch.run (fun sw ->
                   let proc =
-                    Eio.Process.spawn ~sw pm ~cwd ?env
+                    Eio.Process.spawn ~sw pm ~cwd:effective_cwd ?env
                       ~stdout:(Eio.Flow.buffer_sink buf)
                       argv
                   in

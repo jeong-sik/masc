@@ -202,9 +202,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_websocket_discovery", readonly_tool);
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
-    ( "masc_run_get",
-      readonly_tool );
-    ("masc_run_list", readonly_tool);
+    (* masc_run_get, masc_run_list: migrated to Tool_spec.register (tool_run.ml) *)
     ("masc_execute_dry_run", readonly_tool);
     ( "masc_admin_cleanup",
       with_semantic_flags ~destructive:true
@@ -242,6 +240,16 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operation_pause",
       { default_metadata with destructive = Some false } );
   ]
+
+(* ================================================================ *)
+(* Runtime metadata table (O(1) lookup, seeded from explicit list)  *)
+(* ================================================================ *)
+
+let metadata_table : (string, metadata) Hashtbl.t = Hashtbl.create 256
+let () = List.iter (fun (n, m) -> Hashtbl.replace metadata_table n m) explicit_metadata
+
+let register_metadata name (meta : metadata) =
+  Hashtbl.replace metadata_table name meta
 
 (* ================================================================ *)
 (* Public MCP surface (legacy list, kept for backward compat)       *)
@@ -335,7 +343,7 @@ let implementation_allows_public_visibility = function
   | Simulation | Placeholder -> false
 
 let metadata name =
-  match List.assoc_opt name explicit_metadata with
+  match Hashtbl.find_opt metadata_table name with
   | Some meta -> meta
   | None ->
     if is_public_mcp name then default_metadata

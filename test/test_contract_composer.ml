@@ -93,12 +93,12 @@ let test_keeper_bridge_compose_workspace () =
   let rc = CB.of_keeper_meta meta in
   let criteria = rc.eval_criteria in
   let open Yojson.Safe.Util in
-  check string "local -> draft" "draft"
+  check string "local -> execute" "execute"
     (EM.to_string rc.runtime_constraints.requested_execution_mode);
   check string "local -> medium" "medium"
     (Agent_sdk.Risk_class.to_string rc.runtime_constraints.risk_class);
-  check (list string) "workspace allowed mutations"
-    [ "workspace_only" ] rc.runtime_constraints.allowed_mutations;
+  check (list string) "workspace bridge leaves mutation gating to keeper policy"
+    [] rc.runtime_constraints.allowed_mutations;
   check (option string) "keeper review_requirement is None"
     None rc.runtime_constraints.review_requirement;
   check string "keeper criteria name" "keeper-test"
@@ -117,8 +117,8 @@ let test_keeper_bridge_compose_read_only () =
     (EM.to_string rc.runtime_constraints.requested_execution_mode);
   check string "read_only -> low" "low"
     (Agent_sdk.Risk_class.to_string rc.runtime_constraints.risk_class);
-  check (list string) "read_only allowed mutations"
-    [] rc.runtime_constraints.allowed_mutations
+  check (list string) "read_only keeps workspace guard active"
+    [ "workspace_only" ] rc.runtime_constraints.allowed_mutations
 
 let test_keeper_bridge_compose_full_scope () =
   let meta =
@@ -140,8 +140,8 @@ let test_keeper_bridge_compose_allowed_paths_fallback () =
       ~allowed_paths:[ "/tmp/demo" ] ()
   in
   let rc = CB.of_keeper_meta meta in
-  check (list string) "allowed_paths fallback"
-    [ "workspace_only" ] rc.runtime_constraints.allowed_mutations
+  check (list string) "custom scope no longer injects workspace guard"
+    [] rc.runtime_constraints.allowed_mutations
 
 let () =
   Eio_main.run @@ fun _env ->

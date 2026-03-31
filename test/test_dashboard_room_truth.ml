@@ -264,6 +264,36 @@ let test_operator_digest_shape_matches_room_truth () =
         ) expected_keys;
       ))
 
+let test_room_truth_cached_snapshot_matches_http_projection_blocks () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      warm_execution_cache ();
+      Lib.Server_dashboard_http.warm_shell_cache state;
+      Eio.Switch.run (fun sw ->
+        let http_json =
+          Lib.Server_dashboard_http.dashboard_room_truth_http_json
+            ~state ~sw ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/room-truth")
+        in
+        let cached_snapshot =
+          match Lib.Server_dashboard_http.room_truth_snapshot_from_caches state with
+          | Some json -> json
+          | None -> fail "expected cached room-truth snapshot"
+        in
+        let open Yojson.Safe.Util in
+        let compare_block key =
+          check string (Printf.sprintf "%s block matches cached snapshot" key)
+            (Yojson.Safe.to_string (http_json |> member key))
+            (Yojson.Safe.to_string (cached_snapshot |> member key))
+        in
+        List.iter compare_block ["room"; "execution"; "command"; "operator"; "focus"];
+      ))
+
 let test_dashboard_room_truth_cold_cache_falls_back_to_partial_truth () =
   let dir = test_dir () in
   Fun.protect
@@ -309,6 +339,8 @@ let () =
           test_case "mixed runtimes keep counts aligned" `Quick
             test_dashboard_room_truth_mixed_runtime_counts;
           test_case "operator digest shape matches room-truth" `Quick test_operator_digest_shape_matches_room_truth;
+          test_case "cached snapshot matches HTTP projection blocks" `Quick
+            test_room_truth_cached_snapshot_matches_http_projection_blocks;
           test_case "expired execution warmup falls back to partial truth" `Quick
             test_dashboard_room_truth_cold_cache_falls_back_to_partial_truth;
         ] );

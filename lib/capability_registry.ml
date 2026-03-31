@@ -351,6 +351,7 @@ let surface_tool_schemas_from (public_tool_source_schemas : Types.tool_schema li
   match surface with
   | Public_mcp ->
       public_tool_source_schemas
+      |> Tool_help_registry.canonicalize_schemas
       |> List.filter (fun (schema : Types.tool_schema) ->
              Tool_catalog.is_public_mcp schema.name)
       |> dedupe_schemas

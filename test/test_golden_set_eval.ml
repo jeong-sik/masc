@@ -78,7 +78,6 @@ let bundle_of_golden_case (gc : GS.golden_case) : CL.loaded_bundle =
     result_status = Completed;
     started_at = 1000.0;
     ended_at = 1001.0;
-    scope = None;
   } in
   {
     proof;

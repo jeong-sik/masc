@@ -125,7 +125,8 @@ type stage_timing = {
   improve_ms : float;
 }
 
-let stage_timing_ring_size = Env_config.KeeperProactive.stage_timing_ring_size
+let stage_timing_ring_size () =
+  Runtime_params.get Governance_registry.keeper_stage_timing_ring_size
 
 let percentile arr p =
   let n = Array.length arr in
@@ -137,7 +138,7 @@ let percentile arr p =
     sorted.(min idx (n - 1))
 
 let stage_timing_to_json ~ring ~count =
-  let n = min count stage_timing_ring_size in
+  let n = min count (stage_timing_ring_size ()) in
   if n = 0 then `Null
   else
     let extract field =
@@ -161,11 +162,15 @@ let stage_timing_to_json ~ring ~count =
 let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
     (m : keeper_meta) (stop : bool Atomic.t) ~(wakeup : bool Atomic.t) : unit =
   let keepalive_started_ts = Time_compat.now () in
-  let snapshot_interval_sec = Env_config.KeeperRuntime.snapshot_sec in
+  let snapshot_interval_sec () =
+    Runtime_params.get Governance_registry.keeper_snapshot_sec in
   let last_snapshot_ts = ref 0.0 in
   let consecutive_failures = ref 0 in
-  (* Phase 0: per-stage timing ring buffer *)
-  let timing_ring = Array.make stage_timing_ring_size
+  (* Phase 0: per-stage timing ring buffer.
+     ring_size is read once at fiber start — mid-flight resize requires
+     ring buffer reallocation, so new values apply on next fiber restart. *)
+  let ring_sz = stage_timing_ring_size () in
+  let timing_ring = Array.make ring_sz
     { presence_ms = 0.0; snapshot_ms = 0.0; board_ms = 0.0;
       turn_ms = 0.0; recurring_ms = 0.0; improve_ms = 0.0 } in
   let timing_cursor = ref 0 in
@@ -173,10 +178,13 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
   (* Phase 1: work-as-heartbeat freshness tracking.
      Updated ONLY on Room.heartbeat_in_room success after turn. *)
   let last_successful_heartbeat_ts = ref 0.0 in
-  let work_as_hb = Env_config.WorkAsHeartbeat.enabled in
-  let max_silence = Env_config.WorkAsHeartbeat.max_silence_sec in
+  let work_as_hb () =
+    Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
+  let max_silence () =
+    Runtime_params.get Governance_registry.keeper_work_as_hb_max_silence_sec in
   (* Phase 2: smart heartbeat — adaptive scheduling via Heartbeat_smart *)
-  let smart_hb_enabled = Env_config.SmartHeartbeat.enabled in
+  let smart_hb_enabled () =
+    Runtime_params.get Governance_registry.keeper_smart_hb_enabled in
   let smart_hb_config = Heartbeat_smart.default_config in
   let last_heartbeat_cycle_ts = ref 0.0 in
   let rec loop () =
@@ -191,7 +199,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             in
             (* Phase 2: smart heartbeat — skip cycle when busy or deeply idle *)
             let smart_hb_decision =
-              if smart_hb_enabled then
+              if smart_hb_enabled () then
                 let agent_status =
                   if meta_current.paused then Types.Inactive
                   else match meta_current.current_task_id with
@@ -226,8 +234,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                last_heartbeat_cycle_ts := Time_compat.now ());
             (* Phase 1: skip presence sync when recent room heartbeat proves freshness *)
             let presence_fresh =
-              work_as_hb
-              && t_presence_start -. !last_successful_heartbeat_ts < max_silence
+              work_as_hb ()
+              && t_presence_start -. !last_successful_heartbeat_ts < max_silence ()
             in
             let meta_current =
               if presence_fresh then (
@@ -267,7 +275,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             let t_presence_end = Time_compat.now () in
             let now_ts = t_presence_end in
             let t_snapshot_start = now_ts in
-            if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
+            if now_ts -. !last_snapshot_ts >= float_of_int (snapshot_interval_sec ())
             then (
               (try
                  let metrics_store =
@@ -510,7 +518,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                After turn, call Room.heartbeat_in_room to prove room I/O health.
                On success: refresh freshness lease + reset consecutive_failures.
                On failure: leave timestamp unchanged → presence sync resumes next cycle. *)
-            (if work_as_hb && proactive_warmup_elapsed then
+            (if work_as_hb () && proactive_warmup_elapsed then
                let hb_ok = List.exists (fun room_id ->
                  try
                    ignore
@@ -559,7 +567,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             let t_recurring_end = Time_compat.now () in
             let t_improve_start = t_recurring_end in
             let base =
-              if smart_hb_enabled then
+              if smart_hb_enabled () then
                 Heartbeat_smart.effective_interval
                   ~config:smart_hb_config
                   ~last_activity:!last_successful_heartbeat_ts
@@ -588,8 +596,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               improve_ms = (t_improve_end -. t_improve_start) *. 1000.0;
             } in
             timing_ring.(!timing_cursor) <- timing;
-            timing_cursor := (!timing_cursor + 1) mod stage_timing_ring_size;
-            if !timing_filled < stage_timing_ring_size then incr timing_filled;
+            timing_cursor := (!timing_cursor + 1) mod ring_sz;
+            if !timing_filled < ring_sz then incr timing_filled;
             let jitter = base *. Env_config.KeeperKeepalive.jitter_factor *. Random.float 1.0 in
             interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
             if Atomic.get stop then ()

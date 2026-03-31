@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals'
 import { navigate } from '../router'
 import { missionSnapshot } from '../mission-store'
-import { keepers } from '../store'
+import { findKeeper } from '../lib/keeper-utils'
 import type {
   Agent,
   DashboardMissionAttentionQueueItem,
@@ -159,7 +159,7 @@ export function attentionAsIncident(item: DashboardMissionAttentionQueueItem): O
 
 export function enrichedKeeperRow(brief: DashboardMissionKeeperBrief): EnrichedKeeperRow {
   const keeper =
-    keepers.value.find(item => item.name === brief.name || item.agent_name === brief.agent_name) ?? null
+    findKeeper(brief.name) ?? findKeeper(brief.agent_name)
   return {
     brief,
     keeper,

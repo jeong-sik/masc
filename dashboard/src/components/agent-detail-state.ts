@@ -6,9 +6,9 @@ import {
   agents,
   executionContinuityBriefs,
   executionWorkerSupportBriefs,
-  keepers,
   tasks,
 } from '../store'
+import { findKeeper } from '../lib/keeper-utils'
 import { currentDashboardActor, fetchRoomMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineResponse } from '../api'
 import { callMcpTool } from '../api/mcp'
 import { journal } from '../sse'
@@ -19,7 +19,6 @@ import type {
   Agent,
   DashboardExecutionContinuityBrief,
   DashboardMissionAgentBrief,
-  Keeper,
   Task,
 } from '../types'
 
@@ -63,10 +62,7 @@ export function assignedTasks(agentName: string | null): Task[] {
   return tasks.value.filter(t => t.assignee === agentName)
 }
 
-export function keeperForAgent(agentName: string | null): Keeper | null {
-  if (!agentName) return null
-  return keepers.value.find(keeper => keeper.agent_name === agentName || keeper.name === agentName) ?? null
-}
+export const keeperForAgent = findKeeper
 
 export function missionAgentBrief(agentName: string | null): DashboardMissionAgentBrief | null {
   if (!agentName) return null

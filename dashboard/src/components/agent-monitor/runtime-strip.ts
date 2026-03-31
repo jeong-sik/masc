@@ -4,15 +4,8 @@
 
 import { html } from 'htm/preact'
 import { PipelineStageBadge } from '../keeper-pipeline-stage'
-import { keepers } from '../../store'
+import { findKeeper } from '../../lib/keeper-utils'
 import { formatDuration } from '../mission-utils'
-import type { Keeper } from '../../types'
-
-function findKeeper(name: string): Keeper | null {
-  return keepers.value.find(
-    k => k.agent_name === name || k.name === name,
-  ) ?? null
-}
 
 function ctxBarClass(ratio: number | null | undefined): string {
   if (ratio == null) return ''

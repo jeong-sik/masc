@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
+import { isOfflineStatus } from '../lib/status-utils'
 import type { Keeper, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -387,7 +388,7 @@ export function KeeperRuntimeActions({
   const shuttingDown = keeperShuttingDown.value[keeper.name] ?? false
   const recommended = diagnostic?.next_action_path ?? null
   const canRecover = diagnostic?.recoverable === true
-  const isOffline = keeper.status === 'offline' || keeper.status === 'inactive'
+  const isOffline = isOfflineStatus(keeper.status)
   const isRunning = keeper.status === 'active' || keeper.status === 'running' || keeper.status === 'idle' || keeper.status === 'watching' || keeper.status === 'listening'
 
   const btnBase = 'py-1.5 px-4 rounded-lg text-xs font-medium cursor-pointer transition-colors border'

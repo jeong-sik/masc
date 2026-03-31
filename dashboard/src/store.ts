@@ -3,6 +3,7 @@
 // subscribing components re-render automatically.
 
 import { signal, computed, type ReadonlySignal } from '@preact/signals'
+import { isOfflineStatus } from './lib/status-utils'
 import type {
   Agent,
   Task,
@@ -240,7 +241,7 @@ export const keeperLifecycles: ReadonlySignal<Map<string, KeeperLifecycleState>>
   const map = new Map<string, KeeperLifecycleState>()
   for (const k of keepers.value) {
     const status = k.status?.toLowerCase() ?? ''
-    if (status === 'offline' || status === 'inactive') {
+    if (isOfflineStatus(status)) {
       map.set(k.name, 'offline')
       continue
     }

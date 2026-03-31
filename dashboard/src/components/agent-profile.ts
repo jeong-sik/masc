@@ -14,13 +14,14 @@ import { EmptyState } from './common/empty-state'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { StatGrid } from './common/stat-tile'
-import { autonomyHint, formatTokens } from './keeper-detail-panels'
+import { formatTokens } from '../lib/format-number'
+import { findKeeper } from '../lib/keeper-utils'
+import { autonomyHint } from './keeper-detail-panels'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
   agents,
   executionContinuityBriefs,
   executionWorkerSupportBriefs,
-  keepers,
   tasks,
 } from '../store'
 import {
@@ -69,12 +70,6 @@ function findAgent(name: string): Agent | null {
 
 function assignedTasks(name: string): Task[] {
   return tasks.value.filter(t => t.assignee === name)
-}
-
-function findKeeper(name: string): Keeper | null {
-  return keepers.value.find(
-    k => k.agent_name === name || k.name === name,
-  ) ?? null
 }
 
 export function keeperChatTargetName(

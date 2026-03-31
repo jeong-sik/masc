@@ -4,6 +4,7 @@ import type {
   KeeperMetricPoint,
 } from './types'
 import { isRecord, asString, asNumber, asStringArray, toIsoTimestamp } from './components/common/normalize'
+import { isOfflineStatus } from './lib/status-utils'
 
 function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
   const raw = typeof value === 'string' ? value.toLowerCase() : ''
@@ -24,7 +25,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
 
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   const status = keeper.status?.toLowerCase() ?? ''
-  if (status === 'offline' || status === 'inactive') return 'offline'
+  if (isOfflineStatus(status)) return 'offline'
 
   const series = keeper.metrics_series
   if (!series || series.length === 0) {

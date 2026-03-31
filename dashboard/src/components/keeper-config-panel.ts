@@ -7,7 +7,7 @@ import { signal } from '@preact/signals'
 import { fetchKeeperConfig, patchKeeperConfig } from '../api/dashboard'
 import type { KeeperConfigUpdatePayload } from '../api/dashboard'
 import type { KeeperConfig } from '../types'
-import { formatTokens } from './keeper-detail-panels'
+import { formatTokens } from '../lib/format-number'
 import { showToast } from './common/toast'
 import { createAsyncResource, loaded } from '../lib/async-state'
 

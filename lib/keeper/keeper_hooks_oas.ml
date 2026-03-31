@@ -288,3 +288,71 @@ let make_hooks
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
   }
+
+(** Static introspection of hook slot configuration.
+    Returns a JSON summary of which hook slots are active, their gates/effects,
+    and the deny list. Used by the dashboard to display hook status. *)
+let hook_introspection_json
+    ?(max_cost_usd : float option)
+    ?(destructive_check : bool = true)
+    ()
+  : Yojson.Safe.t =
+  let denied_json =
+    `List (List.map (fun s -> `String s) keeper_denied_tools)
+  in
+  let destructive_json =
+    `List (List.map (fun s -> `String s) destructive_check_tools)
+  in
+  `Assoc [
+    ("slots", `Assoc [
+      ("before_turn_params", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_agent_run");
+        ("features", `List [
+          `String "dynamic_context";
+          `String "bm25_progressive_disclosure";
+        ]);
+      ]);
+      ("pre_tool_use", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_hooks_oas");
+        ("gates", `List [
+          `String "keeper_deny_list";
+          `String (if Option.is_some max_cost_usd
+                   then "cost_budget" else "cost_budget_off");
+          `String (if destructive_check
+                   then "destructive_pattern" else "destructive_pattern_off");
+        ]);
+      ]);
+      ("after_turn", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_hooks_oas");
+        ("effects", `List [
+          `String "sse_broadcast";
+          `String "cost_event";
+          `String "metrics";
+        ]);
+      ]);
+      ("post_tool_use", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_hooks_oas");
+        ("features", `List [
+          `String "tool_callback";
+          `String "board_write_detection";
+        ]);
+      ]);
+      ("on_idle", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_hooks_oas");
+      ]);
+    ]);
+    ("deny_list", denied_json);
+    ("deny_list_count", `Int (List.length keeper_denied_tools));
+    ("destructive_check_tools", destructive_json);
+    ("cost_budget",
+      match max_cost_usd with
+      | Some v ->
+        `Assoc [("max_cost_usd", `Float v); ("active", `Bool true)]
+      | None ->
+        `Assoc [("active", `Bool false)]);
+  ]

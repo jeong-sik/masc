@@ -3,6 +3,8 @@
 // clean tool chip badges, proper section spacing.
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { TimeAgo } from './common/time-ago'
 import { missionSnapshot } from '../mission-store'
 import { formatPct } from '../lib/format-number'
@@ -18,6 +20,10 @@ import {
   openToolsInventory,
   toolAuditStateLabel,
 } from './common/tool-audit'
+import { ToolAllowlistEditor } from './tools/tool-allowlist-editor'
+import { toolsData, loadTools } from './tools/tool-state'
+
+const showAllowlistEditor = signal(false)
 
 // ── Utility functions ────────────────────────────────────
 
@@ -81,7 +87,11 @@ function SignalRow({ label, value }: { label: string; value: string | number }) 
 
 function ToolChip({ name }: { name: string }) {
   return html`
-    <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${name}</span>
+    <button type="button"
+      class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)] hover:bg-[rgba(71,184,255,0.18)] cursor-pointer transition-colors"
+      title="클릭하여 도구 상세 보기"
+      onClick=${() => openToolsInventory(name)}
+    >${name}</button>
   `
 }
 
@@ -142,6 +152,8 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
 // ── Neighborhood & Tool Audit ────────────────────────────
 
 export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
+  useEffect(() => { showAllowlistEditor.value = false }, [keeper.name])
+
   const room = operatorSnapshot.value?.room ?? {}
   const actions = (operatorSnapshot.value?.available_actions ?? [])
     .filter(action => action.target_type === 'keeper' || action.target_type === 'room')
@@ -199,12 +211,32 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         </button>
       </div>
 
-      <${ToolSection}
-        title="허용된 도구"
-        description="이 키퍼 런타임에 현재 허용된 도구."
-        tools=${allowedTools}
-        fallback=${allowlistFallback}
-      />
+      <div class="flex items-center justify-between mt-3">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">허용된 도구</span>
+        <button type="button"
+          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+          onClick=${() => {
+            showAllowlistEditor.value = !showAllowlistEditor.value
+            if (showAllowlistEditor.value && !toolsData.value) loadTools()
+          }}
+        >${showAllowlistEditor.value ? '닫기' : '편집'}</button>
+      </div>
+
+      ${showAllowlistEditor.value
+        ? html`<${ToolAllowlistEditor}
+            keeperName=${keeper.name}
+            currentAllowlist=${allowedTools}
+            allToolNames=${(toolsData.value?.tool_inventory?.tools ?? []).map((t: { name: string }) => t.name)}
+            onUpdated=${() => { showAllowlistEditor.value = false; loadTools() }}
+          />`
+        : html`
+          <span class="text-[11px] text-[var(--text-muted)] leading-snug">이 키퍼 런타임에 현재 허용된 도구.</span>
+          <div class="flex flex-wrap gap-1.5">
+            ${allowedTools.length > 0
+              ? allowedTools.map((tool: string) => html`<${ToolChip} name=${tool} />`)
+              : html`<span class="text-[11px] text-[var(--text-muted)] italic">${allowlistFallback}</span>`}
+          </div>
+        `}
 
       <${ToolSection}
         title="관측된 도구"

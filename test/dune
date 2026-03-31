@@ -168,6 +168,7 @@
         test_masc_log
         test_dashboard_room_truth
         test_server_runtime_bootstrap
+        test_server_base_path_diagnostics
         test_server_startup_takeover
         test_worker_runtime
         test_capability_registry
@@ -312,6 +313,7 @@
         test_masc_log
         test_dashboard_room_truth
         test_server_runtime_bootstrap
+        test_server_base_path_diagnostics
         test_server_startup_takeover
         test_worker_runtime
         test_capability_registry

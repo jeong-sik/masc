@@ -241,6 +241,7 @@ let run_turn
     "keeper_board_comment", "게시판 댓글 답글 코멘트";
     "keeper_board_vote", "게시판 투표 추천 반대";
     "keeper_fs_read", "파일 읽기 소스코드 설정";
+    "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성";
     "keeper_shell_readonly", "명령어 조회 검색 탐색";
     "keeper_bash", "명령어 실행 쉘 빌드 테스트";
     "keeper_github", "깃허브 이슈 풀리퀘스트 PR CI";

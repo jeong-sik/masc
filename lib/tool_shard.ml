@@ -182,6 +182,21 @@ For searching across files, use keeper_shell_readonly with op=rg instead.";
       ("required", `List [`String "path"]);
     ];
   };
+  {
+    name = "keeper_fs_edit";
+    description = "Write or append to a file in the project. Use to create new files or update \
+existing ones. For small targeted edits prefer this over keeper_bash with echo/cat. \
+Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path to write")]);
+        ("content", `Assoc [("type", `String "string"); ("description", `String "File content to write")]);
+        ("mode", `Assoc [("type", `String "string"); ("description", `String "Write mode: 'overwrite' (default) or 'append'")]);
+      ]);
+      ("required", `List [`String "path"; `String "content"]);
+    ];
+  };
 ]
 
 let shell_tools : Types.tool_schema list = [
@@ -439,7 +454,7 @@ let shard_filesystem : shard = {
   name = "filesystem";
   tools = filesystem_tools;
   removable = true;
-  description = "File I/O: read only";
+  description = "File I/O: read and write";
 }
 
 let shard_shell : shard = {

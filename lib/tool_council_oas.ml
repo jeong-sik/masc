@@ -302,7 +302,7 @@ let voting_result_of_args args =
            "invalid result %S (expected unanimous, majority, deadlock, or escalate)"
            value)
 
-let handle_execute _ctx args =
+let handle_execute ctx args =
   let topic = get_string args "topic" "" in
   if topic = "" then json_err "topic is required"
   else
@@ -317,6 +317,19 @@ let handle_execute _ctx args =
           | Some exec -> exec.success
           | None -> false
         in
+        (* Track executor decision in telemetry *)
+        (match ctx.room_config, outcome with
+         | Some config, Some exec ->
+           let tool_name = Printf.sprintf "executor:%s" topic in
+           (try Telemetry_eio.track_tool_called config
+             ~tool_name ~success:exec.success ~duration_ms:0
+             ~source:"council" ()
+           with _ -> ());
+           if not exec.success then
+             (try Telemetry_eio.track_error config
+               ~code:"executor_failed" ~message:exec.output ~context:topic
+             with _ -> ())
+         | _ -> ());
         let output =
           match outcome with
           | Some exec when String.trim exec.output <> "" -> exec.output

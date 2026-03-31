@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { TagBadge } from './common/tag-badge'
@@ -6,26 +7,250 @@ import { ActionBar, ActionBtn } from './common/action-bar'
 import { ProvenanceStrip } from './common/provenance-strip'
 import { StatusChip } from './common/status-chip'
 import {
+  missionSnapshot,
   missionBriefing,
   missionBriefingError,
   missionBriefingLoading,
   refreshMissionBriefing,
 } from '../mission-store'
-import { missionTargetTypeLabel, relativeTime, signalClassLabel, statusLabel, toneClass } from './mission-utils'
+import { keepers } from '../store'
+import { operatorSnapshot, refreshOperatorSnapshot } from '../operator-store'
+import { navigate } from '../router'
+import {
+  missionTargetTypeLabel,
+  relativeTime,
+  signalClassLabel,
+  statusLabel,
+  toneClass,
+  trimText,
+} from './mission-utils'
+import {
+  missionInterveneParams,
+  persistWorkflowContext,
+} from '../workflow-context'
+import type { DashboardWorkflowContext } from '../workflow-context'
+import type {
+  DashboardMissionBriefingResponse,
+  DashboardMissionResponse,
+  Keeper,
+  OperatorSnapshot,
+} from '../types'
+
+export interface LiveJudgeTarget {
+  name: string
+  model: string | null
+  source: 'judge_runtime' | 'keeper'
+  online: boolean
+}
+
+function normalizeKeeperStatus(value?: string | null): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function isUnavailableKeeperStatus(status?: string | null): boolean {
+  const normalized = normalizeKeeperStatus(status)
+  return normalized === 'offline'
+    || normalized === 'inactive'
+    || normalized === 'dead'
+    || normalized === 'crashed'
+    || normalized === 'error'
+}
+
+function isPreferredKeeperStatus(status?: string | null): boolean {
+  const normalized = normalizeKeeperStatus(status)
+  return normalized === 'active'
+    || normalized === 'running'
+    || normalized === 'online'
+    || normalized === 'healthy'
+}
+
+function keeperModelLabel(item?: {
+  last_model_used?: string | null
+  active_model?: string | null
+  primary_model?: string | null
+  model?: string | null
+} | null): string | null {
+  if (!item) return null
+  return item.last_model_used ?? item.active_model ?? item.primary_model ?? item.model ?? null
+}
+
+function preferredKeeper(
+  snapshotKeepers: Array<{
+    name?: string | null
+    model?: string | null
+    last_model_used?: string | null
+    active_model?: string | null
+    primary_model?: string | null
+    status?: string | null
+  }>,
+  fallbackKeepers: Keeper[],
+): { name: string, model: string | null, online: boolean } | null {
+  const snapshotCandidates = snapshotKeepers
+    .filter(item => item.name && !isUnavailableKeeperStatus(item.status))
+    .sort((left, right) => Number(isPreferredKeeperStatus(right.status)) - Number(isPreferredKeeperStatus(left.status)))
+  const firstSnapshot = snapshotCandidates[0]
+  if (firstSnapshot?.name) {
+    return {
+      name: firstSnapshot.name,
+      model: keeperModelLabel(firstSnapshot),
+      online: isPreferredKeeperStatus(firstSnapshot.status) || !isUnavailableKeeperStatus(firstSnapshot.status),
+    }
+  }
+  const fallback = fallbackKeepers
+    .filter(item => !isUnavailableKeeperStatus(item.status))
+    .sort((left, right) => Number(isPreferredKeeperStatus(right.status)) - Number(isPreferredKeeperStatus(left.status)))[0]
+  if (!fallback) return null
+  return {
+    name: fallback.name,
+    model: keeperModelLabel(fallback),
+    online: isPreferredKeeperStatus(fallback.status) || !isUnavailableKeeperStatus(fallback.status),
+  }
+}
+
+export function resolveLiveJudgeTarget(
+  snapshot: OperatorSnapshot | null | undefined,
+  fallbackKeepers: Keeper[],
+): LiveJudgeTarget | null {
+  const runtime = snapshot?.operator_judge_runtime
+  const runtimeKeeperName = runtime?.keeper_name?.trim()
+  if (runtimeKeeperName) {
+    const matchedKeeper =
+      snapshot?.keepers?.find(item => item.name === runtimeKeeperName)
+      ?? fallbackKeepers.find(item => item.name === runtimeKeeperName)
+      ?? null
+    return {
+      name: runtimeKeeperName,
+      model: runtime?.model_used ?? keeperModelLabel(matchedKeeper),
+      source: 'judge_runtime',
+      online:
+        runtime?.judge_online === true
+        || (matchedKeeper != null && isPreferredKeeperStatus(matchedKeeper.status)),
+    }
+  }
+  const keeper = preferredKeeper(snapshot?.keepers ?? [], fallbackKeepers)
+  if (!keeper) return null
+  return {
+    name: keeper.name,
+    model: keeper.model,
+    source: 'keeper',
+    online: keeper.online,
+  }
+}
+
+export function buildLiveJudgeSituationReport({
+  mission,
+  briefing,
+  target,
+}: {
+  mission: DashboardMissionResponse | null | undefined
+  briefing: DashboardMissionBriefingResponse | null | undefined
+  target: LiveJudgeTarget
+}): string {
+  const room = mission?.summary.current_room ?? 'default'
+  const roomHealth = mission?.summary.room_health ?? 'unknown'
+  const sessionCount = mission?.sessions.length ?? 0
+  const attentionCount = mission?.attention_queue.length ?? 0
+  const blockerCount = mission?.sessions.filter(item => Boolean(item.blocker_summary)).length ?? 0
+  const metadataGapCount = briefing?.metadata_gap_count ?? briefing?.metadata_gaps.length ?? 0
+  const sectionSummaries = briefing?.sections.slice(0, 3).map(section =>
+    `${section.label}: ${trimText(section.summary, 140) ?? section.summary}`,
+  ) ?? []
+  const lines = [
+    `[상황 보고] ${target.name}${target.model ? ` · ${target.model}` : ''}`,
+    `- room: ${room}`,
+    `- room_health: ${roomHealth}`,
+    `- sessions: ${sessionCount}, attention: ${attentionCount}, blockers: ${blockerCount}`,
+    briefing?.summary ? `- deterministic_briefing: ${trimText(briefing.summary, 180) ?? briefing.summary}` : null,
+    sectionSummaries.length > 0 ? `- section_highlights: ${sectionSummaries.join(' / ')}` : null,
+    metadataGapCount > 0 ? `- metadata_gaps: ${metadataGapCount}` : null,
+    '이 브리핑은 dashboard 렌더링용 deterministic 요약입니다. 위 사실 기준으로 live 판단을 해 주세요.',
+    '답변 형식: 1) 지금 위험 1-3개 2) 바로 필요한 조치 3) 놓친 관측 공백',
+  ]
+  return lines.filter((line): line is string => Boolean(line && line.trim() !== '')).join('\n')
+}
+
+function createLiveJudgeWorkflowContext(
+  target: LiveJudgeTarget,
+  mission: DashboardMissionResponse | null | undefined,
+  briefing: DashboardMissionBriefingResponse | null | undefined,
+): DashboardWorkflowContext {
+  const createdAt = new Date().toISOString()
+  const message = buildLiveJudgeSituationReport({ mission, briefing, target })
+  const metadataGapCount = briefing?.metadata_gap_count ?? briefing?.metadata_gaps.length ?? 0
+  return {
+    id: ['mission', 'live_judge', target.name, createdAt].join(':'),
+    source_surface: 'mission',
+    source_label: '실제 판단 에이전트 보고',
+    action_type: 'keeper_message',
+    target_type: 'keeper',
+    target_id: target.name,
+    focus_kind: 'live_judgment',
+    operation_id: null,
+    summary: `${target.name}에게 상황판 요약을 보내 live 판단을 받습니다.`,
+    payload_preview: `room ${mission?.summary.current_room ?? 'default'} · attention ${mission?.attention_queue.length ?? 0} · gaps ${metadataGapCount}`,
+    suggested_payload: { message },
+    preview: {
+      keeper_name: target.name,
+      model: target.model,
+      report_type: 'live_judgment',
+    },
+    evidence: {
+      briefing_status: briefing?.status ?? null,
+      metadata_gap_count: metadataGapCount,
+      generated_at: briefing?.generated_at ?? null,
+    },
+    created_at: createdAt,
+  }
+}
 
 export function MissionBriefingCard() {
+  const mission = missionSnapshot.value
   const briefing = missionBriefing.value
+  const liveJudge = resolveLiveJudgeTarget(operatorSnapshot.value, keepers.value)
+  const liveJudgeTone = toneClass(liveJudge?.online ? 'ok' : 'warn')
+  const liveJudgeReport =
+    mission && liveJudge
+      ? buildLiveJudgeSituationReport({ mission, briefing, target: liveJudge })
+      : null
   const briefingTone = toneClass(briefing?.status ?? (missionBriefingError.value ? 'bad' : 'warn'))
   const showEmpty = !briefing || briefing.sections.length === 0
   const retryNeedsForce =
     briefing?.status === 'error'
     || (briefing?.status === 'unavailable' && !briefing?.cached)
 
+  useEffect(() => {
+    if (!briefing && !missionBriefingLoading.value && !missionBriefingError.value) {
+      void refreshMissionBriefing()
+    }
+  }, [briefing, missionBriefingLoading.value, missionBriefingError.value])
+
+  useEffect(() => {
+    if (!operatorSnapshot.value) {
+      void refreshOperatorSnapshot({ force: true })
+    }
+  }, [])
+
+  const openLiveJudgeIntervene = () => {
+    if (!liveJudge) return
+    const context = createLiveJudgeWorkflowContext(liveJudge, mission, briefing)
+    persistWorkflowContext(context)
+    navigate('command', {
+      section: 'intervene',
+      ...missionInterveneParams(context),
+    })
+  }
+
   return html`
     <${Card} title="판단 레이어" class="mission-briefing-card rounded-xl">
       <div class="grid gap-1.5 mb-4">
         <h3>왜 그렇게 보이나</h3>
         <p>사회 truth를 읽은 뒤에만 별도 판단 결과를 참고하고, 근거는 접어서 둡니다.</p>
+        <p class="text-[12px] text-[var(--text-muted)] leading-[1.5]">
+          이 카드는 화면용 deterministic 브리핑입니다.
+          ${liveJudge
+            ? html`실제 판단은 <strong class="text-[var(--text-strong)]">${liveJudge.name}</strong>에게 별도 상황 보고를 보내서 받아야 합니다.`
+            : '실제 판단 대상 keeper를 아직 찾지 못했습니다.'}
+        </p>
         <${ProvenanceStrip}
           items=${[
             { kind: 'narrative' },
@@ -42,6 +267,42 @@ export function MissionBriefingCard() {
         ${briefing?.stale ? html`<${StatusChip} label="오래됨" tone="warn" />` : null}
         ${briefing?.refreshing ? html`<${StatusChip} label="갱신 중" tone="warn" />` : null}
       </div>
+
+      ${liveJudge
+        ? html`
+            <section class="grid gap-2 mb-4 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] p-4">
+              <div class="flex items-center justify-between gap-3 flex-wrap">
+                <strong class="text-[var(--text-strong)]">실제 판단 대상</strong>
+                <div class="flex gap-2 flex-wrap">
+                  <${StatusChip}
+                    label=${liveJudge.source === 'judge_runtime' ? 'judge runtime' : 'live keeper'}
+                    tone=${liveJudgeTone}
+                  />
+                  <${StatusChip}
+                    label=${liveJudge.online ? '온라인' : '확인 필요'}
+                    tone=${liveJudgeTone}
+                  />
+                  ${liveJudge.model ? html`<${StatusChip} label=${liveJudge.model} />` : null}
+                </div>
+              </div>
+              <p class="m-0 text-[13px] text-[var(--text-body)] leading-[1.55]">
+                ${liveJudge.name}에게 현재 상황 요약을 보낸 뒤, rendering용 브리핑과 다른 live 판단이 있는지 확인할 수 있습니다.
+              </p>
+              ${liveJudgeReport
+                ? html`
+                    <details class="pt-1">
+                      <summary>보고 프리뷰</summary>
+                      <pre class="m-0 mt-3 whitespace-pre-wrap rounded-lg border border-[var(--white-6)] bg-[var(--white-2)] p-3 text-[12px] leading-[1.55] text-[var(--text-muted)]">${liveJudgeReport}</pre>
+                    </details>
+                  `
+                : null}
+            </section>
+          `
+        : html`
+            <div class="mb-4">
+              <${EmptyState} message="실제 판단 대상 keeper를 아직 찾지 못했습니다. room-truth와 operator snapshot이 들어오면 상황 보고 버튼이 활성화됩니다." compact />
+            </div>
+          `}
 
       ${missionBriefingError.value ? html`<${EmptyState} message=${missionBriefingError.value} compact />` : null}
       ${briefing?.error ? html`<${EmptyState} message=${briefing.error} compact />` : null}
@@ -108,6 +369,11 @@ export function MissionBriefingCard() {
         : null}
 
       <${ActionBar}>
+        <${ActionBtn}
+          label=${liveJudge ? '실제 판단 요청 열기' : '실제 판단 대상 없음'}
+          onClick=${openLiveJudgeIntervene}
+          disabled=${!liveJudge}
+        />
         <${ActionBtn}
           label=${missionBriefingLoading.value ? '응답 기다리는 중…' : '판단 다시 읽기'}
           onClick=${() => { void refreshMissionBriefing(retryNeedsForce) }}

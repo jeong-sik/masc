@@ -32,6 +32,7 @@ import {
   SessionDetailCard,
   KeeperBriefCard,
   InternalSignalCard,
+  MissionBriefingCard,
 } from './mission-cards'
 import { ProvenanceStrip } from './common/provenance-strip'
 import { CollaborationEvidencePanel } from './collaboration-evidence'
@@ -220,6 +221,8 @@ export function Mission() {
         sessionId=${activeSessionId}
         roomId=${focusSession?.room ?? mission.summary.current_room ?? null}
       />
+
+      <${MissionBriefingCard} />
 
       ${hiddenSectionLabels.length > 0
         ? html`

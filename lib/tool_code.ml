@@ -61,16 +61,18 @@ let lexically_normalize_path path =
   | true, _ -> "/" ^ normalized
   | false, _ -> normalized
 
+let rec resolve_longest_existing path =
+  if Sys.file_exists path then Unix.realpath path
+  else
+    let parent = Filename.dirname path in
+    let base = Filename.basename path in
+    if parent = path then path
+    else Filename.concat (resolve_longest_existing parent) base
+
 let normalize_path_for_check path =
   let normalized =
     try Unix.realpath path
-    with Unix.Unix_error _ ->
-      let parent = Filename.dirname path in
-      let parent_norm =
-        try Unix.realpath parent
-        with Unix.Unix_error _ -> parent
-      in
-      Filename.concat parent_norm (Filename.basename path)
+    with Unix.Unix_error _ -> resolve_longest_existing path
   in
   lexically_normalize_path normalized
 

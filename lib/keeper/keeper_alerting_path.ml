@@ -8,15 +8,17 @@ let starts_with ~(prefix : string) (s : string) : bool =
   let lp = String.length prefix in
   String.length s >= lp && String.sub s 0 lp = prefix
 
+let rec resolve_longest_existing (path : string) : string =
+  if Sys.file_exists path then Unix.realpath path
+  else
+    let parent = Filename.dirname path in
+    let base = Filename.basename path in
+    if parent = path then path
+    else Filename.concat (resolve_longest_existing parent) base
+
 let normalize_path_for_check (path : string) : string =
   try Unix.realpath path
-  with Unix.Unix_error _ ->
-    let parent = Filename.dirname path in
-    let parent_norm =
-      try Unix.realpath parent
-      with Unix.Unix_error _ -> parent
-    in
-    Filename.concat parent_norm (Filename.basename path)
+  with Unix.Unix_error _ -> resolve_longest_existing path
 
 let resolve_keeper_target_path ~(config : Room.config)
     ~(allowed_paths : string list) ~(raw_path : string)

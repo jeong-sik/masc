@@ -17,15 +17,15 @@
 ### Critical: code tool path validation is prefix-only and escapes repository boundaries
 
 - Code basis:
-  - [lib/tool_code.ml](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-boundaries-20260331/lib/tool_code.ml#L44)
-  - [lib/tool_code_write.ml](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-boundaries-20260331/lib/tool_code_write.ml#L25)
+  - [lib/tool_code.ml](lib/tool_code.ml#L44)
+  - [lib/tool_code_write.ml](lib/tool_code_write.ml#L25)
 - Why it fails:
   - `validate_path` concatenates raw input and accepts it when `String.starts_with ~prefix:git_root absolute_path`.
   - No `realpath` or separator-aware containment check is applied.
   - `validate_writable_path` reuses the same unchecked path and applies another prefix check to `.worktrees`.
 - Repro:
-  - `masc_code_read` successfully read `/Users/dancer/me/workspace/yousleepwhen/masc-mcp-audit-sibling/proof.txt`, a sibling path outside repo root.
-  - `masc_code_write` successfully wrote `.worktrees/../../masc-mcp-write-outside/proof-write.txt`, which resolved to `/Users/dancer/me/workspace/yousleepwhen/masc-mcp-write-outside/proof-write.txt`.
+  - `masc_code_read` successfully read `<repo-root>/../masc-mcp-audit-sibling/proof.txt`, a sibling path outside repo root.
+  - `masc_code_write` successfully wrote `.worktrees/../../masc-mcp-write-outside/proof-write.txt`, which resolved to `<repo-root>/../masc-mcp-write-outside/proof-write.txt`.
 - Impact:
   - Full MCP callers can read outside-repo files.
   - Full MCP callers can write outside `.worktrees/` and outside the repo entirely.
@@ -37,9 +37,9 @@
 ### High: `with_tool_auth` routes permit unauthenticated HTTP mutation when room auth is disabled
 
 - Code basis:
-  - [lib/server/server_auth.ml](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-boundaries-20260331/lib/server/server_auth.ml#L343)
-  - [lib/server/server_routes_http_routes_command_plane_write.ml](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-boundaries-20260331/lib/server/server_routes_http_routes_command_plane_write.ml#L383)
-  - [lib/server/server_routes_http_routes_frontend.ml](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-boundaries-20260331/lib/server/server_routes_http_routes_frontend.ml#L39)
+  - [lib/server/server_auth.ml](lib/server/server_auth.ml#L343)
+  - [lib/server/server_routes_http_routes_command_plane_write.ml](lib/server/server_routes_http_routes_command_plane_write.ml#L383)
+  - [lib/server/server_routes_http_routes_frontend.ml](lib/server/server_routes_http_routes_frontend.ml#L39)
 - Why it fails:
   - No-token requests only run `ensure_same_origin_browser_request` when an `Origin` header exists.
   - Plain `curl` without `Origin` passes.
@@ -60,8 +60,8 @@
 ### High: dashboard bearer token is sourced from query string and propagated into SSE URL
 
 - Code basis:
-  - [dashboard/src/api/core.ts](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-boundaries-20260331/dashboard/src/api/core.ts#L26)
-  - [dashboard/src/sse.ts](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-boundaries-20260331/dashboard/src/sse.ts#L140)
+  - [dashboard/src/api/core.ts](dashboard/src/api/core.ts#L26)
+  - [dashboard/src/sse.ts](dashboard/src/sse.ts#L140)
 - Why it fails:
   - The dashboard reads `?token=` from `window.location.search`.
   - The same token is copied into the EventSource URL `/mcp?...&token=...`.
@@ -75,8 +75,8 @@
 ### Medium: transport defaults and auth defaults leave the boundary model easy to misread
 
 - Code basis:
-  - [lib/config/env_config_runtime.ml](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-boundaries-20260331/lib/config/env_config_runtime.ml#L244)
-  - [lib/server/server_auth.ml](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-boundaries-20260331/lib/server/server_auth.ml#L47)
+  - [lib/config/env_config_runtime.ml](lib/config/env_config_runtime.ml#L244)
+  - [lib/server/server_auth.ml](lib/server/server_auth.ml#L47)
 - Observation:
   - `MASC_WS_ENABLED` and `MASC_WEBRTC_ENABLED` default to `true`.
   - `MASC_HTTP_AUTH_STRICT` defaults to `false`.
@@ -90,7 +90,7 @@
 ### Medium: command-plane policy allowlists are stored but not enforced on main
 
 - Code basis:
-  - [lib/tool_misc_admin.ml](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-boundaries-20260331/lib/tool_misc_admin.ml#L173)
+  - [lib/tool_misc_admin.ml](lib/tool_misc_admin.ml#L173)
 - Observation:
   - `unit.policy.tool_allowlist` and `unit.policy.model_allowlist` are explicitly reported as `advisory_only`.
 - Impact:

@@ -438,6 +438,22 @@ let tool_usage_of_by_name name =
     Hashtbl.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
     |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
 
+(* -- Config resolution --------------------------------------------- *)
+
+let resolve_config (config : Room_utils_backend_setup.config) keeper_name
+    : Room_utils_backend_setup.config =
+  if keeper_name = "" then config
+  else
+    (* Fast path: scoped lookup in the caller's base_path (O(1) map) *)
+    match get ~base_path:config.base_path keeper_name with
+    | Some _ -> config  (* already in the right scope *)
+    | None ->
+      (* Slow path: cross-base_path scan (O(n) registry) *)
+      match find_by_name keeper_name with
+      | Some entry when entry.base_path <> config.base_path ->
+        { config with base_path = entry.base_path }
+      | _ -> config  (* not found anywhere, keep original *)
+
 (* -- Tool usage persistence ---------------------------------------- *)
 
 let tool_usage_path ~base_path name =

@@ -74,9 +74,8 @@ export async function sendKeeperMessageDetailed(
 // --- SSE streaming ---
 
 function jsonHeaders(): Record<string, string> {
-  const params = new URLSearchParams(window.location.search)
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = params.get('token')
+  const token = sessionStorage.getItem('masc_bearer_token')
   const agent = resolveDashboardActorName(window.location.search)
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (agent) headers['X-MASC-Agent'] = agent

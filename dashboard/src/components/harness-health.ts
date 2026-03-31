@@ -46,12 +46,12 @@ type HarnessRailKey = 'evaluator' | 'pre_compact' | 'handoff'
 function railTitle(rail: HarnessRailKey): string {
   switch (rail) {
     case 'evaluator':
-      return 'Evaluator'
+      return '평가 모델'
     case 'pre_compact':
-      return 'Pre-Compaction'
+      return '압축 전 상태'
     case 'handoff':
     default:
-      return 'Handoff'
+      return '세대 교체'
   }
 }
 
@@ -111,19 +111,19 @@ function flowSummaryLine(title: string, status: RailStatus, detail: string, fres
 function flowFallbackSummary(data: HarnessHealthData): string {
   return [
     flowSummaryLine(
-      'Evaluator',
+      '평가 모델',
       data.overview.evaluator_status,
       railDetail(data, 'evaluator'),
       railFreshness(data, 'evaluator'),
     ),
     flowSummaryLine(
-      'Pre-Compaction',
+      '압축 전 상태',
       data.overview.pre_compact_status,
       railDetail(data, 'pre_compact'),
       railFreshness(data, 'pre_compact'),
     ),
     flowSummaryLine(
-      'Handoff',
+      '세대 교체',
       data.overview.handoff_status,
       railDetail(data, 'handoff'),
       railFreshness(data, 'handoff'),
@@ -142,17 +142,17 @@ export function buildHarnessFlowMermaid(data: HarnessHealthData): string {
     '  classDef staleRail fill:#1f2937,stroke:#94a3b8,color:#e2e8f0,stroke-dasharray: 5 3;',
     '  classDef idleRail fill:#111827,stroke:#475569,color:#94a3b8,stroke-dasharray: 3 4;',
     '  classDef activeRail stroke:#7dd3fc,stroke-width:3px;',
-    '  taskDone["Task completion<br/>anti-rationalization review"]',
-    '  keeperTurn["Keeper turn<br/>continuity pressure"]',
-    '  keeperRollover["Keeper rollover<br/>metrics snapshot"]',
-    `  evaluator["${flowNodeLabel('Evaluator', data.overview.evaluator_status, railDetail(data, 'evaluator'), railFreshness(data, 'evaluator'))}"]`,
-    `  preCompact["${flowNodeLabel('Pre-Compaction', data.overview.pre_compact_status, railDetail(data, 'pre_compact'), railFreshness(data, 'pre_compact'))}"]`,
-    `  handoff["${flowNodeLabel('Handoff', data.overview.handoff_status, railDetail(data, 'handoff'), railFreshness(data, 'handoff'))}"]`,
-    '  readModel["Harness read model<br/>/api/v1/dashboard/harness-health"]',
-    '  labUi["Lab / harness<br/>live Mermaid + detail cards"]',
-    '  taskDone -->|"verdict_recorded"| evaluator',
-    '  keeperTurn -->|"pre_compact"| preCompact',
-    '  keeperRollover -->|"keeper_handoff"| handoff',
+    '  taskDone["작업 완료<br/>판정 검증"]',
+    '  keeperTurn["keeper 턴<br/>압축 압력"]',
+    '  keeperRollover["keeper 교체<br/>지표 스냅샷"]',
+    `  evaluator["${flowNodeLabel('평가 모델', data.overview.evaluator_status, railDetail(data, 'evaluator'), railFreshness(data, 'evaluator'))}"]`,
+    `  preCompact["${flowNodeLabel('압축 전 상태', data.overview.pre_compact_status, railDetail(data, 'pre_compact'), railFreshness(data, 'pre_compact'))}"]`,
+    `  handoff["${flowNodeLabel('세대 교체', data.overview.handoff_status, railDetail(data, 'handoff'), railFreshness(data, 'handoff'))}"]`,
+    '  readModel["하네스 데이터<br/>/api/v1/dashboard/harness-health"]',
+    '  labUi["Lab / 안전 감시<br/>실시간 상태"]',
+    '  taskDone -->|"판정 기록"| evaluator',
+    '  keeperTurn -->|"압축 신호"| preCompact',
+    '  keeperRollover -->|"교체 신호"| handoff',
     '  evaluator --> readModel',
     '  preCompact --> readModel',
     '  handoff --> readModel',
@@ -179,20 +179,20 @@ function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
     <div class="space-y-3">
       <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div>
-          <div class="text-sm font-medium text-[var(--text-strong)]">Live State Graph</div>
+          <div class="text-sm font-medium text-[var(--text-strong)]">실시간 상태 그래프</div>
           <div class="mt-1 text-sm leading-[1.6] text-[var(--text-muted)]">
-            task completion, pre-compaction, handoff가 read model로 모이는 구조를 한 장으로 보여줍니다.
+            작업 완료, 컨텍스트 압축, 세대 교체 신호가 하네스로 모이는 구조입니다.
           </div>
         </div>
         <div class="text-xs text-[var(--text-dim)]">
-          가장 최근 rail ${active ? railTitle(active) : '없음'}
+          가장 최근 채널: ${active ? railTitle(active) : '없음'}
         </div>
       </div>
 
       <div class="flex flex-wrap gap-2 text-[11px] text-[var(--text-dim)]">
-        <span class="rounded-full border border-[var(--white-8)] px-2 py-1">실선: live signal</span>
-        <span class="rounded-full border border-[var(--white-8)] px-2 py-1">점선: snapshot reconciliation</span>
-        <span class="rounded-full border border-[var(--accent)] px-2 py-1 text-[var(--text-body)]">강조: 가장 최근 rail</span>
+        <span class="rounded-full border border-[var(--white-8)] px-2 py-1">실선: 실시간 신호</span>
+        <span class="rounded-full border border-[var(--white-8)] px-2 py-1">점선: 스냅샷 갱신</span>
+        <span class="rounded-full border border-[var(--accent)] px-2 py-1 text-[var(--text-body)]">강조: 가장 최근 채널</span>
       </div>
 
       <${MermaidGraph}
@@ -229,19 +229,19 @@ export function HarnessHealth() {
 
   return html`
     <div class="space-y-4">
-      <${Card} title="Safety Harness" class="section">
+      <${Card} title="안전 감시" class="section">
         ${s.status === 'loading' || s.status === 'idle' ? html`
           <div class="text-sm text-[var(--text-dim)]">로딩 중...</div>
         ` : s.status === 'error' ? html`
           <div class="text-sm text-[var(--bad)]">${s.message}</div>
         ` : !data ? html`
-          <${EmptySignal} text="Harness 데이터가 없습니다." />
+          <${EmptySignal} text="안전 감시 데이터가 없습니다." />
         ` : html`
           <div class="space-y-4">
             <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] p-4">
               <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div class="max-w-3xl">
-                  <div class="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Can I Trust The Experiment Machinery?</div>
+                  <div class="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다</div>
                   <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">${heroTitle(data)}</div>
                   <div class="mt-2 text-sm leading-[1.7] text-[var(--text-body)]">${heroBody(data)}</div>
                 </div>
@@ -261,19 +261,19 @@ export function HarnessHealth() {
 
               <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
                 <${HeroRailCard}
-                  label="Evaluator"
+                  label="평가 모델"
                   status=${data.overview.evaluator_status}
                   detail=${railDetail(data, 'evaluator')}
                   freshness=${railFreshness(data, 'evaluator')}
                 />
                 <${HeroRailCard}
-                  label="Pre-Compaction"
+                  label="압축 전 상태"
                   status=${data.overview.pre_compact_status}
                   detail=${railDetail(data, 'pre_compact')}
                   freshness=${railFreshness(data, 'pre_compact')}
                 />
                 <${HeroRailCard}
-                  label="Handoff"
+                  label="세대 교체"
                   status=${data.overview.handoff_status}
                   detail=${railDetail(data, 'handoff')}
                   freshness=${railFreshness(data, 'handoff')}
@@ -294,32 +294,32 @@ export function HarnessHealth() {
         `}
       <//>
 
-      <${Card} title="Harness Flow" class="section">
+      <${Card} title="감시 흐름도" class="section">
         ${!data || !flowSource ? html`
-          <${EmptySignal} text="Harness flow 데이터가 없습니다." />
+          <${EmptySignal} text="감시 흐름 데이터가 없습니다." />
         ` : html`
           <${HarnessFlowCard} data=${data} />
         `}
       <//>
 
-      <${Card} title="Evaluator Calibration" class="section">
+      <${Card} title="평가 모델 건강도" class="section">
         ${!data || !cal ? html`
-          <${EmptySignal} text="Evaluator calibration 데이터가 없습니다." />
+          <${EmptySignal} text="평가 모델 데이터가 없습니다." />
         ` : html`
           <div class="space-y-4">
             <${RailHeader}
-              title="Judge of the Judge"
-              description="실험 cycle 자체가 아니라, verdict 기계가 얼마나 건강하게 작동하는지 봅니다."
+              title="평가 모델 건강도"
+              description="keeper 출력을 채점하는 모델이 제대로 작동하는지 봅니다."
               status=${data.overview.evaluator_status}
               lastEventAt=${data.overview.evaluator_last_event_at}
             />
 
             ${fallbackPct > 80 ? html`
               <div class="rounded-lg border border-[var(--warn-30)] bg-[var(--warn-12)] px-4 py-3">
-                <div class="mb-1 text-sm font-medium text-[var(--warn)]">Evaluator 미연결</div>
+                <div class="mb-1 text-sm font-medium text-[var(--warn)]">평가 모델 미연결</div>
                 <div class="text-xs text-[var(--warn)]">
-                  전체 ${cal.total_verdicts}건 중 ${fallbackCount}건이 fallback으로 처리됐습니다.
-                  지금은 LLM evaluator보다 fallback gate가 더 많이 작동합니다.
+                  전체 ${cal.total_verdicts}건 중 ${fallbackCount}건이 대체 처리됐습니다.
+                  지금은 평가 모델보다 기본 규칙이 더 많이 작동합니다.
                 </div>
                 ${fallbackReasons.length > 0 ? html`
                   <details class="mt-2">
@@ -335,9 +335,9 @@ export function HarnessHealth() {
             ` : null}
 
             <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <${StatCard} label="총 Verdict" value=${cal.total_verdicts} />
-              <${StatCard} label="Reject 비율" value="${rejectRate}%" />
-              <${StatCard} label="Fallback 비율" value="${fallbackPct}%" />
+              <${StatCard} label="총 판정" value=${cal.total_verdicts} />
+              <${StatCard} label="거부율" value="${rejectRate}%" />
+              <${StatCard} label="대체 처리율" value="${fallbackPct}%" />
               <${StatCard}
                 label="일치율"
                 value="${agreementPct}%"
@@ -350,41 +350,41 @@ export function HarnessHealth() {
             </div>
 
             <div>
-              <div class="mb-2 text-xs uppercase tracking-wider text-[var(--text-dim)]">Gate 분포</div>
+              <div class="mb-2 text-xs uppercase tracking-wider text-[var(--text-dim)]">게이트 분포</div>
               <${GateChart} distribution=${cal.gate_distribution} />
             </div>
 
             <div>
-              <div class="mb-2 text-xs uppercase tracking-wider text-[var(--text-dim)]">최근 Verdict</div>
+              <div class="mb-2 text-xs uppercase tracking-wider text-[var(--text-dim)]">최근 판정</div>
               <${RecentVerdictsList} items=${data.recent_verdicts} />
             </div>
           </div>
         `}
       <//>
 
-      <${Card} title="Pre-Compaction Rail" class="section">
+      <${Card} title="압축 전 상태" class="section">
         ${!data ? html`
-          <${EmptySignal} text="Pre-compaction 데이터가 없습니다." />
+          <${EmptySignal} text="압축 전 상태 데이터가 없습니다." />
         ` : html`
           <div class="space-y-4">
             <${RailHeader}
-              title="Continuity Pressure"
+              title="컨텍스트 압축 압력"
               description=${data.pre_compact.description}
               status=${data.pre_compact.status}
               lastEventAt=${data.pre_compact.last_event_at}
             />
             <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
               <${StatCard}
-                label="최근 ratio"
-                value=${data.overview.latest_pre_compact_ratio != null ? data.overview.latest_pre_compact_ratio.toFixed(2) : '-'}
+                label="최근 컨텍스트 사용률"
+                value=${data.overview.latest_pre_compact_ratio != null ? `${Math.round(data.overview.latest_pre_compact_ratio * 100)}%` : '-'}
                 sub=${`최근 ${data.pre_compact.total_recent}건`}
               />
               <${StatCard}
-                label="최근 freshness"
+                label="최근 신호"
                 value=${freshnessLabel(data.pre_compact.last_event_at)}
               />
               <${StatCard}
-                label="status"
+                label="상태"
                 value=${railStatusLabel(data.pre_compact.status)}
               />
             </div>
@@ -393,29 +393,29 @@ export function HarnessHealth() {
         `}
       <//>
 
-      <${Card} title="Handoff Rail" class="section">
+      <${Card} title="세대 교체 기록" class="section">
         ${!data ? html`
-          <${EmptySignal} text="Handoff 데이터가 없습니다." />
+          <${EmptySignal} text="세대 교체 데이터가 없습니다." />
         ` : html`
           <div class="space-y-4">
             <${RailHeader}
-              title="Keeper Handoff"
+              title="keeper 세대 교체"
               description=${data.recent_handoffs.description}
               status=${data.recent_handoffs.status}
               lastEventAt=${data.recent_handoffs.last_event_at}
             />
             <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
               <${StatCard}
-                label="최근 generation"
-                value=${data.overview.latest_handoff_generation != null ? data.overview.latest_handoff_generation : '-'}
+                label="최근 세대"
+                value=${data.overview.latest_handoff_generation != null ? `${data.overview.latest_handoff_generation}세대` : '-'}
                 sub=${`최근 ${data.recent_handoffs.total_recent}건`}
               />
               <${StatCard}
-                label="최근 freshness"
+                label="최근 신호"
                 value=${freshnessLabel(data.recent_handoffs.last_event_at)}
               />
               <${StatCard}
-                label="status"
+                label="상태"
                 value=${railStatusLabel(data.recent_handoffs.status)}
               />
             </div>

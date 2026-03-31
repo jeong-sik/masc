@@ -263,6 +263,7 @@
    swarm_checkpoint
    telemetry_eio
    tempo
+   tui_decode
    tools
    tool_args
    tool_schema_dsl

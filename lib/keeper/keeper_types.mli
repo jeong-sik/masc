@@ -23,9 +23,19 @@ type proactive_policy = {
   cooldown_sec: int;
 }
 
+type tool_preset =
+  | Minimal
+  | Messaging
+  | Coding
+  | Research
+  | Full
+
 type tool_access =
-  | Unrestricted
-  | Restricted of string list
+  | Preset of {
+      preset : tool_preset;
+      also_allow : string list;
+    }
+  | Custom of string list
 
 (** {1 Runtime types (embedded in agent_runtime_state)} *)
 
@@ -134,7 +144,11 @@ val default_social_model : string
 
 val now_iso : unit -> string
 
-val tool_access_allowlist : tool_access -> string list
+val tool_preset_to_string : tool_preset -> string
+val tool_preset_of_string : string -> tool_preset option
+val tool_access_preset : tool_access -> tool_preset option
+val tool_access_custom_allowlist : tool_access -> string list option
+val tool_access_also_allowlist : tool_access -> string list
 val tool_access_to_json : tool_access -> Yojson.Safe.t
 val tool_access_of_meta_json : Yojson.Safe.t -> (tool_access, string) result
 

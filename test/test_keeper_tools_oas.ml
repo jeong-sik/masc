@@ -11,13 +11,13 @@ let autoresearch_allowlist =
    "masc_autoresearch_search_findings";
    "masc_research_start"; "masc_research_status"]
 
-let make_test_meta ?(name = "test-keeper") ?tool_access ?tool_allowlist ()
+let make_test_meta ?(name = "test-keeper") ?(preset = Keeper_types.Full)
+    ?(also_allow = []) ?tool_access ()
     : Keeper_types.keeper_meta =
   let tool_access =
-    match tool_access, tool_allowlist with
-    | Some access, _ -> access
-    | None, Some names -> Keeper_types.Restricted names
-    | None, None -> Keeper_types.Unrestricted
+    match tool_access with
+    | Some access -> access
+    | None -> Keeper_types.Preset { preset; also_allow }
   in
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String name); ("agent_name", `String name);
@@ -254,12 +254,12 @@ let test_failure_tracking_is_independent_per_args () =
             (is_guardrail_message message)
       | Ok _ -> fail "guardrail should block original failing args")
 
-let make_research_meta ?tool_access ?(tool_allowlist = autoresearch_allowlist) ()
+let make_research_meta ?tool_access ()
     : Keeper_types.keeper_meta =
   let tool_access =
     match tool_access with
     | Some access -> access
-    | None -> Keeper_types.Restricted tool_allowlist
+    | None -> Keeper_types.Preset { preset = Keeper_types.Research; also_allow = [] }
   in
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String "test-researcher");
@@ -271,14 +271,7 @@ let make_research_meta ?tool_access ?(tool_allowlist = autoresearch_allowlist) (
   | Error e -> failwith (Printf.sprintf "make_research_meta failed: %s" e)
 
 let test_research_keeper_has_autoresearch_tools () =
-  let meta =
-    make_research_meta
-      ~tool_allowlist:
-        [ "masc_autoresearch_cycle";
-          "masc_autoresearch_start";
-          "masc_autoresearch_status" ]
-      ()
-  in
+  let meta = make_research_meta () in
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_cycle = List.mem "masc_autoresearch_cycle" allowed in
   let has_start = List.mem "masc_autoresearch_start" allowed in
@@ -288,8 +281,11 @@ let test_research_keeper_has_autoresearch_tools () =
   check bool "has status" true has_status
 
 let test_non_research_keeper_has_autoresearch () =
-  (* #4003: masc_* deny-by-default; non-research keeper needs allowlist *)
-  let meta = make_test_meta ~tool_allowlist:autoresearch_allowlist () in
+  let meta =
+    make_test_meta
+      ~preset:Keeper_types.Minimal
+      ~also_allow:autoresearch_allowlist ()
+  in
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_any = List.exists (fun n ->
     String.length n > 18
@@ -297,13 +293,7 @@ let test_non_research_keeper_has_autoresearch () =
   check bool "has autoresearch tools" true has_any
 
 let test_research_model_tools_include_autoresearch () =
-  let meta =
-    make_research_meta
-      ~tool_allowlist:
-        [ "masc_autoresearch_cycle";
-          "masc_autoresearch_status" ]
-      ()
-  in
+  let meta = make_research_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_model_tools meta in
   let has_cycle = List.exists (fun (t : Types_core.tool_schema) ->
     t.name = "masc_autoresearch_cycle") tools in
@@ -313,7 +303,10 @@ let make_learned_meta () : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String "test-learned");
              ("agent_name", `String "test-learned");
-             ("trace_id", `String "test-trace-learned")]) with
+             ("trace_id", `String "test-trace-learned");
+             ( "tool_access",
+               Keeper_types.tool_access_to_json
+                 (Keeper_types.Preset { preset = Keeper_types.Full; also_allow = [] } ))]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_learned_meta failed: %s" e)
 

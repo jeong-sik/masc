@@ -19,14 +19,14 @@ let make_meta
     ?(policy_voice_enabled = false)
     ?(soul_profile = "default")
     ?(name = "test-keeper")
+    ?(preset = Keeper_types.Full)
+    ?(also_allow = [])
     ?tool_access
-    ?tool_allowlist
     () : Keeper_types.keeper_meta =
   let tool_access =
-    match tool_access, tool_allowlist with
-    | Some access, _ -> access
-    | None, Some names -> Keeper_types.Restricted names
-    | None, None -> Keeper_types.Unrestricted
+    match tool_access with
+    | Some access -> access
+    | None -> Keeper_types.Preset { preset; also_allow }
   in
   let json = `Assoc [
     ("name", `String name);
@@ -182,8 +182,7 @@ let test_safe_empty () =
 (* Group 2: Mode-free tool grants (mode removal)                     *)
 (* ================================================================ *)
 
-(* keeper_* tools are exposed by default.
-   masc_* tools remain allowlist-gated, even after mode removal. *)
+(* Tool exposure now follows preset/custom policy for the full keeper surface. *)
 
 let test_write_done_kills_all () =
   let meta = make_meta
@@ -192,8 +191,7 @@ let test_write_done_kills_all () =
   check (list string) "write_done returns empty" [] tools
 
 let test_all_keepers_get_full_toolset () =
-  (* Any keeper (regardless of mode/shell/profile) gets all tools *)
-  let meta = make_meta () in
+  let meta = make_meta ~preset:Keeper_types.Full () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
@@ -203,23 +201,19 @@ let test_all_keepers_get_full_toolset () =
     (List.mem "keeper_voice_speak" tools)
 
 let test_voice_enabled () =
-  let meta = make_meta ~policy_voice_enabled:true () in
+  let meta = make_meta ~preset:Keeper_types.Messaging () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_voice_speak" true (List.mem "keeper_voice_speak" tools);
   check bool "has keeper_voice_agent" true (List.mem "keeper_voice_agent" tools)
 
 let test_voice_disabled () =
-  let meta = make_meta ~policy_voice_enabled:false () in
+  let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "keeper_voice_speak still available" true (List.mem "keeper_voice_speak" tools);
-  check bool "keeper_voice_agent still available" true (List.mem "keeper_voice_agent" tools)
+  check bool "keeper_voice_speak omitted" false (List.mem "keeper_voice_speak" tools);
+  check bool "keeper_voice_agent omitted" false (List.mem "keeper_voice_agent" tools)
 
 let test_all_keepers_have_research_tools () =
-  (* #4003: masc_* tools are deny-by-default; allowlist must include them *)
-  let research_allowlist =
-    ["masc_research_start"; "masc_research_status";
-     "masc_autoresearch_cycle"; "masc_autoresearch_status"] in
-  let meta = make_meta ~soul_profile:"default" ~tool_allowlist:research_allowlist () in
+  let meta = make_meta ~preset:Keeper_types.Research ~soul_profile:"default" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_any_research = List.exists (fun t ->
     String.length t > 5 &&
@@ -229,31 +223,30 @@ let test_all_keepers_have_research_tools () =
   check bool "has research tools" true has_any_research
 
 let test_heuristic_mode_tools () =
-  let meta = make_meta () in
+  let meta = make_meta ~preset:Keeper_types.Minimal () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "heuristic returns nonempty tools" true (List.length tools > 0)
 
 let test_voice_plus_other_tools () =
-  let meta = make_meta ~policy_voice_enabled:true () in
+  let meta = make_meta ~preset:Keeper_types.Messaging () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has shell_readonly" true (List.mem "keeper_shell_readonly" tools);
   check bool "has voice_speak" true (List.mem "keeper_voice_speak" tools);
-  check bool "has board tools" true (List.mem "keeper_board_post" tools)
+  check bool "has board tools" true (List.mem "keeper_board_post" tools);
+  check bool "omits keeper_fs_read" false (List.mem "keeper_fs_read" tools)
 
 let test_all_keepers_have_shell_and_coding () =
-  let meta = make_meta () in
+  let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "keeper_shell_readonly included" true (List.mem "keeper_shell_readonly" tools);
   check bool "keeper_fs_read included" true (List.mem "keeper_fs_read" tools);
-  check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
+  check bool "keeper_board_get omitted" false (List.mem "keeper_board_get" tools)
 
 let test_all_modes_produce_same_tools () =
-  (* policy_mode and policy_shell_mode are always "unified" and "coding" respectively *)
-  let meta_a = make_meta () in
-  let meta_b = make_meta () in
+  let meta_a = make_meta ~preset:Keeper_types.Minimal () in
+  let meta_b = make_meta ~preset:Keeper_types.Full () in
   let tools_a = Keeper_exec_tools.keeper_allowed_tool_names meta_a in
   let tools_b = Keeper_exec_tools.keeper_allowed_tool_names meta_b in
-  check int "same tool count" (List.length tools_a) (List.length tools_b)
+  check bool "full has more tools" true (List.length tools_b > List.length tools_a)
 
 (* ================================================================ *)
 (* Group 3: Hooks extract_command_from_input                         *)

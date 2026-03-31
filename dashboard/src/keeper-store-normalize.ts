@@ -23,6 +23,22 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
   return 'offline'
 }
 
+function normalizeToolPreset(
+  value: unknown,
+): Keeper['tool_preset'] {
+  const raw = typeof value === 'string' ? value : null
+  if (
+    raw === 'minimal'
+    || raw === 'messaging'
+    || raw === 'coding'
+    || raw === 'research'
+    || raw === 'full'
+  ) {
+    return raw
+  }
+  return null
+}
+
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   const status = keeper.status?.toLowerCase() ?? ''
   if (isOfflineStatus(status)) return 'offline'
@@ -255,6 +271,11 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         recent_input_preview: asString(row.recent_input_preview) ?? null,
         recent_output_preview: asString(row.recent_output_preview) ?? null,
         recent_tool_names: asStringArray(row.recent_tool_names) ?? [],
+        tool_policy_mode: asString(row.tool_policy_mode) ?? undefined,
+        tool_preset: normalizeToolPreset(row.tool_preset),
+        tool_also_allow: asStringArray(row.tool_also_allow) ?? [],
+        tool_custom_allowlist: asStringArray(row.tool_custom_allowlist) ?? [],
+        tool_denylist: asStringArray(row.tool_denylist) ?? [],
         allowed_tool_names: asStringArray(row.allowed_tool_names) ?? [],
         latest_tool_names: asStringArray(row.latest_tool_names) ?? [],
         latest_tool_call_count: asNumber(row.latest_tool_call_count) ?? null,

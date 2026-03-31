@@ -221,9 +221,9 @@ let run_turn
     keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
   in
   (* Build BM25 tool index for progressive disclosure.
-     Essential tools are always available; others are retrieved
-     per-turn based on the goal/context. This prevents the LLM
-     from being overwhelmed by 50+ tools and improves selection.
+     The active keeper tool policy defines the candidate surface, and the
+     index retrieves the most relevant tools per-turn based on goal/context.
+     This prevents the LLM from being overwhelmed by 50+ tools and improves selection.
 
      top_k=20 (up from default 10) for better coverage across 60-80 tools.
      Group by prefix so co-retrieval pulls related tools together

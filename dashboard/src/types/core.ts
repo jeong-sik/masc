@@ -495,6 +495,11 @@ export interface Keeper {
   recent_input_preview?: string | null
   recent_output_preview?: string | null
   recent_tool_names?: string[]
+  tool_policy_mode?: 'preset' | 'custom' | string
+  tool_preset?: 'minimal' | 'messaging' | 'coding' | 'research' | 'full' | null
+  tool_also_allow?: string[]
+  tool_custom_allowlist?: string[]
+  tool_denylist?: string[]
   allowed_tool_names?: string[]
   latest_tool_names?: string[]
   latest_tool_call_count?: number | null
@@ -619,6 +624,19 @@ export interface KeeperConfigCoordination {
   joined_room_ids: string[]
 }
 
+export interface KeeperConfigTools {
+  tool_access: unknown
+  tool_policy_mode: 'preset' | 'custom' | string
+  tool_preset?: 'minimal' | 'messaging' | 'coding' | 'research' | 'full' | null
+  tool_also_allow: string[]
+  tool_custom_allowlist: string[]
+  resolved_allowlist: string[]
+  tool_denylist: string[]
+  active_masc_tool_count: number
+  active_keeper_tool_count: number
+  total_active: number
+}
+
 export interface KeeperConfigSources {
   live_meta_path: string
   default_manifest_path: string | null
@@ -676,6 +694,7 @@ export interface KeeperConfig {
   hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime
   coordination: KeeperConfigCoordination
+  tools: KeeperConfigTools
   sources: KeeperConfigSources
   metrics: KeeperConfigMetrics
 }

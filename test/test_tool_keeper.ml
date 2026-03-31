@@ -1200,6 +1200,88 @@ let test_keeper_up_update_preserves_proactive_when_omitted () =
       in
       check bool "proactive preserved when omitted" true updated_meta.proactive.enabled)
 
+let test_keeper_up_update_clears_explicit_tool_lists () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "tool-policy-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let create_args =
+        `Assoc
+          [
+            ("name", `String "tool-policy-demo");
+            ("goal", `String "Exercise tool policy updates");
+            ("tool_preset", `String "minimal");
+            ( "tool_also_allow",
+              `List
+                [
+                  `String "masc_governance_status";
+                  `String " masc_governance_status ";
+                  `String "";
+                ] );
+            ("tool_denylist", `List [ `String "masc_broadcast"; `String "masc_broadcast" ]);
+          ]
+      in
+      let create_parsed =
+        match Masc_mcp.Keeper_turn_up_args.parse keeper_ctx create_args with
+        | Ok parsed -> parsed
+        | Error (_, msg) -> fail ("failed to parse create args: " ^ msg)
+      in
+      let ok, _ =
+        Masc_mcp.Keeper_turn_up_create.create_keeper keeper_ctx create_parsed
+      in
+      check bool "initial keeper create ok" true ok;
+      let old_meta =
+        match Masc_mcp.Keeper_types.read_meta config "tool-policy-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after create"
+        | Error e -> fail e
+      in
+      (match old_meta.tool_access with
+      | Masc_mcp.Keeper_types.Preset { preset = Masc_mcp.Keeper_types.Minimal; also_allow } ->
+          check (list string) "create normalizes also_allow"
+            [ "masc_governance_status" ] also_allow
+      | _ -> fail "expected minimal preset after create");
+      check (list string) "create normalizes denylist"
+        [ "masc_broadcast" ] old_meta.tool_denylist;
+      let update_args =
+        `Assoc
+          [
+            ("name", `String "tool-policy-demo");
+            ("goal", `String "Exercise tool policy updates");
+            ("tool_also_allow", `List []);
+            ("tool_denylist", `List []);
+          ]
+      in
+      let update_parsed =
+        match Masc_mcp.Keeper_turn_up_args.parse keeper_ctx update_args with
+        | Ok parsed -> parsed
+        | Error (_, msg) -> fail ("failed to parse update args: " ^ msg)
+      in
+      let ok, _ =
+        Masc_mcp.Keeper_turn_up_update.update_keeper keeper_ctx update_parsed old_meta
+      in
+      check bool "update keeper ok" true ok;
+      let updated_meta =
+        match Masc_mcp.Keeper_types.read_meta config "tool-policy-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after update"
+        | Error e -> fail e
+      in
+      (match updated_meta.tool_access with
+      | Masc_mcp.Keeper_types.Preset { preset = Masc_mcp.Keeper_types.Minimal; also_allow } ->
+          check (list string) "update clears also_allow" [] also_allow
+      | _ -> fail "expected minimal preset after update");
+      check (list string) "update clears denylist" [] updated_meta.tool_denylist)
+
 let test_keeper_up_persists_explicit_goal_horizons () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1943,6 +2025,8 @@ let () =
            test_keeper_msg_rejects_goal_horizon_updates;
          test_case "keeper up update preserves proactive when omitted" `Quick
            test_keeper_up_update_preserves_proactive_when_omitted;
+         test_case "keeper up update clears explicit tool lists" `Quick
+           test_keeper_up_update_clears_explicit_tool_lists;
          test_case "write_meta syncs registry meta" `Quick
            test_write_meta_syncs_registry_meta;
          test_case "keeper up persists allowed paths" `Quick

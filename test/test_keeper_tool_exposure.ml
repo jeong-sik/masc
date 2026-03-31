@@ -12,13 +12,13 @@ open Masc_mcp
    ============================================================ *)
 
 let make_meta ?(name = "test-keeper") ?(soul_profile = "")
-    ?(policy_voice_enabled = false) ?tool_access ?tool_allowlist ()
+    ?(policy_voice_enabled = false) ?(preset = Keeper_types.Full)
+    ?(also_allow = []) ?tool_access ()
     : Keeper_types.keeper_meta =
   let tool_access =
-    match tool_access, tool_allowlist with
-    | Some access, _ -> access
-    | None, Some names -> Keeper_types.Restricted names
-    | None, None -> Keeper_types.Unrestricted
+    match tool_access with
+    | Some access -> access
+    | None -> Keeper_types.Preset { preset; also_allow }
   in
   let json =
     `Assoc
@@ -72,7 +72,7 @@ let test_default_has_voice () =
     (has_tool "keeper_voice_speak" tools)
 
 let test_default_has_governance_tools () =
-  let meta = make_meta ~tool_allowlist:["masc_governance_status"; "masc_case_brief_submit"] () in
+  let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has governance status" true
     (has_tool "masc_governance_status" tools);
@@ -80,44 +80,55 @@ let test_default_has_governance_tools () =
     (has_tool "masc_case_brief_submit" tools)
 
 let test_default_has_research_tools () =
-  (* Autoresearch tools need allowlist since deny-by-default *)
-  let meta = make_meta ~soul_profile:"default"
-    ~tool_allowlist:["masc_autoresearch_cycle"; "masc_autoresearch_status";
-                     "masc_autoresearch_inject"; "masc_autoresearch_stop"] () in
+  let meta = make_meta ~soul_profile:"default" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
 
-let test_explicit_empty_allowlist_blocks_masc_only () =
-  let meta = make_meta ~tool_access:(Keeper_types.Restricted []) () in
+let test_custom_empty_blocks_all_tools () =
+  let meta = make_meta ~tool_access:(Keeper_types.Custom []) () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "keeper tool still available" true
+  check int "custom empty blocks every tool" 0 (List.length tools)
+
+let test_custom_unknown_tool_names_are_dropped () =
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  let meta =
+    make_meta
+      ~tool_access:
+        (Keeper_types.Custom
+           [ "keeper_time_now"; "masc_status"; "totally_unknown_tool" ])
+      ()
+  in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "keeps known keeper tool" true
     (has_tool "keeper_time_now" tools);
-  check bool "masc tool blocked" false
-    (has_tool "masc_status" tools)
+  check bool "keeps known masc tool" true
+    (has_tool "masc_status" tools);
+  check bool "drops unknown tool" false
+    (has_tool "totally_unknown_tool" tools)
 
 (* ============================================================
    3. Voice tools are always available
    ============================================================ *)
 
-let test_voice_enabled_adds_voice_tools () =
-  let meta = make_meta ~policy_voice_enabled:true () in
+let test_messaging_preset_has_voice_tools () =
+  let meta = make_meta ~preset:Keeper_types.Messaging () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_voice_speak" true (has_tool "keeper_voice_speak" tools);
   check bool "has keeper_voice_agent" true (has_tool "keeper_voice_agent" tools);
   check bool "has keeper_voice_sessions" true (has_tool "keeper_voice_sessions" tools)
 
-let test_voice_disabled_no_voice_tools () =
-  let meta = make_meta ~policy_voice_enabled:false () in
+let test_coding_preset_omits_voice_tools () =
+  let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "voice_speak still available" true (has_tool "keeper_voice_speak" tools);
-  check bool "voice_agent still available" true (has_tool "keeper_voice_agent" tools)
+  check bool "voice_speak omitted" false (has_tool "keeper_voice_speak" tools);
+  check bool "voice_agent omitted" false (has_tool "keeper_voice_agent" tools)
 
 (* ============================================================
    4. All keepers get shell tools (mode removed)
    ============================================================ *)
 
-let test_all_keepers_have_shell_readonly () =
-  let meta = make_meta () in
+let test_coding_preset_has_shell_readonly () =
+  let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_shell_readonly" true
     (has_tool "keeper_shell_readonly" tools)
@@ -128,7 +139,7 @@ let test_all_keepers_have_shell_readonly () =
 
 let test_all_keepers_have_coding_tools () =
   let coding_names = Tool_code_write.tool_names in
-  let meta = make_meta ~tool_allowlist:(coding_names @ ["masc_worktree_create"; "masc_code_search"]) () in
+  let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_any_coding = List.exists (fun n -> has_tool n tools) coding_names in
   check bool "coding tools present" true has_any_coding;
@@ -137,14 +148,18 @@ let test_all_keepers_have_coding_tools () =
   check bool "has code search" true
     (has_tool "masc_code_search" tools)
 
+let test_full_preset_includes_keeper_fs_edit () =
+  let meta = make_meta ~preset:Keeper_types.Full () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "has keeper_fs_edit" true
+    (has_tool "keeper_fs_edit" tools)
+
 (* ============================================================
    6. All keepers get autoresearch tools (mode removed)
    ============================================================ *)
 
 let test_all_keepers_have_autoresearch () =
-  let meta = make_meta ~soul_profile:"teaching"
-    ~tool_allowlist:["masc_autoresearch_cycle"; "masc_autoresearch_status";
-                     "masc_autoresearch_inject"; "masc_autoresearch_stop"] () in
+  let meta = make_meta ~preset:Keeper_types.Research ~soul_profile:"teaching" () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
 
@@ -152,29 +167,29 @@ let test_all_keepers_have_autoresearch () =
    7. All modes produce same tool set (mode removed)
    ============================================================ *)
 
-let test_all_modes_same_tool_count () =
-  let heuristic = make_meta () in
-  let learned = make_meta ~soul_profile:"research" () in
-  let h_tools = Keeper_exec_tools.keeper_allowed_tool_names heuristic in
-  let l_tools = Keeper_exec_tools.keeper_allowed_tool_names learned in
-  check int "same tool count across modes"
-    (List.length h_tools) (List.length l_tools)
+let test_presets_have_different_tool_count () =
+  let minimal = make_meta ~preset:Keeper_types.Minimal () in
+  let full = make_meta ~preset:Keeper_types.Full () in
+  let minimal_tools = Keeper_exec_tools.keeper_allowed_tool_names minimal in
+  let full_tools = Keeper_exec_tools.keeper_allowed_tool_names full in
+  check bool "full has more than minimal"
+    true (List.length full_tools > List.length minimal_tools)
 
-let test_any_mode_has_board_tools () =
-  let meta = make_meta () in
+let test_messaging_preset_has_board_tools () =
+  let meta = make_meta ~preset:Keeper_types.Messaging () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_board_get" true (has_tool "keeper_board_get" tools);
   check bool "has keeper_board_post" true (has_tool "keeper_board_post" tools)
 
-let test_any_mode_has_read_tools () =
-  let meta = make_meta () in
+let test_research_preset_has_read_tools () =
+  let meta = make_meta ~preset:Keeper_types.Research () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   (* keeper_read removed: dead alias with no schema, keeper_fs_read is the actual tool *)
   check bool "has keeper_fs_read" true (has_tool "keeper_fs_read" tools);
   check bool "has keeper_library_search" true (has_tool "keeper_library_search" tools)
 
-let test_any_mode_has_coordination_tools () =
-  let meta = make_meta () in
+let test_coding_preset_has_coordination_tools () =
+  let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_tasks_list" true
     (has_tool "keeper_tasks_list" tools);
@@ -183,8 +198,8 @@ let test_any_mode_has_coordination_tools () =
   check bool "has keeper_broadcast" true
     (has_tool "keeper_broadcast" tools)
 
-let test_any_mode_has_governance_tools () =
-  let meta = make_meta ~tool_allowlist:["masc_governance_status"; "masc_petition_submit"] () in
+let test_messaging_preset_has_governance_tools () =
+  let meta = make_meta ~preset:Keeper_types.Messaging () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has governance status" true
     (has_tool "masc_governance_status" tools);
@@ -200,10 +215,17 @@ let test_sufficient_tool_count () =
    8. Combined profiles
    ============================================================ *)
 
-let test_research_learned_voice_combined () =
-  let meta = make_meta ~soul_profile:"research"
-    ~policy_voice_enabled:true
-    ~tool_allowlist:["masc_autoresearch_cycle"; "masc_autoresearch_status"] () in
+let test_research_plus_voice_override_combined () =
+  let meta =
+    make_meta ~soul_profile:"research"
+      ~tool_access:
+        (Keeper_types.Preset
+           {
+             preset = Keeper_types.Research;
+             also_allow = [ "keeper_voice_speak"; "keeper_voice_agent" ];
+           })
+      ()
+  in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has voice" true (has_tool "keeper_voice_speak" tools);
   check bool "has shell readonly" true (has_tool "keeper_shell_readonly" tools);
@@ -364,32 +386,36 @@ let () =
       test_case "has voice tools" `Quick test_default_has_voice;
       test_case "has governance tools" `Quick test_default_has_governance_tools;
       test_case "has research tools" `Quick test_default_has_research_tools;
-      test_case "explicit empty allowlist blocks masc only" `Quick
-        test_explicit_empty_allowlist_blocks_masc_only;
+      test_case "custom empty blocks all tools" `Quick
+        test_custom_empty_blocks_all_tools;
+      test_case "custom unknown tool names are dropped" `Quick
+        test_custom_unknown_tool_names_are_dropped;
     ]);
     ("voice_profile", [
-      test_case "enabled adds voice" `Quick test_voice_enabled_adds_voice_tools;
-      test_case "disabled no voice" `Quick test_voice_disabled_no_voice_tools;
+      test_case "messaging preset has voice" `Quick test_messaging_preset_has_voice_tools;
+      test_case "coding preset omits voice" `Quick test_coding_preset_omits_voice_tools;
     ]);
     ("shell_tools", [
-      test_case "all keepers have shell readonly" `Quick test_all_keepers_have_shell_readonly;
+      test_case "coding preset has shell readonly" `Quick test_coding_preset_has_shell_readonly;
     ]);
     ("coding_tools", [
       test_case "all keepers have coding tools" `Quick test_all_keepers_have_coding_tools;
+      test_case "full preset includes keeper_fs_edit" `Quick
+        test_full_preset_includes_keeper_fs_edit;
     ]);
     ("autoresearch_tools", [
       test_case "all keepers have autoresearch" `Quick test_all_keepers_have_autoresearch;
     ]);
     ("mode_free_access", [
-      test_case "all modes same tool count" `Quick test_all_modes_same_tool_count;
-      test_case "has board tools" `Quick test_any_mode_has_board_tools;
-      test_case "has read tools" `Quick test_any_mode_has_read_tools;
-      test_case "has coordination tools" `Quick test_any_mode_has_coordination_tools;
-      test_case "has governance tools" `Quick test_any_mode_has_governance_tools;
+      test_case "presets have different tool count" `Quick test_presets_have_different_tool_count;
+      test_case "messaging has board tools" `Quick test_messaging_preset_has_board_tools;
+      test_case "research has read tools" `Quick test_research_preset_has_read_tools;
+      test_case "coding has coordination tools" `Quick test_coding_preset_has_coordination_tools;
+      test_case "messaging has governance tools" `Quick test_messaging_preset_has_governance_tools;
       test_case "sufficient tool count" `Quick test_sufficient_tool_count;
     ]);
     ("combined_profiles", [
-      test_case "research+learned+voice+readonly" `Quick test_research_learned_voice_combined;
+      test_case "research plus voice override" `Quick test_research_plus_voice_override_combined;
     ]);
     ("deduplication", [
       test_case "no duplicate tools" `Quick test_no_duplicate_tools;
@@ -426,7 +452,7 @@ let () =
     ("tool_access_of_meta_json_validation", [
       test_case "string tools field returns error" `Quick (fun () ->
         let json = `Assoc [
-          ("kind", `String "restricted");
+          ("kind", `String "custom");
           ("tools", `String "masc_status")
         ] in
         let outer = `Assoc [("tool_access", json)] in
@@ -439,19 +465,19 @@ let () =
         | Ok _ -> fail "expected Error for string tools field");
       test_case "valid list tools parses ok" `Quick (fun () ->
         let json = `Assoc [
-          ("kind", `String "restricted");
+          ("kind", `String "custom");
           ("tools", `List [`String "masc_status"; `String "masc_broadcast"])
         ] in
         let outer = `Assoc [("tool_access", json)] in
         match Keeper_types.tool_access_of_meta_json outer with
-        | Ok (Restricted tools) ->
+        | Ok (Custom tools) ->
             check bool "has masc_status" true (List.mem "masc_status" tools);
             check bool "has masc_broadcast" true (List.mem "masc_broadcast" tools)
-        | Ok Unrestricted -> fail "expected Restricted"
+        | Ok (Preset _) -> fail "expected Custom"
         | Error msg -> fail ("unexpected error: " ^ msg));
       test_case "null tools field returns error" `Quick (fun () ->
         let json = `Assoc [
-          ("kind", `String "restricted");
+          ("kind", `String "custom");
           ("tools", `Null)
         ] in
         let outer = `Assoc [("tool_access", json)] in
@@ -460,7 +486,7 @@ let () =
         | Ok _ -> fail "expected Error for null tools field");
       test_case "integer tools field returns error" `Quick (fun () ->
         let json = `Assoc [
-          ("kind", `String "restricted");
+          ("kind", `String "custom");
           ("tools", `Int 42)
         ] in
         let outer = `Assoc [("tool_access", json)] in
@@ -469,7 +495,7 @@ let () =
         | Ok _ -> fail "expected Error for integer tools field");
       test_case "non-string tool member returns error" `Quick (fun () ->
         let json = `Assoc [
-          ("kind", `String "restricted");
+          ("kind", `String "custom");
           ("tools", `List [`String "masc_status"; `Int 42])
         ] in
         let outer = `Assoc [("tool_access", json)] in

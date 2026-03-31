@@ -138,7 +138,7 @@ let percentile arr p =
     sorted.(min idx (n - 1))
 
 let stage_timing_to_json ~ring ~count =
-  let n = min count (stage_timing_ring_size ()) in
+  let n = min count (Array.length ring) in
   if n = 0 then `Null
   else
     let extract field =

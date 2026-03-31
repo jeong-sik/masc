@@ -308,6 +308,8 @@ let () =
           true (List.mem "keeper.snapshot_sec" s.param_keys);
         Alcotest.(check bool) "has work_as_hb_enabled"
           true (List.mem "keeper.work_as_hb_enabled" s.param_keys);
+        Alcotest.(check bool) "has work_as_hb_max_silence_sec"
+          true (List.mem "keeper.work_as_hb_max_silence_sec" s.param_keys);
         Alcotest.(check bool) "has smart_hb_enabled"
           true (List.mem "keeper.smart_hb_enabled" s.param_keys);
         Alcotest.(check bool) "has stage_timing_ring_size"

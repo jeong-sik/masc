@@ -9,11 +9,16 @@ rc=0
 
 check() {
   local label="$1" baseline="$2" pattern="$3" path="$4"
+  if [[ ! -e "$REPO_ROOT/$path" ]]; then
+    echo "BOUNDARY ERROR: $label — path $path does not exist"
+    rc=1
+    return
+  fi
   local count
-  count="$(grep -rn "$pattern" "$REPO_ROOT/$path" 2>/dev/null | wc -l | tr -d ' ' || true)"
+  count="$(grep -rn --include='*.ml' --include='*.mli' "$pattern" "$REPO_ROOT/$path" 2>/dev/null | wc -l | tr -d ' ' || true)"
   if [[ "$count" -gt "$baseline" ]]; then
     echo "BOUNDARY FAIL: $label — found $count (baseline $baseline)"
-    grep -rn "$pattern" "$REPO_ROOT/$path" 2>/dev/null | head -5
+    grep -rn --include='*.ml' --include='*.mli' "$pattern" "$REPO_ROOT/$path" 2>/dev/null | head -5
     rc=1
   elif [[ "$count" -lt "$baseline" ]]; then
     echo "BOUNDARY INFO: $label — found $count (baseline $baseline) — consider lowering baseline"
@@ -37,7 +42,7 @@ check "V4-marker-definitions" 5 \
 
 # V5: Direct OAS Memory.store calls from MASC bridge code
 # Allowed: memory_oas_bridge.ml (2 actual calls + 5 comments/docs)
-check "V5-memory-store-bypass" 7 \
+check "V5-memory-store-bypass" 5 \
   'Memory\.store[^_]' \
   "lib/memory_oas_bridge.ml"
 

@@ -50,6 +50,8 @@ describe('sendKeeperMessageDetailed', () => {
 
 describe('streamKeeperMessage', () => {
   it('posts direct reply mode to the keeper chat stream endpoint', async () => {
+    window.history.replaceState({}, '', '/?agent=dashboard-eager-manta%E3%85%8A')
+
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('data: {"type":"RUN_FINISHED"}\n\n', {
         status: 200,
@@ -67,11 +69,15 @@ describe('streamKeeperMessage', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const headers = init.headers as Record<string, string>
     expect(JSON.parse(String(init.body))).toEqual({
       name: 'sangsu',
       message: 'ping',
       direct_reply: true,
     })
+    const actorHeader = headers['X-MASC-Agent'] ?? headers['x-masc-agent']
+    expect(actorHeader).toBe('dashboard-eager-manta')
+    expect(actorHeader).not.toContain('%')
     expect(events).toEqual(['RUN_FINISHED'])
   })
 })

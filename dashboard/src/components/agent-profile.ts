@@ -28,6 +28,7 @@ import {
   sendBroadcast,
   fetchAgentTimeline,
   fetchAgentRelations,
+  currentDashboardActor,
   type AgentTimelineEvent,
   type AgentTimelineResponse,
   type AgentRelationsResponse,
@@ -46,8 +47,6 @@ import type {
 import { AgentRuntimeStrip } from './agent-monitor/runtime-strip'
 import { AgentLiveTimeline } from './agent-monitor/live-timeline'
 import { KeeperChatPanel } from './keeper-chat-panel'
-
-const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
 type TaskHistoryRow = { taskId: string; text: string }
 
@@ -145,10 +144,9 @@ async function loadProfile(name: string): Promise<void> {
 async function submitMention(target: string): Promise<void> {
   const text = mentionText.value.trim()
   if (!target || !text) return
-  const sender = localStorage.getItem(AGENT_NAME_KEY)?.trim() || 'dashboard'
   sendingMention.value = true
   try {
-    await sendBroadcast(sender, `@${target} ${text}`)
+    await sendBroadcast(currentDashboardActor(), `@${target} ${text}`)
     mentionText.value = ''
     showToast(`${target}에게 전송`, 'success')
     void loadProfile(target)

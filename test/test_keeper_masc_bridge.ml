@@ -164,6 +164,27 @@ let test_tool_access_restricted_empty_json_preserved () =
   | Masc_mcp.Keeper_types.Unrestricted ->
       Alcotest.fail "expected Restricted []"
 
+let test_tool_access_restricted_missing_tools_defaults_empty () =
+  let meta =
+    match Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String "restricted-missing-tools");
+          ("agent_name", `String "restricted-missing-tools");
+          ("trace_id", `String "restricted-missing-tools-trace");
+          ("tool_access", `Assoc [ ("kind", `String "restricted") ]);
+        ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith e
+  in
+  match meta.Masc_mcp.Keeper_types.tool_access with
+  | Masc_mcp.Keeper_types.Restricted names ->
+      Alcotest.(check int) "restricted missing tools defaults empty" 0
+        (List.length names)
+  | Masc_mcp.Keeper_types.Unrestricted ->
+      Alcotest.fail "expected Restricted []"
+
 (** Malformed tool_access JSON is rejected. *)
 let test_tool_access_invalid_kind_rejected () =
   match Masc_mcp.Keeper_types.meta_of_json
@@ -197,6 +218,28 @@ let test_tool_access_missing_kind_rejected () =
       Alcotest.(check string)
         "missing kind error"
         "meta parse error: Invalid_argument(\"keeper tool_access.kind required\")"
+        e
+
+let test_tool_access_invalid_tools_type_rejected () =
+  match Masc_mcp.Keeper_types.meta_of_json
+    (`Assoc
+      [
+        ("name", `String "invalid-tools-type");
+        ("agent_name", `String "invalid-tools-type");
+        ("trace_id", `String "invalid-tools-type-trace");
+        ( "tool_access",
+          `Assoc
+            [
+              ("kind", `String "restricted");
+              ("tools", `String "masc_status");
+            ] );
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected invalid tools type to fail"
+  | Error e ->
+      Alcotest.(check string)
+        "invalid tools type error"
+        "meta parse error: Invalid_argument(\"keeper tool_access.tools must be an array\")"
         e
 
 (** Allowlist also gates shard-sourced masc_* in allowed_tool_names. *)
@@ -316,10 +359,14 @@ let () =
             test_legacy_empty_allowlist_migrates_to_standard;
           Alcotest.test_case "restricted empty json preserved" `Quick
             test_tool_access_restricted_empty_json_preserved;
+          Alcotest.test_case "restricted missing tools defaults empty" `Quick
+            test_tool_access_restricted_missing_tools_defaults_empty;
           Alcotest.test_case "invalid kind rejected" `Quick
             test_tool_access_invalid_kind_rejected;
           Alcotest.test_case "missing kind rejected" `Quick
             test_tool_access_missing_kind_rejected;
+          Alcotest.test_case "invalid tools type rejected" `Quick
+            test_tool_access_invalid_tools_type_rejected;
         ] );
       ( "dispatch",
         [

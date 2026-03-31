@@ -487,9 +487,8 @@ let resolve_ctx ctx ~name args =
     else { ctx with config }
 
 let dispatch ctx ~name ~args : tool_result option =
-  (* Resolve base_path first so bootstrap runs in the correct scope. *)
-  let ctx = resolve_ctx ctx ~name args in
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
+  let ctx = resolve_ctx ctx ~name args in
   match name with
   | "masc_persona_list" -> Some (Persona.handle_persona_list ctx args)
   | "masc_keeper_create_from_persona" -> Some (handle_keeper_create_from_persona ctx args)
@@ -514,8 +513,8 @@ let dispatch ctx ~name ~args : tool_result option =
     Returns None for all other tool names.
     Called from server_routes_http_keeper_stream. *)
 let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
-  let ctx = resolve_ctx ctx ~name args in
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
+  let ctx = resolve_ctx ctx ~name args in
   match name with
   | "masc_keeper_msg" ->
       Some (handle_keeper_msg_stream ~on_text_delta ctx args)

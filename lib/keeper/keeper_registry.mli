@@ -188,6 +188,13 @@ val find_by_agent_name : string -> registry_entry option
 val tool_usage_of_by_name : string ->
   (string * Keeper_types.tool_call_entry) list
 
+(** Resolve config for a keeper tool dispatch.
+    Tries scoped lookup first (O(1) map lookup), then falls back to
+    cross-base_path scan (O(n)) when not found in the caller's scope.
+    Returns config with the keeper's actual base_path, or the original
+    config unchanged if the keeper is not in the registry. *)
+val resolve_config : Room_utils_backend_setup.config -> string -> Room_utils_backend_setup.config
+
 (** Flush in-memory tool usage stats to disk for persistence across restarts. *)
 val flush_tool_usage : base_path:string -> string -> unit
 

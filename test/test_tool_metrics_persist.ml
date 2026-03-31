@@ -21,7 +21,9 @@ let with_tmp_dir f =
        (Unix.getpid ())
        (int_of_float (Unix.gettimeofday () *. 1000.0))) in
   Fs_compat.mkdir_p (Filename.concat dir "data/tool-metrics");
+  P.reset_for_testing ();
   Fun.protect ~finally:(fun () ->
+    P.reset_for_testing ();
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
   ) (fun () -> f dir)
 
@@ -89,6 +91,15 @@ let test_malformed_lines_skipped () =
      | Some s -> Alcotest.(check int) "good count" 1 s.call_count
      | None -> Alcotest.fail "expected good stats"))
 
+let test_reset_clears_cached_store () =
+  with_tmp_dir (fun base_path ->
+    ignore (P.restore ~base_path);
+    P.enqueue (make_result ~name:"alpha" ~success:true ~duration_ms:1.0);
+    P.reset_for_testing ();
+    P.flush_now ();
+    let restored = P.restore ~base_path in
+    Alcotest.(check int) "reset drops queued records and cache" 0 restored)
+
 let () =
   Alcotest.run "Tool_metrics_persist" [
     "persistence", [
@@ -98,5 +109,7 @@ let () =
         test_restore_empty_dir;
       eio_test "malformed lines skipped"
         test_malformed_lines_skipped;
+      eio_test "reset clears cached store"
+        test_reset_clears_cached_store;
     ];
   ]

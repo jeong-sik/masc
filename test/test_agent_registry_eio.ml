@@ -94,6 +94,28 @@ let test_cleanup_stale () =
   let cleaned = Agent_registry_eio.cleanup_stale_sessions () in
   check bool "cleanup returned count" true (cleaned >= 0)
 
+let test_reset_clears_cached_session_mappings () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Agent_registry_eio.reset_for_testing ();
+  let sid = Printf.sprintf "reset-session-%d" (Random.int 10000) in
+  let id1 =
+    Agent_registry_eio.get_or_create_identity ~mcp_session_id:sid
+      (`Assoc [ ("_agent_name", `String "cached-agent") ])
+  in
+  Agent_registry_eio.set_resolved_name sid "cached-agent";
+  check (option string) "resolved name set" (Some "cached-agent")
+    (Agent_registry_eio.get_resolved_name sid);
+  Agent_registry_eio.reset_for_testing ();
+  check (option string) "resolved name cleared" None
+    (Agent_registry_eio.get_resolved_name sid);
+  let id2 =
+    Agent_registry_eio.get_or_create_identity ~mcp_session_id:sid
+      (`Assoc [ ("_agent_name", `String "cached-agent") ])
+  in
+  check bool "session mapping cleared by reset" true
+    (id1.session_key <> id2.session_key)
+
 let test_concurrent_access () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -125,6 +147,8 @@ let () =
       test_case "active_count" `Quick test_active_count;
       test_case "list_active" `Quick test_list_active;
       test_case "cleanup_stale" `Quick test_cleanup_stale;
+      test_case "reset_clears_cached_session_mappings" `Quick
+        test_reset_clears_cached_session_mappings;
     ];
     "concurrency", [
       test_case "concurrent_access" `Quick test_concurrent_access;

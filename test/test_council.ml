@@ -579,8 +579,8 @@ let test_executor_deploy_not_silent () =
      | Error msg ->
        check bool "error mentions deploy"
          (contains_substring msg "deploy") true;
-       check bool "error mentions not implemented"
-         (contains_substring msg "not implemented") true
+       check bool "error mentions unsupported"
+         (contains_substring msg "unsupported") true
      | Ok _ -> fail "deploy build_action should return Error, not Ok")
 
 let test_executor_build_action_close_pr () =

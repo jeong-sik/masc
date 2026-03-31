@@ -379,5 +379,5 @@ bisect-ppx-report html --coverage-path _coverage
 | 문서 | 경로 |
 |------|------|
 | Verification matrix | `docs/VERIFICATION-MATRIX.md` |
-| LLM judge design | `docs/design/LLM-JUDGE-DESIGN.md` |
+| Check evaluation spec | `docs/design/check-evaluation-spec.md` |
 | Contract-driven agent loop RFC | `docs/design/contract-driven-agent-loop-rfc.md` |

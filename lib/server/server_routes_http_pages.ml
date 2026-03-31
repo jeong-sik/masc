@@ -295,10 +295,18 @@ let http_status_of_graphql = function
   | `Bad_request -> `Bad_request
 
 (** Shared by HTTP/2 gateway handlers that require initialized server state. *)
-let get_server_state () =
+let get_server_state_result () =
   match !server_state with
-  | Some s -> s
-  | None -> failwith "Server state not initialized"
+  | Some s -> Ok s
+  | None -> Error "server state not initialized"
+
+let get_server_state () =
+  match get_server_state_result () with
+  | Ok s -> s
+  | Error message -> invalid_arg message
+
+let server_state_error_json message =
+  Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])
 
 let handle_get_graphql _request reqd =
   let nonce =
@@ -315,11 +323,11 @@ let handle_get_graphql _request reqd =
 let handle_post_graphql request reqd =
   let origin = get_origin request in
   Http.Request.read_body_async reqd (fun body_str ->
-    match !server_state with
-    | None ->
+    match get_server_state_result () with
+    | Error message ->
         respond_json_with_cors ~status:`Internal_server_error request reqd
-          {|{"error":"server state not initialized"}|}
-    | Some state ->
+          (server_state_error_json message)
+    | Ok state ->
         let response = Graphql_api.handle_request ~config:state.room_config body_str in
         let status = http_status_of_graphql response.status in
         let headers = Httpun.Headers.of_list (

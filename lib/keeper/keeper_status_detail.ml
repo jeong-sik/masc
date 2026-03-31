@@ -18,7 +18,16 @@ let handle_keeper_status ctx args : tool_result =
   if not (validate_name name) then
     (false, "❌ invalid keeper name")
   else
-    match read_meta ctx.config name with
+    (* Resolve config base_path from keeper registry when available,
+       because the caller's config may use a different base_path than
+       the keeper was registered with (e.g. dashboard session). *)
+    let config =
+      match Keeper_registry.find_by_name name with
+      | Some entry -> { ctx.config with base_path = entry.base_path }
+      | None -> ctx.config
+    in
+    let ctx = { ctx with config } in
+    match read_meta config name with
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
     | Ok (Some m) ->
@@ -38,7 +47,7 @@ let handle_keeper_status ctx args : tool_result =
       in
       let models = Oas_model_resolve.models_of_cascade_name m.cascade_name in
       let primary_max_context = Oas_model_resolve.resolve_primary_max_context models in
-      let base_dir = session_base_dir ctx.config in
+      let base_dir = session_base_dir config in
          let ctx_opt =
            if include_context then
              let (_session, ctx_opt) =

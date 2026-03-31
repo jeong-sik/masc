@@ -81,7 +81,7 @@ extract_token() {
 
 manifest_json="$(
   env -u DUNE_RPC MASC_STORAGE_TYPE=filesystem MASC_POSTGRES_URL= DATABASE_URL= SUPABASE_DB_URL= SB_PG_URL= \
-    opam exec -- dune exec --root "$ROOT_DIR" test/tool_matrix_manifest.exe \
+    opam exec -- dune exec --root "$ROOT_DIR" bin/public_tool_manifest.exe \
     | awk 'BEGIN { printing = 0 } /^\{/ { printing = 1 } printing { print }'
 )"
 expected_public_tools="$(printf '%s\n' "$manifest_json" | jq -c '.public_tool_names | sort')"

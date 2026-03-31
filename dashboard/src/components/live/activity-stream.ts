@@ -9,7 +9,7 @@ import {
   eventKindLabel,
   type LiveFilterKind,
 } from '../../live-store'
-import { connected } from '../../sse'
+import { connected, totalEvents } from '../../sse'
 import { formatTimeAgo } from '../common/time-ago'
 
 const FILTER_OPTIONS: { kind: LiveFilterKind; label: string; cssClass: string }[] = [
@@ -46,7 +46,7 @@ export function ActivityStream() {
     <div class="grid gap-3 grid-rows-[auto_auto_1fr] min-h-0">
       <div class="activity-stream-head flex items-center justify-between gap-3 border-b border-[var(--border-slate-12)] pb-3">
         <h3 class="m-0 text-[0.95rem] font-semibold text-[var(--text-strong)]">활동 스트림</h3>
-        <span class="text-xs text-[var(--text-muted)]">${entries.length} events</span>
+        <span class="text-xs text-[var(--text-muted)]">${totalEvents.value} 수신 · ${entries.length} 표시</span>
       </div>
       <${FilterBar} />
       <div class="activity-stream-list grid gap-2 content-start">

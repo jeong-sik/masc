@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { createAsyncResource } from '../lib/async-state'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
@@ -13,6 +14,7 @@ import { EmptyState } from './common/empty-state'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { StatGrid } from './common/stat-tile'
+import { autonomyHint, formatTokens } from './keeper-detail-panels'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
   agents,
@@ -50,12 +52,15 @@ const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
 type TaskHistoryRow = { taskId: string; text: string }
 
-const loading = signal(false)
-const profileError = signal('')
-const roomActivity = signal<string[]>([])
-const taskHistories = signal<TaskHistoryRow[]>([])
-const agentTimeline = signal<AgentTimelineResponse | null>(null)
-const agentRelations = signal<AgentRelationsResponse | null>(null)
+interface ProfileData {
+  roomActivity: string[]
+  taskHistories: TaskHistoryRow[]
+  agentTimeline: AgentTimelineResponse | null
+  agentRelations: AgentRelationsResponse | null
+}
+
+const profileResource = createAsyncResource<ProfileData>()
+let profileLoadedName = ''
 const mentionText = signal('')
 const sendingMention = signal(false)
 
@@ -96,32 +101,26 @@ function workerBrief(name: string) {
   return executionWorkerSupportBriefs.value.find(w => w.name === name) ?? null
 }
 
-async function loadProfile(name: string): Promise<void> {
-  loading.value = true
-  profileError.value = ''
-  roomActivity.value = []
-  taskHistories.value = []
-  agentTimeline.value = null
-  agentRelations.value = null
-
-  try {
+function loadProfile(name: string): Promise<void> {
+  if (profileLoadedName !== name) {
+    profileResource.reset()
+    profileLoadedName = name
+  }
+  return profileResource.load(async () => {
     const [lines, timeline, relations] = await Promise.all([
       fetchRoomMessages(80),
       fetchAgentTimeline(name, 4, 20).catch(() => null),
       fetchAgentRelations(name).catch(() => null),
     ])
 
-    agentRelations.value = relations
-
-    roomActivity.value = lines
+    const activity = lines
       .filter(line => line.includes(name))
       .slice(0, 20)
 
-    agentTimeline.value = timeline
-
     const owned = assignedTasks(name).slice(0, 6)
+    let histories: TaskHistoryRow[] = []
     if (owned.length > 0) {
-      const rows = await Promise.all(
+      histories = await Promise.all(
         owned.map(async task => {
           try {
             const text = await fetchTaskHistory(task.id, 25)
@@ -132,13 +131,15 @@ async function loadProfile(name: string): Promise<void> {
           }
         }),
       )
-      taskHistories.value = rows
     }
-  } catch (err) {
-    profileError.value = err instanceof Error ? err.message : '프로필 로드 실패'
-  } finally {
-    loading.value = false
-  }
+
+    return {
+      roomActivity: activity,
+      taskHistories: histories,
+      agentTimeline: timeline,
+      agentRelations: relations,
+    }
+  })
 }
 
 async function submitMention(target: string): Promise<void> {
@@ -209,7 +210,8 @@ function CharacterPlate({ name }: { name: string }) {
   const workerState = worker?.state
   const workerFocus = worker?.focus
 
-  const timeline = agentTimeline.value
+  const cps = profileResource.state.value
+  const timeline = cps.status === 'loaded' ? cps.data.agentTimeline : null
   const summary = timeline?.summary
 
   return html`
@@ -234,13 +236,12 @@ function CharacterPlate({ name }: { name: string }) {
             ${displayName}
           </h2>
           ${koreanName ? html`<span class="text-base text-[var(--text-muted)]">(${koreanName})</span>` : ''}
-          ${generation != null ? html`<span class="text-sm font-bold text-[var(--accent)] bg-[var(--accent-10)] border border-[rgba(71,184,255,0.25)] px-1.5 py-px tabular-nums rounded">Lv.${generation}</span>` : null}
+          ${generation != null ? html`<span class="text-sm font-bold text-[var(--accent)] bg-[var(--accent-10)] border border-[rgba(71,184,255,0.25)] px-1.5 py-px tabular-nums rounded" title="세대 번호 — 핸드오프마다 증가 (레벨/등급 아님)">Gen.${generation}</span>` : null}
         </div>
 
         <div class="flex items-center gap-1.5 flex-wrap">
           <${StatusBadge} status=${headerStatus} />
           ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-[11px] text-[var(--text-muted)] bg-[var(--accent-8)] border border-[rgba(71,184,255,0.15)] px-[5px] py-px rounded">${model}</span>` : null}
-          ${signalTruth ? html`<span class="ff-plate__signal rounded ff-plate__signal--${signalTruth}">${signalTruth}</span>` : null}
         </div>
 
         ${ctxPct != null ? html`
@@ -250,6 +251,9 @@ function CharacterPlate({ name }: { name: string }) {
               <div class="h-full rounded-full transition-[width] duration-[250ms] ease-[ease] motion-reduce:transition-none ${ctxBarClass(ctxRatio) === 'warn' ? 'bg-linear-to-r from-[var(--warn)] to-[var(--warn-bright)]' : ctxBarClass(ctxRatio) === 'bad' ? 'bg-linear-to-r from-[var(--bad)] to-[var(--warn-bright)]' : 'bg-linear-to-r from-[var(--accent)] to-[var(--ok)]'}" style=${{ width: `${ctxPct}%` }}></div>
             </div>
             <span class="text-[13px] tabular-nums text-[var(--text-strong)] min-w-9 text-right">${ctxPct}%</span>
+            ${keeper?.context_tokens != null && keeper?.context_max != null
+              ? html`<span class="text-[11px] tabular-nums text-[var(--text-muted)] font-mono ml-1">${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}</span>`
+              : null}
           </div>
         ` : null}
 
@@ -281,10 +285,10 @@ function CharacterPlate({ name }: { name: string }) {
       <div class="w-full mt-2">
         ${isKeeper ? html`
           <${StatGrid} cols=${4} items=${[
-            { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : 'N/A', variant: 'gold' },
+            { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : 'N/A', hint: keeper.context_tokens != null && keeper.context_max != null ? `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}` : undefined, variant: 'gold' },
             { label: '세대', value: generation ?? 0, variant: 'gold' },
             { label: '턴', value: keeper.turn_count ?? 0, variant: 'gold' },
-            { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, variant: 'gold' },
+            { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, hint: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled), variant: 'gold' },
           ]} />
         ` : html`
           <${StatGrid} cols=${4} items=${[
@@ -306,9 +310,13 @@ export function AgentProfile({ name }: { name: string }) {
     void loadProfile(name)
   }, [name])
 
+  const ps = profileResource.state.value
+  const profileData = ps.status === 'loaded' ? ps.data : undefined
+  const profileLoading = ps.status === 'loading'
+
   const owned = assignedTasks(name)
-  const lines = roomActivity.value
-  const timeline = agentTimeline.value
+  const lines = profileData?.roomActivity ?? []
+  const timeline = profileData?.agentTimeline ?? null
   const keeper = findKeeper(name)
   const keeperChatName = keeperChatTargetName(name, keeper)
   const isKeeper = keeper != null
@@ -317,12 +325,12 @@ export function AgentProfile({ name }: { name: string }) {
     <div class="px-1 ${isKeeper ? 'ff-profile--keeper' : ''}">
       <div class="flex gap-2 mb-3">
         <${ActionButton} variant="ghost" onClick=${() => navigate('monitoring', { section: 'agents' })}>← 목록<//>
-        <${ActionButton} variant="ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
-          ${loading.value ? '...' : '새로고침'}
+        <${ActionButton} variant="ghost" onClick=${() => { void loadProfile(name) }} disabled=${profileLoading}>
+          ${profileLoading ? '...' : '새로고침'}
         <//>
       </div>
 
-      ${profileError.value ? html`<div class="council-error rounded-lg">${profileError.value}</div>` : null}
+      ${ps.status === 'error' ? html`<div class="council-error rounded-lg">${ps.message}</div>` : null}
 
       <${CharacterPlate} name=${name} />
 
@@ -344,7 +352,7 @@ export function AgentProfile({ name }: { name: string }) {
         ` : null}
 
         ${(() => {
-          const rel = agentRelations.value
+          const rel = profileData?.agentRelations ?? null
           if (!rel) return null
           const collabs = rel.collaborators ?? []
           const interests = rel.interests ?? []
@@ -406,9 +414,9 @@ export function AgentProfile({ name }: { name: string }) {
                 html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[13px] text-[#c8daf7] leading-[1.4] rounded-lg">${line}</div>`)}</div>`}
         <//>
 
-        ${taskHistories.value.length > 0 ? html`
+        ${(profileData?.taskHistories ?? []).length > 0 ? html`
           <${Card} title="태스크 이력" class="ff-card rounded-xl col-span-full">
-            <div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`
+            <div class="agent-history-list">${(profileData?.taskHistories ?? []).map((row: TaskHistoryRow) => html`
               <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
                 <div class="mb-2"><span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${row.taskId}</span></div>
                 <pre class="m-0 whitespace-pre-wrap text-[13px] leading-[1.5] text-[#cfe0ff] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>

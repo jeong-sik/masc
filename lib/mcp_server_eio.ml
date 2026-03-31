@@ -17,7 +17,7 @@
 (** {1 Re-exported Types} *)
 
 type server_state = Mcp_server.server_state
-type jsonrpc_request = Mcp_server.jsonrpc_request
+type jsonrpc_request = Mcp_transport_protocol.jsonrpc_request
 type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
@@ -42,12 +42,12 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
 
 (** {1 Re-exported Mcp_server Functions} *)
 
-let is_jsonrpc_response = Mcp_server.is_jsonrpc_response
-let get_id = Mcp_server.get_id
-let is_valid_request_id = Mcp_server.is_valid_request_id
-let validate_initialize_params = Mcp_server.validate_initialize_params
-let has_field = Mcp_server.has_field
-let get_field = Mcp_server.get_field
+let is_jsonrpc_response = Mcp_transport_protocol.is_jsonrpc_response
+let get_id = Mcp_transport_protocol.get_id
+let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
+let validate_initialize_params = Mcp_transport_protocol.validate_initialize_params
+let has_field = Mcp_transport_protocol.has_field
+let get_field = Mcp_transport_protocol.get_field
 
 (** {1 Governance Re-exports} *)
 
@@ -107,11 +107,6 @@ let () =
   register_module_tag ~schemas:Tool_operator.schemas ~tag:Mod_operator;
   register_module_tag ~schemas:Tool_command_plane.schemas ~tag:Mod_command_plane;
   register_module_tag ~schemas:Tool_local_runtime.schemas ~tag:Mod_local_runtime;
-  (* Backward-compatible aliases: old masc_llama_* names route to local_runtime *)
-  register_name_tag ~tool_name:"masc_llama_models" ~tag:Mod_local_runtime;
-  register_name_tag ~tool_name:"masc_llama_runtime_status" ~tag:Mod_local_runtime;
-  register_name_tag ~tool_name:"masc_llama_runtime_bench" ~tag:Mod_local_runtime;
-  register_name_tag ~tool_name:"masc_llama_runtime_verify" ~tag:Mod_local_runtime;
   register_module_tag ~schemas:Tool_team_session.schemas ~tag:Mod_team_session;
   register_module_tag ~schemas:Tool_voice.schemas ~tag:Mod_voice;
   register_module_tag ~schemas:Tool_portal.schemas ~tag:Mod_portal;

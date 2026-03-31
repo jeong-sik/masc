@@ -3,25 +3,14 @@ import { ActionButton } from './common/button'
 // Displays tool usage statistics from Tool_unified.summary_report()
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { fetchToolMetrics, type ToolMetricsResponse, type ToolMetricsTopEntry } from '../api'
+import { createAsyncResource } from '../lib/async-state'
 
-const metricsData = signal<ToolMetricsResponse | null>(null)
-const metricsError = signal<string | null>(null)
-const metricsLoading = signal(false)
+const metricsResource = createAsyncResource<ToolMetricsResponse>()
 
-async function loadMetrics() {
-  if (metricsLoading.value) return
-  metricsLoading.value = true
-  metricsError.value = null
-  try {
-    metricsData.value = await fetchToolMetrics()
-  } catch (err) {
-    metricsError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    metricsLoading.value = false
-  }
+function loadMetrics() {
+  return metricsResource.load(() => fetchToolMetrics())
 }
 
 function tierLabel(tier: string): string {
@@ -91,12 +80,13 @@ function TierDistribution({ dist }: { dist: Record<string, number> }) {
 }
 
 export function ToolMetrics() {
-  const data = metricsData.value
-  const loading = metricsLoading.value
-  const error = metricsError.value
+  const s = metricsResource.state.value
+  const data = s.status === 'loaded' ? s.data : undefined
+  const loading = s.status === 'loading'
+  const error = s.status === 'error' ? s.message : null
 
   useEffect(() => {
-    if (!metricsData.value && !metricsLoading.value) {
+    if (s.status === 'idle') {
       void loadMetrics()
     }
   }, [])

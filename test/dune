@@ -35,6 +35,7 @@
         test_subscriptions test_session test_progress test_spawn
         test_validation test_response
         test_dashboard
+        test_dashboard_perf
         test_dashboard_tool_host_events
         test_multi_room test_worktree_detection test_bounded test_mention test_hat
         test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
@@ -85,6 +86,7 @@
           test_subscriptions test_session test_progress test_spawn
           test_validation test_response
           test_dashboard
+          test_dashboard_perf
           test_dashboard_tool_host_events
           test_multi_room test_worktree_detection test_bounded test_mention test_hat
           test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
@@ -170,6 +172,7 @@
         test_masc_log
         test_dashboard_room_truth
         test_server_runtime_bootstrap
+        test_server_base_path_diagnostics
         test_server_startup_takeover
         test_worker_runtime
         test_capability_registry
@@ -314,6 +317,7 @@
         test_masc_log
         test_dashboard_room_truth
         test_server_runtime_bootstrap
+        test_server_base_path_diagnostics
         test_server_startup_takeover
         test_worker_runtime
         test_capability_registry

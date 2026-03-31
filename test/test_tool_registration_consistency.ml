@@ -81,6 +81,24 @@ let contains_token haystack needle =
   in
   n_len = 0 || loop 0
 
+let extract_masc_tokens contents =
+  let len = String.length contents in
+  let rec loop idx acc =
+    if idx >= len then
+      List.rev acc
+    else if idx + 5 <= len && String.sub contents idx 5 = "masc_" then
+      let rec advance j =
+        if j < len && is_token_char contents.[j] then advance (j + 1) else j
+      in
+      let next = advance (idx + 5) in
+      let token = String.sub contents idx (next - idx) in
+      loop next (token :: acc)
+    else
+      loop (idx + 1) acc
+  in
+  loop 0 []
+  |> List.sort_uniq String.compare
+
 let read_file path =
   let ic = open_in path in
   Fun.protect
@@ -142,6 +160,40 @@ let test_front_door_surfaces_do_not_reintroduce_claim_alias () =
           "front-door surface %s reintroduces deprecated masc_claim alias"
           relative)
     paths
+
+let test_benchmark_scripts_follow_session_contract () =
+  let scripts =
+    [ "benchmarks/quick-bench.sh"; "benchmarks/benchmark.sh" ]
+  in
+  List.iter
+    (fun relative ->
+      let contents = read_file (repo_path relative) in
+      if not (contains_substring contents "method\":\"initialize\"")
+         && not (contains_substring contents "method: \"initialize\"")
+      then
+        Alcotest.failf
+          "benchmark script %s must initialize an MCP session before tools/call"
+          relative;
+      if not (contains_token contents "MCP_SESSION_ID") then
+        Alcotest.failf
+          "benchmark script %s must carry MCP_SESSION_ID through tools/call"
+          relative)
+    scripts
+
+let test_benchmark_scripts_only_reference_registered_tools () =
+  let scripts =
+    [ "benchmarks/quick-bench.sh"; "benchmarks/benchmark.sh" ]
+  in
+  List.iter
+    (fun relative ->
+      let contents = read_file (repo_path relative) in
+      extract_masc_tokens contents
+      |> List.iter (fun tool_name ->
+             if not (List.mem tool_name all_schema_names) then
+               Alcotest.failf
+                 "benchmark script %s references unregistered tool %s"
+                 relative tool_name))
+    scripts
 
 let test_multi_room_doc_keeps_historical_banner () =
   let contents = read_file (doc_path "MULTI-ROOM-DESIGN.md") in
@@ -219,6 +271,10 @@ let () =
             test_docs_do_not_reintroduce_ghost_claim_surface;
           Alcotest.test_case "front-door surfaces do not reintroduce claim alias" `Quick
             test_front_door_surfaces_do_not_reintroduce_claim_alias;
+          Alcotest.test_case "benchmark scripts follow session contract" `Quick
+            test_benchmark_scripts_follow_session_contract;
+          Alcotest.test_case "benchmark scripts only reference registered tools" `Quick
+            test_benchmark_scripts_only_reference_registered_tools;
           Alcotest.test_case "multi-room doc keeps historical banner" `Quick
             test_multi_room_doc_keeps_historical_banner;
           Alcotest.test_case "docs do not reintroduce removed mode surface" `Quick

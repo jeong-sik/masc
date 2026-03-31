@@ -13,9 +13,8 @@
 
 open Tool_args
 open Keeper_types
-open Keeper_memory [@@warning "-33"]
-open Keeper_alerting [@@warning "-33"]
-open Keeper_exec_tools [@@warning "-33"]
+open Keeper_memory
+open Keeper_alerting
 open Keeper_keepalive
 open Keeper_execution
 open Keeper_turn_setup

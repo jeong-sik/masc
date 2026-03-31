@@ -54,6 +54,94 @@ let resolve_base_dir ?(base_dir : string option) ?(config : Room_utils.config op
   | None, Some cfg -> Filename.concat cfg.base_path ".masc"
   | None, None -> Filename.concat (Env_config.me_root ()) ".masc"
 
+type file_stamp = float * int
+
+let file_stamp_opt path =
+  try
+    let stats = Unix.stat path in
+    Some (stats.Unix.st_mtime, stats.Unix.st_size)
+  with
+  | Unix.Unix_error _ -> None
+  | Sys_error _ -> None
+
+type episode_file_cache = {
+  mutable stamp : file_stamp option;
+  mutable episodes : Institution_eio.episode list;
+  mutable ids : (string, unit) Hashtbl.t;
+}
+
+let episode_file_cache_tbl : (string, episode_file_cache) Hashtbl.t =
+  Hashtbl.create 4
+
+let episode_ids_of episodes =
+  let ids = Hashtbl.create (max 16 (List.length episodes)) in
+  List.iter
+    (fun (episode : Institution_eio.episode) -> Hashtbl.replace ids episode.id ())
+    episodes;
+  ids
+
+let load_all_episodes_cached () =
+  let path = Institution_eio.episodes_jsonl_path () in
+  let stamp = file_stamp_opt path in
+  match Hashtbl.find_opt episode_file_cache_tbl path with
+  | Some cache when cache.stamp = stamp -> cache
+  | _ ->
+      let episodes = Institution_eio.load_recent_episodes_jsonl ~limit:max_int in
+      let cache = { stamp; episodes; ids = episode_ids_of episodes } in
+      Hashtbl.replace episode_file_cache_tbl path cache;
+      cache
+
+let cached_recent_episodes ~limit =
+  let cache = load_all_episodes_cached () in
+  let total = List.length cache.episodes in
+  if total <= limit then cache.episodes
+  else
+    let rec drop n = function
+      | [] -> []
+      | remaining when n <= 0 -> remaining
+      | _ :: rest -> drop (n - 1) rest
+    in
+    drop (total - limit) cache.episodes
+
+let note_episode_flush (episode : Institution_eio.episode) =
+  let path = Institution_eio.episodes_jsonl_path () in
+  let cache = load_all_episodes_cached () in
+  cache.episodes <- cache.episodes @ [episode];
+  Hashtbl.replace cache.ids episode.id ();
+  cache.stamp <- file_stamp_opt path;
+  Hashtbl.replace episode_file_cache_tbl path cache
+
+type procedure_file_cache = {
+  mutable stamp : file_stamp option;
+  mutable procedures : Procedural_memory.procedure list;
+}
+
+let procedure_file_cache_tbl : (string, procedure_file_cache) Hashtbl.t =
+  Hashtbl.create 16
+
+let load_procedures_cached ~(agent_name : string) =
+  let path = Procedural_memory.procedures_path ~agent_name in
+  let stamp = file_stamp_opt path in
+  match Hashtbl.find_opt procedure_file_cache_tbl path with
+  | Some cache when cache.stamp = stamp -> cache.procedures
+  | _ ->
+      let procedures = Procedural_memory.load_procedures ~agent_name in
+      Hashtbl.replace procedure_file_cache_tbl path { stamp; procedures };
+      procedures
+
+let store_procedures_cache ~(agent_name : string)
+    (procedures : Procedural_memory.procedure list) =
+  let path = Procedural_memory.procedures_path ~agent_name in
+  let stamp = file_stamp_opt path in
+  Hashtbl.replace procedure_file_cache_tbl path { stamp; procedures }
+
+let top_procedures_cached ~(agent_name : string) ~(limit : int) =
+  load_procedures_cached ~agent_name
+  |> List.filter Procedural_memory.is_crystallized
+  |> List.sort (fun (a : Procedural_memory.procedure) (b : Procedural_memory.procedure) ->
+         Float.compare b.confidence a.confidence)
+  |> List.filteri (fun i _ -> i < limit)
+
 (** Create an OAS [long_term_backend].
 
     Always uses session-based JSONL files under
@@ -106,7 +194,7 @@ let seed_institution ~(memory : Agent_sdk.Memory.t) ~(config : Room_utils.config
     Loads top-N procedures (adaptive threshold: standard 3+/70% OR rare 2+/100%)
     and stores as a single Long_term entry.  Returns the number of procedures seeded. *)
 let seed_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limit : int) : int =
-  let procs = Procedural_memory.top_procedures ~agent_name ~limit in
+  let procs = top_procedures_cached ~agent_name ~limit in
   if procs = [] then 0
   else begin
     let json = `Assoc [
@@ -252,11 +340,7 @@ let institution_episode_of_oas ~(agent_name : string)
   }
 
 let persisted_episode_ids () =
-  let seen = Hashtbl.create 128 in
-  Institution_eio.load_recent_episodes_jsonl ~limit:max_int
-  |> List.iter (fun (episode : Institution_eio.episode) ->
-         Hashtbl.replace seen episode.id ());
-  seen
+  Hashtbl.copy (load_all_episodes_cached ()).ids
 
 (** Pre-seed the Episodic tier.
 
@@ -265,7 +349,7 @@ let persisted_episode_ids () =
 let seed_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
     ~(limit : int) : int =
   ignore agent_name;
-  let episodes = Institution_eio.load_recent_episodes_jsonl ~limit in
+  let episodes = cached_recent_episodes ~limit in
   List.iter
     (fun episode ->
       (try Agent_sdk.Memory.store_episode memory (oas_episode_of_institution episode)
@@ -286,10 +370,11 @@ let flush_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
        (fun flushed (episode : Agent_sdk.Memory.episode) ->
          if Hashtbl.mem persisted_ids episode.id then flushed
          else (
+           let persisted = institution_episode_of_oas ~agent_name episode in
            Hashtbl.replace persisted_ids episode.id ();
            Fs_compat.append_jsonl path
-             (Institution_eio.episode_to_json
-                (institution_episode_of_oas ~agent_name episode));
+             (Institution_eio.episode_to_json persisted);
+           note_episode_flush persisted;
            flushed + 1))
        0
 
@@ -327,7 +412,7 @@ let oas_procedure_of_masc (p : Procedural_memory.procedure) :
     Returns the number of procedures seeded. *)
 let seed_procedures_as_oas ~(memory : Agent_sdk.Memory.t)
     ~(agent_name : string) ~(limit : int) : int =
-  let procs = Procedural_memory.top_procedures ~agent_name ~limit in
+  let procs = top_procedures_cached ~agent_name ~limit in
   List.iter (fun p ->
     (try Agent_sdk.Memory.store_procedure memory (oas_procedure_of_masc p)
      with exn -> Logs.warn (fun m -> m "Failed to store procedure memory: %s" (Printexc.to_string exn)))
@@ -358,7 +443,7 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
     Agent_sdk.Memory.matching_procedures memory
       ~pattern:"" ()
   in
-  let existing_raw = Procedural_memory.load_procedures ~agent_name in
+  let existing_raw = load_procedures_cached ~agent_name in
   let procedures = ref (dedupe_procedures_by_id existing_raw) in
   let needs_rewrite = ref (List.length existing_raw <> List.length !procedures) in
   let flushed = ref 0 in
@@ -404,6 +489,7 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
   ) oas_procs;
   if !needs_rewrite then
     Procedural_memory.rewrite_procedures ~agent_name !procedures;
+  store_procedures_cache ~agent_name !procedures;
   !flushed
 
 (* ================================================================ *)

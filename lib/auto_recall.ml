@@ -117,7 +117,7 @@ let fetch_from_broadcasts (room_config : Room_utils.config) ~(config : recall_co
         ("seq", `Int msg.seq);
         ("from", `String msg.from_agent);
         ("timestamp", `String msg.timestamp);
-        ("mention", match msg.mention with Some m -> `String m | None -> `Null);
+        ("mention", Json_util.string_opt_to_json msg.mention);
       ];
     }
   ) messages

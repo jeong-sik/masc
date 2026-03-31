@@ -5,26 +5,21 @@ import { TextInput } from './common/input'
 import { TransportHealthPanel } from './transport-health'
 import { fetchDashboardConfig } from '../api/dashboard'
 import type { DashboardConfigResponse, ConfigEntry } from '../api/dashboard'
+import { createAsyncResource } from '../lib/async-state'
 
-const configData = signal<DashboardConfigResponse | null>(null)
-const configLoading = signal(false)
-const configError = signal<string | null>(null)
+const configResource = createAsyncResource<DashboardConfigResponse>()
 const searchQuery = signal('')
 const expandedCategories = signal<Set<string>>(new Set())
 
-export async function refreshServerConfig(): Promise<void> {
-  configLoading.value = true
-  configError.value = null
-  try {
-    configData.value = await fetchDashboardConfig()
-    if (expandedCategories.value.size === 0 && configData.value) {
-      expandedCategories.value = new Set(Object.keys(configData.value.categories))
+export function refreshServerConfig(): Promise<void> {
+  configResource.reset()
+  return configResource.load(async () => {
+    const data = await fetchDashboardConfig()
+    if (expandedCategories.value.size === 0) {
+      expandedCategories.value = new Set(Object.keys(data.categories))
     }
-  } catch (err) {
-    configError.value = err instanceof Error ? err.message : 'Failed to load config'
-  } finally {
-    configLoading.value = false
-  }
+    return data
+  })
 }
 
 function toggleCategory(name: string) {
@@ -124,7 +119,8 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
 }
 
 function ServerMeta() {
-  const data = configData.value
+  const sm = configResource.state.value
+  const data = sm.status === 'loaded' ? sm.data : undefined
   if (!data) return null
   const { server } = data
 
@@ -151,11 +147,12 @@ function ServerMeta() {
 }
 
 export function ServerConfig() {
-  const data = configData.value
-  const loading = configLoading.value
-  const error = configError.value
+  const s = configResource.state.value
+  const data = s.status === 'loaded' ? s.data : undefined
+  const loading = s.status === 'loading'
+  const error = s.status === 'error' ? s.message : null
 
-  if (!data && !loading && !error) {
+  if (s.status === 'idle') {
     void refreshServerConfig()
   }
 

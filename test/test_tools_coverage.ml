@@ -610,9 +610,7 @@ let test_masc_spawn_schema () =
           Alcotest.(check bool) "has prompt" true (List.mem_assoc "prompt" props)
       | None -> Alcotest.fail "masc_spawn missing properties"
 
-let test_masc_llama_models_schema () =
-  (* Tool renamed from masc_llama_models to masc_local_runtime_models;
-     old name kept as dispatch alias only *)
+let test_masc_local_runtime_models_schema () =
   match find_tool "masc_local_runtime_models" with
   | None -> Alcotest.fail "masc_local_runtime_models not found"
   | Some schema ->
@@ -1095,7 +1093,7 @@ let () =
         test_masc_tool_admin_update_schema;
     ];
     "runtime_verify_tools", [
-      Alcotest.test_case "llama-models" `Quick test_masc_llama_models_schema;
+      Alcotest.test_case "local-runtime-models" `Quick test_masc_local_runtime_models_schema;
       Alcotest.test_case "runtime-verify" `Quick
         test_masc_runtime_verify_schema;
       Alcotest.test_case "llama-runtime-verify" `Quick

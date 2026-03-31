@@ -1,14 +1,19 @@
-import { signal } from '@preact/signals'
+import { signal, computed } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
+import { createAsyncResource, getData } from '../../lib/async-state'
 
 export type FlowState = 'unknown' | 'running' | 'paused'
 export const flowState = signal<FlowState>('unknown')
 export const flowLoading = signal(false)
 
-// Room strategy state
-export const roomStrategy = signal<Record<string, unknown> | null>(null)
-export const roomStrategyLoading = signal(false)
+// Room strategy resource
+const roomStrategyResource = createAsyncResource<Record<string, unknown>>()
+const roomStrategyMutating = signal(false)
+export const roomStrategy = computed(() => getData(roomStrategyResource.state.value) ?? null)
+export const roomStrategyLoading = computed(() =>
+  roomStrategyMutating.value || roomStrategyResource.state.value.status === 'loading',
+)
 
 // Maintenance state
 export const maintenanceResult = signal<string | null>(null)
@@ -52,25 +57,25 @@ export async function interruptRoom(reason?: string): Promise<void> {
 // ── Room Strategy ───────────────────────────────
 
 export async function fetchRoomStrategy(): Promise<void> {
-  roomStrategyLoading.value = true
-  try {
+  await roomStrategyResource.load(async () => {
     const raw = await callMcpTool('masc_room_strategy_get', {})
-    roomStrategy.value = JSON.parse(raw) as Record<string, unknown>
-  } catch {
-    roomStrategy.value = null
+    return JSON.parse(raw) as Record<string, unknown>
+  }).catch(() => {
     showToast('룸 전략 조회 실패', 'error')
-  } finally { roomStrategyLoading.value = false }
+  })
 }
 
 export async function setRoomStrategy(updates: Record<string, unknown>): Promise<void> {
-  roomStrategyLoading.value = true
+  roomStrategyMutating.value = true
   try {
     await callMcpTool('masc_room_strategy_set', updates)
     showToast('룸 전략 업데이트 완료', 'success')
     await fetchRoomStrategy()
   } catch (err) {
     showToast(`룸 전략 저장 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
-  } finally { roomStrategyLoading.value = false }
+  } finally {
+    roomStrategyMutating.value = false
+  }
 }
 
 // ── Maintenance ─────────────────────────────────

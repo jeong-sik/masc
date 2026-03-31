@@ -5,10 +5,9 @@ import {
   fetchDashboardCollaborationEvidence,
   type DashboardCollaborationEvidenceResponse,
 } from '../api'
+import { createAsyncResource } from '../lib/async-state'
 
-const collaborationEvidence = signal<DashboardCollaborationEvidenceResponse | null>(null)
-const collaborationEvidenceError = signal<string | null>(null)
-const collaborationEvidenceLoading = signal(false)
+const collaborationResource = createAsyncResource<DashboardCollaborationEvidenceResponse>()
 const collaborationEvidenceKey = signal('')
 
 type CollaborationCountKey = keyof DashboardCollaborationEvidenceResponse['counts']
@@ -28,19 +27,12 @@ const COLLABORATION_COUNT_METRICS: Array<{ key: CollaborationCountKey, label: st
   { key: 'unique_actor_count', label: 'actors' },
 ]
 
-async function loadCollaborationEvidence(sessionId?: string | null, roomId?: string | null) {
+function loadCollaborationEvidence(sessionId?: string | null, roomId?: string | null) {
   const key = `${sessionId ?? ''}:${roomId ?? ''}`
-  if (collaborationEvidenceLoading.value && collaborationEvidenceKey.value === key) return
-  collaborationEvidenceLoading.value = true
-  collaborationEvidenceError.value = null
+  if (collaborationEvidenceKey.value === key && collaborationResource.state.value.status === 'loading') return
   collaborationEvidenceKey.value = key
-  try {
-    collaborationEvidence.value = await fetchDashboardCollaborationEvidence({ sessionId, roomId })
-  } catch (err) {
-    collaborationEvidenceError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    collaborationEvidenceLoading.value = false
-  }
+  collaborationResource.reset()
+  return collaborationResource.load(() => fetchDashboardCollaborationEvidence({ sessionId, roomId }))
 }
 
 function evidenceTone(value: string): string {
@@ -95,7 +87,8 @@ export function CollaborationEvidencePanel({
     void loadCollaborationEvidence(sessionId, roomId)
   }, [sessionId, roomId])
 
-  const data = collaborationEvidence.value
+  const s = collaborationResource.state.value
+  const data = s.status === 'loaded' ? s.data : undefined
   const counts = data?.counts
   const metrics = counts ? visibleCollaborationCountMetrics(counts) : []
   const evidenceRows = data ? collaborationEvidenceSupportRows(data) : []
@@ -145,11 +138,11 @@ export function CollaborationEvidencePanel({
         </div>
       </div>
 
-      ${collaborationEvidenceError.value
-        ? html`<div class="text-[12px] text-[var(--bad)]">${collaborationEvidenceError.value}</div>`
+      ${s.status === 'error'
+        ? html`<div class="text-[12px] text-[var(--bad)]">${s.message}</div>`
         : null}
 
-      ${collaborationEvidenceLoading.value && !data
+      ${(s.status === 'loading' || s.status === 'idle') && !data
         ? html`<div class="text-[12px] text-[var(--text-muted)]">협업 근거 불러오는 중...</div>`
         : null}
 

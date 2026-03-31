@@ -349,19 +349,6 @@ let test_path_empty_allowed_permits_all_within_root () =
    11. Dead alias removal (#4120)
    ============================================================ *)
 
-let test_keeper_read_not_in_catalog () =
-  let internal = Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal in
-  check bool "keeper_read not in Keeper_internal surface" false
-    (List.mem "keeper_read" internal)
-
-let test_keeper_read_not_in_allowed () =
-  let meta = make_meta () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "keeper_read not in allowed_tool_names" false
-    (has_tool "keeper_read" tools);
-  check bool "keeper_fs_read is present" true
-    (has_tool "keeper_fs_read" tools)
-
 (* ============================================================
    Runner
    ============================================================ *)
@@ -416,10 +403,6 @@ let () =
       test_case "whitespace only rejected" `Quick test_path_whitespace_only_rejected;
       test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;
     ]);
-    ("dead_alias_removal", [
-      test_case "keeper_read not in catalog" `Quick test_keeper_read_not_in_catalog;
-      test_case "keeper_read not in allowed" `Quick test_keeper_read_not_in_allowed;
-    ]);
     (* Merged from test_keeper_deny_list_coverage.ml *)
     ("deny_list", [
       test_case "dangerous tools denied" `Quick (fun () ->
@@ -466,17 +449,15 @@ let () =
             check bool "has masc_broadcast" true (List.mem "masc_broadcast" tools)
         | Ok Unrestricted -> fail "expected Restricted"
         | Error msg -> fail ("unexpected error: " ^ msg));
-      test_case "null tools field defaults to empty" `Quick (fun () ->
+      test_case "null tools field returns error" `Quick (fun () ->
         let json = `Assoc [
           ("kind", `String "restricted");
           ("tools", `Null)
         ] in
         let outer = `Assoc [("tool_access", json)] in
         match Keeper_types.tool_access_of_meta_json outer with
-        | Ok (Restricted tools) ->
-            check bool "empty list" true (List.length tools = 0)
-        | Ok Unrestricted -> fail "expected Restricted"
-        | Error msg -> fail ("unexpected error: " ^ msg));
+        | Error _ -> ()
+        | Ok _ -> fail "expected Error for null tools field");
       test_case "integer tools field returns error" `Quick (fun () ->
         let json = `Assoc [
           ("kind", `String "restricted");
@@ -486,5 +467,14 @@ let () =
         match Keeper_types.tool_access_of_meta_json outer with
         | Error _ -> ()
         | Ok _ -> fail "expected Error for integer tools field");
+      test_case "non-string tool member returns error" `Quick (fun () ->
+        let json = `Assoc [
+          ("kind", `String "restricted");
+          ("tools", `List [`String "masc_status"; `Int 42])
+        ] in
+        let outer = `Assoc [("tool_access", json)] in
+        match Keeper_types.tool_access_of_meta_json outer with
+        | Error _ -> ()
+        | Ok _ -> fail "expected Error for non-string tools member");
     ]);
   ]

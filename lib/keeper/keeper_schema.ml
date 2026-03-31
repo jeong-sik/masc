@@ -455,33 +455,6 @@ let keeper_schemas : tool_schema list = [
   };
 ]
 
-let persistent_alias_name = function
-  | "masc_keeper_create_from_persona" -> Some "masc_persistent_agent_create_from_persona"
-  | name when String.starts_with ~prefix:"masc_keeper_" name ->
-      Some
-        ("masc_persistent_agent_"
-        ^ String.sub name (String.length "masc_keeper_")
-            (String.length name - String.length "masc_keeper_"))
-  | _ -> None
-
-let persistent_alias_description schema =
-  "Persistent agent alias for "
-  ^ schema.name
-  ^ ". Uses the current event-driven stateful assistant behavior."
-
-let persistent_agent_alias_schemas =
-  keeper_schemas
-  |> List.filter_map (fun (schema : tool_schema) ->
-         match persistent_alias_name schema.name with
-         | None -> None
-         | Some alias_name ->
-             Some
-               {
-                 schema with
-                 name = alias_name;
-                 description = persistent_alias_description schema;
-               })
-
 let housekeep_schemas : tool_schema list = [
   {
     name = "masc_housekeep_scan";
@@ -539,4 +512,4 @@ let housekeep_schemas : tool_schema list = [
 ]
 
 let schemas : tool_schema list =
-  keeper_schemas @ persistent_agent_alias_schemas @ housekeep_schemas
+  keeper_schemas @ housekeep_schemas

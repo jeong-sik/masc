@@ -1,7 +1,6 @@
 (** Board_pg query definitions — row types, SQL queries, column defs. *)
 
-open Board_core [@@warning "-33"]
-open Board [@@warning "-33"]
+open Board
 open Pg_infix
 
 let ttl_where = "(expires_at = 0 OR expires_at > extract(epoch from now()))"

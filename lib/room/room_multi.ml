@@ -3,7 +3,7 @@
     Keeps the current-room pointer durable while avoiding named-room registry
     management. *)
 
-open Room_utils [@@warning "-33"]
+open Room_utils
 
 (** Get current room file path *)
 let current_room_path config = current_room_root_path config

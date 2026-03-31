@@ -9,16 +9,12 @@ import type { KeeperConfigUpdatePayload } from '../api/dashboard'
 import type { KeeperConfig } from '../types'
 import { formatTokens } from './keeper-detail-panels'
 import { showToast } from './common/toast'
+import { createAsyncResource, loaded } from '../lib/async-state'
 
 // ── State ────────────────────────────────────────────────
 
-type ConfigState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'loaded'; config: KeeperConfig }
-  | { status: 'error'; message: string }
-
-const configState = signal<ConfigState>({ status: 'idle' })
+const configResource = createAsyncResource<KeeperConfig>()
+const configState = configResource.state
 const configKeeperName = signal<string>('')
 const editMode = signal(false)
 const saving = signal(false)
@@ -132,19 +128,15 @@ function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number |
 
 export async function loadKeeperConfig(name: string): Promise<void> {
   if (configKeeperName.value === name && configState.value.status === 'loaded') return
-  configKeeperName.value = name
-  configState.value = { status: 'loading' }
-  try {
-    const config = await fetchKeeperConfig(name)
-    configState.value = { status: 'loaded', config }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : '설정 로드 실패'
-    configState.value = { status: 'error', message }
+  if (configKeeperName.value !== name) {
+    configResource.reset()
   }
+  configKeeperName.value = name
+  await configResource.load(() => fetchKeeperConfig(name))
 }
 
 export function resetKeeperConfig(): void {
-  configState.value = { status: 'idle' }
+  configResource.reset()
   configKeeperName.value = ''
   editMode.value = false
   editDraft.value = null
@@ -382,7 +374,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
   if (state.status !== 'loaded') return null
 
-  const c = state.config
+  const c = state.data
   const isEditing = editMode.value
   const isSaving = saving.value
 
@@ -401,7 +393,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     runtimeSaving.value = true
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
-      configState.value = { status: 'loaded', config: updated }
+      configState.value = loaded(updated)
       runtimeDraft.value = initRuntimeDraftFromConfig(updated)
       showToast('런타임 설정 저장 완료', 'success')
     } catch (err) {
@@ -440,7 +432,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     saveError.value = null
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
-      configState.value = { status: 'loaded', config: updated }
+      configState.value = loaded(updated)
       editMode.value = false
       editDraft.value = null
     } catch (err) {

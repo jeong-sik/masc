@@ -579,7 +579,7 @@ let test_prompt_prefers_silence_guidance () =
 
 let test_metrics_mixed_response () =
   let result =
-    make_run_result ~text:"Done." ~tools:["keeper_read"]
+    make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
       ~model:"test-model" ~input_tok:150 ~output_tok:60
   in
   let updated =
@@ -639,6 +639,51 @@ let test_normalize_response_text_empty_without_tools_errors () =
            with Not_found -> false
          in
          found)
+
+let test_tool_usage_delta_uses_registry_counts () =
+  let before =
+    [
+      ("keeper_board_post", 1);
+      ("keeper_fs_read", 0);
+      ("keeper_voice_agent", 2);
+    ]
+  in
+  let after =
+    [
+      ("keeper_board_post", 1);
+      ("keeper_fs_read", 1);
+      ("keeper_voice_agent", 4);
+    ]
+  in
+  check (list string) "delta tracks repeated calls"
+    [ "keeper_fs_read"; "keeper_voice_agent"; "keeper_voice_agent" ]
+    (KAR.tool_usage_delta ~before ~after)
+
+let test_tool_usage_delta_ignores_removed_tools () =
+  let before =
+    [
+      ("keeper_board_post", 2);
+      ("keeper_voice_agent", 1);
+    ]
+  in
+  let after =
+    [
+      ("keeper_board_post", 2);
+    ]
+  in
+  check (list string) "no phantom tools when counts drop"
+    []
+    (KAR.tool_usage_delta ~before ~after)
+
+let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
+  let merged =
+    KAR.merge_reported_and_observed_tool_names
+      ~reported_tool_names:[ "keeper_board_post" ]
+      ~observed_tool_names:[ "keeper_voice_agent"; "keeper_voice_agent" ]
+  in
+  check (list string) "observed dispatch plus synthetic tool"
+    [ "keeper_voice_agent"; "keeper_voice_agent"; "keeper_board_post" ]
+    merged
 
 let test_social_model_silences_skip_only_turn () =
   let result =
@@ -860,6 +905,12 @@ let () =
             test_normalize_response_text_tool_only_synthesizes;
           test_case "normalize empty without tools errors" `Quick
             test_normalize_response_text_empty_without_tools_errors;
+          test_case "tool usage delta uses registry counts" `Quick
+            test_tool_usage_delta_uses_registry_counts;
+          test_case "tool usage delta ignores removed tools" `Quick
+            test_tool_usage_delta_ignores_removed_tools;
+          test_case "merge observed and synthetic tool names" `Quick
+            test_merge_reported_and_observed_tool_names_preserves_synthetic_tools;
           test_case "social model silences skip-only turn" `Quick
             test_social_model_silences_skip_only_turn;
           test_case "social model requires explicit headers" `Quick

@@ -267,21 +267,21 @@ let compute_metrics_window
                     ("trace_id", `String trace_id);
                     ("generation", `Int gen);
                     ("to_model",
-                      match handoff_to_model with
-                      | Some s when s <> "" -> `String s
-                      | _ -> `Null);
+                      Json_util.string_opt_to_json
+                        (match handoff_to_model with
+                         | Some s when s <> "" -> Some s
+                         | _ -> None));
                     ("prev_trace_id",
-                      match handoff_prev_trace_id with
-                      | Some s when s <> "" -> `String s
-                      | _ -> `Null);
+                      Json_util.string_opt_to_json
+                        (match handoff_prev_trace_id with
+                         | Some s when s <> "" -> Some s
+                         | _ -> None));
                     ("new_trace_id",
-                      match handoff_new_trace_id with
-                      | Some s when s <> "" -> `String s
-                      | _ -> `Null);
-                    ("new_generation",
-                      match handoff_new_generation with
-                      | Some g -> `Int g
-                      | None -> `Null);
+                      Json_util.string_opt_to_json
+                        (match handoff_new_trace_id with
+                         | Some s when s <> "" -> Some s
+                         | _ -> None));
+                    ("new_generation", Json_util.int_opt_to_json handoff_new_generation);
                   ]);
                 end;
                 if compacted then begin
@@ -300,10 +300,7 @@ let compute_metrics_window
                     ("before_tokens", `Int before_tokens);
                     ("after_tokens", `Int after_tokens);
                     ("saved_tokens", `Int saved_tokens);
-                    ("trigger",
-                      match compaction_trigger_now with
-                      | Some reason -> `String reason
-                      | None -> `Null);
+                    ("trigger", Json_util.string_opt_to_json compaction_trigger_now);
                   ]);
                 end;
                 if is_interaction
@@ -459,21 +456,21 @@ let compute_metrics_window
                       else
                         `Null);
                     ("handoff_to_model",
-                      match handoff_to_model with
-                      | Some s when s <> "" -> `String s
-                      | _ -> `Null);
+                      Json_util.string_opt_to_json
+                        (match handoff_to_model with
+                         | Some s when s <> "" -> Some s
+                         | _ -> None));
                     ("handoff_prev_trace_id",
-                      match handoff_prev_trace_id with
-                      | Some s when s <> "" -> `String s
-                      | _ -> `Null);
+                      Json_util.string_opt_to_json
+                        (match handoff_prev_trace_id with
+                         | Some s when s <> "" -> Some s
+                         | _ -> None));
                     ("handoff_new_trace_id",
-                      match handoff_new_trace_id with
-                      | Some s when s <> "" -> `String s
-                      | _ -> `Null);
-                    ("handoff_new_generation",
-                      match handoff_new_generation with
-                      | Some g -> `Int g
-                      | None -> `Null);
+                      Json_util.string_opt_to_json
+                        (match handoff_new_trace_id with
+                         | Some s when s <> "" -> Some s
+                         | _ -> None));
+                    ("handoff_new_generation", Json_util.int_opt_to_json handoff_new_generation);
                     ("generation", `Int gen);
                     ("input_tokens", `Int input_tokens);
                     ("output_tokens", `Int output_tokens);
@@ -484,36 +481,23 @@ let compute_metrics_window
                     ("compaction_before_tokens", `Int before_tokens);
                     ("compaction_after_tokens", `Int after_tokens);
                     ("compaction_saved_tokens", `Int saved_tokens);
-                    ("compaction_trigger",
-                      match compaction_trigger_now with
-                      | Some reason -> `String reason
-                      | None -> `Null);
+                    ("compaction_trigger", Json_util.string_opt_to_json compaction_trigger_now);
                     ("work_kind", `String work_kind);
                     ("tool_call_count", `Int tool_call_count_now);
                     ("tools_used", `List (List.map (fun s -> `String s) tools_used));
                     ("proactive_fallback_applied", `Bool proactive_fallback_applied_now);
-                    ("proactive_preview",
-                      match proactive_preview_now with
-                      | Some s -> `String s
-                      | None -> `Null);
+                    ("proactive_preview", Json_util.string_opt_to_json proactive_preview_now);
                     ("drift_applied", `Bool drift_applied_now);
-                    ("drift_reason",
-                      match drift_reason_now with
-                      | Some s -> `String s
-                      | None -> `Null);
+                    ("drift_reason", Json_util.string_opt_to_json drift_reason_now);
                     ("auto_reflect", `Bool auto_reflect_now);
                     ("auto_plan", `Bool auto_plan_now);
                     ("auto_compact", `Bool auto_compact_now);
                     ("auto_handoff", `Bool auto_handoff_now);
                     ("guardrail_stop", `Bool guardrail_stop_now);
-                    ("repetition_risk",
-                      match repetition_risk_opt with Some v -> `Float v | None -> `Null);
-                    ("goal_alignment",
-                      match goal_alignment_opt with Some v -> `Float v | None -> `Null);
-                    ("response_alignment",
-                      match response_alignment_opt with Some v -> `Float v | None -> `Null);
-                    ("goal_drift",
-                      match goal_drift_opt with Some v -> `Float v | None -> `Null);
+                    ("repetition_risk", Json_util.float_opt_to_json repetition_risk_opt);
+                    ("goal_alignment", Json_util.float_opt_to_json goal_alignment_opt);
+                    ("response_alignment", Json_util.float_opt_to_json response_alignment_opt);
+                    ("goal_drift", Json_util.float_opt_to_json goal_drift_opt);
                     ("reflection", j |> member "reflection");
                     ("memory_performed", `Bool memory_performed);
                     ("memory_query_kind", `String memory_query_kind);
@@ -524,19 +508,17 @@ let compute_metrics_window
                     ("memory_correction_success", `Bool memory_correction_success_now);
                     ("memory_notes_added", `Int memory_notes_added_now);
                     ("memory_top_kind",
-                      match memory_top_kind_now with
-                      | Some s when String.trim s <> "" -> `String s
-                      | _ -> `Null);
+                      Json_util.string_opt_to_json
+                        (match memory_top_kind_now with
+                         | Some s when String.trim s <> "" -> Some s
+                         | _ -> None));
                     ("memory_note_kinds",
                       `List (List.map (fun s -> `String s) memory_note_kinds));
                     ("memory_compaction_performed", `Bool memory_compaction_performed_now);
                     ("memory_compaction_before_notes", `Int memory_compaction_before_notes_now);
                     ("memory_compaction_dropped_notes", `Int memory_compaction_dropped_notes_now);
                     ("memory_compaction_invalid_dropped", `Int memory_compaction_invalid_dropped_now);
-                    ("memory_expected_topic",
-                      match memory_expected_topic with
-                      | Some s -> `String s
-                      | None -> `Null);
+                    ("memory_expected_topic", Json_util.string_opt_to_json memory_expected_topic);
                   ])
               with
               | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None

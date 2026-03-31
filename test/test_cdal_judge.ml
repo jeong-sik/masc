@@ -45,7 +45,6 @@ let make_proof
     result_status = Completed;
     started_at = 1000.0;
     ended_at = 1001.0;
-    scope = None;
   }
 
 let make_contract

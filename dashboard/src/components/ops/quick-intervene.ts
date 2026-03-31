@@ -3,6 +3,7 @@
 //   'room' → broadcast, 'session:{id}' → team_note, 'keeper:{name}' → keeper_message
 
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
 import { TextInput } from '../common/input'
@@ -10,8 +11,8 @@ import {
   operatorActionBusy,
   operatorSnapshot,
 } from '../../operator-store'
-import { quickTarget, quickMessage } from './ops-state'
-import { executeAction, normalizeStatus, submitPause, submitResume } from './helpers'
+import { actorName, persistActorName, quickTarget, quickMessage } from './ops-state'
+import { executeAction, normalizeStatus } from './helpers'
 
 function parseTarget(value: string): {
   action_type: 'broadcast' | 'team_note' | 'keeper_message'
@@ -45,10 +46,10 @@ async function submitQuickMessage() {
 }
 
 export function QuickIntervene() {
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const snapshot = operatorSnapshot.value
   const sessions = snapshot?.sessions ?? []
   const keepers = snapshot?.keepers ?? []
-  const room = snapshot?.room ?? {}
   const busy = operatorActionBusy.value
 
   const runningSessions = sessions.filter(s => { const st = normalizeStatus(s.status); return st === 'running' || st === 'active' })
@@ -56,6 +57,21 @@ export function QuickIntervene() {
 
   return html`
     <section class="${CARD_STANDARD} flex flex-col gap-3">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <h3 class="text-sm font-semibold text-[var(--text-strong)]">빠른 개입</h3>
+          <p class="mt-1 text-[12px] leading-[1.45] text-[var(--text-muted)]">메시지나 메모를 방, 세션, 키퍼에 바로 보냅니다.</p>
+        </div>
+        <${ActionButton}
+          variant="subtle"
+          size="sm"
+          onClick=${() => { setShowAdvanced(current => !current) }}
+          disabled=${busy}
+        >
+          ${showAdvanced ? '고급 닫기' : '고급 설정'}
+        <//>
+      </div>
+
       <div class="flex gap-2 items-stretch flex-wrap">
         <select
           class="shrink-0 rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[13px] text-[var(--text-body)] transition-colors cursor-pointer min-w-[120px] focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
@@ -90,13 +106,27 @@ export function QuickIntervene() {
         <${ActionButton} variant="primary" size="lg" onClick=${() => { void submitQuickMessage() }} disabled=${busy || quickMessage.value.trim() === ''}>
           보내기
         <//>
-        <div class="flex gap-1 ml-auto">
-          ${room.paused
-            ? html`<${ActionButton} variant="ghost" size="lg" onClick=${() => { void submitResume() }} disabled=${busy}>재개<//>`
-            : html`<${ActionButton} variant="ghost" size="lg" onClick=${() => { void submitPause() }} disabled=${busy}>일시정지<//>`
-          }
-        </div>
       </div>
+
+      ${showAdvanced
+        ? html`
+            <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+              <label class="block text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--text-muted)]" for="quick-intervene-actor">
+                기록 주체
+              </label>
+              <p class="mt-1 text-[12px] leading-[1.45] text-[var(--text-muted)]">개입과 승인 요청은 이 이름으로 기록됩니다.</p>
+              <${TextInput}
+                class="mt-3 max-w-[260px] border-[var(--white-8)] bg-[var(--white-3)]"
+                value=${actorName.value.trim() || 'dashboard'}
+                name="quick_intervene_actor"
+                ariaLabel="개입 기록 주체"
+                autoComplete="off"
+                onInput=${(event: Event) => { persistActorName((event.target as HTMLInputElement).value) }}
+                disabled=${busy}
+              />
+            </div>
+          `
+        : null}
     </section>
   `
 }

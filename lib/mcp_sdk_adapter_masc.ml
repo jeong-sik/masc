@@ -20,19 +20,7 @@ let instructions_for_profile = function
   | Managed_agent -> TP.managed_agent_instructions
   | Operator_remote -> TP.operator_remote_instructions
 
-let jsonrpc_notification ?params method_name =
-  let fields =
-    [
-      ("jsonrpc", `String "2.0");
-      ("method", `String method_name);
-    ]
-  in
-  `Assoc
-    (fields
-    @
-    match params with
-    | Some value -> [ ("params", value) ]
-    | None -> [])
+let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
 
 let make_context ?mcp_session_id () : Handler.context =
   let send_notification ~method_ ~params =
@@ -282,7 +270,7 @@ let create_handler
        handler
 
 let dispatch_ping ~id =
-  Some (Mcp_server.make_response ~id (`Assoc []))
+  Some (Mcp_transport_protocol.make_response ~id (`Assoc []))
 
 let dispatch_request
     ~handle_call_tool_eio:_

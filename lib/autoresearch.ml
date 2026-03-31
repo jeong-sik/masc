@@ -337,18 +337,18 @@ let linked_status_json ~base_path (link : swarm_link) =
       ("current_cycle", `Int current_cycle);
       ("best_score", `Float best_score);
       ( "last_decision",
-        match last_decision with Some value -> `String value | None -> `Null );
+        Json_util.string_opt_to_json last_decision );
       ("target_file", `String link.target_file);
       ( "program_note",
-        match option_first_some program_note link.program_note with Some value -> `String value | None -> `Null );
+        Json_util.string_opt_to_json (option_first_some program_note link.program_note) );
       ( "operation_id",
-        match link.operation_id with Some value -> `String value | None -> `Null );
+        Json_util.string_opt_to_json link.operation_id );
       ("workdir", `String workdir);
       ("source_workdir", `String source_workdir);
       ("warnings", `List (List.map (fun value -> `String value) warnings));
       ( "queued_hypothesis",
-        match queued_hypothesis with Some value -> `String value | None -> `Null );
-      ("error", match error_message with Some value -> `String value | None -> `Null);
+        Json_util.string_opt_to_json queued_hypothesis );
+      ("error", Json_util.string_opt_to_json error_message);
     ]
 
 (** Summary for status reporting. *)

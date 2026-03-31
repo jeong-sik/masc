@@ -150,6 +150,25 @@ let transport_json request =
               []) );
     ]
 
+let health_path_diagnostics () =
+  match current_server_state_opt () with
+  | Some state ->
+      Server_base_path_diagnostics.detect
+        ?input_base_path:(Env_config_core.base_path_opt ())
+        ?env_masc_base_path:(Env_config_core.base_path_opt ())
+        ?env_me_root:(Env_config_core.me_root_opt ())
+        ~effective_base_path:state.room_config.base_path
+        ~effective_masc_root:(Room.masc_root_dir state.room_config)
+        ()
+  | None ->
+      let effective_base_path = default_base_path () in
+      let effective_masc_root = Filename.concat effective_base_path ".masc" in
+      Server_base_path_diagnostics.detect
+        ?input_base_path:(Env_config_core.base_path_opt ())
+        ?env_masc_base_path:(Env_config_core.base_path_opt ())
+        ?env_me_root:(Env_config_core.me_root_opt ())
+        ~effective_base_path ~effective_masc_root ()
+
 let make_health_json ?(listener = "http/1.1") request =
   let uptime_secs = int_of_float (Unix.gettimeofday () -. server_start_time) in
   let uptime_str =
@@ -173,6 +192,7 @@ let make_health_json ?(listener = "http/1.1") request =
             `List (List.map (fun v -> `String v) mcp_protocol_versions) );
         ] );
     ("transport", transport_json request);
+    ("paths", Server_base_path_diagnostics.to_yojson (health_path_diagnostics ()));
     ("uptime", `String uptime_str);
     ("sse_clients", `Int (Sse.client_count ()));
     ("startup", Server_startup_state.to_yojson ());

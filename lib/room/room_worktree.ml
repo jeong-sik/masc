@@ -232,50 +232,5 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
 let worktree_list config =
   if not (is_initialized config) then
     `Assoc [("error", `String "MASC not initialized")]
-  else begin
-    match git_root config with
-    | None -> `Assoc [("error", `String "Not a git repository")]
-    | Some root ->
-        let lines = run_argv_lines ["git"; "-C"; root; "worktree"; "list"; "--porcelain"] in
-
-        (* Parse porcelain output into worktree info *)
-        let rec parse_worktrees lines current acc =
-          match lines with
-          | [] ->
-              if current <> [] then List.rev (List.rev current :: acc)
-              else List.rev acc
-          | "" :: rest ->
-              if current <> [] then parse_worktrees rest [] (List.rev current :: acc)
-              else parse_worktrees rest [] acc
-          | line :: rest ->
-              parse_worktrees rest (line :: current) acc
-        in
-        let worktree_blocks = parse_worktrees lines [] [] in
-
-        let parse_block block =
-          let path = ref "" in
-          let branch = ref "" in
-          List.iter (fun line ->
-            if String.length line > 9 && String.sub line 0 9 = "worktree " then
-              path := String.sub line 9 (String.length line - 9)
-            else if String.length line > 7 && String.sub line 0 7 = "branch " then
-              branch := String.sub line 7 (String.length line - 7)
-          ) block;
-          if !path <> "" then
-            Some (`Assoc [
-              ("path", `String !path);
-              ("branch", `String !branch);
-              ("is_masc", `Bool (String.length !path > 11 &&
-                try String.sub !path (String.length !path - 11) 11 = ".worktrees/"
-                with Invalid_argument _ -> false));
-            ])
-          else None
-        in
-
-        let worktrees = List.filter_map parse_block worktree_blocks in
-        `Assoc [
-          ("worktrees", `List worktrees);
-          ("count", `Int (List.length worktrees));
-          ("masc_hint", `String "Use masc_worktree_create to add a new worktree for your task");
-        ]
-  end
+  else
+    Room_git.list ~base_path:config.base_path

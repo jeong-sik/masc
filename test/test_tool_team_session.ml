@@ -119,5 +119,15 @@ let () =
             `Quick
             Test_tool_team_session_flow
               .test_filesystem_backend_event_lock_serializes_fibers;
+          Alcotest.test_case "decomposability-single-worker" `Quick
+            Test_tool_team_session_misc.test_decomposability_single_worker;
+          Alcotest.test_case "decomposability-manager-executor-only" `Quick
+            Test_tool_team_session_misc.test_decomposability_manager_executor_only;
+          Alcotest.test_case "decomposability-independent-workers" `Quick
+            Test_tool_team_session_misc.test_decomposability_independent_workers;
+          Alcotest.test_case "decomposability-manual-skips-gate" `Quick
+            Test_tool_team_session_misc.test_decomposability_manual_skips_gate;
+          Alcotest.test_case "decomposability-synthesize-few-workers" `Quick
+            Test_tool_team_session_misc.test_decomposability_synthesize_few_workers;
         ] );
     ]

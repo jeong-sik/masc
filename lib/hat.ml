@@ -248,7 +248,7 @@ let config_to_json config =
     ("instructions", `String config.instructions);
     ("triggers", `List (List.map (fun s -> `String s) config.triggers));
     ("emits", `List (List.map (fun s -> `String s) config.emits));
-    ("backend", match config.backend with None -> `Null | Some b -> `String b);
+    ("backend", Json_util.string_opt_to_json config.backend);
   ]
 
 let hatted_agent_to_json agent =

@@ -342,8 +342,7 @@ let finding_to_yojson (f : advisory_finding) : Yojson.Safe.t =
       ("severity", `String f.severity);
       ("category", `String f.category);
       ("summary", `String f.summary);
-      ( "location",
-        match f.location with Some l -> `String l | None -> `Null );
+      ("location", Json_util.string_opt_to_json f.location);
     ]
 
 let result_to_yojson (r : eval_result) : Yojson.Safe.t =

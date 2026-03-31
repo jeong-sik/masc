@@ -5,6 +5,7 @@ import { useEffect } from 'preact/hooks'
 import { lastEvent } from '../sse'
 import { navigate } from '../router'
 import { Card } from './common/card'
+import { MermaidGraph } from './common/mermaid-graph'
 import {
   harness,
   loadHarnessHealth,
@@ -12,6 +13,10 @@ import {
   handleHarnessSSE,
   resetHarnessHealthState,
   refreshHarnessSurface,
+} from './harness-health-state'
+import type {
+  RailStatus,
+  HarnessHealthData,
 } from './harness-health-state'
 import {
   railStatusLabel,
@@ -34,6 +39,173 @@ import {
 
 export { resetHarnessHealthState, refreshHarnessSurface }
 
+// ── Mermaid flow helpers (live state graph) ──
+
+type HarnessRailKey = 'evaluator' | 'pre_compact' | 'handoff'
+
+function railTitle(rail: HarnessRailKey): string {
+  switch (rail) {
+    case 'evaluator':
+      return 'Evaluator'
+    case 'pre_compact':
+      return 'Pre-Compaction'
+    case 'handoff':
+    default:
+      return 'Handoff'
+  }
+}
+
+function railEventAt(data: HarnessHealthData, rail: HarnessRailKey): number | null {
+  switch (rail) {
+    case 'evaluator':
+      return data.overview.evaluator_last_event_at
+    case 'pre_compact':
+      return data.overview.pre_compact_last_event_at
+    case 'handoff':
+    default:
+      return data.overview.handoff_last_event_at
+  }
+}
+
+function activeRail(data: HarnessHealthData): HarnessRailKey | null {
+  const rails: HarnessRailKey[] = ['evaluator', 'pre_compact', 'handoff']
+  return rails.reduce<HarnessRailKey | null>((current, rail) => {
+    if (!current) return railEventAt(data, rail) == null ? null : rail
+    const currentTs = railEventAt(data, current) ?? Number.NEGATIVE_INFINITY
+    const nextTs = railEventAt(data, rail) ?? Number.NEGATIVE_INFINITY
+    return nextTs > currentTs ? rail : current
+  }, null)
+}
+
+function escapeMermaidLabel(value: string): string {
+  return value
+    .replace(/"/g, '\'')
+    .replace(/[\[\]{}()|#;]/g, ' ')
+    .replace(/\n+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
+function flowNodeLabel(title: string, status: RailStatus, detail: string, freshness: string): string {
+  return escapeMermaidLabel(`${title}<br/>${railStatusLabel(status)}<br/>${detail}<br/>최근 ${freshness}`)
+}
+
+function flowStatusClass(status: RailStatus): string {
+  switch (status) {
+    case 'healthy':
+      return 'healthyRail'
+    case 'warning':
+      return 'warningRail'
+    case 'stale':
+      return 'staleRail'
+    case 'idle':
+    default:
+      return 'idleRail'
+  }
+}
+
+function flowSummaryLine(title: string, status: RailStatus, detail: string, freshness: string): string {
+  return `${title}: ${railStatusLabel(status)} · ${detail} · 최근 ${freshness}`
+}
+
+function flowFallbackSummary(data: HarnessHealthData): string {
+  return [
+    flowSummaryLine(
+      'Evaluator',
+      data.overview.evaluator_status,
+      railDetail(data, 'evaluator'),
+      railFreshness(data, 'evaluator'),
+    ),
+    flowSummaryLine(
+      'Pre-Compaction',
+      data.overview.pre_compact_status,
+      railDetail(data, 'pre_compact'),
+      railFreshness(data, 'pre_compact'),
+    ),
+    flowSummaryLine(
+      'Handoff',
+      data.overview.handoff_status,
+      railDetail(data, 'handoff'),
+      railFreshness(data, 'handoff'),
+    ),
+  ].join(' | ')
+}
+
+export function buildHarnessFlowMermaid(data: HarnessHealthData): string {
+  const currentRail = activeRail(data)
+  const source = [
+    'flowchart LR',
+    '  classDef source fill:#0f172a,stroke:#475569,color:#cbd5e1;',
+    '  classDef hub fill:#111827,stroke:#38bdf8,color:#e0f2fe;',
+    '  classDef healthyRail fill:#082f1d,stroke:#4ade80,color:#dcfce7;',
+    '  classDef warningRail fill:#3b2a07,stroke:#fbbf24,color:#fde68a;',
+    '  classDef staleRail fill:#1f2937,stroke:#94a3b8,color:#e2e8f0,stroke-dasharray: 5 3;',
+    '  classDef idleRail fill:#111827,stroke:#475569,color:#94a3b8,stroke-dasharray: 3 4;',
+    '  classDef activeRail stroke:#7dd3fc,stroke-width:3px;',
+    '  taskDone["Task completion<br/>anti-rationalization review"]',
+    '  keeperTurn["Keeper turn<br/>continuity pressure"]',
+    '  keeperRollover["Keeper rollover<br/>metrics snapshot"]',
+    `  evaluator["${flowNodeLabel('Evaluator', data.overview.evaluator_status, railDetail(data, 'evaluator'), railFreshness(data, 'evaluator'))}"]`,
+    `  preCompact["${flowNodeLabel('Pre-Compaction', data.overview.pre_compact_status, railDetail(data, 'pre_compact'), railFreshness(data, 'pre_compact'))}"]`,
+    `  handoff["${flowNodeLabel('Handoff', data.overview.handoff_status, railDetail(data, 'handoff'), railFreshness(data, 'handoff'))}"]`,
+    '  readModel["Harness read model<br/>/api/v1/dashboard/harness-health"]',
+    '  labUi["Lab / harness<br/>live Mermaid + detail cards"]',
+    '  taskDone -->|"verdict_recorded"| evaluator',
+    '  keeperTurn -->|"pre_compact"| preCompact',
+    '  keeperRollover -->|"keeper_handoff"| handoff',
+    '  evaluator --> readModel',
+    '  preCompact --> readModel',
+    '  handoff --> readModel',
+    '  readModel --> labUi',
+    '  labUi -. "debounced reload" .-> readModel',
+    '  class taskDone,keeperTurn,keeperRollover source;',
+    `  class evaluator ${flowStatusClass(data.overview.evaluator_status)};`,
+    `  class preCompact ${flowStatusClass(data.overview.pre_compact_status)};`,
+    `  class handoff ${flowStatusClass(data.overview.handoff_status)};`,
+    '  class readModel,labUi hub;',
+  ]
+  if (currentRail === 'evaluator') source.push('  class evaluator activeRail;')
+  if (currentRail === 'pre_compact') source.push('  class preCompact activeRail;')
+  if (currentRail === 'handoff') source.push('  class handoff activeRail;')
+  return source.join('\n')
+}
+
+function HarnessFlowCard({ data }: { data: HarnessHealthData }) {
+  const source = buildHarnessFlowMermaid(data)
+  const active = activeRail(data)
+  const fallbackText = flowFallbackSummary(data)
+
+  return html`
+    <div class="space-y-3">
+      <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div class="text-sm font-medium text-[var(--text-strong)]">Live State Graph</div>
+          <div class="mt-1 text-sm leading-[1.6] text-[var(--text-muted)]">
+            task completion, pre-compaction, handoff가 read model로 모이는 구조를 한 장으로 보여줍니다.
+          </div>
+        </div>
+        <div class="text-xs text-[var(--text-dim)]">
+          가장 최근 rail ${active ? railTitle(active) : '없음'}
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-2 text-[11px] text-[var(--text-dim)]">
+        <span class="rounded-full border border-[var(--white-8)] px-2 py-1">실선: live signal</span>
+        <span class="rounded-full border border-[var(--white-8)] px-2 py-1">점선: snapshot reconciliation</span>
+        <span class="rounded-full border border-[var(--accent)] px-2 py-1 text-[var(--text-body)]">강조: 가장 최근 rail</span>
+      </div>
+
+      <${MermaidGraph}
+        source=${source}
+        prefix="harness-flow"
+        fallbackText=${fallbackText}
+        minHeightClass="min-h-[260px]"
+        diagramClass="border border-[var(--white-8)]"
+      />
+    </div>
+  `
+}
+
 export function HarnessHealth() {
   useEffect(() => {
     void loadHarnessHealth()
@@ -53,6 +225,7 @@ export function HarnessHealth() {
   const fallbackCount = cal?.fallback_count ?? 0
   const fallbackPct = data ? Math.round((data.overview.fallback_ratio ?? 0) * 100) : 0
   const fallbackReasons = cal?.recent_fallback_reasons ?? []
+  const flowSource = data ? buildHarnessFlowMermaid(data) : null
 
   return html`
     <div class="space-y-4">
@@ -118,6 +291,14 @@ export function HarnessHealth() {
 
             <${ScopePairing} />
           </div>
+        `}
+      <//>
+
+      <${Card} title="Harness Flow" class="section">
+        ${!data || !flowSource ? html`
+          <${EmptySignal} text="Harness flow 데이터가 없습니다." />
+        ` : html`
+          <${HarnessFlowCard} data=${data} />
         `}
       <//>
 

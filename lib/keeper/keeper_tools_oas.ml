@@ -209,7 +209,7 @@ let make_tools
                     ~base_path:config.base_path ~actor_key:meta.name
                 in
                 (match change_block with
-                 | Some cb ->
+                 | Some _cb ->
                      Log.Keeper.info "post-tool git delta detected for %s after %s"
                        meta.name td.name
                  | None -> ());

@@ -96,7 +96,7 @@ let handle_keeper_tools_post state req reqd =
                  Http.Response.json ~status:`Bad_request
                    (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
              | Ok meta' ->
-                 (match Keeper_types.write_meta config meta' with
+                 (match Keeper_types.write_meta ~force:true config meta' with
                   | Ok () ->
                       let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta' in
                       let masc_count = List.length (List.filter (fun n -> String.starts_with ~prefix:"masc_" n) allowed) in

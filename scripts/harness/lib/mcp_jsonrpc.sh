@@ -70,14 +70,8 @@ mcp_extract_result() {
   '
 }
 
-mcp_extract_payload() {
-  jq -c '
-    if ._harness_error? then
-      empty
-    else
-      try (.result.content[0].text | fromjson | .payload) catch empty
-    end
-  '
+mcp_extract_is_error() {
+  jq -r 'try (.result.isError) catch "true"'
 }
 
 mcp_extract_error() {
@@ -290,4 +284,21 @@ mcp_call_tool() {
   fi
 
   mcp_jsonrpc_call "$id" "tools/call" "$params_json" "$session_id" "$token" "$endpoint"
+}
+
+# Call tool and assert success. Returns the full payload on success.
+# Usage: payload="$(mcp_call_tool_checked <id> <tool> <args_json> [session_id] [token] [endpoint])"
+mcp_call_tool_checked() {
+  local payload
+  payload="$(mcp_call_tool "$@")"
+  mcp_require_tool_ok "$payload" "${2:-tool}_checked"
+  printf '%s' "$payload"
+}
+
+# Call tool, assert success, extract .result. Returns the parsed result object.
+# Usage: result="$(mcp_call_tool_result <id> <tool> <args_json> [session_id] [token] [endpoint])"
+mcp_call_tool_result() {
+  local payload
+  payload="$(mcp_call_tool_checked "$@")"
+  printf '%s' "$payload" | mcp_extract_result
 }

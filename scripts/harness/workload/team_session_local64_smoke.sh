@@ -47,59 +47,38 @@ SESSION_ID=""
 CALL_ID=91008
 SPAWN_RESULTS_FILE="$(mcp_mktemp_file "local64-smoke-spawn-results" ".jsonl")"
 
-call_tool() {
-  local id="$1"
-  local tool_name="$2"
-  local args_json="$3"
-  mcp_call_tool "$id" "$tool_name" "$args_json"
-}
-
-extract_text() {
-  mcp_extract_text
-}
-
-extract_result() {
-  mcp_extract_result
-}
-
 next_call_id() {
   CALL_ID=$((CALL_ID + 1))
   printf '%s\n' "$CALL_ID"
 }
 
-require_json() {
-  local payload="$1"
-  local label="${2:-team_session_local64_smoke payload}"
-  mcp_require_json "$payload" "$label"
-}
-
 session_status_result() {
   local raw
-  raw="$(call_tool "$(next_call_id)" "masc_team_session_status" \
+  raw="$(mcp_call_tool "$(next_call_id)" "masc_team_session_status" \
     "$(jq -cn --arg s "$SESSION_ID" '{session_id:$s}')")"
-  require_tool_success "$raw"
-  printf '%s' "$raw" | extract_result
+  mcp_require_tool_ok "$raw"
+  printf '%s' "$raw" | mcp_extract_result
 }
 
 session_events_result() {
   local limit="${1:-2000}"
   local raw
-  raw="$(call_tool "$(next_call_id)" "masc_team_session_events" \
+  raw="$(mcp_call_tool "$(next_call_id)" "masc_team_session_events" \
     "$(jq -cn --arg s "$SESSION_ID" --argjson limit "$limit" '{session_id:$s,limit:$limit}')")"
-  require_tool_success "$raw"
-  printf '%s' "$raw" | extract_result
+  mcp_require_tool_ok "$raw"
+  printf '%s' "$raw" | mcp_extract_result
 }
 
 operator_digest_result() {
   local raw
-  raw="$(call_tool "$(next_call_id)" "masc_operator_digest" '{"target_type":"room"}')"
-  require_tool_success "$raw"
-  printf '%s' "$raw" | extract_result
+  raw="$(mcp_call_tool "$(next_call_id)" "masc_operator_digest" '{"target_type":"room"}')"
+  mcp_require_tool_ok "$raw"
+  printf '%s' "$raw" | mcp_extract_result
 }
 
 append_spawn_results() {
   local payload="$1"
-  printf '%s' "$payload" | extract_result | jq -c '
+  printf '%s' "$payload" | mcp_extract_result | jq -c '
     if .spawn.results? then
       .spawn.results[]
     else
@@ -110,7 +89,7 @@ append_spawn_results() {
 
 count_step_accepts() {
   local payload="$1"
-  printf '%s' "$payload" | extract_result | jq '
+  printf '%s' "$payload" | mcp_extract_result | jq '
     if .spawn.results? then
       [.spawn.results[] | select((.status // "") == "accepted" or .success == true)] | length
     else
@@ -147,18 +126,12 @@ wait_for_session_progress() {
   exit 1
 }
 
-require_tool_success() {
-  local payload="$1"
-  local label="${2:-team_session_local64_smoke tool}"
-  mcp_require_tool_ok "$payload" "$label"
-}
-
 require_result_condition() {
   local payload="$1"
   local jq_expr="$2"
   local failure_message="$3"
   local result_json
-  result_json="$(printf '%s' "$payload" | extract_result)"
+  result_json="$(printf '%s' "$payload" | mcp_extract_result)"
   if ! printf '%s' "$result_json" | jq -e "$jq_expr" >/dev/null; then
     echo "FAIL: $failure_message"
     printf '%s\n' "$result_json"
@@ -179,11 +152,11 @@ require_json_condition() {
 
 cleanup() {
   if [ -n "$SESSION_ID" ]; then
-    call_tool 90981 "masc_team_session_stop" \
+    mcp_call_tool 90981 "masc_team_session_stop" \
       "{\"session_id\":\"$SESSION_ID\",\"reason\":\"local64_smoke_cleanup\",\"generate_report\":false}" \
       >/dev/null 2>&1 || true
   fi
-  call_tool 90982 "masc_leave" "{\"agent_name\":\"$COORD_AGENT\"}" >/dev/null 2>&1 || true
+  mcp_call_tool 90982 "masc_leave" "{\"agent_name\":\"$COORD_AGENT\"}" >/dev/null 2>&1 || true
   rm -f "$SPAWN_RESULTS_FILE" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -349,13 +322,13 @@ run_spawn_wave() {
   spawn_batch_json="$(build_spawn_batch "$start_idx" "$end_idx" "$LLAMA_SWARM_MODEL")"
   step_args="$(jq -cn --arg s "$SESSION_ID" --arg a "$COORD_AGENT" --argjson batch "$spawn_batch_json" --argjson timeout "$SPAWN_TIMEOUT_SEC" \
     '{session_id:$s,actor:$a,wait_mode:"background",spawn_batch:$batch,spawn_timeout_seconds:$timeout}')"
-  step_raw="$(call_tool "$(next_call_id)" "masc_team_session_step" "$step_args")"
-  require_tool_success "$step_raw"
+  step_raw="$(mcp_call_tool "$(next_call_id)" "masc_team_session_step" "$step_args")"
+  mcp_require_tool_ok "$step_raw"
   append_spawn_results "$step_raw"
   wave_success="$(count_step_accepts "$step_raw")"
   if [ "$wave_success" -lt "$expected_count" ]; then
     echo "FAIL: ${wave_name} spawn accepted ${wave_success}/${expected_count}" >&2
-    printf '%s\n' "$step_raw" | extract_result | jq .
+    printf '%s\n' "$step_raw" | mcp_extract_result | jq .
     exit 1
   fi
 
@@ -364,17 +337,17 @@ run_spawn_wave() {
 }
 
 echo "[1/8] init + join coordinator"
-init_raw="$(call_tool 91001 "masc_init" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a}')")"
-require_tool_success "$init_raw"
-join_raw="$(call_tool 91002 "masc_join" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a,capabilities:["team-session","local64","operator"]}')")"
-require_tool_success "$join_raw"
+init_raw="$(mcp_call_tool 91001 "masc_init" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a}')")"
+mcp_require_tool_ok "$init_raw"
+join_raw="$(mcp_call_tool 91002 "masc_join" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a,capabilities:["team-session","local64","operator"]}')")"
+mcp_require_tool_ok "$join_raw"
 
 echo "[2/8] start local64 session"
 start_args="$(jq -cn --arg goal "$GOAL" --argjson duration "$SESSION_DURATION_SEC" \
   '{goal:$goal,duration_seconds:$duration,checkpoint_interval_sec:20,min_agents:1,orchestration_mode:"assist",communication_mode:"hybrid",scale_profile:"local64",fallback_policy:"strict_local_only",instruction_profile:"strict",alert_channel:"both",report_formats:["markdown","json"],agents:["team-session-local64-smoke"]}')"
-start_raw="$(call_tool 91003 "masc_team_session_start" "$start_args")"
-require_tool_success "$start_raw"
-SESSION_ID="$(printf '%s' "$start_raw" | extract_result | jq -r '.session_id // empty')"
+start_raw="$(mcp_call_tool 91003 "masc_team_session_start" "$start_args")"
+mcp_require_tool_ok "$start_raw"
+SESSION_ID="$(printf '%s' "$start_raw" | mcp_extract_result | jq -r '.session_id // empty')"
 if [ -z "$SESSION_ID" ]; then
   echo "FAIL: session_id missing"
   printf '%s\n' "$start_raw"
@@ -383,8 +356,8 @@ fi
 echo "session_id=$SESSION_ID"
 
 echo "[3/8] inspect local llama runtime"
-runtime_raw="$(call_tool 91004 "masc_local_runtime_status" '{"include_models":true}')"
-require_tool_success "$runtime_raw"
+runtime_raw="$(mcp_call_tool 91004 "masc_local_runtime_status" '{"include_models":true}')"
+mcp_require_tool_ok "$runtime_raw"
 require_result_condition "$runtime_raw" '.runtime_count >= 1 and .configured_capacity >= 1' "runtime status missing pool data"
 
 echo "[4/8] spawn local64 workers (spawn_timeout=${SPAWN_TIMEOUT_SEC}s http_timeout=${HTTP_TIMEOUT_SEC}s workers=${WORKER_COUNT})"
@@ -458,8 +431,8 @@ fi
 require_json_condition "$digest_json" "$digest_expr" "operator digest did not expose local64 census/runtime visibility"
 
 echo "[8/8] benchmark runtime pool"
-bench_raw="$(call_tool 91008 "masc_local_runtime_bench" '{"parallelism":8,"rounds":1,"runtime_pool":"local64"}')"
-require_tool_success "$bench_raw"
+bench_raw="$(mcp_call_tool 91008 "masc_local_runtime_bench" '{"parallelism":8,"rounds":1,"runtime_pool":"local64"}')"
+mcp_require_tool_ok "$bench_raw"
 require_result_condition "$bench_raw" '.total_requests >= 1 and .per_runtime_breakdown != null' "runtime bench did not return breakdown"
 
 spawn_success_count="$(printf '%s' "$final_events_json" | jq -r '[.events[] | select(.event_type == "team_step_spawn" and .detail.success == true)] | length')"

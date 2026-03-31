@@ -93,8 +93,6 @@ let handle_start (ctx : context) args =
       | Ok config ->
       let loop_id = Mdal.generate_loop_id () in
 
-      let state_post_id = "" in
-
       let started_at = Time_compat.now () in
       let state : Mdal.loop_state = {
         loop_id;
@@ -110,7 +108,6 @@ let handle_start (ctx : context) args =
         start_time = started_at;
         updated_at = started_at;
         stopped_at = None;
-        state_post_id;
         execution_mode = `Worker_spawn;
         worker_engine = Some `Api_tool_loop;
         worker_model = Some resolved_worker_model;
@@ -317,7 +314,6 @@ let handle_iterate (ctx : context) args =
                      set_terminal_state state ~status:`Completed ~reason:"goal_met"
                        ~error_message:None;
                      persist_loop config state;
-                     post_final_summary state;
                      emit_completed_event ~loop_id:state.loop_id
                        ~final_metric:metric_after ~iterations:iter_num;
                      assoc_with_fields (state_to_json ~config state)
@@ -388,9 +384,6 @@ let handle_stop (ctx : context) args =
     | Some state ->
       set_terminal_state state ~status:`Stopped ~reason ~error_message:None;
       persist_loop config state;
-      post_final_summary state;
-
-      (* Broadcast via SSE *)
       emit_stop_event state ~reason;
 
       assoc_with_fields (state_to_json ~config state)

@@ -525,7 +525,7 @@ let render_keeper_list (state : state) =
       if idx < List.length state.keepers then begin
         let k = List.nth state.keepers idx in
         let is_selected = idx = state.keeper_cursor in
-        let model_short = short_model k.k_active_model in
+        let model_short = short_model (Option.value ~default:"-" k.k_active_model) in
         let proactive_str = if k.k_proactive_enabled then
           Ansi.green ^ "on" ^ Ansi.reset
         else
@@ -641,7 +641,7 @@ let render_keeper_detail (state : state) =
 
     (* Model section *)
     add_section "Model";
-    add_row "Active Model:" k.k_active_model;
+    add_row "Active Model:" (Option.value ~default:"-" k.k_active_model);
     add_row "Available:" (String.concat ", " k.k_models);
     add_empty ();
 
@@ -660,7 +660,7 @@ let render_keeper_detail (state : state) =
     (* Behavior section *)
     add_section "Behavior";
     add_row "Proactive:" (bool_indicator k.k_proactive_enabled);
-    add_row "Initiative:" (bool_indicator k.k_initiative_enabled);
+    add_row "Initiative:" (bool_indicator (Option.value ~default:false k.k_initiative_enabled));
     add_row "Drift:" (bool_indicator k.k_drift_enabled);
     add_empty ();
 

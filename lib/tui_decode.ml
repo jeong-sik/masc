@@ -21,10 +21,10 @@ type keeper = {
   k_short_goal : string;
   k_soul_profile : string;
   k_generation : int;
-  k_active_model : string;
+  k_active_model : string option;
   k_models : string list;
   k_proactive_enabled : bool;
-  k_initiative_enabled : bool;
+  k_initiative_enabled : bool option;
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : float;
@@ -157,14 +157,32 @@ let decode_keeper ~filename json =
   let* k_short_goal = require_string_field json "short_goal" in
   let* k_soul_profile = require_string_field json "soul_profile" in
   let* k_generation = require_int_field json "generation" in
-  let* k_active_model = require_string_field json "active_model" in
-  let* k_models = require_string_list json "models" in
+  let* k_active_model = optional_string json "active_model" in
+  let* k_models =
+    match member "models" json with
+    | `Null -> Ok []
+    | `List items ->
+        let rec collect acc = function
+          | [] -> Ok (List.rev acc)
+          | `String s :: rest -> collect (s :: acc) rest
+          | _ -> Error "field 'models' must be a list of strings"
+        in
+        collect [] items
+    | _ -> Error "field 'models' must be a list of strings or null"
+  in
   let* k_proactive_enabled = require_bool_field json "proactive_enabled" in
-  let* k_initiative_enabled = require_bool_field json "initiative_enabled" in
+  let* k_initiative_enabled = optional_bool json "initiative_enabled" in
   let* k_total_turns = require_int_field json "total_turns" in
   let* k_total_tokens = require_int_field json "total_tokens" in
   let* k_total_cost_usd = require_float_field json "total_cost_usd" in
-  let* k_last_turn_ts = require_string_field json "last_turn_ts" in
+  let* k_last_turn_ts =
+    match member "last_turn_ts" json with
+    | `String s -> Ok s
+    | `Float f -> Ok (string_of_int (int_of_float f))
+    | `Int n -> Ok (string_of_int n)
+    | `Null -> Ok ""
+    | _ -> Error "field 'last_turn_ts' must be a string or number"
+  in
   let* k_compaction_count = require_int_field json "compaction_count" in
   let* k_compaction_ratio_gate = require_float_field json "compaction_ratio_gate" in
   let* k_scope_kind = require_string_field json "scope_kind" in

@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.198.0] - 2026-03-31
+
+### Changed
+- **MDAL board cleanup** — remove board posting residue from MDAL loop (#4315).
+- **OTel lazy init** — avoid eager CA store initialization (#4307).
+- **Dashboard MetricsWindow** — expand type, replace duplicated RuntimeSignals (#4311).
+
+### Fixed
+- **GC thrashing** — O(n+ops) tree index + memory retention fix, eliminates 12.7GB thrashing (#4313).
+- **Keeper tool descriptions** — disambiguate overlapping descriptions (#4312).
+
 ## [2.197.0] - 2026-03-31
 
 ### Added

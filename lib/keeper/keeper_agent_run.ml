@@ -31,6 +31,7 @@ type run_result = {
   tools_used : string list;
   checkpoint : Agent_sdk.Checkpoint.t option;
   proof : Agent_sdk.Cdal_proof.t option;
+  stop_reason : Oas_worker.stop_reason;
 }
 
 let keeper_tool_usage_snapshot ~base_path ~keeper_name : (string * int) list =
@@ -528,4 +529,5 @@ let run_turn
            tools_used = tool_names;
            checkpoint = result.checkpoint;
            proof = result.proof;
+           stop_reason = result.stop_reason;
          })

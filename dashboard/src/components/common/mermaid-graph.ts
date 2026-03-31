@@ -59,13 +59,14 @@ export function MermaidGraph({
       try {
         const mermaid = await getMermaid()
         const { svg } = await mermaid.render(nextRenderId(prefix), source)
-        if (cancelled || !hostRef.current) return
+        const hostEl = hostRef.current
+        if (cancelled || !hostEl) return
         const parser = new DOMParser()
         const doc = parser.parseFromString(svg, 'image/svg+xml')
         const svgEl = doc.documentElement
         if (svgEl instanceof SVGElement) {
-          hostRef.current.textContent = ''
-          hostRef.current.appendChild(svgEl)
+          hostEl.textContent = ''
+          hostEl.appendChild(svgEl)
         }
       } catch (err) {
         if (cancelled) return

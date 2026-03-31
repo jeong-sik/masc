@@ -404,6 +404,7 @@ let run_with_masc_tools
       ~name:td.name
       ~description:td.description
       ~input_schema:td.input_schema
+      ~mutation_class:"workspace"
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   let config = { config with tools = oas_tools @ config.tools } in
@@ -679,6 +680,7 @@ let run_named_with_masc_tools
     Tool_bridge.oas_tool_of_masc
       ~name:td.name ~description:td.description
       ~input_schema:td.input_schema
+      ~mutation_class:"workspace"
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools

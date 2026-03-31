@@ -1,6 +1,30 @@
 # Changelog
 
 
+## [2.188.0] - 2026-03-31
+
+### Added
+- **Confidence-gated BM25 tool disclosure** — keeper tool disclosure with fallback (#4157).
+- **Dashboard tool UX** — improvements (#4117, #4118, #4119, #4120) (#4132).
+- **Keeper mutation_class** — declare keeper tools as workspace mutation_class (#4131).
+- **Mutation_class on OAS paths** — declare mutation_class on all OAS tool creation paths (#4142).
+
+### Changed
+- **God file split: tool_catalog** — extract surfaces and tiers into leaf modules (#4143).
+- **God file split: tool_misc** — extract transport and admin handlers into sub-modules (#4156).
+- **Keeper tool_access ADT** — replace tool_allowlist with structured ADT (#4130).
+- **Test deps wrapper** — centralise test deps via masc_test_deps (#4145).
+- **TUI boundary parsing** — parse tui data at the boundary (#4137).
+- **Harness transport unification** — migrate 6 scripts to mcp_jsonrpc (#4138, #4154).
+- **Harness passthrough removal** — drop passthrough wrappers, use mcp_* directly (#4136).
+- **CI checkout v5** — bump checkout action and resync opam truth (#4153).
+
+### Fixed
+- **Tool result JSON envelope** — normalize keeper tool results to consistent JSON (#4102, #4159).
+- **Readonly shell_exec** — set correct mutation_class for readonly shell_exec tool (#4151).
+- **AI code review followup** — P0-P2 fixes v2 (#4134).
+- **Dead skip_reason removal** — remove dead skip_reason record/consume machinery (#4135, #4139).
+
 ## [2.187.0] - 2026-03-31
 
 ### Added

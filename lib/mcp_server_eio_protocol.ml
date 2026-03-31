@@ -12,13 +12,13 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Managed_agent
   | Operator_remote
 
-let make_response = Mcp_server.make_response
-let make_error = Mcp_server.make_error
-let is_jsonrpc_v2 = Mcp_server.is_jsonrpc_v2
-let is_jsonrpc_response = Mcp_server.is_jsonrpc_response
-let get_id = Mcp_server.get_id
-let is_valid_request_id = Mcp_server.is_valid_request_id
-let jsonrpc_request_of_yojson = Mcp_server.jsonrpc_request_of_yojson
+let make_response = Mcp_transport_protocol.make_response
+let make_error = Mcp_transport_protocol.make_error
+let is_jsonrpc_v2 = Mcp_transport_protocol.is_jsonrpc_v2
+let is_jsonrpc_response = Mcp_transport_protocol.is_jsonrpc_response
+let get_id = Mcp_transport_protocol.get_id
+let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
+let jsonrpc_request_of_yojson = Mcp_transport_protocol.jsonrpc_request_of_yojson
 
 let unavailable_tool_message name =
   if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name then
@@ -78,19 +78,7 @@ let clear_resource_subscriptions_for_session session_id =
   with_resource_subscription_lock (fun () ->
       Hashtbl.remove resource_subscriptions session_id)
 
-let jsonrpc_notification ?params method_name =
-  let base =
-    [
-      ("jsonrpc", `String "2.0");
-      ("method", `String method_name);
-    ]
-  in
-  `Assoc
-    (base
-    @
-    match params with
-    | Some params -> [ ("params", params) ]
-    | None -> [])
+let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
 
 let send_resource_updated_notification ~session_id ~uri =
   Sse.send_to session_id
@@ -171,11 +159,11 @@ let maybe_emit_resource_notifications ~success ~tool_name =
 (** {1 Protocol Handlers} *)
 
 let handle_initialize_eio ?(profile = Full) id params =
-  match Mcp_server.validate_initialize_params params with
+  match Mcp_transport_protocol.validate_initialize_params params with
   | Error msg -> make_error ~id (-32602) msg
   | Ok () ->
       let protocol_version =
-        params |> Mcp_server.protocol_version_from_params
+        params |> Mcp_transport_protocol.protocol_version_from_params
       in
       (match Mcp_server.validate_protocol_version protocol_version with
        | Error msg -> make_error ~id (-32602) msg
@@ -438,7 +426,7 @@ let handle_request
             let id = get_id req in
             if not (is_valid_request_id id) then
               make_error ~id:`Null (-32600) "Invalid Request: id must be string, number, or null"
-            else if Mcp_server.is_notification req then
+            else if Mcp_transport_protocol.is_notification req then
               `Null
             else
                 (try

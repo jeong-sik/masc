@@ -19,10 +19,10 @@ let external_effect_tools =
   [ "keeper_bash"; "keeper_github"; "masc_broadcast";
     "masc_spawn"; "masc_execute"; "shell_exec" ]
 
-(* Tools that mutate workspace but have no external effect. *)
+(* Tools that mutate workspace but have no external effect.
+   Canonical list in Tool_catalog_surfaces. *)
 let workspace_mutating_tools =
-  [ "keeper_fs_edit"; "keeper_write";
-    "create_text_file"; "edit_text_file"; "file_write" ]
+  Tool_catalog_surfaces.workspace_mutating_tool_names
 
 let has_any tools patterns =
   List.exists (fun t -> List.mem t patterns) tools

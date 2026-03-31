@@ -1,13 +1,7 @@
 module Oas = Agent_sdk
 
 let workspace_mutating_tools =
-  [
-    "keeper_fs_edit";
-    "keeper_write";
-    "create_text_file";
-    "edit_text_file";
-    "file_write";
-  ]
+  Tool_catalog_surfaces.workspace_mutating_tool_names
 
 let workspace_mutating_tools_for_scope = function
   | Some Team_session_types.Observe_only ->

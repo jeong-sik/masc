@@ -75,6 +75,16 @@ let keeper_internal_replacement = function
   | _ -> None
 
 (* ================================================================ *)
+(* Workspace mutation classification                                *)
+(* ================================================================ *)
+
+(** Tools that mutate the workspace filesystem. Canonical list shared by
+    cdal_contract_bridge.ml and contract_risk.ml. *)
+let workspace_mutating_tool_names =
+  [ "keeper_fs_edit"; "keeper_write";
+    "create_text_file"; "edit_text_file"; "file_write" ]
+
+(* ================================================================ *)
 (* Surface type + canonical lists                                   *)
 (* ================================================================ *)
 

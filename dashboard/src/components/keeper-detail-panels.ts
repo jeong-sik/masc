@@ -172,31 +172,29 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
           ? html`<${KpiCard} label="Cost (USD)" value=${latestCost} />`
           : null}
       </div>
-      ${'' /* Autonomy KPIs — activity breakdown */}
-      ${(keeper.autonomous_action_count ?? 0) > 0 || (keeper.board_reactive_turn_count ?? 0) > 0 ? html`
-        <div class="grid grid-cols-4 gap-2">
-          <${KpiCard}
-            label="Auto Actions"
-            value=${keeper.autonomous_action_count ?? '-'}
-            hint="자율 행동 횟수"
-          />
-          <${KpiCard}
-            label="Auto Turns"
-            value=${keeper.autonomous_turn_count ?? '-'}
-            hint=${keeper.autonomous_text_turn_count != null ? `텍스트 ${keeper.autonomous_text_turn_count} / 도구 ${keeper.autonomous_tool_turn_count ?? 0}` : undefined}
-          />
-          <${KpiCard}
-            label="Board React"
-            value=${keeper.board_reactive_turn_count ?? '-'}
-            hint="게시판 반응"
-          />
-          <${KpiCard}
-            label="Noop"
-            value=${keeper.noop_turn_count ?? '-'}
-            hint="비활동 턴"
-          />
-        </div>
-      ` : null}
+      ${'' /* Autonomy KPIs — always visible for keeper context */}
+      <div class="grid grid-cols-4 gap-2">
+        <${KpiCard}
+          label="Auto Actions"
+          value=${keeper.autonomous_action_count ?? 0}
+          hint=${(keeper.autonomous_action_count ?? 0) === 0 ? (keeper.proactive_enabled ? '활성 · 미발동' : '자율 비활성') : '자율 행동 횟수'}
+        />
+        <${KpiCard}
+          label="Auto Turns"
+          value=${keeper.autonomous_turn_count ?? 0}
+          hint=${keeper.autonomous_text_turn_count != null ? `텍스트 ${keeper.autonomous_text_turn_count} / 도구 ${keeper.autonomous_tool_turn_count ?? 0}` : (keeper.autonomous_turn_count ?? 0) === 0 ? '미발동' : undefined}
+        />
+        <${KpiCard}
+          label="Board React"
+          value=${keeper.board_reactive_turn_count ?? 0}
+          hint="게시판 반응"
+        />
+        <${KpiCard}
+          label="Noop"
+          value=${keeper.noop_turn_count ?? 0}
+          hint="비활동 턴"
+        />
+      </div>
       ${'' /* Proactive activity callout */}
       ${keeper.last_proactive_ago_s != null ? html`
         <div class="rounded-xl border border-purple-400/20 bg-purple-500/5 p-3 text-[11px]">

@@ -91,12 +91,18 @@ export function workerBriefForAgent(agentName: string | null) {
 
 export function agentJournalEntries(agentName: string | null): JournalEntry[] {
   if (!agentName) return []
-  const nameLower = agentName.toLowerCase()
+  const keeper = keeperForAgent(agentName)
+  const names = [agentName, keeper?.name, keeper?.agent_name]
+    .filter((n): n is string => n != null && n !== '')
+    .map(n => n.toLowerCase())
+
   return journal.value
     .filter((entry: JournalEntry) => {
       const text = entry.text.toLowerCase()
       const agent = entry.agent.toLowerCase()
-      return agent === nameLower || text.includes(nameLower) || text.includes(`@${nameLower}`)
+      return names.some(name =>
+        agent === name || text.includes(name) || text.includes(`@${name}`),
+      )
     })
     .slice(0, 15)
 }
@@ -150,8 +156,16 @@ export async function refreshAgentDetail(): Promise<void> {
         .catch(() => null),
     ])
 
+    const keeper = keeperForAgent(agentName)
+    const matchNames = [agentName, keeper?.name, keeper?.agent_name]
+      .filter((n): n is string => n != null && n !== '')
+      .map(n => n.toLowerCase())
+
     roomActivity.value = lines
-      .filter(line => line.includes(agentName))
+      .filter(line => {
+        const lower = line.toLowerCase()
+        return matchNames.some(name => lower.includes(name))
+      })
       .slice(0, 20)
 
     agentTimeline.value = timelineResult

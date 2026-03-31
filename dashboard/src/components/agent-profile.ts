@@ -13,6 +13,7 @@ import { EmptyState } from './common/empty-state'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { StatGrid } from './common/stat-tile'
+import { formatTokens } from './keeper-detail-panels'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
   agents,
@@ -234,13 +235,12 @@ function CharacterPlate({ name }: { name: string }) {
             ${displayName}
           </h2>
           ${koreanName ? html`<span class="text-base text-[var(--text-muted)]">(${koreanName})</span>` : ''}
-          ${generation != null ? html`<span class="text-sm font-bold text-[var(--accent)] bg-[var(--accent-10)] border border-[rgba(71,184,255,0.25)] px-1.5 py-px tabular-nums rounded">Lv.${generation}</span>` : null}
+          ${generation != null ? html`<span class="text-sm font-bold text-[var(--accent)] bg-[var(--accent-10)] border border-[rgba(71,184,255,0.25)] px-1.5 py-px tabular-nums rounded" title="세대 번호 — 핸드오프마다 증가 (레벨/등급 아님)">Gen.${generation}</span>` : null}
         </div>
 
         <div class="flex items-center gap-1.5 flex-wrap">
           <${StatusBadge} status=${headerStatus} />
           ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-[11px] text-[var(--text-muted)] bg-[var(--accent-8)] border border-[rgba(71,184,255,0.15)] px-[5px] py-px rounded">${model}</span>` : null}
-          ${signalTruth ? html`<span class="ff-plate__signal rounded ff-plate__signal--${signalTruth}">${signalTruth}</span>` : null}
         </div>
 
         ${ctxPct != null ? html`
@@ -250,6 +250,9 @@ function CharacterPlate({ name }: { name: string }) {
               <div class="h-full rounded-full transition-[width] duration-[250ms] ease-[ease] motion-reduce:transition-none ${ctxBarClass(ctxRatio) === 'warn' ? 'bg-linear-to-r from-[var(--warn)] to-[var(--warn-bright)]' : ctxBarClass(ctxRatio) === 'bad' ? 'bg-linear-to-r from-[var(--bad)] to-[var(--warn-bright)]' : 'bg-linear-to-r from-[var(--accent)] to-[var(--ok)]'}" style=${{ width: `${ctxPct}%` }}></div>
             </div>
             <span class="text-[13px] tabular-nums text-[var(--text-strong)] min-w-9 text-right">${ctxPct}%</span>
+            ${keeper?.context_tokens != null && keeper?.context_max != null
+              ? html`<span class="text-[11px] tabular-nums text-[var(--text-muted)] font-mono ml-1">${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}</span>`
+              : null}
           </div>
         ` : null}
 
@@ -281,10 +284,10 @@ function CharacterPlate({ name }: { name: string }) {
       <div class="w-full mt-2">
         ${isKeeper ? html`
           <${StatGrid} cols=${4} items=${[
-            { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : 'N/A', variant: 'gold' },
+            { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : 'N/A', hint: keeper.context_tokens != null && keeper.context_max != null ? `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}` : undefined, variant: 'gold' },
             { label: '세대', value: generation ?? 0, variant: 'gold' },
             { label: '턴', value: keeper.turn_count ?? 0, variant: 'gold' },
-            { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, variant: 'gold' },
+            { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, hint: (keeper.autonomous_turn_count ?? 0) === 0 ? (keeper.proactive_enabled ? '활성 · 미발동' : '자율 비활성') : undefined, variant: 'gold' },
           ]} />
         ` : html`
           <${StatGrid} cols=${4} items=${[

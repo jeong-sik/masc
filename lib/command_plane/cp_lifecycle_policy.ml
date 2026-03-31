@@ -47,9 +47,7 @@ let request_or_apply_assignment config ~(actor : string) ~requested_action json 
                           ("operation_id", `String operation_id);
                           ("target_unit_id", `String target_unit_id);
                           ( "note",
-                            match get_string_opt json "note" with
-                            | Some value -> `String value
-                            | None -> `Null );
+                            Json_util.string_opt_to_json (get_string_opt json "note") );
                         ] );
                     ( "preview",
                       `Assoc
@@ -113,7 +111,7 @@ let dispatch_escalate_json config ~(actor : string) json =
             [
               ("operation_id", `String operation_id);
               ("target_unit_id", `String target_unit_id);
-              ("note", match get_string_opt json "note" with Some value -> `String value | None -> `Null);
+              ("note", Json_util.string_opt_to_json (get_string_opt json "note"));
             ]))
   with Invalid_argument message -> Error message
 
@@ -159,7 +157,7 @@ let unit_reparent_json config ~(actor : string) json =
       (`Assoc
         [
           ( "parent_unit_id",
-            match parent_unit_id with Some value -> `String value | None -> `Null
+            Json_util.string_opt_to_json parent_unit_id
           );
         ])
     |> Result.map (fun unit ->
@@ -193,7 +191,7 @@ let unit_reassign_json config ~(actor : string) json =
       ~event_type:"unit_reassigned"
       (`Assoc
         [
-          ("leader_id", match leader_id with Some value -> `String value | None -> `Null);
+          ("leader_id", Json_util.string_opt_to_json leader_id);
           ("roster", if roster = [] then json_list_of_strings [] else json_list_of_strings roster);
         ])
     |> Result.map (fun unit ->
@@ -524,7 +522,7 @@ let detachment_status_detail_json config units agents operations
       ("leader_status", `String leader_status);
       ("heartbeat_expired", `Bool heartbeat_expired);
       ( "progress_age_sec",
-        match progress_age_sec with Some value -> `Int value | None -> `Null );
+        Json_util.int_opt_to_json progress_age_sec );
       ( "needs_attention",
         `Bool
           (heartbeat_expired
@@ -735,7 +733,7 @@ let dispatch_tick_json config ~(actor : string) json =
               (`Assoc
                 [
                   ("detachment_id", `String detachment.detachment_id);
-                  ("from_leader", match detachment.leader_id with Some value -> `String value | None -> `Null);
+                  ("from_leader", Json_util.string_opt_to_json detachment.leader_id);
                   ("to_leader", `String next_leader);
                 ]);
             failovers := refreshed.detachment_id :: !failovers

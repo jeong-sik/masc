@@ -343,11 +343,11 @@ let metrics_to_json metrics =
 let payload_to_json payload =
   `Assoc [
     ("summary", `String payload.summary);
-    ("current_task", match payload.current_task with Some t -> `String t | None -> `Null);
+    ("current_task", Json_util.string_opt_to_json payload.current_task);
     ("todos", `List (List.map (fun t -> `String t) payload.todos));
-    ("pdca_state", match payload.pdca_state with Some p -> `String p | None -> `Null);
+    ("pdca_state", Json_util.string_opt_to_json payload.pdca_state);
     ("relevant_files", `List (List.map (fun f -> `String f) payload.relevant_files));
-    ("session_id", match payload.session_id with Some s -> `String s | None -> `Null);
+    ("session_id", Json_util.string_opt_to_json payload.session_id);
     ("relay_generation", `Int payload.relay_generation);
     ("active_goal_ids", `List (List.map (fun g -> `String g) payload.active_goal_ids));
     ("goal_progress", `List (List.map (fun (gid, pct) ->

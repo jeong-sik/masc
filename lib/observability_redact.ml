@@ -89,13 +89,10 @@ let build_tool_call_trace_json ?tool_use_id ~tool_name ~input
     [
       ("tool_name", `String tool_name);
       ("kind", `String "tool_use");
-      ( "tool_input_preview",
-        match input_preview with Some s -> `String s | None -> `Null );
-      ( "tool_args_preview",
-        match input_preview with Some s -> `String s | None -> `Null );
-      ( "tool_output_preview",
-        match output_preview with Some s -> `String s | None -> `Null );
-      ("is_error", match is_error with Some b -> `Bool b | None -> `Null);
+      ("tool_input_preview", Json_util.string_opt_to_json input_preview);
+      ("tool_args_preview", Json_util.string_opt_to_json input_preview);
+      ("tool_output_preview", Json_util.string_opt_to_json output_preview);
+      ("is_error", Json_util.bool_opt_to_json is_error);
     ]
   in
   let with_id =

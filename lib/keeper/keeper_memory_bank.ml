@@ -501,8 +501,7 @@ let memory_summary_to_json (summary : keeper_memory_summary) : Yojson.Safe.t =
     [
       ("total_notes", `Int summary.total_notes);
       ("last_ts_unix", `Float summary.last_ts_unix);
-      ( "top_kind",
-        match summary.top_kind with Some kind -> `String kind | None -> `Null );
+      ("top_kind", Json_util.string_opt_to_json summary.top_kind);
       ( "kind_counts",
         `List
           (List.map

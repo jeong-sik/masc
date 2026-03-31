@@ -102,7 +102,7 @@ let test_keeper_internal_contains_known_tools () =
   List.iter
     (fun name ->
       Alcotest.(check bool) (name ^ " is internal") true (SS.mem name internal))
-    [ "keeper_time_now"; "keeper_board_post"; "keeper_bash"; "keeper_search" ]
+    [ "keeper_time_now"; "keeper_board_post"; "keeper_bash"; "keeper_memory_search" ]
 
 let test_is_on_surface_consistent () =
   List.iter (fun surface ->

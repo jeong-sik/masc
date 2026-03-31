@@ -55,7 +55,7 @@ let keeper_board_tool_names =
     "keeper_board_list";
     "keeper_board_stats";
     "keeper_board_search";
-    "keeper_board_delete";
+    (* keeper_board_delete removed from default shard in #4309 *)
   ]
 
 let keeper_voice_tool_names =

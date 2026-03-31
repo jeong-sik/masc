@@ -163,7 +163,7 @@ let () =
      keeper_exec_tools cannot reference Tool_registry directly. *)
   Keeper_exec_tools.on_keeper_tool_call :=
     (fun ~tool_name ~success ~duration_ms ->
-       Tool_registry.record_call_if_known ~source:Keeper_internal
+       Tool_registry.record_call ~source:Keeper_internal
          ~tool_name ~success ~duration_ms ());
   Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ());
   (* C-4: Register input schema validation pre-hook.

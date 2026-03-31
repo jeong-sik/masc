@@ -322,7 +322,6 @@ let test_destructive_check_tools_membership () =
   let tools = Keeper_hooks_oas.destructive_check_tools in
   check bool "keeper_bash in list" true (List.mem "keeper_bash" tools);
   check bool "keeper_fs_edit in list" true (List.mem "keeper_fs_edit" tools);
-  check bool "keeper_edit in list" true (List.mem "keeper_edit" tools);
   check bool "keeper_github in list" true (List.mem "keeper_github" tools);
   check bool "keeper_fs_read not in list" false (List.mem "keeper_fs_read" tools);
   check bool "keeper_board_post not in list" false (List.mem "keeper_board_post" tools)

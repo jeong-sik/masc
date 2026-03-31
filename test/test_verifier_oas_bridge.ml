@@ -43,7 +43,7 @@ let test_allowlist_maps_to_allowlist () =
   let gate =
     make_gate ~allowlist_enabled:true
       ~allowed:["keeper_read"; "keeper_bash"]
-      ~denied:["keeper_edit"]
+      ~denied:["keeper_fs_edit"]
       ()
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
@@ -60,7 +60,7 @@ let test_allowlist_maps_to_allowlist () =
 let test_denylist_maps_to_denylist () =
   let gate =
     make_gate ~allowlist_enabled:false
-      ~denied:["keeper_bash"; "keeper_edit"]
+      ~denied:["keeper_bash"; "keeper_fs_edit"]
       ()
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
@@ -69,7 +69,7 @@ let test_denylist_maps_to_denylist () =
     (match g.tool_filter with
      | Oas.Guardrails.DenyList names ->
          List.sort String.compare names
-         = List.sort String.compare ["keeper_bash"; "keeper_edit"]
+         = List.sort String.compare ["keeper_bash"; "keeper_fs_edit"]
      | _ -> false)
 
 let test_neither_maps_to_allowall () =
@@ -159,8 +159,8 @@ let test_read_tools_are_readonly () =
 
 let test_write_tools_are_not_readonly () =
   let write_tools = [
-    "keeper_bash"; "keeper_edit";
-    "keeper_fs_edit"; "keeper_github";
+    "keeper_bash"; "keeper_fs_edit";
+    "keeper_github";
     "write_file"; "delete_node";
     (* underscore-joined: "read" is NOT at word boundary *)
     "keeper_read"; "bulk_search";
@@ -256,7 +256,7 @@ let test_default_gate_roundtrip () =
       destructive_check_enabled = true;
       allowlist_enabled = false;
       allowed_tools = [];
-      denied_tools = [ "keeper_bash"; "keeper_edit"; "keeper_fs_edit"; "keeper_github" ];
+      denied_tools = [ "keeper_bash"; "keeper_fs_edit"; "keeper_github" ];
     }
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in

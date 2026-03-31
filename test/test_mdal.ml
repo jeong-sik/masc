@@ -54,7 +54,6 @@ let dummy_state ?(loop_id = "mdal-test") ?(baseline = 0.5)
     start_time = now;
     updated_at = now;
     stopped_at = None;
-    state_post_id = "post-test";
     execution_mode = `Manual_only;
     worker_engine = None;
     worker_model = None;

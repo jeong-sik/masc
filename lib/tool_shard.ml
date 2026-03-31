@@ -193,7 +193,8 @@ let shell_tools : Types.tool_schema list = [
     description = "Run a read-only project command. Safe, no side effects. \
 ops: pwd (working dir), ls (directory listing), cat (file content), \
 rg (ripgrep search across files), git_status (repo state). \
-Use for exploring the project before taking action.";
+To read a single file, prefer keeper_fs_read (handles truncation). \
+Use this tool for multi-file search (rg), directory listing (ls), or repo state (git_status).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -215,6 +216,7 @@ let coding_keeper_bridge_tools : Types.tool_schema list = [
 Use for builds (dune build, make), tests (dune test), git operations, \
 and any command that may modify files. Returns exit_code and output. \
 For read-only exploration, prefer keeper_shell_readonly (safer). \
+To write a file, prefer keeper_fs_edit (path-checked, audited). \
 For worktree-isolated code operations, prefer masc_code_shell (restricted path).";
     input_schema = `Assoc [
       ("type", `String "object");

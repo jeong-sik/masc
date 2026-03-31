@@ -210,7 +210,7 @@ module type EMITTER = sig
   val cleanup : on_done:(unit -> unit) -> unit -> unit
 end
 
-let mk_emitter ~stop ~net (config : Config.t) : (module EMITTER) =
+let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
   let open struct
     let client =
       Mirage_crypto_rng_unix.use_default ();
@@ -226,7 +226,7 @@ let mk_emitter ~stop ~net (config : Config.t) : (module EMITTER) =
       | Error err ->
           Atomic.incr n_errors;
           report_err_ err;
-          Eio_unix.sleep 3.
+          Eio.Time.sleep clock 3.
 
     let timeout =
       if config.batch_timeout_ms > 0 then
@@ -423,7 +423,7 @@ end
 
 let create_backend ~sw ?(stop = Atomic.make false) ?(config = Config.make ()) env
     : (module OT.Collector.BACKEND) =
-  let module E = (val mk_emitter ~stop ~net:env#net config) in
+  let module E = (val mk_emitter ~stop ~clock:env#clock ~net:env#net config) in
   let module B = Backend (E) in
   Eio.Fiber.fork ~sw (fun () ->
       while not @@ Atomic.get stop do

@@ -4,8 +4,8 @@
     for coordinating cluster-wide agent pacing. *)
 
 open Types
-open Room_utils [@@warning "-33"]
-open Room_state [@@warning "-33"]
+open Room_utils
+open Room_state
 
 (** Path to tempo.json *)
 let tempo_path config = Filename.concat (masc_dir config) "tempo.json"

@@ -197,7 +197,6 @@ let loop_to_json (state : Mdal.loop_state) =
       ("start_time", `Float state.start_time);
       ("updated_at", `Float state.updated_at);
       ("stopped_at", Json_util.float_opt_to_json state.stopped_at);
-      ("state_post_id", `String state.state_post_id);
       ("execution_mode", `String (Mdal.execution_mode_to_string state.execution_mode));
       ("worker_engine",
        Json_util.option_to_yojson
@@ -238,7 +237,6 @@ let loop_of_json json =
                   start_time = json |> member "start_time" |> to_float;
                   updated_at = json |> member "updated_at" |> to_float;
                   stopped_at = json |> member "stopped_at" |> to_float_option;
-                  state_post_id = json |> member "state_post_id" |> to_string;
                   execution_mode;
                   worker_engine =
                     (match json |> member "worker_engine" |> to_string_option with

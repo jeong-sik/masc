@@ -201,3 +201,24 @@ After recording, the run shows as completed in masc_run_list and masc_run_get.";
   };
 
 ]
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let read_only_tools = [ "masc_run_get"; "masc_run_list" ]
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      let is_ro = List.mem s.name read_only_tools in
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_run
+           ~input_schema:s.input_schema
+           ~is_read_only:is_ro
+           ~is_idempotent:is_ro
+           ()))
+    schemas

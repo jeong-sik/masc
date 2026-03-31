@@ -102,3 +102,19 @@ let dispatch ctx ~name ~args =
   | "masc_cost_log" -> Some (handle_cost_log ctx args)
   | "masc_cost_report" -> Some (handle_cost_report ctx args)
   | _ -> None
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_cost
+           ~input_schema:s.input_schema
+           ()))
+    schemas

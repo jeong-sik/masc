@@ -199,3 +199,19 @@ If miss, check masc_cache_list to verify the key exists or re-populate with masc
   };
 
 ]
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_cache
+           ~input_schema:s.input_schema
+           ()))
+    schemas

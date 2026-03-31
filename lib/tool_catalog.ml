@@ -202,9 +202,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_websocket_discovery", readonly_tool);
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
-    ( "masc_run_get",
-      readonly_tool );
-    ("masc_run_list", readonly_tool);
+    (* masc_run_get, masc_run_list: migrated to Tool_spec.register (tool_run.ml) *)
     ("masc_execute_dry_run", readonly_tool);
     ( "masc_admin_cleanup",
       with_semantic_flags ~destructive:true

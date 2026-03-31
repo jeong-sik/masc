@@ -190,6 +190,82 @@ let test_fold_vs_summarize_old () =
 (* Runner                                                            *)
 (* ================================================================ *)
 
+(* ================================================================ *)
+(* Persona-aware compaction tests (#4318)                           *)
+(* ================================================================ *)
+
+let test_keywords_for_profile () =
+  let safety_kw = Masc_mcp.Keeper_compaction.keywords_for_profile "safety" in
+  check bool "safety has 'risk'" true (List.mem "risk" safety_kw);
+  let research_kw = Masc_mcp.Keeper_compaction.keywords_for_profile "research" in
+  check bool "research has 'hypothesis'" true (List.mem "hypothesis" research_kw);
+  let relationship_kw = Masc_mcp.Keeper_compaction.keywords_for_profile "relationship" in
+  check bool "relationship has 'trust'" true (List.mem "trust" relationship_kw);
+  let delivery_kw = Masc_mcp.Keeper_compaction.keywords_for_profile "delivery" in
+  check bool "delivery has 'blocker'" true (List.mem "blocker" delivery_kw);
+  let unknown_kw = Masc_mcp.Keeper_compaction.keywords_for_profile "unknown_profile" in
+  check int "unknown profile => empty" 0 (List.length unknown_kw)
+
+let test_persona_stub_includes_excerpts () =
+  let msgs =
+    [ user "I noticed trust is building between us.";
+      assistant "Yes, the rapport has improved.";
+      user "Let's discuss style preferences.";
+      assistant "Sure, what tone do you prefer?" ]
+    @ make_turns 2
+    @ [user "Final."; assistant "Done."]
+  in
+  let reducer = Masc_mcp.Keeper_compaction.persona_fold_strategy
+    ~keep_recent:1 ~soul_profile:"relationship" () in
+  let result = R.reduce reducer msgs in
+  let stub = List.hd result in
+  let stub_text = T.text_of_message stub in
+  check bool "stub has Key context section" true
+    (try let _ = Str.search_forward (Str.regexp_string "Key context:") stub_text 0 in true
+     with Not_found -> false);
+  check bool "stub mentions trust" true
+    (try let _ = Str.search_forward (Str.regexp_string "trust") stub_text 0 in true
+     with Not_found -> false)
+
+let test_persona_stub_no_excerpts_generic () =
+  let msgs = make_turns 5 @ [user "Final."; assistant "Done."] in
+  let reducer = Masc_mcp.Keeper_compaction.persona_fold_strategy
+    ~keep_recent:1 ~soul_profile:"relationship" () in
+  let result = R.reduce reducer msgs in
+  let stub = List.hd result in
+  let stub_text = T.text_of_message stub in
+  (* No keywords matched => no Key context section *)
+  check bool "no Key context when no keywords match" false
+    (try let _ = Str.search_forward (Str.regexp_string "Key context:") stub_text 0 in true
+     with Not_found -> false)
+
+let test_persona_fold_backward_compat () =
+  (* persona fold with empty soul_profile behaves like original fold *)
+  let msgs = make_turns 5 in
+  let persona_reducer = Masc_mcp.Keeper_compaction.persona_fold_strategy
+    ~keep_recent:3 ~soul_profile:"" () in
+  let original_reducer = Masc_mcp.Keeper_compaction.fold_completed_strategy
+    ~keep_recent:3 () in
+  let persona_result = R.reduce persona_reducer msgs in
+  let original_result = R.reduce original_reducer msgs in
+  check int "same message count" (List.length original_result) (List.length persona_result);
+  (* Stub text should be identical since empty profile yields no keywords *)
+  let persona_stub = T.text_of_message (List.hd persona_result) in
+  let original_stub = T.text_of_message (List.hd original_result) in
+  check string "stub text identical" original_stub persona_stub
+
+let test_persona_fold_keeps_recent_10 () =
+  let msgs = make_turns 15 in
+  let reducer = Masc_mcp.Keeper_compaction.persona_fold_strategy
+    ~keep_recent:10 ~soul_profile:"delivery" () in
+  let result = R.reduce reducer msgs in
+  (* 15 turns, keep 10 => 5 folded into stub + 10 recent (2 msgs each) = 21 msgs *)
+  check int "1 stub + 20 recent msgs" 21 (List.length result)
+
+(* ================================================================ *)
+(* Runner                                                            *)
+(* ================================================================ *)
+
 let () =
   run "keeper_compaction"
     [
@@ -201,5 +277,13 @@ let () =
           test_case "empty messages not folded" `Quick test_empty_not_folded;
           test_case "all within keep_recent" `Quick test_all_within_keep_recent;
           test_case "fold vs SummarizeOld comparison" `Quick test_fold_vs_summarize_old;
+        ] );
+      ( "persona_fold",
+        [
+          test_case "keywords_for_profile" `Quick test_keywords_for_profile;
+          test_case "stub includes excerpts" `Quick test_persona_stub_includes_excerpts;
+          test_case "no excerpts for generic turns" `Quick test_persona_stub_no_excerpts_generic;
+          test_case "backward compat with empty profile" `Quick test_persona_fold_backward_compat;
+          test_case "keeps recent 10" `Quick test_persona_fold_keeps_recent_10;
         ] );
     ]

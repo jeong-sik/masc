@@ -331,17 +331,14 @@ let compact_if_needed
         (* PreCompact observability: log strategy and context state (#3165) *)
       let strategies = Context_compact_oas.[
         PruneToolOutputs; MergeContiguous;
-        DropLowImportance; SummarizeOld]
+        DropLowImportance]
       in
+      (* FoldCompleted replaces SummarizeOld — applied as a separate
+         OAS Custom reducer after the standard strategy pipeline. *)
+      let fold_reducer = Keeper_compaction.fold_completed_strategy () in
       let strategy_names =
-        List.map
-          (function
-            | Context_compact_oas.PruneToolOutputs -> "PruneToolOutputs"
-            | Context_compact_oas.MergeContiguous -> "MergeContiguous"
-            | Context_compact_oas.DropLowImportance -> "DropLowImportance"
-            | Context_compact_oas.SummarizeOld -> "SummarizeOld"
-            | Context_compact_oas.Dynamic _ -> "Dynamic")
-          strategies
+        List.map Context_compact_oas.strategy_name strategies
+        @ ["FoldCompleted"]
       in
       Log.Harness.info
         "[pre_compact] keeper=%s ratio=%.4f messages=%d tokens=%d trigger=%s"
@@ -380,11 +377,21 @@ let compact_if_needed
           Log.Harness.warn "[pre_compact] sse broadcast failed: %s"
             (Printexc.to_string exn));
       let messages, token_count =
-          Context_compact_oas.compact
-            ~system_prompt:ctx.system_prompt
-            ~messages:ctx.messages
-            ~strategies
-            ()
+          let msgs_after_compact, _ =
+            Context_compact_oas.compact
+              ~system_prompt:ctx.system_prompt
+              ~messages:ctx.messages
+              ~strategies
+              ()
+          in
+          (* Apply keeper-private fold after standard strategies *)
+          let msgs_after_fold =
+            Agent_sdk.Context_reducer.reduce fold_reducer msgs_after_compact
+          in
+          let token_count =
+            Context_compact_oas.count_tokens ctx.system_prompt msgs_after_fold
+          in
+          (msgs_after_fold, token_count)
         in
         let compacted_ctx =
           sync_oas_context

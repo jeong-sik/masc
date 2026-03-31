@@ -22,6 +22,10 @@ type proactive_policy = {
   cooldown_sec: int;
 }
 
+type tool_access =
+  | Unrestricted
+  | Restricted of string list
+
 (* -- Runtime types (moved into agent_runtime_state) -- *)
 
 type compaction_runtime = {
@@ -71,6 +75,9 @@ type agent_runtime_state = {
   board_reactive_turn_count: int;
   mention_reactive_turn_count: int;
   noop_turn_count: int;
+  last_speech_act: string;
+  last_blocker: string;
+  last_need: string;
 }
 
 type keeper_meta = {
@@ -82,6 +89,7 @@ type keeper_meta = {
   mid_goal: string;
   long_goal: string;
   soul_profile: string;
+  social_model: string;
   cascade_name: string;
   will: string;
   needs: string;
@@ -92,7 +100,7 @@ type keeper_meta = {
   execution_scope: string;
   allowed_paths: string list;
   scope_kind: string;
-  tool_allowlist: string list;
+  tool_access: tool_access;
   tool_denylist: string list;
   room_scope: string;
   mention_targets: string list;
@@ -124,6 +132,63 @@ type keeper_meta = {
   (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
   runtime: agent_runtime_state;
 }
+
+let default_social_model = "bdi_speech_v1"
+
+let normalize_tool_access = function
+  | Unrestricted -> Unrestricted
+  | Restricted names ->
+      Restricted
+        (names
+        |> List.filter (fun name -> String.trim name <> "")
+        |> dedupe_keep_order)
+
+let tool_access_allowlist = function
+  | Unrestricted -> []
+  | Restricted names -> names
+
+let tool_access_to_json access =
+  match normalize_tool_access access with
+  | Unrestricted ->
+      `Assoc [ ("kind", `String "unrestricted") ]
+  | Restricted names ->
+      `Assoc
+        [
+          ("kind", `String "restricted");
+          ("tools", `List (List.map (fun s -> `String s) names));
+        ]
+
+let tool_access_of_meta_json (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member "tool_access" json with
+  | `Null ->
+      let legacy_allowlist =
+        match Safe_ops.json_string_list "tool_allowlist" json with
+        | [] -> Tool_catalog.standard_tools
+        | names -> names
+      in
+      Ok (normalize_tool_access (Restricted legacy_allowlist))
+  | `Assoc _ as access_json -> (
+      let kind =
+        Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
+      in
+      let tools =
+        match Yojson.Safe.Util.member "tools" access_json with
+        | `List l ->
+            Ok (List.filter_map (fun v -> match v with `String s -> Some s | _ -> None) l)
+        | `Null -> Ok []
+        | _ -> Error "tool_access.tools must be an array or null"
+      in
+      match tools with
+      | Error msg -> Error msg
+      | Ok tools -> (
+          match kind with
+          | Some "unrestricted" -> Ok Unrestricted
+          | Some "restricted" ->
+              Ok (normalize_tool_access (Restricted tools))
+          | Some other ->
+              Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
+          | None -> Error "keeper tool_access.kind required"))
+  | _ -> Error "keeper tool_access must be an object"
 
 (* -- Updater helpers for nested record updates -- *)
 
@@ -240,6 +305,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("mid_goal", `String m.mid_goal);
       ("long_goal", `String m.long_goal);
       ("soul_profile", `String m.soul_profile);
+      ("social_model", `String m.social_model);
       ("cascade_name", `String m.cascade_name);
       ("will", `String m.will);
       ("needs", `String m.needs);
@@ -249,7 +315,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("execution_scope", `String m.execution_scope);
       ("allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths));
       ("scope_kind", `String m.scope_kind);
-      ("tool_allowlist", `List (List.map (fun s -> `String s) m.tool_allowlist));
+      ("tool_access", tool_access_to_json m.tool_access);
       ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
       ("room_scope", `String m.room_scope);
       ("mention_targets", `List (List.map (fun s -> `String s) m.mention_targets));
@@ -311,9 +377,11 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("board_reactive_turn_count", `Int rt.board_reactive_turn_count);
       ("mention_reactive_turn_count", `Int rt.mention_reactive_turn_count);
       ("noop_turn_count", `Int rt.noop_turn_count);
+      ("last_speech_act", `String rt.last_speech_act);
+      ("last_blocker", `String rt.last_blocker);
+      ("last_need", `String rt.last_need);
       ("paused", `Bool m.paused);
-      ("current_task_id",
-        (match m.current_task_id with None -> `Null | Some s -> `String s));
+      ("current_task_id", Json_util.string_opt_to_json m.current_task_id);
     ]
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
@@ -341,6 +409,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_string ~default:default_soul_profile "soul_profile" json
       |> canonical_soul_profile
       |> Option.value ~default:default_soul_profile
+    in
+    let social_model =
+      Safe_ops.json_string ~default:default_social_model "social_model" json
     in
     let will =
       Safe_ops.json_string ~default:default_keeper_will "will" json
@@ -378,7 +449,11 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let scope_kind =
       Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
     in
-    let tool_allowlist = Safe_ops.json_string_list "tool_allowlist" json in
+    let tool_access =
+      match tool_access_of_meta_json json with
+      | Ok access -> access
+      | Error msg -> raise (Invalid_argument msg)
+    in
     let tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
     let room_scope =
       Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope
@@ -512,6 +587,15 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let noop_turn_count =
       Safe_ops.json_int ~default:0 "noop_turn_count" json
     in
+    let last_speech_act =
+      Safe_ops.json_string ~default:"" "last_speech_act" json
+    in
+    let last_blocker =
+      Safe_ops.json_string ~default:"" "last_blocker" json
+    in
+    let last_need =
+      Safe_ops.json_string ~default:"" "last_need" json
+    in
     let paused =
       Safe_ops.json_bool ~default:false "paused" json
     in
@@ -530,6 +614,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           mid_goal;
           long_goal;
           soul_profile;
+          social_model;
           cascade_name;
           will;
           needs;
@@ -539,7 +624,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           execution_scope;
           allowed_paths;
           scope_kind;
-          tool_allowlist;
+          tool_access;
           tool_denylist;
           room_scope;
           mention_targets;
@@ -613,6 +698,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
             board_reactive_turn_count;
             mention_reactive_turn_count;
             noop_turn_count;
+            last_speech_act;
+            last_blocker;
+            last_need;
           };
         }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

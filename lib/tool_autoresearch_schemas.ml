@@ -7,10 +7,11 @@
 let schemas : Types.tool_schema list = [
   {
     name = "masc_autoresearch_start";
-    description = "Start an autonomous experiment loop (inspired by Karpathy's autoresearch). \
-Each cycle: measure baseline -> apply change -> measure again -> keep if improved, discard if not. \
-Changes are tracked via git commits. Results are logged to JSONL. \
-Requires: goal (what to optimize), metric_fn (shell command that outputs a float on the last line).";
+    description = "Start a solo experiment loop: iteratively modify a target file to optimize \
+a metric. Each cycle: read file -> LLM generates change -> measure -> keep if improved, \
+discard if not. Runs autonomously until max_cycles or stopped. Returns loop_id. \
+For team-coordinated research with multiple workers, use masc_autoresearch_swarm_start. \
+Requires: goal, metric_fn (shell command outputting a float), target_file.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -56,9 +57,11 @@ The MODEL receives the full file, generates a modified version, and writes it ba
 
   {
     name = "masc_autoresearch_swarm_start";
-    description = "Start an autoresearch loop and immediately wrap it in the canonical swarm-facing surfaces. \
-Creates the raw loop, attempts a managed CPv2 research operation, starts a linked team session, seeds planned worker roles, \
-and persists cross-links so team-session status/stop can surface the linked loop.";
+    description = "Start an experiment loop with team coordination. Same experiment logic \
+as masc_autoresearch_start but also creates a team session, seeds worker roles, and \
+links loop status to the team. Use when multiple agents should collaborate on the \
+research. Returns loop_id and team_session_id. Other agents can monitor via team \
+session tools.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -105,8 +108,11 @@ and persists cross-links so team-session status/stop can surface the linked loop
 
   {
     name = "masc_repo_synthesis_swarm_start";
-    description = "Start a repo-synthesis benchmark or case-study run through CPv2 operation + attached team session + proof surfaces. \
-Use this as the canonical front door for repo-scoped synthesis questions before dropping to raw CPv2 tools.";
+    description = "Start a repository-scoped code synthesis task with team coordination. \
+Use for questions about a codebase (e.g. 'Generate a DB schema from these requirements'). \
+Creates a team session and seeds workers to answer the question collaboratively. \
+Unlike autoresearch (metric-driven loops), this is question-driven with artifact output. \
+Returns synthesis_id and team_session_id.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -213,10 +219,10 @@ Useful for directing the research based on human insight.";
 
   {
     name = "masc_autoresearch_cycle";
-    description = "Run one experiment cycle of a Karpathy-style autoresearch loop. \
-Steps: read target file -> MODEL generates modified code -> measure before -> write file -> \
-git commit -> measure after -> keep if improved (update baseline), git reset --hard HEAD~1 if not. \
-Call this repeatedly to drive the autonomous loop.";
+    description = "Run one experiment cycle of an active loop. Reads target file, LLM generates \
+a modification, measures before/after, keeps change if metric improved. Returns cycle_number, \
+before_score, after_score, kept (bool). Requires an active loop from masc_autoresearch_start. \
+Normally the loop runs autonomously; use this for manual single-step control.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -234,9 +240,10 @@ Call this repeatedly to drive the autonomous loop.";
 
   {
     name = "masc_autoresearch_record_finding";
-    description = "Record a structured research finding from an autoresearch loop. \
-Findings are persisted to JSONL locally and synced to Neo4j (best-effort). \
-Use after synthesizing insights from multiple experiment cycles.";
+    description = "Record a research insight from experiment cycles. Persisted to JSONL \
+and synced to Neo4j. Use after observing a pattern across multiple cycles (e.g. \
+'increasing batch size beyond 32 degrades accuracy'). Returns finding_id. \
+Searchable later via masc_autoresearch_search_findings.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

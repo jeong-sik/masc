@@ -95,14 +95,6 @@ let reset_runtime_stores_for_testing () =
 let set_pre_compact_store_for_testing ~base_dir =
   pre_compact_store_ref := Some (Dated_jsonl.create ~base_dir ())
 
-let json_float_option = function
-  | Some value -> `Float value
-  | None -> `Null
-
-let json_string_option = function
-  | Some value -> `String value
-  | None -> `Null
-
 let string_field json key =
   Safe_ops.json_string ~default:"" key json
 
@@ -143,7 +135,7 @@ let verdict_item_json (item : harness_verdict_item) =
       ("gate", `String item.gate);
       ("verdict", `String item.verdict);
       ("evaluator_cascade", `String item.evaluator_cascade);
-      ("fallback_reason", json_string_option item.fallback_reason);
+      ("fallback_reason", Json_util.string_opt_to_json item.fallback_reason);
     ]
 
 let verdict_item_of_json json =
@@ -260,13 +252,10 @@ let handoff_event_json (event : handoff_event) =
       ("keeper_name", `String event.keeper_name);
       ("trace_id", `String event.trace_id);
       ("generation", `Int event.generation);
-      ( "next_generation",
-        match event.next_generation with Some value -> `Int value | None -> `Null );
-      ( "prev_trace_id",
-        match event.prev_trace_id with Some value -> `String value | None -> `Null );
-      ( "new_trace_id",
-        match event.new_trace_id with Some value -> `String value | None -> `Null );
-      ("to_model", json_string_option event.to_model);
+      ("next_generation", Json_util.int_opt_to_json event.next_generation);
+      ("prev_trace_id", Json_util.string_opt_to_json event.prev_trace_id);
+      ("new_trace_id", Json_util.string_opt_to_json event.new_trace_id);
+      ("to_model", Json_util.string_opt_to_json event.to_model);
     ]
 
 let read_keeper_metric_records ?since ?until (config : Room.config) keeper_name =
@@ -379,17 +368,15 @@ let overview_json
       ( "pre_compact_status",
         `String (status_to_string (pre_compact_status latest_pre_compact)) );
       ("handoff_status", `String (status_to_string (handoff_status latest_handoff)));
-      ("last_signal_at", json_float_option last_signal_at);
-      ("evaluator_last_event_at", json_float_option verdict_last);
-      ("pre_compact_last_event_at", json_float_option pre_compact_last);
-      ("handoff_last_event_at", json_float_option handoff_last);
+      ("last_signal_at", Json_util.float_opt_to_json last_signal_at);
+      ("evaluator_last_event_at", Json_util.float_opt_to_json verdict_last);
+      ("pre_compact_last_event_at", Json_util.float_opt_to_json pre_compact_last);
+      ("handoff_last_event_at", Json_util.float_opt_to_json handoff_last);
       ("fallback_ratio", `Float fallback_ratio);
       ( "latest_pre_compact_ratio",
-        json_float_option (Option.map pre_compact_ratio latest_pre_compact) );
+        Json_util.float_opt_to_json (Option.map pre_compact_ratio latest_pre_compact) );
       ( "latest_handoff_generation",
-        match Option.bind latest_handoff handoff_generation with
-        | Some value -> `Int value
-        | None -> `Null );
+        Json_util.int_opt_to_json (Option.bind latest_handoff handoff_generation) );
     ]
 
 let record_pre_compact_at ~timestamp ~keeper_name ~context_ratio ~message_count
@@ -428,11 +415,11 @@ let recent_pre_compact_json ?since ?until ~has_any
         `String
           "Shows recent context compaction attempts before long-running keeper turns are condensed." );
       ("status", `String status);
-      ("last_event_at", json_float_option (Option.map pre_compact_timestamp latest));
+      ("last_event_at", Json_util.float_opt_to_json (Option.map pre_compact_timestamp latest));
       ( "empty_reason",
         match recent_events with
         | _ :: _ -> `Null
-        | [] -> json_string_option (empty_reason ~has_any ?since ?until ()) );
+        | [] -> Json_util.string_opt_to_json (empty_reason ~has_any ?since ?until ()) );
       ("recent_events", `List (List.map pre_compact_event_json recent_events));
       ("total_recent", `Int (List.length events));
     ]
@@ -447,11 +434,11 @@ let recent_handoffs_json ?since ?until ~has_any
         `String
           "Shows recent keeper checkpoint rollovers sourced from keeper metrics snapshots." );
       ("status", `String status);
-      ("last_event_at", json_float_option (Option.map handoff_timestamp latest));
+      ("last_event_at", Json_util.float_opt_to_json (Option.map handoff_timestamp latest));
       ( "empty_reason",
         match recent_events with
         | _ :: _ -> `Null
-        | [] -> json_string_option (empty_reason ~has_any ?since ?until ()) );
+        | [] -> Json_util.string_opt_to_json (empty_reason ~has_any ?since ?until ()) );
       ("recent_events", `List (List.map handoff_event_json recent_events));
       ("total_recent", `Int (List.length events));
     ]

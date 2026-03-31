@@ -187,7 +187,7 @@ let test_self_preservation_suppresses_dominant () =
   (* Only the first 3 are heartbeat failures *)
   let to_restart = List.filteri (fun i _ -> i <> 3) entries in
   (* total=4: all keepers including the running one *)
-  let result = Sup.apply_self_preservation ~total_keepers:4
+  let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:4
     (to_restart @ [List.nth entries 3]) in
   (* Dominant cohort (heartbeat, 3 entries) should be suppressed.
      Only the exception entry (1) should remain. *)
@@ -210,7 +210,7 @@ let test_self_preservation_below_threshold () =
   let entry = match R.get ~base_path:bp "lone" with
     | Some e -> e | None -> fail "missing lone" in
   let to_restart = [(entry, "crash")] in
-  let result = Sup.apply_self_preservation ~total_keepers:10 to_restart in
+  let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:10 to_restart in
   check int "all pass through" 1 (List.length result)
 
 (** min_candidates not met: 1 candidate < 2 minimum.
@@ -225,7 +225,7 @@ let test_self_preservation_min_candidates_not_met () =
     | Some e -> e | None -> fail "missing solo" in
   let to_restart = [(entry, "crash")] in
   (* ratio = 1/1 = 1.0 > 0.3, BUT candidates=1 < min(2) *)
-  let result = Sup.apply_self_preservation ~total_keepers:1 to_restart in
+  let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:1 to_restart in
   check int "passes despite high ratio" 1 (List.length result)
 
 (* ══════════════════════════════════════════════════════════

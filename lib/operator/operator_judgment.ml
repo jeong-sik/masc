@@ -37,9 +37,7 @@ let target_type_of_string = function
   | "team_session" -> Some Team_session
   | _ -> None
 
-let option_to_yojson f = function
-  | Some value -> f value
-  | None -> `Null
+let option_to_yojson = Json_util.option_to_yojson
 
 let ensure_dir path =
   Fs_compat.mkdir_p path

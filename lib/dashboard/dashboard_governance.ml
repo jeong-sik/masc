@@ -4,8 +4,8 @@ module GV2 = Council.Governance_v2
 
 type detail_status = [ `OK | `Not_found ]
 
-let option_to_yojson f = function Some value -> f value | None -> `Null
-let string_opt_json = option_to_yojson (fun value -> `String value)
+let option_to_yojson = Json_util.option_to_yojson
+let string_opt_json = Json_util.string_opt_to_json
 let iso_of_unix = Dashboard_utils.iso_of_unix
 
 let rec take n items =

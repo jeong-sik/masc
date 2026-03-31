@@ -7,16 +7,7 @@
 
 open Types
 
-let unique_preserve_order items =
-  let rec loop seen rev_items = function
-    | [] -> List.rev rev_items
-    | x :: xs ->
-        if List.mem x seen then
-          loop seen rev_items xs
-        else
-          loop (x :: seen) (x :: rev_items) xs
-  in
-  loop [] [] items
+let unique_preserve_order = Json_util.dedupe_keep_order
 
 let dedupe_schemas (schemas : Types.tool_schema list) =
   let seen = Hashtbl.create (List.length schemas) in
@@ -262,70 +253,6 @@ let local_worker_internal_schemas : Types.tool_schema list =
             ( "properties",
               `Assoc [ ("loop_id", `Assoc [ ("type", `String "string") ]) ] );
             ("required", `List [ `String "loop_id" ]);
-          ];
-    };
-    {
-      Types.name = "masc_memento_mori";
-      description =
-        "Check context pressure and auto-handle prepare or handoff when thresholds are crossed.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("context_ratio", `Assoc [ ("type", `String "number") ]);
-                  ("full_context", `Assoc [ ("type", `String "string") ]);
-                  ("summary", `Assoc [ ("type", `String "string") ]);
-                  ("current_task", `Assoc [ ("type", `String "string") ]);
-                  ("target_agent", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "context_ratio" ]);
-          ];
-    };
-    {
-      Types.name = "keeper_research";
-      description = "Research a topic using the MODEL and share findings with the board.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("topic", `Assoc [ ("type", `String "string") ]);
-                  ("agent_name", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "topic" ]);
-          ];
-    };
-    {
-      Types.name = "keeper_profile";
-      description = "Get an agent profile including recent board activity, stats, and interests. Use when reviewing an agent's contributions before collaboration or mentioning them.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc [ ("agent_name", `Assoc [ ("type", `String "string") ]) ] );
-            ("required", `List [ `String "agent_name" ]);
-          ];
-    };
-    {
-      Types.name = "keeper_search";
-      description = "Search board content (posts, comments, code snippets) and agents by keyword. Use when looking for prior discussions on a topic or finding agents with relevant expertise.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("query", `Assoc [ ("type", `String "string") ]);
-                  ("limit", `Assoc [ ("type", `String "integer") ]);
-                ] );
-            ("required", `List [ `String "query" ]);
           ];
     };
   ]

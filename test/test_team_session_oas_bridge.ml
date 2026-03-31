@@ -307,6 +307,48 @@ let test_is_safe_worker_run_id_rejects_dot_segments () =
   Alcotest.(check bool) "slash rejected" false
     (Team_session_oas_bridge.is_safe_worker_run_id "run/123")
 
+let test_slot_aware_cap_reduces_parallelism () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:4
+      ~selection_count:2 ~all_discovered:true ~endpoints_found:2 ~total:2
+  in
+  Alcotest.(check int) "cap reduced to discovered total" 2 cap
+
+let test_slot_aware_cap_keeps_single_entry_sessions_unchanged () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:1
+      ~selection_count:2 ~all_discovered:true ~endpoints_found:1 ~total:1
+  in
+  Alcotest.(check int) "single-entry sessions keep original entry count" 1 cap
+
+let test_slot_aware_cap_accepts_shared_endpoint_selections () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:3
+      ~selection_count:2 ~all_discovered:true ~endpoints_found:1 ~total:1
+  in
+  Alcotest.(check int) "shared endpoint still caps concurrency" 1 cap
+
+let test_slot_aware_cap_accepts_partially_collapsed_endpoint_selections () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:4
+      ~selection_count:3 ~all_discovered:true ~endpoints_found:2 ~total:2
+  in
+  Alcotest.(check int) "partially collapsed shared endpoints still cap concurrency" 2 cap
+
+let test_slot_aware_cap_falls_back_without_full_discovery () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:3
+      ~selection_count:2 ~all_discovered:false ~endpoints_found:1 ~total:1
+  in
+  Alcotest.(check int) "fallback keeps original entry count" 3 cap
+
+let test_slot_aware_cap_falls_back_for_non_positive_selection_count () =
+  let cap =
+    Team_session_oas_bridge.slot_aware_concurrency_cap ~entry_count:3
+      ~selection_count:0 ~all_discovered:true ~endpoints_found:1 ~total:1
+  in
+  Alcotest.(check int) "non-positive selection count keeps original entry count" 3 cap
+
 (* ================================================================ *)
 (* Supported tool runtime tests                                     *)
 (* ================================================================ *)
@@ -328,6 +370,48 @@ let test_supported_local_worker_tools_present () =
     (List.mem "masc_run_init" names);
   Alcotest.(check bool) "masc_repair_loop_start present" true
     (List.mem "masc_repair_loop_start" names)
+
+let test_supported_local_worker_tools_for_observe_only_filter_mutations () =
+  let names =
+    Team_session_oas_bridge.supported_local_worker_tool_names_for_scope
+      (Some Team_session_types.Observe_only)
+  in
+  Alcotest.(check bool) "observe_only keeps masc_status" true
+    (List.mem "masc_status" names);
+  Alcotest.(check bool) "observe_only keeps masc_code_read" true
+    (List.mem "masc_code_read" names);
+  Alcotest.(check bool) "observe_only keeps masc_worktree_list" true
+    (List.mem "masc_worktree_list" names);
+  Alcotest.(check bool) "observe_only blocks masc_worktree_create" false
+    (List.mem "masc_worktree_create" names);
+  Alcotest.(check bool) "observe_only blocks masc_worktree_remove" false
+    (List.mem "masc_worktree_remove" names);
+  Alcotest.(check bool) "observe_only blocks masc_run_init" false
+    (List.mem "masc_run_init" names);
+  Alcotest.(check bool) "observe_only blocks masc_board_post" false
+    (List.mem "masc_board_post" names)
+
+let test_supported_local_worker_tools_for_observe_only_resolve_subset () =
+  let schemas =
+    match
+      Team_session_oas_bridge.supported_local_worker_tools_for_scope
+        (Some Team_session_types.Observe_only)
+    with
+    | Ok schemas -> schemas
+    | Error message ->
+        Alcotest.failf "expected scoped schemas, got error: %s" message
+  in
+  let names =
+    List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
+  in
+  Alcotest.(check bool) "scoped schemas keep masc_status" true
+    (List.mem "masc_status" names);
+  Alcotest.(check bool) "scoped schemas keep masc_code_read" true
+    (List.mem "masc_code_read" names);
+  Alcotest.(check bool) "scoped schemas block masc_worktree_create" false
+    (List.mem "masc_worktree_create" names);
+  Alcotest.(check bool) "scoped schemas block masc_run_log" false
+    (List.mem "masc_run_log" names)
 
 let test_dispatch_supported_tool_status () =
   Eio_main.run @@ fun env ->
@@ -378,7 +462,7 @@ let test_run_repair_loop_until_terminal_with_fake_dispatch () =
     | "masc_repair_loop_iterate" ->
         incr iterate_calls;
         if !iterate_calls = 1 then
-          ( false,
+          ( true,
             Yojson.Safe.to_string
               (`Assoc
                 [
@@ -412,6 +496,46 @@ let test_run_repair_loop_until_terminal_with_fake_dispatch () =
   let json = Yojson.Safe.from_string body in
   Alcotest.(check string) "status passed" "passed"
     Yojson.Safe.Util.(json |> member "status" |> to_string)
+
+let test_run_repair_loop_until_terminal_with_guard () =
+  let iterate_calls = ref 0 in
+  let dispatch_tool ~name ~args:_ =
+    match name with
+    | "masc_repair_loop_start" ->
+        ( true,
+          Yojson.Safe.to_string
+            (`Assoc
+              [
+                ("loop_id", `String "loop-guard");
+                ("status", `String "running");
+                ("attempt_count", `Int 0);
+                ("max_attempts", `Int 2);
+              ]) )
+    | "masc_repair_loop_iterate" ->
+        incr iterate_calls;
+        ( true,
+          Yojson.Safe.to_string
+            (`Assoc
+              [
+                ("loop_id", `String "loop-guard");
+                ("status", `String "running");
+                ("attempt_count", `Int !iterate_calls);
+                ("max_attempts", `Int 2);
+              ]) )
+    | other -> Alcotest.failf "unexpected tool call: %s" other
+  in
+  let ok, body =
+    Team_session_oas_bridge.run_repair_loop_until_terminal_with ~dispatch_tool
+      (`Assoc
+        [
+          ("plugin_id", `String "ocaml");
+          ("task_spec", `String "Never reaches terminal state.");
+        ])
+  in
+  Alcotest.(check bool) "guard returns failure" false ok;
+  Alcotest.(check int) "guard caps iterate calls" 3 !iterate_calls;
+  Alcotest.(check string) "guard message"
+    "repair loop iteration guard exceeded for loop-guard" body
 
 (* ================================================================ *)
 (* Runner                                                           *)
@@ -456,15 +580,33 @@ let () =
         test_telemetry_of_run_result_carries_trace_ref;
       Alcotest.test_case "worker run id rejects dot segments" `Quick
         test_is_safe_worker_run_id_rejects_dot_segments;
+      Alcotest.test_case "slot-aware cap reduces parallelism" `Quick
+        test_slot_aware_cap_reduces_parallelism;
+      Alcotest.test_case "slot-aware cap keeps single-entry sessions unchanged" `Quick
+        test_slot_aware_cap_keeps_single_entry_sessions_unchanged;
+      Alcotest.test_case "slot-aware cap accepts shared endpoint selections" `Quick
+        test_slot_aware_cap_accepts_shared_endpoint_selections;
+      Alcotest.test_case "slot-aware cap accepts partially collapsed endpoint selections" `Quick
+        test_slot_aware_cap_accepts_partially_collapsed_endpoint_selections;
+      Alcotest.test_case "slot-aware cap falls back without full discovery" `Quick
+        test_slot_aware_cap_falls_back_without_full_discovery;
+      Alcotest.test_case "slot-aware cap falls back for non-positive selection count" `Quick
+        test_slot_aware_cap_falls_back_for_non_positive_selection_count;
     ];
     "supported_tools", [
       Alcotest.test_case "schemas present" `Quick
         test_supported_local_worker_tools_present;
+      Alcotest.test_case "observe_only filters mutating names" `Quick
+        test_supported_local_worker_tools_for_observe_only_filter_mutations;
+      Alcotest.test_case "observe_only resolves scoped schemas" `Quick
+        test_supported_local_worker_tools_for_observe_only_resolve_subset;
       Alcotest.test_case "status dispatch" `Quick
         test_dispatch_supported_tool_status;
       Alcotest.test_case "heartbeat autojoin" `Quick
         test_dispatch_supported_tool_heartbeat_autojoin;
       Alcotest.test_case "repair loop wrapper iterates until terminal" `Quick
         test_run_repair_loop_until_terminal_with_fake_dispatch;
+      Alcotest.test_case "repair loop wrapper guards runaway status" `Quick
+        test_run_repair_loop_until_terminal_with_guard;
     ];
   ]

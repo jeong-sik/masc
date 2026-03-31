@@ -231,6 +231,13 @@ let build
     |> Oas.Builder.with_tools config.tools
     |> Oas.Builder.with_guardrails guardrails
   in
+  (* When tools are present, set tool_choice=Auto so models that require
+     explicit tool_choice (e.g. GLM-5.1) will actually invoke tools. *)
+  let builder =
+    if config.tools <> [] then
+      Oas.Builder.with_tool_choice Oas.Types.Auto builder
+    else builder
+  in
   let builder = match config.hooks with
     | Some h -> Oas.Builder.with_hooks h builder
     | None -> builder
@@ -389,6 +396,7 @@ let run_with_masc_tools
     ~(config : config)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ?contract
     ?on_event
     (goal : string)
   : (run_result, string) result =
@@ -397,10 +405,11 @@ let run_with_masc_tools
       ~name:td.name
       ~description:td.description
       ~input_schema:td.input_schema
+      ~mutation_class:"workspace"
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   let config = { config with tools = oas_tools @ config.tools } in
-  run ~sw ~net ~config ?on_event goal
+  run ~sw ~net ~config ?on_event ?contract goal
 
 (* ================================================================ *)
 (* Cascade profile defaults (moved from Cascade module)              *)
@@ -672,6 +681,7 @@ let run_named_with_masc_tools
     Tool_bridge.oas_tool_of_masc
       ~name:td.name ~description:td.description
       ~input_schema:td.input_schema
+      ~mutation_class:"workspace"
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
@@ -691,6 +701,7 @@ let run_model_with_masc_tools
     ?hooks
     ?memory
     ?enable_thinking
+    ?contract
     ?raw_trace
     ?on_event
     ?transport
@@ -714,5 +725,5 @@ let run_model_with_masc_tools
           ()
       in
       let config = { config with raw_trace; transport = transport_resolved; priority } in
-      run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event
+      run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?contract ?on_event
         goal

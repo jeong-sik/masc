@@ -1,6 +1,160 @@
 # Changelog
 
 
+## [2.190.0] - 2026-03-31
+
+### Added
+- **Keeper lossy fold compaction** — structured fold stubs preserving task/outcome/artifact counts (#4183).
+- **Keeper delta checkpoint** — shadow-apply, sidecar write, 6 Prometheus metrics (#4181).
+- **CDAL cross-run window projection** — proof window aggregation + spec alignment (#4176).
+- **Dashboard agent/keeper detail UX overhaul** — redesigned detail pages (#4196).
+- **masc_status visibility improvements** — worktree status, agent zombies, current task (#4177).
+- **Team-session zero-tool guard** — reject completion without tool use in code-change scopes (#4180).
+
+### Changed
+- **Dead tool cleanup** — remove dead schemas, tombstones, and legacy aliases (#4188).
+- **Dashboard internal tools hidden** — hide internal tools by default in Lab/Tools (#4182).
+- **Team-session observe-only scope** — scope local worker tools for observe-only (#4175).
+- **Warning suppressors removed** — unjustified warning suppressors across 13 modules (#4194).
+
+### Fixed
+- **Cdal_proof.scope test breakage** — remove stale scope field from 6 test files (#4199).
+- **OCaml runtime hardening** — harden preconditions and test seams (#4141).
+- **Doc truth fixes** — review follow-up version truth corrections (#4187, #4178).
+
+## [2.189.0] - 2026-03-31
+
+### Added
+- **Telemetry executor tracking** — track executor decision outcomes in telemetry (#4174).
+- **Room state health counters** — expose state_update_attempts/failures in dashboard monitoring (#4173).
+- **Keeper Korean keyword aliases** — add Korean aliases for BM25 tool retrieval (#4171).
+- **Dashboard feature flags nav** — expose ghost FeatureHealth widget in lab navigation (#4146).
+- **Dashboard tab visit counter** — localStorage-based tab/section visit metrics (#4150).
+- **Transport health on config page** — TransportHealthPanel added to Lab > Config (#4149).
+
+### Changed
+- **CI boundary ratchet guard** — add MASC/OAS boundary lint guard (#4167).
+- **OCaml runtime hardening** — harden preconditions and test seams (#4141).
+- **Dashboard widget dedup** — remove duplicate connection status and counter chips from sidebar and live monitor (#4147, #4148).
+
+### Fixed
+- **Team-session scope gate** — deny MASC mutating tools in Observe_only scope (#4168).
+- **Harness latency accumulation** — accumulate MCP_LAST_TIME_TOTAL across retries (#4170).
+- **Keeper tool_access validation** — validate tool_access.tools field type (#4165).
+- **Keeper JSON envelope** — embed change_block inside JSON envelope (#4161).
+- **TUI legacy decode** — make legacy keeper fields optional in decode_keeper (#4158).
+- **Harness script migration** — migrate last two scripts off direct jsonrpc_sse (#4162).
+
+## [2.188.0] - 2026-03-31
+
+### Added
+- **Confidence-gated BM25 tool disclosure** — keeper tool disclosure with fallback (#4157).
+- **Dashboard tool UX** — improvements (#4117, #4118, #4119, #4120) (#4132).
+- **Keeper mutation_class** — declare keeper tools as workspace mutation_class (#4131).
+- **Mutation_class on OAS paths** — declare mutation_class on all OAS tool creation paths (#4142).
+
+### Changed
+- **God file split: tool_catalog** — extract surfaces and tiers into leaf modules (#4143).
+- **God file split: tool_misc** — extract transport and admin handlers into sub-modules (#4156).
+- **Keeper tool_access ADT** — replace tool_allowlist with structured ADT (#4130).
+- **Test deps wrapper** — centralise test deps via masc_test_deps (#4145).
+- **TUI boundary parsing** — parse tui data at the boundary (#4137).
+- **Harness transport unification** — migrate 6 scripts to mcp_jsonrpc (#4138, #4154).
+- **Harness passthrough removal** — drop passthrough wrappers, use mcp_* directly (#4136).
+- **CI checkout v5** — bump checkout action and resync opam truth (#4153).
+
+### Fixed
+- **Tool result JSON envelope** — normalize keeper tool results to consistent JSON (#4102, #4159).
+- **Readonly shell_exec** — set correct mutation_class for readonly shell_exec tool (#4151).
+- **AI code review followup** — P0-P2 fixes v2 (#4134).
+- **Dead skip_reason removal** — remove dead skip_reason record/consume machinery (#4135, #4139).
+
+## [2.187.0] - 2026-03-31
+
+### Added
+- **Tool skip Override** — surface tool skip reasons to LLM via Override (#4127).
+- **Health baseline** — tighten to match actual counts (#4125).
+
+### Changed
+- **Dashboard HTTP facade split** — extract room_truth, runtime_info modules (-76 lines) (#4069).
+
+## [2.186.0] - 2026-03-31
+
+### Fixed
+- **Harness health dashboard** — align frontend schema with backend after #3883 mitosis removal (#4113).
+- **Research List.hd** — replace unsafe List.hd with pattern match in run_git (#4121).
+- **CDAL tool block** — remove restriction blocking keeper tool execution (#4104).
+- **Tool output prune** — raise keeper tool output prune limit from 500 to 1500 chars (#4114).
+
+### Changed
+- **Harness smoke scripts** — extract shared boilerplate from observability smoke scripts (#4095).
+- **Json_util** — consolidate duplicated JSON option helpers (#4112).
+
+## [2.185.0] - 2026-03-31
+
+### Fixed
+- **Dashboard keeper auth** — localhost-friendly keeper tools API auth (#4079).
+- **Context compact coverage** — fix summarize_old pairing test (#4093).
+- **Keeper denied tools** — sync denied tools with LLM visibility, progressive disclosure (#4076).
+
+## [2.184.0] - 2026-03-31
+
+### Added
+- **Governance audit trail** — param audit trail + rollback UI (#4072).
+- **Pulse rhythm API** — set_rhythm/get_rhythm for runtime interval (#4063).
+
+### Fixed
+- **Keeper tool_allowlist** — correct runtime semantics: empty list means no tools allowed; JSON deserialization migrates empty to standard_tools for backward compatibility (#4059).
+- **Keeper bridge tests** — update for allowlist semantics + shard bypass (#4088).
+- **Json_util dedup** — consolidate to canonical SSOT (#4085).
+
+## [2.183.0] - 2026-03-31
+
+### Fixed
+- **Research exit status** — check process exit instead of silently ignoring (#4080).
+- **Explicit naming** — replace `let _ =` with explicit naming in 3 modules (#4083).
+
+### Removed
+- **Mitosis artifacts** — dead tool and docs cleanup (#4057).
+
+## [2.182.0] - 2026-03-31
+
+### Added
+- **Observation masking** — mask summarized tool results with structured stubs (#4043).
+- **Judge slot backoff** — per-cycle slot backoff for governance/operator judges (#4041).
+- **Governance action dedup** — expand canonical action normalization (#4020).
+
+### Fixed
+- **Build break** — resolve unused-rec and type ambiguity in context_compact_oas (#4074).
+- **Keeper tool_choice** — set Auto + relax dashboard tools API auth (#4042).
+- **Room atomic_update** — surface errors instead of silent ignore (#4077).
+- **Persona normalization** — normalize persona soul profiles (#4064).
+- **Voice config** — reset voice configuration boundaries (#4027).
+
+### Changed
+- **Keeper social model** — remove unused params and mutable ref (#4075).
+
+### Removed
+- **Mitosis/sentinel dead code** — final cleanup (#4067).
+
+## [2.181.0] - 2026-03-31
+
+### Added
+- **Dead ETA prediction** — dashboard health score followup (#4038).
+- **Observability smoke harness** — harness scripts for CI observability (#4031).
+- **Keeper crash cohort + health score** — status summary (#4015).
+- **Board nested replies** — dashboard reply UI (#4014).
+- **Board cleaner persona** — sonsukku keeper persona (#4012, #4016).
+- **Keeper social model** — typed social state routing (#4036).
+- **Council capability routing** — replace keyword heuristics with capability-aware routing (#4039).
+
+### Fixed
+- **Research tool exposure** — restore keeper autoresearch/research test parity after SSOT refactor (#4032).
+- **Team session capacity** — harden slot-aware runtime guards (#4022).
+- **Governance action dedup** — expand canonical action normalization (#4020).
+- **Dashboard SSE delete** — real-time board post deletion (#4019).
+- **Judge per-cycle slot backoff** — governance and operator judges skip refresh when local LLM slots are saturated (#4041).
+
 ## [2.180.0] - 2026-03-30
 
 ### Added

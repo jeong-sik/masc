@@ -1,8 +1,8 @@
 (** Routing, spawn spec parsing, model inference, and worker management
     for team session step execution. *)
 
-let int_opt_to_json = function Some n -> `Int n | None -> `Null
-let float_opt_to_json = function Some v -> `Float v | None -> `Null
+let int_opt_to_json = Json_util.int_opt_to_json
+let float_opt_to_json = Json_util.float_opt_to_json
 
 let truncate_for_event ?(max_len = 320) (s : string) =
   if String.length s <= max_len then

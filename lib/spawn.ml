@@ -440,15 +440,8 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
 (** Spawn and wait for result (synchronous) *)
 let spawn_sync = spawn
 
-(** Helper for optional int to JSON *)
-let int_opt_to_json = function
-  | Some n -> `Int n
-  | None -> `Null
-
-(** Helper for optional float to JSON *)
-let float_opt_to_json = function
-  | Some f -> `Float f
-  | None -> `Null
+let int_opt_to_json = Json_util.int_opt_to_json
+let float_opt_to_json = Json_util.float_opt_to_json
 
 (** Result to JSON *)
 let result_to_json result =

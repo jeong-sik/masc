@@ -83,11 +83,24 @@ let with_eio f =
   Eio_guard.enable ();
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  Fun.protect
-    ~finally:(fun () ->
-      Time_compat.clear_clock ();
-      Eio_guard.disable ())
-    (fun () -> f env)
+  Process_eio.reset_for_testing ();
+  Process_eio.init
+    ~cwd_default:(Eio.Stdenv.fs env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun test_env_sw ->
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env)
+    ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw:test_env_sw
+    (fun () ->
+      Fun.protect
+        ~finally:(fun () ->
+          Process_eio.reset_for_testing ();
+          Time_compat.clear_clock ();
+          Eio_guard.disable ())
+        (fun () -> f env))
 
 let transition_task_ok config ~agent_name ~task_id ~action =
   match Room.transition_task_r config ~agent_name ~task_id ~action () with

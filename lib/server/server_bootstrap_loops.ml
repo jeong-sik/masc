@@ -7,7 +7,7 @@ let install_tooling ~governance_level (state : Mcp_server.server_state) =
   Governance_pipeline.install ~config:state.room_config ~governance_level;
   Tool_permissions.install ~get_agent_name:(fun () -> None)
 
-let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
+let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
   Sse.set_clock clock;
@@ -165,7 +165,7 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   let governance_judge_dispatch = make_judge_dispatch ~actor:"governance-judge" in
   let operator_judge_dispatch = make_judge_dispatch ~actor:"operator-judge" in
   fork_subsystem "governance_judge" (fun () ->
-    Dashboard_governance_judge.start ~sw ~clock
+    Dashboard_governance_judge.start ~sw ~clock ~net
       ~base_path:state.room_config.base_path
       ~masc_tools:judge_masc_tools ~dispatch:governance_judge_dispatch
       ~build_facts:(fun () ->
@@ -187,7 +187,7 @@ let start_keeper_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
         mcp_session_id = None;
       }
     in
-    Dashboard_operator_judge.start ~sw ~clock ~config:state.room_config
+    Dashboard_operator_judge.start ~sw ~clock ~net ~config:state.room_config
       ~masc_tools:judge_masc_tools ~dispatch:operator_judge_dispatch
       ~build_facts:(fun () ->
         Operator_control.snapshot_json ~actor:"operator-judge" ~view:"summary"

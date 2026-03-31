@@ -85,10 +85,14 @@ let params_of_json_schema (schema : Yojson.Safe.t) : Agent_sdk.Types.tool_param 
         ~input_schema:schema_json
         (fun args -> handle_vote_create ctx args)
     ]} *)
-let oas_tool_of_masc ~name ~description ~input_schema handler : Agent_sdk.Tool.t =
+let oas_tool_of_masc ~name ~description ~input_schema
+    ?(mutation_class : string option) handler : Agent_sdk.Tool.t =
   let parameters = params_of_json_schema input_schema in
   let oas_handler json_args =
     let success, msg = handler json_args in
     to_oas_tool_result (success, msg)
   in
-  Agent_sdk.Tool.create ~name ~description ~parameters oas_handler
+  let descriptor : Agent_sdk.Tool.descriptor =
+    { kind = None; mutation_class; shell = None; notes = []; examples = [] }
+  in
+  Agent_sdk.Tool.create ~descriptor ~name ~description ~parameters oas_handler

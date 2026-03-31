@@ -110,15 +110,43 @@ let json_assoc_list kv =
 let parse_json_or_string s =
   try Yojson.Safe.from_string s with Yojson.Json_error _ -> `String s
 
+(** {1 Option serialization helpers}
+
+    Canonical [None -> `Null] converters for building JSON.
+    Use these instead of per-module [let int_opt_to_json = ...] definitions. *)
+
+let option_to_yojson (f : 'a -> Yojson.Safe.t) : 'a option -> Yojson.Safe.t = function
+  | Some value -> f value
+  | None -> `Null
+
+let int_opt_to_json : int option -> Yojson.Safe.t = function
+  | Some n -> `Int n
+  | None -> `Null
+
+let string_opt_to_json : string option -> Yojson.Safe.t = function
+  | Some s -> `String s
+  | None -> `Null
+
+let float_opt_to_json : float option -> Yojson.Safe.t = function
+  | Some f -> `Float f
+  | None -> `Null
+
+let bool_opt_to_json : bool option -> Yojson.Safe.t = function
+  | Some b -> `Bool b
+  | None -> `Null
+
 (** List utilities *)
 
 let dedupe_keep_order xs =
-  let rec loop seen acc = function
+  let seen = Hashtbl.create (List.length xs) in
+  let rec loop acc = function
     | [] -> List.rev acc
     | x :: rest ->
-        if List.mem x seen then
-          loop seen acc rest
-        else
-          loop (x :: seen) (x :: acc) rest
+        if Hashtbl.mem seen x then
+          loop acc rest
+        else begin
+          Hashtbl.replace seen x ();
+          loop (x :: acc) rest
+        end
   in
-  loop [] [] xs
+  loop [] xs

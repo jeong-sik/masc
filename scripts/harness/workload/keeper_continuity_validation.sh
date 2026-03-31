@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-source "$REPO_ROOT/scripts/harness/jsonrpc_sse.sh"
+source "$REPO_ROOT/scripts/harness/lib/mcp_jsonrpc.sh"
 source "$REPO_ROOT/scripts/harness/lib/server_bootstrap.sh"
 
 RUN_ID="${RUN_ID:-keeper-continuity-$(date +%Y%m%d_%H%M%S)-$$}"
@@ -143,34 +143,25 @@ call_mcp_tool() {
   local tool_name="$2"
   local args_json="$3"
   local timeout_sec="${4:-$TURN_TIMEOUT_SEC}"
-  local raw payload error text
 
-  payload="$(jq -cn \
-    --argjson id "$req_id" \
-    --arg tool "$tool_name" \
-    --argjson args "$args_json" \
-    '{jsonrpc:"2.0",id:$id,method:"tools/call",params:{name:$tool,arguments:$args}}')"
+  local saved_timeout="${HTTP_TIMEOUT_SEC:-}"
+  HTTP_TIMEOUT_SEC="$timeout_sec"
+  LAST_TOOL_RAW="$(mcp_call_tool "$req_id" "$tool_name" "$args_json")"
+  HTTP_TIMEOUT_SEC="$saved_timeout"
 
-  if ! raw="$(curl -sS --http2-prior-knowledge -m "$timeout_sec" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -d "$payload")"; then
-    LAST_TOOL_RAW=""
-    LAST_TOOL_ERROR="curl failed for $tool_name"
+  if printf '%s' "$LAST_TOOL_RAW" | jq -e '._harness_error? != null' >/dev/null 2>&1; then
+    LAST_TOOL_ERROR="$(printf '%s' "$LAST_TOOL_RAW" | jq -r '._harness_error.message // "transport error"')"
     return 1
   fi
 
-  raw="$(jsonrpc_normalize_response "$raw" "$req_id")"
-  error="$(printf '%s' "$raw" | jq -r '
+  LAST_TOOL_ERROR="$(printf '%s' "$LAST_TOOL_RAW" | jq -r '
     if .error?.message then .error.message
     elif (.result?.isError // false) == true then
       ([.result.content[]? | select(.type == "text") | .text] | join(" "))
     else empty end
   ' 2>/dev/null | awk 'NF { print; exit }')"
 
-  LAST_TOOL_RAW="$raw"
-  LAST_TOOL_ERROR="$error"
-  if [[ -n "$error" ]]; then
+  if [[ -n "$LAST_TOOL_ERROR" ]]; then
     return 1
   fi
   return 0

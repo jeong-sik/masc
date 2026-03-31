@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { TextInput } from './common/input'
+import { TransportHealthPanel } from './transport-health'
 import { fetchDashboardConfig } from '../api/dashboard'
 import type { DashboardConfigResponse, ConfigEntry } from '../api/dashboard'
 
@@ -191,5 +192,9 @@ export function ServerConfig() {
         )}
       ` : null}
     <//>
+
+    <div class="mt-4">
+      <${TransportHealthPanel} />
+    </div>
   `
 }

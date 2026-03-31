@@ -113,22 +113,10 @@ extract_tool_result() {
   mcp_extract_result
 }
 
-require_json() {
-  local payload="$1"
-  local label="${2:-team_session_failed_batch_spawn}"
-  mcp_require_json "$payload" "$label"
-}
-
 require_success_response() {
   local payload="$1"
   local label="${2:-team_session_failed_batch_spawn response}"
   mcp_require_jsonrpc_ok "$payload" "$label"
-}
-
-require_tool_success() {
-  local payload="$1"
-  local label="${2:-team_session_failed_batch_spawn tool}"
-  mcp_require_tool_ok "$payload" "$label"
 }
 
 require_json_condition() {
@@ -200,12 +188,12 @@ create_agent_token() {
   join_payload="$(jq -cn --arg a "$agent_name" --argjson caps "$caps_json" '{agent_name:$a,capabilities:$caps}')"
   local join_raw
   join_raw="$(call_tool "$session_id" "" 10 "masc_join" "$join_payload")"
-  require_tool_success "$join_raw"
+  mcp_require_tool_ok "$join_raw"
   local nickname
   nickname="$(parse_nickname_from_text "$join_raw")"
   local token_raw
   token_raw="$(call_tool "$session_id" "" 11 "masc_auth_create_token" "$(jq -cn --arg role "$role" '{role:$role}')")"
-  require_tool_success "$token_raw"
+  mcp_require_tool_ok "$token_raw"
   printf '%s|%s' "$nickname" "$(parse_token_from_text "$token_raw")"
 }
 
@@ -218,7 +206,7 @@ join_with_token() {
   join_payload="$(jq -cn --arg a "$agent_name" --argjson caps "$caps_json" '{agent_name:$a,capabilities:$caps}')"
   local join_raw
   join_raw="$(call_tool "$session_id" "$token" 20 "masc_join" "$join_payload")"
-  require_tool_success "$join_raw"
+  mcp_require_tool_ok "$join_raw"
 }
 
 printf '[1/8] start server with deterministic llama failure endpoint\n'
@@ -252,14 +240,14 @@ fi
 
 printf '[2/9] bootstrap room and auth\n'
 init_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "" 1 "masc_init" "$(jq -cn --arg a "$SUPERVISOR_AGENT" '{agent_name:$a}')")"
-require_tool_success "$init_raw"
+mcp_require_tool_ok "$init_raw"
 switch_mode_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "" 2 "masc_switch_mode" '{"mode":"full"}')"
-require_tool_success "$switch_mode_raw"
+mcp_require_tool_ok "$switch_mode_raw"
 SUPERVISOR_IDENTITY="$(create_agent_token "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_AGENT" "admin" '["supervisor","failure-replay"]')"
 SUPERVISOR_NICKNAME="${SUPERVISOR_IDENTITY%%|*}"
 SUPERVISOR_TOKEN="${SUPERVISOR_IDENTITY##*|}"
 enable_auth_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "" 12 "masc_auth_enable" '{"require_token":true}')"
-require_tool_success "$enable_auth_raw"
+mcp_require_tool_ok "$enable_auth_raw"
 join_with_token "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" "$SUPERVISOR_NICKNAME" '["supervisor","failure-replay"]'
 
 printf '[3/9] start team session\n'
@@ -268,7 +256,7 @@ start_payload="$(jq -cn \
   --arg supervisor "$SUPERVISOR_NICKNAME" \
   '{goal:$goal,duration_seconds:180,checkpoint_interval_sec:15,orchestration_mode:"assist",communication_mode:"broadcast",execution_scope:"limited_code_change",fallback_policy:"none",instruction_profile:"strict",min_agents:1,agents:[$supervisor]}')"
 start_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 3 "masc_team_session_start" "$start_payload")"
-require_tool_success "$start_raw"
+mcp_require_tool_ok "$start_raw"
 TEAM_SESSION_ID="$(printf '%s' "$start_raw" | extract_tool_result | jq -r '.session_id // empty')"
 if [ -z "$TEAM_SESSION_ID" ]; then
   echo "FAIL: missing session_id"
@@ -278,7 +266,7 @@ fi
 
 FAILURE_NOTE="[failure-replay] explicit model=${LLAMA_SWARM_MODEL}; llama endpoint intentionally unreachable at ${FAIL_LLAMA_SERVER_URL}"
 note_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 4 "masc_team_session_turn" "$(jq -cn --arg s "$TEAM_SESSION_ID" --arg msg "$FAILURE_NOTE" '{session_id:$s,turn_kind:"note",message:$msg}')")"
-require_tool_success "$note_raw"
+mcp_require_tool_ok "$note_raw"
 
 printf '[4/9] replay deterministic failed batch spawn\n'
 spawn_batch_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 5 "masc_team_session_step" "$(jq -cn \
@@ -289,7 +277,7 @@ spawn_batch_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 5 "mas
     {spawn_role:"planner",worker_class:"manager",worker_size:"xlg",spawn_selection_note:$note,spawn_prompt:"planner failure replay worker",spawn_timeout_seconds:30},
     {spawn_role:"implementer-a",worker_class:"executor",worker_size:"lg",spawn_selection_note:$note,spawn_prompt:"implementer failure replay worker",spawn_timeout_seconds:30}
   ]}')")"
-require_tool_success "$spawn_batch_raw"
+mcp_require_tool_ok "$spawn_batch_raw"
 spawn_result="$(printf '%s' "$spawn_batch_raw" | extract_tool_result)"
 require_json_condition "$spawn_result" '.spawn.mode == "batch" and .spawn.count == 2 and (.spawn.results | length) == 2' "spawn batch result shape is wrong"
 require_json_condition "$spawn_result" '.spawn.results | all(.success == false)' "spawn batch unexpectedly succeeded"
@@ -299,7 +287,7 @@ FAILED_RUNTIME_ACTOR_2="$(printf '%s' "$spawn_result" | jq -r '.spawn.results[1]
 
 printf '[5/9] verify detach + participant accounting\n'
 spawn_events_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 6 "masc_team_session_events" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,event_types:["team_step_spawn"],limit:100}')")"
-require_tool_success "$spawn_events_raw"
+mcp_require_tool_ok "$spawn_events_raw"
 spawn_events_result="$(printf '%s' "$spawn_events_raw" | extract_tool_result)"
 spawn_event_count="$(printf '%s' "$spawn_events_result" | jq -r '.count // 0')"
 if [ "$spawn_event_count" -gt 0 ]; then
@@ -310,22 +298,22 @@ else
 fi
 
 detached_events_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 7 "masc_team_session_events" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,event_types:["session_agent_detached"],limit:100}')")"
-require_tool_success "$detached_events_raw"
+mcp_require_tool_ok "$detached_events_raw"
 detached_events_result="$(printf '%s' "$detached_events_raw" | extract_tool_result)"
 require_json_condition "$detached_events_result" '.count == 2' "unexpected number of detached-agent events"
 
 status_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 8 "masc_team_session_status" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s}')")"
-require_tool_success "$status_raw"
+mcp_require_tool_ok "$status_raw"
 status_result="$(printf '%s' "$status_raw" | extract_tool_result)"
 require_json_condition "$status_result" '.summary.active_agents | length == 1' "active_agents accounting is wrong after failed spawn replay"
 require_json_condition "$status_result" '.summary.planned_workers | length == 2' "planned_workers accounting is wrong after failed spawn replay"
 
 replay_note_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 9 "masc_team_session_turn" "$(jq -cn --arg s "$TEAM_SESSION_ID" --arg msg "[failure-replay] observed 2 failed spawns and 2 detached actors" '{session_id:$s,turn_kind:"note",message:$msg}')")"
-require_tool_success "$replay_note_raw"
+mcp_require_tool_ok "$replay_note_raw"
 
 printf '[6/9] verify operator digest signals\n'
 digest_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 92 "masc_operator_digest" "$(jq -cn --arg actor "$SUPERVISOR_NICKNAME" --arg s "$TEAM_SESSION_ID" '{actor:$actor,target_type:"team_session",target_id:$s}')")"
-require_tool_success "$digest_raw"
+mcp_require_tool_ok "$digest_raw"
 digest_result="$(printf '%s' "$digest_raw" | extract_tool_result)"
 require_json_condition "$digest_result" '.target_type == "team_session"' "digest target_type mismatch"
 require_json_condition "$digest_result" '[.attention_items[]?.kind] | index("spawn_failure_present") != null' "digest missing spawn_failure_present"
@@ -333,12 +321,12 @@ require_json_condition "$digest_result" '[.attention_items[]?.kind] | index("det
 
 printf '[7/9] stop session and generate artifacts\n'
 stop_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 10 "masc_team_session_stop" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,reason:"failed_batch_spawn_replay_complete",generate_report:true}')")"
-require_tool_success "$stop_raw"
+mcp_require_tool_ok "$stop_raw"
 
 deadline=$(( $(date +%s) + STOP_WAIT_SEC ))
 while :; do
   stop_status_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 11 "masc_team_session_status" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s}')")"
-  require_tool_success "$stop_status_raw"
+  mcp_require_tool_ok "$stop_status_raw"
   stop_status_result="$(printf '%s' "$stop_status_raw" | extract_tool_result)"
   stop_status="$(printf '%s' "$stop_status_result" | jq -r '.session.status // empty')"
   if [ "$stop_status" != "running" ]; then
@@ -353,7 +341,7 @@ while :; do
 done
 
 report_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 12 "masc_team_session_report" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,force_regenerate:false}')")"
-require_tool_success "$report_raw"
+mcp_require_tool_ok "$report_raw"
 report_result="$(printf '%s' "$report_raw" | extract_tool_result)"
 report_json_path="$(printf '%s' "$report_result" | jq -r '.json_path // empty')"
 report_md_path="$(printf '%s' "$report_result" | jq -r '.markdown_path // empty')"
@@ -364,7 +352,7 @@ if [ -z "$report_json_path" ] || [ -z "$report_md_path" ]; then
 fi
 
 prove_raw="$(call_tool "$SUPERVISOR_SESSION_ID" "$SUPERVISOR_TOKEN" 13 "masc_team_session_prove" "$(jq -cn --arg s "$TEAM_SESSION_ID" '{session_id:$s,generate_report_if_missing:true}')")"
-require_tool_success "$prove_raw"
+mcp_require_tool_ok "$prove_raw"
 prove_result="$(printf '%s' "$prove_raw" | extract_tool_result)"
 require_json_condition "$prove_result" '.proof.evidence.spawn_failure_count == 2' "proof evidence is missing spawn_failure_count=2"
 require_json_condition "$prove_result" '.proof.evidence.detached_agent_count == 2' "proof evidence is missing detached_agent_count=2"

@@ -215,16 +215,6 @@ let tempo_section (config : Room_utils.config) : section =
   let content = [Tempo.format_state state] in
   { title = "Tempo"; content; empty_msg = "" }
 
-let dedupe_keep_order strings =
-  let seen = Hashtbl.create 16 in
-  List.filter (fun value ->
-    if Hashtbl.mem seen value then false
-    else (
-      Hashtbl.add seen value ();
-      true
-    )
-  ) strings
-
 let ordered_room_ids (config : Room_utils.config) =
   let current_room = Room.current_room_id config in
   (current_room, [ current_room ])

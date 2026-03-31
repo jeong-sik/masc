@@ -110,6 +110,18 @@ let test_run_argv_with_stdin_and_status_propagates_cancelled () =
   check bool "Cancelled propagated from run_argv_with_stdin_and_status" true
     !raised
 
+let test_reset_for_testing_clears_runtime () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  check bool "initialized before reset" true (Process_eio.is_initialized ());
+  Process_eio.reset_for_testing ();
+  check bool "cleared after reset" false (Process_eio.is_initialized ());
+  check bool "proc_mgr unavailable after reset" true
+    (match Process_eio.get_proc_mgr () with Ok _ -> false | Error _ -> true)
+
 let () =
   run "Process_eio coverage"
     [
@@ -136,5 +148,7 @@ let () =
             test_run_argv_with_stdin_propagates_cancelled;
           test_case "run_argv_with_stdin_and_status-propagates-cancelled" `Quick
             test_run_argv_with_stdin_and_status_propagates_cancelled;
+          test_case "reset_for_testing-clears-runtime" `Quick
+            test_reset_for_testing_clears_runtime;
         ] );
     ]

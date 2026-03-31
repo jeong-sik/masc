@@ -35,6 +35,10 @@ Browser (Preact SPA)
 OCaml Backend:
   server_dashboard_http.ml (facade)
     |-- server_dashboard_http_core.ml (Executor_pool offload, batch API)
+    |-- server_dashboard_http_runtime_info.ml (runtime/config resolution, tools)
+    |-- server_dashboard_http_execution_surfaces.ml (execution/transport cache + refresh)
+    |-- server_dashboard_http_room_truth_support.ml (shared room-truth assembly)
+    |-- server_dashboard_http_room_truth.ml (room-truth read model + SSE snapshot)
     |-- dashboard_http_monitoring.ml  (tool health, board/governance monitors)
     |-- dashboard_http_keeper.ml      (keeper dashboard rendering)
     |   |-- dashboard_http_keeper_detail.ml (metrics window computation)
@@ -686,7 +690,7 @@ Execution과 Mission surface는 24시간 cutoff으로 session을 필터링한다
 | 문서 | 경로 |
 |------|------|
 | Dashboard quick links | `README.md` |
-| Dashboard control plane RFC | `docs/rfc/RFC-dashboard-control-plane.md` |
+| Dashboard operator control ADR | `docs/ADR-002-DASHBOARD-OPERATOR-CONTROL-SURFACE.md` |
 | Dashboard perf degradation | `memory/masc-dashboard-perf-degradation.md` |
 | Dashboard FF-style design direction | `memory/project_masc-dashboard-ff-design-direction.md` |
 | Keeper detail redesign | `memory/project_dashboard-keeper-detail-redesign.md` |

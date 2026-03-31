@@ -87,8 +87,8 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc
 | `NEO4J_HTTP_URI` | string | `""` | Neo4j HTTP API URI |
 | `NEO4J_USER` | string | `"neo4j"` | Neo4j 사용자 |
 | `NEO4J_PASSWORD` | string | (필수) | Neo4j 비밀번호 |
-| `VOICE_MCP_HOST` | string | `"127.0.0.1"` | Voice MCP 호스트 |
-| `VOICE_MCP_PORT` | int | 8936 | Voice MCP 포트 |
+| `VOICE_MCP_HOST` | string | `"127.0.0.1"` | Legacy voice session fallback host. Prefer `.masc/voice_config.json` `session.endpoints` or `MASC_HTTP_*`. |
+| `VOICE_MCP_PORT` | int | 8936 | Legacy voice session fallback port. Prefer `.masc/voice_config.json` `session.endpoints` or `MASC_HTTP_*`. |
 
 **Timeout 모듈** (통합 타임아웃):
 

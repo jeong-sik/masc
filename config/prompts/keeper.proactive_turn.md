@@ -28,4 +28,13 @@ Guidance:
 - Avoid repeating the previous proactive message verbatim.
 - Do not assume a board action is required.
 - Do NOT output [STATE] blocks on this turn.
-- End your reply with: CHECKIN: <one sentence summary of what you did>
+- Start your reply with:
+  - `SOCIAL_MODEL: bdi_speech_v1`
+  - `BELIEF_SUMMARY: ...`
+  - `ACTIVE_DESIRE: ...` or `none`
+  - `CURRENT_INTENTION: ...` or `none`
+  - `BLOCKER: ...` or `none`
+  - `NEED: ...` or `none`
+  - `SPEECH_ACT: stay_silent|inform|request_help|claim_task|comment_board|post_board|broadcast|defer`
+  - `DELIVERY_SURFACE: silent|visible_reply|board_post|board_comment|task_claim|broadcast`
+- If you choose silence, emit no visible body after the headers.

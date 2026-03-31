@@ -91,6 +91,11 @@ export const boardSortMode = signal<BoardSortMode>('recent')
 export const boardExcludeSystem = signal(true)
 export const boardExcludeAutomation = signal(false)
 
+export function removeBoardPost(postId: string | undefined): void {
+  if (!postId) return
+  boardPosts.value = boardPosts.value.filter(p => p.id !== postId)
+}
+
 // --- Goals state ---
 
 export const goals = signal<Goal[]>([])

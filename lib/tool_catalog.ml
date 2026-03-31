@@ -1,3 +1,21 @@
+(** Tool_catalog — Visibility, lifecycle, and tier metadata for MCP tools.
+
+    Central registry for tool access control:
+    - Visibility: Default (public) vs Hidden (internal-only)
+    - Lifecycle: Active, Deprecated, Placeholder
+    - Tier: Essential (~20) < Standard (~50) < Full (all)
+    - Surface: Canonical per-surface tool name membership SSOT
+
+    Sub-modules (private):
+    - Tool_catalog_surfaces: surface type, canonical tool lists, keeper-internal
+    - Tool_catalog_tiers: tier type, essential/standard tool lists
+
+    @since 2.188.0 — Decomposed from monolithic tool_catalog.ml *)
+
+(* ================================================================ *)
+(* Types                                                            *)
+(* ================================================================ *)
+
 type visibility =
   | Default
   | Hidden
@@ -12,10 +30,16 @@ type implementation_status =
   | Simulation
   | Placeholder
 
-type tier =
-  | Essential
-  | Standard
-  | Full
+(* Re-export tier type and surface type from sub-modules *)
+include (Tool_catalog_tiers : sig
+  type tier = Tool_catalog_tiers.tier = Essential | Standard | Full
+end)
+
+include (Tool_catalog_surfaces : sig
+  type surface = Tool_catalog_surfaces.surface =
+    | Public_mcp | Spawned_agent | Local_worker | Session_min
+    | Admin | Keeper_internal | Keeper_denied | Mdal_auditable
+end)
 
 type metadata = {
   visibility : visibility;
@@ -29,6 +53,10 @@ type metadata = {
   destructive : bool option;
   idempotent : bool option;
 }
+
+(* ================================================================ *)
+(* Metadata constructors                                            *)
+(* ================================================================ *)
 
 let default_metadata =
   {
@@ -114,6 +142,10 @@ let readonly_tool =
 
 let destructive_tool =
   with_semantic_flags ~destructive:true default_metadata
+
+(* ================================================================ *)
+(* Explicit metadata registry                                       *)
+(* ================================================================ *)
 
 let explicit_metadata : (string * metadata) list =
   [
@@ -211,14 +243,17 @@ let explicit_metadata : (string * metadata) list =
       { default_metadata with destructive = Some false } );
   ]
 
-(** {1 Public MCP Surface}
+(* ================================================================ *)
+(* Public MCP surface (legacy list, kept for backward compat)       *)
+(* ================================================================ *)
 
-    The subset of tools exposed via tools/list on the Full (external MCP client)
-    profile. Internal tools remain callable via [Tool_dispatch.dispatch] but are
-    hidden from discovery. This keeps the MCP surface focused on agent
-    communication and coordination.
+(** The subset of tools exposed via tools/list on the Full (external MCP client)
+    profile. Some hidden tools remain callable directly, but keeper-internal
+    adapters do not. This keeps the MCP surface focused on agent communication,
+    coordination, and stable public operations.
 
-    Override: set [MASC_FULL_SURFACE=1] to restore the full inventory. *)
+    Override: set [MASC_FULL_SURFACE=1] to restore the full inventory,
+    excluding keeper-internal tools. *)
 
 let public_mcp_tools =
   [
@@ -248,6 +283,25 @@ let public_mcp_tools =
     "masc_tool_help"; "masc_check";
   ]
 
+(* Delegate to surfaces sub-module *)
+let keeper_internal_set = Tool_catalog_surfaces.keeper_internal_set
+
+let keeper_internal_replacement = Tool_catalog_surfaces.keeper_internal_replacement
+
+let keeper_internal_metadata name =
+  let replacement = keeper_internal_replacement name in
+  let implementation_status =
+    match replacement with
+    | Some _ -> Adapter
+    | None -> Real
+  in
+  hidden_active
+    ?canonical_name:replacement
+    ?replacement
+    ~allow_direct_call_when_hidden:false
+    ~implementation_status
+    "Keeper-internal tool. Use the keeper runtime or the public MASC equivalent when available."
+
 let public_mcp_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create 64 in
   List.iter (fun name -> Hashtbl.replace tbl name ()) public_mcp_tools;
@@ -266,6 +320,10 @@ let is_public_mcp name = Hashtbl.mem public_mcp_set name
 
 let full_surface_override () = Env_config.Tools.full_surface_enabled ()
 
+(* ================================================================ *)
+(* Metadata lookup                                                  *)
+(* ================================================================ *)
+
 let implementation_status_to_string = function
   | Real -> "real"
   | Adapter -> "adapter"
@@ -281,6 +339,8 @@ let metadata name =
   | Some meta -> meta
   | None ->
     if is_public_mcp name then default_metadata
+    else if Hashtbl.mem keeper_internal_set name then
+      keeper_internal_metadata name
     else
       (* Non-public, non-explicit tools are internal: hidden from tools/list
          but callable via tools/call (tool_allowed_in_profile uses include_hidden). *)
@@ -320,90 +380,21 @@ let lifecycle_to_string = function
 let deprecated_tool_entries : (string * metadata) list =
   List.filter (fun (_name, meta) -> meta.lifecycle = Deprecated) explicit_metadata
 
-(** {1 Tool Tier System}
+(* ================================================================ *)
+(* Re-export: Tier system (from Tool_catalog_tiers)                 *)
+(* ================================================================ *)
 
-    3-tier tool filtering to reduce the number of tools presented to models.
-    Essential (~20) < Standard (~50) < Full (all).
-    Tier is an additive overlay on the existing mode/category system. *)
+let essential_tools = Tool_catalog_tiers.essential_tools
+let standard_tools = Tool_catalog_tiers.standard_tools
+let tier_to_string = Tool_catalog_tiers.tier_to_string
+let tier_of_string = Tool_catalog_tiers.tier_of_string
+let tool_tier = Tool_catalog_tiers.tool_tier
+let is_in_tier = Tool_catalog_tiers.is_in_tier
+let tier_tool_count = Tool_catalog_tiers.tier_tool_count
 
-let essential_tools =
-  [
-    "masc_join"; "masc_leave"; "masc_status"; "masc_set_room";
-    "masc_add_task"; "masc_claim_next"; "masc_transition"; "masc_tasks";
-    "masc_broadcast"; "masc_heartbeat"; "masc_messages";
-    "masc_worktree_create"; "masc_worktree_list"; "masc_worktree_remove";
-    "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
-    "masc_who"; "masc_dashboard"; "masc_agent_timeline";
-  ]
-
-let standard_tools =
-  essential_tools
-  @ [
-    (* Board *)
-    "masc_board_post"; "masc_board_get"; "masc_board_list";
-    "masc_board_vote"; "masc_board_comment"; "masc_board_comment_vote";
-    "masc_board_search"; "masc_board_stats"; "masc_board_profile";
-    "masc_board_hearths"; "masc_board_delete";
-    (* Team Session *)
-    "masc_team_session_start"; "masc_team_session_step";
-    "masc_team_session_status"; "masc_team_session_stop";
-    "masc_team_session_list"; "masc_team_session_events";
-    "masc_autoresearch_swarm_start";
-    (* Governance V2 *)
-    "masc_petition_submit"; "masc_case_brief_submit";
-    "masc_cases"; "masc_case_status";
-    "masc_ruling_status"; "masc_execution_orders";
-    "masc_governance_status";
-    (* Decision *)
-    "decision_create"; "decision_finalize"; "decision_status";
-    (* Handover *)
-    "masc_handover_create"; "masc_handover_claim";
-    "masc_handover_get"; "masc_handover_list";
-    (* Misc *)
-    "masc_spawn"; "masc_agents"; "masc_progress";
-    "masc_note_add"; "masc_batch_add_tasks";
-    (* Config introspection *)
-    "masc_config";
-  ]
-
-(** Pre-built Hashtbl sets for O(1) tier lookups.
-    The lists above are kept for enumeration/documentation. *)
-let essential_set : (string, unit) Hashtbl.t =
-  let tbl = Hashtbl.create 32 in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) essential_tools;
-  tbl
-
-let standard_set : (string, unit) Hashtbl.t =
-  let tbl = Hashtbl.create 64 in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) standard_tools;
-  tbl
-
-let tier_to_string = function
-  | Essential -> "essential"
-  | Standard -> "standard"
-  | Full -> "full"
-
-let tier_of_string = function
-  | "essential" -> Some Essential
-  | "standard" -> Some Standard
-  | "full" -> Some Full
-  | _ -> None
-
-let tool_tier name =
-  if Hashtbl.mem essential_set name then Essential
-  else if Hashtbl.mem standard_set name then Standard
-  else Full
-
-let is_in_tier tier name =
-  match tier with
-  | Full -> true
-  | Standard -> Hashtbl.mem standard_set name
-  | Essential -> Hashtbl.mem essential_set name
-
-let tier_tool_count = function
-  | Essential -> List.length essential_tools
-  | Standard -> List.length standard_tools
-  | Full -> -1  (* unknown until schemas are enumerated *)
+(* ================================================================ *)
+(* JSON metadata helpers                                            *)
+(* ================================================================ *)
 
 let metadata_to_fields name =
   let meta = metadata name in
@@ -447,163 +438,11 @@ let allow_direct_call name =
   | Default -> true
   | Hidden -> meta.allow_direct_call_when_hidden
 
-let hidden_placeholder_tools () = []
+(* ================================================================ *)
+(* Re-export: Surface system (from Tool_catalog_surfaces)           *)
+(* ================================================================ *)
 
-(** {1 Tool Surface System}
-
-    Canonical per-surface tool name lists — the SSOT for tool surface
-    membership. All other modules should derive their allowlists from
-    [tools_for_surface] instead of maintaining independent hardcoded lists.
-
-    To add a tool to a surface: add it to the appropriate list below.
-    To query surface membership at runtime: use [is_on_surface]. *)
-
-type surface =
-  | Public_mcp
-  | Spawned_agent
-  | Local_worker
-  | Session_min
-  | Admin
-  | Keeper_denied
-  | Mdal_auditable
-
-let public_mcp_surface_tools =
-  [
-    (* Room lifecycle *)
-    "masc_start"; "masc_join"; "masc_leave"; "masc_set_room"; "masc_status";
-    (* Messaging *)
-    "masc_broadcast"; "masc_messages"; "masc_who";
-    (* Task coordination *)
-    "masc_add_task"; "masc_batch_add_tasks"; "masc_tasks";
-    "masc_claim_next"; "masc_transition";
-    (* Planning *)
-    "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
-    (* Heartbeat *)
-    "masc_heartbeat";
-    (* Keeper interaction *)
-    "masc_keeper_msg"; "masc_keeper_list"; "masc_keeper_status";
-    "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
-    (* Board *)
-    "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote"; "masc_board_delete";
-    (* Agent discovery *)
-    "masc_agents"; "masc_dashboard"; "masc_agent_card";
-    (* Transport *)
-    "masc_transport_status"; "masc_websocket_discovery";
-    "masc_webrtc_offer"; "masc_webrtc_answer";
-    (* Utility *)
-    "masc_tool_help"; "masc_check";
-  ]
-
-let spawned_agent_surface_tools =
-  [
-    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
-    "masc_task_history"; "masc_broadcast"; "masc_join"; "masc_leave";
-    "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
-    "masc_messages";
-    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
-    "masc_handover_create"; "masc_handover_list"; "masc_handover_claim";
-    "masc_handover_get";
-    "masc_relay_status"; "masc_relay_checkpoint";
-    "masc_board_list"; "masc_board_post"; "masc_board_comment";
-    "masc_board_vote"; "masc_board_get";
-    "masc_tool_help";
-    "masc_portal_open"; "masc_portal_send"; "masc_portal_status";
-    "masc_team_session_start"; "masc_team_session_step";
-    "masc_team_session_status"; "masc_team_session_events";
-    "masc_team_session_finalize"; "masc_team_session_stop";
-    "masc_team_session_report"; "masc_team_session_list";
-    "masc_a2a_delegate"; "masc_a2a_subscribe";
-    "masc_poll_events"; "masc_spawn";
-  ]
-
-let local_worker_surface_tools =
-  [
-    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
-    "masc_add_task"; "masc_heartbeat";
-    "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote"; "masc_board_search";
-    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
-    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
-    "masc_run_init"; "masc_run_plan"; "masc_run_log";
-    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
-    "masc_repair_loop_start"; "masc_repair_loop_status";
-    "masc_repair_loop_iterate"; "masc_repair_loop_stop";
-  ]
-
-let session_min_surface_tools =
-  [
-    "masc_room_status"; "masc_list_tasks"; "masc_claim_next";
-    "masc_set_current_task"; "masc_complete_task"; "masc_add_task";
-    "masc_broadcast"; "masc_heartbeat";
-  ]
-
-let admin_surface_tools =
-  [
-    "masc_auth_create_token";
-    "masc_autoresearch_cycle"; "masc_autoresearch_inject";
-    "masc_autoresearch_start"; "masc_autoresearch_stop";
-    "masc_autoresearch_swarm_start";
-    "masc_repo_synthesis_swarm_start";
-    "masc_policy_freeze_unit"; "masc_policy_kill_switch";
-    "masc_tool_admin_update"; "masc_tool_grant"; "masc_tool_revoke";
-    "masc_operator_action"; "masc_operator_confirm"; "masc_operator_snapshot";
-    "masc_team_session_finalize"; "masc_tool_admin_snapshot";
-  ]
-
-let keeper_denied_surface_tools =
-  [
-    "masc_room_delete"; "masc_room_destroy";
-    "masc_force_leave"; "masc_force_remove_agent";
-    "masc_admin_reset"; "masc_admin_cleanup";
-    "masc_gc_force"; "masc_config_set"; "masc_config_reset";
-    "masc_spawn";
-    "masc_operator_action"; "masc_operator_confirm";
-    "masc_operator_judgment_write";
-    "masc_execute"; "masc_execute_dry_run";
-    "masc_neo4j_query"; "masc_pg_query";
-  ]
-
-let mdal_auditable_surface_tools =
-  [
-    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
-    "masc_worktree_create"; "masc_worktree_list"; "masc_worktree_remove";
-    "masc_run_init"; "masc_run_plan"; "masc_run_log";
-    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
-    "masc_spawn";
-  ]
-
-let tools_for_surface = function
-  | Public_mcp -> public_mcp_surface_tools
-  | Spawned_agent -> spawned_agent_surface_tools
-  | Local_worker -> local_worker_surface_tools
-  | Session_min -> session_min_surface_tools
-  | Admin -> admin_surface_tools
-  | Keeper_denied -> keeper_denied_surface_tools
-  | Mdal_auditable -> mdal_auditable_surface_tools
-
-let all_surfaces =
-  [Public_mcp; Spawned_agent; Local_worker; Session_min;
-   Admin; Keeper_denied; Mdal_auditable]
-
-let surface_sets : (surface * (string, unit) Hashtbl.t) list =
-  List.map (fun surface ->
-    let tools = tools_for_surface surface in
-    let tbl = Hashtbl.create (List.length tools) in
-    List.iter (fun name -> Hashtbl.replace tbl name ()) tools;
-    (surface, tbl)
-  ) all_surfaces
-
-let is_on_surface surface name =
-  match List.assoc_opt surface surface_sets with
-  | Some tbl -> Hashtbl.mem tbl name
-  | None -> false
-
-let surface_to_string = function
-  | Public_mcp -> "public_mcp"
-  | Spawned_agent -> "spawned_agent"
-  | Local_worker -> "local_worker"
-  | Session_min -> "session_min"
-  | Admin -> "admin"
-  | Keeper_denied -> "keeper_denied"
-  | Mdal_auditable -> "mdal_auditable"
+let tools_for_surface = Tool_catalog_surfaces.tools_for_surface
+let all_surfaces = Tool_catalog_surfaces.all_surfaces
+let is_on_surface = Tool_catalog_surfaces.is_on_surface
+let surface_to_string = Tool_catalog_surfaces.surface_to_string

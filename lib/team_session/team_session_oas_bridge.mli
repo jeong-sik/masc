@@ -39,8 +39,15 @@ val supported_local_worker_tool_names : string list
 (** Canonical list of tool names supported by local workers in team sessions.
     Exposed for parity testing against [Tool_catalog.tools_for_surface Local_worker]. *)
 
+val supported_local_worker_tool_names_for_scope :
+  Team_session_types.execution_scope option -> string list
+
 val supported_local_worker_tools :
   unit -> (Types.tool_schema list, string) result
+
+val supported_local_worker_tools_for_scope :
+  Team_session_types.execution_scope option ->
+  (Types.tool_schema list, string) result
 
 val dispatch_supported_tool :
   sw:Eio.Switch.t ->
@@ -61,6 +68,14 @@ val run_repair_loop_until_terminal :
   config:Room.config ->
   Yojson.Safe.t ->
   bool * string
+
+val slot_aware_concurrency_cap :
+  entry_count:int ->
+  selection_count:int ->
+  all_discovered:bool ->
+  endpoints_found:int ->
+  total:int ->
+  int
 
 val role_of_worker_class :
   Team_session_types.worker_class option -> Swarm.Swarm_types.agent_role

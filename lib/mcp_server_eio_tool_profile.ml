@@ -20,7 +20,7 @@ Do not assume access to any other MASC tool from this endpoint."
 
 let managed_agent_instructions =
   "MASC managed-agent profile exposes the internal agent control surface. \
-Prefer SDK-style task and room aliases such as masc_room_status, masc_list_tasks, masc_claim_task, masc_set_current_task, masc_complete_task, masc_release_task, masc_cancel_task, masc_send_direct, masc_add_task, masc_batch_add_tasks, masc_broadcast, and masc_heartbeat. \
+Prefer SDK-style task and room aliases such as masc_room_status, masc_list_tasks, masc_claim_task, masc_set_current_task, masc_complete_task, masc_release_task, masc_cancel_task, masc_add_task, masc_batch_add_tasks, masc_broadcast, and masc_heartbeat. \
 Use canonical passthrough tools only when no managed alias exists on this endpoint. \
 Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
 
@@ -94,12 +94,18 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
           Config.visible_tool_schemas
             ~include_hidden:show_all ~include_deprecated ()
         in
-        if show_all then all
+        let without_keeper_internal =
+          List.filter
+            (fun (schema : Types.tool_schema) ->
+              not (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name))
+            all
+        in
+        if show_all then without_keeper_internal
         else
           List.filter
             (fun (schema : Types.tool_schema) ->
               Tool_catalog.is_public_mcp schema.name)
-            all
+            without_keeper_internal
     | Managed_agent ->
         let passthrough =
           Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false ()
@@ -116,11 +122,16 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
 let tool_allowed_in_profile state profile tool_name =
   match profile with
   | Full ->
-      (* tools/call accepts any registered tool regardless of the public MCP
-         surface or visibility. include_hidden ensures Hidden tools are callable. *)
-      Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()
-      |> List.exists (fun (schema : Types.tool_schema) ->
-             String.equal schema.name tool_name)
+      if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name then
+        false
+      else if Tool_catalog.full_surface_override () then
+        Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()
+        |> List.exists (fun (schema : Types.tool_schema) ->
+               String.equal schema.name tool_name)
+      else if Tool_catalog.is_public_mcp tool_name then
+        true
+      else
+        Tool_catalog.allow_direct_call tool_name
   | Managed_agent ->
       tool_schemas_for_profile state Managed_agent
       |> List.exists (fun (schema : Types.tool_schema) ->
@@ -284,7 +295,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_complete_task", "Complete Task");
   ("masc_release_task", "Release Task");
   ("masc_cancel_task", "Cancel Task");
-  ("masc_send_direct", "Send Direct Message");
   ("masc_claim_next", "Claim Next Task");
   (* Misc *)
   ("masc_poll_events", "Poll Events");

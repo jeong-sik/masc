@@ -96,7 +96,7 @@ graph TB
 
 ### 3.1 Transport 선택 로직 (에이전트 측)
 
-`lib/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
+`lib/grpc/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
 
 ```ocaml
 type t = Http | Grpc | Ws | Webrtc | Local

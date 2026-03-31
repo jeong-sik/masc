@@ -12,7 +12,14 @@ open Masc_mcp
    ============================================================ *)
 
 let make_meta ?(name = "test-keeper") ?(soul_profile = "")
-    ?(policy_voice_enabled = false) ?(tool_allowlist = []) () : Keeper_types.keeper_meta =
+    ?(policy_voice_enabled = false) ?tool_access ?tool_allowlist ()
+    : Keeper_types.keeper_meta =
+  let tool_access =
+    match tool_access, tool_allowlist with
+    | Some access, _ -> access
+    | None, Some names -> Keeper_types.Restricted names
+    | None, None -> Keeper_types.Unrestricted
+  in
   let json =
     `Assoc
       [
@@ -21,7 +28,7 @@ let make_meta ?(name = "test-keeper") ?(soul_profile = "")
         ("trace_id", `String "test-trace-exposure");
         ("soul_profile", `String soul_profile);
         ("policy_voice_enabled", `Bool policy_voice_enabled);
-        ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
+        ("tool_access", Keeper_types.tool_access_to_json tool_access);
       ]
   in
   match Keeper_types.meta_of_json json with
@@ -79,6 +86,14 @@ let test_default_has_research_tools () =
                      "masc_autoresearch_inject"; "masc_autoresearch_stop"] () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
+
+let test_explicit_empty_allowlist_blocks_masc_only () =
+  let meta = make_meta ~tool_access:(Keeper_types.Restricted []) () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "keeper tool still available" true
+    (has_tool "keeper_time_now" tools);
+  check bool "masc tool blocked" false
+    (has_tool "masc_status" tools)
 
 (* ============================================================
    3. Voice tools are always available
@@ -154,7 +169,7 @@ let test_any_mode_has_board_tools () =
 let test_any_mode_has_read_tools () =
   let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has keeper_read" true (has_tool "keeper_read" tools);
+  (* keeper_read removed: dead alias with no schema, keeper_fs_read is the actual tool *)
   check bool "has keeper_fs_read" true (has_tool "keeper_fs_read" tools);
   check bool "has keeper_library_search" true (has_tool "keeper_library_search" tools)
 
@@ -194,7 +209,7 @@ let test_research_learned_voice_combined () =
   check bool "has shell readonly" true (has_tool "keeper_shell_readonly" tools);
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools);
   check bool "has board" true (has_tool "keeper_board_get" tools);
-  check bool "has read" true (has_tool "keeper_read" tools)
+  check bool "has read" true (has_tool "keeper_fs_read" tools)
 
 (* ============================================================
    9. Tool deduplication
@@ -331,6 +346,10 @@ let test_path_empty_allowed_permits_all_within_root () =
     check bool "src ok with empty allowed" true (Result.is_ok r2))
 
 (* ============================================================
+   11. Dead alias removal (#4120)
+   ============================================================ *)
+
+(* ============================================================
    Runner
    ============================================================ *)
 
@@ -345,6 +364,8 @@ let () =
       test_case "has voice tools" `Quick test_default_has_voice;
       test_case "has governance tools" `Quick test_default_has_governance_tools;
       test_case "has research tools" `Quick test_default_has_research_tools;
+      test_case "explicit empty allowlist blocks masc only" `Quick
+        test_explicit_empty_allowlist_blocks_masc_only;
     ]);
     ("voice_profile", [
       test_case "enabled adds voice" `Quick test_voice_enabled_adds_voice_tools;
@@ -381,5 +402,72 @@ let () =
       test_case "empty path rejected" `Quick test_path_empty_rejected;
       test_case "whitespace only rejected" `Quick test_path_whitespace_only_rejected;
       test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;
+    ]);
+    (* Merged from test_keeper_deny_list_coverage.ml *)
+    ("deny_list", [
+      test_case "dangerous tools denied" `Quick (fun () ->
+        let dl = Keeper_hooks_oas.keeper_denied_tools in
+        List.iter (fun name ->
+          check bool (name ^ " denied") true (List.mem name dl))
+          [ "masc_room_delete"; "masc_spawn"; "masc_force_leave";
+            "masc_config_set"; "masc_neo4j_query"; "masc_pg_query";
+            "masc_operator_action"; "masc_operator_confirm"; "masc_execute" ]);
+      test_case "safe tools not denied" `Quick (fun () ->
+        let dl = Keeper_hooks_oas.keeper_denied_tools in
+        List.iter (fun name ->
+          check bool (name ^ " allowed") false (List.mem name dl))
+          [ "keeper_board_post"; "masc_broadcast"; "masc_status";
+            "masc_tasks"; "keeper_bash" ]);
+      test_case "deny list reasonable size" `Quick (fun () ->
+        let n = List.length Keeper_hooks_oas.keeper_denied_tools in
+        check bool "non-empty" true (n > 0);
+        check bool "5-30 range" true (n >= 5 && n <= 30));
+    ]);
+    ("tool_access_of_meta_json_validation", [
+      test_case "string tools field returns error" `Quick (fun () ->
+        let json = `Assoc [
+          ("kind", `String "restricted");
+          ("tools", `String "masc_status")
+        ] in
+        let outer = `Assoc [("tool_access", json)] in
+        match Keeper_types.tool_access_of_meta_json outer with
+        | Error msg ->
+            check bool "mentions array" true
+              (String.length msg > 0 &&
+               (try ignore (Str.search_forward (Str.regexp_string "array") msg 0); true
+                with Not_found -> false))
+        | Ok _ -> fail "expected Error for string tools field");
+      test_case "valid list tools parses ok" `Quick (fun () ->
+        let json = `Assoc [
+          ("kind", `String "restricted");
+          ("tools", `List [`String "masc_status"; `String "masc_broadcast"])
+        ] in
+        let outer = `Assoc [("tool_access", json)] in
+        match Keeper_types.tool_access_of_meta_json outer with
+        | Ok (Restricted tools) ->
+            check bool "has masc_status" true (List.mem "masc_status" tools);
+            check bool "has masc_broadcast" true (List.mem "masc_broadcast" tools)
+        | Ok Unrestricted -> fail "expected Restricted"
+        | Error msg -> fail ("unexpected error: " ^ msg));
+      test_case "null tools field defaults to empty" `Quick (fun () ->
+        let json = `Assoc [
+          ("kind", `String "restricted");
+          ("tools", `Null)
+        ] in
+        let outer = `Assoc [("tool_access", json)] in
+        match Keeper_types.tool_access_of_meta_json outer with
+        | Ok (Restricted tools) ->
+            check bool "empty list" true (List.length tools = 0)
+        | Ok Unrestricted -> fail "expected Restricted"
+        | Error msg -> fail ("unexpected error: " ^ msg));
+      test_case "integer tools field returns error" `Quick (fun () ->
+        let json = `Assoc [
+          ("kind", `String "restricted");
+          ("tools", `Int 42)
+        ] in
+        let outer = `Assoc [("tool_access", json)] in
+        match Keeper_types.tool_access_of_meta_json outer with
+        | Error _ -> ()
+        | Ok _ -> fail "expected Error for integer tools field");
     ]);
   ]

@@ -3,6 +3,7 @@ open Server_auth
 open Server_routes_http_common
 open Server_routes_http_pages
 open Server_routes_http_runtime
+open Server_voice_config
 
 module Http = Http_server_eio
 module Common = Server_routes_http_common
@@ -126,6 +127,14 @@ let add_routes ~port ~host router =
            |> Yojson.Safe.to_string
          in
          Http.Response.json json reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/voice/config" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         let status, json = voice_config_payload () in
+         let status =
+           match status with `OK -> `OK | `Error -> `Internal_server_error
+         in
+         Http.Response.json ~status (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/" (fun _req reqd -> redirect_to_dashboard reqd)
   |> Http.Router.get "/static/css/middleware.css"

@@ -431,6 +431,49 @@ let consensus_tests = [
   test_consensus_persist_vote_failure_is_atomic;
 ]
 
+(* --- New capability-aware router tests --- *)
+
+let test_router_short_complex_query () =
+  let r = Router.extract_requirements "OCaml mutex deadlock analysis" in
+  check bool "reasoning > 0.3" (r.reasoning_depth > 0.3) true;
+  check bool "code > 0.3" (r.code_ability > 0.3) true
+
+let test_router_deep_reasoning () =
+  let r = Router.extract_requirements "why is the halting problem undecidable" in
+  check bool "reasoning > 0.3" (r.reasoning_depth > 0.3) true
+
+let test_router_speed_priority () =
+  let r = Router.extract_requirements "quick one-liner to reverse a string" in
+  check bool "speed > 0.3" (r.speed_priority > 0.3) true
+
+let test_router_complex_selects_large_tier () =
+  let decision = Router.route
+    "prove that this distributed algorithm satisfies safety and liveness under partial synchrony" in
+  let has_large = List.exists (fun (a : Router.agent_spec) ->
+    match a.tier with Router.Large | Router.Giant -> true | _ -> false
+  ) decision.agents in
+  check bool "complex selects large tier" has_large true
+
+let test_router_simple_prefers_cheap () =
+  let decision = Router.route "what is 2+2" in
+  let top = List.hd decision.agents in
+  check bool "cheap top agent" (top.cost_per_1k < 0.01) true
+
+let test_router_dot_product_correctness () =
+  let r = Router.extract_requirements "debug this OCaml concurrent mutex issue" in
+  let complexity = Router.calculate_complexity "debug this OCaml concurrent mutex issue" in
+  let opus_cap = { Router.reasoning_score = 0.95; code_score = 0.9;
+                   creativity_score = 0.9; factual_score = 0.9; speed_score = 0.3 } in
+  let tiny_cap = { Router.reasoning_score = 0.3; code_score = 0.4;
+                   creativity_score = 0.3; factual_score = 0.5; speed_score = 1.0 } in
+  let opus_agent = { Router.name = "opus"; model = "opus"; tier = Router.Large;
+                     capabilities = opus_cap; cost_per_1k = 0.015 } in
+  let tiny_agent = { Router.name = "tiny"; model = "tiny"; tier = Router.Tiny;
+                     capabilities = tiny_cap; cost_per_1k = 0.0 } in
+  let opus_score = Router.score_agent ~requirements:r ~complexity opus_agent in
+  let tiny_score = Router.score_agent ~requirements:r ~complexity tiny_agent in
+  check bool "opus > tiny for complex+code" (opus_score > tiny_score) true
+
 let router_tests = [
   "classify code", `Quick, test_router_classify_code;
   "classify analysis", `Quick, test_router_classify_analysis;
@@ -438,6 +481,12 @@ let router_tests = [
   "complexity complex", `Quick, test_router_complexity_complex;
   "agent selection", `Quick, test_router_agent_selection;
   "reason mentions heuristic", `Quick, test_router_reason_mentions_heuristic;
+  "short complex query", `Quick, test_router_short_complex_query;
+  "deep reasoning", `Quick, test_router_deep_reasoning;
+  "speed priority", `Quick, test_router_speed_priority;
+  "complex selects large tier", `Quick, test_router_complex_selects_large_tier;
+  "simple prefers cheap", `Quick, test_router_simple_prefers_cheap;
+  "dot product correctness", `Quick, test_router_dot_product_correctness;
 ]
 
 let balance_tests = [
@@ -496,22 +545,21 @@ let contains_substring s sub =
     loop 0
 
 let test_executor_merge_with_valid_pr () =
-  (* Topic with valid PR number should match and extract the number *)
+  (* build_action should produce MergePR with the extracted PR number *)
   match Executor.find_action "Merge PR #42" with
   | None -> fail "should match merge PR pattern"
   | Some mapping ->
-    (* The template uses MergePR 0 as placeholder *)
-    (match mapping.Executor.action with
-     | Executor.GitHubAction (Executor.MergePR 0) -> ()
-     | _ -> fail "expected MergePR 0 placeholder in template");
-    (* extract_number should find 42 from the topic *)
-    (match Executor.extract_number "Merge PR #42" with
-     | Some 42 -> ()
-     | Some n -> fail (Printf.sprintf "expected 42, got %d" n)
-     | None -> fail "should extract 42")
+    let group = Re.exec mapping.Executor.compiled_re
+      (String.lowercase_ascii "Merge PR #42") in
+    (match mapping.Executor.build_action group with
+     | Ok (Executor.GitHubAction (Executor.MergePR 42)) -> ()
+     | Ok (Executor.GitHubAction (Executor.MergePR n)) ->
+       fail (Printf.sprintf "expected MergePR 42, got MergePR %d" n)
+     | Ok _ -> fail "expected GitHubAction MergePR"
+     | Error msg -> fail (Printf.sprintf "build_action failed: %s" msg))
 
 let test_executor_deploy_errors () =
-  (* Deploy stub should error, not pretend to succeed *)
+  (* Deploy build_action should return Error, execute_decision surfaces it *)
   let result = Consensus.Unanimous Consensus.Approve in
   match Executor.execute_decision ~topic:"deploy v2.0" ~result with
   | None -> fail "should return Some (error result), not None"
@@ -521,14 +569,54 @@ let test_executor_deploy_errors () =
       (contains_substring r.output "deploy") true
 
 let test_executor_deploy_not_silent () =
-  (* Verify the deploy mapping still exists but is explicitly blocked *)
+  (* Verify the deploy mapping exists but build_action returns Error *)
   match Executor.find_action "deploy v1.0" with
   | None -> fail "deploy pattern should still match"
   | Some mapping ->
-    (* The template has the echo placeholder *)
-    (match mapping.Executor.action with
-     | Executor.ExecCommand ["echo"; "Deploy placeholder"] -> ()
-     | _ -> fail "expected deploy echo placeholder in template")
+    let group = Re.exec mapping.Executor.compiled_re
+      (String.lowercase_ascii "deploy v1.0") in
+    (match mapping.Executor.build_action group with
+     | Error msg ->
+       check bool "error mentions deploy"
+         (contains_substring msg "deploy") true;
+       check bool "error mentions unsupported"
+         (contains_substring msg "unsupported") true
+     | Ok _ -> fail "deploy build_action should return Error, not Ok")
+
+let test_executor_build_action_close_pr () =
+  (* ClosePR pattern should extract PR number via build_action *)
+  match Executor.find_action "close PR #99" with
+  | None -> fail "should match close PR pattern"
+  | Some mapping ->
+    let group = Re.exec mapping.Executor.compiled_re
+      (String.lowercase_ascii "close PR #99") in
+    (match mapping.Executor.build_action group with
+     | Ok (Executor.GitHubAction (Executor.ClosePR 99)) -> ()
+     | Ok (Executor.GitHubAction (Executor.ClosePR n)) ->
+       fail (Printf.sprintf "expected ClosePR 99, got ClosePR %d" n)
+     | Ok _ -> fail "expected GitHubAction ClosePR"
+     | Error msg -> fail (Printf.sprintf "build_action failed: %s" msg))
+
+let test_executor_describe_merge () =
+  match Executor.find_action "merge PR #77" with
+  | None -> fail "should match"
+  | Some mapping ->
+    let desc = mapping.Executor.describe "merge PR #77" in
+    check bool "describes merge 77"
+      (contains_substring desc "77") true
+
+let test_executor_deploy_version_in_error () =
+  (* build_action error should include the matched version string *)
+  match Executor.find_action "deploy v3.14" with
+  | None -> fail "should match deploy pattern"
+  | Some mapping ->
+    let group = Re.exec mapping.Executor.compiled_re
+      (String.lowercase_ascii "deploy v3.14") in
+    (match mapping.Executor.build_action group with
+     | Error msg ->
+       check bool "error includes version"
+         (contains_substring msg "v3.14") true
+     | Ok _ -> fail "deploy should return Error")
 
 let executor_tests = [
   "find action PR", `Quick, test_executor_find_action_pr;
@@ -536,9 +624,12 @@ let executor_tests = [
   "dry run approve", `Quick, test_executor_dry_run_approve;
   "dry run reject", `Quick, test_executor_dry_run_reject;
   "github argv create issue", `Quick, test_executor_github_argv_create_issue;
-  "merge with valid PR extracts number", `Quick, test_executor_merge_with_valid_pr;
-  "deploy stub errors", `Quick, test_executor_deploy_errors;
-  "deploy pattern exists but blocked", `Quick, test_executor_deploy_not_silent;
+  "merge build_action extracts PR number", `Quick, test_executor_merge_with_valid_pr;
+  "close build_action extracts PR number", `Quick, test_executor_build_action_close_pr;
+  "deploy build_action returns error", `Quick, test_executor_deploy_errors;
+  "deploy pattern exists and blocked via type", `Quick, test_executor_deploy_not_silent;
+  "describe includes PR number", `Quick, test_executor_describe_merge;
+  "deploy error includes version", `Quick, test_executor_deploy_version_in_error;
 ]
 
 (* ============================================================

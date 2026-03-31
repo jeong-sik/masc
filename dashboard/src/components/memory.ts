@@ -41,6 +41,7 @@ const detailLoading = signal(false)
 const detailPostId = signal<string | null>(null)
 const commentText = signal('')
 const commentSubmitting = signal(false)
+const replyingTo = signal<string | null>(null)
 const showNewPostForm = signal(false)
 const newPostTitle = signal('')
 const newPostContent = signal('')
@@ -265,13 +266,14 @@ async function loadPostDetail(postId: string) {
   }
 }
 
-async function submitComment(postId: string) {
+async function submitComment(postId: string, parentId?: string) {
   const text = commentText.value.trim()
   if (!text) return
   commentSubmitting.value = true
   try {
-    await commentPost(postId, commentAuthor.value, text)
+    await commentPost(postId, commentAuthor.value, text, parentId)
     commentText.value = ''
+    replyingTo.value = null
     showToast('댓글을 등록했습니다', 'success')
     await loadPostDetail(postId)
     refreshBoard()
@@ -594,38 +596,90 @@ function PostCard({ post }: { post: BoardPost }) {
   `
 }
 
-function CommentItem({ comment }: { comment: BoardComment }) {
+function CommentItem({ comment, postId, depth = 0, replies = [] }: { comment: BoardComment; postId: string; depth?: number; replies?: BoardComment[] }) {
   const needsTruncation = (comment.content?.length ?? 0) > 300
   const [expanded, setExpanded] = useState(false)
   const displayText = needsTruncation && !expanded
     ? `${comment.content.slice(0, 297)}...`
     : comment.content
+  const isReplying = replyingTo.value === comment.id
+  const indent = depth > 0 ? `ml-${Math.min(depth * 4, 12)}` : ''
 
   return html`
-    <div class="board-comment rounded-lg p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)]">
-      <div class="flex items-center gap-2 mb-1.5">
-        <span class="text-[12px]">${authorAvatar(comment.author)}</span>
-        <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('monitoring', { section: 'agents', agent: comment.author })}>${comment.author}</a>
-        <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
+    <div class="${indent}">
+      <div class="board-comment rounded-lg p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="text-[12px]">${authorAvatar(comment.author)}</span>
+          <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('monitoring', { section: 'agents', agent: comment.author })}>${comment.author}</a>
+          <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
+          <button type="button"
+            class="text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 ml-auto"
+            onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
+          >${isReplying ? '취소' : '답글'}</button>
+        </div>
+        <div class="text-[13px] text-[var(--text-body)] leading-[1.55] whitespace-pre-wrap">${displayText}</div>
+        ${needsTruncation ? html`
+          <button type="button"
+            class="mt-1 text-[11px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
+            onClick=${() => setExpanded(!expanded)}
+          >${expanded ? '접기' : '더 보기...'}</button>
+        ` : null}
+        ${isReplying ? html`
+          <div class="mt-2 flex gap-2">
+            <${TextInput}
+              class="flex-1"
+              placeholder="답글 작성..."
+              value=${commentText.value}
+              onInput=${(event: Event) => { commentText.value = (event.target as HTMLInputElement).value }}
+              onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') submitComment(postId, comment.id) }}
+              disabled=${commentSubmitting.value}
+            />
+            <button type="button"
+              class="py-1.5 px-3 rounded-lg text-[12px] font-medium font-[inherit] cursor-pointer transition-all duration-150 border
+                ${commentSubmitting.value || commentText.value.trim() === ''
+                  ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
+                  : 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
+                }"
+              onClick=${() => submitComment(postId, comment.id)}
+              disabled=${commentSubmitting.value || commentText.value.trim() === ''}
+            >
+              ${commentSubmitting.value ? '...' : '등록'}
+            </button>
+          </div>
+        ` : null}
       </div>
-      <div class="text-[13px] text-[var(--text-body)] leading-[1.55] whitespace-pre-wrap">${displayText}</div>
-      ${needsTruncation ? html`
-        <button type="button"
-          class="mt-1 text-[11px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
-          onClick=${() => setExpanded(!expanded)}
-        >${expanded ? '접기' : '더 보기...'}</button>
+      ${replies.length > 0 ? html`
+        <div class="flex flex-col gap-1.5 mt-1.5">
+          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} replies=${[]} />`)}
+        </div>
       ` : null}
     </div>
   `
 }
 
-function CommentThread({ comments }: { comments: BoardComment[] }) {
+function buildCommentTree(comments: BoardComment[]): { roots: BoardComment[]; childrenMap: Map<string, BoardComment[]> } {
+  const childrenMap = new Map<string, BoardComment[]>()
+  const roots: BoardComment[] = []
+  for (const c of comments) {
+    if (c.parent_id) {
+      const siblings = childrenMap.get(c.parent_id) ?? []
+      siblings.push(c)
+      childrenMap.set(c.parent_id, siblings)
+    } else {
+      roots.push(c)
+    }
+  }
+  return { roots, childrenMap }
+}
+
+function CommentThread({ comments, postId }: { comments: BoardComment[]; postId: string }) {
   if (comments.length === 0) return html`<${EmptyState} message="아직 댓글이 없습니다" compact />`
 
+  const { roots, childrenMap } = buildCommentTree(comments)
   const INITIAL_SHOW = 5
   const [expanded, setExpanded] = useState(false)
-  const hiddenCount = comments.length - INITIAL_SHOW
-  const visible = expanded || comments.length <= INITIAL_SHOW ? comments : comments.slice(-INITIAL_SHOW)
+  const hiddenCount = roots.length - INITIAL_SHOW
+  const visible = expanded || roots.length <= INITIAL_SHOW ? roots : roots.slice(-INITIAL_SHOW)
 
   return html`
     <div class="flex flex-col gap-2">
@@ -636,7 +690,7 @@ function CommentThread({ comments }: { comments: BoardComment[] }) {
           onClick=${() => setExpanded(true)}
         >이전 댓글 ${hiddenCount}개 더 보기</button>
       ` : null}
-      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} />`)}
+      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} replies=${childrenMap.get(comment.id) ?? []} />`)}
       ${expanded && hiddenCount > 0 ? html`
         <button type="button"
           class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 text-left py-1"
@@ -754,7 +808,7 @@ function PostDetail({ post }: { post: BoardPost }) {
         <${Card} title="댓글">
           ${detailLoading.value
             ? html`<div class="loading-state loading-pulse">댓글 불러오는 중...</div>`
-            : html`<${CommentThread} comments=${detailComments.value} />`}
+            : html`<${CommentThread} comments=${detailComments.value} postId=${post.id} />`}
           <${CommentForm} postId=${post.id} />
         <//>
       </div>

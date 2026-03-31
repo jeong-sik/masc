@@ -93,6 +93,10 @@
    dashboard_provider_runs
    proactive_refresh
    server_dashboard_http_runtime_support
+   server_dashboard_http_runtime_info
+   server_dashboard_http_execution_surfaces
+   server_dashboard_http_room_truth_support
+   server_dashboard_http_room_truth
    server_dashboard_http
    server_dashboard_http_cache
    server_dashboard_http_core
@@ -259,6 +263,7 @@
    swarm_checkpoint
    telemetry_eio
    tempo
+   tui_decode
    tools
    tool_args
    tool_schema_dsl
@@ -395,6 +400,7 @@
    eval_calibration
    ;; Keeper contract
    keeper_schema
+   keeper_social_model
    keeper_config
    keeper_toml_loader
    keeper_contract
@@ -435,6 +441,7 @@
    keeper_working_context
    keeper_checkpoint_store
    keeper_text_processing
+   keeper_compaction
    keeper_exec_context
    keeper_tools_oas
    keeper_hooks_oas
@@ -498,6 +505,12 @@
    tool_autoresearch
    ;; Code Research Loop — tool_research adapter (core logic in masc_research library)
    tool_research
+   ;; godsplit-catalog: tool_catalog decomposition (private sub-modules)
+   tool_catalog_surfaces
+   tool_catalog_tiers
+   ;; godsplit-misc: tool_misc decomposition (private sub-modules)
+   tool_misc_transport
+   tool_misc_admin
 )
 (private_modules
  dashboard_http_keeper_metrics
@@ -567,6 +580,7 @@
   keeper_working_context
   keeper_checkpoint_store
   keeper_text_processing
+  keeper_compaction
   keeper_exec_context
   keeper_turn_session
   keeper_turn_setup
@@ -628,7 +642,13 @@
   tool_improve_loop_planner
   tool_improve_loop_executor
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
-  tool_schema_dsl)
+  tool_schema_dsl
+  ;; godsplit-catalog: tool_catalog decomposition
+  tool_catalog_surfaces
+  tool_catalog_tiers
+  ;; godsplit-misc: tool_misc decomposition
+  tool_misc_transport
+  tool_misc_admin)
  (libraries
    mcp_protocol
    mcp_protocol.eio

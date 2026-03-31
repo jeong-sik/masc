@@ -44,6 +44,22 @@ type room_state = {
   pause_reason: string option;
 }
 
+(** {1 Health Counters} *)
+
+let state_update_attempts = Atomic.make 0
+let state_update_failures = Atomic.make 0
+
+let state_health_counters () =
+  let attempts = Atomic.get state_update_attempts in
+  let failures = Atomic.get state_update_failures in
+  `Assoc [
+    ("state_update_attempts", `Int attempts);
+    ("state_update_failures", `Int failures);
+    ("failure_rate",
+      `Float (if attempts = 0 then 0.0
+              else float_of_int failures /. float_of_int attempts));
+  ]
+
 (** {1 Helpers} *)
 
 let now_iso () =
@@ -229,9 +245,9 @@ let room_state_to_json state =
     ("event_seq", `Int state.event_seq);
     ("mode", `String state.mode);
     ("paused", `Bool state.paused);
-    ("paused_by", match state.paused_by with Some s -> `String s | None -> `Null);
-    ("paused_at", match state.paused_at with Some f -> `Float f | None -> `Null);
-    ("pause_reason", match state.pause_reason with Some s -> `String s | None -> `Null);
+    ("paused_by", Json_util.string_opt_to_json state.paused_by);
+    ("paused_at", Json_util.float_opt_to_json state.paused_at);
+    ("pause_reason", Json_util.string_opt_to_json state.pause_reason);
   ]
 
 let room_state_of_json json =
@@ -286,6 +302,7 @@ let write_state config state =
     Returns [Ok new_state] on success.
 *)
 let atomic_update_state config ~f =
+  Atomic.incr state_update_attempts;
   let transform json_opt =
     let current_state =
       match json_opt with
@@ -311,6 +328,7 @@ let atomic_update_state config ~f =
         room_state_of_json json
       with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
   | Error e ->
+      Atomic.incr state_update_failures;
       Error (match e with
         | Backend.IOError msg -> msg
         | Backend.NotFound k -> "Not found: " ^ k
@@ -364,20 +382,22 @@ let register_agent config ~name ?(capabilities=[]) () =
   match Backend.FileSystem.set config.backend (agent_key name) json_str with
   | Ok () ->
       (* Atomically update room state to include this agent *)
-      let _ = atomic_update_state config ~f:(fun state ->
+      (match atomic_update_state config ~f:(fun state ->
         let active_agents =
           if List.mem name state.active_agents then state.active_agents
           else name :: state.active_agents
         in
         { state with active_agents }
-      ) in
+      ) with
+      | Ok _ -> ()
+      | Error msg -> Log.Room.warn "join_agent: state update failed for %s: %s" name msg);
 
       (* Auto-subscribe to Messages for A2A communication (via hook) *)
       !Room_hooks.subscribe_messages_fn ~subscriber:name;
 
       (* Log join event only for new agents, skip for re-joins *)
       if not already_active then begin
-        let _ = log_event config
+        let _event = log_event config
           ~event_type:AgentJoin
           ~agent:name
           ~payload:(`Assoc [
@@ -412,13 +432,15 @@ let remove_agent config ~name =
   match Backend.FileSystem.delete config.backend (agent_key name) with
   | Ok () ->
       (* Atomically update room state to remove this agent *)
-      let _ = atomic_update_state config ~f:(fun state ->
+      (match atomic_update_state config ~f:(fun state ->
         let active_agents = List.filter (fun n -> n <> name) state.active_agents in
         { state with active_agents }
-      ) in
+      ) with
+      | Ok _ -> ()
+      | Error msg -> Log.Room.warn "remove_agent: state update failed for %s: %s" name msg);
 
       (* Log leave event *)
-      let _ = log_event config
+      let _event = log_event config
         ~event_type:AgentLeave
         ~agent:name
         ~payload:`Null in
@@ -532,7 +554,7 @@ let message_to_json msg =
     ("seq", `Int msg.seq);
     ("from", `String msg.from_agent);
     ("content", `String msg.content);
-    ("mention", match msg.mention with Some m -> `String m | None -> `Null);
+    ("mention", Json_util.string_opt_to_json msg.mention);
     ("timestamp", `Float msg.timestamp);
   ]
 
@@ -587,17 +609,19 @@ let broadcast config ~from_agent ~content =
   match Backend.FileSystem.set config.backend (message_key seq) json_str with
   | Ok () ->
       (* Atomically update state's message_seq for consistency *)
-      let _ = atomic_update_state config ~f:(fun state ->
+      (match atomic_update_state config ~f:(fun state ->
         { state with message_seq = seq }
-      ) in
+      ) with
+      | Ok _ -> ()
+      | Error msg -> Log.Room.warn "broadcast: state update failed for seq %d: %s" seq msg);
 
       (* Log broadcast event *)
-      let _ = log_event config
+      let _event = log_event config
         ~event_type:Broadcast
         ~agent:from_agent
         ~payload:(`Assoc [
           ("message_seq", `Int seq);
-          ("mention", match msg.mention with Some m -> `String m | None -> `Null);
+          ("mention", Json_util.string_opt_to_json msg.mention);
           ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
         ]) in
 

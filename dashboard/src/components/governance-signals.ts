@@ -3,7 +3,7 @@ import type {
   DashboardGovernanceResponse,
   GovernanceCaseBundle,
 } from '../types'
-import type { RuntimeParam, RuntimeParamsSurface } from '../api'
+import type { RuntimeParam, RuntimeParamsSurface, ParamAuditEntry } from '../api'
 import type { GovernanceFilter } from './governance-utils'
 
 export const governanceLoading = signal(false)
@@ -23,3 +23,5 @@ export const detailLoading = signal(false)
 export const runtimeParams = signal<RuntimeParam[]>([])
 export const runtimeSurfaces = signal<RuntimeParamsSurface[]>([])
 export const runtimeLoading = signal(false)
+export const paramAuditEntries = signal<ParamAuditEntry[]>([])
+export const paramAuditLoading = signal(false)

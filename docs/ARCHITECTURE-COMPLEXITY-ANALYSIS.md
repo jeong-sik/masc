@@ -63,7 +63,6 @@ Useful but not core to coordination.
 |--------|-------|------|--------|
 | tool_team_session | **4412** | Team session spawning | Active, too large |
 | tool_mdal | 1092 | Metric-Driven Agent Loop | Active |
-| tool_mitosis | 1722 | Context split/succession | OFF by default |
 | tool_llama | 1052 | llama.cpp runtime mgmt | Active |
 | tool_voice | ~200 | TTS/voice | OFF by default |
 | tool_portal | ~200 | 1:1 secret messaging | Active |

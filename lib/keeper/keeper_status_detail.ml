@@ -178,9 +178,7 @@ let handle_keeper_status ctx args : tool_result =
                              ( "secondary",
                                `List (List.map (fun s -> `String s) secondary) );
                              ( "reason",
-                               match reason with
-                               | Some s -> `String s
-                               | None -> `Null );
+                               Json_util.string_opt_to_json reason );
                            ])
                     | _ -> find_latest tl
                   with Yojson.Json_error _ -> find_latest tl)
@@ -266,7 +264,7 @@ let handle_keeper_status ctx args : tool_result =
                          ("kind", `String entry_kind);
                          ("is_fragment", `Bool is_fragment);
                          ("ts_unix", `Float ts_unix);
-                         ("age_s", match age_s with Some v -> `Float v | None -> `Null);
+                         ("age_s", Json_util.float_opt_to_json age_s);
                          ("content", `String preview);
                        ]
                      in
@@ -334,7 +332,7 @@ let handle_keeper_status ctx args : tool_result =
                            ("kind", `String event_kind);
                            ("channel", `String (Safe_ops.json_string ~default:"turn" "channel" j));
                            ("ts_unix", `Float ts_unix);
-                           ("age_s", match age_s with Some v -> `Float v | None -> `Null);
+                           ("age_s", Json_util.float_opt_to_json age_s);
                            ("trace_id", `String (Safe_ops.json_string ~default:"" "trace_id" j));
                            ("generation", `Int (Safe_ops.json_int ~default:m.runtime.generation "generation" j));
                            ("context_ratio", `Float (Safe_ops.json_float ~default:0.0 "context_ratio" j));
@@ -437,7 +435,7 @@ let handle_keeper_status ctx args : tool_result =
            ("last_compaction_ago_s", `Float last_compaction_ago_s);
            ("last_proactive_ago_s", `Float last_proactive_ago_s);
            ("active_model", `String active_model);
-           ("next_model_hint", match next_model_hint with Some s -> `String s | None -> `Null);
+           ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
            ("trace_history_count", `Int trace_history_count);
            ("handoff_count_total", `Int trace_history_count);
            ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
@@ -447,17 +445,11 @@ let handle_keeper_status ctx args : tool_result =
            ("latest_tool_names",
              string_list_to_json tool_audit_snapshot.latest_tool_names);
            ("latest_tool_call_count",
-             match tool_audit_snapshot.latest_tool_call_count with
-             | Some value -> `Int value
-             | None -> `Null);
+             Json_util.int_opt_to_json tool_audit_snapshot.latest_tool_call_count);
            ("tool_audit_source",
-             match tool_audit_snapshot.tool_audit_source with
-             | Some value -> `String value
-             | None -> `Null);
+             Json_util.string_opt_to_json tool_audit_snapshot.tool_audit_source);
            ("tool_audit_at",
-             match tool_audit_snapshot.tool_audit_at with
-             | Some value -> `String value
-             | None -> `Null);
+             Json_util.string_opt_to_json tool_audit_snapshot.tool_audit_at);
            ("lifecycle", `Assoc [
              ("created_at", `String m.created_at);
              ("updated_at", `String m.updated_at);
@@ -498,10 +490,23 @@ let handle_keeper_status ctx args : tool_result =
              ("noop_turn_count", `Int m.runtime.noop_turn_count);
              ("tool_action_count", `Int m.runtime.autonomous_action_count);
            ]);
+           ("social", `Assoc [
+             ("model", `String m.social_model);
+             ("last_speech_act",
+               if String.trim m.runtime.last_speech_act = ""
+               then `Null
+               else `String m.runtime.last_speech_act);
+             ("last_blocker",
+               if String.trim m.runtime.last_blocker = ""
+               then `Null
+               else `String m.runtime.last_blocker);
+             ("last_need",
+               if String.trim m.runtime.last_need = ""
+               then `Null
+               else `String m.runtime.last_need);
+           ]);
            ("active_team_session_id",
-             match m.active_team_session_id with
-             | Some session_id -> `String session_id
-             | None -> `Null);
+             Json_util.string_opt_to_json m.active_team_session_id);
            ("team_session_state", team_session_state_json ctx.config m);
            ("last_team_session_started_at",
              if String.trim m.last_team_session_started_at = "" then `Null
@@ -529,7 +534,7 @@ let handle_keeper_status ctx args : tool_result =
            ("coordination", coordination_surface_json m);
            ("sources", source_provenance_json ctx.config m);
            ("context", ctx_stats);
-           ("skill_route", match last_skill_route with Some v -> v | None -> `Null);
+           ("skill_route", Json_util.option_to_yojson Fun.id last_skill_route);
            ("metrics_overview", metrics_summary_to_json metrics_overview);
 	           ("memory_bank", memory_summary_to_json memory_bank_summary);
            ("metrics_tail", metrics_tail);

@@ -365,7 +365,7 @@ cd dashboard && pnpm run build  # TypeScript type check
 | Pitfall Section | Related ADR | Key Takeaway |
 |----------------|-------------|--------------|
 | #8 Feature Flag Registry Duplicates | [ADR-003: Feature Flag Registry Management](ADR-003-FEATURE-FLAG-REGISTRY-MANAGEMENT.md) | Registry는 SSOT, env_name은 전역 고유, concurrent merge는 semantic validation 필요 |
-| Context/Mitosis pattern | [ADR-001: Mitosis vs Compaction](ADR-001-MITOSIS-VS-COMPACTION.md) | Hybrid approach (mitosis + compaction fallback), context ratio 불확실성 인지 |
+| Context/Mitosis pattern | [ADR-001: Mitosis vs Compaction](ADR-001-MITOSIS-VS-COMPACTION.md) | Historical: mitosis runtime removed in v2.170+. Context transfer now uses Relay/Handoff system |
 | Dashboard Control Surface | [ADR-002: Dashboard Operator Control Surface](ADR-002-DASHBOARD-OPERATOR-CONTROL-SURFACE.md) | `masc_operator_*` quartet가 canonical, generic tool executor는 admin-only |
 
 **Why ADRs?**

@@ -1,3 +1,5 @@
+> **Historical**: The mitosis runtime was removed in v2.170+. This ADR is preserved for architectural context. Context transfer now uses the Relay/Handoff system.
+
 # ADR-001: Mitosis vs Compaction - 컨텍스트 한계 대응 전략
 
 **Status**: Accepted

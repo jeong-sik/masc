@@ -86,6 +86,65 @@ let keeper_tool_result_is_failure (result : string) : bool =
     has_error_field || has_error_status || has_ok_false
   with Yojson.Json_error _ -> false
 
+(** Normalize a raw tool result string into a consistent JSON envelope.
+
+    The LLM sees this output directly. Without normalization, tool results
+    use 6+ different schemas ({ok,error,status,...} in various combinations),
+    making it hard for the LLM to parse success/failure reliably.
+
+    After normalization, all results follow:
+    - Success: {"ok": true, "result": <original_json_or_string>}
+    - Success with changes: {"ok": true, "result": ..., "changes": <delta>}
+    - Failure: {"ok": false, "error": <message>, "detail": <original_json|null>}
+
+    The [success] flag comes from [keeper_tool_result_is_failure], which
+    already handles all legacy schema variants. *)
+let normalize_tool_result ~(success : bool) (raw : string) : string =
+  try
+    let json = Yojson.Safe.from_string raw in
+    if success then
+      (* Success: wrap original JSON under "result" key.
+         If original already has "ok":true, the normalized envelope
+         is still consistent — "ok" at the top level is authoritative. *)
+      Yojson.Safe.to_string (`Assoc [
+        ("ok", `Bool true);
+        ("result", json);
+      ])
+    else
+      (* Failure: extract error message from whichever field is present,
+         preserve original JSON as "detail" for debugging. *)
+      let error_msg =
+        match Safe_ops.json_string_opt "error" json with
+        | Some msg when String.trim msg <> "" -> msg
+        | _ ->
+          match Safe_ops.json_string_opt "message" json with
+          | Some msg when String.trim msg <> "" -> msg
+          | _ ->
+            match Safe_ops.json_string_opt "status" json with
+            | Some s when String.lowercase_ascii (String.trim s) = "error" ->
+              "tool returned error status"
+            | _ -> "tool call failed"
+      in
+      Yojson.Safe.to_string (`Assoc [
+        ("ok", `Bool false);
+        ("error", `String error_msg);
+        ("detail", json);
+      ])
+  with Yojson.Json_error _ ->
+    (* Raw is not JSON (e.g. plain text from keeper_tasks_list).
+       Wrap as-is. *)
+    if success then
+      Yojson.Safe.to_string (`Assoc [
+        ("ok", `Bool true);
+        ("result", `String raw);
+      ])
+    else
+      Yojson.Safe.to_string (`Assoc [
+        ("ok", `Bool false);
+        ("error", `String raw);
+        ("detail", `Null);
+      ])
+
 let make_tools
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
@@ -109,6 +168,7 @@ let make_tools
         ~name:td.name
         ~description:td.description
         ~input_schema:td.input_schema
+        ~mutation_class:"workspace"
         (fun input ->
           let key = args_key td.name input in
           let prior_fails =
@@ -118,9 +178,10 @@ let make_tools
           if prior_fails >= max_consecutive_failures then begin
             Log.Keeper.warn "tool %s blocked after %d consecutive failures (same args)"
               td.name prior_fails;
-            (false, Printf.sprintf
+            let msg = Printf.sprintf
               "This tool has failed %d times in a row with the same arguments. Try a different approach or different arguments."
-              prior_fails)
+              prior_fails in
+            (false, normalize_tool_result ~success:false msg)
           end else
             try
               let result =
@@ -128,27 +189,47 @@ let make_tools
                   ~config ~meta ~ctx_work:(!ctx_ref)
                   ~name:td.name ~input
               in
-              if keeper_tool_result_is_failure result then begin
+              let is_failure = keeper_tool_result_is_failure result in
+              if is_failure then begin
                 let count = prior_fails + 1 in
                 Hashtbl.replace failure_counts key count;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
                 Log.Keeper.warn
                   "tool %s returned error result (%d/%d) for same args"
                   td.name count max_consecutive_failures;
-                (false, result)
+                (false, normalize_tool_result ~success:false result)
               end else begin
                 Hashtbl.remove failure_counts key;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:true;
                 (* PR#814 Gap 1: Capture git status delta after successful tool execution.
                    If the working tree changed, log it so the keeper is aware of
                    file-system side effects from its tool calls. *)
-                (match Worktree_live_context.capture_change_block
-                         ~base_path:config.base_path ~actor_key:meta.name with
-                 | Some change_block ->
+                let change_block =
+                  Worktree_live_context.capture_change_block
+                    ~base_path:config.base_path ~actor_key:meta.name
+                in
+                (match change_block with
+                 | Some _cb ->
                      Log.Keeper.info "post-tool git delta detected for %s after %s"
-                       meta.name td.name;
-                     (true, result ^ "\n" ^ change_block)
-                 | None -> (true, result))
+                       meta.name td.name
+                 | None -> ());
+                let normalized = normalize_tool_result ~success:true result in
+                let final_result =
+                  match change_block with
+                  | None -> normalized
+                  | Some cb ->
+                    (* Inject changes field into the normalized JSON envelope
+                       to preserve valid JSON structure. *)
+                    (try
+                       let json = Yojson.Safe.from_string normalized in
+                       match json with
+                       | `Assoc fields ->
+                         Yojson.Safe.to_string
+                           (`Assoc (fields @ [("changes", `String cb)]))
+                       | _ -> normalized
+                     with Yojson.Json_error _ -> normalized)
+                in
+                (true, final_result)
               end
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               let count = prior_fails + 1 in
@@ -158,6 +239,6 @@ let make_tools
                 td.name count max_consecutive_failures
                 (Printexc.to_string exn) in
               Log.Keeper.error "%s" msg;
-              (false, msg)))
+              (false, normalize_tool_result ~success:false msg)))
     else None
   ) tool_defs

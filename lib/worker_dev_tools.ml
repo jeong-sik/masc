@@ -163,6 +163,8 @@ type tool_exec_observer =
 let make_file_read ?workdir ?on_exec () =
   Agent_sdk.Tool.create
     ~name:"file_read"
+    ~descriptor:{ kind = None; mutation_class = Some "read_only";
+                  shell = None; notes = []; examples = [] }
     ~description:"Read file contents by absolute path. Returns file text. \
       Use shell_exec with 'ls' instead if you need directory listing. \
       Maximum 100KB per read to prevent context overflow."
@@ -215,6 +217,8 @@ let make_file_read ?workdir ?on_exec () =
 let make_file_write ?workdir ?on_exec () =
   Agent_sdk.Tool.create
     ~name:"file_write"
+    ~descriptor:{ kind = None; mutation_class = Some "workspace";
+                  shell = None; notes = []; examples = [] }
     ~description:"Write content to a file by absolute path. Creates the file \
       if it doesn't exist, overwrites if it does. Creates parent directories. \
       Use file_read first to check existing content before overwriting."
@@ -270,9 +274,11 @@ let make_file_write ?workdir ?on_exec () =
                Printf.sprintf "Cannot write: %s" msg; recoverable = false })
 
 let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_commands
-    ~description =
+    ?(mutation_class = "workspace") ~description () =
   Agent_sdk.Tool.create
     ~name:"shell_exec"
+    ~descriptor:{ kind = None; mutation_class = Some mutation_class;
+                  shell = None; notes = []; examples = [] }
     ~description
     ~parameters:[
       { name = "command";
@@ -362,15 +368,18 @@ let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =
        Use for: running tests, git commands, build tools, directory listing. \
        Unlike file_read (single file), this handles approved CLI operations. \
        Commands run in /bin/sh but shell control syntax is rejected."
+    ()
 
 let make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock =
   make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock
     ~allowed_commands:readonly_allowed_commands
+    ~mutation_class:"read_only"
     ~description:
       "Execute a read-only shell command and return stdout+stderr. \
        Timeout: 30s default, max 120s. \
        Use for search, inspection, and verification only. \
        Write-oriented commands are intentionally excluded."
+    ()
 
 (** Create dev tools that close over Eio capabilities.
     Returns [file_read; file_write; shell_exec]. *)

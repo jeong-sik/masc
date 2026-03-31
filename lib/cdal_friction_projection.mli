@@ -57,3 +57,42 @@ val project_single_run :
 
 (** Canonical JSON serialization with sorted keys. *)
 val to_json : friction_projection -> Yojson.Safe.t
+
+(** {1 Cross-run window support}
+
+    @since CDAL Phase 3 *)
+
+(** Cross-run window specification. *)
+type run_window =
+  | Single_run
+  | Last_n_runs of int
+  | Session of string
+  | Rolling_seconds of float
+
+(** [project_window ~store ~window ?scope ?completeness_gaps
+     ?tripwire_threshold proofs]
+    Projects friction across a set of runs. For [Single_run],
+    delegates to [project_single_run] using the first proof.
+    For cross-run windows, aggregates violations across multiple
+    manifests.
+
+    @since CDAL Phase 3 *)
+val project_window :
+  store:Agent_sdk.Proof_store.config ->
+  window:run_window ->
+  ?completeness_gaps:Cdal_types.completeness_gap list ->
+  ?tripwire_threshold:int ->
+  Agent_sdk.Cdal_proof.t list ->
+  friction_projection option
+
+(** Compute deterministic basis hash for cross-run window.
+    Includes window type, run IDs (sorted), and version.
+
+    @since CDAL Phase 3 *)
+val compute_window_basis_hash :
+  window:run_window ->
+  run_ids:string list ->
+  string
+
+(** String representation of a run window. *)
+val window_to_string : run_window -> string

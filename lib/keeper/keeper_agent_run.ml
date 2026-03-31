@@ -33,9 +33,13 @@ type run_result = {
   proof : Agent_sdk.Cdal_proof.t option;
 }
 
-let normalize_response_text ~(text : string) ~(tool_names : string list) :
+let normalize_response_text
+    ~(text : string)
+    ~(tool_names : string list)
+    () :
     (string, string) result =
-  if String.trim text <> "" then Ok text
+  let trimmed = String.trim text in
+  if trimmed <> "" then Ok text
   else
     match tool_names with
     | [] -> Error "keeper turn completed with no textual reply"
@@ -183,31 +187,162 @@ let run_turn
   let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
+  (* Build BM25 tool index for progressive disclosure.
+     Essential tools are always available; others are retrieved
+     per-turn based on the goal/context. This prevents the LLM
+     from being overwhelmed by 50+ tools and improves selection.
+
+     top_k=20 (up from default 10) for better coverage across 60-80 tools.
+     Group by prefix so co-retrieval pulls related tools together
+     (e.g. matching keeper_board_post also retrieves keeper_board_comment).
+     OAS Tool_index.build already supports group co-retrieval. *)
+  let tool_index_config =
+    { Agent_sdk.Tool_index.default_config with top_k = 20 } in
+  (* Korean keyword aliases for bilingual BM25 matching.
+     Tool descriptions are English; Korean users issue Korean queries.
+     Appending Korean keywords gives BM25 term overlap across languages.
+     Keys must match actual tool names from keeper_tools. *)
+  let korean_keywords = [
+    "keeper_board_post", "게시판 글 작성 올리기 포스트";
+    "keeper_board_get", "게시판 글 읽기 조회 확인";
+    "keeper_board_list", "게시판 목록 최근글";
+    "keeper_board_comment", "게시판 댓글 답글 코멘트";
+    "keeper_board_vote", "게시판 투표 추천 반대";
+    "keeper_fs_read", "파일 읽기 소스코드 설정";
+    "keeper_shell_readonly", "명령어 조회 검색 탐색";
+    "keeper_bash", "명령어 실행 쉘 빌드 테스트";
+    "keeper_github", "깃허브 이슈 풀리퀘스트 PR CI";
+    "keeper_memory_search", "기억 검색 대화 이전 메시지";
+    "keeper_library_search", "라이브러리 지식 문서 검색";
+    "keeper_library_read", "라이브러리 문서 읽기 지식";
+    "keeper_time_now", "시간 현재 타임스탬프";
+    "keeper_context_status", "컨텍스트 상태 토큰 사용량";
+    "keeper_broadcast", "브로드캐스트 알림 공지 전달";
+    "keeper_tasks_list", "태스크 목록 할일 백로그";
+    "keeper_tasks_audit", "태스크 감사 고아 방치";
+    "keeper_task_claim", "태스크 가져오기 할당";
+    "keeper_task_done", "태스크 완료 마감";
+    "keeper_task_force_release", "태스크 강제해제 반환";
+    "keeper_task_force_done", "태스크 강제완료";
+    "keeper_voice_speak", "음성 말하기 보이스";
+    "keeper_voice_agent", "음성 설정 보이스";
+    "keeper_voice_sessions", "음성 세션 목록";
+    "keeper_voice_session_start", "음성 세션 시작";
+    "keeper_voice_session_end", "음성 세션 종료";
+  ] in
+  let tool_entries = List.map (fun (t : Agent_sdk.Tool.t) ->
+    let name = t.schema.name in
+    let group =
+      if String.starts_with ~prefix:"keeper_board_" name then Some "board"
+      else if String.starts_with ~prefix:"keeper_memory_" name
+           || String.starts_with ~prefix:"keeper_library_" name then Some "knowledge"
+      else if String.starts_with ~prefix:"keeper_task" name then Some "tasks"
+      else if String.starts_with ~prefix:"keeper_voice_" name then Some "voice"
+      else if String.starts_with ~prefix:"keeper_fs_" name
+           || name = "keeper_shell_readonly"
+           || name = "keeper_bash" then Some "filesystem"
+      else None
+    in
+    let kr_kw = match List.assoc_opt name korean_keywords with
+      | Some kw -> " " ^ kw
+      | None -> ""
+    in
+    Agent_sdk.Tool_index.{ name; description = t.schema.description ^ kr_kw; group }
+  ) keeper_tools in
+  let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
+  let always_include_tools =
+    [ "keeper_time_now"; "keeper_context_status";
+      "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
+      "keeper_tasks_list"; "keeper_fs_read"; "keeper_shell_readonly";
+      "keeper_board_get"; "keeper_board_post";
+      "keeper_extend_turns" ]
+  in
+  (* Fallback: all keeper tool names minus always_include.
+     Derived from keeper_tools (already per-keeper allow/deny filtered)
+     so no phantom tool names leak in. Used when BM25 confidence is low. *)
+  let all_tool_names =
+    List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
+  in
+  let fallback_tools =
+    List.filter (fun name ->
+      not (List.mem name always_include_tools)
+    ) all_tool_names
+  in
+  let confidence_threshold = 0.5 in
   let base_hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
     ?trajectory_acc
     () in
-  (* Compose dynamic_context injection via extra_system_context.
-     The before_turn_params hook fires each turn and sets
-     extra_system_context, which OAS prepends as a User message
-     after context reduction (agent_turn.ml:66-75). *)
+  (* Compose dynamic_context injection + progressive tool disclosure
+     in a single before_turn_params hook.
+
+     Both modifications return AdjustParams, so they must be in the
+     same hook to avoid compose's outer-bypasses-inner semantics.
+
+     Progressive disclosure uses BM25 retrieval: each turn selects
+     the top-k tools most relevant to the current goal + context,
+     plus always_include essentials. This keeps the LLM focused. *)
+  let before_turn_hook : Agent_sdk.Hooks.hooks = {
+    Agent_sdk.Hooks.empty with
+    before_turn_params = Some (fun event ->
+      match event with
+      | Agent_sdk.Hooks.BeforeTurnParams { current_params; messages; _ } ->
+        (* 1. Dynamic context injection *)
+        let ctx =
+          if String.trim dynamic_context = "" then
+            current_params.extra_system_context
+          else
+            match current_params.extra_system_context with
+            | None -> Some dynamic_context
+            | Some existing -> Some (existing ^ "\n\n" ^ dynamic_context)
+        in
+        (* 2. Progressive tool disclosure via BM25 retrieval.
+           Extract context from last user message for relevance scoring. *)
+        let last_user_text =
+          List.fold_left (fun acc (m : Agent_sdk.Types.message) ->
+            match m.role with
+            | Agent_sdk.Types.User ->
+              Agent_sdk.Types.text_of_content m.content
+            | _ -> acc
+          ) "" messages
+        in
+        let query_text =
+          if String.trim last_user_text <> "" then last_user_text
+          else user_message
+        in
+        (* Confidence-gated union: always retrieve, but union fallback
+           when BM25 confidence is low (e.g. Korean query vs English docs).
+           Partial retrieval results are always kept — never discarded. *)
+        let retrieved = Agent_sdk.Tool_index.retrieve tool_index query_text in
+        let top_score = match retrieved with
+          | (_, s) :: _ -> s
+          | [] -> 0.0
+        in
+        let retrieved_names = List.map fst retrieved in
+        let use_fallback = top_score < confidence_threshold in
+        let all_allowed =
+          let base = always_include_tools @ retrieved_names in
+          if use_fallback then
+            List.sort_uniq String.compare (base @ fallback_tools)
+          else
+            List.sort_uniq String.compare base
+        in
+        if Keeper_types_profile.keeper_debug then
+          Log.Keeper.info
+            "tool_disclosure keeper=%s top_score=%.3f retrieved=%d allowed=%d fallback=%b query_len=%d"
+            meta.name top_score (List.length retrieved_names)
+            (List.length all_allowed) use_fallback (String.length query_text);
+        let tool_filter =
+          Agent_sdk.Guardrails.AllowList all_allowed
+        in
+        Agent_sdk.Hooks.AdjustParams
+          { current_params with
+            extra_system_context = ctx;
+            tool_filter_override = Some tool_filter }
+      | _ -> Agent_sdk.Hooks.Continue)
+  } in
   let hooks =
-    if String.trim dynamic_context = "" then base_hooks
-    else
-      let inject_ctx : Agent_sdk.Hooks.hooks = {
-        Agent_sdk.Hooks.empty with
-        before_turn_params = Some (fun event ->
-          match event with
-          | Agent_sdk.Hooks.BeforeTurnParams { current_params; _ } ->
-            let ctx = match current_params.extra_system_context with
-              | None -> dynamic_context
-              | Some existing -> existing ^ "\n\n" ^ dynamic_context
-            in
-            Agent_sdk.Hooks.AdjustParams
-              { current_params with extra_system_context = Some ctx }
-          | _ -> Agent_sdk.Hooks.Continue)
-      } in
-      Agent_sdk.Hooks.compose ~outer:inject_ctx ~inner:base_hooks
+    Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks
   in
   let base_dir = Filename.concat config.base_path ".masc" in
   let memory =
@@ -224,7 +359,7 @@ let run_turn
   let reducer = Agent_sdk.Context_reducer.compose [
     Agent_sdk.Context_reducer.keep_last 30;
     { Agent_sdk.Context_reducer.strategy =
-        Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 } };
+        Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = Context_compact_oas.tool_output_prune_limit } };
     { strategy = Agent_sdk.Context_reducer.Merge_contiguous };
   ] in
   (* 8. Run Agent *)
@@ -234,89 +369,89 @@ let run_turn
     else None
   in
   match
-    Oas_worker.run_named
-      ~cascade_name
-      ~goal:user_message
-      ~session_id:meta.runtime.trace_id
-      ~system_prompt:turn_system_prompt
-      ~tools
-      ~initial_messages:history_messages
-      ~hooks
-      ~context_reducer:reducer
-      ~memory
-      ~max_turns
-      ~max_idle_turns:5
-      ~temperature
-      ~max_tokens
-      ?guardrails
-      ?on_event
-      ~agent_ref
-      ?contract
-      ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
-      ~working_context:checkpoint_sidecar
-      ~priority:(Option.value priority ~default:Llm_provider.Request_priority.Interactive)
-      ~cache_system_prompt:true
-      ()
-  with
-  | Error e -> Error e
-  | Ok result ->
-    (match result.checkpoint with
-     | Some checkpoint -> (
-         try
-           (* Unify session_id to trace_id so load_oas can find this
-              checkpoint on the next turn. oas_worker generates a per-turn
-              session_id that differs from trace_id, causing a load miss. *)
-           let checkpoint =
-             { checkpoint with Agent_sdk.Checkpoint.session_id = meta.runtime.trace_id }
-           in
-           Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir
-             checkpoint
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-             Log.Keeper.error "keeper:%s OAS checkpoint save failed: %s"
-               meta.name (Printexc.to_string exn))
-     | None ->
-         Log.Keeper.warn "keeper:%s missing OAS checkpoint after run"
-           meta.name);
-    let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
-    let text = Agent_sdk.Types.text_of_content result.response.content in
-    let model = result.response.model in
-    let tool_names =
-      List.filter_map (function
-        | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
-        result.response.content
-    in
-    let usage = Keeper_exec_context.usage_of_response result.response in
-    (match normalize_response_text ~text ~tool_names with
-     | Error e -> Error e
-     | Ok response_text ->
-         let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
-         Keeper_exec_context.persist_message
-           ~source:history_assistant_source
-           session assistant_msg;
-         ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
-         (match result.proof with
-         | Some p ->
-            Log.Keeper.info "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
-              meta.name p.run_id
-              (Agent_sdk.Execution_mode.to_string p.effective_execution_mode)
-              (Agent_sdk.Cdal_proof.show_result_status p.result_status)
-              (List.length p.raw_evidence_refs);
-            let store = Agent_sdk.Proof_store.default_config in
-            let outcome = Cdal_eval_v1.evaluate ~store p in
-            let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
-            Cdal_eval_v1.persist verdict;
-            Log.Keeper.info
-              "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
-              meta.name
-              (Cdal_types.contract_status_to_string verdict.status)
-              verdict.claim_scope
-              verdict.judgment_hash;
-            (match outcome with
-             | Cdal_eval_v1.Load_failure (err, _) ->
-               Log.Keeper.warn "keeper:%s contract_verdict load failure: %s"
-                 meta.name (Cdal_loader.load_error_to_string err)
+        Oas_worker.run_named
+          ~cascade_name
+          ~goal:user_message
+          ~session_id:meta.runtime.trace_id
+          ~system_prompt:turn_system_prompt
+          ~tools
+          ~initial_messages:history_messages
+          ~hooks
+          ~context_reducer:reducer
+          ~memory
+          ~max_turns
+          ~max_idle_turns:5
+          ~temperature
+          ~max_tokens
+          ?guardrails
+          ?on_event
+          ~agent_ref
+          ?contract
+          ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
+          ~working_context:checkpoint_sidecar
+          ~priority:(Option.value priority ~default:Llm_provider.Request_priority.Interactive)
+          ~cache_system_prompt:true
+          ()
+      with
+      | Error e -> Error e
+      | Ok result ->
+        (match result.checkpoint with
+         | Some checkpoint -> (
+             try
+               (* Unify session_id to trace_id so load_oas can find this
+                  checkpoint on the next turn. oas_worker generates a per-turn
+                  session_id that differs from trace_id, causing a load miss. *)
+               let checkpoint =
+                 { checkpoint with Agent_sdk.Checkpoint.session_id = meta.runtime.trace_id }
+               in
+               Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir
+                 checkpoint
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+                 Log.Keeper.error "keeper:%s OAS checkpoint save failed: %s"
+                   meta.name (Printexc.to_string exn))
+         | None ->
+             Log.Keeper.warn "keeper:%s missing OAS checkpoint after run"
+               meta.name);
+        let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
+        let text = Agent_sdk.Types.text_of_content result.response.content in
+        let model = result.response.model in
+        let tool_names =
+          List.filter_map (function
+            | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
+            result.response.content
+        in
+        let usage = Keeper_exec_context.usage_of_response result.response in
+        (match normalize_response_text ~text ~tool_names () with
+         | Error e -> Error e
+         | Ok response_text ->
+             let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
+             Keeper_exec_context.persist_message
+               ~source:history_assistant_source
+               session assistant_msg;
+             ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
+             (match result.proof with
+             | Some p ->
+                Log.Keeper.info "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
+                  meta.name p.run_id
+                  (Agent_sdk.Execution_mode.to_string p.effective_execution_mode)
+                  (Agent_sdk.Cdal_proof.show_result_status p.result_status)
+                  (List.length p.raw_evidence_refs);
+                let store = Agent_sdk.Proof_store.default_config in
+                let outcome = Cdal_eval_v1.evaluate ~store p in
+                let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
+                Cdal_eval_v1.persist verdict;
+                Log.Keeper.info
+                  "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
+                  meta.name
+                  (Cdal_types.contract_status_to_string verdict.status)
+                  verdict.claim_scope
+                  verdict.judgment_hash;
+                (match outcome with
+                 | Cdal_eval_v1.Load_failure (err, _) ->
+                   Log.Keeper.warn "keeper:%s contract_verdict load failure: %s"
+                     meta.name (Cdal_loader.load_error_to_string err)
              | Cdal_eval_v1.Verdict (_, _) -> ());
             (match Cdal_eval_v1.friction_of_outcome outcome with
              | Some fp ->

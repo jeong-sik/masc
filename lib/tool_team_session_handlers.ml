@@ -8,49 +8,45 @@ open Tool_team_session_support
 module Oas = Agent_sdk
 
 let handle_start ctx args : result =
-  let goal = get_string args "goal" "" in
-  if String.trim goal = "" then
-    (false, json_error "goal is required")
-  else
-    let duration_seconds =
-      let raw_seconds = get_int args "duration_seconds" 0 in
-      if raw_seconds > 0 then
-        raw_seconds
-      else
-        let duration_minutes = get_int args "duration_minutes" 60 in
-        max 1 duration_minutes * 60
-    in
-    let checkpoint_interval_sec = get_int args "checkpoint_interval_sec" 60 in
-    let min_agents = get_int args "min_agents" 2 in
-    let scale_profile = parse_scale_profile args in
-    let control_profile = parse_control_profile ~scale_profile args in
-    let auto_resume = get_bool args "auto_resume" true in
-    let report_formats = parse_report_formats args in
-    let execution_scope = parse_execution_scope args in
-    let orchestration_mode = parse_orchestration_mode args in
-    let communication_mode = parse_communication_mode args in
-    let model_cascade = get_string_list args "model_cascade" in
-    let fallback_policy = parse_fallback_policy args in
-    let instruction_profile = parse_instruction_profile args in
-    let alert_channel = parse_alert_channel args in
-    let agents = get_agent_names args "agents" in
-    let operation_id = get_string_opt args "operation_id" in
-    match
-      let env = object
-        method clock = ctx.clock
-        method process_mgr = match ctx.proc_mgr with Some pm -> pm | None -> failwith "process_mgr not available"
-        method net = match ctx.net with Some n -> n | None -> failwith "net not available"
-      end in
-      Team_session_engine_eio.start_session ~sw:ctx.sw ~env
-        ~config:ctx.config ~created_by:ctx.agent_name ~goal ~duration_seconds
-        ~execution_scope ~checkpoint_interval_sec ~min_agents
-        ~scale_profile ~control_profile
-        ~orchestration_mode ~communication_mode ~model_cascade ~fallback_policy
-        ~instruction_profile ~alert_channel ~auto_resume ~report_formats
-        ~agent_names:agents ~operation_id
-    with
-    | Ok json -> (true, json_ok [ ("result", json) ])
-    | Error e -> (false, json_error e)
+  let*! goal = get_string_required args "goal" in
+  let duration_seconds =
+    let raw_seconds = get_int args "duration_seconds" 0 in
+    if raw_seconds > 0 then
+      raw_seconds
+    else
+      let duration_minutes = get_int args "duration_minutes" 60 in
+      max 1 duration_minutes * 60
+  in
+  let checkpoint_interval_sec = get_int args "checkpoint_interval_sec" 60 in
+  let min_agents = get_int args "min_agents" 2 in
+  let scale_profile = parse_scale_profile args in
+  let control_profile = parse_control_profile ~scale_profile args in
+  let auto_resume = get_bool args "auto_resume" true in
+  let report_formats = parse_report_formats args in
+  let execution_scope = parse_execution_scope args in
+  let orchestration_mode = parse_orchestration_mode args in
+  let communication_mode = parse_communication_mode args in
+  let model_cascade = get_string_list args "model_cascade" in
+  let fallback_policy = parse_fallback_policy args in
+  let instruction_profile = parse_instruction_profile args in
+  let alert_channel = parse_alert_channel args in
+  let agents = get_agent_names args "agents" in
+  let operation_id = get_string_opt args "operation_id" in
+  match team_session_start_env_result ctx with
+  | Error msg ->
+      error_result_typed ~code:Precondition_failed msg
+  | Ok env -> (
+      match
+        Team_session_engine_eio.start_session ~sw:ctx.sw ~env
+          ~config:ctx.config ~created_by:ctx.agent_name ~goal ~duration_seconds
+          ~execution_scope ~checkpoint_interval_sec ~min_agents
+          ~scale_profile ~control_profile
+          ~orchestration_mode ~communication_mode ~model_cascade ~fallback_policy
+          ~instruction_profile ~alert_channel ~auto_resume ~report_formats
+          ~agent_names:agents ~operation_id
+      with
+      | Ok json -> (true, json_ok [ ("result", json) ])
+      | Error e -> (false, json_error e))
 
 let handle_status ctx args : result =
   match get_valid_session_id args with

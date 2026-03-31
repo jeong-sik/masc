@@ -50,6 +50,16 @@ val json_assoc_list : (string * string) list -> Yojson.Safe.t
 val parse_json_or_string : string -> Yojson.Safe.t
 (** [parse_json_or_string s] parses JSON or returns string literal *)
 
+(** {1 Option serialization helpers}
+
+    Canonical [None -> `Null] converters for building JSON. *)
+
+val option_to_yojson : ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
+val int_opt_to_json : int option -> Yojson.Safe.t
+val string_opt_to_json : string option -> Yojson.Safe.t
+val float_opt_to_json : float option -> Yojson.Safe.t
+val bool_opt_to_json : bool option -> Yojson.Safe.t
+
 (** List utilities *)
 
 val dedupe_keep_order : 'a list -> 'a list

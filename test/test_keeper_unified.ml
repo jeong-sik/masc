@@ -4,6 +4,7 @@ module WO = Masc_mcp.Keeper_world_observation
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
 module KAR = Masc_mcp.Keeper_agent_run
+module KSM = Masc_mcp.Keeper_social_model
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
@@ -44,6 +45,16 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let contains_substring haystack needle =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if i + needle_len > hay_len then false
+    else if String.sub haystack i needle_len = needle then true
+    else loop (i + 1)
+  in
+  needle_len = 0 || loop 0
 
 (* ---------- World Observation type tests ---------- *)
 
@@ -413,6 +424,10 @@ let test_unified_turn_runtime_defaults () =
     check int "unified max_turns default" 20
       (KC.keeper_unified_max_turns ()))))
 
+let test_meta_defaults_social_model () =
+  check string "default social model" "bdi_speech_v1"
+    minimal_meta.social_model
+
 (* ---------- Metrics observation tests ---------- *)
 
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
@@ -475,10 +490,35 @@ let test_metrics_noop_response () =
     updated.runtime.autonomous_action_count;
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns
 
+let test_metrics_persist_social_state_fields () =
+  let result =
+    make_run_result
+      ~text:
+        "SOCIAL_MODEL: bdi_speech_v1\nBELIEF_SUMMARY: quiet_room\nACTIVE_DESIRE: maintain_quiet_readiness\nCURRENT_INTENTION: stay_available_without_noise\nBLOCKER: none\nNEED: none\nSPEECH_ACT: stay_silent\nDELIVERY_SURFACE: silent"
+      ~tools:[]
+      ~model:"test-model" ~input_tok:50 ~output_tok:10
+  in
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let routed, social_state =
+        KSM.apply_to_result ~meta:minimal_meta
+          ~observation:base_observation result
+      in
+      let updated =
+        UT.update_metrics_from_result minimal_meta ~latency_ms:100
+          ~observation:base_observation ~social_state routed
+      in
+      check string "speech act tracked" "stay_silent"
+        updated.runtime.last_speech_act;
+      check string "no blocker tracked" "" updated.runtime.last_blocker;
+      check string "no need tracked" "" updated.runtime.last_need)
+
 let test_metrics_failure_response () =
   let reason = "Agent run failed: Max turns exceeded (turn 10, limit 10)" in
   let updated =
-    UT.update_metrics_from_failure minimal_meta ~latency_ms:250 ~reason
+    UT.update_metrics_from_failure minimal_meta ~latency_ms:250 ~reason ()
   in
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns;
   check int "latency recorded" 250 updated.runtime.usage.last_latency_ms;
@@ -526,9 +566,20 @@ let test_prompt_includes_board_activity_section () =
        with Not_found -> false
      in found)
 
+let test_prompt_prefers_silence_guidance () =
+  let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
+  check bool "mentions speech act header" true
+    (let found =
+       try
+         ignore (Str.search_forward (Str.regexp_string "SPEECH_ACT:") sys 0);
+         true
+       with Not_found -> false
+     in
+     found)
+
 let test_metrics_mixed_response () =
   let result =
-    make_run_result ~text:"Done." ~tools:["keeper_read"]
+    make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
       ~model:"test-model" ~input_tok:150 ~output_tok:60
   in
   let updated =
@@ -546,7 +597,7 @@ let test_metrics_mixed_response () =
      in found)
 
 let test_normalize_response_text_passthrough () =
-  match KAR.normalize_response_text ~text:"All good." ~tool_names:[] with
+  match KAR.normalize_response_text ~text:"All good." ~tool_names:[] () with
   | Ok text -> check string "keeps text" "All good." text
   | Error e -> fail ("unexpected error: " ^ e)
 
@@ -554,6 +605,7 @@ let test_normalize_response_text_tool_only_synthesizes () =
   match KAR.normalize_response_text
           ~text:""
           ~tool_names:["keeper_board_post"; "keeper_board_comment"]
+          ()
   with
   | Ok text ->
       check bool "mentions no textual reply" true
@@ -573,7 +625,7 @@ let test_normalize_response_text_tool_only_synthesizes () =
   | Error e -> fail ("unexpected error: " ^ e)
 
 let test_normalize_response_text_empty_without_tools_errors () =
-  match KAR.normalize_response_text ~text:"" ~tool_names:[] with
+  match KAR.normalize_response_text ~text:"" ~tool_names:[] () with
   | Ok text -> fail ("expected error, got: " ^ text)
   | Error e ->
       check bool "error mentions textual reply" true
@@ -587,6 +639,164 @@ let test_normalize_response_text_empty_without_tools_errors () =
            with Not_found -> false
          in
          found)
+
+let test_social_model_silences_skip_only_turn () =
+  let result =
+    make_run_result
+      ~text:
+        "SOCIAL_MODEL: bdi_speech_v1\nBELIEF_SUMMARY: quiet_room\nACTIVE_DESIRE: maintain_quiet_readiness\nCURRENT_INTENTION: stay_available_without_noise\nBLOCKER: none\nNEED: none\nSPEECH_ACT: stay_silent\nDELIVERY_SURFACE: silent"
+      ~tools:[]
+      ~model:"test-model" ~input_tok:20 ~output_tok:5
+  in
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let routed, state =
+        KSM.apply_to_result ~meta:minimal_meta
+          ~observation:base_observation result
+      in
+      check string "speech act" "stay_silent"
+        (KSM.speech_act_to_string state.speech_act);
+      check string "delivery surface" "silent"
+        (KSM.delivery_surface_to_string state.delivery_surface);
+      check string "visible response suppressed" "" routed.response_text;
+      check (list string) "no synthetic tools" [] routed.tools_used)
+
+let test_social_model_requires_explicit_headers () =
+  let result =
+    make_run_result ~text:"I think I should ask for help." ~tools:[]
+      ~model:"test-model" ~input_tok:20 ~output_tok:5
+  in
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let routed, state =
+        KSM.apply_to_result ~meta:minimal_meta
+          ~observation:base_observation result
+      in
+      check string "speech act" "defer"
+        (KSM.speech_act_to_string state.speech_act);
+      check string "delivery surface" "silent"
+        (KSM.delivery_surface_to_string state.delivery_surface);
+      check (option string) "blocker notes protocol violation"
+        (Some "missing social headers") state.blocker;
+      check string "visible response suppressed" "" routed.response_text;
+      check (list string) "no synthetic tools" [] routed.tools_used)
+
+let test_social_model_routes_blocker_to_board_post () =
+  let result =
+    make_run_result
+      ~text:
+        "SOCIAL_MODEL: bdi_speech_v1\nBELIEF_SUMMARY: quiet_room\nACTIVE_DESIRE: seek_help\nCURRENT_INTENTION: recover_tool_route\nBLOCKER: tool route unavailable\nNEED: tool route or operator guidance\nSPEECH_ACT: request_help\nDELIVERY_SURFACE: board_post"
+      ~tools:[]
+      ~model:"test-model" ~input_tok:30 ~output_tok:10
+  in
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let routed, state =
+        KSM.apply_to_result ~meta:minimal_meta
+          ~observation:base_observation result
+      in
+      let posts =
+        Masc_mcp.Board_dispatch.list_posts
+          ~sort_by:Masc_mcp.Board_dispatch.Recent ~limit:10 ()
+      in
+      check string "speech act" "request_help"
+        (KSM.speech_act_to_string state.speech_act);
+      check string "delivery surface" "board_post"
+        (KSM.delivery_surface_to_string state.delivery_surface);
+      check string "response suppressed after routing" "" routed.response_text;
+      check bool "synthetic board tool recorded" true
+        (List.mem "keeper_board_post" routed.tools_used);
+      check int "one board post created" 1 (List.length posts);
+      match posts with
+      | [ post ] ->
+          check string "post author" minimal_meta.name
+            (Masc_mcp.Board.Agent_id.to_string post.author);
+          check bool "post body mentions blocker" true
+            (contains_substring post.body "blocked")
+      | _ -> fail "expected one request-help board post")
+
+(* ---------- render_inline_skip_reason tests ---------- *)
+
+let str_contains s sub =
+  try ignore (Str.search_forward (Str.regexp_string sub) s 0); true
+  with Not_found -> false
+
+let test_render_inline_skip_reason_deny () =
+  let result = HK.render_inline_skip_reason
+    ~tool_name:"keeper_bash"
+    ~reason_code:"keeper_deny"
+    ~reason_text:"tool is on the keeper deny list"
+  in
+  check bool "prefix" true (String.starts_with ~prefix:"[tool_skipped]" result);
+  check bool "tool" true (str_contains result "tool=keeper_bash");
+  check bool "code" true (str_contains result "code=keeper_deny");
+  check bool "reason encoded" true (str_contains result "reason=tool%20is%20on")
+
+let test_render_inline_skip_reason_cost () =
+  let result = HK.render_inline_skip_reason
+    ~tool_name:"keeper_bash"
+    ~reason_code:"cost_gate"
+    ~reason_text:"accumulated_cost_usd=0.5100 exceeded limit=0.5000"
+  in
+  check bool "prefix" true (String.starts_with ~prefix:"[tool_skipped]" result);
+  check bool "code" true (str_contains result "code=cost_gate");
+  check bool "reason encoded equals" true (str_contains result "0.5100%20exceeded")
+
+let test_render_inline_skip_reason_destructive () =
+  let result = HK.render_inline_skip_reason
+    ~tool_name:"keeper_bash"
+    ~reason_code:"destructive_guard"
+    ~reason_text:"pattern='rm -rf' (recursive forced deletion)"
+  in
+  check bool "prefix" true (String.starts_with ~prefix:"[tool_skipped]" result);
+  check bool "code" true (str_contains result "code=destructive_guard");
+  check bool "pattern encoded" true (str_contains result "pattern%3D")
+
+let test_render_inline_escape_edge_cases () =
+  (* Empty reason text *)
+  let empty = HK.render_inline_skip_reason
+    ~tool_name:"t" ~reason_code:"c" ~reason_text:"" in
+  check bool "empty reason" true (str_contains empty "reason=");
+  (* Percent sign in reason *)
+  let pct = HK.render_inline_skip_reason
+    ~tool_name:"t" ~reason_code:"c" ~reason_text:"CPU at 90%" in
+  check bool "percent encoded" true (str_contains pct "90%25")
+
+let test_render_inline_with_replacement () =
+  (* keeper_board_post has replacement=masc_board_post in Tool_catalog *)
+  let result = HK.render_inline_skip_reason
+    ~tool_name:"keeper_board_post"
+    ~reason_code:"keeper_deny"
+    ~reason_text:"denied"
+  in
+  check bool "has replacement" true (str_contains result "replacement=")
+
+let test_normalize_override_passthrough () =
+  let override_text =
+    "[tool_skipped] tool=keeper_bash source=keeper_hook code=keeper_deny \
+     reason=tool%20is%20on%20the%20keeper%20deny%20list"
+  in
+  match KAR.normalize_response_text
+          ~text:override_text
+          ~tool_names:["keeper_bash"]
+          ()
+  with
+  | Ok text -> check string "passes through" override_text text
+  | Error e -> fail ("unexpected error: " ^ e)
 
 (* ---------- Test runner ---------- *)
 
@@ -625,9 +835,13 @@ let () =
           test_case "hustle economy" `Quick test_prompt_hustle_economy;
           test_case "includes worktree delta" `Quick test_prompt_includes_worktree_delta;
           test_case "room state section" `Quick test_prompt_room_state_section;
+          test_case "prefers silence guidance" `Quick
+            test_prompt_prefers_silence_guidance;
         ] );
       ( "config",
         [
+          test_case "default social model" `Quick
+            test_meta_defaults_social_model;
           test_case "unified runtime defaults" `Quick
             test_unified_turn_runtime_defaults;
         ] );
@@ -636,6 +850,8 @@ let () =
           test_case "text response" `Quick test_metrics_text_response;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
+          test_case "social fields" `Quick
+            test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;
           test_case "mixed response" `Quick test_metrics_mixed_response;
           test_case "normalize passthrough" `Quick
@@ -644,5 +860,23 @@ let () =
             test_normalize_response_text_tool_only_synthesizes;
           test_case "normalize empty without tools errors" `Quick
             test_normalize_response_text_empty_without_tools_errors;
+          test_case "social model silences skip-only turn" `Quick
+            test_social_model_silences_skip_only_turn;
+          test_case "social model requires explicit headers" `Quick
+            test_social_model_requires_explicit_headers;
+          test_case "social model routes blocker to board post" `Quick
+            test_social_model_routes_blocker_to_board_post;
+          test_case "render_inline deny" `Quick
+            test_render_inline_skip_reason_deny;
+          test_case "render_inline cost" `Quick
+            test_render_inline_skip_reason_cost;
+          test_case "render_inline destructive" `Quick
+            test_render_inline_skip_reason_destructive;
+          test_case "normalize override passthrough" `Quick
+            test_normalize_override_passthrough;
+          test_case "escape edge cases" `Quick
+            test_render_inline_escape_edge_cases;
+          test_case "render_inline with replacement" `Quick
+            test_render_inline_with_replacement;
         ] );
     ]

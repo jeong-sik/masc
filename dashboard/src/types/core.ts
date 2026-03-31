@@ -72,6 +72,7 @@ export interface BoardPost {
 export interface BoardComment {
   id: string
   post_id: string
+  parent_id?: string | null
   author: string
   content: string
   created_at: string
@@ -531,9 +532,27 @@ export interface KeeperConfigMetrics {
   compaction_count: number
 }
 
+export interface KeeperHookSlot {
+  active: boolean
+  source: string
+  gates?: string[]
+  effects?: string[]
+  features?: string[]
+}
+
+export interface KeeperHookIntrospection {
+  slots: Record<string, KeeperHookSlot>
+  deny_list: string[]
+  deny_list_count: number
+  destructive_check_tools: string[]
+  cost_budget: { max_cost_usd?: number | null; active: boolean }
+}
+
 export interface KeeperConfig {
   name: string
   execution_scope: string
+  allowed_paths: string[]
+  effective_allowed_paths: string[]
   prompt: KeeperConfigPrompt
   execution: KeeperConfigExecution
   compaction: KeeperConfigCompaction
@@ -541,6 +560,7 @@ export interface KeeperConfig {
   drift: KeeperConfigDrift
   auto_team_session: KeeperConfigAutoTeamSession
   handoff: KeeperConfigHandoff
+  hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime
   coordination: KeeperConfigCoordination
   sources: KeeperConfigSources

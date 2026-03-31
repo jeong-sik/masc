@@ -72,6 +72,7 @@ type ExecutionScope = 'observe_only' | 'workspace' | 'local'
 
 type RuntimeDraft = {
   execution_scope: ExecutionScope
+  allowed_paths_text: string
   proactive_enabled: boolean
   proactive_idle_sec: number
   proactive_cooldown_sec: number
@@ -90,6 +91,7 @@ const runtimeSaving = signal(false)
 function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     execution_scope: (c.execution_scope as ExecutionScope) ?? 'workspace',
+    allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
     proactive_cooldown_sec: c.proactive.cooldown_sec,
@@ -106,6 +108,9 @@ function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
 function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
   const payload: KeeperConfigUpdatePayload = {}
   if (draft.execution_scope !== (orig.execution_scope ?? 'workspace')) payload.execution_scope = draft.execution_scope
+  const newPaths = draft.allowed_paths_text.split('\n').map(s => s.trim()).filter(Boolean)
+  const origPaths = orig.allowed_paths ?? []
+  if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
   if (draft.proactive_idle_sec !== orig.proactive.idle_sec) payload.proactive_idle_sec = draft.proactive_idle_sec
   if (draft.proactive_cooldown_sec !== orig.proactive.cooldown_sec) payload.proactive_cooldown_sec = draft.proactive_cooldown_sec
@@ -599,8 +604,27 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             <option value="local">local</option>
           </select>
         </div>
+        <div class="py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-[var(--text-body)]">allowed_paths</span>
+            <span class="text-[10px] text-[var(--text-muted)]">한 줄에 하나씩. * = 전체 허용</span>
+          </div>
+          <textarea class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1.5 text-[var(--text-body)] resize-y"
+            rows=${3}
+            value=${rd.allowed_paths_text}
+            placeholder=".masc/keepers/<name>/"
+            onInput=${(e: Event) => updateRuntimeDraft('allowed_paths_text', (e.target as HTMLTextAreaElement).value)}
+          ></textarea>
+        </div>
+        ${(c.effective_allowed_paths ?? []).length > 0 ? html`
+          <div class="py-1.5 px-3 text-[10px] text-[var(--text-muted)]">
+            effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
+          </div>
+        ` : null}
       ` : html`
         <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'workspace'} />
+        <${ConfigRow} label="allowed_paths" value=${(c.allowed_paths ?? []).join(', ') || '(computed default)'} />
+        <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />
       `}
 
       <${SectionHeader} title="프로액티브" />
@@ -701,6 +725,31 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           >초기화</button>
           <span class="text-[10px] text-accent">변경된 설정이 있습니다</span>
         </div>
+      ` : null}
+
+      ${c.hooks ? html`
+        <${SectionHeader} title="훅 슬롯" />
+        ${Object.entries(c.hooks.slots).map(([name, slot]) => html`
+          <div class="flex items-start gap-2 py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 mb-1.5">
+            <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]' : 'bg-zinc-500'}"></span>
+            <div class="flex-1 min-w-0">
+              <div class="flex justify-between">
+                <span class="text-[12px] font-semibold text-text-strong">${name}</span>
+                <span class="text-[10px] text-text-muted">${slot.source}</span>
+              </div>
+              ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
+                <div class="flex flex-wrap gap-1 mt-1">
+                  ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
+                    <span class="text-[9px] px-1.5 py-0.5 rounded-md ${d.endsWith('_off') ? 'bg-zinc-700/50 text-zinc-400' : 'bg-accent/10 text-accent/80'}">${d}</span>
+                  `)}
+                </div>
+              ` : null}
+            </div>
+          </div>
+        `)}
+        <${ConfigRow} label="거부 목록 수" value=${String(c.hooks.deny_list_count)} />
+        <${ConfigRow} label="파괴 검사 도구" value=${c.hooks.destructive_check_tools.join(', ')} />
+        <${ConfigRow} label="비용 예산" value=${c.hooks.cost_budget.active ? '$' + (c.hooks.cost_budget.max_cost_usd ?? 0).toFixed(2) : '비활성'} />
       ` : null}
 
       <${SectionHeader} title="마지막 호출 성능" />

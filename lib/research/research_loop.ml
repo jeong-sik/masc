@@ -237,7 +237,7 @@ let create_worktree ~(repo_path : string) ~(experiment_id : string) : string opt
   let worktree_path = Printf.sprintf "%s/.worktrees/research-%s" repo_path experiment_id in
   let branch = Printf.sprintf "research/exp-%s" experiment_id in
   try
-    let _ = Process_eio.run_argv_with_status ~timeout_sec:30.0
+    let _status, _out = Process_eio.run_argv_with_status ~timeout_sec:30.0
       [ "git"; "-C"; repo_path; "worktree"; "add"; worktree_path; "-b"; branch; "HEAD" ]
     in
     Some worktree_path
@@ -248,7 +248,7 @@ let create_worktree ~(repo_path : string) ~(experiment_id : string) : string opt
 (** Remove experiment worktree. *)
 let cleanup_worktree ~(repo_path : string) ~(worktree_path : string) : unit =
   (try
-    let _ = Process_eio.run_argv_with_status ~timeout_sec:30.0
+    let _status, _out = Process_eio.run_argv_with_status ~timeout_sec:30.0
       [ "git"; "-C"; repo_path; "worktree"; "remove"; worktree_path ]
     in ()
   with exn -> log_best_effort_failure "worktree cleanup" exn)
@@ -291,10 +291,15 @@ let apply_patch ~(worktree_path : string) ~(hypothesis : hypothesis) : bool =
             [ "git"; "-C"; worktree_path; "apply"; "--check"; patch_file ] in
           let ok = match status with Unix.WEXITED 0 -> true | _ -> false in
           if ok then begin
-            let _ = Process_eio.run_argv_with_status ~timeout_sec:10.0
+            let apply_status, _out = Process_eio.run_argv_with_status ~timeout_sec:10.0
               [ "git"; "-C"; worktree_path; "apply"; patch_file ] in
             (try Sys.remove patch_file with Sys_error _ -> ());
-            true
+            (match apply_status with
+             | Unix.WEXITED 0 -> true
+             | _ ->
+               Log.Server.warn "research: git apply failed after --check passed";
+               Fs_compat.save_file target patch;
+               true)
           end else begin
             (try Sys.remove patch_file with Sys_error _ -> ());
             (* Fallback: treat as full file replacement *)
@@ -389,18 +394,18 @@ let run_experiment ~sw ~net ~clock ~(config : Research_config.t)
        (if entry.metric.status = Research_metric.Keep then begin
          Log.Server.info "research: creating PR for kept experiment %s" experiment_id;
          let branch = Printf.sprintf "research/exp-%s" experiment_id in
-         (* Commit in the worktree *)
+         let run_git args timeout =
+           let command_label = match args with cmd :: _ -> cmd | [] -> "git" in
+           let status, out = Process_eio.run_argv_with_status ~timeout_sec:timeout args in
+           match status with
+           | Unix.WEXITED 0 -> Ok out
+           | Unix.WEXITED n -> Error (Printf.sprintf "%s exited %d" command_label n)
+           | Unix.WSIGNALED n -> Error (Printf.sprintf "%s killed by signal %d" command_label n)
+           | Unix.WSTOPPED n -> Error (Printf.sprintf "%s stopped by signal %d" command_label n)
+         in
          (try
-           let _ = Process_eio.run_argv_with_status ~timeout_sec:10.0
-             [ "git"; "-C"; worktree_path; "add"; "-A" ] in
            let msg = Printf.sprintf "research(%s): %s" experiment_id
              entry.hypothesis.description in
-           let _ = Process_eio.run_argv_with_status ~timeout_sec:10.0
-             [ "git"; "-C"; worktree_path; "commit"; "-m"; msg ] in
-           (* Push branch *)
-           let _ = Process_eio.run_argv_with_status ~timeout_sec:30.0
-             [ "git"; "-C"; worktree_path; "push"; "-u"; "origin"; branch ] in
-           (* Create draft PR via gh *)
            let pr_body = Printf.sprintf
              "Automated code improvement via research loop.\n\n\
               - **Experiment**: %s\n\
@@ -414,13 +419,20 @@ let run_experiment ~sw ~net ~clock ~(config : Research_config.t)
              (entry.metric.test_pass_rate *. 100.0)
              entry.metric.loc_delta
            in
-           let _ = Process_eio.run_argv_with_status ~timeout_sec:30.0
-             [ "gh"; "pr"; "create"; "--draft";
+           let ( let* ) = Result.bind in
+           let result =
+             let* _ = run_git [ "git"; "-C"; worktree_path; "add"; "-A" ] 10.0 in
+             let* _ = run_git [ "git"; "-C"; worktree_path; "commit"; "-m"; msg ] 10.0 in
+             let* _ = run_git [ "git"; "-C"; worktree_path; "push"; "-u"; "origin"; branch ] 30.0 in
+             run_git [ "gh"; "pr"; "create"; "--draft";
                "--title"; Printf.sprintf "research: %s" entry.hypothesis.description;
                "--body"; pr_body;
                "--head"; branch;
-               "--repo"; "jeong-sik/masc-mcp" ] in
-           Log.Server.info "research: PR created for %s" experiment_id
+               "--repo"; "jeong-sik/masc-mcp" ] 30.0
+           in
+           (match result with
+            | Ok _ -> Log.Server.info "research: PR created for %s" experiment_id
+            | Error step_err -> Log.Server.warn "research: auto-PR aborted at: %s" step_err)
          with exn ->
            Log.Server.warn "research: auto-PR failed: %s" (Printexc.to_string exn))
        end);

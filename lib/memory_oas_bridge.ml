@@ -120,16 +120,6 @@ let seed_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limi
     List.length procs
   end
 
-(** Legacy keeper memory-bank adapter.
-
-    Historical call sites still invoke this helper, but the current 5-tier path
-    seeds episodic memory through [seed_episodes]. The removed Memory_stream
-    backend is not revived here, so this remains an intentional no-op.
-    Returns 0 to preserve legacy callers. *)
-let seed_memory_bank ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limit : int) : int =
-  ignore (memory, agent_name, limit);
-  0
-
 (* ================================================================ *)
 (* Episodic tier: Institution_eio JSONL <-> OAS episodes            *)
 (* ================================================================ *)

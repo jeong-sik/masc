@@ -139,7 +139,7 @@ Rules:
 - `basis_hash` (section 6) makes the snapshot deterministic: the same selected run IDs produce the same hash regardless of what arrives later
 - callers that need consistency across retries must compare `basis_hash` values; a hash change means the underlying run set changed
 - late-arriving runs are picked up by the next window query, not patched into the previous result
-- timestamp proximity (e.g., "runs within 5 seconds of now") must not be used as an ordering key. Use `manifest_creation_time` written atomically at the end of proof capture
+- timestamp proximity (e.g., "runs within 5 seconds of now") must not be used as an ordering key. Use `ended_at` from the proof manifest, which is written atomically at the end of proof capture
 
 This avoids the complexity of retroactive window mutation and keeps aggregation results reproducible.
 
@@ -154,9 +154,7 @@ Runs may use different proof manifest schema versions. The loader must handle ve
 | Unknown schema version | treat as corruption, apply partial-failure policy (section 5) |
 | Schema version too old to normalize | same as unknown |
 
-The normalization step must be explicit: a `normalize_manifest : Cdal_proof.t -> (Cdal_proof.t, string) result` function that handles version-specific field defaults and renames.
-
-No implicit field inference. If a v1 manifest lacks a field that v2 requires, the normalizer must either fill a documented default or return an error.
+Since the current schema remains at version 1 (with optional fields added via `[@yojson.default]`), normalization is handled by the existing `Cdal_proof.of_json` decoder. A separate `normalize_manifest` function is not needed at this time. If a future schema v2 introduces breaking field changes, an explicit normalizer should be added.
 
 ## 11. Proof_store Read-Side API (OAS)
 
@@ -168,31 +166,37 @@ Proposed additions to `proof_store.mli`:
 (** Run metadata for ordering and filtering. *)
 type run_info = {
   run_id: string;
-  created_at: float;       (** manifest creation timestamp *)
+  ended_at: float;         (** from Cdal_proof.t.ended_at *)
   schema_version: int;     (** proof manifest schema version *)
-  scope: string option;    (** declared scope (keeper/task/room/etc.) *)
+  scope: string option;    (** opaque scope label set by producer *)
 }
 
-(** List runs with metadata, ordered by [created_at] ascending.
-    Corrupted manifests (unreadable JSON, missing timestamp) are excluded
-    from the result and reported in the [errors] list. *)
+type window_bounds = {
+  max_runs: int;           (** hard limit on run count, default 50 *)
+  max_bytes: int;          (** hard limit on total bytes scanned, default 50MB *)
+}
+
+(** List runs with metadata, ordered by [ended_at] ascending,
+    tie-broken by [run_id].
+    Corrupted manifests are excluded and reported in the errors list. *)
 val list_runs_ordered :
   config ->
   ?scope:string ->
+  ?bounds:window_bounds ->
+  unit ->
   (run_info list * string list, string) result
-  (* Ok (runs, corruption_errors) | Error fatal *)
 
 (** Load manifests for a window of runs.
-    Applies partial-failure policy: readable runs are returned,
-    unreadable runs are reported as errors. *)
+    Readable runs returned; unreadable runs reported as errors. *)
 val load_window :
   config ->
   run_ids:string list ->
+  ?bounds:window_bounds ->
+  unit ->
   ((Cdal_proof.t * Yojson.Safe.t) list * string list, string) result
-  (* Ok (loaded_manifests, per_run_errors) | Error fatal *)
 ```
 
-These signatures keep the existing `list_runs` unchanged (backward compatible) and add structured alternatives. Implementation is tracked in OAS.
+These signatures keep the existing `list_runs` unchanged (backward compatible) and add structured alternatives. Implemented in OAS `proof_store.ml`.
 
 ## 12. Exit Criteria
 

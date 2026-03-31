@@ -131,7 +131,7 @@ let vote_cast config ~agent_name ~vote_id ~choice =
             ("status", `String (vote_status_to_string new_status));
             ("created_at", json |> member "created_at");
             ("resolved_at", if resolved then `String (now_iso ()) else `Null);
-            ("winner", match winner with Some w -> `String w | None -> `Null);
+            ("winner", Json_util.string_opt_to_json winner);
           ] in
 
           write_json config vote_path updated_json;

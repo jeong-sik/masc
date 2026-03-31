@@ -48,4 +48,12 @@
   --color-text-slate-light: #cbd5e1;
   --color-cyan: #22d3ee;
   --color-purple: #a78bfa;
+
+  /* Spacing scale (8px grid) */
+  --spacing-page: 20px;        /* gap-5  — page-level section gaps */
+  --spacing-section: 16px;     /* gap-4  — within sections */
+  --spacing-card: 16px;        /* p-4    — card internal padding */
+  --spacing-group: 12px;       /* gap-3  — grouped items */
+  --spacing-element: 8px;      /* gap-2  — tight element spacing */
+  --spacing-overlay-inset: 24px; /* p-6  — overlay viewport inset */
 }

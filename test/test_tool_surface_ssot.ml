@@ -87,6 +87,23 @@ let test_keeper_denied_disjoint_from_public_mcp () =
   Alcotest.(check bool) "Keeper_denied disjoint from Public_mcp" true
     (SS.is_empty overlap)
 
+let test_keeper_internal_disjoint_from_public_mcp () =
+  let internal = set_of (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal) in
+  let public = set_of (Tool_catalog.tools_for_surface Tool_catalog.Public_mcp) in
+  let overlap = SS.inter internal public in
+  if not (SS.is_empty overlap) then
+    Alcotest.failf "Keeper_internal overlaps with Public_mcp: {%s}"
+      (String.concat ", " (SS.elements overlap));
+  Alcotest.(check bool) "Keeper_internal disjoint from Public_mcp" true
+    (SS.is_empty overlap)
+
+let test_keeper_internal_contains_known_tools () =
+  let internal = set_of (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal) in
+  List.iter
+    (fun name ->
+      Alcotest.(check bool) (name ^ " is internal") true (SS.mem name internal))
+    [ "keeper_time_now"; "keeper_board_post"; "keeper_bash"; "keeper_memory_search" ]
+
 let test_is_on_surface_consistent () =
   List.iter (fun surface ->
     let tools = Tool_catalog.tools_for_surface surface in
@@ -116,6 +133,10 @@ let () =
             test_session_min_and_local_worker_share_core;
           Alcotest.test_case "Keeper_denied ∩ Public_mcp = ∅" `Quick
             test_keeper_denied_disjoint_from_public_mcp;
+          Alcotest.test_case "Keeper_internal ∩ Public_mcp = ∅" `Quick
+            test_keeper_internal_disjoint_from_public_mcp;
+          Alcotest.test_case "Keeper_internal contains known tools" `Quick
+            test_keeper_internal_contains_known_tools;
           Alcotest.test_case "is_on_surface consistent" `Quick
             test_is_on_surface_consistent;
         ] );

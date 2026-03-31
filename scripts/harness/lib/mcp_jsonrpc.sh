@@ -9,6 +9,8 @@
 : "${HARNESS_LOG_FILE:=}"
 : "${HARNESS_LOG_TAIL_LINES:=120}"
 : "${MCP_CURL_EXTRA_ARGS:=}"
+: "${MCP_PROTOCOL_VERSION:=}"
+MCP_LAST_TIME_TOTAL=""
 
 _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/harness/jsonrpc_sse.sh
@@ -70,14 +72,8 @@ mcp_extract_result() {
   '
 }
 
-mcp_extract_payload() {
-  jq -c '
-    if ._harness_error? then
-      empty
-    else
-      try (.result.content[0].text | fromjson | .payload) catch empty
-    end
-  '
+mcp_extract_is_error() {
+  jq -r 'try (.result.isError) catch "true"'
 }
 
 mcp_extract_error() {
@@ -193,6 +189,7 @@ mcp_jsonrpc_call() {
 
   local request_body
   if ! request_body="$(_mcp_build_request_body "$id" "$method" "$params_json" 2>/dev/null)"; then
+    MCP_LAST_TIME_TOTAL=""
     _mcp_build_transport_error \
       "failed to build JSON-RPC request" \
       "$endpoint" \
@@ -208,25 +205,32 @@ mcp_jsonrpc_call() {
   local raw=""
   local status=0
   local stderr_text=""
+  local cumulative_time="0"
   local -a extra_args=()
   if [[ -n "${MCP_CURL_EXTRA_ARGS:-}" ]]; then
     read -r -a extra_args <<< "${MCP_CURL_EXTRA_ARGS}"
   fi
 
   while :; do
-    local body_file stderr_file
+    local body_file stderr_file resp_file
     body_file="$(mcp_mktemp_file "masc-jsonrpc-body" ".json")"
     stderr_file="$(mcp_mktemp_file "masc-jsonrpc-stderr" ".log")"
+    resp_file="$(mcp_mktemp_file "masc-jsonrpc-resp" ".json")"
     printf '%s' "$request_body" >"$body_file"
 
     local -a cmd=(
       curl -sS --max-time "$timeout_sec"
       -X POST "$endpoint"
+      -o "$resp_file"
+      -w '%{time_total}'
       -H 'Content-Type: application/json'
       -H 'Accept: application/json, text/event-stream'
     )
     if [[ -n "$session_id" ]]; then
       cmd+=( -H "Mcp-Session-Id: $session_id" )
+    fi
+    if [[ -n "${MCP_PROTOCOL_VERSION:-}" ]]; then
+      cmd+=( -H "Mcp-Protocol-Version: $MCP_PROTOCOL_VERSION" )
     fi
     if [[ -n "$token" ]]; then
       cmd+=( -H "Authorization: Bearer $token" )
@@ -237,11 +241,16 @@ mcp_jsonrpc_call() {
     cmd+=( --data-binary "@$body_file" )
 
     set +e
-    raw="$("${cmd[@]}" 2>"$stderr_file")"
+    local attempt_time
+    attempt_time="$("${cmd[@]}" 2>"$stderr_file")"
     status=$?
     set -e
+    # Accumulate wall-clock time across retries (including sleep delays via awk).
+    cumulative_time="$(awk -v c="$cumulative_time" -v a="${attempt_time:-0}" 'BEGIN{printf "%.6f", c + a}')"
+    MCP_LAST_TIME_TOTAL="$cumulative_time"
     stderr_text="$(cat "$stderr_file" 2>/dev/null || true)"
-    rm -f "$body_file" "$stderr_file"
+    raw="$(cat "$resp_file" 2>/dev/null || true)"
+    rm -f "$body_file" "$stderr_file" "$resp_file"
 
     if [[ "$status" -eq 0 ]]; then
       jsonrpc_normalize_response "$raw" "$id"
@@ -254,6 +263,9 @@ mcp_jsonrpc_call() {
     case "$status" in
       7|28)
         sleep "$retry_delay"
+        # Include retry sleep in cumulative time.
+        cumulative_time="$(awk -v c="$cumulative_time" -v d="$retry_delay" 'BEGIN{printf "%.6f", c + d}')"
+        MCP_LAST_TIME_TOTAL="$cumulative_time"
         attempt=$((attempt + 1))
         ;;
       *)
@@ -290,4 +302,21 @@ mcp_call_tool() {
   fi
 
   mcp_jsonrpc_call "$id" "tools/call" "$params_json" "$session_id" "$token" "$endpoint"
+}
+
+# Call tool and assert success. Returns the full payload on success.
+# Usage: payload="$(mcp_call_tool_checked <id> <tool> <args_json> [session_id] [token] [endpoint])"
+mcp_call_tool_checked() {
+  local payload
+  payload="$(mcp_call_tool "$@")"
+  mcp_require_tool_ok "$payload" "${2:-tool}_checked"
+  printf '%s' "$payload"
+}
+
+# Call tool, assert success, extract .result. Returns the parsed result object.
+# Usage: result="$(mcp_call_tool_result <id> <tool> <args_json> [session_id] [token] [endpoint])"
+mcp_call_tool_result() {
+  local payload
+  payload="$(mcp_call_tool_checked "$@")"
+  printf '%s' "$payload" | mcp_extract_result
 }

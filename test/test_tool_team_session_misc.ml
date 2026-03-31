@@ -64,6 +64,34 @@ let test_dispatch_unknown () =
     = None);
   cleanup_dir base_dir
 
+let test_start_requires_process_mgr_when_runtime_unavailable () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  Process_eio.reset_for_testing ();
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+  in
+  let ok, body =
+    dispatch_exn ctx ~name:"masc_team_session_start"
+      ~args:
+        (`Assoc
+          [
+            ("goal", `String "requires-runtime");
+            ("duration_seconds", `Int 90);
+          ])
+  in
+  Alcotest.(check bool) "start denied without process manager" false ok;
+  let json = parse_json_exn body in
+  Alcotest.(check string) "error code" "precondition_failed"
+    (Yojson.Safe.Util.(json |> member "error_code" |> to_string));
+  Alcotest.(check string) "message"
+    "process_mgr not available for team session start"
+    (Yojson.Safe.Util.(json |> member "message" |> to_string));
+  cleanup_dir base_dir
+
 let test_unauthorized_session_access () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->

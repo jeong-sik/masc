@@ -21,6 +21,22 @@ let is_ephemeral_agent_name name =
 let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =
   (not has_explicit_agent_name) && is_ephemeral_agent_name agent_name
 
+let direct_call_block_message name =
+  if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name then
+    let replacement_hint =
+      match (Tool_catalog.metadata name).Tool_catalog.replacement with
+      | Some replacement ->
+          Printf.sprintf " Try `%s` instead." replacement
+      | None -> ""
+    in
+    Printf.sprintf
+      "Tool '%s' is keeper-internal and not callable from external MCP clients.%s"
+      name replacement_hint
+  else
+    Printf.sprintf
+      "Tool '%s' is hidden from the default tool surface and not callable directly."
+      name
+
 let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~arguments =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for agent_name persistence across tool calls *)
@@ -136,10 +152,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   let mode_gate_error =
     if not (Tool_catalog.allow_direct_call name) then
-      Some
-        (Printf.sprintf
-           "Tool '%s' is hidden from the default tool surface and not callable directly."
-           name)
+      Some (direct_call_block_message name)
     else
       None
   in
@@ -550,13 +563,10 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_autoresearch ->
         let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_
             ~program_note:_ =
-          match state.Mcp_server.proc_mgr with
-          | None -> Error "process_mgr not available"
-          | Some process_mgr ->
-              let net = match state.Mcp_server.net with
-                | Some n -> n
-                | None -> failwith "net not available for team session"
-              in
+          match state.Mcp_server.proc_mgr, state.Mcp_server.net with
+          | None, _ -> Error "process_mgr not available"
+          | Some _process_mgr, None -> Error "net not available for team session"
+          | Some process_mgr, Some net ->
               let env = object
                 method clock = clock
                 method process_mgr = process_mgr

@@ -517,6 +517,57 @@ let () = test "circuit_breaker wrap_exn catches exceptions" (fun () ->
   assert (s.recent_failures = 1)
 )
 
+(* ── Test: set_rhythm updates interval ────────────────────── *)
+
+let () = test "set_rhythm changes interval" (fun () ->
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let t = Pulse.create
+    ~clock
+    ~rhythm:{ Pulse.base_s = 100.0; min_s = 50.0; max_s = 200.0; quiet = (0, 0) }
+    ~lifecycle:Pulse.Perpetual
+    ~consumers:[]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Pulse.run ~sw t;
+  Eio.Time.sleep clock 0.05;  (* startup beat *)
+  let before = (Pulse.stats t).total_beats in
+  (* Switch to fast rhythm via set_rhythm *)
+  Pulse.set_rhythm t { Pulse.base_s = 0.05; min_s = 0.03; max_s = 1.0; quiet = (0, 0) };
+  (* Nudge to break the current long sleep and pick up new rhythm *)
+  Pulse.nudge t ~reason:"rhythm-changed";
+  Eio.Time.sleep clock 0.4;
+  let after = (Pulse.stats t).total_beats in
+  Pulse.shutdown t;
+  Eio.Time.sleep clock 0.1;
+  (* Rhythm beats should have accumulated from the fast interval *)
+  let gained = after - before in
+  if gained < 3 then
+    failwith (Printf.sprintf "expected >=3 beats after set_rhythm, got %d" gained)
+)
+
+(* ── Test: get_rhythm returns current value ──────────────── *)
+
+let () = test "get_rhythm returns current rhythm" (fun () ->
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let t = Pulse.create
+    ~clock
+    ~rhythm:Pulse.default_rhythm
+    ~lifecycle:Pulse.Perpetual
+    ~consumers:[]
+  in
+  let r = Pulse.get_rhythm t in
+  assert (r.base_s = 60.0);
+  assert (r.min_s = 30.0);
+  Pulse.set_rhythm t { Pulse.base_s = 15.0; min_s = 10.0; max_s = 60.0; quiet = (2, 5) };
+  let r2 = Pulse.get_rhythm t in
+  assert (r2.base_s = 15.0);
+  assert (r2.min_s = 10.0);
+  assert (r2.max_s = 60.0);
+  assert (r2.quiet = (2, 5))
+)
+
 (* ── Summary ───────────────────────────────────────────────── *)
 
 let () =

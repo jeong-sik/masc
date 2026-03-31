@@ -279,7 +279,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      | Some fs ->
          (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
                 ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
-                ~source:"external_mcp" ()
+                ~source:(Tool_registry.string_of_source External_mcp) ()
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             log_mcp_exn ~label:"telemetry tracking failed" exn)
      | None -> ());

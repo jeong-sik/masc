@@ -63,15 +63,21 @@ let infer_keeper_risk_class ~(scope_kind : string) : Oas.Risk_class.t =
 let infer_keeper_execution_mode ~(scope_kind : string) : Oas.Execution_mode.t =
   match String.lowercase_ascii scope_kind with
   | "read_only" | "readonly" | "observe" -> Oas.Execution_mode.Diagnose
-  | "workspace" | "local" -> Oas.Execution_mode.Draft
   | _ -> Oas.Execution_mode.Execute
 
 let infer_keeper_allowed_mutations ~(execution_scope : string)
     ~(allowed_paths : string list) =
+  ignore allowed_paths;
   match String.lowercase_ascii execution_scope with
-  | "workspace" | "local" -> [ "workspace_only" ]
+  | "observe_only" ->
+    (* observe_only keepers should not mutate — preserve CDAL enforcement. *)
+    [ "workspace_only" ]
   | _ ->
-      if allowed_paths <> [] then [ "workspace_only" ] else []
+    (* Standard keepers handle their own tool access control via
+       keeper_hooks_oas.ml deny list and keeper_exec_tools.ml
+       allowlist/denylist.  "workspace_only" here caused mode_enforcer
+       to block keeper_*/masc_* tools misclassified as External_Effect. *)
+    []
 
 let build_keeper_eval_criteria ~keeper_name ~(goal : string) =
   `Assoc [ ("keeper_name", `String keeper_name); ("goal", `String goal) ]
@@ -82,14 +88,22 @@ let of_keeper
     ~(scope_kind : string)
     ~(execution_scope : string)
     ~(allowed_paths : string list) : Oas.Risk_contract.t =
+  let exec_mode = infer_keeper_execution_mode ~scope_kind in
+  let risk = infer_keeper_risk_class ~scope_kind in
+  let mutations = infer_keeper_allowed_mutations ~execution_scope ~allowed_paths in
+  Log.Keeper.info
+    "cdal contract for %s: mode=%s risk=%s mutations=[%s] scope_kind=%s exec_scope=%s"
+    keeper_name
+    (Oas.Execution_mode.to_string exec_mode)
+    (Oas.Risk_class.to_string risk)
+    (String.concat "," mutations)
+    scope_kind execution_scope;
   {
     Oas.Risk_contract.runtime_constraints =
       {
-        requested_execution_mode =
-          infer_keeper_execution_mode ~scope_kind;
-        risk_class = infer_keeper_risk_class ~scope_kind;
-        allowed_mutations =
-          infer_keeper_allowed_mutations ~execution_scope ~allowed_paths;
+        requested_execution_mode = exec_mode;
+        risk_class = risk;
+        allowed_mutations = mutations;
         review_requirement = None;
       };
     eval_criteria = build_keeper_eval_criteria ~keeper_name ~goal;

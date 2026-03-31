@@ -19,13 +19,22 @@ let make_meta
     ?(policy_voice_enabled = false)
     ?(soul_profile = "default")
     ?(name = "test-keeper")
+    ?tool_access
+    ?tool_allowlist
     () : Keeper_types.keeper_meta =
+  let tool_access =
+    match tool_access, tool_allowlist with
+    | Some access, _ -> access
+    | None, Some names -> Keeper_types.Restricted names
+    | None, None -> Keeper_types.Unrestricted
+  in
   let json = `Assoc [
     ("name", `String name);
     ("agent_name", `String name);
     ("trace_id", `String "safety-test-trace");
     ("policy_voice_enabled", `Bool policy_voice_enabled);
     ("soul_profile", `String soul_profile);
+    ("tool_access", Keeper_types.tool_access_to_json tool_access);
   ] in
   match Keeper_types.meta_of_json json with
   | Ok meta -> meta
@@ -173,9 +182,8 @@ let test_safe_empty () =
 (* Group 2: Mode-free tool grants (mode removal)                     *)
 (* ================================================================ *)
 
-(* Mode removal: all keepers get all tools unconditionally.
-   write_done remains the only exposure gate.
-   Safety is enforced through eval_gate deny lists. *)
+(* keeper_* tools are exposed by default.
+   masc_* tools remain allowlist-gated, even after mode removal. *)
 
 let test_write_done_kills_all () =
   let meta = make_meta
@@ -188,7 +196,6 @@ let test_all_keepers_get_full_toolset () =
   let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
-  check bool "has keeper_read" true (List.mem "keeper_read" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
   check bool "has keeper_board_get" true (List.mem "keeper_board_get" tools);
   check bool "has keeper_shell_readonly" true (List.mem "keeper_shell_readonly" tools);
@@ -208,8 +215,11 @@ let test_voice_disabled () =
   check bool "keeper_voice_agent still available" true (List.mem "keeper_voice_agent" tools)
 
 let test_all_keepers_have_research_tools () =
-  (* Mode removal: research tools available to all keepers *)
-  let meta = make_meta ~soul_profile:"default" () in
+  (* #4003: masc_* tools are deny-by-default; allowlist must include them *)
+  let research_allowlist =
+    ["masc_research_start"; "masc_research_status";
+     "masc_autoresearch_cycle"; "masc_autoresearch_status"] in
+  let meta = make_meta ~soul_profile:"default" ~tool_allowlist:research_allowlist () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_any_research = List.exists (fun t ->
     String.length t > 5 &&
@@ -399,7 +409,7 @@ let () =
       test_case "all keepers get full toolset" `Quick test_all_keepers_get_full_toolset;
       test_case "voice enabled" `Quick test_voice_enabled;
       test_case "voice disabled" `Quick test_voice_disabled;
-      test_case "all keepers have research tools" `Quick test_all_keepers_have_research_tools;
+      test_case "allowlisted keepers have research tools" `Quick test_all_keepers_have_research_tools;
       test_case "heuristic mode" `Quick test_heuristic_mode_tools;
       test_case "voice plus other tools" `Quick test_voice_plus_other_tools;
       test_case "all keepers have shell and coding" `Quick test_all_keepers_have_shell_and_coding;

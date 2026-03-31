@@ -43,10 +43,30 @@ export function OpsKeeperColumn() {
   const selectedKeeper = keepers.find(keeper => keeper.name === selectedKeeperName.value) ?? keepers[0] ?? null
   const busy = operatorActionBusy.value
 
+  const statusCounts = keepers.reduce((acc: Record<string, number>, k) => {
+    const s = k.status === 'active' || k.status === 'running' ? 'running'
+      : k.status === 'offline' ? 'offline'
+      : k.status === 'paused' ? 'paused'
+      : k.status === 'crashed' ? 'crashed'
+      : k.status === 'dead' ? 'dead'
+      : 'other'
+    acc[s] = (acc[s] ?? 0) + 1
+    return acc
+  }, {})
+
   return html`
     <div class="flex flex-col gap-4 min-w-0">
       <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0 ops-lane-panel ops-keeper-section">
         <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)]">키퍼 목록</h3>
+        ${keepers.length > 0 ? html`
+          <div class="flex gap-3 text-[11px] font-mono">
+            ${statusCounts.running ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--ok)]"></span>${statusCounts.running} running</span>` : null}
+            ${statusCounts.paused ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#f59e0b]"></span>${statusCounts.paused} paused</span>` : null}
+            ${statusCounts.crashed ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#ef4444]"></span>${statusCounts.crashed} crashed</span>` : null}
+            ${statusCounts.dead ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#6b7280]"></span>${statusCounts.dead} dead</span>` : null}
+            ${statusCounts.offline ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--text-muted)]"></span>${statusCounts.offline} offline</span>` : null}
+          </div>
+        ` : null}
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">keeper를 선택하면 아래에서 메시지를 보내거나 상세 정보를 볼 수 있습니다.</p>
 
         <div class="flex flex-col gap-2">

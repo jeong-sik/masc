@@ -6,7 +6,6 @@
 
 ### ✅ 있는 것
 - `resilience.ml` - ZeroZombie (좀비 에이전트 정리)
-- `mitosis.ml` - 에이전트 분열/생명주기
 - `rate_limit.ml` - 요청 제한
 - `cancellation.ml` - 취소 처리
 

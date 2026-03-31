@@ -1,4 +1,7 @@
 [@@@warning "-32-69"]
+module Tui_decode = Masc_mcp.Tui_decode
+open Tui_decode
+
 (* MASC TUI - Terminal User Interface for Multi-Agent Coordination
 
     Phase 1: keeper selector + detail view
@@ -83,21 +86,10 @@ module Ansi = struct
 end
 
 (** Agent type with status *)
-type agent = {
-  name: string;
-  status: string;
-  current_task: string option;
-  last_seen: string;
-}
+type agent = Tui_decode.agent
 
 (** Task type *)
-type task = {
-  id: string;
-  title: string;
-  status: string;
-  priority: int;
-  claimed_by: string option;
-}
+type task = Tui_decode.task
 
 (** Event for the event log *)
 type event = {
@@ -107,53 +99,10 @@ type event = {
 }
 
 (** Keeper metadata parsed from keepers/*.json *)
-type keeper = {
-  k_name: string;
-  k_goal: string;
-  k_short_goal: string;
-  k_soul_profile: string;
-  k_generation: int;
-  k_active_model: string;
-  k_models: string list;
-  k_proactive_enabled: bool;
-  k_initiative_enabled: bool;
-  k_total_turns: int;
-  k_total_tokens: int;
-  k_total_cost_usd: float;
-  k_last_turn_ts: string;
-  k_compaction_count: int;
-  k_compaction_ratio_gate: float;
-  k_scope_kind: string;
-  k_room_scope: string;
-  k_trigger_mode: string;
-  k_context_budget: int;
-  k_handoff_threshold: float;
-  k_drift_enabled: bool;
-  k_verify: bool;
-  k_created_at: string;
-  k_updated_at: string;
-}
+type keeper = Tui_decode.keeper
 
 (** A single metrics/log entry parsed from JSONL *)
-type log_entry = {
-  le_ts: string;
-  le_channel: string;
-  le_context_ratio: float;
-  le_context_tokens: int;
-  le_context_max: int;
-  le_message_count: int;
-  le_model_used: string;
-  le_input_tokens: int;
-  le_output_tokens: int;
-  le_latency_ms: int;
-  le_cost_usd: float;
-  le_work_kind: string;
-  le_tools_used: string list;
-  le_compacted: bool;
-  le_goal_alignment: float;
-  le_repetition_risk: float;
-  le_guardrail_stop: bool;
-}
+type log_entry = Tui_decode.log_entry
 
 (** Message history entry *)
 type msg_entry = {
@@ -576,7 +525,7 @@ let render_keeper_list (state : state) =
       if idx < List.length state.keepers then begin
         let k = List.nth state.keepers idx in
         let is_selected = idx = state.keeper_cursor in
-        let model_short = short_model k.k_active_model in
+        let model_short = short_model (Option.value ~default:"-" k.k_active_model) in
         let proactive_str = if k.k_proactive_enabled then
           Ansi.green ^ "on" ^ Ansi.reset
         else
@@ -692,7 +641,7 @@ let render_keeper_detail (state : state) =
 
     (* Model section *)
     add_section "Model";
-    add_row "Active Model:" k.k_active_model;
+    add_row "Active Model:" (Option.value ~default:"-" k.k_active_model);
     add_row "Available:" (String.concat ", " k.k_models);
     add_empty ();
 
@@ -711,7 +660,7 @@ let render_keeper_detail (state : state) =
     (* Behavior section *)
     add_section "Behavior";
     add_row "Proactive:" (bool_indicator k.k_proactive_enabled);
-    add_row "Initiative:" (bool_indicator k.k_initiative_enabled);
+    add_row "Initiative:" (bool_indicator (Option.value ~default:false k.k_initiative_enabled));
     add_row "Drift:" (bool_indicator k.k_drift_enabled);
     add_empty ();
 
@@ -828,17 +777,20 @@ let render_keeper_logs (state : state) =
             (ctx_color e.le_context_ratio) pct Ansi.reset in
           let tokens_str = Printf.sprintf "%6d/%6d"
             e.le_context_tokens e.le_context_max in
-          let io_str = Printf.sprintf "%4d/%4d"
-            e.le_input_tokens e.le_output_tokens in
+          let io_str =
+            match e.le_input_tokens, e.le_output_tokens with
+            | Some input, Some output -> Printf.sprintf "%4d/%4d" input output
+            | _ -> Ansi.dim ^ "   --/--" ^ Ansi.reset
+          in
           let lat_str =
-            if e.le_latency_ms > 0 then
-              Printf.sprintf "%5dms" e.le_latency_ms
-            else
-              Ansi.dim ^ "     --" ^ Ansi.reset
+            match e.le_latency_ms with
+            | Some latency when latency > 0 -> Printf.sprintf "%5dms" latency
+            | _ -> Ansi.dim ^ "     --" ^ Ansi.reset
           in
           let cost_str =
-            if e.le_cost_usd > 0.0 then Printf.sprintf "$%.3f" e.le_cost_usd
-            else Ansi.dim ^ "   --" ^ Ansi.reset
+            match e.le_cost_usd with
+            | Some cost when cost > 0.0 -> Printf.sprintf "$%.3f" cost
+            | _ -> Ansi.dim ^ "   --" ^ Ansi.reset
           in
           let tools_str =
             if List.length e.le_tools_used > 0 then
@@ -846,11 +798,14 @@ let render_keeper_logs (state : state) =
             else ""
           in
           let guardrail_str =
-            if e.le_guardrail_stop then Ansi.red ^ " STOP" ^ Ansi.reset else ""
+            match e.le_guardrail_stop with
+            | Some true -> Ansi.red ^ " STOP" ^ Ansi.reset
+            | _ -> ""
           in
+          let work_kind = Option.value ~default:"" e.le_work_kind in
           let line = Printf.sprintf "  %s %s %s %s %s %s %s  %-10s%s%s"
             time_str (channel_color e.le_channel) ctx_str tokens_str
-            io_str lat_str cost_str e.le_work_kind tools_str guardrail_str
+            io_str lat_str cost_str work_kind tools_str guardrail_str
           in
           box_line buf cols line
         end else
@@ -988,6 +943,9 @@ let render (state : state) =
 (** Load keepers from .masc/keepers/ *)
 let load_keepers (base_path : string) : keeper list =
   let keepers_dir = Filename.concat (Filename.concat base_path ".masc") "keepers" in
+  let report path err =
+    Printf.eprintf "[masc-tui] keeper decode failed for %s: %s\n%!" path err
+  in
   if Sys.file_exists keepers_dir && Sys.is_directory keepers_dir then
     Sys.readdir keepers_dir
     |> Array.to_list
@@ -1006,39 +964,17 @@ let load_keepers (base_path : string) : keeper list =
          try
            let path = Filename.concat keepers_dir f in
            let json = Yojson.Safe.from_file path in
-           let open Yojson.Safe.Util in
-           let str key default = try json |> member key |> to_string with Type_error _ -> default in
-           let int_ key default = try json |> member key |> to_int with Type_error _ -> default in
-           let float_ key default = try json |> member key |> to_number with Type_error _ -> default in
-           let bool_ key default = try json |> member key |> to_bool with Type_error _ -> default in
-           let str_list key = try json |> member key |> to_list |> List.map to_string with Type_error _ -> [] in
-           Some {
-             k_name = str "name" (Filename.chop_suffix f ".json");
-             k_goal = str "goal" "";
-             k_short_goal = str "short_goal" "";
-             k_soul_profile = str "soul_profile" "unknown";
-             k_generation = int_ "generation" 0;
-             k_active_model = str "active_model" "unknown";
-             k_models = str_list "models";
-             k_proactive_enabled = bool_ "proactive_enabled" false;
-             k_initiative_enabled = bool_ "initiative_enabled" false;
-             k_total_turns = int_ "total_turns" 0;
-             k_total_tokens = int_ "total_tokens" 0;
-             k_total_cost_usd = float_ "total_cost_usd" 0.0;
-             k_last_turn_ts = str "last_turn_ts" "";
-             k_compaction_count = int_ "compaction_count" 0;
-             k_compaction_ratio_gate = float_ "compaction_ratio_gate" 0.5;
-             k_scope_kind = str "scope_kind" "local";
-             k_room_scope = str "room_scope" "current";
-             k_trigger_mode = str "trigger_mode" "legacy";
-             k_context_budget = int_ "context_budget" 0;
-             k_handoff_threshold = float_ "handoff_threshold" 0.85;
-             k_drift_enabled = bool_ "drift_enabled" false;
-             k_verify = bool_ "verify" false;
-             k_created_at = str "created_at" "";
-             k_updated_at = str "updated_at" "";
-           }
-         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Sys_error _ -> None
+           match Tui_decode.decode_keeper ~filename:f json with
+           | Ok keeper -> Some keeper
+           | Error err ->
+               report path err;
+               None
+         with Yojson.Json_error err ->
+           report (Filename.concat keepers_dir f) ("invalid JSON: " ^ err);
+           None
+         | Sys_error err ->
+           report (Filename.concat keepers_dir f) err;
+           None
        )
     |> List.sort (fun a b -> String.compare a.k_name b.k_name)
   else []
@@ -1064,34 +1000,11 @@ let read_last_lines path n =
 
 (** Parse a single metrics JSONL line into a log_entry *)
 let parse_log_entry (line : string) : log_entry option =
-  try
-    let json = Yojson.Safe.from_string line in
-    let open Yojson.Safe.Util in
-    let str key default = try json |> member key |> to_string with Type_error _ -> default in
-    let int_ key default = try json |> member key |> to_int with Type_error _ -> default in
-    let float_ key default = try json |> member key |> to_number with Type_error _ -> default in
-    let bool_ key default = try json |> member key |> to_bool with Type_error _ -> default in
-    let str_list key = try json |> member key |> to_list |> List.map to_string with Type_error _ -> [] in
-    Some {
-      le_ts = str "ts" "";
-      le_channel = str "channel" "unknown";
-      le_context_ratio = float_ "context_ratio" 0.0;
-      le_context_tokens = int_ "context_tokens" 0;
-      le_context_max = int_ "context_max" 0;
-      le_message_count = int_ "message_count" 0;
-      le_model_used = str "model_used" "";
-      le_input_tokens = (try json |> member "usage" |> member "input_tokens" |> to_int with Type_error _ -> 0);
-      le_output_tokens = (try json |> member "usage" |> member "output_tokens" |> to_int with Type_error _ -> 0);
-      le_latency_ms = int_ "latency_ms" 0;
-      le_cost_usd = float_ "cost_usd" 0.0;
-      le_work_kind = str "work_kind" "";
-      le_tools_used = str_list "tools_used";
-      le_compacted = bool_ "compacted" false;
-      le_goal_alignment = float_ "goal_alignment" 0.0;
-      le_repetition_risk = float_ "repetition_risk" 0.0;
-      le_guardrail_stop = bool_ "guardrail_stop" false;
-    }
-  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+  match Tui_decode.parse_log_entry line with
+  | Ok entry -> Some entry
+  | Error err ->
+      Printf.eprintf "[masc-tui] log decode failed: %s\n%!" err;
+      None
 
 (** Find the most recent metrics file for a keeper *)
 let find_metrics_files (base_path : string) (keeper_name : string) : string list =
@@ -1174,6 +1087,9 @@ let load_live_context (state : state) (base_path : string) (keeper_name : string
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
   let masc_dir = Filename.concat base_path ".masc" in
+  let report path err =
+    Printf.eprintf "[masc-tui] state decode failed for %s: %s\n%!" path err
+  in
 
   (* Load agents *)
   let agents_dir = Filename.concat masc_dir "agents" in
@@ -1186,18 +1102,17 @@ let load_from_masc_dir (state : state) (base_path : string) =
            try
              let path = Filename.concat agents_dir f in
              let json = Yojson.Safe.from_file path in
-             let open Yojson.Safe.Util in
-             let name = json |> member "name" |> to_string in
-             let status_val = json |> member "status" in
-             let status = match status_val with
-               | `List (s :: _) -> to_string s
-               | `String s -> s
-               | _ -> "unknown"
-             in
-             let current_task = json |> member "current_task" |> to_string_option in
-             let last_seen = json |> member "last_seen" |> to_string in
-             Some { name; status; current_task; last_seen }
-           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Sys_error _ -> None
+             match Tui_decode.decode_agent json with
+             | Ok agent -> Some agent
+             | Error err ->
+                 report path err;
+                 None
+           with Yojson.Json_error err ->
+             report (Filename.concat agents_dir f) ("invalid JSON: " ^ err);
+             None
+           | Sys_error err ->
+             report (Filename.concat agents_dir f) err;
+             None
          )
     else []
   );
@@ -1213,14 +1128,17 @@ let load_from_masc_dir (state : state) (base_path : string) =
            try
              let path = Filename.concat tasks_dir f in
              let json = Yojson.Safe.from_file path in
-             let open Yojson.Safe.Util in
-             let id = json |> member "id" |> to_string in
-             let title = json |> member "title" |> to_string in
-             let status = json |> member "status" |> to_string in
-             let priority = json |> member "priority" |> to_int_option |> Option.value ~default:3 in
-             let claimed_by = json |> member "claimed_by" |> to_string_option in
-             Some { id; title; status; priority; claimed_by }
-           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Sys_error _ -> None
+             match Tui_decode.decode_task json with
+             | Ok task -> Some task
+             | Error err ->
+                 report path err;
+                 None
+           with Yojson.Json_error err ->
+             report (Filename.concat tasks_dir f) ("invalid JSON: " ^ err);
+             None
+           | Sys_error err ->
+             report (Filename.concat tasks_dir f) err;
+             None
          )
       |> List.sort (fun a b -> compare a.priority b.priority)
     else []
@@ -1290,62 +1208,9 @@ let send_keeper_message (state : state) (keeper_name : string) (message : string
          done with End_of_file -> ());
 
         let response = Buffer.contents buf in
-
-        (* Parse SSE response: look for data: lines *)
-        let lines = String.split_on_char '\n' response in
-        let result = Buffer.create 1024 in
-        List.iter (fun line ->
-          let line = String.trim line in
-          if String.length line > 6 && String.sub line 0 6 = "data: " then begin
-            let data = String.sub line 6 (String.length line - 6) in
-            (* Try to parse JSON and extract delta *)
-            (try
-              let json = Yojson.Safe.from_string data in
-              let open Yojson.Safe.Util in
-              let typ = try json |> member "type" |> to_string with Type_error _ -> "" in
-              if typ = "content_delta" || typ = "delta" then begin
-                let delta = try json |> member "delta" |> to_string with Type_error _ -> "" in
-                Buffer.add_string result delta
-              end else if typ = "content_complete" || typ = "complete" then begin
-                let text = try json |> member "text" |> to_string with Type_error _ -> "" in
-                if text <> "" && Buffer.length result = 0 then
-                  Buffer.add_string result text
-              end
-            with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
-          end
-        ) lines;
-
-        let reply = Buffer.contents result in
-        if String.length reply > 0 then reply
-        else begin
-          (* Fallback: look for JSON response body *)
-          let body_start = try
-            let idx = ref 0 in
-            let found = ref false in
-            while not !found && !idx < String.length response - 3 do
-              if String.sub response !idx 4 = "\r\n\r\n" then begin
-                found := true;
-                idx := !idx + 4
-              end else
-                incr idx
-            done;
-            if !found then !idx else 0
-          with Invalid_argument _ -> 0 in
-          if body_start > 0 then begin
-            let body_str = String.sub response body_start (String.length response - body_start) in
-            (* Try parsing as JSON *)
-            (try
-              let json = Yojson.Safe.from_string (String.trim body_str) in
-              let open Yojson.Safe.Util in
-              let text = try json |> member "result" |> member "text" |> to_string with Type_error _ -> "" in
-              if text <> "" then text
-              else
-                let msg = try json |> member "error" |> member "message" |> to_string with Type_error _ -> "" in
-                if msg <> "" then "(error: " ^ msg ^ ")"
-                else "(no response parsed)"
-            with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> "(response parsing failed)")
-          end else "(empty response)"
-        end)
+        (match Tui_decode.parse_keeper_chat_response response with
+         | Ok reply -> reply
+         | Error err -> "(response parsing failed: " ^ err ^ ")"))
   with
   | Unix.Unix_error (err, _, _) ->
     Printf.sprintf "(connection failed: %s -- is MASC server running on port %d?)"

@@ -14,9 +14,6 @@ let test_list_masc_tools_exposes_board_and_keeper_schemas () =
                  [
                    "masc_board_post";
                    "masc_board_list";
-                   "keeper_search";
-                   "keeper_profile";
-                   "keeper_research";
                  ])
             ()
         with
@@ -25,10 +22,7 @@ let test_list_masc_tools_exposes_board_and_keeper_schemas () =
               List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
             in
             check bool "masc_board_post" true (List.mem "masc_board_post" names);
-            check bool "masc_board_list" true (List.mem "masc_board_list" names);
-            check bool "keeper_search" true (List.mem "keeper_search" names);
-            check bool "keeper_profile" true (List.mem "keeper_profile" names);
-            check bool "keeper_research" true (List.mem "keeper_research" names)
+            check bool "masc_board_list" true (List.mem "masc_board_list" names)
         | Error err -> failf "expected schema lookup to succeed: %s" err)
 
 let () =

@@ -113,6 +113,10 @@ module RouterApi = struct
   let route ?(max_agents=3) ?(input_tokens=1000) ?(output_tokens=500) query =
     Router.route ~max_agents ~input_tokens ~output_tokens query
 
+  (** Extract multi-dimensional requirements from query text *)
+  let extract_requirements query =
+    Router.extract_requirements query
+
   (** Classify a query into heuristic categories with confidence *)
   let classify query =
     Router.classify_query query

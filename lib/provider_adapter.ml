@@ -238,10 +238,62 @@ let voice_endpoint_auth_env_name (endpoint : Voice_config.endpoint) =
   let adapter = voice_adapter_for_endpoint endpoint in
   voice_auth_env_name ?endpoint_api_key_env:endpoint.api_key_env adapter
 
+let trim_opt = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
 let ends_with ~suffix s =
   let slen = String.length s in
   let plen = String.length suffix in
   slen >= plen && String.sub s (slen - plen) plen = suffix
+
+let normalize_base_url value =
+  let trimmed = String.trim value in
+  if String.length trimmed > 1 && trimmed.[String.length trimmed - 1] = '/' then
+    String.sub trimmed 0 (String.length trimmed - 1)
+  else
+    trimmed
+
+let legacy_voice_env_warning_emitted = ref false
+
+let warn_legacy_voice_env_once () =
+  if not !legacy_voice_env_warning_emitted then (
+    legacy_voice_env_warning_emitted := true;
+    Log.Misc.warn
+      "VOICE_MCP_HOST/PORT fallback is deprecated; prefer .masc/voice_config.json \
+       session.endpoints or MASC_HTTP_* listener settings.")
+
+let legacy_voice_base_url_opt () =
+  let host_opt = Sys.getenv_opt "VOICE_MCP_HOST" |> trim_opt in
+  let port_opt = Sys.getenv_opt "VOICE_MCP_PORT" |> trim_opt in
+  match host_opt, port_opt with
+  | None, None -> None
+  | _ ->
+      warn_legacy_voice_env_once ();
+      let host = Option.value host_opt ~default:"127.0.0.1" in
+      let port = Option.value port_opt ~default:"8936" in
+      Some (Printf.sprintf "http://%s:%s" host port)
+
+let http_listener_env_explicit () =
+  Option.is_some (Sys.getenv_opt "MASC_HTTP_BASE_URL" |> trim_opt)
+  || Option.is_some (Sys.getenv_opt "MASC_HOST" |> trim_opt)
+  || Option.is_some (Sys.getenv_opt "MASC_HTTP_PORT" |> trim_opt)
+
+let default_voice_session_base_url () =
+  match Sys.getenv_opt "MASC_HTTP_BASE_URL" |> trim_opt with
+  | Some base_url -> normalize_base_url base_url
+  | None ->
+      if http_listener_env_explicit () then
+        Printf.sprintf "http://%s:%s"
+          (Env_config_core.masc_host ()) (Env_config_core.masc_http_port ())
+      else (
+        match legacy_voice_base_url_opt () with
+        | Some legacy_base_url -> normalize_base_url legacy_base_url
+        | None ->
+            Printf.sprintf "http://%s:%s"
+              (Env_config_core.masc_host ()) (Env_config_core.masc_http_port ()))
 
 let compose_voice_endpoint_url ~base_url ~path =
   let base_uri = Uri.of_string base_url in
@@ -268,6 +320,9 @@ let compose_voice_endpoint_url ~base_url ~path =
   in
   Uri.with_path base_uri final_path |> Uri.to_string
 
+let default_voice_session_url ~path =
+  compose_voice_endpoint_url ~base_url:(default_voice_session_base_url ()) ~path
+
 let voice_session_endpoint_result (config : Voice_config.t) =
   match Voice_config.select_endpoint config.session.endpoints with
   | Some endpoint ->
@@ -288,7 +343,7 @@ let voice_session_mcp_url_of_endpoint (endpoint : Voice_config.endpoint) =
     | None -> (
         match endpoint.base_url with
         | Some base_url -> Ok (compose_voice_endpoint_url ~base_url ~path:"/mcp")
-        | None -> Ok "http://127.0.0.1:8936/mcp")
+        | None -> Ok (default_voice_session_url ~path:"/mcp"))
 
 let voice_session_health_url_of_endpoint (endpoint : Voice_config.endpoint) =
   let adapter = voice_adapter_for_endpoint endpoint in
@@ -300,7 +355,7 @@ let voice_session_health_url_of_endpoint (endpoint : Voice_config.endpoint) =
     | None -> (
         match endpoint.base_url with
         | Some base_url -> Ok (compose_voice_endpoint_url ~base_url ~path:"/health")
-        | None -> Ok "http://127.0.0.1:8936/health")
+        | None -> Ok (default_voice_session_url ~path:"/health"))
 
 let voice_transport_supports_http_tts (adapter : voice_adapter) =
   match adapter.transport with
@@ -312,13 +367,6 @@ let voice_endpoint_supports_http_tts (endpoint : Voice_config.endpoint) =
   |> voice_transport_supports_http_tts
 
 let default_elevenlabs_base_url = "https://api.elevenlabs.io/v1"
-
-let normalize_base_url value =
-  let trimmed = String.trim value in
-  if String.length trimmed > 1 && trimmed.[String.length trimmed - 1] = '/' then
-    String.sub trimmed 0 (String.length trimmed - 1)
-  else
-    trimmed
 
 let voice_endpoint_base_url (endpoint : Voice_config.endpoint) =
   match voice_adapter_for_endpoint endpoint with
@@ -420,17 +468,6 @@ let nonempty_env name =
 
 let env_present name = Option.is_some (nonempty_env name)
 
-let dedupe_keep_order items =
-  let seen = Hashtbl.create (List.length items) in
-  List.filter
-    (fun item ->
-      if Hashtbl.mem seen item then
-        false
-      else (
-        Hashtbl.add seen item ();
-        true))
-    items
-
 let bare_ollama_migration_message () =
   "Bare `ollama` is no longer supported. Use `default` for normal selection, or `llama:<model>` / another explicit provider:model label as an override."
 
@@ -523,7 +560,7 @@ let default_model_label_for_family = function
       Error "Custom provider requires explicit runtime_model"
 
 let preferred_execution_model_labels () =
-  dedupe_keep_order
+  Json_util.dedupe_keep_order
     (List.filter_map
        Fun.id
        [
@@ -552,7 +589,7 @@ let preferred_execution_model_labels () =
        ])
 
 let preferred_verifier_model_labels () =
-  dedupe_keep_order
+  Json_util.dedupe_keep_order
     (List.filter_map
        Fun.id
        [

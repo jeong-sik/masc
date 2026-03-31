@@ -192,6 +192,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            mid_goal;
            long_goal;
            soul_profile;
+           social_model = default_social_model;
            cascade_name = "keeper_unified";
            will;
            needs;
@@ -201,7 +202,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            execution_scope;
            allowed_paths;
            scope_kind;
-           tool_allowlist = [];
+           tool_access = Restricted Tool_catalog.standard_tools;
            tool_denylist = [];
            room_scope;
            voice_enabled;
@@ -275,6 +276,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              board_reactive_turn_count = 0;
              mention_reactive_turn_count = 0;
              noop_turn_count = 0;
+             last_speech_act = "";
+             last_blocker = "";
+             last_need = "";
            };
          } in
          Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
@@ -329,6 +333,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              ("voice_enabled", `Bool meta.voice_enabled);
              ("voice_channel", `String meta.voice_channel);
              ("voice_agent_id", `String meta.voice_agent_id);
+             ("social_model", `String meta.social_model);
              ("proactive_enabled", `Bool meta.proactive.enabled);
              ("proactive_idle_sec", `Int meta.proactive.idle_sec);
              ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);

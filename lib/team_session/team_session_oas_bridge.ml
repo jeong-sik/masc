@@ -13,6 +13,37 @@ module Oas = Agent_sdk
 let supported_local_worker_tool_names =
   Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 
+let observe_only_blocked_local_worker_tool_names =
+  [
+    "masc_add_task";
+    "masc_claim_next";
+    "masc_transition";
+    "masc_board_post";
+    "masc_board_comment";
+    "masc_board_vote";
+    "masc_worktree_create";
+    "masc_worktree_remove";
+    "masc_run_init";
+    "masc_run_plan";
+    "masc_run_log";
+    "masc_run_deliverable";
+    "masc_repair_loop_start";
+    "masc_repair_loop_iterate";
+    "masc_repair_loop_stop";
+  ]
+
+let supported_local_worker_tool_names_for_scope execution_scope =
+  match execution_scope with
+  | Some Team_session_types.Observe_only ->
+      List.filter
+        (fun name ->
+          not (List.mem name observe_only_blocked_local_worker_tool_names))
+        supported_local_worker_tool_names
+  | Some Team_session_types.Limited_code_change
+  | Some Team_session_types.Autonomous
+  | None ->
+      supported_local_worker_tool_names
+
 let supported_local_worker_tools () =
   match
     Agent_tool_surfaces.local_worker_tool_schemas
@@ -23,6 +54,19 @@ let supported_local_worker_tools () =
       Error
         (Printf.sprintf
            "team_session_oas_bridge: failed to resolve worker tool schemas: %s"
+           msg)
+
+let supported_local_worker_tools_for_scope execution_scope =
+  match
+    Agent_tool_surfaces.local_worker_tool_schemas
+      ~names:(supported_local_worker_tool_names_for_scope execution_scope)
+      ()
+  with
+  | Ok schemas -> Ok schemas
+  | Error msg ->
+      Error
+        (Printf.sprintf
+           "team_session_oas_bridge: failed to resolve scoped worker tool schemas: %s"
            msg)
 
 let add_string_field_if_missing key value fields =
@@ -153,10 +197,29 @@ let dispatch_supported_tool ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.conf
 let parse_tool_json body =
   try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
 
+let int_member_opt key json =
+  match Yojson.Safe.Util.member key json with
+  | `Int value -> Some value
+  | `Intlit raw -> int_of_string_opt raw
+  | _ -> None
+
 let repair_loop_status_of_body body =
   match parse_tool_json body with
   | Some json -> Tool_repair_loop_types.status_of_json json
   | None -> None
+
+let repair_loop_iteration_budget body =
+  match parse_tool_json body with
+  | Some json ->
+      let attempt_count =
+        Option.value ~default:0 (int_member_opt "attempt_count" json)
+      in
+      let max_attempts =
+        Option.value ~default:(max 1 (attempt_count + 1))
+          (int_member_opt "max_attempts" json)
+      in
+      max 1 (min 64 (max_attempts - attempt_count + 1))
+  | None -> 16
 
 let run_repair_loop_until_terminal_with
     ~(dispatch_tool : name:string -> args:Yojson.Safe.t -> bool * string)
@@ -169,22 +232,26 @@ let run_repair_loop_until_terminal_with
   | Some started_json -> (
       match Yojson.Safe.Util.member "loop_id" started_json with
       | `String loop_id ->
-          let rec loop last_ok last_body =
+          let rec loop remaining last_ok last_body =
             match repair_loop_status_of_body last_body with
             | Some status when Tool_repair_loop_types.is_terminal_status status ->
                 (last_ok, last_body)
+            | Some _ when remaining <= 0 ->
+                ( false,
+                  Printf.sprintf
+                    "repair loop iteration guard exceeded for %s" loop_id )
             | Some _ ->
                 let iterate_ok, iterate_body =
                   dispatch_tool ~name:"masc_repair_loop_iterate"
                     ~args:(`Assoc [ ("loop_id", `String loop_id) ])
                 in
-                if not iterate_ok && Option.is_none (parse_tool_json iterate_body) then
+                if not iterate_ok then
                   (iterate_ok, iterate_body)
                 else
-                  loop iterate_ok iterate_body
+                  loop (remaining - 1) iterate_ok iterate_body
             | None -> (last_ok, last_body)
           in
-          loop started_ok started_body
+          loop (repair_loop_iteration_budget started_body) started_ok started_body
       | _ -> (started_ok, started_body))
 
 let run_repair_loop_until_terminal ~sw ~(clock : _ Eio.Time.clock)
@@ -193,6 +260,17 @@ let run_repair_loop_until_terminal ~sw ~(clock : _ Eio.Time.clock)
     ~dispatch_tool:(fun ~name ~args ->
       dispatch_supported_tool ~sw ~clock ~config ~name ~args)
     args
+
+let slot_aware_concurrency_cap ~entry_count ~selection_count ~all_discovered
+    ~endpoints_found ~total =
+  if entry_count <= 1 || selection_count <= 0 then
+    entry_count
+  (* Multiple worker selections can legitimately collapse onto one discovered
+     local endpoint, so endpoint coverage is not a 1:1 proxy for slot count. *)
+  else if all_discovered && endpoints_found > 0 && total > 0 then
+    total
+  else
+    entry_count
 
 (* ── Role mapping ──────────────────────────────────────────────── *)
 
@@ -473,6 +551,15 @@ let planned_worker_to_entry_with_state
   let cascade_name = cascade_of_worker ~session_cascade pw in
   let max_turns = Option.value ~default:10 pw.max_turns in
   let telemetry_ref = ref Swarm.Swarm_types.empty_telemetry in
+  let scoped_tool_names =
+    supported_local_worker_tool_names_for_scope pw.execution_scope
+  in
+  let scoped_masc_tools =
+    List.filter
+      (fun (tool : Types.tool_schema) ->
+        List.mem tool.name scoped_tool_names)
+      masc_tools
+  in
   let system_prompt =
     Printf.sprintf "You are agent '%s' in a team session (room: %s). Your role: %s."
       name config.base_path
@@ -489,13 +576,16 @@ let planned_worker_to_entry_with_state
         ~args:(normalize_tool_args ~tool_name ~agent_name:name args)
     in
     let contract = Option.map (fun dc ->
-      let tool_names = List.map (fun (t : Types.tool_schema) -> t.name) masc_tools in
+      let tool_names =
+        List.map (fun (t : Types.tool_schema) -> t.name) scoped_masc_tools
+      in
       Contract_composer.compose ~delivery_contract:dc ~tool_names
     ) delivery_contract in
     match
       Oas_worker.run_named_with_masc_tools
         ~cascade_name ~goal:prompt ~system_prompt
-        ~masc_tools ~dispatch:dispatch_with_defaults ~max_turns
+        ~masc_tools:scoped_masc_tools ~dispatch:dispatch_with_defaults
+        ~max_turns
         ~temperature:(Cascade_inference.resolve_temperature
           ~cascade_name ~fallback:(fun () -> 0.3))
         ~max_tokens:(Cascade_inference.resolve_max_tokens
@@ -577,21 +667,27 @@ let session_to_swarm_config
   in
   (* Slot-aware max_concurrent_agents for local-only sessions *)
   let slot_aware_cap =
-    let all_selections =
-      session.planned_workers
-      |> List.map (fun pw ->
-           cascade_of_worker ~session_cascade:session.model_cascade pw)
-      |> List.sort_uniq String.compare
-    in
-    let config_path = Oas_worker.default_config_path () in
-    let cap =
-      Llm_provider.Cascade_config.local_capacity_for_selections
-        ~sw ~net ?config_path all_selections
-    in
-    if cap.all_discovered && cap.endpoints_found > 0 && cap.total > 0
-       && cap.endpoints_found >= List.length all_selections
-    then cap.total
-    else entry_count
+    if entry_count <= 1 then
+      entry_count
+    else
+      let all_selections =
+        session.planned_workers
+        |> List.map (fun pw ->
+             cascade_of_worker ~session_cascade:session.model_cascade pw)
+        |> List.sort_uniq String.compare
+      in
+      match all_selections with
+      | [] -> entry_count
+      | _ ->
+          let config_path = Oas_worker.default_config_path () in
+          let cap =
+            Llm_provider.Cascade_config.local_capacity_for_selections
+              ~sw ~net ?config_path all_selections
+          in
+          slot_aware_concurrency_cap ~entry_count
+            ~selection_count:(List.length all_selections)
+            ~all_discovered:cap.all_discovered
+            ~endpoints_found:cap.endpoints_found ~total:cap.total
   in
   { entries; mode;
     convergence = make_convergence_metric ~entry_count success_by_agent;

@@ -63,19 +63,7 @@ let risk_rank = function
 let max_risk left right =
   if risk_rank left >= risk_rank right then left else right
 
-let unique_preserve_order items =
-  let seen = Hashtbl.create (List.length items) in
-  let rec loop rev_items = function
-    | [] -> List.rev rev_items
-    | x :: xs ->
-        if Hashtbl.mem seen x then
-          loop rev_items xs
-        else begin
-          Hashtbl.add seen x ();
-          loop (x :: rev_items) xs
-        end
-  in
-  loop [] items
+let unique_preserve_order = Json_util.dedupe_keep_order
 
 let dedupe_schemas (schemas : Types.tool_schema list) =
   let seen = Hashtbl.create (List.length schemas) in
@@ -173,16 +161,16 @@ let make_seed ?capability_id ?(risk_class = Safe)
   }
 
 let spawned_agent_public_tool_names : string list =
-  Agent_tool_surfaces.spawned_agent_public_tool_names
+  Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent
 
 let spawned_agent_prefixed_tools : string list =
-  Agent_tool_surfaces.spawned_agent_prefixed_tools
+  prefixed_tool_names (Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent)
 
 let mdal_auditable_tool_names : string list =
-  Agent_tool_surfaces.mdal_auditable_tool_names
+  Tool_catalog.tools_for_surface Tool_catalog.Mdal_auditable
 
 let local_worker_public_tool_names : string list =
-  Agent_tool_surfaces.local_worker_public_tool_names
+  Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 
 let local_worker_internal_schemas : Types.tool_schema list =
   Agent_tool_surfaces.local_worker_internal_schemas

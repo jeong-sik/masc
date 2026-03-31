@@ -25,6 +25,53 @@ let destructive_check_tools =
 let keeper_denied_tools =
   Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
 
+(** Percent-encode field value for structured [tool_skipped] output.
+    Matches [Keeper_agent_run.escape_field_value] encoding.
+    Local copy to avoid circular dependency. *)
+let escape_field s =
+  let buf = Buffer.create (String.length s * 3 / 2 + 1) in
+  String.iter (fun ch ->
+    match ch with
+    | ' ' -> Buffer.add_string buf "%20"
+    | '=' -> Buffer.add_string buf "%3D"
+    | '\n' -> Buffer.add_string buf "%0A"
+    | '\r' -> Buffer.add_string buf "%0D"
+    | '\t' -> Buffer.add_string buf "%09"
+    | '%' -> Buffer.add_string buf "%25"
+    | _ -> Buffer.add_char buf ch) s;
+  Buffer.contents buf
+
+(** Render structured skip reason for inline Override injection.
+    The LLM sees this as the ToolResult content immediately within
+    the same turn, enabling in-turn reasoning about alternatives.
+    @since Phase 8 — Skip→Override migration *)
+let render_inline_skip_reason ~tool_name ~reason_code ~reason_text : string =
+  let replacement_hint =
+    match (Tool_catalog.metadata tool_name).Tool_catalog.replacement with
+    | Some replacement ->
+      Printf.sprintf " replacement=%s" (escape_field replacement)
+    | None -> ""
+  in
+  Printf.sprintf
+    "[tool_skipped] tool=%s source=keeper_hook code=%s reason=%s%s"
+    (escape_field tool_name)
+    (escape_field reason_code)
+    (escape_field reason_text)
+    replacement_hint
+
+(** Broadcast a tool skip event via SSE for dashboard visibility. *)
+let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
+  (try
+    Sse.broadcast
+      (`Assoc [
+        ("type", `String "keeper_tool_skipped");
+        ("name", `String keeper_name);
+        ("tool_name", `String tool_name);
+        ("reason_code", `String reason_code);
+        ("ts_unix", `Float (Unix.gettimeofday ()));
+      ])
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+
 (** Extract command or content string from tool input JSON for screening.
     Reads "command", "cmd" (keeper_github), or "content" keys. *)
 let extract_command_from_input (input : Yojson.Safe.t) : string =
@@ -58,8 +105,7 @@ let emit_cost_event
   let path = Filename.concat masc_root "costs.jsonl" in
   let entry = `Assoc [
     ("agent", `String agent_name);
-    ("task_id",
-      (match task_id with Some t -> `String t | None -> `Null));
+    ("task_id", Json_util.string_opt_to_json task_id);
     ("model", `String model);
     ("input_tokens", `Int input_tokens);
     ("output_tokens", `Int output_tokens);
@@ -92,10 +138,10 @@ let emit_cost_event
     @param on_tool_executed Optional callback after each tool execution
     @param trajectory_acc Optional trajectory accumulator for cost attribution *)
 let make_hooks
-    ~(config : Room.config)
+    ~config:(_config : Room.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
-    ~(session : Keeper_working_context.session_context)
-    ~(ctx_ref : Keeper_working_context.working_context ref)
+    ~session:(_session : Keeper_working_context.session_context)
+    ~ctx_ref:(_ctx_ref : Keeper_working_context.working_context ref)
     ~(generation : int)
     ?(max_cost_usd : float option)
     ?(destructive_check : bool = true)
@@ -104,9 +150,6 @@ let make_hooks
     ?(trajectory_acc : Trajectory.accumulator option)
     ()
   : Agent_sdk.Hooks.hooks =
-  ignore config;
-  ignore session;
-  ignore ctx_ref;
   let sse_turn_complete = "keeper_turn_complete" in
   let board_write_tools =
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
@@ -175,7 +218,11 @@ let make_hooks
           | Error { Agent_sdk.Types.message; _ } ->
             Printf.sprintf "error: %s" message
         in
-        on_tool_executed tool_name input output_text;
+        (try on_tool_executed tool_name input output_text
+         with Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
+                (!meta_ref).name tool_name (Printexc.to_string exn));
         if List.mem tool_name board_write_tools then
           Log.Keeper.info "keeper:%s social_event tool=%s"
             (!meta_ref).name tool_name;
@@ -185,28 +232,48 @@ let make_hooks
     pre_tool_use = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
+        let keeper_name = (!meta_ref).name in
         (* Safety gate 0: Keeper deny list *)
         if List.mem tool_name keeper_denied_tools then begin
           Log.Keeper.warn "keeper:%s deny list: blocked %s"
-            (!meta_ref).name tool_name;
-          Agent_sdk.Hooks.Skip
+            keeper_name tool_name;
+          broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code:"keeper_deny";
+          Agent_sdk.Hooks.Override
+            (render_inline_skip_reason
+               ~tool_name
+               ~reason_code:"keeper_deny"
+               ~reason_text:"tool is on the keeper deny list")
         end
         else
         (* Safety gate 1: Cost budget *)
         (match max_cost_usd with
          | Some limit when accumulated_cost_usd >= limit ->
+           let reason_text =
+             Printf.sprintf "accumulated_cost_usd=%.4f exceeded limit=%.4f"
+               accumulated_cost_usd limit
+           in
            Log.Keeper.warn "keeper:%s cost gate: $%.4f >= $%.4f limit, skipping %s"
-             (!meta_ref).name accumulated_cost_usd limit tool_name;
-           Agent_sdk.Hooks.Skip
+             keeper_name accumulated_cost_usd limit tool_name;
+           broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code:"cost_gate";
+           Agent_sdk.Hooks.Override
+             (render_inline_skip_reason
+                ~tool_name ~reason_code:"cost_gate" ~reason_text)
          | _ ->
            (* Safety gate 2: Destructive pattern detection *)
            if destructive_check && List.mem tool_name destructive_check_tools then
              let cmd = extract_command_from_input input in
              match Eval_gate.detect_destructive cmd with
              | Some (pattern, desc) ->
+               let reason_text =
+                 Printf.sprintf "pattern='%s' (%s)" pattern desc
+               in
                Log.Keeper.warn "keeper:%s destructive pattern in %s: '%s' (%s)"
-                 (!meta_ref).name tool_name pattern desc;
-               Agent_sdk.Hooks.Skip
+                 keeper_name tool_name pattern desc;
+               broadcast_tool_skipped ~keeper_name ~tool_name
+                 ~reason_code:"destructive_guard";
+               Agent_sdk.Hooks.Override
+                 (render_inline_skip_reason
+                    ~tool_name ~reason_code:"destructive_guard" ~reason_text)
              | None -> Agent_sdk.Hooks.Continue
            else
              Agent_sdk.Hooks.Continue)
@@ -220,3 +287,71 @@ let make_hooks
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
   }
+
+(** Static introspection of hook slot configuration.
+    Returns a JSON summary of which hook slots are active, their gates/effects,
+    and the deny list. Used by the dashboard to display hook status. *)
+let hook_introspection_json
+    ?(max_cost_usd : float option)
+    ?(destructive_check : bool = true)
+    ()
+  : Yojson.Safe.t =
+  let denied_json =
+    `List (List.map (fun s -> `String s) keeper_denied_tools)
+  in
+  let destructive_json =
+    `List (List.map (fun s -> `String s) destructive_check_tools)
+  in
+  `Assoc [
+    ("slots", `Assoc [
+      ("before_turn_params", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_agent_run");
+        ("features", `List [
+          `String "dynamic_context";
+          `String "bm25_progressive_disclosure";
+        ]);
+      ]);
+      ("pre_tool_use", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_hooks_oas");
+        ("gates", `List [
+          `String "keeper_deny_list";
+          `String (if Option.is_some max_cost_usd
+                   then "cost_budget" else "cost_budget_off");
+          `String (if destructive_check
+                   then "destructive_pattern" else "destructive_pattern_off");
+        ]);
+      ]);
+      ("after_turn", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_hooks_oas");
+        ("effects", `List [
+          `String "sse_broadcast";
+          `String "cost_event";
+          `String "metrics";
+        ]);
+      ]);
+      ("post_tool_use", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_hooks_oas");
+        ("features", `List [
+          `String "tool_callback";
+          `String "board_write_detection";
+        ]);
+      ]);
+      ("on_idle", `Assoc [
+        ("active", `Bool true);
+        ("source", `String "keeper_hooks_oas");
+      ]);
+    ]);
+    ("deny_list", denied_json);
+    ("deny_list_count", `Int (List.length keeper_denied_tools));
+    ("destructive_check_tools", destructive_json);
+    ("cost_budget",
+      match max_cost_usd with
+      | Some v ->
+        `Assoc [("max_cost_usd", `Float v); ("active", `Bool true)]
+      | None ->
+        `Assoc [("active", `Bool false)]);
+  ]

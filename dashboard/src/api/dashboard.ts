@@ -289,6 +289,24 @@ export function clearRuntimeParam(paramKey: string): Promise<{ ok: boolean; mess
   return post('/api/v1/governance/params/clear', { param_key: paramKey })
 }
 
+export interface ParamAuditEntry {
+  timestamp: number
+  key: string
+  old_value: unknown
+  new_value: unknown
+  actor: string
+  case_id?: string
+}
+
+export interface ParamAuditResponse {
+  entries: ParamAuditEntry[]
+  count: number
+}
+
+export function fetchParamAudit(limit = 50): Promise<ParamAuditResponse> {
+  return get(`/api/v1/governance/params/audit?limit=${limit}`)
+}
+
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
   return get('/api/v1/dashboard/mission')
 }
@@ -602,6 +620,7 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
 export type KeeperConfigUpdatePayload = {
   // Scope
   execution_scope?: 'observe_only' | 'workspace' | 'local'
+  allowed_paths?: string[]
   // Prompt fields
   goal?: string
   short_goal?: string

@@ -153,19 +153,19 @@ let test_keeper_direct_reply_contracts () =
 
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "cached_surface_or_first_success_json _execution_cache");
   check bool "mission default route serves cached surface immediately" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "cached_surface_or_first_success_json _mission_cache");
   check bool "room truth advertises initializing while execution warms" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
        {|("status", `String "initializing")|});
   check bool "execution render timeout is env-configurable" true
     (file_contains_pattern "lib/dashboard/dashboard_execution.ml"
        "MASC_DASHBOARD_EXECUTION_RENDER_TIMEOUT_S");
   check bool "execution proactive refresh timeout is extended" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S");
   check bool "mission proactive refresh timeout is extended" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
@@ -363,7 +363,7 @@ let test_dashboard_executor_pool_contracts () =
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "run_dashboard_compute ~mode ?net ?mono_clock ~sw ~clock");
   check bool "execution refresh loop uses dashboard compute helper" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~net");
   check bool "server state captures mono_clock for threaded readonly compute" true
     (file_contains_pattern "lib/mcp_server.ml"
@@ -378,7 +378,7 @@ let test_dashboard_executor_pool_contracts () =
     (file_not_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "Eio_context.get_mono_clock ()");
   check bool "execution parameterized path uses dashboard compute helper" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw");
   check bool "server bootstrap wires executor pool into dashboard" true
     (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
@@ -485,6 +485,35 @@ let test_oas_worker_capability_threading_contracts () =
     (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
        "?raw_trace ~proof_ref ?contract ~sw")
 
+let test_team_session_spawn_tool_contracts () =
+  check bool "team session spawn uses explicit masc tools path" true
+    (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
+       "Oas_worker.run_model_with_masc_tools");
+  check bool "team session spawn branches on local spawn agents" true
+    (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
+       "if deps.is_local_spawn_agent prepared.spec.spawn_agent then");
+  check bool "team session spawn keeps non-local model-only path" true
+    (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
+       {|Oas_worker.run_model_by_label
+                          ~model_label:prepared.runtime_model_label
+                          ~goal:prepared.spec.spawn_prompt
+                          ~system_prompt:(Printf.sprintf
+                            "You are agent '%s'. Execute the task and return a clear result."
+                             prepared.spec.spawn_agent)
+                          ~max_turns
+                          ~temperature:(Safe_ops.get_env_float_logged
+                            "MASC_SPAWN_TEMPERATURE" ~default:0.3)
+                          ~max_tokens:(Safe_ops.get_env_int_logged
+                            "MASC_SPAWN_MAX_TOKENS" ~default:4096)
+                          ~priority:Llm_provider.Request_priority.Interactive
+                          ?contract ?net:ctx.net ~sw:ctx.sw|});
+  check bool "team session spawn contract uses scoped tool names" true
+    (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
+       "supported_local_worker_tool_names_for_scope");
+  check bool "team session bridge exposes scoped local worker tools" true
+    (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
+       "supported_local_worker_tool_names_for_scope")
+
 let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
@@ -502,7 +531,7 @@ let test_dashboard_timeout_guard_contracts () =
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        "Transport_metrics.transport_health_json");
   check bool "server dashboard transport health helper uses cached surface" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        {|cached_surface_json _transport_health_cache|});
   check bool "mission refresh dedupes inflight fetches" true
     (file_contains_pattern "dashboard/src/mission-actions.ts"
@@ -513,13 +542,13 @@ let test_dashboard_timeout_guard_contracts () =
 
 let test_room_truth_adaptive_timeout_contracts () =
   check bool "shell fiber uses adaptive timeout" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
        "shell_timeout_s");
   check bool "room-truth timeout configurable via env var" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
        "MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S");
   check bool "shell_warmed tracking exists" true
-    (file_contains_pattern "lib/server/server_dashboard_http.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "_shell_warmed")
 
 let test_mermaid_xss_contracts () =
@@ -559,6 +588,23 @@ let test_router_contract_alignment () =
     (file_contains_pattern "lib/council/router.ml"
        "LLM-routed MoE system.")
 
+let test_runtime_precondition_contracts () =
+  check bool "team session support resolves start env via helper" true
+    (file_contains_pattern "lib/tool_team_session_support.ml"
+       "let team_session_start_env_result");
+  check bool "team session start returns typed precondition error" true
+    (file_contains_pattern "lib/tool_team_session_handlers.ml"
+       {|error_result_typed ~code:Precondition_failed|});
+  check bool "graphql routes expose result-based server state lookup" true
+    (file_contains_pattern "lib/server/server_routes_http_pages.ml"
+       "let get_server_state_result () =");
+  check bool "h2 governance routes use server state guard helper" true
+    (file_contains_pattern "lib/server/server_h2_gateway_routes_extra.ml"
+       "let with_server_state f =");
+  check bool "council deploy action uses unsupported contract wording" true
+    (file_contains_pattern "lib/council/executor.ml"
+       "deploy action unsupported")
+
 let () =
   run "ci_hardening_source"
     [
@@ -592,6 +638,8 @@ let () =
              test_worktree_list_contracts;
            test_case "oas worker capability threading contracts" `Quick
              test_oas_worker_capability_threading_contracts;
+           test_case "team session spawn tool contracts" `Quick
+             test_team_session_spawn_tool_contracts;
            test_case "dashboard timeout guard contracts" `Quick
              test_dashboard_timeout_guard_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
@@ -599,6 +647,8 @@ let () =
              test_http_client_fd_safety_contracts;
            test_case "room-truth adaptive timeout contracts" `Quick
              test_room_truth_adaptive_timeout_contracts;
+           test_case "runtime precondition contracts" `Quick
+             test_runtime_precondition_contracts;
            test_case "router contract alignment" `Quick
              test_router_contract_alignment;
          ]);

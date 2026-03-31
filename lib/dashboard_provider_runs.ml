@@ -49,7 +49,7 @@ let trim_nonempty value =
 let dedupe_keep_order values =
   values
   |> List.filter_map trim_nonempty
-  |> Provider_adapter.dedupe_keep_order
+  |> Json_util.dedupe_keep_order
 
 let string_of_run_status = function
   | Queued -> "queued"
@@ -65,12 +65,10 @@ let run_record_to_json (run : run_record) =
       ("provider", `String run.provider);
       ("model", `String run.model);
       ("created_at", `String run.created_at);
-      ( "started_at",
-        match run.started_at with Some value -> `String value | None -> `Null );
-      ( "finished_at",
-        match run.finished_at with Some value -> `String value | None -> `Null );
-      ("output", match run.output with Some value -> `String value | None -> `Null);
-      ("error", match run.error with Some value -> `String value | None -> `Null);
+      ("started_at", Json_util.string_opt_to_json run.started_at);
+      ("finished_at", Json_util.string_opt_to_json run.finished_at);
+      ("output", Json_util.string_opt_to_json run.output);
+      ("error", Json_util.string_opt_to_json run.error);
     ]
 
 let is_terminal_status = function
@@ -367,18 +365,12 @@ let provider_snapshot_to_json (snapshot : provider_snapshot) =
       ("status", `String snapshot.status);
       ("available", `Bool snapshot.available);
       ("supports_single_agent_run", `Bool snapshot.supports_single_agent_run);
-      ( "default_model",
-        match snapshot.default_model with
-        | Some value -> `String value
-        | None -> `Null );
+      ("default_model", Json_util.string_opt_to_json snapshot.default_model);
       ("model_count", `Int (List.length snapshot.models));
       ("models", `List (List.map (fun model -> `String model) snapshot.models));
       ("source", `String snapshot.source);
-      ( "endpoint_url",
-        match snapshot.endpoint_url with
-        | Some value -> `String value
-        | None -> `Null );
-      ("note", match snapshot.note with Some value -> `String value | None -> `Null);
+      ("endpoint_url", Json_util.string_opt_to_json snapshot.endpoint_url);
+      ("note", Json_util.string_opt_to_json snapshot.note);
     ]
 
 let provider_inventory_json () =

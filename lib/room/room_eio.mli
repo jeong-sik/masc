@@ -279,6 +279,11 @@ val get_recent_events : config -> limit:int -> Yojson.Safe.t list
 
 (** {1 Health & Status} *)
 
+(** In-process counters for [atomic_update_state] attempts and failures.
+    Returns a JSON object with [state_update_attempts], [state_update_failures],
+    and [failure_rate]. *)
+val state_health_counters : unit -> Yojson.Safe.t
+
 (** Run a health check against the backend. *)
 val health_check : config -> (Backend_types.health_result, string) result
 

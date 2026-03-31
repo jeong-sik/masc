@@ -32,7 +32,7 @@ let persisted_summary_json (summary : Autoresearch.persisted_summary) =
       ("best_score", `Float summary.best_score);
       ("best_cycle", `Int summary.best_cycle);
       ( "queued_hypothesis",
-        match summary.queued_hypothesis with Some value -> `String value | None -> `Null );
+        Json_util.string_opt_to_json summary.queued_hypothesis );
       ("total_keeps", `Int summary.total_keeps);
       ("total_discards", `Int summary.total_discards);
       ("max_cycles", `Int summary.max_cycles);
@@ -42,12 +42,12 @@ let persisted_summary_json (summary : Autoresearch.persisted_summary) =
       ("elapsed_s", `Float summary.elapsed_s);
       ("recent_cycles", `List []);
       ( "program_note",
-        match summary.program_note with Some value -> `String value | None -> `Null );
+        Json_util.string_opt_to_json summary.program_note );
       ("warnings", `List (List.map (fun value -> `String value) summary.warnings));
       ("patience", `Int summary.patience);
       ("consecutive_discards", `Int summary.consecutive_discards);
-      ("build_verify_fn", match summary.build_verify_fn with Some cmd -> `String cmd | None -> `Null);
-      ("error", match summary.error_message with Some e -> `String e | None -> `Null);
+      ("build_verify_fn", Json_util.string_opt_to_json summary.build_verify_fn);
+      ("error", Json_util.string_opt_to_json summary.error_message);
     ]
 
 let resolve_loop_id args =
@@ -179,7 +179,7 @@ let status_json (ctx : context) ~loop_id json_fields =
         [
           ("session_id", `String link.session_id);
           ( "operation_id",
-            match link.operation_id with Some value -> `String value | None -> `Null );
+            Json_util.string_opt_to_json link.operation_id );
         ]
     | None ->
         [ ("session_id", `Null); ("operation_id", `Null) ]
@@ -189,7 +189,7 @@ let status_json (ctx : context) ~loop_id json_fields =
     @ link_fields
     @ [
         ( "queued_hypothesis",
-          match queued_hypothesis with Some value -> `String value | None -> `Null );
+          Json_util.string_opt_to_json queued_hypothesis );
       ])
 
 let build_swarm_goal ~goal ~target_file ~program_note =
@@ -229,7 +229,7 @@ let handle_start (ctx : context) args =
         ("source_workdir", `String state.source_workdir);
         ("queued_hypothesis", `Null);
         ("patience", `Int state.patience);
-        ("build_verify_fn", match state.build_verify_fn with Some cmd -> `String cmd | None -> `Null);
+        ("build_verify_fn", Json_util.string_opt_to_json state.build_verify_fn);
         ("warnings", `List (List.map (fun value -> `String value) state.warnings));
       ])
 
@@ -337,18 +337,14 @@ let handle_swarm_start (ctx : context) args =
                       ("loop_id", `String state.loop_id);
                       ("session_id", `String session_id);
                       ( "operation_id",
-                        match operation_id with
-                        | Some value -> `String value
-                        | None -> `Null );
+                        Json_util.string_opt_to_json operation_id );
                       ("artifacts_dir", `String artifacts_dir);
                       ("linked_status", Autoresearch.linked_status_json ~base_path:ctx.base_path link);
                       ( "warnings",
                         `List (List.map (fun w -> `String w) state.warnings) );
                       ("goal", `String params.goal);
                       ( "program_note",
-                        match program_note with
-                        | Some value -> `String value
-                        | None -> `Null );
+                        Json_util.string_opt_to_json program_note );
                     ]))
           )
 

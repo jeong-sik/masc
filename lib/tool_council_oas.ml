@@ -264,6 +264,7 @@ let handle_route _ctx args =
     if by_schema <> "" then by_schema else get_string args "input" ""
   in
   let decision = Council.Router.route query in
+  let r = decision.requirements in
   json_ok (`Assoc [
     ("reason", `String decision.reason);
     ("estimated_cost", `Float decision.estimated_cost);
@@ -274,6 +275,15 @@ let handle_route _ctx args =
         ("model", `String a.model);
         ("tier", `String (Council.Router.show_model_tier a.tier));
       ]) decision.agents));
+    ("requirements", `Assoc [
+      ("reasoning_depth", `Float r.reasoning_depth);
+      ("code_ability", `Float r.code_ability);
+      ("creativity", `Float r.creativity);
+      ("factual_precision", `Float r.factual_precision);
+      ("speed_priority", `Float r.speed_priority);
+    ]);
+    ("match_scores", `Assoc (List.map (fun (name, score) ->
+      (name, `Float score)) decision.match_scores));
   ])
 
 let voting_result_of_args args =
@@ -292,7 +302,7 @@ let voting_result_of_args args =
            "invalid result %S (expected unanimous, majority, deadlock, or escalate)"
            value)
 
-let handle_execute _ctx args =
+let handle_execute ctx args =
   let topic = get_string args "topic" "" in
   if topic = "" then json_err "topic is required"
   else
@@ -300,13 +310,39 @@ let handle_execute _ctx args =
     | Error msg -> json_err msg
     | Ok result ->
         let preview = Council.ExecutorApi.dry_run ~topic ~result in
+        let t0 = Time_compat.now () in
         let outcome = Council.ExecutorApi.execute ~topic ~result in
+        let elapsed_ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
         let matched = Option.is_some outcome in
         let executed =
           match outcome with
           | Some exec -> exec.success
           | None -> false
         in
+        (* Track executor decision in telemetry, gated by toggle *)
+        if Env_config_core.telemetry_enabled () then
+          (match ctx.room_config, outcome with
+           | Some config, Some exec ->
+             let tool_name = Printf.sprintf "executor:%s" topic in
+             (try Telemetry_eio.track_tool_called config
+               ~tool_name ~success:exec.success ~duration_ms:elapsed_ms
+               ~agent_id:ctx.agent_name ~source:"council" ()
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | _ -> ());
+             if not exec.success then begin
+               let msg =
+                 if String.length exec.output > 512
+                 then String.sub exec.output 0 512
+                 else exec.output
+               in
+               (try Telemetry_eio.track_error config
+                 ~code:"executor_failed" ~message:msg ~context:topic
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | _ -> ())
+             end
+           | _ -> ());
         let output =
           match outcome with
           | Some exec when String.trim exec.output <> "" -> exec.output

@@ -4,11 +4,26 @@ open Agent_sdk
 open Alcotest
 open Masc_mcp
 
-let make_test_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
+let autoresearch_allowlist =
+  ["masc_autoresearch_start"; "masc_autoresearch_cycle";
+   "masc_autoresearch_status"; "masc_autoresearch_stop";
+   "masc_autoresearch_inject"; "masc_autoresearch_record_finding";
+   "masc_autoresearch_search_findings";
+   "masc_research_start"; "masc_research_status"]
+
+let make_test_meta ?(name = "test-keeper") ?tool_access ?tool_allowlist ()
+    : Keeper_types.keeper_meta =
+  let tool_access =
+    match tool_access, tool_allowlist with
+    | Some access, _ -> access
+    | None, Some names -> Keeper_types.Restricted names
+    | None, None -> Keeper_types.Unrestricted
+  in
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String name); ("agent_name", `String name);
              ("trace_id", `String "test-trace-001");
-             ("allowed_paths", `List [`String "*"])]) with
+             ("allowed_paths", `List [`String "*"]);
+             ("tool_access", Keeper_types.tool_access_to_json tool_access)]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 
@@ -117,10 +132,14 @@ let test_error_json_is_returned_as_tool_error () =
       with
       | Error { Agent_sdk.Types.message; _ } ->
           let json = Yojson.Safe.from_string message in
-          check bool "error field preserved" true
+          (* After normalization, error results follow {"ok":false,"error":"...","detail":{...}} *)
+          check bool "ok is false" false
+            (Yojson.Safe.Util.(member "ok" json |> to_bool));
+          check bool "error field present" true
             (Option.is_some (Safe_ops.json_string_opt "error" json));
-          check bool "path field preserved" true
-            (Option.is_some (Safe_ops.json_string_opt "path" json))
+          let detail = Yojson.Safe.Util.member "detail" json in
+          check bool "detail preserves path" true
+            (Option.is_some (Safe_ops.json_string_opt "path" detail))
       | Ok _ -> fail "missing file should be surfaced as tool error")
 
 let test_repeated_error_results_are_blocked () =
@@ -235,17 +254,31 @@ let test_failure_tracking_is_independent_per_args () =
             (is_guardrail_message message)
       | Ok _ -> fail "guardrail should block original failing args")
 
-let make_research_meta () : Keeper_types.keeper_meta =
+let make_research_meta ?tool_access ?(tool_allowlist = autoresearch_allowlist) ()
+    : Keeper_types.keeper_meta =
+  let tool_access =
+    match tool_access with
+    | Some access -> access
+    | None -> Keeper_types.Restricted tool_allowlist
+  in
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String "test-researcher");
              ("agent_name", `String "test-researcher");
              ("trace_id", `String "test-trace-research");
-             ("soul_profile", `String "research")]) with
+             ("soul_profile", `String "research");
+             ("tool_access", Keeper_types.tool_access_to_json tool_access)]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_research_meta failed: %s" e)
 
 let test_research_keeper_has_autoresearch_tools () =
-  let meta = make_research_meta () in
+  let meta =
+    make_research_meta
+      ~tool_allowlist:
+        [ "masc_autoresearch_cycle";
+          "masc_autoresearch_start";
+          "masc_autoresearch_status" ]
+      ()
+  in
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_cycle = List.mem "masc_autoresearch_cycle" allowed in
   let has_start = List.mem "masc_autoresearch_start" allowed in
@@ -255,8 +288,8 @@ let test_research_keeper_has_autoresearch_tools () =
   check bool "has status" true has_status
 
 let test_non_research_keeper_has_autoresearch () =
-  (* Mode removal: all keepers get all tools unconditionally *)
-  let meta = make_test_meta () in
+  (* #4003: masc_* deny-by-default; non-research keeper needs allowlist *)
+  let meta = make_test_meta ~tool_allowlist:autoresearch_allowlist () in
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let has_any = List.exists (fun n ->
     String.length n > 18
@@ -264,7 +297,13 @@ let test_non_research_keeper_has_autoresearch () =
   check bool "has autoresearch tools" true has_any
 
 let test_research_model_tools_include_autoresearch () =
-  let meta = make_research_meta () in
+  let meta =
+    make_research_meta
+      ~tool_allowlist:
+        [ "masc_autoresearch_cycle";
+          "masc_autoresearch_status" ]
+      ()
+  in
   let tools = Keeper_exec_tools.keeper_allowed_model_tools meta in
   let has_cycle = List.exists (fun (t : Types_core.tool_schema) ->
     t.name = "masc_autoresearch_cycle") tools in
@@ -338,6 +377,64 @@ let test_library_read_missing_topic () =
     (`Assoc [("topic", `String "nonexistent-topic-xyz-999")]) in
   check bool "missing topic fails" false ok
 
+(* ── normalize_tool_result tests ──────────────────────────── *)
+
+let parse json_str =
+  Yojson.Safe.from_string json_str
+
+let json_bool key json =
+  Yojson.Safe.Util.(member key json |> to_bool)
+
+let json_string key json =
+  Yojson.Safe.Util.(member key json |> to_string)
+
+let test_normalize_success_json () =
+  let raw = {|{"ok":true,"path":"/tmp/a.ml","bytes":42}|} in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:true raw in
+  let json = parse normalized in
+  check bool "ok is true" true (json_bool "ok" json);
+  let result = Yojson.Safe.Util.member "result" json in
+  check string "path preserved" "/tmp/a.ml"
+    Yojson.Safe.Util.(member "path" result |> to_string)
+
+let test_normalize_success_plain_text () =
+  let raw = "📋 No tasks yet." in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:true raw in
+  let json = parse normalized in
+  check bool "ok is true" true (json_bool "ok" json);
+  check string "result is text" "📋 No tasks yet." (json_string "result" json)
+
+let test_normalize_failure_error_field () =
+  let raw = {|{"error":"file not found","path":"/tmp/missing"}|} in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
+  let json = parse normalized in
+  check bool "ok is false" false (json_bool "ok" json);
+  check string "error extracted" "file not found" (json_string "error" json);
+  let detail = Yojson.Safe.Util.member "detail" json in
+  check string "detail preserves path" "/tmp/missing"
+    Yojson.Safe.Util.(member "path" detail |> to_string)
+
+let test_normalize_failure_status_error () =
+  let raw = {|{"status":"error","agent_id":"v1","message":"voice unavailable"}|} in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
+  let json = parse normalized in
+  check bool "ok is false" false (json_bool "ok" json);
+  check string "error from message" "voice unavailable" (json_string "error" json)
+
+let test_normalize_failure_ok_false () =
+  let raw = {|{"ok":false,"error":"command_blocked","reason":"not in allowlist"}|} in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
+  let json = parse normalized in
+  check bool "ok is false" false (json_bool "ok" json);
+  check string "error extracted" "command_blocked" (json_string "error" json)
+
+let test_normalize_failure_plain_text () =
+  let raw = "tool keeper_bash failed (3/5): Unix_error(ENOENT)" in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
+  let json = parse normalized in
+  check bool "ok is false" false (json_bool "ok" json);
+  check string "error is raw text" raw (json_string "error" json)
+
 let () =
   run "Keeper_tools_oas" [
     "make_tools", [
@@ -349,10 +446,18 @@ let () =
       test_case "failure count resets after success" `Quick test_failure_count_resets_after_success;
       test_case "failure tracking is independent per args" `Quick test_failure_tracking_is_independent_per_args;
     ];
+    "normalize_tool_result", [
+      test_case "success JSON wraps under result" `Quick test_normalize_success_json;
+      test_case "success plain text wraps as string" `Quick test_normalize_success_plain_text;
+      test_case "failure extracts error field" `Quick test_normalize_failure_error_field;
+      test_case "failure extracts message from status:error" `Quick test_normalize_failure_status_error;
+      test_case "failure handles ok:false hybrid" `Quick test_normalize_failure_ok_false;
+      test_case "failure plain text wraps as error" `Quick test_normalize_failure_plain_text;
+    ];
     "research_profile", [
       test_case "has autoresearch tools" `Quick test_research_keeper_has_autoresearch_tools;
-      test_case "non-research has autoresearch" `Quick test_non_research_keeper_has_autoresearch;
-      test_case "model tools include autoresearch" `Quick test_research_model_tools_include_autoresearch;
+      test_case "allowlisted non-research has autoresearch" `Quick test_non_research_keeper_has_autoresearch;
+      test_case "allowlisted model tools include autoresearch" `Quick test_research_model_tools_include_autoresearch;
     ];
     "library_tools", [
       test_case "all keepers have library tools" `Quick test_all_keepers_have_library_tools;

@@ -107,11 +107,6 @@ let () =
   register_module_tag ~schemas:Tool_operator.schemas ~tag:Mod_operator;
   register_module_tag ~schemas:Tool_command_plane.schemas ~tag:Mod_command_plane;
   register_module_tag ~schemas:Tool_local_runtime.schemas ~tag:Mod_local_runtime;
-  (* Backward-compatible aliases: old masc_llama_* names route to local_runtime *)
-  register_name_tag ~tool_name:"masc_llama_models" ~tag:Mod_local_runtime;
-  register_name_tag ~tool_name:"masc_llama_runtime_status" ~tag:Mod_local_runtime;
-  register_name_tag ~tool_name:"masc_llama_runtime_bench" ~tag:Mod_local_runtime;
-  register_name_tag ~tool_name:"masc_llama_runtime_verify" ~tag:Mod_local_runtime;
   register_module_tag ~schemas:Tool_team_session.schemas ~tag:Mod_team_session;
   register_module_tag ~schemas:Tool_voice.schemas ~tag:Mod_voice;
   register_module_tag ~schemas:Tool_portal.schemas ~tag:Mod_portal;

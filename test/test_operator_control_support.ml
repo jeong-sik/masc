@@ -38,12 +38,20 @@ let operator_ctx ?mcp_session_id env sw config agent_name :
     agent_name;
     sw;
     clock = Eio.Stdenv.clock env;
-    proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None;
+    proc_mgr = Some (Eio.Stdenv.process_mgr env);
+    net = Some (Eio.Stdenv.net env);
     mcp_session_id;
   }
 
 let team_ctx env sw config agent_name : _ Tool_team_session.context =
-  { config; agent_name; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+  {
+    config;
+    agent_name;
+    sw;
+    clock = Eio.Stdenv.clock env;
+    proc_mgr = Some (Eio.Stdenv.process_mgr env);
+    net = Some (Eio.Stdenv.net env);
+  }
 
 let dispatch_team_exn ctx ~name ~args =
   match Tool_team_session.dispatch ctx ~name ~args with

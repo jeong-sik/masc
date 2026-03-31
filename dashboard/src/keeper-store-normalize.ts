@@ -114,10 +114,15 @@ function normalizeMetricsWindow(raw: unknown): Keeper['metrics_window'] | undefi
 
   const normalized: Keeper['metrics_window'] = {}
   for (const [key, value] of Object.entries(raw)) {
-    // Top-N lists: array of objects with at least one string field
+    // Top-N lists: array of objects with at least one meaningful value
     if (TOP_LIST_KEYS.has(key)) {
       if (!Array.isArray(value)) continue
-      const items = value.filter(item => isRecord(item))
+      const items = value.filter(item => {
+        if (!isRecord(item)) return false
+        return Object.values(item).some(v =>
+          (typeof v === 'string' && v.trim() !== '') || typeof v === 'number',
+        )
+      })
       if (items.length > 0) normalized[key] = items
       continue
     }

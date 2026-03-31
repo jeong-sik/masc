@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-source "$REPO_ROOT/scripts/harness/jsonrpc_sse.sh"
+source "$REPO_ROOT/scripts/harness/lib/mcp_jsonrpc.sh"
 source "$REPO_ROOT/scripts/harness/lib/server_bootstrap.sh"
 
 RUN_ID="${RUN_ID:-keeper-continuity-$(date +%Y%m%d_%H%M%S)-$$}"

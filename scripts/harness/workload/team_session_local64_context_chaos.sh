@@ -2,9 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-source "${ROOT_DIR}/scripts/harness/jsonrpc_sse.sh"
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8945/mcp}"
+MCP_CURL_EXTRA_ARGS="${MCP_CURL_EXTRA_ARGS:---http1.1}"
 COORD_AGENT="${COORD_AGENT:-team-session-local64-context-chaos}"
 WORKER_COUNT="${WORKER_COUNT:-4}"
 PRESSURE_WORKER_COUNT="${PRESSURE_WORKER_COUNT:-2}"
@@ -44,65 +45,12 @@ fi
 
 SESSION_ID=""
 
-jsonrpc_call() {
-  local id="$1"
-  local method="$2"
-  local params="$3"
-  local raw
-  raw="$(curl -sS --http2-prior-knowledge --http1.1 --max-time "$HTTP_TIMEOUT_SEC" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -H "mcp-session-id: $MCP_SESSION_ID" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":$id,\"method\":\"$method\",\"params\":$params}")"
-  jsonrpc_normalize_response "$raw" "$id"
-}
-
-call_tool() {
-  local id="$1"
-  local tool_name="$2"
-  local args_json="$3"
-  jsonrpc_call "$id" "tools/call" "{\"name\":\"$tool_name\",\"arguments\":$args_json}"
-}
-
-extract_text() {
-  jq -r 'try (.result.content[0].text) catch empty'
-}
-
-extract_result() {
-  jq -c 'try (.result.content[0].text | fromjson | if has("result") and .result != null then .result else . end) catch empty'
-}
-
-extract_is_error() {
-  jq -r 'try (.result.isError) catch "true"'
-}
-
-require_json() {
-  local payload="$1"
-  if ! printf '%s' "$payload" | jq -e . >/dev/null 2>&1; then
-    echo "FAIL: invalid payload"
-    printf '%s\n' "$payload"
-    exit 1
-  fi
-}
-
-require_tool_success() {
-  local payload="$1"
-  require_json "$payload"
-  local is_error
-  is_error="$(printf '%s' "$payload" | extract_is_error)"
-  if [ "$is_error" = "true" ]; then
-    echo "FAIL: tool returned isError=true"
-    printf '%s\n' "$payload" | extract_text
-    exit 1
-  fi
-}
-
 require_result_condition() {
   local payload="$1"
   local jq_expr="$2"
   local failure_message="$3"
   local result_json
-  result_json="$(printf '%s' "$payload" | extract_result)"
+  result_json="$(printf '%s' "$payload" | mcp_extract_result)"
   if ! printf '%s' "$result_json" | jq -e "$jq_expr" >/dev/null; then
     echo "FAIL: $failure_message"
     printf '%s\n' "$result_json"
@@ -112,11 +60,11 @@ require_result_condition() {
 
 cleanup() {
   if [ -n "$SESSION_ID" ]; then
-    call_tool 93981 "masc_team_session_stop" \
+    mcp_call_tool 93981 "masc_team_session_stop" \
       "{\"session_id\":\"$SESSION_ID\",\"reason\":\"local64_context_chaos_cleanup\",\"generate_report\":false}" \
       >/dev/null 2>&1 || true
   fi
-  call_tool 93982 "masc_leave" "{\"agent_name\":\"$COORD_AGENT\"}" >/dev/null 2>&1 || true
+  mcp_call_tool 93982 "masc_leave" "{\"agent_name\":\"$COORD_AGENT\"}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -223,17 +171,17 @@ build_spawn_batch() {
 }
 
 echo "[1/8] init + join coordinator"
-init_raw="$(call_tool 93901 "masc_init" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a}')")"
-require_tool_success "$init_raw"
-join_raw="$(call_tool 93902 "masc_join" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a,capabilities:["team-session","local64","operator","context-chaos"]}')")"
-require_tool_success "$join_raw"
+init_raw="$(mcp_call_tool 93901 "masc_init" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a}')")"
+mcp_require_tool_ok "$init_raw"
+join_raw="$(mcp_call_tool 93902 "masc_join" "$(jq -cn --arg a "$COORD_AGENT" '{agent_name:$a,capabilities:["team-session","local64","operator","context-chaos"]}')")"
+mcp_require_tool_ok "$join_raw"
 
 echo "[2/8] start local64 context-chaos session"
 start_args="$(jq -cn --arg goal "$GOAL" --argjson duration "$SESSION_DURATION_SEC" \
   '{goal:$goal,duration_seconds:$duration,checkpoint_interval_sec:20,min_agents:1,orchestration_mode:"assist",communication_mode:"hybrid",scale_profile:"local64",fallback_policy:"strict_local_only",instruction_profile:"strict",alert_channel:"both",report_formats:["markdown","json"],agents:["team-session-local64-context-chaos"]}')"
-start_raw="$(call_tool 93903 "masc_team_session_start" "$start_args")"
-require_tool_success "$start_raw"
-SESSION_ID="$(printf '%s' "$start_raw" | extract_result | jq -r '.session_id // empty')"
+start_raw="$(mcp_call_tool 93903 "masc_team_session_start" "$start_args")"
+mcp_require_tool_ok "$start_raw"
+SESSION_ID="$(printf '%s' "$start_raw" | mcp_extract_result | jq -r '.session_id // empty')"
 if [ -z "$SESSION_ID" ]; then
   echo "FAIL: session_id missing"
   printf '%s\n' "$start_raw"
@@ -242,16 +190,16 @@ fi
 echo "session_id=$SESSION_ID"
 
 echo "[3/8] inspect runtime pool"
-runtime_raw="$(call_tool 93904 "masc_llama_runtime_status" '{"include_models":true}')"
-require_tool_success "$runtime_raw"
+runtime_raw="$(mcp_call_tool 93904 "masc_llama_runtime_status" '{"include_models":true}')"
+mcp_require_tool_ok "$runtime_raw"
 require_result_condition "$runtime_raw" '.runtime_count >= 1 and .configured_capacity >= 1' "runtime status missing local64 runtime data"
 
 echo "[4/8] spawn pressure batch (spawn_timeout=${SPAWN_TIMEOUT_SEC}s http_timeout=${HTTP_TIMEOUT_SEC}s workers=${WORKER_COUNT} pressure=${PRESSURE_WORKER_COUNT})"
 spawn_batch_json="$(build_spawn_batch "$SESSION_ID" "$WORKER_COUNT" "$PRESSURE_WORKER_COUNT" "$LLAMA_SWARM_MODEL")"
 step_args="$(jq -cn --arg s "$SESSION_ID" --arg a "$COORD_AGENT" --argjson batch "$spawn_batch_json" --argjson timeout "$SPAWN_TIMEOUT_SEC" \
   '{session_id:$s,actor:$a,spawn_batch:$batch,spawn_timeout_seconds:$timeout}')"
-step_raw="$(call_tool 93905 "masc_team_session_step" "$step_args")"
-require_tool_success "$step_raw"
+step_raw="$(mcp_call_tool 93905 "masc_team_session_step" "$step_args")"
+mcp_require_tool_ok "$step_raw"
 require_result_condition "$step_raw" '
   if .spawn == null then false
   else
@@ -273,8 +221,8 @@ echo "[5/8] wait for events to settle"
 sleep "$WAIT_AFTER_SPAWN_SEC"
 
 echo "[6/8] verify team session status visibility"
-status_raw="$(call_tool 93906 "masc_team_session_status" "$(jq -cn --arg s "$SESSION_ID" '{session_id:$s}')")"
-require_tool_success "$status_raw"
+status_raw="$(mcp_call_tool 93906 "masc_team_session_status" "$(jq -cn --arg s "$SESSION_ID" '{session_id:$s}')")"
+mcp_require_tool_ok "$status_raw"
 require_result_condition "$status_raw" '
   .summary.scale_profile == "local64"
   and (.summary.planned_worker_count >= '"$WORKER_COUNT"')
@@ -286,8 +234,8 @@ require_result_condition "$status_raw" '
 ' "session status did not expose local64 pressure visibility"
 
 echo "[7/8] verify operator digest"
-digest_raw="$(call_tool 93907 "masc_operator_digest" '{"target_type":"room"}')"
-require_tool_success "$digest_raw"
+digest_raw="$(mcp_call_tool 93907 "masc_operator_digest" '{"target_type":"room"}')"
+mcp_require_tool_ok "$digest_raw"
 require_result_condition "$digest_raw" '
   ((.role_census.manager // 0) >= 1)
   and ((.role_census.metacog // 0) >= 1)
@@ -297,8 +245,8 @@ require_result_condition "$digest_raw" '
 ' "operator digest did not expose local64 census/runtime state"
 
 echo "[8/8] benchmark runtime pool"
-bench_raw="$(call_tool 93908 "masc_llama_runtime_bench" '{"parallelism":8,"rounds":1,"runtime_pool":"local64"}')"
-require_tool_success "$bench_raw"
+bench_raw="$(mcp_call_tool 93908 "masc_llama_runtime_bench" '{"parallelism":8,"rounds":1,"runtime_pool":"local64"}')"
+mcp_require_tool_ok "$bench_raw"
 require_result_condition "$bench_raw" '.total_requests >= 1 and .per_runtime_breakdown != null' "runtime bench did not return local64 breakdown"
 
 echo "PASS: local64 context chaos session=${SESSION_ID} workers=${WORKER_COUNT} pressure_workers=${PRESSURE_WORKER_COUNT}"

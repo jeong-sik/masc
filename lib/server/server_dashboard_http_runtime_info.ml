@@ -290,7 +290,15 @@ let current_worktree_results_dir (config : Room.config) =
   let cwd = Sys.getcwd () in
   let worktrees_root = Filename.concat config.base_path ".worktrees" in
   if path_descends_from ~root:worktrees_root cwd then
-    Some (Filename.concat cwd "benchmarks/results")
+    let rel = String.sub cwd (String.length worktrees_root + 1)
+        (String.length cwd - String.length worktrees_root - 1) in
+    let worktree_name =
+      match String.index_opt rel '/' with
+      | Some i -> String.sub rel 0 i
+      | None -> rel
+    in
+    let worktree_root = Filename.concat worktrees_root worktree_name in
+    Some (Filename.concat worktree_root "benchmarks/results")
   else None
 
 let display_benchmark_path (config : Room.config) path =
@@ -305,7 +313,11 @@ let display_benchmark_path (config : Room.config) path =
       else Filename.basename path
 
 let benchmark_results_dir_candidates (config : Room.config) =
-  let env_dir = Sys.getenv_opt "MASC_BENCHMARK_RESULTS_DIR" in
+  let env_dir =
+    match Sys.getenv_opt "MASC_BENCHMARK_RESULTS_DIR" with
+    | Some "" | None -> None
+    | some -> some
+  in
   let scoped_dirs =
     [
       Option.value ~default:"" (current_worktree_results_dir config);

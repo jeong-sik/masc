@@ -147,6 +147,9 @@ let execute_spawn_pipeline
                     in
                     let unexpected_failure ~elapsed_ms error =
                       let output_preview = deps.truncate_for_event error in
+                      Log.Spawn.error
+                        "spawn worker failed (worker_run_id=%s, agent=%s): %s"
+                        prepared.worker_run_id worker_name error;
                       release_prepared_runtime prepared ~success:false ~error
                         ~latency_ms:elapsed_ms ();
                       persist_worker_run_snapshot

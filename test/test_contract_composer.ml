@@ -65,6 +65,20 @@ let test_compose_observe_only_shell_exec () =
   check (option string) "observe_only shell_exec does not require review"
     None rc.runtime_constraints.review_requirement
 
+let test_compose_observe_only_file_write () =
+  let dc = make_dc () in
+  let rc =
+    CC.compose ~delivery_contract:dc ~tool_names:["file_write"]
+      ~execution_scope:(Some Team_session_types.Observe_only)
+  in
+  check string "observe_only file_write stays low"
+    "low"
+    (Agent_sdk.Risk_class.to_string rc.runtime_constraints.risk_class);
+  check (list string) "observe_only file_write does not allow mutations"
+    [] rc.runtime_constraints.allowed_mutations;
+  check (option string) "observe_only file_write does not require review"
+    None rc.runtime_constraints.review_requirement
+
 let test_eval_criteria_fields () =
   let dc = make_dc ~acceptance_checks:["lint"; "test"]
     ~required_artifacts:["a.ml"; "b.ml"] () in
@@ -164,6 +178,8 @@ let () =
       "high risk → review required", `Quick, test_compose_high_risk_review;
       "observe_only shell_exec stays low", `Quick,
       test_compose_observe_only_shell_exec;
+      "observe_only file_write stays low", `Quick,
+      test_compose_observe_only_file_write;
       "eval_criteria fields", `Quick, test_eval_criteria_fields;
       "keeper bridge workspace", `Quick, test_keeper_bridge_compose_workspace;
       "keeper bridge read_only", `Quick, test_keeper_bridge_compose_read_only;

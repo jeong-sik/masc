@@ -114,6 +114,15 @@ let test_observe_only_shell_exec_is_read_only () =
   check_risk "observe_only shell_exec stays low risk" Agent_sdk.Risk_class.Low
     risk
 
+let test_observe_only_file_write_is_read_only () =
+  let dc = make_dc ~required_artifacts:["readme"] ~repair_budget:3 () in
+  let risk =
+    Masc_mcp.Contract_risk.of_delivery_contract ~execution_scope:(Some Team_session_types.Observe_only)
+      ~delivery_contract:dc ~tool_names:["file_write"]
+  in
+  check_risk "observe_only file_write stays low risk" Agent_sdk.Risk_class.Low
+    risk
+
 let test_file_write_is_workspace_mutation () =
   let dc = make_dc ~required_artifacts:["readme"] ~repair_budget:3 () in
   let risk =
@@ -137,6 +146,8 @@ let () =
       "shell_exec is external effect", `Quick, test_shell_exec_is_external_effect;
       "observe_only shell_exec stays read-only", `Quick,
       test_observe_only_shell_exec_is_read_only;
+      "observe_only file_write stays read-only", `Quick,
+      test_observe_only_file_write_is_read_only;
       "file_write is workspace mutation", `Quick, test_file_write_is_workspace_mutation;
     ];
   ]

@@ -35,6 +35,14 @@ let external_effect_tools_for_scope = function
         external_effect_tools
   | _ -> external_effect_tools
 
+let workspace_mutating_tools_for_scope = function
+  | Some Team_session_types.Observe_only ->
+      (* observe_only file_write is denied before dispatch, so it should not
+         inflate contract risk when callers preserve the original tool list. *)
+      List.filter (fun name -> not (String.equal name "file_write"))
+        workspace_mutating_tools
+  | _ -> workspace_mutating_tools
+
 (** Blast radius: how many things could break.
     - Large: external-effect tools or 5+ required artifacts
     - Medium: workspace-mutating tools or 2-4 artifacts
@@ -46,7 +54,9 @@ let assess_blast_radius ~(dc : Team_session_types.delivery_contract)
      || artifact_count >= 5
   then
     Large
-  else if has_any tool_names workspace_mutating_tools || artifact_count >= 2 then
+  else if has_any tool_names (workspace_mutating_tools_for_scope execution_scope)
+            || artifact_count >= 2
+  then
     Medium
   else Small
 
@@ -57,7 +67,9 @@ let assess_blast_radius ~(dc : Team_session_types.delivery_contract)
 let assess_irreversibility ~execution_scope ~tool_names =
   if has_any tool_names (external_effect_tools_for_scope execution_scope) then
     Irreversible
-  else if has_any tool_names workspace_mutating_tools then Partial
+  else if has_any tool_names (workspace_mutating_tools_for_scope execution_scope)
+  then
+    Partial
   else Reversible
 
 (** Recovery cost: effort to fix if things go wrong.

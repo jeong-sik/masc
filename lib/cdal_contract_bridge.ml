@@ -10,11 +10,17 @@ let workspace_mutating_tools =
     "file_write";
   ]
 
-let is_workspace_mutating name =
-  List.mem name workspace_mutating_tools
+let workspace_mutating_tools_for_scope = function
+  | Some Team_session_types.Observe_only ->
+      List.filter (fun name -> not (String.equal name "file_write"))
+        workspace_mutating_tools
+  | _ -> workspace_mutating_tools
 
-let allowed_mutations_of_tool_names tool_names =
-  List.filter is_workspace_mutating tool_names
+let is_workspace_mutating ~execution_scope name =
+  List.mem name (workspace_mutating_tools_for_scope execution_scope)
+
+let allowed_mutations_of_tool_names ~execution_scope tool_names =
+  List.filter (is_workspace_mutating ~execution_scope) tool_names
 
 let review_requirement_of_risk_class = function
   | Oas.Risk_class.High | Oas.Risk_class.Critical -> Some "human_review"
@@ -50,7 +56,8 @@ let of_delivery_contract
         requested_execution_mode =
           requested_mode_of_repair_budget delivery_contract.repair_budget;
         risk_class;
-        allowed_mutations = allowed_mutations_of_tool_names tool_names;
+        allowed_mutations =
+          allowed_mutations_of_tool_names ~execution_scope tool_names;
         review_requirement = review_requirement_of_risk_class risk_class;
       };
     eval_criteria = build_delivery_eval_criteria delivery_contract;

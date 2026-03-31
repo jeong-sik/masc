@@ -86,7 +86,7 @@ Checked modules:
 
 Command:
 
-- `rg -n "failwith|Option\\.get|Obj\\.magic|List\\.hd|List\\.tl" ...`
+- `rg -n "failwith|Option\\.get|Obj\\.magic|List\\.hd|List\\.tl" lib/oas_*.ml lib/*oas*.ml lib/team_session/team_session_oas_bridge.ml lib/keeper/*oas*.ml -g '!_build'`
   - Result: no matches
   - [evidence] source: local command; checked: 2026-03-31; confidence: High
 

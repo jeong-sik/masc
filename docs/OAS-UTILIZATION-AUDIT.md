@@ -1,6 +1,6 @@
 # MASC-MCP OAS Utilization Audit
 
-Date: 2026-03-25
+Date: 2026-03-31
 OAS Version: 0.99.1 floor (CI/runtime pin on `jeong-sik/oas@61e5314630c3db7b6415b937e83f4beac27897ee`, latest tagged floor `v0.99.1`)
 Snapshot: `main` audit aligned to the current upstream `agent_sdk.opam`; drift is checked against upstream `refs/heads/main`, not GitHub releases
 

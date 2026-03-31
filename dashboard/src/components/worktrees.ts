@@ -4,6 +4,8 @@ import { LoadingState } from './common/feedback-state'
 import { useEffect, useState } from 'preact/hooks'
 import { callMcpTool } from '../api/mcp'
 
+const REFS_HEADS_PREFIX = 'refs/heads/'
+
 interface Worktree {
   id: string
   branch: string
@@ -11,6 +13,148 @@ interface Worktree {
   agent?: string
   task_id?: string
   created_at?: string
+}
+
+function normalizeWorktreeBranch(branch: string): string {
+  if (branch.startsWith(REFS_HEADS_PREFIX)) {
+    return branch.slice(REFS_HEADS_PREFIX.length)
+  }
+  return branch
+}
+
+function normalizeWorktreeEntry(entry: unknown, index: number): Worktree | null {
+  if (!entry || typeof entry !== 'object') {
+    return null
+  }
+
+  const record = entry as Record<string, unknown>
+  const rawPath = record.path ?? record.worktree
+  const path = typeof rawPath === 'string' ? rawPath.trim() : ''
+  const rawBranch = typeof record.branch === 'string' ? record.branch.trim() : ''
+  const branch = normalizeWorktreeBranch(rawBranch)
+
+  if (!path || !branch) {
+    return null
+  }
+
+  return {
+    id:
+      typeof record.id === 'string' && record.id.trim()
+        ? record.id
+        : `${branch}:${path}:${index}`,
+    branch,
+    path,
+    agent: typeof record.agent === 'string' ? record.agent : undefined,
+    task_id:
+      typeof record.task_id === 'string'
+        ? record.task_id
+        : typeof record.taskId === 'string'
+          ? record.taskId
+          : undefined,
+    created_at:
+      typeof record.created_at === 'string'
+        ? record.created_at
+        : typeof record.createdAt === 'string'
+          ? record.createdAt
+          : undefined,
+  }
+}
+
+function collectWorktreeItems(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) {
+    return parsed
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    return []
+  }
+
+  const record = parsed as Record<string, unknown>
+  if (Array.isArray(record.worktrees)) {
+    return record.worktrees
+  }
+  if (Array.isArray(record.items)) {
+    return record.items
+  }
+  return []
+}
+
+function hasWorktreeCollection(parsed: unknown): boolean {
+  if (Array.isArray(parsed)) {
+    return true
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    return false
+  }
+
+  const record = parsed as Record<string, unknown>
+  return Array.isArray(record.worktrees) || Array.isArray(record.items)
+}
+
+function parsePorcelainWorktrees(raw: string): Worktree[] {
+  const blocks = raw
+    .trim()
+    .split(/\n\s*\n/)
+    .map(block => block.trim())
+    .filter(Boolean)
+
+  return blocks
+    .map((block, index) => {
+      let path = ''
+      let branch = ''
+      let detached = false
+
+      for (const line of block.split('\n').map(item => item.trim())) {
+        if (line.startsWith('worktree ')) {
+          path = line.slice('worktree '.length).trim()
+        } else if (line.startsWith('branch ')) {
+          branch = normalizeWorktreeBranch(line.slice('branch '.length).trim())
+        } else if (line === 'detached') {
+          detached = true
+        }
+      }
+
+      if (!path) {
+        return null
+      }
+
+      const label = branch || (detached ? '(detached)' : '')
+      if (!label) {
+        return null
+      }
+
+      return {
+        id: `${label}:${path}:${index}`,
+        branch: label,
+        path,
+      } satisfies Worktree
+    })
+    .filter((item): item is Worktree => item !== null)
+}
+
+export function parseWorktreeResponse(raw: string): Worktree[] {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed)
+    const worktrees = collectWorktreeItems(parsed)
+      .map((entry, index) => normalizeWorktreeEntry(entry, index))
+      .filter((entry): entry is Worktree => entry !== null)
+    if (worktrees.length > 0 || hasWorktreeCollection(parsed)) {
+      return worktrees
+    }
+  } catch {
+    // Fall through to raw text parsing.
+  }
+
+  const porcelainWorktrees = parsePorcelainWorktrees(raw)
+  if (porcelainWorktrees.length > 0) {
+    return porcelainWorktrees
+  }
+
+  return [{ id: 'raw', branch: 'Unknown', path: raw }]
 }
 
 export function Worktrees() {
@@ -23,12 +167,7 @@ export function Worktrees() {
       try {
         setLoading(true)
         const resText = await callMcpTool('masc_worktree_list', {})
-        try {
-          const parsed = JSON.parse(resText)
-          setWorktrees(Array.isArray(parsed) ? parsed : parsed.worktrees || [])
-        } catch {
-          setWorktrees([{ id: 'raw', branch: 'Unknown', path: resText }])
-        }
+        setWorktrees(parseWorktreeResponse(resText))
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : '워크트리 로드 실패')
       } finally {

@@ -1,5 +1,4 @@
 (* MASC Logging System - Structured logging with levels *)
-[@@@warning "-32"]
 
 (** Log levels *)
 type level =

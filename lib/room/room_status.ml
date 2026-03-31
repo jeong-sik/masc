@@ -4,9 +4,9 @@
     including agents, tasks, and message summary. *)
 
 open Types
-open Room_utils [@@warning "-33"]
-open Room_state [@@warning "-33"]
-open Room_multi [@@warning "-33"]
+open Room_utils
+open Room_state
+open Room_multi
 
 (** Get room status *)
 let status config =

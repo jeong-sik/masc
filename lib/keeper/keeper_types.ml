@@ -181,7 +181,7 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
               let tools = Safe_ops.json_string_list "tools" access_json in
               Ok (normalize_tool_access (Restricted tools))
           | _ ->
-              Error "keeper tool_access.tools must be an array")
+              Error "keeper tool_access.tools must be an array or null")
       | Some other ->
           Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
       | None -> Error "keeper tool_access.kind required")

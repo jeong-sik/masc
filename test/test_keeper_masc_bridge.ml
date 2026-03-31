@@ -220,6 +220,33 @@ let test_tool_access_missing_kind_rejected () =
         "meta parse error: Invalid_argument(\"keeper tool_access.kind required\")"
         e
 
+(** Explicit "tools": null is treated as Restricted [] (same as absent). *)
+let test_tool_access_explicit_null_tools () =
+  let meta =
+    match Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String "null-tools");
+          ("agent_name", `String "null-tools");
+          ("trace_id", `String "null-tools-trace");
+          ( "tool_access",
+            `Assoc
+              [
+                ("kind", `String "restricted");
+                ("tools", `Null);
+              ] );
+        ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith e
+  in
+  match meta.Masc_mcp.Keeper_types.tool_access with
+  | Masc_mcp.Keeper_types.Restricted names ->
+      Alcotest.(check int) "explicit null tools defaults empty" 0
+        (List.length names)
+  | Masc_mcp.Keeper_types.Unrestricted ->
+      Alcotest.fail "expected Restricted []"
+
 let test_tool_access_invalid_tools_type_rejected () =
   match Masc_mcp.Keeper_types.meta_of_json
     (`Assoc
@@ -239,7 +266,7 @@ let test_tool_access_invalid_tools_type_rejected () =
   | Error e ->
       Alcotest.(check string)
         "invalid tools type error"
-        "meta parse error: Invalid_argument(\"keeper tool_access.tools must be an array\")"
+        "meta parse error: Invalid_argument(\"keeper tool_access.tools must be an array or null\")"
         e
 
 (** Allowlist also gates shard-sourced masc_* in allowed_tool_names. *)
@@ -365,6 +392,8 @@ let () =
             test_tool_access_invalid_kind_rejected;
           Alcotest.test_case "missing kind rejected" `Quick
             test_tool_access_missing_kind_rejected;
+          Alcotest.test_case "explicit null tools defaults empty" `Quick
+            test_tool_access_explicit_null_tools;
           Alcotest.test_case "invalid tools type rejected" `Quick
             test_tool_access_invalid_tools_type_rejected;
         ] );

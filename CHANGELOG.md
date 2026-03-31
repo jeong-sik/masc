@@ -1,6 +1,27 @@
 # Changelog
 
 
+## [2.191.0] - 2026-03-31
+
+### Added
+- **Proof event linkage** — explicit event linking into proof evidence (#4213).
+- **Dashboard intervene hierarchy** — refined dashboard intervention layout (#4205).
+- **Dashboard executor outcomes** — executor outcomes in monitoring JSON (#4191).
+- **Dashboard AsyncState** — AsyncState<T> infrastructure + 2 component migrations (#4189).
+- **Judge handoff** — live judge handoff from mission (#4208).
+- **OAS perf benchmarking** — improve benchmarking and dashboard visibility (#4214).
+- **Runtime diagnostics** — base-path diagnostics and dual-root guard (#4212).
+
+### Changed
+- **MCP JSON-RPC extraction** — extract JSON-RPC types into mcp_transport_protocol (#4218).
+- **Warning suppressors removed** — remove unjustified suppressors + Cdal_proof.scope fix (#4194).
+- **Team-session scope defaults** — share effective worker scope defaults (#4193).
+
+### Fixed
+- **Board tool dispatch** — register masc_board_* tools in dispatch hashtable (#4223).
+- **Keeper tool access** — fix tool access review follow-up (#4211).
+- **Keeper audit metrics** — repair keeper tool audit metrics (#4197).
+
 ## [2.190.0] - 2026-03-31
 
 ### Added

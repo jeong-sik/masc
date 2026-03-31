@@ -23,6 +23,12 @@ let make_meta ?tool_access ?(tool_denylist = []) () =
   | Ok meta -> meta
   | Error e -> failwith e
 
+let allowed_names_of_json json =
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  match Masc_mcp.Keeper_types.meta_of_json json with
+  | Ok meta -> KET.keeper_allowed_tool_names meta
+  | Error e -> failwith e
+
 let test_inject_stores_filtered_masc () =
   let schemas : Types.tool_schema list =
     [
@@ -133,23 +139,61 @@ let test_preset_with_also_allow_opens_extra_tool () =
   Alcotest.(check bool) "minimal omits board post" false
     (List.mem "keeper_board_post" names)
 
-let test_tool_access_missing_defaults_to_full () =
-  let meta =
-    match Masc_mcp.Keeper_types.meta_of_json
+let test_tool_access_missing_migrates_legacy_standard_policy () =
+  let names =
+    allowed_names_of_json
       (`Assoc
         [
-          ("name", `String "default-full");
-          ("agent_name", `String "default-full");
-          ("trace_id", `String "default-full-trace");
+          ("name", `String "legacy-standard");
+          ("agent_name", `String "legacy-standard");
+          ("trace_id", `String "legacy-standard-trace");
         ])
-    with
-    | Ok meta -> meta
-    | Error e -> failwith e
   in
-  match meta.Masc_mcp.Keeper_types.tool_access with
-  | Masc_mcp.Keeper_types.Preset { preset = Masc_mcp.Keeper_types.Full; also_allow } ->
-      Alcotest.(check (list string)) "full has empty also_allow" [] also_allow
-  | _ -> Alcotest.fail "expected missing tool_access to default to full preset"
+  Alcotest.(check bool) "keeps keeper internal tool" true
+    (List.mem "keeper_time_now" names);
+  Alcotest.(check bool) "keeps legacy standard masc tool" true
+    (List.mem "masc_status" names);
+  Alcotest.(check bool) "does not silently expand to full" false
+    (List.mem "masc_autoresearch_cycle" names)
+
+let test_tool_access_legacy_unrestricted_maps_to_full () =
+  let names =
+    allowed_names_of_json
+      (`Assoc
+        [
+          ("name", `String "legacy-unrestricted");
+          ("agent_name", `String "legacy-unrestricted");
+          ("trace_id", `String "legacy-unrestricted-trace");
+          ("tool_access", `Assoc [ ("kind", `String "unrestricted") ]);
+        ])
+  in
+  Alcotest.(check bool) "full keeps keeper internal tool" true
+    (List.mem "keeper_fs_edit" names);
+  Alcotest.(check bool) "full keeps autoresearch tool" true
+    (List.mem "masc_autoresearch_cycle" names)
+
+let test_tool_access_legacy_restricted_keeps_internal_and_listed_tools () =
+  let names =
+    allowed_names_of_json
+      (`Assoc
+        [
+          ("name", `String "legacy-restricted");
+          ("agent_name", `String "legacy-restricted");
+          ("trace_id", `String "legacy-restricted-trace");
+          ( "tool_access",
+            `Assoc
+              [
+                ("kind", `String "restricted");
+                ("tools", `List [ `String "masc_status" ]);
+              ] );
+        ])
+  in
+  Alcotest.(check bool) "restricted keeps keeper internal tool" true
+    (List.mem "keeper_time_now" names);
+  Alcotest.(check bool) "restricted keeps listed masc tool" true
+    (List.mem "masc_status" names);
+  Alcotest.(check bool) "restricted does not unlock unrelated masc tool" false
+    (List.mem "masc_autoresearch_cycle" names)
 
 let test_tool_access_preset_empty_json_preserved () =
   let meta =
@@ -426,8 +470,12 @@ let () =
         ] );
       ( "meta_json",
         [
-          Alcotest.test_case "missing tool_access defaults to full" `Quick
-            test_tool_access_missing_defaults_to_full;
+          Alcotest.test_case "missing tool_access migrates legacy standard policy" `Quick
+            test_tool_access_missing_migrates_legacy_standard_policy;
+          Alcotest.test_case "legacy unrestricted maps to full" `Quick
+            test_tool_access_legacy_unrestricted_maps_to_full;
+          Alcotest.test_case "legacy restricted keeps internal tools" `Quick
+            test_tool_access_legacy_restricted_keeps_internal_and_listed_tools;
           Alcotest.test_case "preset empty json preserved" `Quick
             test_tool_access_preset_empty_json_preserved;
           Alcotest.test_case "custom empty json preserved" `Quick

@@ -147,8 +147,17 @@ let default_social_model = "bdi_speech_v1"
 
 let normalize_tool_names names =
   names
-  |> List.filter (fun name -> String.trim name <> "")
+  |> List.map String.trim
+  |> List.filter (fun name -> name <> "")
   |> dedupe_keep_order
+
+let legacy_keeper_internal_tool_names =
+  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+
+let legacy_standard_tool_names = Tool_catalog.standard_tools
+
+let migrate_legacy_restricted_tools names =
+  Custom (normalize_tool_names (legacy_keeper_internal_tool_names @ names))
 
 let tool_preset_to_string = function
   | Minimal -> "minimal"
@@ -202,7 +211,12 @@ let tool_access_to_json access =
 let tool_access_of_meta_json (json : Yojson.Safe.t) =
   match Yojson.Safe.Util.member "tool_access" json with
   | `Null ->
-      Ok (Preset { preset = Full; also_allow = [] } |> normalize_tool_access)
+      let legacy_allowlist =
+        match Safe_ops.json_string_list "tool_allowlist" json with
+        | [] -> legacy_standard_tool_names
+        | names -> names
+      in
+      Ok (migrate_legacy_restricted_tools legacy_allowlist)
   | `Assoc _ as access_json -> (
       let kind =
         Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
@@ -231,6 +245,12 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
         | _ -> string_list_field field_name
       in
       match kind with
+      | Some "unrestricted" ->
+          Ok (Preset { preset = Full; also_allow = [] } |> normalize_tool_access)
+      | Some "restricted" -> (
+          match string_list_field_opt "tools" with
+          | Ok tools -> Ok (migrate_legacy_restricted_tools tools)
+          | Error msg -> Error msg)
       | Some "preset" -> (
           let preset_raw =
             Yojson.Safe.Util.member "preset" access_json

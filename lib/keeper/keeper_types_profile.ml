@@ -137,6 +137,23 @@ let dedupe_keep_order items =
         true))
     items
 
+let normalize_name_list items =
+  items
+  |> List.map String.trim
+  |> List.filter (fun item -> item <> "")
+  |> dedupe_keep_order
+
+let normalize_name_list_opt items =
+  match normalize_name_list items with
+  | [] -> None
+  | xs -> Some xs
+
+let normalize_tool_preset_raw raw =
+  let normalized = String.trim (String.lowercase_ascii raw) in
+  match normalized with
+  | "minimal" | "messaging" | "coding" | "research" | "full" -> Some normalized
+  | _ -> None
+
 let first_some = Dashboard_utils.first_some
 
 let canonical_room_scope = function
@@ -302,8 +319,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     Result.bind result (fun () ->
         match str "tool_preset" with
         | Some raw -> (
-            match String.trim (String.lowercase_ascii raw) with
-            | "minimal" | "messaging" | "coding" | "research" | "full" -> Ok ()
+            match normalize_tool_preset_raw raw with
+            | Some _ -> Ok ()
             | _ ->
                 Error
                   (Printf.sprintf
@@ -352,15 +369,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         execution_scope = str "execution_scope";
         tool_preset =
           str "tool_preset"
-          |> Option.map (fun raw -> String.trim (String.lowercase_ascii raw));
-        tool_also_allow =
-          (match strs "tool_also_allow" with
-           | [] -> None
-           | xs -> Some xs);
-        tool_denylist =
-          (match strs "tool_denylist" with
-           | [] -> None
-           | xs -> Some xs);
+          |> Option.bind normalize_tool_preset_raw;
+        tool_also_allow = normalize_name_list_opt (strs "tool_also_allow");
+        tool_denylist = normalize_name_list_opt (strs "tool_denylist");
       })
     result
 
@@ -462,16 +473,22 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                    | xs -> Some xs);
                 execution_scope = Safe_ops.json_string_opt "execution_scope" keeper_json;
                 tool_preset =
-                  Safe_ops.json_string_opt "tool_preset" keeper_json
-                  |> Option.map (fun raw -> String.trim (String.lowercase_ascii raw));
+                  (match Safe_ops.json_string_opt "tool_preset" keeper_json with
+                  | None -> None
+                  | Some raw -> (
+                      match normalize_tool_preset_raw raw with
+                      | Some normalized -> Some normalized
+                      | None ->
+                          Log.Keeper.warn
+                            "persona profile %s has invalid tool_preset '%s'; ignoring"
+                            path raw;
+                          None));
                 tool_also_allow =
-                  (match Safe_ops.json_string_list "tool_also_allow" keeper_json with
-                   | [] -> None
-                   | xs -> Some xs);
+                  normalize_name_list_opt
+                    (Safe_ops.json_string_list "tool_also_allow" keeper_json);
                 tool_denylist =
-                  (match Safe_ops.json_string_list "tool_denylist" keeper_json with
-                   | [] -> None
-                   | xs -> Some xs);
+                  normalize_name_list_opt
+                    (Safe_ops.json_string_list "tool_denylist" keeper_json);
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 

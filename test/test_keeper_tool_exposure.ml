@@ -89,6 +89,23 @@ let test_custom_empty_blocks_all_tools () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check int "custom empty blocks every tool" 0 (List.length tools)
 
+let test_custom_unknown_tool_names_are_dropped () =
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  let meta =
+    make_meta
+      ~tool_access:
+        (Keeper_types.Custom
+           [ "keeper_time_now"; "masc_status"; "totally_unknown_tool" ])
+      ()
+  in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "keeps known keeper tool" true
+    (has_tool "keeper_time_now" tools);
+  check bool "keeps known masc tool" true
+    (has_tool "masc_status" tools);
+  check bool "drops unknown tool" false
+    (has_tool "totally_unknown_tool" tools)
+
 (* ============================================================
    3. Voice tools are always available
    ============================================================ *)
@@ -130,6 +147,12 @@ let test_all_keepers_have_coding_tools () =
     (has_tool "masc_worktree_create" tools);
   check bool "has code search" true
     (has_tool "masc_code_search" tools)
+
+let test_full_preset_includes_keeper_fs_edit () =
+  let meta = make_meta ~preset:Keeper_types.Full () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "has keeper_fs_edit" true
+    (has_tool "keeper_fs_edit" tools)
 
 (* ============================================================
    6. All keepers get autoresearch tools (mode removed)
@@ -365,6 +388,8 @@ let () =
       test_case "has research tools" `Quick test_default_has_research_tools;
       test_case "custom empty blocks all tools" `Quick
         test_custom_empty_blocks_all_tools;
+      test_case "custom unknown tool names are dropped" `Quick
+        test_custom_unknown_tool_names_are_dropped;
     ]);
     ("voice_profile", [
       test_case "messaging preset has voice" `Quick test_messaging_preset_has_voice_tools;
@@ -375,6 +400,8 @@ let () =
     ]);
     ("coding_tools", [
       test_case "all keepers have coding tools" `Quick test_all_keepers_have_coding_tools;
+      test_case "full preset includes keeper_fs_edit" `Quick
+        test_full_preset_includes_keeper_fs_edit;
     ]);
     ("autoresearch_tools", [
       test_case "all keepers have autoresearch" `Quick test_all_keepers_have_autoresearch;

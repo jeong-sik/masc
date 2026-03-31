@@ -45,6 +45,22 @@ type parsed_args = {
   instructions_opt : string option;
 }
 
+let normalize_tool_name_list names =
+  names
+  |> List.map String.trim
+  |> List.filter (fun name -> name <> "")
+  |> dedupe_keep_order
+
+let get_present_tool_name_list_opt args key =
+  match Yojson.Safe.Util.member key args with
+  | `Null -> None
+  | _ -> Some (normalize_tool_name_list (get_string_list args key))
+
+let resolve_tool_name_list ~preferred ~fallback =
+  first_some preferred fallback
+  |> Option.value ~default:[]
+  |> normalize_tool_name_list
+
 let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
@@ -104,16 +120,8 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let continuity_compaction_cooldown_sec_opt =
       Safe_ops.json_int_opt "continuity_compaction_cooldown_sec" args
     in
-    let tool_also_allow_opt =
-      match get_string_list args "tool_also_allow" with
-      | [] -> None
-      | names -> Some names
-    in
-    let tool_denylist_opt =
-      match get_string_list args "tool_denylist" with
-      | [] -> None
-      | names -> Some names
-    in
+    let tool_also_allow_opt = get_present_tool_name_list_opt args "tool_also_allow" in
+    let tool_denylist_opt = get_present_tool_name_list_opt args "tool_denylist" in
     let auto_handoff_opt = get_bool_opt args "auto_handoff" in
     let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
     let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in

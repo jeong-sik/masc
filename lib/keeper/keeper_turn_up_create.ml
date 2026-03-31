@@ -108,12 +108,14 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         (first_some p.tool_preset_opt (preset_of_defaults p.profile_defaults))
     in
     let tool_also_allow =
-      Option.value ~default:[]
-        (first_some p.tool_also_allow_opt p.profile_defaults.tool_also_allow)
+      resolve_tool_name_list
+        ~preferred:p.tool_also_allow_opt
+        ~fallback:p.profile_defaults.tool_also_allow
     in
     let tool_denylist =
-      Option.value ~default:[]
-        (first_some p.tool_denylist_opt p.profile_defaults.tool_denylist)
+      resolve_tool_name_list
+        ~preferred:p.tool_denylist_opt
+        ~fallback:p.profile_defaults.tool_denylist
     in
     let soul_profile =
       Option.value

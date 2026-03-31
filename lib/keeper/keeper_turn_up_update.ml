@@ -85,21 +85,26 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     | Preset current ->
         let preset = Option.value ~default:current.preset p.tool_preset_opt in
         let also_allow =
-          Option.value ~default:current.also_allow p.tool_also_allow_opt
+          resolve_tool_name_list
+            ~preferred:p.tool_also_allow_opt
+            ~fallback:(Some current.also_allow)
         in
         Preset { preset; also_allow }
     | Custom names -> (
         match p.tool_preset_opt with
         | Some preset ->
             let also_allow =
-              Option.value ~default:[]
-                (first_some p.tool_also_allow_opt p.profile_defaults.tool_also_allow)
+              resolve_tool_name_list
+                ~preferred:p.tool_also_allow_opt
+                ~fallback:p.profile_defaults.tool_also_allow
             in
             Preset { preset; also_allow }
         | None -> Custom names)
   in
   let tool_denylist =
-    Option.value ~default:old.tool_denylist p.tool_denylist_opt
+    resolve_tool_name_list
+      ~preferred:p.tool_denylist_opt
+      ~fallback:(Some old.tool_denylist)
   in
   let updated = { old with
     goal;

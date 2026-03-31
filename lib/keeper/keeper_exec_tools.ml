@@ -72,6 +72,9 @@ let keeper_research_loop_tool_names =
 
 let keeper_coding_tool_names = Tool_code_write.tool_names
 
+let keeper_internal_candidate_tool_names =
+  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+
 let keeper_voice_tool_schemas =
   match Tool_shard.get_shard "voice" with
   | Some shard -> shard.tools
@@ -106,7 +109,8 @@ let inject_masc_schemas (schemas : Types.tool_schema list) =
       schemas
 
 let dedupe_tool_names names =
-  dedupe_keep_order (List.filter (fun name -> String.trim name <> "") names)
+  dedupe_keep_order
+    (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 
 let keeper_base_tool_names =
   [ "keeper_time_now"; "keeper_context_status"; "keeper_memory_search" ]
@@ -156,13 +160,7 @@ let keeper_coding_masc_tool_names =
 
 let keeper_all_candidate_tool_names () =
   dedupe_tool_names
-    ( keeper_base_tool_names
-    @ keeper_filesystem_tool_names
-    @ keeper_library_tool_names
-    @ keeper_shell_readonly_tool_names
-    @ keeper_coordination_tool_names
-    @ keeper_board_tool_names
-    @ keeper_voice_tool_names
+    ( keeper_internal_candidate_tool_names
     @ keeper_governance_tool_names
     @ keeper_coding_shard_tool_names
     @ keeper_coding_tool_names
@@ -214,22 +212,54 @@ let resolved_allowlist (meta : keeper_meta) =
       dedupe_tool_names (preset_allowlist preset @ also_allow)
   | Custom allowlist -> dedupe_tool_names allowlist
 
-let filter_by_access ~(meta : keeper_meta) (name : string) : bool =
-  if is_keeper_denied name then false
-  else
-    List.mem name (resolved_allowlist meta)
-    && not (List.mem name meta.tool_denylist)
+type tool_access_lookup = {
+  candidate_names : string list;
+  candidate_set : (string, unit) Hashtbl.t;
+  allow_set : (string, unit) Hashtbl.t;
+  deny_set : (string, unit) Hashtbl.t;
+}
+
+let tool_name_set names =
+  let tbl = Hashtbl.create (max 16 (List.length names)) in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) names;
+  tbl
+
+let tool_access_lookup_of_meta (meta : keeper_meta) =
+  let candidate_names = keeper_all_candidate_tool_names () in
+  let candidate_set = tool_name_set candidate_names in
+  let allow_names =
+    match meta.tool_access with
+    | Preset { preset = Full; _ } -> candidate_names
+    | _ ->
+        resolved_allowlist meta
+        |> List.filter (fun name -> Hashtbl.mem candidate_set name)
+        |> dedupe_tool_names
+  in
+  {
+    candidate_names;
+    candidate_set;
+    allow_set = tool_name_set allow_names;
+    deny_set = tool_name_set meta.tool_denylist;
+  }
+
+let filter_by_access ~(lookup : tool_access_lookup) (name : string) : bool =
+  not (is_keeper_denied name)
+  && Hashtbl.mem lookup.candidate_set name
+  && Hashtbl.mem lookup.allow_set name
+  && not (Hashtbl.mem lookup.deny_set name)
 
 let keeper_masc_tool_names (meta : keeper_meta) : string list =
+  let lookup = tool_access_lookup_of_meta meta in
   !masc_schemas_ref
   |> List.filter_map (fun (schema : Types.tool_schema) ->
-    if filter_by_access ~meta schema.name
+    if filter_by_access ~lookup schema.name
     then Some schema.name
     else None)
 
 let keeper_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
+  let lookup = tool_access_lookup_of_meta meta in
   !masc_schemas_ref
-  |> List.filter (fun (schema : Types.tool_schema) -> filter_by_access ~meta schema.name)
+  |> List.filter (fun (schema : Types.tool_schema) -> filter_by_access ~lookup schema.name)
 
 let keeper_default_model_tools (_meta : keeper_meta) : Types.tool_schema list =
   keeper_model_tools @ keeper_voice_tool_schemas
@@ -240,8 +270,9 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
   if write_done then
     []
   else
-    keeper_all_candidate_tool_names ()
-    |> List.filter (fun name -> filter_by_access ~meta name)
+    let lookup = tool_access_lookup_of_meta meta in
+    lookup.candidate_names
+    |> List.filter (fun name -> filter_by_access ~lookup name)
     |> dedupe_tool_names
 
 (** Return keeper model tool schemas under the active preset/custom policy. *)
@@ -302,7 +333,8 @@ let execute_keeper_tool_call
     ~(name : string) ~(input : Yojson.Safe.t) : string =
   let args = input in
   let now_ts = Time_compat.now () in
-  if not (filter_by_access ~meta name) then
+  let lookup = tool_access_lookup_of_meta meta in
+  if not (filter_by_access ~lookup name) then
     Yojson.Safe.to_string
       (`Assoc [ ("error", `String "tool_not_allowed");
                 ("tool", `String name) ])

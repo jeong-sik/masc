@@ -13,7 +13,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
 
 let dedupe_tool_names names =
   Json_util.dedupe_keep_order
-    (List.filter (fun name -> String.trim name <> "") names)
+    (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 
 let keeper_tools_response_json (meta : Keeper_types.keeper_meta) =
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
@@ -80,6 +80,11 @@ let handle_keeper_tools_post state req reqd =
                | "set_policy" ->
                    let mode = Safe_ops.json_string ~default:"" "mode" args in
                    let preset_raw = Safe_ops.json_string_opt "preset" args in
+                   let allow_present =
+                     match Yojson.Safe.Util.member "allow" args with
+                     | `Null -> false
+                     | _ -> true
+                   in
                    let allow = Safe_ops.json_string_list "allow" args |> dedupe_tool_names in
                    let also_allow =
                      Safe_ops.json_string_list "also_allow" args |> dedupe_tool_names
@@ -103,8 +108,11 @@ let handle_keeper_tools_post state req reqd =
                                  Ok
                                    (Keeper_types.Preset
                                       { preset; also_allow })))
-                     | "custom" ->
-                         Ok (Keeper_types.Custom allow)
+                    | "custom" ->
+                        if not allow_present then
+                          Error "allow required when mode=custom"
+                        else
+                        Ok (Keeper_types.Custom allow)
                      | "full" ->
                          Ok
                            (Keeper_types.Preset

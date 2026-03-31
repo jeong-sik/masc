@@ -15,21 +15,38 @@ let dedupe_tool_names names =
   Json_util.dedupe_keep_order
     (List.filter (fun name -> String.trim name <> "") names)
 
-let keeper_tools_add_allow tool_access tools =
-  let tools = dedupe_tool_names tools in
-  match tool_access, tools with
-  | Keeper_types.Unrestricted, [] -> Keeper_types.Unrestricted
-  | Keeper_types.Unrestricted, _ ->
-      Keeper_types.Restricted tools
-  | Keeper_types.Restricted current, _ ->
-      Keeper_types.Restricted (dedupe_tool_names (current @ tools))
-
-let keeper_tools_remove_allow tool_access tools =
-  match tool_access with
-  | Keeper_types.Unrestricted -> Keeper_types.Unrestricted
-  | Keeper_types.Restricted current ->
-      Keeper_types.Restricted
-        (List.filter (fun name -> not (List.mem name tools)) current)
+let keeper_tools_response_json (meta : Keeper_types.keeper_meta) =
+  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let masc_count =
+    List.length
+      (List.filter (fun name -> String.starts_with ~prefix:"masc_" name) allowed)
+  in
+  let tool_preset = Keeper_types.tool_access_preset meta.tool_access in
+  let tool_also_allow = Keeper_types.tool_access_also_allowlist meta.tool_access in
+  let tool_custom_allowlist =
+    Keeper_types.tool_access_custom_allowlist meta.tool_access
+    |> Option.value ~default:[]
+  in
+  `Assoc
+    [
+      ("ok", `Bool true);
+      ("tool_access", Keeper_types.tool_access_to_json meta.tool_access);
+      ( "tool_policy_mode",
+        `String
+          (match Keeper_types.tool_access_custom_allowlist meta.tool_access with
+           | Some _ -> "custom"
+           | None -> "preset") );
+      ( "tool_preset",
+        match tool_preset with
+        | Some preset -> `String (Keeper_types.tool_preset_to_string preset)
+        | None -> `Null );
+      ("tool_also_allow", `List (List.map (fun s -> `String s) tool_also_allow));
+      ("tool_custom_allowlist", `List (List.map (fun s -> `String s) tool_custom_allowlist));
+      ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
+      ("tool_denylist", `List (List.map (fun s -> `String s) meta.tool_denylist));
+      ("active_masc_tool_count", `Int masc_count);
+      ("total_active", `Int (List.length allowed));
+    ]
 
 (** Handle POST /api/v1/keepers/:name/tools.
     Extracted so it can be called from any prefix_post handler that
@@ -58,39 +75,57 @@ let handle_keeper_tools_post state req reqd =
           (try
              let args = Yojson.Safe.from_string body_str in
              let action = Safe_ops.json_string ~default:"" "action" args in
-             let tools = Safe_ops.json_string_list "tools" args in
-             let allowlist_of_meta (meta : Keeper_types.keeper_meta) =
-               Keeper_types.tool_access_allowlist meta.tool_access
+             let updated_meta =
+               match action with
+               | "set_policy" ->
+                   let mode = Safe_ops.json_string ~default:"" "mode" args in
+                   let preset_raw = Safe_ops.json_string_opt "preset" args in
+                   let allow = Safe_ops.json_string_list "allow" args |> dedupe_tool_names in
+                   let also_allow =
+                     Safe_ops.json_string_list "also_allow" args |> dedupe_tool_names
+                   in
+                   let deny =
+                     Safe_ops.json_string_list "deny" args |> dedupe_tool_names
+                   in
+                   let tool_access_result =
+                     match mode with
+                     | "preset" -> (
+                         match preset_raw with
+                         | None -> Error "preset required when mode=preset"
+                         | Some raw -> (
+                             match Keeper_types.tool_preset_of_string raw with
+                             | None ->
+                                 Error
+                                   (Printf.sprintf
+                                      "invalid tool_preset '%s' (allowed: minimal, messaging, coding, research, full)"
+                                      raw)
+                             | Some preset ->
+                                 Ok
+                                   (Keeper_types.Preset
+                                      { preset; also_allow })))
+                     | "custom" ->
+                         Ok (Keeper_types.Custom allow)
+                     | "full" ->
+                         Ok
+                           (Keeper_types.Preset
+                              { preset = Keeper_types.Full; also_allow = [] })
+                     | "" ->
+                         Error "mode required (preset|custom|full)"
+                     | other ->
+                         Error (Printf.sprintf "unknown mode: %s" other)
+                   in
+                   Result.map
+                     (fun tool_access ->
+                       {
+                         meta with
+                         tool_access;
+                         tool_denylist = deny;
+                         updated_at = Keeper_types.now_iso ();
+                       })
+                     tool_access_result
+               | "" -> Error "action required (set_policy)"
+               | other -> Error (Printf.sprintf "unknown action: %s" other)
              in
-             let updated_meta = match action with
-               | "set_allowlist" ->
-                   Ok { meta with
-                        tool_access = Keeper_types.Restricted (dedupe_tool_names tools);
-                        updated_at = Keeper_types.now_iso () }
-               | "set_unrestricted" ->
-                   Ok { meta with
-                        tool_access = Keeper_types.Unrestricted;
-                        updated_at = Keeper_types.now_iso () }
-               | "set_denylist" ->
-                   Ok { meta with
-                        tool_denylist = dedupe_tool_names tools;
-                        updated_at = Keeper_types.now_iso () }
-               | "add_allow" ->
-                   Ok { meta with
-                        tool_access = keeper_tools_add_allow meta.tool_access tools;
-                        updated_at = Keeper_types.now_iso () }
-               | "remove_allow" ->
-                   Ok { meta with
-                        tool_access = keeper_tools_remove_allow meta.tool_access tools;
-                        updated_at = Keeper_types.now_iso () }
-               | "add_deny" ->
-                   Ok { meta with
-                        tool_denylist = dedupe_tool_names (meta.tool_denylist @ tools);
-                        updated_at = Keeper_types.now_iso () }
-               | "remove_deny" ->
-                   Ok { meta with tool_denylist = List.filter (fun n -> not (List.mem n tools)) meta.tool_denylist; updated_at = Keeper_types.now_iso () }
-               | "" -> Error "action required (set_allowlist|set_unrestricted|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
-               | other -> Error (Printf.sprintf "unknown action: %s" other) in
              (match updated_meta with
              | Error msg ->
                  Http.Response.json ~status:`Bad_request
@@ -101,17 +136,8 @@ let handle_keeper_tools_post state req reqd =
                     keeper turn updated meta between our read and write. *)
                  (match Keeper_types.write_meta ~force:true config meta' with
                   | Ok () ->
-                      let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta' in
-                      let masc_count = List.length (List.filter (fun n -> String.starts_with ~prefix:"masc_" n) allowed) in
-                      let tool_allowlist = allowlist_of_meta meta' in
                       Http.Response.json ~compress:true ~request:req
-                        (Yojson.Safe.to_string (`Assoc [
-                           ("ok", `Bool true);
-                           ("tool_access", Keeper_types.tool_access_to_json meta'.tool_access);
-                           ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
-                           ("tool_denylist", `List (List.map (fun s -> `String s) meta'.tool_denylist));
-                           ("active_masc_tool_count", `Int masc_count);
-                           ("total_active", `Int (List.length allowed))])) reqd
+                        (Yojson.Safe.to_string (keeper_tools_response_json meta')) reqd
                   | Error e ->
                       Http.Response.json ~status:`Internal_server_error
                         (Printf.sprintf {|{"error":"write failed: %s"}|} (String.escaped e)) reqd))

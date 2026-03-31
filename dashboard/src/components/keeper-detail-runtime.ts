@@ -20,7 +20,7 @@ import {
   toolAuditStateLabel,
 } from './common/tool-audit'
 import { ToolAllowlistEditor } from './tools/tool-allowlist-editor'
-import { toolsData, loadTools } from './tools/tool-state'
+import { loadTools } from './tools/tool-state'
 
 const showAllowlistEditor = signal(false)
 
@@ -296,7 +296,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
           class="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
           onClick=${() => {
             showAllowlistEditor.value = !showAllowlistEditor.value
-            if (showAllowlistEditor.value && !toolsData.value) loadTools()
+            if (showAllowlistEditor.value) loadTools()
           }}
         >${showAllowlistEditor.value ? '닫기' : '편집'}</button>
       </div>
@@ -304,8 +304,12 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       ${showAllowlistEditor.value
         ? html`<${ToolAllowlistEditor}
             keeperName=${keeper.name}
-            currentAllowlist=${allowedTools}
-            allToolNames=${(toolsData.value?.tool_inventory?.tools ?? []).map((t: { name: string }) => t.name)}
+            currentMode=${keeper.tool_policy_mode ?? 'preset'}
+            currentPreset=${keeper.tool_preset ?? 'full'}
+            currentAlsoAllow=${keeper.tool_also_allow ?? []}
+            currentCustomAllowlist=${keeper.tool_custom_allowlist ?? []}
+            currentDenylist=${keeper.tool_denylist ?? []}
+            resolvedAllowlist=${allowedTools}
             onUpdated=${() => { showAllowlistEditor.value = false; loadTools() }}
           />`
         : html`

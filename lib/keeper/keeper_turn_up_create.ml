@@ -9,6 +9,9 @@ open Keeper_keepalive
 open Keeper_execution
 open Keeper_turn_up_args
 
+let preset_of_defaults defaults =
+  Option.bind defaults.tool_preset tool_preset_of_string
+
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
@@ -100,6 +103,18 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
     let handoff_threshold = Option.value ~default:0.85 p.handoff_threshold_opt in
     let handoff_cooldown_sec = Option.value ~default:300 p.handoff_cooldown_sec_opt in
+    let tool_preset =
+      Option.value ~default:Full
+        (first_some p.tool_preset_opt (preset_of_defaults p.profile_defaults))
+    in
+    let tool_also_allow =
+      Option.value ~default:[]
+        (first_some p.tool_also_allow_opt p.profile_defaults.tool_also_allow)
+    in
+    let tool_denylist =
+      Option.value ~default:[]
+        (first_some p.tool_denylist_opt p.profile_defaults.tool_denylist)
+    in
     let soul_profile =
       Option.value
         ~default:(Option.value ~default:default_soul_profile p.profile_defaults.soul_profile)
@@ -202,8 +217,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            execution_scope;
            allowed_paths;
            scope_kind;
-           tool_access = Restricted Tool_catalog.standard_tools;
-           tool_denylist = [];
+           tool_access = Preset { preset = tool_preset; also_allow = tool_also_allow };
+           tool_denylist;
            room_scope;
            voice_enabled;
            voice_channel;
@@ -334,6 +349,17 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              ("voice_channel", `String meta.voice_channel);
              ("voice_agent_id", `String meta.voice_agent_id);
              ("social_model", `String meta.social_model);
+             ("tool_access", tool_access_to_json meta.tool_access);
+             ("tool_preset",
+               match tool_access_preset meta.tool_access with
+               | Some preset -> `String (tool_preset_to_string preset)
+               | None -> `Null);
+             ("tool_also_allow",
+               `List
+                 (List.map (fun value -> `String value)
+                    (tool_access_also_allowlist meta.tool_access)));
+             ("tool_denylist",
+               `List (List.map (fun value -> `String value) meta.tool_denylist));
              ("proactive_enabled", `Bool meta.proactive.enabled);
              ("proactive_idle_sec", `Int meta.proactive.idle_sec);
              ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);

@@ -31,6 +31,9 @@ type parsed_args = {
   compaction_message_gate_opt : int option;
   compaction_token_gate_opt : int option;
   continuity_compaction_cooldown_sec_opt : int option;
+  tool_preset_opt : tool_preset option;
+  tool_also_allow_opt : string list option;
+  tool_denylist_opt : string list option;
   auto_handoff_opt : bool option;
   handoff_threshold_opt : float option;
   handoff_cooldown_sec_opt : int option;
@@ -60,6 +63,22 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     match soul_profile_opt_res, compaction_profile_opt_res with
     | Error e, _ | _, Error e -> Error (false, e)
     | Ok soul_profile_opt, Ok compaction_profile_opt ->
+    let tool_preset_opt =
+      match get_string_opt args "tool_preset" with
+      | None -> Ok None
+      | Some raw -> (
+          match tool_preset_of_string raw with
+          | Some preset -> Ok (Some preset)
+          | None ->
+              Error
+                (false,
+                 Printf.sprintf
+                   "invalid tool_preset '%s' (allowed: minimal, messaging, coding, research, full)"
+                   raw))
+    in
+    match tool_preset_opt with
+    | Error e -> Error e
+    | Ok tool_preset_opt ->
     let goal_opt = get_string_opt args "goal" in
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
@@ -84,6 +103,16 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let compaction_token_gate_opt = Safe_ops.json_int_opt "compaction_token_gate" args in
     let continuity_compaction_cooldown_sec_opt =
       Safe_ops.json_int_opt "continuity_compaction_cooldown_sec" args
+    in
+    let tool_also_allow_opt =
+      match get_string_list args "tool_also_allow" with
+      | [] -> None
+      | names -> Some names
+    in
+    let tool_denylist_opt =
+      match get_string_list args "tool_denylist" with
+      | [] -> None
+      | names -> Some names
     in
     let auto_handoff_opt = get_bool_opt args "auto_handoff" in
     let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
@@ -149,6 +178,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       compaction_message_gate_opt;
       compaction_token_gate_opt;
       continuity_compaction_cooldown_sec_opt;
+      tool_preset_opt;
+      tool_also_allow_opt;
+      tool_denylist_opt;
       auto_handoff_opt;
       handoff_threshold_opt;
       handoff_cooldown_sec_opt;

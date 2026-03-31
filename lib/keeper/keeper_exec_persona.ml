@@ -37,6 +37,7 @@ let resolved_keeper_args_to_json
     ~name ~persona_name ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ~soul_profile ~will ~needs ~desires ~policy_voice_enabled
     ~room_scope ~scope_kind ~mention_targets
+    ~tool_preset ~tool_also_allow ~tool_denylist
     ~proactive_enabled ~shards
     ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
   let base =
@@ -56,6 +57,9 @@ let resolved_keeper_args_to_json
       ("room_scope", `String room_scope);
       ("scope_kind", `String scope_kind);
       ("mention_targets", string_list_to_json mention_targets);
+      ("tool_preset", `String (tool_preset_to_string tool_preset));
+      ("tool_also_allow", string_list_to_json tool_also_allow);
+      ("tool_denylist", string_list_to_json tool_denylist);
       ("proactive_enabled", `Bool proactive_enabled);
       ("auto_handoff", `Bool auto_handoff);
       ("handoff_threshold", `Float handoff_threshold);
@@ -195,30 +199,94 @@ let resolved_keeper_args_from_persona args :
               |> first_some defaults.proactive_enabled
               |> Option.value ~default:false
             in
-            let shards =
-              match get_string_list args "shards" with
-              | _ :: _ as xs -> Some xs
-              | [] -> defaults.shards
-            in
-            let auto_handoff = get_bool args "auto_handoff" true in
-            let handoff_threshold =
-              Safe_ops.json_float_opt "handoff_threshold" args
-              |> Option.value ~default:0.85
-            in
-            let handoff_cooldown_sec =
-              Safe_ops.json_int_opt "handoff_cooldown_sec" args
-              |> Option.value ~default:300
-            in
-            let resolved =
-              resolved_keeper_args_to_json
-                ~name
-                ~persona_name
-                ~goal ~short_goal ~mid_goal ~long_goal
-                ~instructions ~soul_profile ~will ~needs ~desires
-                ~policy_voice_enabled
-                ~room_scope ~scope_kind ~mention_targets
-                ~proactive_enabled ~shards
-                ~auto_handoff ~handoff_threshold
-                ~handoff_cooldown_sec
-            in
-            Ok (persona, resolved)
+            (match get_string_opt args "tool_preset" with
+             | Some raw -> (
+                 match tool_preset_of_string raw with
+                 | None ->
+                     Error
+                       (Printf.sprintf
+                          "invalid tool_preset '%s' (allowed: minimal, messaging, coding, research, full)"
+                          raw)
+                 | Some tool_preset ->
+                     let tool_also_allow =
+                       match get_string_list args "tool_also_allow" with
+                       | _ :: _ as xs -> xs
+                       | [] -> Option.value ~default:[] defaults.tool_also_allow
+                     in
+                     let tool_denylist =
+                       match get_string_list args "tool_denylist" with
+                       | _ :: _ as xs -> xs
+                       | [] -> Option.value ~default:[] defaults.tool_denylist
+                     in
+                     let shards =
+                       match get_string_list args "shards" with
+                       | _ :: _ as xs -> Some xs
+                       | [] -> defaults.shards
+                     in
+                     let auto_handoff = get_bool args "auto_handoff" true in
+                     let handoff_threshold =
+                       Safe_ops.json_float_opt "handoff_threshold" args
+                       |> Option.value ~default:0.85
+                     in
+                     let handoff_cooldown_sec =
+                       Safe_ops.json_int_opt "handoff_cooldown_sec" args
+                       |> Option.value ~default:300
+                     in
+                     let resolved =
+                       resolved_keeper_args_to_json
+                         ~name
+                         ~persona_name
+                         ~goal ~short_goal ~mid_goal ~long_goal
+                         ~instructions ~soul_profile ~will ~needs ~desires
+                         ~policy_voice_enabled
+                         ~room_scope ~scope_kind ~mention_targets
+                         ~tool_preset ~tool_also_allow ~tool_denylist
+                         ~proactive_enabled ~shards
+                         ~auto_handoff ~handoff_threshold
+                         ~handoff_cooldown_sec
+                     in
+                     Ok (persona, resolved))
+             | None ->
+                 let tool_preset =
+                   match Option.bind defaults.tool_preset tool_preset_of_string with
+                   | Some preset -> preset
+                   | None -> Full
+                 in
+                 let tool_also_allow =
+                   match get_string_list args "tool_also_allow" with
+                   | _ :: _ as xs -> xs
+                   | [] -> Option.value ~default:[] defaults.tool_also_allow
+                 in
+                 let tool_denylist =
+                   match get_string_list args "tool_denylist" with
+                   | _ :: _ as xs -> xs
+                   | [] -> Option.value ~default:[] defaults.tool_denylist
+                 in
+                 let shards =
+                   match get_string_list args "shards" with
+                   | _ :: _ as xs -> Some xs
+                   | [] -> defaults.shards
+                 in
+                 let auto_handoff = get_bool args "auto_handoff" true in
+                 let handoff_threshold =
+                   Safe_ops.json_float_opt "handoff_threshold" args
+                   |> Option.value ~default:0.85
+                 in
+                 let handoff_cooldown_sec =
+                   Safe_ops.json_int_opt "handoff_cooldown_sec" args
+                   |> Option.value ~default:300
+                 in
+                 let resolved =
+                   resolved_keeper_args_to_json
+                     ~name
+                     ~persona_name
+                     ~goal ~short_goal ~mid_goal ~long_goal
+                     ~instructions ~soul_profile ~will ~needs ~desires
+                     ~policy_voice_enabled
+                     ~room_scope ~scope_kind ~mention_targets
+                     ~tool_preset ~tool_also_allow ~tool_denylist
+                     ~proactive_enabled ~shards
+                     ~auto_handoff ~handoff_threshold
+                     ~handoff_cooldown_sec
+                 in
+                 Ok (persona, resolved))

@@ -206,6 +206,9 @@ type keeper_profile_defaults = {
   shards : string list option;
   allowed_paths : string list option;
   execution_scope : string option;
+  tool_preset : string option;
+  tool_also_allow : string list option;
+  tool_denylist : string list option;
 }
 
 type persona_summary = {
@@ -236,6 +239,9 @@ let empty_keeper_profile_defaults = {
   shards = None;
   allowed_paths = None;
   execution_scope = None;
+  tool_preset = None;
+  tool_also_allow = None;
+  tool_denylist = None;
 }
 
 let personas_root_opt () =
@@ -270,15 +276,17 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     |> List.map k
     |> List.filter (fun key -> List.mem_assoc key doc)
   in
-  (match removed_present with
-   | [] -> Ok ()
-   | fields ->
-       Error
-         (Printf.sprintf
-            "removed keeper TOML keys: %s"
-            (String.concat ", " fields)))
-  |> fun result ->
-  Result.bind result (fun () ->
+  let result =
+    match removed_present with
+    | [] -> Ok ()
+    | fields ->
+        Error
+          (Printf.sprintf
+             "removed keeper TOML keys: %s"
+             (String.concat ", " fields))
+  in
+  let result =
+    Result.bind result (fun () ->
       match str "soul_profile" with
       | Some raw ->
           (match canonical_soul_profile raw with
@@ -289,45 +297,72 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                     raw)
            | Some _ -> Ok ())
       | None -> Ok ())
-  |> Result.map (fun () ->
-       {
-         manifest_path = None;
-         goal = str "goal";
-         short_goal =
-           str "short_goal"
-           |> normalize_goal_horizon_opt;
-         mid_goal =
-           str "mid_goal"
-           |> normalize_goal_horizon_opt;
-         long_goal =
-           str "long_goal"
-           |> normalize_goal_horizon_opt;
-         soul_profile =
-           str "soul_profile"
-           |> Option.map (fun s ->
-                canonical_soul_profile s
-                |> Option.value ~default:default_soul_profile);
-         will = str "will";
-         needs = str "needs";
-         desires = str "desires";
-         instructions = str "instructions";
-         policy_voice_enabled = bool_ "policy_voice_enabled";
-         room_scope =
-           str "room_scope"
-           |> Option.map canonical_room_scope;
-         scope_kind = str "scope_kind";
-         mention_targets = strs "mention_targets";
-         proactive_enabled = bool_ "proactive_enabled";
-         shards =
-           (match strs "shards" with
-            | [] -> None
-            | xs -> Some xs);
-         allowed_paths =
-           (match strs "allowed_paths" with
-            | [] -> None
-            | xs -> Some xs);
-         execution_scope = str "execution_scope";
-       })
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "tool_preset" with
+        | Some raw -> (
+            match String.trim (String.lowercase_ascii raw) with
+            | "minimal" | "messaging" | "coding" | "research" | "full" -> Ok ()
+            | _ ->
+                Error
+                  (Printf.sprintf
+                     "invalid tool_preset '%s' (allowed: minimal, messaging, coding, research, full)"
+                     raw))
+        | None -> Ok ())
+  in
+  Result.map
+    (fun () ->
+      {
+        manifest_path = None;
+        goal = str "goal";
+        short_goal =
+          str "short_goal"
+          |> normalize_goal_horizon_opt;
+        mid_goal =
+          str "mid_goal"
+          |> normalize_goal_horizon_opt;
+        long_goal =
+          str "long_goal"
+          |> normalize_goal_horizon_opt;
+        soul_profile =
+          str "soul_profile"
+          |> Option.map (fun s ->
+               canonical_soul_profile s
+               |> Option.value ~default:default_soul_profile);
+        will = str "will";
+        needs = str "needs";
+        desires = str "desires";
+        instructions = str "instructions";
+        policy_voice_enabled = bool_ "policy_voice_enabled";
+        room_scope =
+          str "room_scope"
+          |> Option.map canonical_room_scope;
+        scope_kind = str "scope_kind";
+        mention_targets = strs "mention_targets";
+        proactive_enabled = bool_ "proactive_enabled";
+        shards =
+          (match strs "shards" with
+           | [] -> None
+           | xs -> Some xs);
+        allowed_paths =
+          (match strs "allowed_paths" with
+           | [] -> None
+           | xs -> Some xs);
+        execution_scope = str "execution_scope";
+        tool_preset =
+          str "tool_preset"
+          |> Option.map (fun raw -> String.trim (String.lowercase_ascii raw));
+        tool_also_allow =
+          (match strs "tool_also_allow" with
+           | [] -> None
+           | xs -> Some xs);
+        tool_denylist =
+          (match strs "tool_denylist" with
+           | [] -> None
+           | xs -> Some xs);
+      })
+    result
 
 let load_keeper_toml (path : string)
     : (string * keeper_profile_defaults, string) result =
@@ -426,6 +461,17 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                    | [] -> None
                    | xs -> Some xs);
                 execution_scope = Safe_ops.json_string_opt "execution_scope" keeper_json;
+                tool_preset =
+                  Safe_ops.json_string_opt "tool_preset" keeper_json
+                  |> Option.map (fun raw -> String.trim (String.lowercase_ascii raw));
+                tool_also_allow =
+                  (match Safe_ops.json_string_list "tool_also_allow" keeper_json with
+                   | [] -> None
+                   | xs -> Some xs);
+                tool_denylist =
+                  (match Safe_ops.json_string_list "tool_denylist" keeper_json with
+                   | [] -> None
+                   | xs -> Some xs);
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 

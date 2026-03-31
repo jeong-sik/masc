@@ -1,14 +1,14 @@
-(** Test keeper masc_* tool bridge — verifies allowlist/denylist gating
-    and schema injection for keeper tool exposure. *)
+(** Test keeper masc_* tool bridge under preset/custom tool policy. *)
 
 module KET = Masc_mcp.Keeper_exec_tools
 
-let make_meta ?tool_access ?tool_allowlist ?(tool_denylist = []) () =
+let make_meta ?tool_access ?(tool_denylist = []) () =
   let tool_access =
-    match tool_access, tool_allowlist with
-    | Some access, _ -> access
-    | None, Some names -> Masc_mcp.Keeper_types.Restricted names
-    | None, None -> Masc_mcp.Keeper_types.Unrestricted
+    match tool_access with
+    | Some access -> access
+    | None ->
+        Masc_mcp.Keeper_types.Preset
+          { preset = Masc_mcp.Keeper_types.Full; also_allow = [] }
   in
   match Masc_mcp.Keeper_types.meta_of_json
     (`Assoc
@@ -23,8 +23,7 @@ let make_meta ?tool_access ?tool_allowlist ?(tool_denylist = []) () =
   | Ok meta -> meta
   | Error e -> failwith e
 
-(** Verify inject_masc_schemas stores all masc_* schemas (no filtering). *)
-let test_inject_stores_all_masc () =
+let test_inject_stores_filtered_masc () =
   let schemas : Types.tool_schema list =
     [
       { name = "masc_status"; description = ""; input_schema = `Assoc [] };
@@ -34,16 +33,19 @@ let test_inject_stores_all_masc () =
     ]
   in
   KET.inject_masc_schemas schemas;
-  (* Full tier to verify storage — allowlist all 3 *)
-  let meta = make_meta
-    ~tool_allowlist:["masc_status"; "masc_broadcast"; "masc_messages"] () in
+  let meta =
+    make_meta
+      ~tool_access:
+        (Masc_mcp.Keeper_types.Custom
+           [ "masc_status"; "masc_broadcast"; "masc_messages" ])
+      ()
+  in
   let names = KET.keeper_masc_tool_names meta in
   Alcotest.(check int) "3 masc tools" 3 (List.length names);
   Alcotest.(check bool) "no keeper_time_now" false
     (List.mem "keeper_time_now" names)
 
-(** Explicit unrestricted access exposes the full masc_* surface. *)
-let test_unrestricted_exposes_masc () =
+let test_full_preset_exposes_masc () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
@@ -53,104 +55,140 @@ let test_unrestricted_exposes_masc () =
   Alcotest.(check bool) "has masc_autoresearch_cycle" true
     (List.mem "masc_autoresearch_cycle" names)
 
-(** Standard tier: allowed_tool_names with standard_tools exposes shards too. *)
-let test_standard_exposes_shard_masc () =
+let test_messaging_preset_exposes_board_and_governance () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta ~tool_allowlist:Masc_mcp.Tool_catalog.standard_tools () in
+  let meta =
+    make_meta
+      ~tool_access:
+        (Masc_mcp.Keeper_types.Preset
+           { preset = Masc_mcp.Keeper_types.Messaging; also_allow = [] })
+      ()
+  in
   let names = KET.keeper_allowed_tool_names meta in
-  (* keeper_* always available *)
-  Alcotest.(check bool) "has keeper_time_now" true
-    (List.mem "keeper_time_now" names);
   Alcotest.(check bool) "has keeper_board_post" true
     (List.mem "keeper_board_post" names);
-  (* masc_* from standard_tools *)
-  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_governance_status" true
-    (List.mem "masc_governance_status" names)
+    (List.mem "masc_governance_status" names);
+  Alcotest.(check bool) "omits keeper_shell_readonly" false
+    (List.mem "keeper_shell_readonly" names)
 
-(** Allowlist opens specific tools. *)
-let test_allowlist_opens_tools () =
+let test_custom_opens_specific_tools_only () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta
-    ~tool_allowlist:["masc_status"; "masc_broadcast"; "masc_join"] () in
+  let meta =
+    make_meta
+      ~tool_access:
+        (Masc_mcp.Keeper_types.Custom
+           [ "masc_status"; "masc_broadcast"; "masc_join" ])
+      ()
+  in
   let names = KET.keeper_masc_tool_names meta in
   Alcotest.(check int) "3 allowed" 3 (List.length names);
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "has masc_broadcast" true (List.mem "masc_broadcast" names);
+  Alcotest.(check bool) "has masc_broadcast" true
+    (List.mem "masc_broadcast" names);
   Alcotest.(check bool) "has masc_join" true (List.mem "masc_join" names);
-  Alcotest.(check bool) "no masc_board_post" false (List.mem "masc_board_post" names)
+  Alcotest.(check bool) "no masc_board_post" false
+    (List.mem "masc_board_post" names)
 
-(** Denylist overrides allowlist. *)
 let test_deny_overrides_allow () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta
-    ~tool_allowlist:["masc_status"; "masc_broadcast"; "masc_join"]
-    ~tool_denylist:["masc_broadcast"] () in
+  let meta =
+    make_meta
+      ~tool_access:
+        (Masc_mcp.Keeper_types.Custom
+           [ "masc_status"; "masc_broadcast"; "masc_join" ])
+      ~tool_denylist:[ "masc_broadcast" ] ()
+  in
   let names = KET.keeper_masc_tool_names meta in
   Alcotest.(check int) "2 after deny" 2 (List.length names);
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "no masc_broadcast (denied)" false
     (List.mem "masc_broadcast" names)
 
-(** Denylist restricts standard-tier tools. *)
-let test_denylist_restricts_standard_tier () =
+let test_custom_empty_blocks_all () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta
-    ~tool_allowlist:Masc_mcp.Tool_catalog.standard_tools
-    ~tool_denylist:["masc_status"; "masc_governance_status"] () in
+  let meta =
+    make_meta ~tool_access:(Masc_mcp.Keeper_types.Custom []) ()
+  in
   let names = KET.keeper_allowed_tool_names meta in
-  Alcotest.(check bool) "no masc_status (denied)" false
-    (List.mem "masc_status" names);
-  Alcotest.(check bool) "no masc_governance_status (denied)" false
+  Alcotest.(check int) "no tools" 0 (List.length names)
+
+let test_preset_with_also_allow_opens_extra_tool () =
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  let meta =
+    make_meta
+      ~tool_access:
+        (Masc_mcp.Keeper_types.Preset
+           {
+             preset = Masc_mcp.Keeper_types.Minimal;
+             also_allow = [ "masc_governance_status" ];
+           })
+      ()
+  in
+  let names = KET.keeper_allowed_tool_names meta in
+  Alcotest.(check bool) "minimal keeps base tool" true
+    (List.mem "keeper_time_now" names);
+  Alcotest.(check bool) "also_allow adds governance" true
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "other standard tools remain" true
-    (List.length names > 0)
+  Alcotest.(check bool) "minimal omits board post" false
+    (List.mem "keeper_board_post" names)
 
-(** Explicit empty allowlist is restricted, not unrestricted. *)
-let test_restricted_empty_allowlist_blocks_masc () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta
-    ~tool_access:(Masc_mcp.Keeper_types.Restricted []) () in
-  let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "no masc tools" 0 (List.length names);
-  Alcotest.(check bool) "masc_status blocked" false
-    (List.mem "masc_status" names)
-
-(** Legacy persisted empty tool_allowlist migrates to standard_tools. *)
-let test_legacy_empty_allowlist_migrates_to_standard () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+let test_tool_access_missing_defaults_to_full () =
   let meta =
     match Masc_mcp.Keeper_types.meta_of_json
       (`Assoc
         [
-          ("name", `String "legacy-keeper");
-          ("agent_name", `String "legacy-keeper");
-          ("trace_id", `String "legacy-trace");
-          ("tool_allowlist", `List []);
+          ("name", `String "default-full");
+          ("agent_name", `String "default-full");
+          ("trace_id", `String "default-full-trace");
         ])
     with
     | Ok meta -> meta
     | Error e -> failwith e
   in
-  let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check bool) "legacy empty allowlist keeps masc_status" true
-    (List.mem "masc_status" names);
-  Alcotest.(check bool) "legacy empty allowlist does not become unrestricted" false
-    (List.mem "masc_autoresearch_cycle" names)
+  match meta.Masc_mcp.Keeper_types.tool_access with
+  | Masc_mcp.Keeper_types.Preset { preset = Masc_mcp.Keeper_types.Full; also_allow } ->
+      Alcotest.(check (list string)) "full has empty also_allow" [] also_allow
+  | _ -> Alcotest.fail "expected missing tool_access to default to full preset"
 
-(** Restricted JSON preserves an explicit empty tools list. *)
-let test_tool_access_restricted_empty_json_preserved () =
+let test_tool_access_preset_empty_json_preserved () =
   let meta =
     match Masc_mcp.Keeper_types.meta_of_json
       (`Assoc
         [
-          ("name", `String "restricted-json");
-          ("agent_name", `String "restricted-json");
-          ("trace_id", `String "restricted-json-trace");
+          ("name", `String "preset-json");
+          ("agent_name", `String "preset-json");
+          ("trace_id", `String "preset-json-trace");
           ( "tool_access",
             `Assoc
               [
-                ("kind", `String "restricted");
+                ("kind", `String "preset");
+                ("preset", `String "coding");
+                ("also_allow", `List []);
+              ] );
+        ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith e
+  in
+  match meta.Masc_mcp.Keeper_types.tool_access with
+  | Masc_mcp.Keeper_types.Preset
+      { preset = Masc_mcp.Keeper_types.Coding; also_allow } ->
+      Alcotest.(check int) "preset empty preserved" 0 (List.length also_allow)
+  | _ -> Alcotest.fail "expected coding preset with empty also_allow"
+
+let test_tool_access_custom_empty_json_preserved () =
+  let meta =
+    match Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String "custom-json");
+          ("agent_name", `String "custom-json");
+          ("trace_id", `String "custom-json-trace");
+          ( "tool_access",
+            `Assoc
+              [
+                ("kind", `String "custom");
                 ("tools", `List []);
               ] );
         ])
@@ -159,12 +197,10 @@ let test_tool_access_restricted_empty_json_preserved () =
     | Error e -> failwith e
   in
   match meta.Masc_mcp.Keeper_types.tool_access with
-  | Masc_mcp.Keeper_types.Restricted names ->
-      Alcotest.(check int) "restricted empty preserved" 0 (List.length names)
-  | Masc_mcp.Keeper_types.Unrestricted ->
-      Alcotest.fail "expected Restricted []"
+  | Masc_mcp.Keeper_types.Custom names ->
+      Alcotest.(check int) "custom empty preserved" 0 (List.length names)
+  | _ -> Alcotest.fail "expected Custom []"
 
-(** Malformed tool_access JSON is rejected. *)
 let test_tool_access_invalid_kind_rejected () =
   match Masc_mcp.Keeper_types.meta_of_json
     (`Assoc
@@ -199,6 +235,45 @@ let test_tool_access_missing_kind_rejected () =
         "meta parse error: keeper tool_access.kind required"
         e
 
+let test_tool_access_missing_preset_rejected () =
+  match Masc_mcp.Keeper_types.meta_of_json
+    (`Assoc
+      [
+        ("name", `String "missing-preset");
+        ("agent_name", `String "missing-preset");
+        ("trace_id", `String "missing-preset-trace");
+        ("tool_access", `Assoc [ ("kind", `String "preset") ]);
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected missing preset to fail"
+  | Error e ->
+      Alcotest.(check string)
+        "missing preset error"
+        "meta parse error: keeper tool_access.preset required"
+        e
+
+let test_tool_access_invalid_preset_rejected () =
+  match Masc_mcp.Keeper_types.meta_of_json
+    (`Assoc
+      [
+        ("name", `String "invalid-preset");
+        ("agent_name", `String "invalid-preset");
+        ("trace_id", `String "invalid-preset-trace");
+        ( "tool_access",
+          `Assoc
+            [
+              ("kind", `String "preset");
+              ("preset", `String "bogus");
+            ] );
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected invalid preset to fail"
+  | Error e ->
+      Alcotest.(check string)
+        "invalid preset error"
+        "meta parse error: invalid keeper tool_access.preset: bogus"
+        e
+
 let test_tool_access_missing_tools_rejected () =
   match Masc_mcp.Keeper_types.meta_of_json
     (`Assoc
@@ -206,7 +281,7 @@ let test_tool_access_missing_tools_rejected () =
         ("name", `String "missing-tools");
         ("agent_name", `String "missing-tools");
         ("trace_id", `String "missing-tools-trace");
-        ("tool_access", `Assoc [ ("kind", `String "restricted") ]);
+        ("tool_access", `Assoc [ ("kind", `String "custom") ]);
       ])
   with
   | Ok _ -> Alcotest.fail "expected missing tools to fail"
@@ -226,7 +301,7 @@ let test_tool_access_invalid_tool_member_rejected () =
         ( "tool_access",
           `Assoc
             [
-              ("kind", `String "restricted");
+              ("kind", `String "custom");
               ("tools", `List [ `String "masc_status"; `Int 1 ]);
             ] );
       ])
@@ -238,52 +313,37 @@ let test_tool_access_invalid_tool_member_rejected () =
         "meta parse error: keeper tool_access.tools[1] must be a string"
         e
 
-let test_legacy_nonempty_allowlist_normalizes_to_restricted_empty () =
-  let meta =
-    match Masc_mcp.Keeper_types.meta_of_json
-      (`Assoc
-        [
-          ("name", `String "legacy-blank-allowlist");
-          ("agent_name", `String "legacy-blank-allowlist");
-          ("trace_id", `String "legacy-blank-allowlist-trace");
-          ("tool_allowlist", `List [ `String " "; `String "" ]);
-        ])
-    with
-    | Ok meta -> meta
-    | Error e -> failwith e
-  in
-  match meta.Masc_mcp.Keeper_types.tool_access with
-  | Masc_mcp.Keeper_types.Restricted names ->
-      Alcotest.(check int) "normalized empty remains restricted" 0 (List.length names)
-  | Masc_mcp.Keeper_types.Unrestricted ->
-      Alcotest.fail "legacy non-empty allowlist must not become unrestricted"
-
-(** Allowlist also gates shard-sourced masc_* in allowed_tool_names. *)
 let test_allowlist_gates_shard_tools () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta
-    ~tool_allowlist:["masc_status"; "masc_governance_status"] () in
+  let meta =
+    make_meta
+      ~tool_access:
+        (Masc_mcp.Keeper_types.Custom
+           [ "masc_status"; "masc_governance_status" ])
+      ()
+  in
   let names = KET.keeper_allowed_tool_names meta in
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_governance_status" true
     (List.mem "masc_governance_status" names);
-  (* Allowlist now gates ALL masc_* tools uniformly, including shard-sourced ones.
-     masc_autoresearch_cycle is NOT in the allowlist, so it must be excluded. *)
-  Alcotest.(check bool) "masc_autoresearch_cycle blocked by allowlist" false
+  Alcotest.(check bool) "masc_autoresearch_cycle blocked by custom policy" false
     (List.mem "masc_autoresearch_cycle" names)
 
-(** Verify dispatch passthrough returns None for unregistered tools. *)
 let test_dispatch_unregistered () =
   let result =
     Masc_mcp.Tool_dispatch.dispatch ~name:"masc_nonexistent_xyz" ~args:(`Assoc [])
   in
   Alcotest.(check bool) "unregistered returns None" true (result = None)
 
-(** Verify schemas and names are consistent. *)
 let test_schemas_match_names () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
-  let meta = make_meta
-    ~tool_allowlist:["masc_status"; "masc_join"; "masc_broadcast"] () in
+  let meta =
+    make_meta
+      ~tool_access:
+        (Masc_mcp.Keeper_types.Custom
+           [ "masc_status"; "masc_join"; "masc_broadcast" ])
+      ()
+  in
   let names = KET.keeper_masc_tool_names meta in
   let schemas = KET.keeper_masc_tool_schemas meta in
   Alcotest.(check int) "count matches"
@@ -294,21 +354,20 @@ let test_schemas_match_names () =
         (List.mem s.name names))
     schemas
 
-(** Keeper_denied tools are excluded at injection time. *)
 let test_denied_tools_excluded_from_injection () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
-  (* Every tool in Keeper_denied surface must be absent *)
-  let denied = Masc_mcp.Tool_catalog.tools_for_surface
-    Masc_mcp.Tool_catalog.Keeper_denied in
-  List.iter (fun denied_name ->
-    Alcotest.(check bool)
-      (denied_name ^ " must not appear")
-      false (List.mem denied_name names)
-  ) denied
+  let denied =
+    Masc_mcp.Tool_catalog.tools_for_surface Masc_mcp.Tool_catalog.Keeper_denied
+  in
+  List.iter
+    (fun denied_name ->
+      Alcotest.(check bool)
+        (denied_name ^ " must not appear")
+        false (List.mem denied_name names))
+    denied
 
-(** is_keeper_denied returns true for denied tools, false for others. *)
 let test_is_keeper_denied () =
   Alcotest.(check bool) "masc_room_delete is denied" true
     (KET.is_keeper_denied "masc_room_delete");
@@ -319,94 +378,68 @@ let test_is_keeper_denied () =
   Alcotest.(check bool) "keeper_time_now is not denied" false
     (KET.is_keeper_denied "keeper_time_now")
 
-(** Keeper_denied tools excluded from allowed_tool_names even without denylist. *)
 let test_denied_excluded_from_allowed_names () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let meta = make_meta () in
   let names = KET.keeper_allowed_tool_names meta in
-  let denied = Masc_mcp.Tool_catalog.tools_for_surface
-    Masc_mcp.Tool_catalog.Keeper_denied in
-  List.iter (fun denied_name ->
-    Alcotest.(check bool)
-      (denied_name ^ " must not appear in allowed_names")
-      false (List.mem denied_name names)
-  ) denied;
-  (* keeper_* tools are still present *)
+  let denied =
+    Masc_mcp.Tool_catalog.tools_for_surface Masc_mcp.Tool_catalog.Keeper_denied
+  in
+  List.iter
+    (fun denied_name ->
+      Alcotest.(check bool)
+        (denied_name ^ " must not appear in allowed_names")
+        false (List.mem denied_name names))
+    denied;
   Alcotest.(check bool) "keeper_time_now still present" true
     (List.mem "keeper_time_now" names);
-  (* non-denied masc_* tools are still present *)
   Alcotest.(check bool) "masc_status still present" true
     (List.mem "masc_status" names)
-
-let test_dashboard_add_allow_restricts_unrestricted () =
-  let updated =
-    Masc_mcp.Server_routes_http_routes_dashboard.keeper_tools_add_allow
-      Masc_mcp.Keeper_types.Unrestricted
-      [ "masc_status"; "masc_status"; "masc_join" ]
-  in
-  match updated with
-  | Masc_mcp.Keeper_types.Restricted names ->
-      Alcotest.(check (list string))
-        "deduped restricted allowlist"
-        [ "masc_status"; "masc_join" ]
-        names
-  | Masc_mcp.Keeper_types.Unrestricted ->
-      Alcotest.fail "add_allow should restrict unrestricted access"
-
-let test_dashboard_add_allow_empty_keeps_unrestricted () =
-  let updated =
-    Masc_mcp.Server_routes_http_routes_dashboard.keeper_tools_add_allow
-      Masc_mcp.Keeper_types.Unrestricted
-      [ " "; "" ]
-  in
-  match updated with
-  | Masc_mcp.Keeper_types.Unrestricted -> ()
-  | Masc_mcp.Keeper_types.Restricted _ ->
-      Alcotest.fail "empty add_allow should not lock unrestricted keeper down"
 
 let () =
   Alcotest.run "Keeper masc bridge"
     [
       ( "injection",
         [
-          Alcotest.test_case "stores all masc_* schemas" `Quick
-            test_inject_stores_all_masc;
+          Alcotest.test_case "stores filtered masc_* schemas" `Quick
+            test_inject_stores_filtered_masc;
         ] );
-      ( "unrestricted_by_default",
+      ( "preset_policy",
         [
-          Alcotest.test_case "unrestricted exposes masc tools" `Quick
-            test_unrestricted_exposes_masc;
-          Alcotest.test_case "standard exposes shard masc_*" `Quick
-            test_standard_exposes_shard_masc;
+          Alcotest.test_case "full preset exposes masc tools" `Quick
+            test_full_preset_exposes_masc;
+          Alcotest.test_case "messaging preset exposes board and governance" `Quick
+            test_messaging_preset_exposes_board_and_governance;
+          Alcotest.test_case "preset also_allow opens extra tool" `Quick
+            test_preset_with_also_allow_opens_extra_tool;
         ] );
-      ( "allowlist",
+      ( "custom_policy",
         [
           Alcotest.test_case "opens specific tools" `Quick
-            test_allowlist_opens_tools;
+            test_custom_opens_specific_tools_only;
+          Alcotest.test_case "deny overrides allow" `Quick
+            test_deny_overrides_allow;
+          Alcotest.test_case "custom empty blocks all" `Quick
+            test_custom_empty_blocks_all;
           Alcotest.test_case "gates shard tools too" `Quick
             test_allowlist_gates_shard_tools;
         ] );
-      ( "denylist",
-        [
-          Alcotest.test_case "deny overrides allow" `Quick
-            test_deny_overrides_allow;
-          Alcotest.test_case "deny restricts standard tier" `Quick
-            test_denylist_restricts_standard_tier;
-          Alcotest.test_case "restricted empty allowlist blocks masc" `Quick
-            test_restricted_empty_allowlist_blocks_masc;
-        ] );
       ( "meta_json",
         [
-          Alcotest.test_case "legacy empty allowlist migrates to standard" `Quick
-            test_legacy_empty_allowlist_migrates_to_standard;
-          Alcotest.test_case "legacy non-empty allowlist stays restricted" `Quick
-            test_legacy_nonempty_allowlist_normalizes_to_restricted_empty;
-          Alcotest.test_case "restricted empty json preserved" `Quick
-            test_tool_access_restricted_empty_json_preserved;
+          Alcotest.test_case "missing tool_access defaults to full" `Quick
+            test_tool_access_missing_defaults_to_full;
+          Alcotest.test_case "preset empty json preserved" `Quick
+            test_tool_access_preset_empty_json_preserved;
+          Alcotest.test_case "custom empty json preserved" `Quick
+            test_tool_access_custom_empty_json_preserved;
           Alcotest.test_case "invalid kind rejected" `Quick
             test_tool_access_invalid_kind_rejected;
           Alcotest.test_case "missing kind rejected" `Quick
             test_tool_access_missing_kind_rejected;
+          Alcotest.test_case "missing preset rejected" `Quick
+            test_tool_access_missing_preset_rejected;
+          Alcotest.test_case "invalid preset rejected" `Quick
+            test_tool_access_invalid_preset_rejected;
           Alcotest.test_case "missing tools rejected" `Quick
             test_tool_access_missing_tools_rejected;
           Alcotest.test_case "invalid tool member rejected" `Quick
@@ -429,9 +462,5 @@ let () =
             test_is_keeper_denied;
           Alcotest.test_case "denied excluded from allowed_names" `Quick
             test_denied_excluded_from_allowed_names;
-          Alcotest.test_case "dashboard add_allow restricts unrestricted" `Quick
-            test_dashboard_add_allow_restricts_unrestricted;
-          Alcotest.test_case "dashboard add_allow empty keeps unrestricted" `Quick
-            test_dashboard_add_allow_empty_keeps_unrestricted;
         ] );
     ]

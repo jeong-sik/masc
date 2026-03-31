@@ -2,8 +2,9 @@
 
 import { signal, computed, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry } from './types'
+import type { PipelineStage } from './types/core'
 import { journal } from './sse'
-import { agents, agentMotionMap } from './store'
+import { agents, agentMotionMap, keepers, staleKeepers } from './store'
 import type { AgentMotionSnapshot } from './components/common/agent-motion'
 
 // --- Filter toggles ---
@@ -138,6 +139,48 @@ export const focusAgents: ReadonlySignal<FocusAgent[]> = computed(() => {
       const pressureOrder = { hot: 0, normal: 1, calm: 2 }
       return pressureOrder[a.pressure] - pressureOrder[b.pressure]
     })
+})
+
+// --- Keeper health summary for Live Monitor ---
+
+export interface KeeperPressure {
+  name: string
+  ratio: number
+  stage: PipelineStage
+}
+
+export interface KeeperHealthSummary {
+  activeCount: number
+  totalCount: number
+  warningCount: number
+  criticalCount: number
+  staleCount: number
+  pressures: KeeperPressure[]
+}
+
+export const keeperHealthSummary: ReadonlySignal<KeeperHealthSummary> = computed(() => {
+  const all = keepers.value
+  const active = all.filter(k => k.keepalive_running === true)
+  const stale = staleKeepers.value
+
+  let warningCount = 0
+  let criticalCount = 0
+
+  const pressures: KeeperPressure[] = active.map(k => {
+    const ratio = k.context_ratio ?? 0
+    if (ratio > 0.85) criticalCount++
+    else if (ratio > 0.70 || stale.has(k.name)) warningCount++
+    return { name: k.name, ratio, stage: (k.pipeline_stage ?? 'idle') as PipelineStage }
+  }).sort((a, b) => b.ratio - a.ratio)
+
+  return {
+    activeCount: active.length,
+    totalCount: all.length,
+    warningCount,
+    criticalCount,
+    staleCount: stale.size,
+    pressures,
+  }
 })
 
 // --- Event type color mapping ---

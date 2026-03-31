@@ -729,92 +729,6 @@ let test_social_model_routes_blocker_to_board_post () =
             (contains_substring post.body "blocked")
       | _ -> fail "expected one request-help board post")
 
-let test_normalize_response_text_rewrites_generic_skip () =
-  let skip_reason : HK.skip_reason =
-    {
-      tool_name = "keeper_board_post";
-      source = "keeper_hook";
-      reason_code = "keeper_deny";
-      reason_text = "tool is on the keeper deny list";
-      skipped_at_unix = 0.0;
-    }
-  in
-  match KAR.normalize_response_text
-          ~text:"Tool execution skipped by hook"
-          ~tool_names:["keeper_board_post"]
-          ~skip_reason
-          ()
-  with
-  | Ok text ->
-      check bool "structured prefix" true
-        (String.starts_with ~prefix:"[tool_skipped]" text);
-      check bool "mentions tool" true
-        (let found =
-           try
-             ignore
-               (Str.search_forward
-                  (Str.regexp_string "keeper_board_post")
-                  text 0);
-             true
-           with Not_found -> false
-         in
-         found);
-      check bool "mentions replacement" true
-        (let found =
-           try
-             ignore
-               (Str.search_forward
-                  (Str.regexp_string "replacement=masc_board_post")
-                  text 0);
-             true
-           with Not_found -> false
-         in
-         found);
-      check bool "encodes reason spaces" true
-        (let found =
-           try
-             ignore
-               (Str.search_forward
-                  (Str.regexp_string "reason=tool%20is%20on%20the%20keeper%20deny%20list")
-                  text 0);
-             true
-           with Not_found -> false
-         in
-         found)
-  | Error e -> fail ("unexpected error: " ^ e)
-
-let test_normalize_response_text_empty_with_skip_reason () =
-  let skip_reason : HK.skip_reason =
-    {
-      tool_name = "keeper_bash";
-      source = "keeper_hook";
-      reason_code = "destructive_guard";
-      reason_text = "pattern='rm -rf' (recursive forced deletion)";
-      skipped_at_unix = 0.0;
-    }
-  in
-  match KAR.normalize_response_text
-          ~text:""
-          ~tool_names:[]
-          ~skip_reason
-          ()
-  with
-  | Ok text ->
-      check bool "structured prefix" true
-        (String.starts_with ~prefix:"[tool_skipped]" text);
-      check bool "mentions code" true
-        (let found =
-           try
-             ignore
-               (Str.search_forward
-                  (Str.regexp_string "destructive_guard")
-                  text 0);
-             true
-           with Not_found -> false
-         in
-         found)
-  | Error e -> fail ("unexpected error: " ^ e)
-
 (* ---------- render_inline_skip_reason tests ---------- *)
 
 let str_contains s sub =
@@ -870,13 +784,6 @@ let test_render_inline_with_replacement () =
     ~reason_text:"denied"
   in
   check bool "has replacement" true (str_contains result "replacement=")
-
-let test_consume_skip_reason_none_after_override () =
-  (* After Override migration, no record_skip_reason is called,
-     so consume_skip_reason should return None *)
-  HK.clear_skip_reason "test-keeper";
-  let result = HK.consume_skip_reason "test-keeper" in
-  check bool "returns None" true (result = None)
 
 let test_normalize_override_passthrough () =
   let override_text =
@@ -959,10 +866,6 @@ let () =
             test_social_model_requires_explicit_headers;
           test_case "social model routes blocker to board post" `Quick
             test_social_model_routes_blocker_to_board_post;
-          test_case "normalize rewrites generic skip" `Quick
-            test_normalize_response_text_rewrites_generic_skip;
-          test_case "normalize empty with skip reason" `Quick
-            test_normalize_response_text_empty_with_skip_reason;
           test_case "render_inline deny" `Quick
             test_render_inline_skip_reason_deny;
           test_case "render_inline cost" `Quick
@@ -975,7 +878,5 @@ let () =
             test_render_inline_escape_edge_cases;
           test_case "render_inline with replacement" `Quick
             test_render_inline_with_replacement;
-          test_case "consume_skip_reason None after Override" `Quick
-            test_consume_skip_reason_none_after_override;
         ] );
     ]

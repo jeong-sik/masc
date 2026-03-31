@@ -124,12 +124,47 @@ let test_code_read_path_traversal () =
   let args = `Assoc [("path", `String "../../../etc/passwd")] in
   let (ok, msg) = dispatch_exn ctx ~name:"masc_code_read" ~args in
   Alcotest.(check bool) "path traversal blocked" false ok;
-  (* validate_path rejects: either "Path traversal" or "Not in a git repository" *)
   let has_security_msg =
     msg_contains ~needle:"traversal" msg ||
     msg_contains ~needle:"git" msg in
   Alcotest.(check bool) "error mentions security boundary" true has_security_msg;
   cleanup_dir base_dir
+
+(* Regression: dotdot hidden inside a valid-looking prefix must be caught *)
+let test_code_read_dotdot_inside_prefix () =
+  let ctx, base_dir = make_ctx () in
+  let attack_path = ".worktrees/../../escape/proof.txt" in
+  let args = `Assoc [("path", `String attack_path)] in
+  let (ok, _msg) = dispatch_exn ctx ~name:"masc_code_read" ~args in
+  Alcotest.(check bool) "dotdot inside prefix blocked" false ok;
+  cleanup_dir base_dir
+
+let test_code_read_absolute_sibling () =
+  let ctx, base_dir = make_ctx () in
+  let sibling = Filename.concat (Filename.dirname base_dir) "sibling" in
+  let args = `Assoc [("path", `String sibling)] in
+  let (ok, _msg) = dispatch_exn ctx ~name:"masc_code_read" ~args in
+  Alcotest.(check bool) "absolute sibling path blocked" false ok;
+  cleanup_dir base_dir
+
+let test_code_read_null_byte () =
+  let ctx, base_dir = make_ctx () in
+  let args = `Assoc [("path", `String "test.ml\x00../../etc/passwd")] in
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_code_read" ~args in
+  Alcotest.(check bool) "null byte blocked" false ok;
+  Alcotest.(check bool) "error mentions null" true (msg_contains ~needle:"null" msg);
+  cleanup_dir base_dir
+
+let test_normalize_path_resolves_dotdot () =
+  let check desc input expected =
+    let result = Tool_code.normalize_path input in
+    Alcotest.(check string) desc expected result
+  in
+  check "simple dotdot" "/a/b/../c" "/a/c";
+  check "multiple dotdot" "/a/b/c/../../d" "/a/d";
+  check "dotdot at root" "/a/../../../x" "/x";
+  check "dot removal" "/a/./b/./c" "/a/b/c";
+  check "trailing slash" "/a/b/" "/a/b"
 
 let test_code_read_with_offset_limit () =
   let ctx, base_dir = make_ctx () in
@@ -180,7 +215,13 @@ let () =
     ("code_read", [
       Alcotest.test_case "no path" `Quick test_code_read_no_path;
       Alcotest.test_case "path traversal" `Quick test_code_read_path_traversal;
+      Alcotest.test_case "dotdot inside prefix" `Quick test_code_read_dotdot_inside_prefix;
+      Alcotest.test_case "absolute sibling path" `Quick test_code_read_absolute_sibling;
+      Alcotest.test_case "null byte injection" `Quick test_code_read_null_byte;
       Alcotest.test_case "offset and limit" `Quick test_code_read_with_offset_limit;
+    ]);
+    ("normalize_path", [
+      Alcotest.test_case "resolves dotdot" `Quick test_normalize_path_resolves_dotdot;
     ]);
     ("code_symbols", [
       Alcotest.test_case "empty args" `Quick test_code_symbols_empty;

@@ -4,6 +4,7 @@ import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import { EmptyState } from './common/empty-state'
+import { Markdown } from './common/markdown'
 import { TextInput, TextArea } from './common/input'
 import { stripStateBlocks } from '../keeper-message'
 import { navigate, navigateToPost, route } from '../router'
@@ -37,7 +38,6 @@ import {
   bulkDeleteSelected,
   splitVisiblePosts,
   filterHint,
-  previewText,
   isUpdated,
   boardPostKind,
   authorAvatar,
@@ -304,8 +304,11 @@ function PostCard({ post }: { post: BoardPost }) {
         <!-- Title -->
         <div class="text-[14px] font-medium text-[var(--text-strong)] leading-snug mb-1.5 group-hover:text-[var(--accent)] transition-colors">${post.title}</div>
 
-        <!-- Content preview: max 3 lines -->
-        <div class="text-[13px] text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${previewText(stripStateBlocks(post.body))}</div>
+        <!-- Content preview: rendered markdown, height-capped -->
+        <div class="text-[13px] text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden relative max-h-[4.8em]">
+          <${Markdown} text=${stripStateBlocks(post.body)} />
+          <div class="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-[var(--card)] to-transparent pointer-events-none" />
+        </div>
 
         <!-- Footer: author + meta + badges -->
         <div class="flex items-center gap-2 flex-wrap">

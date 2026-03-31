@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { PulseStrip } from './live/pulse-strip'
+import { KeeperHealthStrip } from './live/keeper-health-strip'
 import { ActivityStream } from './live/activity-stream'
 import { FocusSidebar } from './live/focus-sidebar'
 
@@ -21,6 +22,8 @@ export function Live() {
       <section class="rounded-[24px] border border-[var(--border-slate-12)] bg-[var(--white-3)] p-4">
         <${PulseStrip} />
       </section>
+
+      <${KeeperHealthStrip} />
 
       <div class="live-panels grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
         <section class="live-panel-main monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-[520px] p-4">

@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.200.0] - 2026-04-01
+
+### Added
+- **BM25 retrieval tests** — keeper tool selection quality harness with 20 scenarios (#4330).
+- **Keeper STATE split** — DONE/NEXT split + budget visibility + metrics (#4328).
+
+### Changed
+- **OAS SDK 0.99.6** — align Cdal_proof.scope + bump pin (#4333).
+- **Keeper KV cache removed** — dead code + boundary violation cleanup (#4327).
+
 ## [2.199.0] - 2026-03-31
 
 ### Added

@@ -246,7 +246,7 @@ mcp_jsonrpc_call() {
     status=$?
     set -e
     # Accumulate wall-clock time across retries (including sleep delays via awk).
-    cumulative_time="$(awk "BEGIN{printf \"%.6f\", $cumulative_time + ${attempt_time:-0}}")"
+    cumulative_time="$(awk -v c="$cumulative_time" -v a="${attempt_time:-0}" 'BEGIN{printf "%.6f", c + a}')"
     MCP_LAST_TIME_TOTAL="$cumulative_time"
     stderr_text="$(cat "$stderr_file" 2>/dev/null || true)"
     raw="$(cat "$resp_file" 2>/dev/null || true)"
@@ -264,7 +264,7 @@ mcp_jsonrpc_call() {
       7|28)
         sleep "$retry_delay"
         # Include retry sleep in cumulative time.
-        cumulative_time="$(awk "BEGIN{printf \"%.6f\", $cumulative_time + $retry_delay}")"
+        cumulative_time="$(awk -v c="$cumulative_time" -v d="$retry_delay" 'BEGIN{printf "%.6f", c + d}')"
         MCP_LAST_TIME_TOTAL="$cumulative_time"
         attempt=$((attempt + 1))
         ;;

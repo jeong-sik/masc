@@ -22,7 +22,7 @@ export function Work() {
     : 'board'
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="flex flex-col gap-5">
       <div class="transition-opacity duration-300">
         <${ErrorBoundary} label=${current}>
           ${current === 'board' ? html`<${Memory} />`

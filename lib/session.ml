@@ -240,7 +240,7 @@ let push_message registry ~from_agent ~content ~mention =
       ("type", `String "masc/message");
       ("from", `String from_agent);
       ("content", `String content);
-      ("mention", match mention with Some m -> `String m | None -> `Null);
+      ("mention", Json_util.string_opt_to_json mention);
       ("timestamp", `String (now_iso ()));
     ] in
 
@@ -499,7 +499,7 @@ module McpSessionStore = struct
       ("id", `String s.id);
       ("created_at", `Float s.created_at);
       ("last_activity", `Float s.last_activity);
-      ("agent_name", match s.agent_name with None -> `Null | Some n -> `String n);
+      ("agent_name", Json_util.string_opt_to_json s.agent_name);
       ("request_count", `Int s.request_count);
       ("metadata", `Assoc (List.map (fun (k, v) -> (k, `String v)) s.metadata));
     ]

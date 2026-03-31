@@ -14,20 +14,26 @@ export function ToolSummaryView({ inventory }: { inventory: DashboardToolInvento
     .slice(-5)
     .reverse()
 
-  const totalCount = inventory.length
-  const enabledCount = inventory.filter(item => item.enabled_in_current_mode).length
-  const deprecatedCount = inventory.filter(item => item.lifecycle === 'deprecated').length
+  const visible = inventory.filter(item => item.visibility !== 'hidden')
+  const hiddenCount = inventory.length - visible.length
+  const visibleCount = visible.length
+  const enabledCount = visible.filter(item => item.enabled_in_current_mode).length
+  const deprecatedCount = visible.filter(item => item.lifecycle === 'deprecated').length
 
   return html`
     <div class="py-2">
       <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-4">
         <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${totalCount}</span>
-          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">전체 도구</span>
+          <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${visibleCount}</span>
+          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">공개 도구</span>
         </div>
         <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${enabledCount}</span>
           <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">활성화됨</span>
+        </div>
+        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${hiddenCount}</span>
+          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">내부 전용</span>
         </div>
         <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${deprecatedCount}</span>

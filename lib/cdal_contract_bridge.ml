@@ -68,9 +68,7 @@ let infer_keeper_execution_mode ~(scope_kind : string) : Oas.Execution_mode.t =
   | "read_only" | "readonly" | "observe" -> Oas.Execution_mode.Diagnose
   | _ -> Oas.Execution_mode.Execute
 
-let infer_keeper_allowed_mutations ~(execution_scope : string)
-    ~(allowed_paths : string list) =
-  ignore allowed_paths;
+let infer_keeper_allowed_mutations ~(execution_scope : string) =
   match String.lowercase_ascii execution_scope with
   | "observe_only" ->
     (* observe_only keepers should not mutate — preserve CDAL enforcement. *)
@@ -89,11 +87,10 @@ let of_keeper
     ~(keeper_name : string)
     ~(goal : string)
     ~(scope_kind : string)
-    ~(execution_scope : string)
-    ~(allowed_paths : string list) : Oas.Risk_contract.t =
+    ~(execution_scope : string) : Oas.Risk_contract.t =
   let exec_mode = infer_keeper_execution_mode ~scope_kind in
   let risk = infer_keeper_risk_class ~scope_kind in
-  let mutations = infer_keeper_allowed_mutations ~execution_scope ~allowed_paths in
+  let mutations = infer_keeper_allowed_mutations ~execution_scope in
   Log.Keeper.info
     "cdal contract for %s: mode=%s risk=%s mutations=[%s] scope_kind=%s exec_scope=%s"
     keeper_name
@@ -115,4 +112,3 @@ let of_keeper
 let of_keeper_meta (meta : Keeper_types.keeper_meta) : Oas.Risk_contract.t =
   of_keeper ~keeper_name:meta.name ~goal:meta.short_goal
     ~scope_kind:meta.scope_kind ~execution_scope:meta.execution_scope
-    ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)

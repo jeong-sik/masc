@@ -46,7 +46,7 @@ let test_merge_contiguous_still_merges_plain_user () =
 (* ================================================================ *)
 
 let test_compact_prune_tool_outputs () =
-  let long_output = String.make 600 'x' in
+  let long_output = String.make 2000 'x' in
   let msgs = [
     msg Agent_sdk.Types.User "query";
     tool_msg long_output;

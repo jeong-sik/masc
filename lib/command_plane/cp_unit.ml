@@ -411,6 +411,82 @@ let rec build_tree_json ~child_map ~unit_lookup ~agent_statuses ~live_agents ~op
             ("children", `List children);
           ])
 
+(* O(n + ops) indexed version — uses pre-computed Hashtbl lookups.
+   Produces identical JSON output as build_tree_json. *)
+let rec build_tree_json_indexed ~(tree_idx : Cp_tree_index.tree_index) unit_id
+    =
+  match Hashtbl.find_opt tree_idx.unit_tbl unit_id with
+  | None -> None
+  | Some (unit : unit_record) ->
+      let children =
+        match Hashtbl.find_opt tree_idx.child_tbl unit_id with
+        | Some rows ->
+            rows
+            |> List.sort (fun (a : unit_record) (b : unit_record) ->
+                   compare (kind_order a.kind, a.label) (kind_order b.kind, b.label))
+            |> List.filter_map (fun (child : unit_record) ->
+                   build_tree_json_indexed ~tree_idx child.unit_id)
+        | None -> []
+      in
+      let descendant_op_count =
+        Hashtbl.find_opt tree_idx.subtree_active_ops unit_id
+        |> Option.value ~default:0
+      in
+      let live_roster =
+        Hashtbl.find_opt tree_idx.live_roster_count unit_id
+        |> Option.value ~default:0
+      in
+      let leader_status =
+        match unit.leader_id with
+        | Some leader -> Cp_tree_index.agent_status_for_tbl tree_idx leader
+        | None -> "missing"
+      in
+      let reasons = ref [] in
+      if unit.leader_id = None then reasons := "leader_missing" :: !reasons;
+      if unit.leader_id <> None && leader_status = "offline" then
+        reasons := "leader_offline" :: !reasons;
+      if List.length unit.roster > unit.budget.headcount_cap then
+        reasons := "headcount_cap_exceeded" :: !reasons;
+      if descendant_op_count > unit.budget.active_operation_cap then
+        reasons := "active_operation_cap_exceeded" :: !reasons;
+      if unit.roster <> [] && live_roster = 0 then
+        reasons := "roster_offline" :: !reasons;
+      let health =
+        if
+          List.exists
+            (fun reason ->
+              reason = "leader_offline"
+              || reason = "active_operation_cap_exceeded")
+            !reasons
+        then "bad"
+        else if !reasons <> [] then "warn"
+        else "ok"
+      in
+      let cleanup_days = Env_config_runtime.Cp.cleanup_days in
+      let stale_cutoff = Cp_cleanup.cutoff_iso ~days:cleanup_days in
+      let is_stale = unit.updated_at < stale_cutoff in
+      if is_stale then reasons := "stale" :: !reasons;
+      Some
+        (`Assoc
+          [
+            ("unit", unit_to_json unit);
+            ("leader_status", `String leader_status);
+            ("roster_total", `Int (List.length unit.roster));
+            ("roster_live", `Int live_roster);
+            ("roster_health",
+             `Assoc
+               [
+                 ("total", `Int (List.length unit.roster));
+                 ("live", `Int live_roster);
+                 ("offline", `Int (List.length unit.roster - live_roster));
+               ]);
+            ("active_operation_count", `Int descendant_op_count);
+            ("is_stale", `Bool is_stale);
+            ("health", `String health);
+            ("reasons", json_list_of_strings (List.rev !reasons));
+            ("children", `List children);
+          ])
+
 let topology_units config =
   let agents = safe_live_agents config in
   let managed_units = read_units config in

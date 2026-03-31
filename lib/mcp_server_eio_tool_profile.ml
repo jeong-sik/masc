@@ -20,8 +20,8 @@ Do not assume access to any other MASC tool from this endpoint."
 
 let managed_agent_instructions =
   "MASC managed-agent profile exposes the internal agent control surface. \
-Prefer SDK-style task and room aliases such as masc_room_status, masc_list_tasks, masc_claim_task, masc_set_current_task, masc_complete_task, masc_release_task, masc_cancel_task, masc_add_task, masc_batch_add_tasks, masc_broadcast, and masc_heartbeat. \
-Use canonical passthrough tools only when no managed alias exists on this endpoint. \
+Prefer canonical task-control tools such as masc_status, masc_tasks, masc_claim_next, masc_transition, and masc_plan_set_task. \
+Managed aliases that remain listed on this endpoint are compatibility helpers, not the recommended control plane. \
 Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
 
 let managed_agent_passthrough_tool_names =
@@ -133,9 +133,10 @@ let tool_allowed_in_profile state profile tool_name =
       else
         Tool_catalog.allow_direct_call tool_name
   | Managed_agent ->
-      tool_schemas_for_profile state Managed_agent
-      |> List.exists (fun (schema : Types.tool_schema) ->
-             String.equal schema.name tool_name)
+      Option.is_some (Sdk_tool_contract.sdk_binding_by_name tool_name)
+      || (tool_schemas_for_profile state Managed_agent
+          |> List.exists (fun (schema : Types.tool_schema) ->
+                 String.equal schema.name tool_name))
   | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
 
 let is_destructive_tool_name name =

@@ -117,6 +117,15 @@ let start ~sw ~clock ~config ~compute ~on_result =
              config.label !consecutive_failures;
          consecutive_failures := 0;
          current_interval := config.interval_s;
+         (* Adaptive: if compute took >50% of base interval, double next interval
+            to reduce overlap probability when compute is slow *)
+         if dt > config.interval_s *. 0.5 then begin
+           current_interval :=
+             min config.max_backoff_s (config.interval_s *. 2.0);
+           Log.Dashboard.info
+             "%s: compute %.1fs > 50%% of %.0fs, next interval %.0fs"
+             config.label dt config.interval_s !current_interval
+         end;
          (* Sub-second refreshes are cache hits — log at debug to reduce noise *)
          if dt >= 1.0 then
            Log.Dashboard.info "%s refreshed (%.1fs)" config.label dt

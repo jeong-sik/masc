@@ -1,13 +1,15 @@
 # Issue #3015 Status Assessment: OAS Dependency Inversion
 
-**Date**: 2026-03-30
+**Date**: 2026-03-30 (Updated: 2026-03-31)
 **Issue**: #3015 "C-1: Resolve OAS dependency inversion — MASC as OAS application"
-**Status**: Open, labeled `target:now` (current product-promise blocker)
+**Status**: Open, labeled `target:next` (originally `target:now`, now deprioritized)
 **Assessment**: ✅ **READY TO PROGRESS** — No blocking dependencies identified
 
 ---
 
 ## Executive Summary
+
+**UPDATE 2026-03-31**: Issue #3015 has been relabeled from `target:now` to `target:next`, indicating this architectural work has been deprioritized in favor of more immediate product concerns.
 
 Issue #3015 is a multi-phase architectural migration to make MASC a thin application layer over OAS (OCaml Agent SDK) rather than reimplementing memory, context management, and inference logic. Based on comprehensive codebase analysis:
 

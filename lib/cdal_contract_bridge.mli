@@ -21,7 +21,6 @@ val of_keeper :
   goal:string ->
   scope_kind:string ->
   execution_scope:string ->
-  allowed_paths:string list ->
   Agent_sdk.Risk_contract.t
 
 val of_keeper_meta : Keeper_types.keeper_meta -> Agent_sdk.Risk_contract.t

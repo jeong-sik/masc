@@ -37,6 +37,52 @@ type slot =
 
 let table : (string, slot) Hashtbl.t = Hashtbl.create 16
 let mu = Eio.Mutex.create ()
+
+(** Maximum cache entries before eviction kicks in.
+    Evicts expired entries first, then oldest stale entries. *)
+let max_entries =
+  match Sys.getenv_opt "MASC_DASHBOARD_CACHE_MAX_ENTRIES" with
+  | Some s -> (try max 16 (min 512 (int_of_string (String.trim s))) with Failure _ -> 64)
+  | None -> 64
+
+(** Evict one expired or stale entry when table exceeds max_entries.
+    Must be called inside the mutex-guarded section. *)
+let maybe_evict () =
+  if Hashtbl.length table > max_entries then begin
+    let now_ts = Time_compat.now () in
+    let victim = ref None in
+    Hashtbl.iter (fun key slot ->
+      match slot with
+      | Ready entry when entry.stale_until <= now_ts ->
+          (* Fully expired — best victim *)
+          (match !victim with
+           | Some (_, true) -> ()  (* already found expired *)
+           | _ -> victim := Some (key, true))
+      | Ready entry when entry.expires_at <= now_ts ->
+          (* Stale — second priority *)
+          (match !victim with
+           | Some (_, true) -> ()  (* prefer expired *)
+           | _ -> victim := Some (key, false))
+      | _ -> ()
+    ) table;
+    match !victim with
+    | Some (key, _) -> Hashtbl.remove table key
+    | None -> ()
+  end
+
+(** Remove all fully expired entries (past stale_until).
+    Returns the number of entries removed. *)
+let [@warning "-32"] cleanup_expired () =
+  let now_ts = Time_compat.now () in
+  Eio.Mutex.use_rw ~protect:true mu (fun () ->
+    let victims = Hashtbl.fold (fun key slot acc ->
+      match slot with
+      | Ready entry when entry.stale_until <= now_ts -> key :: acc
+      | _ -> acc
+    ) table [] in
+    List.iter (fun key -> Hashtbl.remove table key) victims;
+    List.length victims)
+
 (** Background revalidation switch — must be set via [set_sw] before
     stale-while-revalidate can fork background fibers. *)
 let _bg_sw : Eio.Switch.t option ref = ref None
@@ -53,12 +99,13 @@ let now () = Time_compat.now ()
 
 (** Default stale grace multiplier: stale data is served for [ttl * stale_factor]
     seconds after expiry while recomputation runs in the background.
-    Set high (10x) because Eio cooperative scheduling inflates wall-clock
-    time for compute-heavy endpoints (e.g. /execution), making frequent
-    recomputation expensive.  A large stale window ensures callers almost
-    always receive instant stale responses while background revalidation
-    runs. *)
-let stale_factor = 10.0
+    Reduced from 10x to 3x — the 10x factor was masking slow compute
+    by holding stale data for 22 minutes. With O(n+ops) tree index and
+    adaptive refresh intervals, compute is faster so shorter grace is safe. *)
+let stale_factor =
+  Dashboard_http_helpers.float_of_env_default
+    "MASC_DASHBOARD_STALE_FACTOR"
+    ~default:3.0 ~min_v:1.0 ~max_v:10.0
 
 exception Compute_timeout of string * bool
 
@@ -97,6 +144,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
         | Some (Ready entry) when entry.stale_until > now () ->
           (* Case 2: stale but within grace — serve stale, trigger bg recompute *)
           let cond = Eio.Condition.create () in
+          maybe_evict ();
           Hashtbl.replace table key
             (Computing { cond; started_at = now (); stale = Some entry.value });
           `Stale (entry.value, cond)
@@ -138,6 +186,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                 key elapsed cooldown_ttl));
               ("generated_at", `String (Types.now_iso ()));
             ] in
+            maybe_evict ();
             Hashtbl.replace table key
               (Ready { value = error_value;
                        expires_at = ts +. cooldown_ttl;
@@ -148,6 +197,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
         | _ ->
           (* Case 3: expired or absent — must compute *)
           let cond = Eio.Condition.create () in
+          maybe_evict ();
           Hashtbl.replace table key
             (Computing { cond; started_at = now (); stale = None });
           `Compute cond)

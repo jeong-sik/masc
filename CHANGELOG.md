@@ -1,6 +1,37 @@
 # Changelog
 
 
+## [2.197.0] - 2026-03-31
+
+### Added
+- **E2E test gate** — gate server tests behind MASC_E2E_TESTS env (#4299, #3807).
+
+### Changed
+- **MASC/OAS boundary ownership** — tighten boundary definitions (#4297).
+- **CDAL contract bridge** — remove unused allowed_paths (#4305).
+
+### Fixed
+- **Keeper turn budget** — treat exhaustion as pause, not crash (#4298).
+- **MDAL loop** — remove board posting from MDAL loop (#4302).
+
+## [2.196.0] - 2026-03-31
+
+### Added
+- **Dashboard planning overhaul** — stats, guide cards, kanban improvements (#4286).
+- **Dashboard coordination root** — surface coordination root separately (#4268).
+
+### Changed
+- **Metrics unification** — unify keeper tool recording + remove keeper_edit dead code (#4232).
+- **Dashboard surface labeling** — fix public_mcp surface labels (#4265).
+
+### Fixed
+- **Shard board schemas** — add missing board tool schemas for keeper sessions (#4293).
+- **Keeper dispatch order** — restore bootstrap-before-resolve order (#4279, #4292).
+- **Keeper fresher_meta bypass** — bypass in dashboard tool API writes (#4288).
+- **Live Monitor clarity** — data clarity + base_path stability (#4260).
+- **SSE URL token** — update for sessionStorage-based token (#4280).
+- **CI version truth** — sync PRODUCT-OPERATING-PLAN and SPEC-INDEX (#4295).
+
 ## [2.195.0] - 2026-03-31
 
 ### Added

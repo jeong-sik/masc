@@ -303,6 +303,131 @@ export type PipelineStage =
   | 'proactive'
   | 'offline'
 
+// Aggregated metrics computed by the backend over a sliding window.
+// Fields mirror dashboard_http_keeper_detail.ml summary output.
+export interface MetricsWindowTopItem {
+  tool?: string
+  kind?: string
+  model?: string
+  reason?: string
+  trigger?: string
+  count?: number
+  [key: string]: unknown
+}
+
+export interface MetricsWindow {
+  // -- Sample metadata --
+  sample_points?: number
+  window_sample_points?: number
+  turn_points?: number
+  window_turn_points?: number
+  heartbeat_points?: number
+  window_heartbeat_points?: number
+  proactive_points?: number
+  window_proactive_points?: number
+  window_interactions?: number
+  window_turns?: number
+  window_series_max_lines?: number
+  window_series_max_bytes?: number
+  primary_model?: string
+
+  // -- Handoff / Compaction counts --
+  handoff_count?: number
+  compaction_events?: number
+  compaction_before_tokens?: number
+  compaction_saved_tokens?: number
+  compaction_saved_ratio?: number
+  avg_compaction_saved_tokens?: number
+
+  // -- Fallback rates --
+  fallback_count?: number
+  fallback_rate?: number
+  model_fallback_count?: number
+  model_fallback_rate?: number
+  model_fallback_numerator?: number
+  model_fallback_denominator?: number
+  proactive_fallback_count?: number
+  proactive_fallback_rate?: number
+  proactive_template_fallback_count?: number
+  proactive_template_fallback_rate?: number
+  proactive_template_fallback_numerator?: number
+  proactive_template_fallback_denominator?: number
+
+  // -- Intervention --
+  intervention_share?: number
+  intervention_per_turn?: number
+
+  // -- Automation counts & rates --
+  auto_reflect_count?: number
+  auto_plan_count?: number
+  auto_compact_count?: number
+  auto_handoff_count?: number
+  guardrail_stop_count?: number
+  auto_reflect_rate?: number
+  auto_plan_rate?: number
+  auto_compact_rate?: number
+  auto_handoff_rate?: number
+  guardrail_stop_rate?: number
+
+  // -- Drift --
+  drift_applied_count?: number
+  drift_applied_rate?: number
+
+  // -- Alignment quality --
+  repetition_risk_avg?: number
+  goal_alignment_avg?: number
+  response_alignment_avg?: number
+  goal_drift_avg?: number
+
+  // -- Proactive preview similarity --
+  proactive_preview_sample_count?: number
+  proactive_preview_pair_count?: number
+  proactive_preview_similarity_avg?: number
+  proactive_preview_similarity_max?: number
+  proactive_preview_similarity_warn?: boolean
+  proactive_preview_similarity_method?: string
+  proactive_preview_similarity_window?: number
+
+  // -- Tool --
+  tool_call_count?: number
+
+  // -- Memory --
+  memory_checks?: number
+  memory_passed?: number
+  memory_failed?: number
+  memory_pass_rate?: number
+  memory_avg_score?: number
+  memory_threshold?: number
+  memory_corrections?: number
+  memory_correction_success?: number
+  memory_notes_added?: number
+
+  // -- Memory compaction --
+  memory_compaction_events?: number
+  memory_compaction_before_notes?: number
+  memory_compaction_dropped_notes?: number
+  memory_compaction_invalid_dropped?: number
+  memory_compaction_drop_ratio?: number
+  memory_compaction_drop_avg?: number
+
+  // -- Memory weather --
+  memory_weather_checks?: number
+  memory_weather_passed?: number
+  memory_weather_pass_rate?: number
+
+  // -- Top-N lists --
+  top_work_kinds?: MetricsWindowTopItem[]
+  top_models?: MetricsWindowTopItem[]
+  top_tools?: MetricsWindowTopItem[]
+  top_memory_kinds?: MetricsWindowTopItem[]
+  top_drift_reasons?: MetricsWindowTopItem[]
+  top_compaction_triggers?: MetricsWindowTopItem[]
+  generation_equipment?: MetricsWindowTopItem[]
+
+  // Catch-all for future fields
+  [key: string]: unknown
+}
+
 export interface Keeper {
   name: string
   pipeline_stage?: PipelineStage
@@ -384,19 +509,7 @@ export interface Keeper {
   skill_primary?: string | null
   skill_secondary?: string[]
   skill_reason?: string | null
-  metrics_window?: {
-    fallback_rate?: number
-    model_fallback_rate?: number
-    proactive_fallback_rate?: number
-    proactive_preview_similarity_avg?: number
-    memory_pass_rate?: number
-    memory_avg_score?: number
-    handoff_count?: number
-    compaction_events?: number
-    compaction_saved_tokens?: number
-    tool_call_count?: number
-    [key: string]: unknown
-  }
+  metrics_window?: MetricsWindow
   agent?: {
     name?: string
     exists?: boolean

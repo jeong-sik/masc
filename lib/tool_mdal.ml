@@ -93,23 +93,6 @@ let handle_start (ctx : context) args =
       | Ok config ->
       let loop_id = Mdal.generate_loop_id () in
 
-      (* Create initial board post *)
-      let state_post_id =
-        match Board_dispatch.create_post
-                ~author:ctx.agent_name
-                ~content:(Printf.sprintf "[MDAL_STATE] %s starting. Profile: %s, Baseline: %.4f, Target: %s"
-                            loop_id profile.name baseline profile.target)
-                ~post_kind:Board.System_post
-                ~meta_json:(`Assoc [ ("source", `String "mdal_state_start") ])
-                ~visibility:Board.Internal
-                ~ttl_hours:24
-                ~hearth:(Mdal.state_hearth loop_id)
-                ()
-        with
-        | Ok post -> Board.Post_id.to_string post.Board.id
-        | Error _ -> "unknown"
-      in
-
       let started_at = Time_compat.now () in
       let state : Mdal.loop_state = {
         loop_id;
@@ -125,7 +108,6 @@ let handle_start (ctx : context) args =
         start_time = started_at;
         updated_at = started_at;
         stopped_at = None;
-        state_post_id;
         execution_mode = `Worker_spawn;
         worker_engine = Some `Api_tool_loop;
         worker_model = Some resolved_worker_model;
@@ -297,19 +279,6 @@ let handle_iterate (ctx : context) args =
                    state.history <- record :: state.history;
                    Mdal.update_stagnation state record;
 
-                   (* Post iteration to board *)
-                   (try
-                      ignore (Board_dispatch.create_post
-                                ~author:"mdal"
-                                ~content:(Mdal.format_iter_post record)
-                                ~post_kind:Board.System_post
-                                ~meta_json:(`Assoc [ ("source", `String "mdal_iteration") ])
-                                ~visibility:Board.Internal
-                                ~ttl_hours:24
-                                ~hearth:(Mdal.iter_hearth state.loop_id)
-                                ())
-                    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.warn "tool_mdal: iter board post failed: %s" (Printexc.to_string exn));
-
                    (* Broadcast via SSE *)
                    (try Sse.broadcast (`Assoc [
                       ("type", `String "mdal_iteration");
@@ -345,7 +314,6 @@ let handle_iterate (ctx : context) args =
                      set_terminal_state state ~status:`Completed ~reason:"goal_met"
                        ~error_message:None;
                      persist_loop config state;
-                     post_final_summary state;
                      emit_completed_event ~loop_id:state.loop_id
                        ~final_metric:metric_after ~iterations:iter_num;
                      assoc_with_fields (state_to_json ~config state)
@@ -416,9 +384,6 @@ let handle_stop (ctx : context) args =
     | Some state ->
       set_terminal_state state ~status:`Stopped ~reason ~error_message:None;
       persist_loop config state;
-      post_final_summary state;
-
-      (* Broadcast via SSE *)
       emit_stop_event state ~reason;
 
       assoc_with_fields (state_to_json ~config state)

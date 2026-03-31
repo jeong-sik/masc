@@ -151,6 +151,28 @@ let test_replacement_targets_have_schemas () =
     | None -> ()
   ) internal
 
+let test_keeper_internal_tools_have_schemas () =
+  (* Every tool in keeper_internal_tools should have a schema in
+     keeper shards (model_tools + voice shard). A name without a schema
+     means the LLM can never select it — a silent capability gap. *)
+  let voice_schemas = match Tool_shard.get_shard "voice" with
+    | Some shard -> shard.tools | None -> [] in
+  let schema_names =
+    (Tool_shard.keeper_model_tools @ voice_schemas)
+    |> List.map (fun (s : Types.tool_schema) -> s.name)
+    |> SS.of_list
+  in
+  let internal_names =
+    Tool_catalog_surfaces.keeper_internal_tools |> SS.of_list
+  in
+  let missing = SS.diff internal_names schema_names in
+  if not (SS.is_empty missing) then
+    Alcotest.failf
+      "keeper_internal_tools without schemas (LLM blind spots): {%s}"
+      (String.concat ", " (SS.elements missing));
+  Alcotest.(check bool) "all internal tools have schemas" true
+    (SS.is_empty missing)
+
 let test_workspace_mutating_canonical_used () =
   (* workspace_mutating_tool_names in tool_catalog_surfaces is the canonical list.
      Verify no empty or phantom entries. *)
@@ -194,6 +216,8 @@ let () =
             test_privileged_keeper_tools_are_internal;
           Alcotest.test_case "replacement targets have schemas" `Quick
             test_replacement_targets_have_schemas;
+          Alcotest.test_case "keeper internal tools have schemas" `Quick
+            test_keeper_internal_tools_have_schemas;
           Alcotest.test_case "workspace_mutating canonical used" `Quick
             test_workspace_mutating_canonical_used;
         ] );

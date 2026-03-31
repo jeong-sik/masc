@@ -25,10 +25,8 @@ let text_of_message = Agent_sdk.Types.text_of_message
 type working_context = {
   system_prompt : string;
   messages : Agent_sdk.Types.message list;
-  token_count : int;
   max_tokens : int;
-  importance_scores : (int * float) list;
-  oas_context : Agent_sdk.Context.t;
+  context : Agent_sdk.Context.t;
 }
 
 type checkpoint = {
@@ -99,13 +97,19 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
   let sys_tokens = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
   List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
 
+let token_count (ctx : working_context) =
+  count_tokens ctx.system_prompt ctx.messages
+
+let message_count (ctx : working_context) =
+  List.length ctx.messages
+
 (* ================================================================ *)
 (* Context Ratio                                                     *)
 (* ================================================================ *)
 
 let context_ratio (ctx : working_context) : float =
   if ctx.max_tokens = 0 then 0.0
-  else float_of_int ctx.token_count /. float_of_int ctx.max_tokens
+  else float_of_int (token_count ctx) /. float_of_int ctx.max_tokens
 
 let exceeds_threshold ctx threshold =
   context_ratio ctx >= threshold
@@ -115,10 +119,8 @@ let exceeds_threshold ctx threshold =
 (* ================================================================ *)
 
 let create ~system_prompt ~max_tokens =
-  let token_count = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
-  let oas_context = Agent_sdk.Context.create () in
-  { system_prompt; messages = []; token_count; max_tokens;
-    importance_scores = []; oas_context }
+  let context = Agent_sdk.Context.create () in
+  { system_prompt; messages = []; max_tokens; context }
 
 let set_system_prompt (ctx : working_context) ~system_prompt =
   let messages =
@@ -126,14 +128,11 @@ let set_system_prompt (ctx : working_context) ~system_prompt =
       if m.role = Agent_sdk.Types.System then { m with role = Agent_sdk.Types.Assistant } else m
     ) ctx.messages
   in
-  let token_count = count_tokens system_prompt messages in
-  { ctx with system_prompt; messages; token_count; importance_scores = [] }
+  { ctx with system_prompt; messages }
 
 let append ctx (msg : Agent_sdk.Types.message) =
-  let new_tokens = msg_tokens msg in
   { ctx with
     messages = ctx.messages @ [msg];
-    token_count = ctx.token_count + new_tokens;
   }
 
 let append_many ctx msgs =
@@ -144,13 +143,19 @@ let append_many ctx msgs =
 (* ================================================================ *)
 
 let sync_oas_context (ctx : working_context) : working_context =
-  let oas = ctx.oas_context in
-  Agent_sdk.Context.set_scoped oas Agent_sdk.Context.Session
-    "message_count" (`Int (List.length ctx.messages));
-  Agent_sdk.Context.set_scoped oas Agent_sdk.Context.Session
-    "token_count" (`Int ctx.token_count);
-  Agent_sdk.Context.set_scoped oas Agent_sdk.Context.Session
-    "context_ratio" (`Float (context_ratio ctx));
+  let context = ctx.context in
+  let message_count = message_count ctx in
+  let token_count = token_count ctx in
+  let context_ratio =
+    if ctx.max_tokens = 0 then 0.0
+    else float_of_int token_count /. float_of_int ctx.max_tokens
+  in
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+    "message_count" (`Int message_count);
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+    "token_count" (`Int token_count);
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+    "context_ratio" (`Float context_ratio);
   ctx
 
 (* ================================================================ *)
@@ -251,7 +256,7 @@ let serialize_context (ctx : working_context) : string =
   let json = `Assoc [
     ("system_prompt", `String (Inference_utils.sanitize_text_utf8 ctx.system_prompt));
     ("messages", `List (List.map message_to_json ctx.messages));
-    ("token_count", `Int ctx.token_count);
+    ("token_count", `Int (token_count ctx));
     ("max_tokens", `Int ctx.max_tokens);
   ] in
   Yojson.Safe.to_string json
@@ -261,18 +266,21 @@ let deserialize_context (s : string) ~max_tokens : working_context =
   let open Yojson.Safe.Util in
   let system_prompt = json |> member "system_prompt" |> to_string in
   let messages = json |> member "messages" |> to_list |> List.map message_of_json in
-  let token_count = json |> member "token_count" |> to_int in
-  { system_prompt; messages; token_count; max_tokens; importance_scores = [];
-    oas_context = Agent_sdk.Context.create () }
+  let _legacy_token_count = json |> member "token_count" |> to_int_option in
+  sync_oas_context
+    {
+      system_prompt;
+      messages;
+      max_tokens;
+      context = Agent_sdk.Context.create ();
+    }
 
 let context_to_json (ctx : working_context) : Yojson.Safe.t =
   `Assoc [
     ("system_prompt", `String (Inference_utils.sanitize_text_utf8 ctx.system_prompt));
     ("messages", `List (List.map message_to_json ctx.messages));
-    ("token_count", `Int ctx.token_count);
+    ("token_count", `Int (token_count ctx));
     ("max_tokens", `Int ctx.max_tokens);
-    ("importance_scores", `List (List.map (fun (i, s) ->
-      `Assoc [("index", `Int i); ("score", `Float s)]) ctx.importance_scores));
   ]
 
 let create_checkpoint ctx ~generation =
@@ -280,8 +288,8 @@ let create_checkpoint ctx ~generation =
     checkpoint_id = generate_checkpoint_id ();
     timestamp = Time_compat.now ();
     generation;
-    message_count = List.length ctx.messages;
-    token_count = ctx.token_count;
+    message_count = message_count ctx;
+    token_count = token_count ctx;
     serialized = serialize_context ctx;
   }
 

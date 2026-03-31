@@ -285,6 +285,7 @@
    tool_run
    tool_bridge
    tool_cache
+   tool_access_policy
    tool_tempo
    tool_portal
    tool_worktree

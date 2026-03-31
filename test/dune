@@ -55,6 +55,7 @@
         test_keeper_compaction
         test_metrics_rotation
         test_tool_tier
+        test_tool_access_policy
         test_tool_budget
         test_tool_exposure
         test_code_swarm
@@ -107,6 +108,7 @@
           test_keeper_compaction
           test_metrics_rotation
           test_tool_tier
+          test_tool_access_policy
           test_tool_budget
           test_tool_exposure
           test_code_swarm

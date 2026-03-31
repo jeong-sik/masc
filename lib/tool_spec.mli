@@ -39,6 +39,7 @@ type t = {
   reason : string option;
   allow_direct_call_when_hidden : bool;
   title : string option;
+  required_permission : Types.permission option;
 }
 
 (** {1 Builder} *)
@@ -60,6 +61,7 @@ val create :
   ?reason:string ->
   ?allow_direct_call_when_hidden:bool ->
   ?title:string ->
+  ?required_permission:Types.permission ->
   unit -> t
 (** Build a tool spec. The first four arguments are required (compile error
     if omitted). All optional arguments default to fail-closed values:

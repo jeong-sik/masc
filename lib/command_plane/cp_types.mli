@@ -11,6 +11,7 @@ type policy_envelope = {
   kill_switch : bool;
   frozen : bool;
 }
+val tool_policy_of_envelope : policy_envelope -> Tool_access_policy.t
 type budget_envelope = {
   headcount_cap : int;
   active_operation_cap : int;

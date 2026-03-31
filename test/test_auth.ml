@@ -5,6 +5,8 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 open Alcotest
 module Auth = Masc_mcp.Auth
+module Tool_spec = Masc_mcp.Tool_spec
+module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Types = Types
 
 (* Setup a temp directory for testing *)
@@ -317,6 +319,21 @@ let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
   | Ok () -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
+let test_declared_tool_permission_from_tool_spec () =
+  let name = "__test_declared_permission_tool" in
+  let spec =
+    Tool_spec.create
+      ~name
+      ~description:"declared permission tool"
+      ~module_tag:Tool_dispatch.Mod_misc
+      ~input_schema:(`Assoc [ ("type", `String "object") ])
+      ~required_permission:Types.CanAdmin
+      ()
+  in
+  Tool_spec.register spec;
+  check bool "tool permission comes from Tool_spec metadata" true
+    (Auth.permission_for_tool name = Some Types.CanAdmin)
+
 (* ============================================ *)
 (* Enable/disable tests                         *)
 (* ============================================ *)
@@ -374,6 +391,8 @@ let () =
         `Quick test_authorize_unknown_non_masc_tool_strict_denied;
       test_case "strict unknown canonical tool allows worker"
         `Quick test_authorize_unknown_canonical_tool_strict_worker_allowed;
+      test_case "declared tool permission from Tool_spec"
+        `Quick test_declared_tool_permission_from_tool_spec;
     ];
     "enable_disable", [
       test_case "enable/disable auth" `Quick test_enable_disable_auth;

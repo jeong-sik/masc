@@ -29,6 +29,7 @@ type metadata = {
   readonly : bool option;
   destructive : bool option;
   idempotent : bool option;
+  required_permission : Types.permission option;
 }
 
 (** {1 Configuration} *)

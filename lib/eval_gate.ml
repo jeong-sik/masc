@@ -53,6 +53,18 @@ let default_config : gate_config = {
   denied_tools = [];
 }
 
+let tool_policy_of_config (config : gate_config) =
+  let allow =
+    if config.allowlist_enabled && config.allowed_tools <> [] then
+      Tool_access_policy.Names config.allowed_tools
+    else
+      Tool_access_policy.All
+  in
+  {
+    Tool_access_policy.allow;
+    deny = Tool_access_policy.Names config.denied_tools;
+  }
+
 (* ================================================================ *)
 (* Destructive pattern detection                                     *)
 (* ================================================================ *)
@@ -190,14 +202,18 @@ let pre_check
     ~(args_json : string)
     : Trajectory.gate_decision =
 
-  (* 1. Deny list *)
-  if List.mem tool_name config.denied_tools then
-    Trajectory.Reject (Printf.sprintf "tool '%s' is in deny list" tool_name)
+  let tool_policy = tool_policy_of_config config in
+  let deny_hit =
+    Tool_access_policy.selector_matches_name tool_policy.deny tool_name
+  in
+  let allow_hit =
+    Tool_access_policy.selector_matches_name tool_policy.allow tool_name
+  in
 
-  (* 2. Allowlist *)
-  else if config.allowlist_enabled
-          && config.allowed_tools <> []
-          && not (List.mem tool_name config.allowed_tools) then
+  (* 1. Shared allow/deny policy *)
+  if deny_hit then
+    Trajectory.Reject (Printf.sprintf "tool '%s' is in deny list" tool_name)
+  else if not allow_hit then
     Trajectory.Reject (Printf.sprintf "tool '%s' not in allowlist" tool_name)
 
   (* 3. Cost budget *)

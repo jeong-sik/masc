@@ -12,7 +12,7 @@ import { registerGovernanceRefresh } from '../sse-store'
 import type { GovernanceDecisionItem } from '../types'
 import { filteredItemsByFilter, getSelectedDecision, itemKey } from './governance-utils'
 import {
-  governanceLoading,
+  governanceResource,
   governanceStarting,
   governanceActing,
   governanceBriefSubmitting,
@@ -25,11 +25,8 @@ import {
   selectedDecisionKey,
   selectedCaseDetail,
   detailLoading,
-  runtimeParams,
-  runtimeSurfaces,
-  runtimeLoading,
-  paramAuditEntries,
-  paramAuditLoading,
+  runtimeParamsResource,
+  paramAuditResource,
 } from './governance-signals'
 
 async function loadDecisionDetail(item: GovernanceDecisionItem | null) {
@@ -52,20 +49,21 @@ export async function selectDecision(item: GovernanceDecisionItem) {
 }
 
 export async function refreshGovernance() {
-  governanceLoading.value = true
   governanceError.value = ''
   try {
-    const data = await fetchDashboardGovernance()
-    governanceData.value = data
-    const items = filteredItemsByFilter(governanceFilter.value, data.items ?? [])
-    const current = selectedDecisionKey.value
-    const next = items.find(item => itemKey(item) === current) ?? items[0] ?? null
-    selectedDecisionKey.value = next ? itemKey(next) : null
-    await loadDecisionDetail(next)
+    await governanceResource.load(async () => {
+      return await fetchDashboardGovernance()
+    })
+    const data = governanceData.value
+    if (data) {
+      const items = filteredItemsByFilter(governanceFilter.value, data.items ?? [])
+      const current = selectedDecisionKey.value
+      const next = items.find(item => itemKey(item) === current) ?? items[0] ?? null
+      selectedDecisionKey.value = next ? itemKey(next) : null
+      await loadDecisionDetail(next)
+    }
   } catch (err) {
     governanceError.value = err instanceof Error ? err.message : '거버넌스 상태를 불러오지 못했습니다'
-  } finally {
-    governanceLoading.value = false
   }
 }
 
@@ -129,26 +127,19 @@ export async function respondToExecutionOrder(decision: 'confirm' | 'deny') {
 }
 
 export async function loadRuntimeParams() {
-  runtimeLoading.value = true
-  try {
+  await runtimeParamsResource.load(async () => {
     const data = await fetchRuntimeParams()
-    runtimeParams.value = data.parameters ?? []
-    runtimeSurfaces.value = data.surfaces ?? []
-  } catch (err) {
+    return { parameters: data.parameters ?? [], surfaces: data.surfaces ?? [] }
+  }).catch(err => {
     console.debug('[governance] runtime params load failed (optional)', err instanceof Error ? err.message : err)
-  } finally {
-    runtimeLoading.value = false
-  }
+  })
 }
 
 export async function loadParamAudit(limit = 50) {
-  paramAuditLoading.value = true
-  try {
+  await paramAuditResource.load(async () => {
     const data = await fetchParamAudit(limit)
-    paramAuditEntries.value = data.entries ?? []
-  } catch (err) {
+    return data.entries ?? []
+  }).catch(err => {
     console.debug('[governance] param audit load failed (optional)', err instanceof Error ? err.message : err)
-  } finally {
-    paramAuditLoading.value = false
-  }
+  })
 }

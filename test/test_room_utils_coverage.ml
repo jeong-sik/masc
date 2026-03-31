@@ -76,6 +76,52 @@ let test_parse_gitdir_with_spaces () =
   | Some path -> check string "trimmed" "/home/user/project" path
   | None -> fail "expected Some"
 
+let test_resolve_masc_base_path_ignores_inherited_env_in_test () =
+  let requested =
+    Filename.concat (Filename.get_temp_dir_name ()) "room-utils-requested"
+  in
+  with_envs
+    [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
+      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+    (fun () ->
+      check string "requested temp path wins in tests" requested
+        (Room_utils.resolve_masc_base_path requested))
+
+let test_resolve_masc_base_path_keeps_matching_explicit_env () =
+  let requested =
+    Filename.concat (Filename.get_temp_dir_name ()) "room-utils-matching"
+  in
+  with_envs
+    [ ("MASC_BASE_PATH", Some requested);
+      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+    (fun () ->
+      check string "matching explicit env preserved" requested
+        (Room_utils.resolve_masc_base_path requested))
+
+let test_resolve_masc_base_path_allows_test_opt_in () =
+  let requested =
+    Filename.concat (Filename.get_temp_dir_name ()) "room-utils-opt-in"
+  in
+  let explicit = "/Users/dancer/me" in
+  with_envs
+    [ ("MASC_BASE_PATH", Some explicit);
+      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", Some "true") ]
+    (fun () ->
+      check string "opt-in preserves inherited env" explicit
+        (Room_utils.resolve_masc_base_path requested))
+
+let test_default_config_syncs_test_base_path_env () =
+  let requested =
+    Filename.concat (Filename.get_temp_dir_name ()) "room-utils-sync-env"
+  in
+  with_envs
+    [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
+      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+    (fun () ->
+      ignore (Room_utils.default_config requested);
+      check (option string) "env synced to requested path" (Some requested)
+        (Sys.getenv_opt "MASC_BASE_PATH"))
+
 (* ============================================================
    env_opt Tests
    ============================================================ *)
@@ -480,6 +526,14 @@ let () =
       test_case "empty" `Quick test_parse_gitdir_empty;
       test_case "nested" `Quick test_parse_gitdir_nested_worktree;
       test_case "with spaces" `Quick test_parse_gitdir_with_spaces;
+      test_case "ignores inherited base env in tests" `Quick
+        test_resolve_masc_base_path_ignores_inherited_env_in_test;
+      test_case "keeps matching explicit env" `Quick
+        test_resolve_masc_base_path_keeps_matching_explicit_env;
+      test_case "allows explicit opt-in to inherited env" `Quick
+        test_resolve_masc_base_path_allows_test_opt_in;
+      test_case "default config syncs test base env" `Quick
+        test_default_config_syncs_test_base_path_env;
     ];
     "env_opt", [
       test_case "nonexistent" `Quick test_env_opt_nonexistent;

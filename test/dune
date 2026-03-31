@@ -12,6 +12,8 @@
    (DATABASE_URL "")
    (SUPABASE_DB_URL "")
    (SB_PG_URL "")
+   ; Ignore shell-level workspace overrides so tests stay isolated in temp dirs.
+   (MASC_BASE_PATH "")
    ; Avoid non-deterministic external network calls during unit tests.
    (GRAPHQL_API_KEY "")
    (ZAI_API_KEY ""))))

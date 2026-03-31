@@ -1,6 +1,24 @@
 # Changelog
 
 
+## [2.196.0] - 2026-03-31
+
+### Added
+- **Dashboard planning overhaul** — stats, guide cards, kanban improvements (#4286).
+- **Dashboard coordination root** — surface coordination root separately (#4268).
+
+### Changed
+- **Metrics unification** — unify keeper tool recording + remove keeper_edit dead code (#4232).
+- **Dashboard surface labeling** — fix public_mcp surface labels (#4265).
+
+### Fixed
+- **Shard board schemas** — add missing board tool schemas for keeper sessions (#4293).
+- **Keeper dispatch order** — restore bootstrap-before-resolve order (#4279, #4292).
+- **Keeper fresher_meta bypass** — bypass in dashboard tool API writes (#4288).
+- **Live Monitor clarity** — data clarity + base_path stability (#4260).
+- **SSE URL token** — update for sessionStorage-based token (#4280).
+- **CI version truth** — sync PRODUCT-OPERATING-PLAN and SPEC-INDEX (#4295).
+
 ## [2.195.0] - 2026-03-31
 
 ### Added

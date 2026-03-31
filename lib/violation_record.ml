@@ -22,12 +22,31 @@ type t = Agent_sdk.Mode_enforcer.violation = {
 }
 
 let violation_kind_of_string s =
-  Agent_sdk.Mode_enforcer.violation_kind_of_string s
+  match String.lowercase_ascii s with
+  | "mutating_in_diagnose" -> Ok Agent_sdk.Mode_enforcer.Mutating_in_diagnose
+  | "external_in_draft" -> Ok Agent_sdk.Mode_enforcer.External_in_draft
+  | "scope_violation" -> Ok Agent_sdk.Mode_enforcer.Scope_violation
+  | other -> Error (Printf.sprintf "unknown violation_kind: %s" other)
 
 let violation_kind_to_string v =
   Agent_sdk.Mode_enforcer.violation_kind_to_string v
 
-let of_json json = Agent_sdk.Mode_enforcer.violation_of_yojson json
+let of_json (json : Yojson.Safe.t) : (t, string) result =
+  let open Yojson.Safe.Util in
+  try
+    let ts = json |> member "ts" |> to_float in
+    let tool_name = json |> member "tool_name" |> to_string in
+    let input_summary = json |> member "input_summary" |> to_string in
+    let effective_mode =
+      match Agent_sdk.Execution_mode.of_yojson (json |> member "effective_mode") with
+      | Ok m -> m
+      | Error _ -> Agent_sdk.Execution_mode.Diagnose
+    in
+    match violation_kind_of_string (json |> member "violation_kind" |> to_string) with
+    | Ok violation_kind ->
+        Ok { ts; tool_name; input_summary; effective_mode; violation_kind }
+    | Error e -> Error e
+  with exn -> Error (Printexc.to_string exn)
 
 let of_json_list (json : Yojson.Safe.t) : (t list, string) result =
   match json with

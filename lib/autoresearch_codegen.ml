@@ -97,19 +97,9 @@ let parse_model_code_response response =
     | Ok _ ->
       Result.error "MODEL response must be a JSON object"
 
-let has_background_capacity () =
-  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-  | Some sw, Some net -> (
-    try
-      let config_path = Oas_worker.default_config_path () in
-      let cap = Llm_provider.Cascade_config.local_capacity_for_selections
-          ~sw ~net ?config_path ["autoresearch"] in
-      not (cap.all_discovered && cap.endpoints_found > 0
-           && cap.process_available = 0 && cap.process_queue_length >= 2)
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> true)
-  | _ -> true
+(* local_capacity_for_selections removed from OAS SDK.
+   TODO(#4326): reimplement via Discovery.discover when needed. *)
+let has_background_capacity () = true
 
 (** Generate code change via Cascade "autoresearch" profile.
     Returns Ok (hypothesis, new_code) or Error reason. *)
@@ -128,7 +118,6 @@ let generate_code_change ~goal ~baseline ~history ~insights
         ~cascade_name:"autoresearch" ~fallback:(fun () -> 0.7))
       ~max_tokens:(Cascade_inference.resolve_max_tokens
         ~cascade_name:"autoresearch" ~fallback:(fun () -> 4096))
-      ~priority:Llm_provider.Request_priority.Background
       ()
   with
   | Error e -> Result.error (Printf.sprintf "MODEL call failed: %s" e)

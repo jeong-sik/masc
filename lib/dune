@@ -34,6 +34,7 @@
    cp_paths
    cp_serde
    cp_io
+   cp_tree_index
    cp_unit
    cp_unit_projection
    cp_snapshot
@@ -211,6 +212,7 @@
    operator_digest_event
    operator_digest_guidance
    operator_digest_types
+   opentelemetry_client_cohttp_eio
    observability_redact
    risk_digest
    operator_digest_session
@@ -703,6 +705,7 @@
    gluten-eio
    gluten
    ipaddr
+   fmt
    cohttp
    cohttp-eio
    agent_sdk
@@ -713,6 +716,10 @@
    tls-eio
    domain-name
    ca-certs
+   pbrt
+   mtime
+   mtime.clock
+   mtime.clock.os
    uuidm
    ;; Zstd compression
    zstd
@@ -774,7 +781,7 @@
    masc_mcp.ag_ui
    ;; OpenTelemetry (spans + OTLP exporter + metrics)
    opentelemetry
-   opentelemetry-client-cohttp-eio
+   opentelemetry.client
    ambient-context
    ambient-context-eio
    )

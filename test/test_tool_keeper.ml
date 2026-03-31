@@ -608,11 +608,11 @@ let test_keeper_bash_requires_cmd_and_runs () =
 let test_keeper_fs_edit_policy_gates () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  (* policy_mode removed: all keepers use unified mode.
-     fs_edit is not in allowed tools by default *)
+  (* keeper_fs_edit is in filesystem shard and allowed by default
+     since it has a proper schema (added in #4304). *)
   let unified = make_keeper_exec_meta () in
   check_keeper_exec_tool_presence "unified fs_edit" unified
-    ~tool_name:"keeper_fs_edit" ~expect_allowed:false
+    ~tool_name:"keeper_fs_edit" ~expect_allowed:true
 
 let test_keeper_fs_edit_enforces_allowed_paths_and_modes () =
   Eio_main.run @@ fun env ->

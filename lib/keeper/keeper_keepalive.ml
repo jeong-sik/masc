@@ -337,8 +337,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                      let auto_rules =
                        evaluate_keeper_auto_rules ~meta:meta_current
                          ~context_ratio:(Keeper_exec_context.context_ratio c)
-                         ~message_count:(List.length c.messages)
-                         ~token_count:c.token_count ~repetition_risk
+                         ~message_count:(Keeper_exec_context.message_count c)
+                         ~token_count:(Keeper_exec_context.token_count c)
+                         ~repetition_risk
                          ~goal_alignment ~response_alignment
                          ()
                      in
@@ -364,17 +365,17 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                            ("cost_usd", `Float 0.0);
                            ( "context_ratio",
                              `Float (Keeper_exec_context.context_ratio c) );
-                           ("context_tokens", `Int c.token_count);
+                           ("context_tokens", `Int (Keeper_exec_context.token_count c));
                            ("context_max", `Int c.max_tokens);
-                           ("message_count", `Int (List.length c.messages));
+                           ("message_count", `Int (Keeper_exec_context.message_count c));
                            ( "continuity_state",
                              match continuity_snapshot with
                              | None -> `Null
                              | Some s -> keeper_state_snapshot_to_json s );
                            ("continuity_summary", `String continuity_summary);
                            ("compacted", `Bool false);
-                           ("compaction_before_tokens", `Int c.token_count);
-                           ("compaction_after_tokens", `Int c.token_count);
+                           ("compaction_before_tokens", `Int (Keeper_exec_context.token_count c));
+                           ("compaction_after_tokens", `Int (Keeper_exec_context.token_count c));
                            ("work_kind", `String "status_tick");
                            ("tool_call_count", `Int 0);
                            ("tools_used", `List []);

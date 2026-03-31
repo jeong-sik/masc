@@ -68,3 +68,14 @@ val collaboration_of_session :
   base_path:string ->
   Team_session_types.session ->
   Agent_sdk.Collaboration.t
+
+type runtime_health = {
+  base_path_exists : bool;
+  room_initialized : bool;
+  session_running : bool;
+}
+
+val with_runtime_health :
+  Agent_sdk.Collaboration.t ->
+  runtime_health ->
+  Agent_sdk.Collaboration.t

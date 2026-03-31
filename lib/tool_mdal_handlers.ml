@@ -232,22 +232,6 @@ let state_to_json ?config (state : Mdal.loop_state) =
       ("history", `List (List.map iter_record_to_json state.history));
     ]
 
-let post_final_summary (state : Mdal.loop_state) =
-  try
-    ignore
-      (Board_dispatch.create_post
-         ~author:"mdal"
-         ~content:(Mdal.format_final_post state)
-         ~post_kind:Board.System_post
-         ~meta_json:(`Assoc [ ("source", `String "mdal_final") ])
-         ~visibility:Board.Internal
-         ~ttl_hours:24
-         ~hearth:(Mdal.state_hearth state.loop_id)
-         ())
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Log.Misc.warn "tool_mdal: final board post failed: %s" (Printexc.to_string exn)
-
 let terminal_response ?config (state : Mdal.loop_state) ~reason ~error_message =
   assoc_with_fields (state_to_json ?config state)
     [
@@ -332,21 +316,18 @@ let set_terminal_state (state : Mdal.loop_state) ~status ~reason ~error_message 
 let stop_for_reason config (state : Mdal.loop_state) ~reason ~message =
   set_terminal_state state ~status:`Stopped ~reason ~error_message:None;
   persist_loop config state;
-  post_final_summary state;
   emit_stop_event state ~reason;
   terminal_response ~config state ~reason ~error_message:message
 
 let fail_loop config (state : Mdal.loop_state) ~reason ~message =
   set_terminal_state state ~status:`Error ~reason ~error_message:(Some message);
   persist_loop config state;
-  post_final_summary state;
   emit_stop_event state ~reason;
   terminal_response ~config state ~reason ~error_message:message
 
 let interrupt_loop config (state : Mdal.loop_state) ~reason ~message =
   set_interrupted_state state ~reason ~error_message:(Some message);
   persist_loop config state;
-  post_final_summary state;
   emit_stop_event state ~reason;
   terminal_response ~config state ~reason ~error_message:message
 

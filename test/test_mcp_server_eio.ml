@@ -809,8 +809,8 @@ let test_handle_request_initialize_managed_profile () =
             in
             Alcotest.(check bool) "mentions managed profile" true
               (contains_substring instructions "managed-agent profile");
-            Alcotest.(check bool) "mentions sdk aliases" true
-              (contains_substring instructions "masc_room_status")
+            Alcotest.(check bool) "mentions canonical task control" true
+              (contains_substring instructions "masc_transition")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
@@ -848,7 +848,7 @@ let test_handle_request_tools_list_managed_profile () =
                    (List.mem "masc_room_status" names);
                  Alcotest.(check bool) "has managed list tasks alias" true
                    (List.mem "masc_list_tasks" names);
-                 Alcotest.(check bool) "has managed claim alias" true
+                 Alcotest.(check bool) "hides managed claim alias" false
                    (List.mem "masc_claim_task" names);
                  Alcotest.(check bool) "omits raw masc_status" false
                    (List.mem "masc_status" names);

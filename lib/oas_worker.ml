@@ -134,6 +134,10 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
 (* Result type                                                       *)
 (* ================================================================ *)
 
+type stop_reason =
+  | Completed
+  | TurnBudgetExhausted of { turns_used : int; limit : int }
+
 type run_result = {
   response : Oas.Types.api_response;
   checkpoint : Oas.Checkpoint.t option;
@@ -141,6 +145,7 @@ type run_result = {
   turns : int;
   trace_ref : Oas.Raw_trace.run_ref option;
   proof : Oas.Cdal_proof.t option;
+  stop_reason : stop_reason;
 }
 
 (* ================================================================ *)
@@ -366,7 +371,22 @@ let run
     let trace_ref = Oas.Agent.last_raw_trace_run agent in
     Oas.Agent.close agent;
     (match result with
-    | Ok response -> Ok { response; checkpoint; session_id; turns; trace_ref; proof }
+    | Ok response -> Ok { response; checkpoint; session_id; turns; trace_ref; proof;
+                          stop_reason = Completed }
+    | Error (Oas.Error.Agent (Oas.Error.MaxTurnsExceeded r)) ->
+      (* Turn budget exhaustion is not a fatal error — the agent made progress.
+         Return Ok with TurnBudgetExhausted so callers can checkpoint and resume
+         instead of treating this as a crash. *)
+      let partial_response : Oas.Types.api_response = {
+        id = session_id; model = "turn-exhausted";
+        stop_reason = Oas.Types.EndTurn;
+        content = [Oas.Types.Text (Printf.sprintf
+          "[turn budget exhausted: %d/%d turns used]" r.turns r.limit)];
+        usage = None;
+      } in
+      Ok { response = partial_response; checkpoint; session_id; turns;
+           trace_ref; proof;
+           stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit } }
     | Error err ->
       (match proof with
        | Some p ->

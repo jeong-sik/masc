@@ -145,18 +145,6 @@ Use when looking for specific topics, past discussions, or related prior work.";
       ("required", `List [`String "query"]);
     ];
   };
-  {
-    name = "keeper_board_delete";
-    description = "Delete a board post and its associated comments and votes. \
-Use for cleanup of stale, test, or expired posts.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("post_id", `Assoc [("type", `String "string"); ("description", `String "ID of the post to delete")]);
-      ]);
-      ("required", `List [`String "post_id"]);
-    ];
-  };
 ]
 
 let select_named_schemas (names : string list) (schemas : Types.tool_schema list) :
@@ -182,6 +170,21 @@ For searching across files, use keeper_shell_readonly with op=rg instead.";
       ("required", `List [`String "path"]);
     ];
   };
+  {
+    name = "keeper_fs_edit";
+    description = "Write or append to a file in the project. Use to create new files or update \
+existing ones. For small targeted edits prefer this over keeper_bash with echo/cat. \
+Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path to write")]);
+        ("content", `Assoc [("type", `String "string"); ("description", `String "File content to write")]);
+        ("mode", `Assoc [("type", `String "string"); ("description", `String "Write mode: 'overwrite' (default) or 'append'")]);
+      ]);
+      ("required", `List [`String "path"; `String "content"]);
+    ];
+  };
 ]
 
 let shell_tools : Types.tool_schema list = [
@@ -190,7 +193,8 @@ let shell_tools : Types.tool_schema list = [
     description = "Run a read-only project command. Safe, no side effects. \
 ops: pwd (working dir), ls (directory listing), cat (file content), \
 rg (ripgrep search across files), git_status (repo state). \
-Use for exploring the project before taking action.";
+To read a single file, prefer keeper_fs_read (handles truncation). \
+Use this tool for multi-file search (rg), directory listing (ls), or repo state (git_status).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -212,6 +216,7 @@ let coding_keeper_bridge_tools : Types.tool_schema list = [
 Use for builds (dune build, make), tests (dune test), git operations, \
 and any command that may modify files. Returns exit_code and output. \
 For read-only exploration, prefer keeper_shell_readonly (safer). \
+To write a file, prefer keeper_fs_edit (path-checked, audited). \
 For worktree-isolated code operations, prefer masc_code_shell (restricted path).";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -439,7 +444,7 @@ let shard_filesystem : shard = {
   name = "filesystem";
   tools = filesystem_tools;
   removable = true;
-  description = "File I/O: read only";
+  description = "File I/O: read and write";
 }
 
 let shard_shell : shard = {

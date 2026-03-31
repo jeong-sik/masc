@@ -55,7 +55,7 @@ let keeper_board_tool_names =
     "keeper_board_list";
     "keeper_board_stats";
     "keeper_board_search";
-    "keeper_board_delete";
+    (* keeper_board_delete removed from default shard in #4309 *)
   ]
 
 let keeper_voice_tool_names =
@@ -271,9 +271,9 @@ let execute_keeper_tool_call
             ("trace_id", `String meta.runtime.trace_id);
             ("generation", `Int meta.runtime.generation);
             ("context_ratio", `Float (Keeper_working_context.context_ratio ctx_work));
-            ("context_tokens", `Int ctx_work.token_count);
+            ("context_tokens", `Int (Keeper_working_context.token_count ctx_work));
             ("context_max", `Int ctx_work.max_tokens);
-            ("message_count", `Int (List.length ctx_work.messages));
+            ("message_count", `Int (Keeper_working_context.message_count ctx_work));
             ("last_model_used", `String meta.runtime.usage.last_model_used);
             ( "continuity_state",
               match continuity with

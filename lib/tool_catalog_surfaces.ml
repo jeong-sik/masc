@@ -40,7 +40,8 @@ let keeper_internal_tools =
     "keeper_board_vote";
     "keeper_board_stats";
     "keeper_board_search";
-    "keeper_board_delete";
+    (* keeper_board_delete removed from default shard in #4309.
+       Dispatch still accepts it for backward compat. *)
     "keeper_shell_readonly";
     "keeper_bash";
     "keeper_github";
@@ -64,7 +65,6 @@ let keeper_internal_replacement = function
   | "keeper_board_vote" -> Some "masc_board_vote"
   | "keeper_board_stats" -> Some "masc_board_stats"
   | "keeper_board_search" -> Some "masc_board_search"
-  | "keeper_board_delete" -> Some "masc_board_delete"
   | "keeper_voice_speak" -> Some "masc_voice_speak"
   | "keeper_voice_agent" -> Some "masc_voice_agent"
   | "keeper_voice_sessions" -> Some "masc_voice_sessions"
@@ -165,7 +165,7 @@ let local_worker_surface_tools =
 let session_min_surface_tools =
   [
     "masc_room_status"; "masc_list_tasks"; "masc_claim_next";
-    "masc_set_current_task"; "masc_complete_task"; "masc_add_task";
+    "masc_plan_set_task"; "masc_transition"; "masc_add_task";
     "masc_broadcast"; "masc_heartbeat";
   ]
 

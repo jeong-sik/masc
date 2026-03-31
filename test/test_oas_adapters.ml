@@ -77,10 +77,11 @@ let test_roundtrip_tool_msg () =
 (* Compaction tests (via Context_compact_oas directly) *)
 
 let compact_ctx (ctx : Keeper_exec_context.working_context) strategies =
-  let messages, token_count =
+  let messages, _ =
     Context_compact_oas.compact
       ~system_prompt:ctx.system_prompt ~messages:ctx.messages ~strategies () in
-  { ctx with Keeper_exec_context.messages; token_count; importance_scores = [] }
+  Keeper_exec_context.sync_oas_context
+    { ctx with Keeper_exec_context.messages }
 (* ================================================================ *)
 
 let test_compact_prune_tool_outputs () =
@@ -91,7 +92,7 @@ let test_compact_prune_tool_outputs () =
   Alcotest.(check bool) "messages preserved"
     true (List.length compacted.messages > 0);
   Alcotest.(check bool) "token count positive"
-    true (compacted.token_count > 0);
+    true (Keeper_exec_context.token_count compacted > 0);
   (* Short tool output (< 1500 chars) should not be truncated *)
   Alcotest.(check int) "message count unchanged for short tool output"
     (List.length (make_test_messages ())) (List.length compacted.messages)
@@ -124,7 +125,7 @@ let test_compact_summarize_old () =
   Alcotest.(check bool) "summarize_old reduces messages"
     true (List.length compacted.messages < List.length msgs);
   Alcotest.(check bool) "token count positive"
-    true (compacted.token_count > 0)
+    true (Keeper_exec_context.token_count compacted > 0)
 
 let test_compact_small_list_unchanged () =
   let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000 in

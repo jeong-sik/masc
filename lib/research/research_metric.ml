@@ -32,16 +32,16 @@ let crash_result ~error_message =
     loc_delta = 0; files_changed = 0; build_seconds = 0.0; test_seconds = 0.0;
     binary_changed = false; status = Crash; error_message }
 
-(** Run a command with timeout. Returns (exit_code, stdout, elapsed_seconds). *)
+(** Run a command with timeout in the given directory.
+    Returns (exit_code, stdout, elapsed_seconds). *)
 let run_cmd_timed ~timeout_sec (argv : string list) ~cwd : (int * string * float) =
   let t0 = Unix.gettimeofday () in
   try
     let status, stdout =
-      Process_eio.run_argv_with_status ~timeout_sec argv
+      Process_eio.run_argv_with_status ~timeout_sec ~cwd argv
     in
     let elapsed = Unix.gettimeofday () -. t0 in
     let code = match status with Unix.WEXITED c -> c | _ -> 1 in
-    ignore cwd;  (* Process_eio uses global cwd; caller sets up worktree *)
     (code, stdout, elapsed)
   with exn ->
     let elapsed = Unix.gettimeofday () -. t0 in
@@ -66,10 +66,9 @@ let parse_test_counts ~returncode (stdout : string) : int * int =
 let measure_loc_delta ~cwd : int * int =
   try
     let _, stdout =
-      Process_eio.run_argv_with_status ~timeout_sec:10.0
+      Process_eio.run_argv_with_status ~timeout_sec:10.0 ~cwd
         [ "git"; "diff"; "--stat"; "HEAD" ]
     in
-    ignore cwd;
     let lines = String.split_on_char '\n' stdout in
     let summary = match List.rev lines with
       | [] -> ""

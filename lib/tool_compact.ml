@@ -149,18 +149,18 @@ let handle_compact args : result =
     (* Build a working_context from the input *)
     let ctx = Keeper_exec_context.create ~system_prompt ~max_tokens in
     let ctx = Keeper_exec_context.append_many ctx messages in
-    let tokens_before = ctx.token_count in
+    let tokens_before = Keeper_exec_context.token_count ctx in
     let msg_count_before = List.length ctx.messages in
     (* Apply compaction *)
-    let messages, token_count =
+    let messages, _ =
       Context_compact_oas.compact
         ~system_prompt:ctx.system_prompt
         ~messages:ctx.messages
         ~strategies
         ()
     in
-    let compacted = { ctx with messages; token_count; importance_scores = [] } in
-    let tokens_after = compacted.token_count in
+    let compacted = Keeper_exec_context.sync_oas_context { ctx with messages } in
+    let tokens_after = Keeper_exec_context.token_count compacted in
     let msg_count_after = List.length compacted.messages in
     let result_json = `Assoc [
       ("success", `Bool true);

@@ -257,6 +257,11 @@ let test_session_to_swarm_config_health_contract () =
        Alcotest.(check string) "session execution_scope metadata" "autonomous"
          scope
    | _ -> Alcotest.fail "expected execution_scope metadata");
+  (match List.assoc_opt "runtime_health" collaboration.metadata with
+   | Some (`Assoc fields) ->
+       Alcotest.(check bool) "runtime health marks ready" true
+         (List.assoc_opt "ready" fields = Some (`Bool true))
+   | _ -> Alcotest.fail "expected runtime_health metadata");
   let resource_ok = Option.get swarm_cfg.resource_check () in
   Alcotest.(check bool) "resource check passes for initialized room" true
     resource_ok;
@@ -292,6 +297,7 @@ let test_telemetry_of_run_result_carries_trace_ref () =
       turns = 3;
       trace_ref = Some trace_ref;
       proof = None;
+      stop_reason = Oas_worker.Completed;
     }
   in
   let telemetry = Team_session_oas_bridge.telemetry_of_run_result result in

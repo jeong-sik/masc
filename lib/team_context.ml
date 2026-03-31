@@ -172,6 +172,240 @@ let count_assoc_to_json counts =
     |> List.map (fun (label, count) -> (label, `Int count))
     |> List.sort (fun (a, _) (b, _) -> compare a b))
 
+type projected_worker_spec = {
+  spawn_agent : string;
+  runtime_actor : string option;
+  spawn_role : string option;
+  spawn_model : string option;
+  execution_scope : string option;
+  thinking_enabled : bool option;
+  thinking_budget : int option;
+  max_turns : int option;
+  timeout_seconds : int option;
+  worker_class : string option;
+  parent_actor : string option;
+  capsule_mode : string option;
+  runtime_pool : string option;
+  lane_id : string option;
+  controller_level : string option;
+  control_domain : string option;
+  supervisor_actor : string option;
+  model_tier : string option;
+  task_profile : string option;
+  risk_level : string option;
+  routing_confidence : float option;
+  routing_reason : string option;
+  routing_escalated : bool;
+}
+
+type projected_session_metadata = {
+  room_id : string;
+  created_by : string;
+  origin_kind : string;
+  execution_scope : string;
+  orchestration_mode : string;
+  control_profile : string;
+  scale_profile : string;
+  instruction_profile : string;
+  fallback_policy : string;
+  communication_mode : string;
+  alert_channel : string;
+  duration_seconds : int;
+  checkpoint_interval_sec : int;
+  min_agents : int;
+  auto_resume : bool;
+  planned_worker_count : int;
+  model_cascade : string list;
+  worker_class_counts : (string * int) list;
+  runtime_pool_counts : (string * int) list;
+  lane_counts : (string * int) list;
+  controller_level_counts : (string * int) list;
+  control_domain_counts : (string * int) list;
+  model_tier_counts : (string * int) list;
+  worker_specs : projected_worker_spec list;
+}
+
+type runtime_health = {
+  base_path_exists : bool;
+  room_initialized : bool;
+  session_running : bool;
+}
+
+let projected_worker_spec_of_planned_worker
+    (pw : Team_session_types.planned_worker) : projected_worker_spec =
+  {
+    spawn_agent = pw.spawn_agent;
+    runtime_actor = pw.runtime_actor;
+    spawn_role = pw.spawn_role;
+    spawn_model = pw.spawn_model;
+    execution_scope =
+      Option.map Team_session_types.execution_scope_to_string pw.execution_scope;
+    thinking_enabled = pw.thinking_enabled;
+    thinking_budget = pw.thinking_budget;
+    max_turns = pw.max_turns;
+    timeout_seconds = pw.timeout_seconds;
+    worker_class =
+      Option.map Team_session_types.worker_class_to_string pw.worker_class;
+    parent_actor = pw.parent_actor;
+    capsule_mode =
+      Option.map Team_session_types.capsule_mode_to_string pw.capsule_mode;
+    runtime_pool = pw.runtime_pool;
+    lane_id = pw.lane_id;
+    controller_level =
+      Option.map Team_session_types.controller_level_to_string
+        pw.controller_level;
+    control_domain =
+      Option.map Team_session_types.control_domain_to_string pw.control_domain;
+    supervisor_actor = pw.supervisor_actor;
+    model_tier =
+      Option.map Team_session_types.model_tier_to_string pw.model_tier;
+    task_profile =
+      Option.map Team_session_types.task_profile_to_string pw.task_profile;
+    risk_level =
+      Option.map Team_session_types.risk_level_to_string pw.risk_level;
+    routing_confidence = pw.routing_confidence;
+    routing_reason = pw.routing_reason;
+    routing_escalated = pw.routing_escalated;
+  }
+
+let projected_session_metadata_of_session
+    (session : Team_session_types.session) : projected_session_metadata =
+  {
+    room_id = session.room_id;
+    created_by = session.created_by;
+    origin_kind =
+      Team_session_types.session_origin_kind_to_string session.origin_kind;
+    execution_scope =
+      Team_session_types.execution_scope_to_string session.execution_scope;
+    orchestration_mode =
+      Team_session_types.orchestration_mode_to_string
+        session.orchestration_mode;
+    control_profile =
+      Team_session_types.control_profile_to_string session.control_profile;
+    scale_profile =
+      Team_session_types.scale_profile_to_string session.scale_profile;
+    instruction_profile =
+      Team_session_types.instruction_profile_to_string
+        session.instruction_profile;
+    fallback_policy =
+      Team_session_types.fallback_policy_to_string session.fallback_policy;
+    communication_mode =
+      Team_session_types.communication_mode_to_string
+        session.communication_mode;
+    alert_channel =
+      Team_session_types.alert_channel_to_string session.alert_channel;
+    duration_seconds = session.duration_seconds;
+    checkpoint_interval_sec = session.checkpoint_interval_sec;
+    min_agents = session.min_agents;
+    auto_resume = session.auto_resume;
+    planned_worker_count = List.length session.planned_workers;
+    model_cascade = session.model_cascade;
+    worker_class_counts =
+      Team_session_types.worker_class_counts session.planned_workers;
+    runtime_pool_counts =
+      Team_session_types.runtime_pool_counts session.planned_workers;
+    lane_counts = Team_session_types.lane_counts session.planned_workers;
+    controller_level_counts =
+      Team_session_types.controller_level_counts session.planned_workers;
+    control_domain_counts =
+      Team_session_types.control_domain_counts session.planned_workers;
+    model_tier_counts =
+      Team_session_types.model_tier_counts session.planned_workers;
+    worker_specs =
+      List.map projected_worker_spec_of_planned_worker session.planned_workers;
+  }
+
+let projected_worker_spec_to_json (spec : projected_worker_spec) :
+    Yojson.Safe.t =
+  let fields =
+    []
+    |> add_json_string_if_present "runtime_actor" spec.runtime_actor
+    |> add_json_string_if_present "spawn_role" spec.spawn_role
+    |> add_json_string_if_present "spawn_model" spec.spawn_model
+    |> add_json_string_if_present "execution_scope" spec.execution_scope
+    |> add_json_string_if_present "worker_class" spec.worker_class
+    |> add_json_string_if_present "parent_actor" spec.parent_actor
+    |> add_json_string_if_present "capsule_mode" spec.capsule_mode
+    |> add_json_string_if_present "runtime_pool" spec.runtime_pool
+    |> add_json_string_if_present "lane_id" spec.lane_id
+    |> add_json_string_if_present "controller_level" spec.controller_level
+    |> add_json_string_if_present "control_domain" spec.control_domain
+    |> add_json_string_if_present "supervisor_actor" spec.supervisor_actor
+    |> add_json_string_if_present "model_tier" spec.model_tier
+    |> add_json_string_if_present "task_profile" spec.task_profile
+    |> add_json_string_if_present "risk_level" spec.risk_level
+    |> add_json_string_if_present "routing_reason" spec.routing_reason
+    |> add_json_bool_if_present "thinking_enabled" spec.thinking_enabled
+    |> add_json_int_if_present "thinking_budget" spec.thinking_budget
+    |> add_json_int_if_present "max_turns" spec.max_turns
+    |> add_json_int_if_present "timeout_seconds" spec.timeout_seconds
+    |> add_json_float_if_present "routing_confidence" spec.routing_confidence
+  in
+  `Assoc
+    (List.rev
+       (("spawn_agent", `String spec.spawn_agent)
+        :: ("routing_escalated", `Bool spec.routing_escalated)
+        :: fields))
+
+let metadata_of_session_projection (projection : projected_session_metadata) :
+    (string * Yojson.Safe.t) list =
+  [
+    ("room_id", `String projection.room_id);
+    ("created_by", `String projection.created_by);
+    ("origin_kind", `String projection.origin_kind);
+    ("execution_scope", `String projection.execution_scope);
+    ("orchestration_mode", `String projection.orchestration_mode);
+    ("control_profile", `String projection.control_profile);
+    ("scale_profile", `String projection.scale_profile);
+    ("instruction_profile", `String projection.instruction_profile);
+    ("fallback_policy", `String projection.fallback_policy);
+    ("communication_mode", `String projection.communication_mode);
+    ("alert_channel", `String projection.alert_channel);
+    ("duration_seconds", `Int projection.duration_seconds);
+    ("checkpoint_interval_sec", `Int projection.checkpoint_interval_sec);
+    ("min_agents", `Int projection.min_agents);
+    ("auto_resume", `Bool projection.auto_resume);
+    ("planned_worker_count", `Int projection.planned_worker_count);
+    ("model_cascade", `List (List.map (fun model -> `String model) projection.model_cascade));
+    ("worker_class_counts", count_assoc_to_json projection.worker_class_counts);
+    ("runtime_pool_counts", count_assoc_to_json projection.runtime_pool_counts);
+    ("lane_counts", count_assoc_to_json projection.lane_counts);
+    ( "controller_level_counts",
+      count_assoc_to_json projection.controller_level_counts );
+    ("control_domain_counts", count_assoc_to_json projection.control_domain_counts);
+    ("model_tier_counts", count_assoc_to_json projection.model_tier_counts);
+    ( "worker_specs",
+      `List (List.map projected_worker_spec_to_json projection.worker_specs) );
+  ]
+
+let runtime_health_to_json (health : runtime_health) =
+  `Assoc
+    [
+      ("base_path_exists", `Bool health.base_path_exists);
+      ("room_initialized", `Bool health.room_initialized);
+      ("session_running", `Bool health.session_running);
+      ( "ready",
+        `Bool
+          (health.base_path_exists && health.room_initialized
+         && health.session_running) );
+    ]
+
+let replace_metadata_field key value metadata =
+  let remaining =
+    List.filter (fun (existing, _) -> not (String.equal existing key)) metadata
+  in
+  (key, value) :: remaining
+
+let with_runtime_health
+    (collaboration : Agent_sdk.Collaboration.t)
+    (health : runtime_health) : Agent_sdk.Collaboration.t =
+  {
+    collaboration with
+    metadata =
+      replace_metadata_field "runtime_health" (runtime_health_to_json health)
+        collaboration.metadata;
+  }
+
 let planned_worker_summary (pw : Team_session_types.planned_worker) : string option =
   let parts = ref [] in
   let add label value =
@@ -215,85 +449,6 @@ let planned_worker_summary (pw : Team_session_types.planned_worker) : string opt
   | [] -> None
   | parts -> Some (String.concat "; " parts)
 
-let planned_worker_metadata_json (pw : Team_session_types.planned_worker) :
-    Yojson.Safe.t =
-  let fields =
-    []
-    |> add_json_string_if_present "runtime_actor" pw.runtime_actor
-    |> add_json_string_if_present "spawn_role" pw.spawn_role
-    |> add_json_string_if_present "spawn_model" pw.spawn_model
-    |> add_json_string_if_present "parent_actor" pw.parent_actor
-    |> add_json_string_if_present "runtime_pool" pw.runtime_pool
-    |> add_json_string_if_present "lane_id" pw.lane_id
-    |> add_json_string_if_present "supervisor_actor" pw.supervisor_actor
-    |> add_json_string_if_present "routing_reason" pw.routing_reason
-    |> add_json_bool_if_present "thinking_enabled" pw.thinking_enabled
-    |> add_json_int_if_present "thinking_budget" pw.thinking_budget
-    |> add_json_int_if_present "max_turns" pw.max_turns
-    |> add_json_int_if_present "timeout_seconds" pw.timeout_seconds
-    |> add_json_float_if_present "routing_confidence" pw.routing_confidence
-  in
-  let fields =
-    ("spawn_agent", `String pw.spawn_agent) :: ("routing_escalated", `Bool pw.routing_escalated) :: fields
-  in
-  let fields =
-    match pw.execution_scope with
-    | Some scope ->
-        ("execution_scope", `String (Team_session_types.execution_scope_to_string scope))
-        :: fields
-    | None -> fields
-  in
-  let fields =
-    match pw.worker_class with
-    | Some worker_class ->
-        ("worker_class", `String (Team_session_types.worker_class_to_string worker_class))
-        :: fields
-    | None -> fields
-  in
-  let fields =
-    match pw.capsule_mode with
-    | Some mode ->
-        ("capsule_mode", `String (Team_session_types.capsule_mode_to_string mode))
-        :: fields
-    | None -> fields
-  in
-  let fields =
-    match pw.controller_level with
-    | Some level ->
-        ("controller_level", `String (Team_session_types.controller_level_to_string level))
-        :: fields
-    | None -> fields
-  in
-  let fields =
-    match pw.control_domain with
-    | Some domain ->
-        ("control_domain", `String (Team_session_types.control_domain_to_string domain))
-        :: fields
-    | None -> fields
-  in
-  let fields =
-    match pw.model_tier with
-    | Some tier ->
-        ("model_tier", `String (Team_session_types.model_tier_to_string tier))
-        :: fields
-    | None -> fields
-  in
-  let fields =
-    match pw.task_profile with
-    | Some profile ->
-        ("task_profile", `String (Team_session_types.task_profile_to_string profile))
-        :: fields
-    | None -> fields
-  in
-  let fields =
-    match pw.risk_level with
-    | Some risk ->
-        ("risk_level", `String (Team_session_types.risk_level_to_string risk))
-        :: fields
-    | None -> fields
-  in
-  `Assoc (List.rev fields)
-
 let planned_worker_to_participant
     (pw : Team_session_types.planned_worker)
     : Agent_sdk.Collaboration.participant =
@@ -326,6 +481,7 @@ let collaboration_of_session
     Agent_sdk.Context.set ctx
       (Printf.sprintf "finding_%d" i) (`String f)
   ) findings;
+  let projection = projected_session_metadata_of_session session in
   {
     id = session.session_id;
     goal = session.goal;
@@ -342,67 +498,7 @@ let collaboration_of_session
        | None -> session.started_at);
     outcome = session.stop_reason;
     max_participants = None;
-    metadata =
-      [
-        ("room_id", `String session.room_id);
-        ("created_by", `String session.created_by);
-        ("origin_kind",
-         `String (Team_session_types.session_origin_kind_to_string
-                    session.origin_kind));
-        ("execution_scope",
-         `String
-           (Team_session_types.execution_scope_to_string session.execution_scope));
-        ("orchestration_mode",
-         `String
-           (Team_session_types.orchestration_mode_to_string
-              session.orchestration_mode));
-        ("control_profile",
-         `String
-           (Team_session_types.control_profile_to_string
-              session.control_profile));
-        ("scale_profile",
-         `String
-           (Team_session_types.scale_profile_to_string session.scale_profile));
-        ("instruction_profile",
-         `String
-           (Team_session_types.instruction_profile_to_string
-              session.instruction_profile));
-        ("fallback_policy",
-         `String
-           (Team_session_types.fallback_policy_to_string session.fallback_policy));
-        ("communication_mode",
-         `String
-           (Team_session_types.communication_mode_to_string
-              session.communication_mode));
-        ("alert_channel",
-         `String
-           (Team_session_types.alert_channel_to_string session.alert_channel));
-        ("duration_seconds", `Int session.duration_seconds);
-        ("checkpoint_interval_sec", `Int session.checkpoint_interval_sec);
-        ("min_agents", `Int session.min_agents);
-        ("auto_resume", `Bool session.auto_resume);
-        ("planned_worker_count", `Int (List.length session.planned_workers));
-        ("model_cascade", `List (List.map (fun model -> `String model) session.model_cascade));
-        ("worker_class_counts",
-         count_assoc_to_json
-           (Team_session_types.worker_class_counts session.planned_workers));
-        ("runtime_pool_counts",
-         count_assoc_to_json
-           (Team_session_types.runtime_pool_counts session.planned_workers));
-        ("lane_counts",
-         count_assoc_to_json (Team_session_types.lane_counts session.planned_workers));
-        ("controller_level_counts",
-         count_assoc_to_json
-           (Team_session_types.controller_level_counts session.planned_workers));
-        ("control_domain_counts",
-         count_assoc_to_json
-           (Team_session_types.control_domain_counts session.planned_workers));
-        ("model_tier_counts",
-         count_assoc_to_json
-           (Team_session_types.model_tier_counts session.planned_workers));
-        ("worker_specs",
-         `List (List.map planned_worker_metadata_json session.planned_workers));
-      ];
+    metadata = metadata_of_session_projection projection;
   }
 
 let truncate_list n lst =

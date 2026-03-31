@@ -628,3 +628,80 @@ let profile_kind_caps (profile : string) : (string * int) list =
 
 let cap_for_kind (caps : (string * int) list) (kind : string) : int =
   List.assoc_opt kind caps |> Option.value ~default:1
+
+(** Synthesize a [STATE] block from run metadata when the model omits one.
+    Produces a deterministic snapshot from tool usage, stop reason, and goal
+    so generation continuity is never broken. Tagged [SYNTHETIC] for
+    downstream consumers to distinguish from model-generated blocks. *)
+let synthesize_state_from_run_result
+    ~(goal : string)
+    ~(tools_used : string list)
+    ~(stop_reason : string)
+    ~(response_text : string)
+    : keeper_state_snapshot =
+  let progress =
+    match tools_used with
+    | [] -> Some "No tools used this generation"
+    | ts ->
+      let unique = List.sort_uniq String.compare ts in
+      Some (Printf.sprintf "Used: %s" (String.concat ", " unique))
+  in
+  let next_items =
+    if stop_reason = "budget_exhausted" then
+      ["Continue previous work"; "Review results from last generation"]
+    else []
+  in
+  let response_hint =
+    let trimmed = String.trim response_text in
+    if String.length trimmed > 100 then
+      Some (String.sub trimmed 0 100 ^ "...")
+    else if trimmed <> "" then Some trimmed
+    else None
+  in
+  let decisions =
+    match response_hint with
+    | Some hint -> [Printf.sprintf "[SYNTHETIC] Last output: %s" hint]
+    | None -> ["[SYNTHETIC] No visible output this generation"]
+  in
+  { goal = (let g = String.trim goal in if g = "" then None else Some g);
+    progress;
+    next_items;
+    decisions;
+    open_questions = [];
+    constraints = [];
+  }
+
+(** Render a [keeper_state_snapshot] back into a [\[STATE\]...\[/STATE\]] block. *)
+let render_state_block (snapshot : keeper_state_snapshot) : string =
+  let buf = Buffer.create 256 in
+  Buffer.add_string buf "[STATE]\n";
+  (match snapshot.goal with
+   | Some g when String.trim g <> "" ->
+     Buffer.add_string buf (Printf.sprintf "Goal: %s\n" g)
+   | _ -> ());
+  (match snapshot.progress with
+   | Some p when String.trim p <> "" ->
+     Buffer.add_string buf (Printf.sprintf "Progress: %s\n" p)
+   | _ -> ());
+  (match snapshot.next_items with
+   | [] -> ()
+   | items ->
+     Buffer.add_string buf
+       (Printf.sprintf "Next: %s\n" (String.concat "; " items)));
+  (match snapshot.decisions with
+   | [] -> ()
+   | items ->
+     Buffer.add_string buf
+       (Printf.sprintf "Decisions: %s\n" (String.concat "; " items)));
+  (match snapshot.open_questions with
+   | [] -> ()
+   | items ->
+     Buffer.add_string buf
+       (Printf.sprintf "OpenQuestions: %s\n" (String.concat "; " items)));
+  (match snapshot.constraints with
+   | [] -> ()
+   | items ->
+     Buffer.add_string buf
+       (Printf.sprintf "Constraints: %s\n" (String.concat "; " items)));
+  Buffer.add_string buf "[/STATE]";
+  Buffer.contents buf

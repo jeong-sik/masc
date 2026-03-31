@@ -105,13 +105,6 @@ let test_dispatch_handover_claim_no_fs () =
   | Some (success, _) -> check bool "fails without fs" false success
   | None -> fail "expected Some"
 
-let test_dispatch_handover_claim_and_spawn_no_fs () =
-  let ctx = make_ctx () in
-  let args = `Assoc [("handover_id", `String "handover-001")] in
-  match Tool_handover.dispatch ctx ~name:"masc_handover_claim_and_spawn" ~args with
-  | Some (success, _) -> check bool "fails without fs" false success
-  | None -> fail "expected Some"
-
 let test_dispatch_handover_get_no_fs () =
   let ctx = make_ctx () in
   let args = `Assoc [("handover_id", `String "handover-001")] in
@@ -158,7 +151,6 @@ let () =
       test_case "handover_create_no_fs" `Quick test_dispatch_handover_create_no_fs;
       test_case "handover_list_no_fs" `Quick test_dispatch_handover_list_no_fs;
       test_case "handover_claim_no_fs" `Quick test_dispatch_handover_claim_no_fs;
-      test_case "handover_claim_and_spawn_no_fs" `Quick test_dispatch_handover_claim_and_spawn_no_fs;
       test_case "handover_get_no_fs" `Quick test_dispatch_handover_get_no_fs;
       test_case "unknown" `Quick test_dispatch_unknown_tool;
     ];

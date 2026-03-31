@@ -147,7 +147,6 @@ let all_known_tool_names =
     "masc_governance_set";
     "masc_governance_status";
     "masc_handover_claim";
-    "masc_handover_claim_and_spawn";
     "masc_handover_create";
     "masc_handover_get";
     "masc_handover_list";
@@ -227,18 +226,6 @@ let all_known_tool_names =
     "masc_pause";
     "masc_pause_status";
     "masc_pending_interrupts";
-    "masc_persistent_agent_add_loop";
-    "masc_persistent_agent_create_from_persona";
-    "masc_persistent_agent_down";
-    "masc_persistent_agent_eval";
-    "masc_persistent_agent_list";
-    "masc_persistent_agent_list_loops";
-    "masc_persistent_agent_msg";
-    "masc_persistent_agent_repair";
-    "masc_persistent_agent_remove_loop";
-    "masc_persistent_agent_status";
-    "masc_persistent_agent_trajectory";
-    "masc_persistent_agent_up";
     "masc_persona_list";
     "masc_petition_submit";
     "masc_plan_clear_task";
@@ -826,7 +813,7 @@ let prepare_for_name fixture name =
   end;
   if List.mem name [ "masc_library_list"; "masc_library_read"; "masc_library_promote"; "masc_library_search" ] then
     ignore (ensure_library_topic fixture);
-  if List.mem name [ "masc_handover_get"; "masc_handover_claim"; "masc_handover_claim_and_spawn" ] then
+  if List.mem name [ "masc_handover_get"; "masc_handover_claim" ] then
     ignore (ensure_handover fixture);
   if name = "masc_unlock" then
     ensure_lock fixture
@@ -869,7 +856,7 @@ let field_value fixture ~tool_name field_name schema =
   | "path" when List.mem tool_name [ "masc_code_write"; "masc_code_edit"; "masc_code_delete"; "masc_code_read"; "masc_code_symbols" ] ->
       `String (ensure_code_file fixture)
   | "working_dir"
-    when List.mem tool_name [ "masc_keeper_repair"; "masc_persistent_agent_repair" ] ->
+    when tool_name = "masc_keeper_repair" ->
       `String fixture.worktree_dir
   | "cwd" -> `String fixture.worktree_dir
   | "command" -> `String "git status"
@@ -915,26 +902,20 @@ let field_value fixture ~tool_name field_name schema =
         [
           "masc_keeper_up";
           "masc_keeper_repair";
-          "masc_persistent_agent_repair";
-          "masc_persistent_agent_up";
         ] ->
       `String "bad keeper!"
   | "task_spec" when tool_name = "masc_keeper_repair" ->
       `String "Write only OCaml code for inc : int -> int."
   | "source_text" when tool_name = "masc_keeper_repair" ->
       `String "let inc n = n + 1\n"
-  | "task_spec" when tool_name = "masc_persistent_agent_repair" ->
-      `String "Write only OCaml code for inc : int -> int."
-  | "source_text" when tool_name = "masc_persistent_agent_repair" ->
-      `String "let inc n = n + 1\n"
-  | "name" when List.mem tool_name [ "masc_keeper_msg"; "masc_persistent_agent_msg" ] ->
+  | "name" when tool_name = "masc_keeper_msg" ->
       `String "bad keeper!"
   | "name" -> `String "tool-matrix"
   | "verification_id" -> `String (ensure_verification_request fixture)
   | "verifier" -> `String fixture.agent_name
   | "verdict" -> `String "pass"
   | "score" -> `Float 0.9
-  | "timeout_sec" when List.mem tool_name [ "masc_keeper_msg"; "masc_persistent_agent_msg" ] ->
+  | "timeout_sec" when tool_name = "masc_keeper_msg" ->
       `Float 1.0
   | "timeout" when tool_name = "masc_listen" -> `Int 1
   | "interval" when tool_name = "masc_heartbeat_start" -> `Int 5
@@ -1028,9 +1009,9 @@ let tool_arguments fixture (schema : Types.tool_schema) =
       | "masc_heartbeat_start" -> [ "interval" ]
       | "masc_listen" -> [ "timeout" ]
       | "masc_verify_request" -> [ "verifier" ]
-      | "masc_keeper_repair" | "masc_persistent_agent_repair" ->
+      | "masc_keeper_repair" ->
           [ "source_text"; "max_attempts"; "working_dir" ]
-      | "masc_keeper_msg" | "masc_persistent_agent_msg" ->
+      | "masc_keeper_msg" ->
           [ "timeout_sec" ]
       | "masc_relay_now" -> [ "target_agent" ]
       | _ -> []
@@ -1095,7 +1076,6 @@ let guard_fragments_for_name name =
         "masc_autoresearch_";
         "masc_handover_";
         "masc_keeper_";
-        "masc_persistent_agent_";
         "masc_local_runtime_";
         "masc_mdal_";
         "masc_relay_";

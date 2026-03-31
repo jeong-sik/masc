@@ -634,6 +634,5 @@ let merge_result_to_json (mr : merge_result) =
       ("conflicts", `List (List.map (fun s -> `String s) mr.conflicts));
       ("build_ok", `Bool mr.build_ok);
       ("skipped_workers", `List (List.map (fun s -> `String s) mr.skipped_workers));
-      ( "pr_url",
-        match mr.pr_url with Some u -> `String u | None -> `Null );
+      ("pr_url", Json_util.string_opt_to_json mr.pr_url);
     ]

@@ -26,7 +26,7 @@ let check_risk msg expected actual =
 
 let test_low_risk () =
   let dc = make_dc ~required_artifacts:["readme"] ~repair_budget:5 () in
-  let tools = ["keeper_read"; "keeper_search"] in
+  let tools = ["keeper_read"; "keeper_board_list"] in
   let risk = Masc_mcp.Contract_risk.of_delivery_contract ~delivery_contract:dc ~tool_names:tools in
   check_risk "read-only + generous budget = Low" Agent_sdk.Risk_class.Low risk
 

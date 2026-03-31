@@ -245,9 +245,9 @@ let room_state_to_json state =
     ("event_seq", `Int state.event_seq);
     ("mode", `String state.mode);
     ("paused", `Bool state.paused);
-    ("paused_by", match state.paused_by with Some s -> `String s | None -> `Null);
-    ("paused_at", match state.paused_at with Some f -> `Float f | None -> `Null);
-    ("pause_reason", match state.pause_reason with Some s -> `String s | None -> `Null);
+    ("paused_by", Json_util.string_opt_to_json state.paused_by);
+    ("paused_at", Json_util.float_opt_to_json state.paused_at);
+    ("pause_reason", Json_util.string_opt_to_json state.pause_reason);
   ]
 
 let room_state_of_json json =
@@ -554,7 +554,7 @@ let message_to_json msg =
     ("seq", `Int msg.seq);
     ("from", `String msg.from_agent);
     ("content", `String msg.content);
-    ("mention", match msg.mention with Some m -> `String m | None -> `Null);
+    ("mention", Json_util.string_opt_to_json msg.mention);
     ("timestamp", `Float msg.timestamp);
   ]
 
@@ -621,7 +621,7 @@ let broadcast config ~from_agent ~content =
         ~agent:from_agent
         ~payload:(`Assoc [
           ("message_seq", `Int seq);
-          ("mention", match msg.mention with Some m -> `String m | None -> `Null);
+          ("mention", Json_util.string_opt_to_json msg.mention);
           ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
         ]) in
 

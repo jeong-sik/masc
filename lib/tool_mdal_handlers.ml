@@ -59,7 +59,7 @@ let iter_record_to_json (r : Mdal.iteration_record) : Yojson.Safe.t =
     ("failed_attempts", `String r.failed_attempts);
     ("next_suggestion", `String r.next_suggestion);
     ("elapsed_ms", `Int r.elapsed_ms);
-    ("cost_usd", match r.cost_usd with Some c -> `Float c | None -> `Null);
+    ("cost_usd", Json_util.float_opt_to_json r.cost_usd);
     ("evidence", evidence_json);
   ]
 
@@ -191,19 +191,15 @@ let state_to_json ?config (state : Mdal.loop_state) =
           None,
           Mdal.current_evidence_status state )
   in
-  let stopped_at =
-    match state.stopped_at with
-    | Some ts -> `Float ts
-    | None -> `Null
-  in
+  let stopped_at = Json_util.float_opt_to_json state.stopped_at in
   `Assoc
     [
       ("loop_id", `String state.loop_id);
       ("status", `String (Mdal.status_to_string state.status));
       ("strict_mode", `Bool state.strict_mode);
-      ("error_message", match state.error_message with Some msg -> `String msg | None -> `Null);
-      ("error_reason", match state.error_message with Some msg -> `String msg | None -> `Null);
-      ("stop_reason", match state.stop_reason with Some reason -> `String reason | None -> `Null);
+      ("error_message", Json_util.string_opt_to_json state.error_message);
+      ("error_reason", Json_util.string_opt_to_json state.error_message);
+      ("stop_reason", Json_util.string_opt_to_json state.stop_reason);
       ("profile", `String state.profile.name);
       ("current_iteration", `Int state.current_iteration);
       ("max_iterations", `Int state.profile.max_iterations);
@@ -218,24 +214,18 @@ let state_to_json ?config (state : Mdal.loop_state) =
       ("stopped_at", stopped_at);
       ("execution_mode", `String (Mdal.execution_mode_to_string state.execution_mode));
       ("worker_engine",
-       match state.worker_engine with
-       | Some engine -> `String (Mdal.worker_engine_to_string engine)
-       | None -> `Null);
-      ("worker_model",
-       match state.worker_model with
-       | Some model -> `String model
-       | None -> `Null);
+       Json_util.option_to_yojson
+         (fun engine -> `String (Mdal.worker_engine_to_string engine))
+         state.worker_engine);
+      ("worker_model", Json_util.string_opt_to_json state.worker_model);
       ("evidence_policy", if state.strict_mode then `String "hard" else `String "legacy");
       ("latest_tool_call_count", `Int latest_tool_call_count);
       ("latest_tool_names", `List (List.map (fun item -> `String item) latest_tool_names));
-      ("session_id",
-       match latest_session_id with
-       | Some value -> `String value
-       | None -> `Null);
+      ("session_id", Json_util.string_opt_to_json latest_session_id);
       ("evidence_status",
-       match evidence_status with
-       | Some status -> `String (Mdal.evidence_status_to_string status)
-       | None -> `Null);
+       Json_util.option_to_yojson
+         (fun status -> `String (Mdal.evidence_status_to_string status))
+         evidence_status);
       ("durability", `String durability);
       ("persistence_backend", `String persistence_backend);
       ("recoverable", `Bool (Mdal.recoverable state));

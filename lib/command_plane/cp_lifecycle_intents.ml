@@ -195,11 +195,10 @@ let intent_forecast_json config intent_id ?(limit = 3) () =
           in
           `Assoc
             [
-              ("stage", match stage with Some value -> `String value | None -> `Null);
+              ("stage", Json_util.string_opt_to_json stage);
               ("artifact_scope", json_list_of_strings artifact_scope);
-              ("unit_id", match base_focus.unit_id with Some value -> `String value | None -> `Null);
-              ( "verification_state",
-                match verification_state with Some value -> `String value | None -> `Null );
+              ("unit_id", Json_util.string_opt_to_json base_focus.unit_id);
+              ("verification_state", Json_util.string_opt_to_json verification_state);
               ("successor_score", `Float score);
               ("reason", `String reason);
             ]

@@ -29,8 +29,6 @@ let ensure_keeper_board_post_args ~author ~source = function
 
 let keeper_read_tool_names =
   [
-    (* "keeper_read" removed: dead alias for keeper_fs_read with no schema.
-       Dispatch still accepts it for backward compat (line ~366). *)
     "keeper_fs_read";
     "keeper_memory_search";
     "keeper_library_search";
@@ -360,7 +358,7 @@ let execute_keeper_tool_call
       let ok, msg = Tool_board.handle_tool "masc_board_vote" board_args in
       if ok then msg
       else Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
-  | "keeper_fs_read" | "keeper_read" ->
+  | "keeper_fs_read" ->
       let path = Safe_ops.json_string ~default:"" "path" args in
       let max_bytes =
         Safe_ops.json_int ~default:20000 "max_bytes" args

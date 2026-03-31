@@ -72,23 +72,6 @@ let handle_handover_claim ctx args =
        | Error e -> (false, Printf.sprintf "❌ Failed to claim handover: %s" e))
   | None -> (false, "❌ Filesystem not available")
 
-let handle_handover_claim_and_spawn ctx args =
-  let handover_id = get_string args "handover_id" "" in
-  if handover_id = "" then
-    (false, "handover_id is required")
-  else
-  let additional_instructions = get_string_opt args "additional_instructions" in
-  let timeout_seconds = get_int_opt args "timeout_seconds" in
-  match ctx.fs, ctx.proc_mgr, ctx.sw with
-  | Some fs, Some pm, Some sw ->
-      (match Handover_eio.claim_and_spawn ~sw ~fs ~proc_mgr:pm ctx.config
-               ~handover_id ~agent_name:ctx.agent_name ?additional_instructions ?timeout_seconds () with
-       | Ok result -> (true, Spawn.result_to_string result)
-       | Error e -> (false, Printf.sprintf "❌ Failed to claim/spawn: %s" e))
-  | None, _, _ -> (false, "❌ Filesystem not available")
-  | _, None, _ -> (false, "❌ Process manager not available in this environment")
-  | _, _, None -> (false, "❌ Eio Switch not available in this environment")
-
 let handle_handover_get ctx args =
   let handover_id = get_string args "handover_id" "" in
   if handover_id = "" then
@@ -120,37 +103,10 @@ let schemas : Types.tool_schema list = [
       ("required", `List [`String "agent_name"; `String "handover_id"]);
     ];
   };
-  {
-    name = "masc_handover_claim_and_spawn";
-    description = "Claim a handover AND automatically spawn the successor agent with the capsule. The successor agent will receive the handover context as its initial prompt and begin work immediately.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("handover_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "ID of the handover to claim");
-        ]);
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Agent to spawn (claude, gemini, codex, llama). Bare 'ollama' is unsupported; use 'default' in model fields for adapter-managed selection.");
-        ]);
-        ("additional_instructions", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional extra instructions for the successor agent");
-        ]);
-        ("timeout_seconds", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Timeout for the spawned agent (default: 300)");
-        ]);
-      ]);
-      ("required", `List [`String "handover_id"; `String "agent_name"]);
-    ];
-  };
-
   (* masc_handover_create *)
   {
     name = "masc_handover_create";
-    description = "Write a structured handover record (goal, progress, decisions, warnings) before context limit or session end. \\nCall when approaching context capacity, hitting a timeout, or completing a task phase. \\nSuccessor claims it via masc_handover_claim or masc_handover_claim_and_spawn.";
+    description = "Write a structured handover record (goal, progress, decisions, warnings) before context limit or session end. \\nCall when approaching context capacity, hitting a timeout, or completing a task phase. \\nSuccessor claims it via masc_handover_claim.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -267,6 +223,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_handover_create" -> Some (handle_handover_create ctx args)
   | "masc_handover_list" -> Some (handle_handover_list ctx args)
   | "masc_handover_claim" -> Some (handle_handover_claim ctx args)
-  | "masc_handover_claim_and_spawn" -> Some (handle_handover_claim_and_spawn ctx args)
   | "masc_handover_get" -> Some (handle_handover_get ctx args)
   | _ -> None

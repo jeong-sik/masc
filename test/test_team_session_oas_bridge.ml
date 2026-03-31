@@ -292,6 +292,7 @@ let test_telemetry_of_run_result_carries_trace_ref () =
       turns = 3;
       trace_ref = Some trace_ref;
       proof = None;
+      stop_reason = Oas_worker.Completed;
     }
   in
   let telemetry = Team_session_oas_bridge.telemetry_of_run_result result in

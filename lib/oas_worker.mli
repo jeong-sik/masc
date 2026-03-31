@@ -18,6 +18,10 @@
 
 module Oas = Agent_sdk
 
+type stop_reason =
+  | Completed
+  | TurnBudgetExhausted of { turns_used : int; limit : int }
+
 type run_result = {
   response : Oas.Types.api_response;
   checkpoint : Oas.Checkpoint.t option;
@@ -25,6 +29,7 @@ type run_result = {
   turns : int;
   trace_ref : Oas.Raw_trace.run_ref option;
   proof : Oas.Cdal_proof.t option;
+  stop_reason : stop_reason;
 }
 
 (** Cascade call/error metrics as JSON array, sorted by call count. *)

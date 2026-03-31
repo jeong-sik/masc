@@ -36,14 +36,7 @@ let is_supported_protocol_version = Mcp_transport_protocol.is_supported_protocol
 let normalize_protocol_version = Mcp_transport_protocol.normalize_protocol_version
 let protocol_version_from_params = Mcp_transport_protocol.protocol_version_from_params
 
-let validate_protocol_version version =
-  if is_supported_protocol_version version then
-    Ok version
-  else
-    Error
-      (Printf.sprintf
-         "Unsupported protocolVersion '%s' (supported: %s)" version
-         (String.concat ", " supported_protocol_versions))
+let validate_protocol_version = Mcp_transport_protocol.validate_protocol_version
 
 (** Server info *)
 type mcp_icon = {

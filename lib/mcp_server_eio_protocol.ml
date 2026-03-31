@@ -165,7 +165,7 @@ let handle_initialize_eio ?(profile = Full) id params =
       let protocol_version =
         params |> Mcp_transport_protocol.protocol_version_from_params
       in
-      (match Mcp_server.validate_protocol_version protocol_version with
+      (match Mcp_transport_protocol.validate_protocol_version protocol_version with
        | Error msg -> make_error ~id (-32602) msg
        | Ok protocol_version ->
            make_response ~id (`Assoc [

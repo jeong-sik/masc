@@ -9,8 +9,11 @@ export const flowLoading = signal(false)
 
 // Room strategy resource
 const roomStrategyResource = createAsyncResource<Record<string, unknown>>()
+const roomStrategyMutating = signal(false)
 export const roomStrategy = computed(() => getData(roomStrategyResource.state.value) ?? null)
-export const roomStrategyLoading = computed(() => roomStrategyResource.state.value.status === 'loading')
+export const roomStrategyLoading = computed(() =>
+  roomStrategyMutating.value || roomStrategyResource.state.value.status === 'loading',
+)
 
 // Maintenance state
 export const maintenanceResult = signal<string | null>(null)
@@ -63,13 +66,15 @@ export async function fetchRoomStrategy(): Promise<void> {
 }
 
 export async function setRoomStrategy(updates: Record<string, unknown>): Promise<void> {
-  // setRoomStrategy is a mutation, not a load. Keep manual loading pattern.
+  roomStrategyMutating.value = true
   try {
     await callMcpTool('masc_room_strategy_set', updates)
     showToast('룸 전략 업데이트 완료', 'success')
     await fetchRoomStrategy()
   } catch (err) {
     showToast(`룸 전략 저장 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+  } finally {
+    roomStrategyMutating.value = false
   }
 }
 

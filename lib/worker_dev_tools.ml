@@ -218,7 +218,7 @@ let make_file_write ?workdir ?on_exec () =
   Agent_sdk.Tool.create
     ~name:"file_write"
     ~descriptor:{ kind = None; mutation_class = Some "workspace";
-                  shell = None; notes = []; examples = [] }
+                   shell = None; notes = []; examples = [] }
     ~description:"Write content to a file by absolute path. Creates the file \
       if it doesn't exist, overwrites if it does. Creates parent directories. \
       Use file_read first to check existing content before overwriting."
@@ -274,10 +274,10 @@ let make_file_write ?workdir ?on_exec () =
                Printf.sprintf "Cannot write: %s" msg; recoverable = false })
 
 let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_commands
-    ?(mutation_class = "workspace") ~description () =
+    ~description () =
   Agent_sdk.Tool.create
     ~name:"shell_exec"
-    ~descriptor:{ kind = None; mutation_class = Some mutation_class;
+    ~descriptor:{ kind = None; mutation_class = Some "workspace";
                   shell = None; notes = []; examples = [] }
     ~description
     ~parameters:[
@@ -373,7 +373,6 @@ let make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock =
 let make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock =
   make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock
     ~allowed_commands:readonly_allowed_commands
-    ~mutation_class:"read_only"
     ~description:
       "Execute a read-only shell command and return stdout+stderr. \
        Timeout: 30s default, max 120s. \

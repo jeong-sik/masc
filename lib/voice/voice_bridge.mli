@@ -62,6 +62,16 @@ val available_tts_endpoints :
 val tts_preview_bytes_from_request_json :
   Yojson.Safe.t -> (string, string) result
 
+(** {1 Speech-to-Text} *)
+
+val transcribe_audio :
+  audio_file:string ->
+  ?language_code:string ->
+  unit ->
+  (Yojson.Safe.t, string) result
+
+val available_stt_endpoints : unit -> Voice_config.endpoint list
+
 (** {1 Voice Session Management} *)
 
 val start_voice_session :

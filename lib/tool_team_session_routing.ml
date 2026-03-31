@@ -434,7 +434,7 @@ let model_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
           ~system_prompt:"You are a routing judge for a hybrid swarm. Output only JSON."
           ~goal:prompt ~max_turns:1
           ~temperature:0.0 ~max_tokens:220
-          ~priority:Llm_provider.Request_priority.Proactive ()
+          ()
       with
       | Ok result -> (
           try

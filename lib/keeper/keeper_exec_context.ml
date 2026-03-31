@@ -753,7 +753,6 @@ let run_proactive_generation
             ~tools ~initial_messages:ctx_work.messages
             ~max_turns:(Keeper_config.keeper_unified_max_turns ())
             ~temperature ~max_tokens
-            ~priority:Llm_provider.Request_priority.Background
             ()) in
       match agent_result with
       | Error e ->

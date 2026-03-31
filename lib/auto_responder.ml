@@ -156,7 +156,7 @@ let call_model_direct_sync ~agent_type ~prompt =
       Oas_worker.run_named ~cascade_name
         ~goal:prompt ~max_turns:1
         ~accept:model_response_is_valid ~max_tokens:500
-        ~priority:Llm_provider.Request_priority.Proactive ()
+        ()
     with
     | Ok result ->
         let resp = result.Oas_worker.response in

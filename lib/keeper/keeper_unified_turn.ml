@@ -567,7 +567,6 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
               ~max_cost_usd
-              ~priority:Llm_provider.Request_priority.Background
               ())
       in
       match run_result with

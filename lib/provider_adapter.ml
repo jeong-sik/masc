@@ -46,6 +46,13 @@ type voice_http_request = {
   body_json : Yojson.Safe.t;
 }
 
+type voice_stt_request = {
+  url : string;
+  headers : (string * string) list;
+  form_fields : (string * string) list;
+  file_field : string * string;  (** (field_name, file_path) *)
+}
+
 type gemini_direct_auth =
   | Gemini_vertex_adc of {
       project : string;
@@ -449,6 +456,40 @@ let voice_http_request_for_tts (endpoint : Voice_config.endpoint) ~api_key
               (elevenlabs_voice_id voice);
           headers;
           body_json;
+        }
+
+let voice_stt_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key
+    ~audio_file ~model =
+  let adapter = voice_adapter_for_endpoint endpoint in
+  match voice_endpoint_base_url endpoint, adapter.transport with
+  | None, _ ->
+      Error
+        (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
+  | Some _, Voice_mcp ->
+      Error
+        (Printf.sprintf
+           "voice config endpoint %s uses voice_mcp and cannot build HTTP STT request"
+           endpoint.id)
+  | Some base_url, Voice_openai_compat ->
+      let headers =
+        if api_key = "" then []
+        else [ ("Authorization", "Bearer " ^ api_key) ]
+      in
+      Ok
+        {
+          url = base_url ^ "/audio/transcriptions";
+          headers;
+          form_fields = [ ("model", model) ];
+          file_field = ("file", audio_file);
+        }
+  | Some base_url, Voice_elevenlabs_direct ->
+      let headers = [ ("xi-api-key", api_key) ] in
+      Ok
+        {
+          url = base_url ^ "/speech-to-text";
+          headers;
+          form_fields = [ ("model_id", model) ];
+          file_field = ("file", audio_file);
         }
 
 let default_cli_agent_name () = Env_config_runtime.Cli.default_agent

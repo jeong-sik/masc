@@ -607,7 +607,7 @@ let planned_worker_to_entry_with_state
         ~max_tokens:(Cascade_inference.resolve_max_tokens
           ~cascade_name ~fallback:(fun () -> 4096))
         ?raw_trace ~proof_ref ?contract ~sw
-        ~priority:Llm_provider.Request_priority.Proactive ()
+        ()
     with
     | Ok result ->
         Hashtbl.replace success_by_agent name true;
@@ -653,7 +653,7 @@ let planned_worker_to_entry
 (* ── session -> swarm_config ───────────────────────────────────── *)
 
 let session_to_swarm_config
-    ~sw ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+    ~sw:_ ~net:(_net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : Room.config)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
@@ -697,15 +697,8 @@ let session_to_swarm_config
       match all_selections with
       | [] -> entry_count
       | _ ->
-          let config_path = Oas_worker.default_config_path () in
-          let cap =
-            Llm_provider.Cascade_config.local_capacity_for_selections
-              ~sw ~net ?config_path all_selections
-          in
-          slot_aware_concurrency_cap ~entry_count
-            ~selection_count:(List.length all_selections)
-            ~all_discovered:cap.all_discovered
-            ~endpoints_found:cap.endpoints_found ~total:cap.total
+          (* local_capacity_for_selections removed from OAS SDK. TODO(#4326) *)
+          entry_count
   in
   { entries; mode;
     convergence = make_convergence_metric ~entry_count success_by_agent;

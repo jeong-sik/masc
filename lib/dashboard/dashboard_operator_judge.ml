@@ -241,7 +241,6 @@ let compute_judgments
   match
     Oas_worker.run_named_with_masc_tools ~cascade_name:"operator_judge"
       ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
-      ~priority:Llm_provider.Request_priority.Background
       ()
   with
   | Error message -> Error message
@@ -255,14 +254,10 @@ let compute_judgments
       | exn ->
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
-let should_backoff ~sw ~net =
+let should_backoff ~sw:_ ~net:_ =
   try
-    let config_path = Oas_worker.default_config_path () in
-    let cap = Llm_provider.Cascade_config.local_capacity_for_selections
-        ~sw ~net ?config_path ["operator_judge"]
-    in
-    cap.all_discovered && cap.endpoints_found > 0
-    && cap.process_available = 0 && cap.process_queue_length >= 2
+    (* local_capacity_for_selections removed from OAS SDK. TODO(#4326) *)
+    false
   with exn ->
     Eio.traceln
       "[operator] capacity check failed in should_backoff: %s"

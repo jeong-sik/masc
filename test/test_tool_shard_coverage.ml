@@ -346,6 +346,7 @@ let test_voice_tools_names () =
   let names = List.map (fun (t : Types.tool_schema) -> t.name)
     voice_shard.Tool_shard.tools in
   Alcotest.(check bool) "has voice_speak" true (List.mem "keeper_voice_speak" names);
+  Alcotest.(check bool) "has voice_listen" true (List.mem "keeper_voice_listen" names);
   Alcotest.(check bool) "has voice_agent" true (List.mem "keeper_voice_agent" names);
   Alcotest.(check bool) "has voice_sessions" true (List.mem "keeper_voice_sessions" names);
   Alcotest.(check bool) "has voice_session_start" true (List.mem "keeper_voice_session_start" names);

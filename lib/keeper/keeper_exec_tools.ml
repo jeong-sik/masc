@@ -49,7 +49,8 @@ let keeper_board_tool_names =
   ]
 
 let keeper_voice_tool_names =
-  [ "keeper_voice_speak"; "keeper_voice_agent"; "keeper_voice_sessions";
+  [ "keeper_voice_speak"; "keeper_voice_listen"; "keeper_voice_agent";
+    "keeper_voice_sessions";
     "keeper_voice_session_start"; "keeper_voice_session_end" ]
 
 let keeper_shell_readonly_tool_names = [ "keeper_shell_readonly" ]
@@ -742,6 +743,84 @@ let execute_keeper_tool_call
         | _ ->
             Yojson.Safe.to_string
               (keeper_text_fallback_json ~agent_id:meta.name ~message))
+  | "keeper_voice_listen" ->
+      let timeout_sec =
+        Safe_ops.json_float ~default:15.0 "timeout_seconds" args
+      in
+      let language_code = Safe_ops.json_string_opt "language_code" args in
+      let audio_file =
+        Filename.concat
+          (Filename.get_temp_dir_name ())
+          (Printf.sprintf "masc_stt_%d_%s.wav"
+             (int_of_float (Unix.gettimeofday ()))
+             (String.map (fun c ->
+                if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                then c else '_') meta.name))
+      in
+      let timeout_str = Printf.sprintf "%.0f" timeout_sec in
+      let play_tone freq =
+        try
+          ignore (Process_eio.run_argv_with_stdin_and_status
+            ~timeout_sec:2.0 ~stdin_content:""
+            [ "play"; "-qn"; "synth"; "0.15"; "sine";
+              Printf.sprintf "%.0f" freq ])
+        with _ -> ()
+      in
+      let rec_argv =
+        [ "rec"; "-q"; "-t"; "wav"; audio_file;
+          "rate"; "16k"; "channels"; "1";
+          "silence"; "1"; "0.5"; "1%"; "1"; "2.0"; "1%" ]
+      in
+      play_tone 880.0;
+      let record_result =
+        try
+          let status, _output =
+            Process_eio.run_argv_with_stdin_and_status
+              ~timeout_sec:(timeout_sec +. 5.0)
+              ~stdin_content:"" rec_argv
+          in
+          match status with
+          | Unix.WEXITED 0 -> Ok ()
+          | Unix.WEXITED code ->
+              Error (Printf.sprintf "rec exit %d" code)
+          | _ -> Error "rec process failed"
+        with exn ->
+          Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
+      in
+      play_tone 440.0;
+      let _ = timeout_str in
+      (match record_result with
+      | Error err ->
+          (try Sys.remove audio_file with Sys_error _ -> ());
+          Yojson.Safe.to_string
+            (`Assoc
+              [ ("status", `String "error");
+                ("error", `String err);
+                ("agent_id", `String meta.name) ])
+      | Ok () ->
+          let file_exists =
+            try (Unix.stat audio_file).st_size > 100
+            with Unix.Unix_error _ -> false
+          in
+          if not file_exists then (
+            (try Sys.remove audio_file with Sys_error _ -> ());
+            Yojson.Safe.to_string
+              (`Assoc
+                [ ("status", `String "no_audio");
+                  ("message", `String "no speech detected or recording too short");
+                  ("agent_id", `String meta.name) ]))
+          else
+            match Voice_bridge.transcribe_audio ~audio_file ?language_code () with
+            | Ok json ->
+                (try Sys.remove audio_file with Sys_error _ -> ());
+                Yojson.Safe.to_string json
+            | Error err ->
+                (try Sys.remove audio_file with Sys_error _ -> ());
+                Yojson.Safe.to_string
+                  (`Assoc
+                    [ ("status", `String "error");
+                      ("error", `String err);
+                      ("agent_id", `String meta.name) ]))
   | "keeper_voice_agent" ->
       (* No net required — reads local voice config *)
       (match Voice_bridge.get_agent_voice ~agent_id:meta.name with

@@ -128,7 +128,7 @@ let run_turn
     ?max_cost_usd
     ?on_event
     ?(trajectory_acc : Trajectory.accumulator option)
-    ?priority
+    ?_priority
     ()
   : (run_result, string) result =
   (* 0. Resolve inference parameters via Cascade_inference *)
@@ -470,7 +470,6 @@ let run_turn
           ~agent_ref
           ?contract
           ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
-          ~priority:(Option.value priority ~default:Llm_provider.Request_priority.Interactive)
           ~cache_system_prompt:true
           ()
       with

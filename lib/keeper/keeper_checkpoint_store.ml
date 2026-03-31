@@ -154,71 +154,8 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : unit =
   | Sys_error _ as e -> raise e
   | exn -> raise (save_oas_error (Printexc.to_string exn))
 
-(* ================================================================ *)
-(* Delta Checkpoint Shadow-Apply                                    *)
-(* ================================================================ *)
-
-let checkpoint_hash (ckpt : Agent_sdk.Checkpoint.t) : string =
-  Digest.string (Agent_sdk.Checkpoint.to_string ckpt) |> Digest.to_hex
-
-let maybe_write_delta_sidecar ~session_dir ~session_id
-    (delta : Agent_sdk.Checkpoint.delta) =
-  match Sys.getenv_opt "OAS_DELTA_CHECKPOINT" with
-  | Some "shadow_write" ->
-    let path =
-      Filename.concat session_dir (session_id ^ ".delta.json")
-    in
-    let json = Agent_sdk.Checkpoint.delta_to_json delta in
-    Keeper_fs.save_atomic path (Yojson.Safe.to_string json)
-  | _ -> ()
-
-let shadow_apply_delta
-    ~(session_dir : string)
-    ~(prev_checkpoint : Agent_sdk.Checkpoint.t option ref)
-    ~(current : Agent_sdk.Checkpoint.t)
-    : unit =
-  match !prev_checkpoint with
-  | None ->
-    prev_checkpoint := Some current
-  | Some base ->
-    (try
-       let delta = Agent_sdk.Checkpoint.compute_delta base current in
-       let full_size =
-         float_of_int (String.length (Agent_sdk.Checkpoint.to_string current))
-       in
-       let delta_json_str =
-         Yojson.Safe.to_string (Agent_sdk.Checkpoint.delta_to_json delta)
-       in
-       let delta_size = float_of_int (String.length delta_json_str) in
-       Prometheus.observe_histogram "masc_full_checkpoint_size_bytes" full_size;
-       Prometheus.observe_histogram "masc_delta_checkpoint_size_bytes" delta_size;
-       if full_size > 0.0 then
-         Prometheus.set_gauge "masc_delta_size_ratio" (delta_size /. full_size);
-       match Agent_sdk.Checkpoint.apply_delta base delta with
-       | Ok rebuilt ->
-         let rebuilt_hash = checkpoint_hash rebuilt in
-         let current_hash = checkpoint_hash current in
-         if String.equal rebuilt_hash current_hash then
-           Prometheus.inc_counter "masc_delta_shadow_match_total" ()
-         else begin
-           Log.Keeper.warn
-             "delta shadow mismatch: rebuilt=%s current=%s session=%s"
-             rebuilt_hash current_hash current.session_id;
-           Prometheus.inc_counter "masc_delta_shadow_mismatch_total" ()
-         end;
-         maybe_write_delta_sidecar ~session_dir
-           ~session_id:current.session_id delta
-       | Error err ->
-         Log.Keeper.warn "delta shadow apply_delta error: %s"
-           (Agent_sdk.Error.to_string err);
-         Prometheus.inc_counter "masc_delta_shadow_error_total" ()
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Keeper.warn "delta shadow exception: %s"
-         (Printexc.to_string exn);
-       Prometheus.inc_counter "masc_delta_shadow_error_total" ());
-    prev_checkpoint := Some current
+(* Delta Checkpoint Shadow-Apply removed: Agent_sdk.Checkpoint.delta
+   type was removed upstream. Functions had zero callers. *)
 
 let load_oas ~(session_dir : string) ~(session_id : string) :
     Agent_sdk.Checkpoint.t option =

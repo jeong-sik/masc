@@ -190,8 +190,30 @@ let run_turn
   (* Build BM25 tool index for progressive disclosure.
      Essential tools are always available; others are retrieved
      per-turn based on the goal/context. This prevents the LLM
-     from being overwhelmed by 50+ tools and improves selection. *)
-  let tool_index = Agent_sdk.Tool_index.of_tools keeper_tools in
+     from being overwhelmed by 50+ tools and improves selection.
+
+     top_k=20 (up from default 10) for better coverage across 60-80 tools.
+     Group by prefix so co-retrieval pulls related tools together
+     (e.g. matching keeper_board_post also retrieves keeper_board_comment).
+     OAS Tool_index.build already supports group co-retrieval. *)
+  let tool_index_config =
+    { Agent_sdk.Tool_index.default_config with top_k = 20 } in
+  let tool_entries = List.map (fun (t : Agent_sdk.Tool.t) ->
+    let name = t.schema.name in
+    let group =
+      if String.starts_with ~prefix:"keeper_board_" name then Some "board"
+      else if String.starts_with ~prefix:"keeper_memory_" name
+           || String.starts_with ~prefix:"keeper_library_" name then Some "knowledge"
+      else if String.starts_with ~prefix:"keeper_task" name then Some "tasks"
+      else if String.starts_with ~prefix:"keeper_voice_" name then Some "voice"
+      else if String.starts_with ~prefix:"keeper_fs_" name
+           || name = "keeper_shell_readonly"
+           || name = "keeper_bash" then Some "filesystem"
+      else None
+    in
+    Agent_sdk.Tool_index.{ name; description = t.schema.description; group }
+  ) keeper_tools in
+  let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
   let always_include_tools =
     [ "keeper_time_now"; "keeper_context_status";
       "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
@@ -199,6 +221,18 @@ let run_turn
       "keeper_board_get"; "keeper_board_post";
       "keeper_extend_turns" ]
   in
+  (* Fallback: all keeper tool names minus always_include.
+     Derived from keeper_tools (already per-keeper allow/deny filtered)
+     so no phantom tool names leak in. Used when BM25 confidence is low. *)
+  let all_tool_names =
+    List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) tools
+  in
+  let fallback_tools =
+    List.filter (fun name ->
+      not (List.mem name always_include_tools)
+    ) all_tool_names
+  in
+  let confidence_threshold = 0.5 in
   let base_hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
     ?trajectory_acc
@@ -240,13 +274,27 @@ let run_turn
           if String.trim last_user_text <> "" then last_user_text
           else user_message
         in
-        let retrieved_names =
-          Agent_sdk.Tool_index.retrieve_names tool_index query_text
+        (* Confidence-gated union: always retrieve, but union fallback
+           when BM25 confidence is low (e.g. Korean query vs English docs).
+           Partial retrieval results are always kept — never discarded. *)
+        let retrieved = Agent_sdk.Tool_index.retrieve tool_index query_text in
+        let top_score = match retrieved with
+          | (_, s) :: _ -> s
+          | [] -> 0.0
         in
+        let retrieved_names = List.map fst retrieved in
+        let use_fallback = top_score < confidence_threshold in
         let all_allowed =
-          List.sort_uniq String.compare
-            (always_include_tools @ retrieved_names)
+          let base = always_include_tools @ retrieved_names in
+          if use_fallback then
+            List.sort_uniq String.compare (base @ fallback_tools)
+          else
+            List.sort_uniq String.compare base
         in
+        Log.Keeper.info
+          "tool_disclosure keeper=%s top_score=%.3f retrieved=%d allowed=%d fallback=%b query_len=%d"
+          meta.name top_score (List.length retrieved_names)
+          (List.length all_allowed) use_fallback (String.length query_text);
         let tool_filter =
           Agent_sdk.Guardrails.AllowList all_allowed
         in

@@ -138,23 +138,60 @@ let rec find_git_root path =
     else find_git_root parent
   end
 
+let bool_env name = Env_config_core.get_bool ~default:false name
+
+let running_under_test_executable () =
+  let executable =
+    Sys.executable_name |> Filename.basename |> String.lowercase_ascii
+  in
+  String.starts_with ~prefix:"test_" executable
+
+let should_ignore_inherited_test_base_path ~requested_path ~explicit_path =
+  running_under_test_executable ()
+  && not (bool_env "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
+  && String.trim requested_path <> ""
+  && not (String.equal requested_path ".")
+  && not (String.equal explicit_path requested_path)
+
+let sync_test_base_path_env resolved_path =
+  if running_under_test_executable ()
+     && not (bool_env "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
+  then
+    match Env_config_core.base_path_opt () with
+    | Some current when String.equal current resolved_path -> ()
+    | _ ->
+        Unix.putenv "MASC_BASE_PATH" resolved_path;
+        Log.Room.info "Synchronized MASC_BASE_PATH=%s for test executable %s"
+          resolved_path (Filename.basename Sys.executable_name)
+
+let resolve_requested_base_path path =
+  match find_git_root path with
+  | Some git_root ->
+      Log.Room.info "MASC base resolved: %s → %s (git root)" path git_root;
+      git_root
+  | None ->
+      Log.Room.info "MASC base: %s (no git root found)" path;
+      path
+
 (** Resolve base_path: when MASC_BASE_PATH is explicitly set, use it
-    directly — git root detection only applies for worktree auto-resolution
-    when no explicit path is configured.  This prevents a sub-repo .git
-    (e.g. masc-mcp/) from hijacking the intended base path. *)
+    directly unless a test executable intentionally ignores an inherited
+    override. Git root detection applies for worktree auto-resolution when
+    no explicit path is configured, or when that inherited test override is
+    ignored. This prevents a sub-repo .git (e.g. masc-mcp/) from hijacking
+    the intended base path. *)
 let resolve_masc_base_path path =
   match Env_config_core.base_path_opt () with
+  | Some explicit
+    when should_ignore_inherited_test_base_path ~requested_path:path
+           ~explicit_path:explicit ->
+      Log.Room.warn
+        "Ignoring inherited MASC_BASE_PATH=%s for test executable %s; using requested base path %s"
+        explicit (Filename.basename Sys.executable_name) path;
+      resolve_requested_base_path path
   | Some explicit ->
       Log.Room.info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
       explicit
-  | None ->
-      match find_git_root path with
-      | Some git_root ->
-          Log.Room.info "MASC base resolved: %s → %s (git root)" path git_root;
-          git_root
-      | None ->
-          Log.Room.info "MASC base: %s (no git root found)" path;
-          path
+  | None -> resolve_requested_base_path path
 
 (* ============================================ *)
 (* Environment helpers                          *)
@@ -370,6 +407,7 @@ let create_backend_eio ~sw ~env cfg =
 let default_config base_path =
   (* Resolve to git root for worktree support - all worktrees share same .masc/ *)
   let resolved_path = resolve_masc_base_path base_path in
+  sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
   Log.Backend.info "MASC Backend: type=%s, postgres_url=%s"
     (Backend_types.show_backend_type backend_config.backend_type)
@@ -416,6 +454,7 @@ let default_config base_path =
     to initialize dependent systems (e.g., Board) without Room depending on them. *)
 let default_config_eio ~sw ~env ?(on_backend_ready = fun _backend -> ()) base_path =
   let resolved_path = resolve_masc_base_path base_path in
+  sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
   Log.Backend.info "MASC Backend: type=%s, postgres_url=%s"
     (Backend_types.show_backend_type backend_config.backend_type)

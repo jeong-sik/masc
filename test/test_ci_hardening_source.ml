@@ -42,6 +42,8 @@ let test_health_and_ci_runner_diagnostics () =
     (file_contains_pattern "scripts/health_snapshot.sh" "\"baseline\": {");
   check bool "health snapshot records regressions array" true
     (file_contains_pattern "scripts/health_snapshot.sh" "\"regressions\": ${regressions_json}");
+  check bool "tests scrub inherited MASC_BASE_PATH overrides" true
+    (file_contains_pattern "test/dune" "(MASC_BASE_PATH \"\")");
   check bool "ci runner captures log file" true
     (file_contains_pattern "scripts/ci-run-tests.sh" "TEST_LOG_FILE=");
   check bool "ci runner prints failure markers" true

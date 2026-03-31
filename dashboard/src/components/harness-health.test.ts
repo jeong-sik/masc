@@ -247,17 +247,20 @@ describe('HarnessHealth', () => {
     expect(container.textContent).toContain('keeper-a')
 
     lastEvent.value = {
-      type: 'keeper_handoff',
-      name: 'keeper-b',
-      ts_unix: 1711440900,
-      from_generation: 8,
-      to_generation: 9,
-      to_model: 'glm-5',
+      type: 'oas:masc:harness:handoff',
+      payload: {
+        timestamp: 1711440900,
+        keeper_name: 'keeper-b',
+        trace_id: 'trace-b',
+        generation: 8,
+        next_generation: 9,
+        to_model: 'glm-5',
+      },
     }
     await flushUi()
 
     expect(container.textContent).toContain('keeper-b')
-    expect(container.textContent).toContain('generation 8')
+    expect(container.textContent).toContain('generation 9')
     expect(mermaidSource(container)).toContain('class handoff activeRail;')
 
     await new Promise(resolve => setTimeout(resolve, 1000))

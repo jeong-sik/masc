@@ -617,7 +617,7 @@ let () =
            test_case "transport health contracts" `Quick
              test_transport_health_contracts;
            test_case "worktree list contracts" `Quick
-           test_worktree_list_contracts;
+             test_worktree_list_contracts;
            test_case "oas worker capability threading contracts" `Quick
              test_oas_worker_capability_threading_contracts;
            test_case "team session spawn tool contracts" `Quick

@@ -507,6 +507,9 @@
    ;; godsplit-catalog: tool_catalog decomposition (private sub-modules)
    tool_catalog_surfaces
    tool_catalog_tiers
+   ;; godsplit-misc: tool_misc decomposition (private sub-modules)
+   tool_misc_transport
+   tool_misc_admin
 )
 (private_modules
  dashboard_http_keeper_metrics
@@ -640,7 +643,10 @@
   tool_schema_dsl
   ;; godsplit-catalog: tool_catalog decomposition
   tool_catalog_surfaces
-  tool_catalog_tiers)
+  tool_catalog_tiers
+  ;; godsplit-misc: tool_misc decomposition
+  tool_misc_transport
+  tool_misc_admin)
  (libraries
    mcp_protocol
    mcp_protocol.eio

@@ -74,7 +74,8 @@
         test_keeper_prompt_metrics
         test_cache_metrics_wiring
         test_tool_surface_ssot
-        test_observability_redact)
+        test_observability_redact
+        test_worker_oas_scope_gate)
  (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
           test_sse test_encryption test_cancellation test_graphql_api
           test_graphql_endpoint
@@ -120,7 +121,8 @@
           test_keeper_prompt_metrics
           test_cache_metrics_wiring
           test_tool_surface_ssot
-          test_observability_redact)
+          test_observability_redact
+          test_worker_oas_scope_gate)
  (libraries masc_test_deps))
 
 ; ============================================================

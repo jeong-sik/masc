@@ -356,20 +356,21 @@ let authorize_tool_request ~base_path ~tool_name request :
   with
   | Error err -> Error err
   | Ok () ->
-      (* When no token is provided and auth is disabled, require loopback.
-         This prevents unauthenticated mutation from non-local processes
-         when room auth is off. *)
+      (* When auth is disabled, require loopback binding regardless of
+         whether a token is present. A garbage token must not bypass the
+         loopback guard — auth disabled means no token validation occurs,
+         so the token value is meaningless. *)
       let loopback_guard =
-        if Option.is_none token && not auth_cfg.Types.enabled then begin
+        if not auth_cfg.Types.enabled then begin
           if http_auth_bind_is_loopback () then begin
             Log.Auth.debug
-              "tool %s: allowing unauthenticated mutation on loopback (auth disabled)"
+              "tool %s: allowing mutation on loopback (auth disabled)"
               tool_name;
             Ok ()
           end else
             Error (Types.Unauthorized
               (Printf.sprintf
-                "tool %s: unauthenticated mutation requires room auth or loopback binding"
+                "tool %s: mutation requires room auth enabled or loopback binding"
                 tool_name))
         end else
           Ok ()

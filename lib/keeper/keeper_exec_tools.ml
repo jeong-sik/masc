@@ -6,7 +6,13 @@ open Keeper_alerting
 
 (** Callback for recording keeper-internal tool calls.
     Set at server initialization to avoid Config dependency cycle.
-    Default: no-op. Set to Tool_registry.record_call_if_known in mcp_server_eio.ml. *)
+    Default: no-op. Set to Tool_registry.record_call_if_known in mcp_server_eio.ml.
+
+    Growth constraint: this callback is only invoked from
+    [Keeper_tools_oas.make_tools], which iterates over
+    [keeper_allowed_model_tools]. The set of recordable tool names
+    is therefore bounded by the keeper's allowed tool list — not
+    by arbitrary user input. *)
 let on_keeper_tool_call :
   (tool_name:string -> success:bool -> duration_ms:int -> unit) ref =
   ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())

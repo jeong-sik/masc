@@ -185,14 +185,13 @@ let make_tools
           end else
             let t0 = Time_compat.now () in
             try
-              let result =
-                Keeper_exec_tools.execute_keeper_tool_call
-                  ~config ~meta ~ctx_work:(!ctx_ref)
-                  ~name:td.name ~input
+              let (result, duration_ms) =
+                Inference_utils.timed (fun () ->
+                  Keeper_exec_tools.execute_keeper_tool_call
+                    ~config ~meta ~ctx_work:(!ctx_ref)
+                    ~name:td.name ~input)
               in
               let is_failure = keeper_tool_result_is_failure result in
-              let duration_ms =
-                int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
               if is_failure then begin
                 let count = prior_fails + 1 in
                 Hashtbl.replace failure_counts key count;

@@ -141,7 +141,10 @@ export function buildDashboardSseUrl(sessionId: string, locationSearch = window.
   const urlParams = new URLSearchParams(locationSearch)
   const sseParams = new URLSearchParams()
   const agent = urlParams.get('agent') ?? urlParams.get('agent_name')
-  const token = urlParams.get('token')
+  // Token from sessionStorage (moved from URL on init) — EventSource does not
+  // support custom headers, so query param is the only option.  The token is
+  // no longer visible in the browser address bar or shareable links.
+  const token = sessionStorage.getItem('masc_bearer_token')
   if (agent) sseParams.set('agent', agent)
   if (token) sseParams.set('token', token)
   sseParams.set('session_id', sessionId)

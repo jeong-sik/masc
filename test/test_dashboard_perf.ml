@@ -51,6 +51,21 @@ let with_temp_base f =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () -> f dir)
 
+let with_cwd dir f =
+  let old = Sys.getcwd () in
+  Unix.chdir dir;
+  Fun.protect ~finally:(fun () -> Unix.chdir old) f
+
+let with_env key value f =
+  let old = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some prev -> Unix.putenv key prev
+      | None -> Unix.putenv key "")
+    f
+
 let test_dashboard_perf_reads_root_benchmarks () =
   with_temp_base @@ fun base_path ->
   let config = Lib.Room.default_config base_path in
@@ -87,9 +102,9 @@ let test_dashboard_perf_reads_root_benchmarks () =
   let json = Lib.Server_dashboard_http.dashboard_perf_http_json config in
   let open Yojson.Safe.Util in
   check string "status" "ok" (json |> member "status" |> to_string);
-  check string "result file" latest_file
+  check string "result file" "benchmarks/results/results_20260331_140000.csv"
     (json |> member "source" |> member "result_file" |> to_string);
-  check string "baseline file" baseline_file
+  check string "baseline file" "benchmarks/results/results_20260331_130000.csv"
     (json |> member "comparison" |> member "baseline_file" |> to_string);
   check int "improved count" 1
     (json |> member "comparison" |> member "verdict_counts" |> member "improved" |> to_int);
@@ -109,9 +124,8 @@ let test_dashboard_perf_reads_root_benchmarks () =
 let test_dashboard_perf_reads_worktree_benchmarks () =
   with_temp_base @@ fun base_path ->
   let config = Lib.Room.default_config base_path in
-  let worktree_results_dir =
-    Filename.concat base_path ".worktrees/feat-perf/benchmarks/results"
-  in
+  let worktree_root = Filename.concat base_path ".worktrees/feat-perf" in
+  let worktree_results_dir = Filename.concat worktree_root "benchmarks/results" in
   let latest_file = Filename.concat worktree_results_dir "results_20260331_150000.csv" in
   write_csv latest_file
     [
@@ -121,16 +135,46 @@ let test_dashboard_perf_reads_worktree_benchmarks () =
       "oas_runtime_single,820,805,1010,1160,measured_ceiling=1";
     ];
   set_mtime latest_file 3_000.0;
+  with_env "MASC_BENCHMARK_RESULTS_DIR" worktree_results_dir @@ fun () ->
   let json = Lib.Server_dashboard_http.dashboard_perf_http_json config in
   let open Yojson.Safe.Util in
   check string "status" "ok" (json |> member "status" |> to_string);
-  check string "worktree dir selected" worktree_results_dir
+  check string "worktree dir selected" ".worktrees/feat-perf/benchmarks/results"
     (json |> member "source" |> member "results_dir" |> to_string);
   check int "benchmark count" 4
     (json |> member "latest_run" |> member "benchmark_count" |> to_int);
   check string "runtime file tag" "1"
     (json |> member "highlights" |> member "runtime_single" |> member "note_tags"
      |> member "measured_ceiling" |> to_string)
+
+let test_dashboard_perf_prefers_latest_scoped_artifact () =
+  with_temp_base @@ fun base_path ->
+  let config = Lib.Room.default_config base_path in
+  let root_results_dir = Filename.concat base_path "benchmarks/results" in
+  let root_file = Filename.concat root_results_dir "results_20260331_160000.csv" in
+  let worktree_root = Filename.concat base_path ".worktrees/feat-perf" in
+  let worktree_results_dir = Filename.concat worktree_root "benchmarks/results" in
+  let worktree_file =
+    Filename.concat worktree_results_dir "results_20260331_150000.csv"
+  in
+  write_csv root_file
+    [
+      "mcp_session_init,6,6,8,10,session";
+      "oas_runtime_single,790,780,980,1100,measured_ceiling=1";
+    ];
+  write_csv worktree_file
+    [
+      "mcp_session_init,7,7,9,12,session";
+      "oas_runtime_single,820,805,1010,1160,measured_ceiling=1";
+    ];
+  set_mtime worktree_file 2_000.0;
+  set_mtime root_file 3_000.0;
+  with_cwd worktree_root @@ fun () ->
+  let json = Lib.Server_dashboard_http.dashboard_perf_http_json config in
+  let open Yojson.Safe.Util in
+  check string "status" "ok" (json |> member "status" |> to_string);
+  check string "latest scoped file wins" "benchmarks/results/results_20260331_160000.csv"
+    (json |> member "source" |> member "result_file" |> to_string)
 
 let test_dashboard_perf_empty_shape () =
   with_temp_base @@ fun base_path ->
@@ -154,5 +198,7 @@ let () =
             test_dashboard_perf_reads_root_benchmarks;
           test_case "falls back to worktree benchmark artifacts" `Quick
             test_dashboard_perf_reads_worktree_benchmarks;
+          test_case "prefers latest artifact within scoped dirs" `Quick
+            test_dashboard_perf_prefers_latest_scoped_artifact;
         ] );
     ]

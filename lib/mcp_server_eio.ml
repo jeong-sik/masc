@@ -153,6 +153,7 @@ let () =
      that still rely on name-based registration. Called AFTER schema-based
      registrations so it fills gaps without overwriting correct mappings. *)
   Tool_tag_init.register_all ();
+  Tool_board.register ();
   mark_tag_registry_initialized ();
   (* Inject masc_* schemas into keeper bridge for tier-based filtering.
      Uses Config.raw_all_tool_schemas which includes Board/MDAL schemas

@@ -42,6 +42,7 @@ type prepared_spawn = {
   runtime_model_label : string;
   runtime_lease : Local_runtime_pool.lease option;
   assigned_runtime : string option;
+  mutable lease_released : bool;
 }
 
 (** OAS worker evidence payload for trace integration. *)

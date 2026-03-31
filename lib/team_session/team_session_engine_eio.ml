@@ -194,6 +194,41 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
             finalizing = false;
             generate_report_on_finalize = true;
           });
+    (* Phase C-2b-gate: Single-agent fallback gate (#3651).
+       Classify task decomposability before swarm dispatch.
+       Low → trim to single worker to avoid swarm overhead on sequential tasks. *)
+    let decomp, decomp_reason =
+      Team_session_engine_policy.classify_decomposability
+        ~orchestration_mode
+        ~planned_workers:session.planned_workers
+    in
+    let session =
+      if decomp = Team_session_types.Decomposability_low
+         && List.length session.planned_workers > 1 then begin
+        let kept = match session.planned_workers with w :: _ -> [w] | [] -> [] in
+        let trimmed = List.length session.planned_workers - List.length kept in
+        Team_session_store.append_event config session_id
+          ~event_type:"single_agent_gate"
+          ~detail:(`Assoc [
+            ("decomposability", `String (Team_session_types.decomposability_to_string decomp));
+            ("reason", `String decomp_reason);
+            ("original_worker_count", `Int (List.length session.planned_workers));
+            ("trimmed_workers", `Int trimmed);
+            ("ts_iso", `String (Types.now_iso ()));
+          ]);
+        { session with planned_workers = kept }
+      end else begin
+        Team_session_store.append_event config session_id
+          ~event_type:"decomposability_classified"
+          ~detail:(`Assoc [
+            ("decomposability", `String (Team_session_types.decomposability_to_string decomp));
+            ("reason", `String decomp_reason);
+            ("worker_count", `Int (List.length session.planned_workers));
+            ("ts_iso", `String (Types.now_iso ()));
+          ]);
+        session
+      end
+    in
     (* Phase C-2c: All modes use OAS Swarm Runner.
        orchestration_mode is mapped by the bridge:
          Auto → Decentralized, Manual/Assist → Supervisor.

@@ -4,14 +4,21 @@
 ## [2.189.0] - 2026-03-31
 
 ### Added
+- **Telemetry executor tracking** — track executor decision outcomes in telemetry (#4174).
+- **Room state health counters** — expose state_update_attempts/failures in dashboard monitoring (#4173).
+- **Keeper Korean keyword aliases** — add Korean aliases for BM25 tool retrieval (#4171).
 - **Dashboard feature flags nav** — expose ghost FeatureHealth widget in lab navigation (#4146).
 - **Dashboard tab visit counter** — localStorage-based tab/section visit metrics (#4150).
 - **Transport health on config page** — TransportHealthPanel added to Lab > Config (#4149).
 
 ### Changed
+- **CI boundary ratchet guard** — add MASC/OAS boundary lint guard (#4167).
+- **OCaml runtime hardening** — harden preconditions and test seams (#4141).
 - **Dashboard widget dedup** — remove duplicate connection status and counter chips from sidebar and live monitor (#4147, #4148).
 
 ### Fixed
+- **Team-session scope gate** — deny MASC mutating tools in Observe_only scope (#4168).
+- **Harness latency accumulation** — accumulate MCP_LAST_TIME_TOTAL across retries (#4170).
 - **Keeper tool_access validation** — validate tool_access.tools field type (#4165).
 - **Keeper JSON envelope** — embed change_block inside JSON envelope (#4161).
 - **TUI legacy decode** — make legacy keeper fields optional in decode_keeper (#4158).

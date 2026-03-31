@@ -311,10 +311,13 @@ let execute_team_action (ctx : 'a context) (request : action_request) =
         | `List _ as xs -> Ok xs
         | _ -> Error "payload.spawn_batch is required"
       in
-      let wait_mode =
+      let* wait_mode =
         match get_string_opt request.payload "wait_mode" with
-        | Some value -> value
-        | None -> "blocking"
+        | None -> Ok "blocking"
+        | Some ("background" | "blocking" as v) -> Ok v
+        | Some other ->
+            Error (Printf.sprintf
+              "payload.wait_mode must be \"background\" or \"blocking\", got %S" other)
       in
       let args =
         `Assoc

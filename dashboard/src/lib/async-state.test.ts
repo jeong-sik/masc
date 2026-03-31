@@ -150,4 +150,30 @@ describe('createAsyncResource', () => {
       expect(final.message).toBe('string error')
     }
   })
+
+  it('handles synchronous throws in load function', async () => {
+    const resource = createAsyncResource<string>()
+
+    await resource.load(() => {
+      throw new Error('sync boom')
+    })
+
+    const final = resource.state.value
+    expect(final.status).toBe('error')
+    if (final.status === 'error') {
+      expect(final.message).toBe('sync boom')
+    }
+  })
+
+  it('allows reload after synchronous throw', async () => {
+    const resource = createAsyncResource<string>()
+
+    await resource.load(() => {
+      throw new Error('sync fail')
+    })
+    expect(resource.state.value.status).toBe('error')
+
+    await resource.load(async () => 'recovered')
+    expect(getData(resource.state.value)).toBe('recovered')
+  })
 })

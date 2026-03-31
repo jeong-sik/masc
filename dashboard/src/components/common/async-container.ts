@@ -38,7 +38,7 @@ export function AsyncContainer<T>({
 
     case 'error':
       return html`
-        <div class="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[length:var(--fs-sm)]">
+        <div class="px-4 py-3 rounded-lg bg-[var(--bad-12)] border border-[var(--bad-30)] text-[var(--bad-light)] text-[length:var(--fs-sm)]">
           ${s.message}
         </div>
       `

@@ -69,7 +69,15 @@ export function createAsyncResource<T>(): AsyncResource<T> {
 
       state.value = loading
 
-      inflight = fn()
+      let promise: Promise<T>
+      try {
+        promise = fn()
+      } catch (e) {
+        state.value = failed(e instanceof Error ? e.message : String(e))
+        return Promise.resolve()
+      }
+
+      inflight = promise
         .then(data => {
           state.value = loaded(data)
         })

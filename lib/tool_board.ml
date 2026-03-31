@@ -730,3 +730,8 @@ let handle_tool name args =
   | "masc_board_migrate" -> handle_migrate args
   | "masc_board_reclassify" -> handle_reclassify args
   | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
+
+let register () =
+  Tool_dispatch.register_module
+    ~schemas:tools
+    ~handler:(fun ~name ~args -> Some (handle_tool name args))

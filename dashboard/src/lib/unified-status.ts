@@ -7,7 +7,6 @@ export interface UnifiedStatusResult {
   canonical: string
   label: string
   description: string
-  dotColor: string
 }
 
 /**
@@ -34,7 +33,7 @@ export function resolveUnifiedStatus(
       description: signal === 'live'
         ? '프로세스 오프라인 (미션 신호는 최근 수신됨)'
         : '프로세스 오프라인',
-      dotColor: 'bg-agent-offline',
+
     }
   }
 
@@ -47,7 +46,7 @@ export function resolveUnifiedStatus(
       canonical: primary,
       label: statusLabel(primary),
       description: desc,
-      dotColor: 'bg-agent-working',
+
     }
   }
 
@@ -59,7 +58,7 @@ export function resolveUnifiedStatus(
       description: signal === 'live'
         ? '대기 중 (미션 신호 수신 중)'
         : '대기 중',
-      dotColor: 'bg-agent-idle',
+
     }
   }
 
@@ -69,20 +68,20 @@ export function resolveUnifiedStatus(
       canonical: primary,
       label: statusLabel(primary),
       description: primary === 'compacting' ? '컨텍스트 압축 중' : '핸드오프 진행 중',
-      dotColor: 'bg-agent-busy',
+
     }
   }
 
   // No keeper/agent status — fall back to signal_truth
   if (!primary && signal) {
     if (signal === 'live') {
-      return { canonical: 'live', label: '활성 (신호)', description: '미션 신호만 확인됨 (프로세스 상태 불명)', dotColor: 'bg-agent-working' }
+      return { canonical: 'live', label: '활성 (신호)', description: '미션 신호만 확인됨 (프로세스 상태 불명)' }
     }
     if (signal === 'stale') {
-      return { canonical: 'stale', label: '오래됨', description: '미션 신호 오래됨, 프로세스 상태 불명', dotColor: 'bg-agent-offline' }
+      return { canonical: 'stale', label: '오래됨', description: '미션 신호 오래됨, 프로세스 상태 불명' }
     }
     if (signal === 'archived') {
-      return { canonical: 'archived', label: '보관됨', description: '미션 종료됨', dotColor: 'bg-agent-offline' }
+      return { canonical: 'archived', label: '보관됨', description: '미션 종료됨' }
     }
   }
 
@@ -91,6 +90,5 @@ export function resolveUnifiedStatus(
     canonical: 'unknown',
     label: '확인 필요',
     description: '상태 정보 없음',
-    dotColor: 'bg-agent-offline',
   }
 }

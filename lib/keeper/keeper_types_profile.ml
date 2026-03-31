@@ -368,8 +368,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            | xs -> Some xs);
         execution_scope = str "execution_scope";
         tool_preset =
-          str "tool_preset"
-          |> Option.bind normalize_tool_preset_raw;
+          (match str "tool_preset" with
+           | None -> None
+           | Some raw -> normalize_tool_preset_raw raw);
         tool_also_allow = normalize_name_list_opt (strs "tool_also_allow");
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
       })

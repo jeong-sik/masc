@@ -128,3 +128,92 @@ let fold_completed ~(keep_recent : int)
 
 let fold_completed_strategy ?(keep_recent = 10) () : Agent_sdk.Context_reducer.t =
   Agent_sdk.Context_reducer.custom (fold_completed ~keep_recent)
+
+(* --- Persona-aware compaction (#4318) --- *)
+
+(** Keywords that each soul_profile considers important.
+    Mirrors the keyword lists in {!Keeper_memory_policy.profile_signal_bonus}
+    but exposed as a reusable function for compaction filtering. *)
+let keywords_for_profile (profile : string) : string list =
+  match profile with
+  | "safety" ->
+    ["risk"; "danger"; "unsafe"; "security"; "guardrail";
+     "\xEC\x9C\x84\xED\x97\x98"; "\xEB\xB3\xB4\xEC\x95\x88"; "\xEC\x95\x88\xEC\xA0\x84"]
+  | "delivery" ->
+    ["blocker"; "deadline"; "ship"; "release"; "next step";
+     "\xEB\xA7\x89\xED\x9E\x98"; "\xEB\xB0\xB0\xED\x8F\xAC"; "\xEB\x8B\xA4\xEC\x9D\x8C \xEB\x8B\xA8\xEA\xB3\x84"]
+  | "research" ->
+    ["hypothesis"; "evidence"; "experiment"; "measure";
+     "\xEA\xB0\x80\xEC\x84\xA4"; "\xEA\xB7\xBC\xEA\xB1\xB0"; "\xEC\x8B\xA4\xED\x97\x98"]
+  | "relationship" ->
+    ["preference"; "style"; "tone"; "trust";
+     "\xEC\x84\xA0\xED\x98\xB8"; "\xEC\x8A\xA4\xED\x83\x80\xEC\x9D\xBC"; "\xED\x86\xA4"; "\xEC\x8B\xA0\xEB\xA2\xB0"]
+  | _ -> []
+
+(** Extract up to 3 first-sentence excerpts from messages that contain
+    keywords relevant to the given [soul_profile]. *)
+let extract_profile_relevant_excerpts
+    ~(soul_profile : string)
+    (msgs : Agent_sdk.Types.message list) : string list =
+  let keywords = keywords_for_profile soul_profile in
+  if keywords = [] then []
+  else
+    msgs
+    |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
+      let text = Agent_sdk.Types.text_of_message m in
+      if Keeper_memory_policy.contains_any_ci text keywords
+      then Some (first_sentence text)
+      else None)
+    |> List.filteri (fun i _ -> i < 3)
+
+(** Build a persona-aware fold stub. Extends the standard stub with
+    "Key context" excerpts filtered by [soul_profile] keywords. *)
+let persona_fold_stub_of_turns
+    ~(soul_profile : string)
+    (turns : Agent_sdk.Types.message list list)
+    : Agent_sdk.Types.message =
+  let all_msgs = List.concat turns in
+  let task = task_of_turn all_msgs in
+  let outcome = outcome_of_turn all_msgs in
+  let artifacts = artifacts_of_turn all_msgs in
+  let n_turns = List.length turns in
+  let excerpts = extract_profile_relevant_excerpts ~soul_profile all_msgs in
+  let excerpt_section = match excerpts with
+    | [] -> ""
+    | _ -> "\nKey context: " ^ String.concat " | " excerpts
+  in
+  let stub_text = Printf.sprintf
+    "[Folded: %s | %d turns]\nOutcome: %s\nArtifacts: %s%s"
+    task n_turns outcome (format_artifacts artifacts) excerpt_section
+  in
+  { Agent_sdk.Types.role = Agent_sdk.Types.User;
+    content = [Agent_sdk.Types.Text stub_text];
+    name = None;
+    tool_call_id = None }
+
+(** Persona-aware fold: same grouping and recency logic as [fold_completed],
+    but uses [persona_fold_stub_of_turns] for profile-relevant excerpts. *)
+let persona_fold_completed ~(keep_recent : int) ~(soul_profile : string)
+    (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  let turns = Agent_sdk.Context_reducer.group_into_turns msgs in
+  let total = List.length turns in
+  if total <= keep_recent then msgs
+  else
+    let old_count = total - keep_recent in
+    let rec split n acc = function
+      | [] -> (List.rev acc, [])
+      | x :: rest ->
+        if n <= 0 then (List.rev acc, x :: rest)
+        else split (n - 1) (x :: acc) rest
+    in
+    let old_turns, recent_turns = split old_count [] turns in
+    match old_turns with
+    | [] -> msgs
+    | _ ->
+      let stub = persona_fold_stub_of_turns ~soul_profile old_turns in
+      stub :: List.concat recent_turns
+
+let persona_fold_strategy ?(keep_recent = 10) ~(soul_profile : string) ()
+    : Agent_sdk.Context_reducer.t =
+  Agent_sdk.Context_reducer.custom
+    (persona_fold_completed ~keep_recent ~soul_profile)

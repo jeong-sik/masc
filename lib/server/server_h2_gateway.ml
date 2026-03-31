@@ -563,6 +563,11 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/dashboard/perf" ->
+          let state = get_server_state () in
+          let json = dashboard_perf_http_json state.Mcp_server.room_config in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
       | `GET, "/api/v1/mdal/loops" ->
           let state = get_server_state () in
           (match mdal_loops_json ~config:state.Mcp_server.room_config httpun_request with

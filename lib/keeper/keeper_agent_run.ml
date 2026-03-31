@@ -358,9 +358,9 @@ let run_turn
   in
   let reducer = Agent_sdk.Context_reducer.compose [
     Agent_sdk.Context_reducer.keep_last 30;
-    { Agent_sdk.Context_reducer.strategy =
-        Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = Context_compact_oas.tool_output_prune_limit } };
-    { strategy = Agent_sdk.Context_reducer.Merge_contiguous };
+    Agent_sdk.Context_reducer.clear_tool_results ~keep_recent:2;
+    Agent_sdk.Context_reducer.merge_contiguous;
+    Agent_sdk.Context_reducer.from_context_config ~max_tokens ();
   ] in
   (* 8. Run Agent *)
   let contract =

@@ -91,6 +91,10 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 
 이 경로가 benchmark와 swarm의 canonical path다.
 
+transport truth를 빠르게 분리하고 싶으면 먼저 `./benchmarks/quick-bench.sh` 또는 `./benchmarks/benchmark.sh`를 쓴다.
+이 두 스크립트는 반드시 `initialize -> notifications/initialized -> Mcp-Session-Id 재사용` 순서를 포함하고, `mcp_session_init`과 runtime lane을 분리해서 기록한다.
+`benchmark.sh`는 warmup 제외와 직전 결과 diff까지 같이 남겨서 before/after 비교용 front door로 쓸 수 있다.
+
 기본 운영 가정:
 
 - `masc_operation_start` 기본 workload는 `coding_task`다.

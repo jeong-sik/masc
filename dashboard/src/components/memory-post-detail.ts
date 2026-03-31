@@ -1,0 +1,262 @@
+import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
+import { Card } from './common/card'
+import { TimeAgo } from './common/time-ago'
+import { Markdown } from './common/markdown'
+import { showToast } from './common/toast'
+import { EmptyState } from './common/empty-state'
+import { TextInput } from './common/input'
+import { stripStateBlocks } from '../keeper-message'
+import { navigate } from '../router'
+import {
+  detailComments,
+  detailLoading,
+  detailPostId,
+  commentText,
+  commentSubmitting,
+  replyingTo,
+  loadPostDetail,
+  submitComment,
+  authorAvatar,
+  kindBadgeColor,
+  visibilityLabel,
+  visibilityBadgeColor,
+  boardPostKind,
+  votePost,
+  refreshBoard,
+} from './memory-state'
+import type { BoardComment, BoardPost } from './memory-state'
+
+// ── Expiry chip (returns html, kept in UI layer) ───────────────────
+function expiryChip(post: BoardPost) {
+  if (!post.expires_at) return null
+  const expiresAtMs = Date.parse(post.expires_at)
+  if (!Number.isFinite(expiresAtMs)) return null
+  if (expiresAtMs <= Date.now()) return html`<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] tracking-wide uppercase bg-[var(--bad-15)] text-[var(--bad-light)] border border-[var(--bad-30)]">만료됨</span>`
+  return html`<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] tracking-wide uppercase bg-[var(--warn-15)] text-[var(--warn)] border border-[var(--warn-30)]">만료까지 <${TimeAgo} timestamp=${post.expires_at} /></span>`
+}
+
+// ── Comment tree building ──────────────────────────────────────────
+function buildCommentTree(comments: BoardComment[]): { roots: BoardComment[]; childrenMap: Map<string, BoardComment[]> } {
+  const childrenMap = new Map<string, BoardComment[]>()
+  const roots: BoardComment[] = []
+  for (const c of comments) {
+    if (c.parent_id) {
+      const siblings = childrenMap.get(c.parent_id) ?? []
+      siblings.push(c)
+      childrenMap.set(c.parent_id, siblings)
+    } else {
+      roots.push(c)
+    }
+  }
+  return { roots, childrenMap }
+}
+
+// ── Comment item ───────────────────────────────────────────────────
+function CommentItem({ comment, postId, depth = 0, replies = [] }: { comment: BoardComment; postId: string; depth?: number; replies?: BoardComment[] }) {
+  const needsTruncation = (comment.content?.length ?? 0) > 300
+  const [expanded, setExpanded] = useState(false)
+  const displayText = needsTruncation && !expanded
+    ? `${comment.content.slice(0, 297)}...`
+    : comment.content
+  const isReplying = replyingTo.value === comment.id
+  const indent = depth > 0 ? `ml-${Math.min(depth * 4, 12)}` : ''
+
+  return html`
+    <div class="${indent}">
+      <div class="board-comment rounded-lg p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="text-[12px]">${authorAvatar(comment.author)}</span>
+          <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('monitoring', { section: 'agents', agent: comment.author })}>${comment.author}</a>
+          <span class="text-[11px] text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
+          <button type="button"
+            class="text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 ml-auto"
+            onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
+          >${isReplying ? '취소' : '답글'}</button>
+        </div>
+        <div class="text-[13px] text-[var(--text-body)] leading-[1.55] whitespace-pre-wrap">${displayText}</div>
+        ${needsTruncation ? html`
+          <button type="button"
+            class="mt-1 text-[11px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
+            onClick=${() => setExpanded(!expanded)}
+          >${expanded ? '접기' : '더 보기...'}</button>
+        ` : null}
+        ${isReplying ? html`
+          <div class="mt-2 flex gap-2">
+            <${TextInput}
+              class="flex-1"
+              placeholder="답글 작성..."
+              value=${commentText.value}
+              onInput=${(event: Event) => { commentText.value = (event.target as HTMLInputElement).value }}
+              onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') submitComment(postId, comment.id) }}
+              disabled=${commentSubmitting.value}
+            />
+            <button type="button"
+              class="py-1.5 px-3 rounded-lg text-[12px] font-medium font-[inherit] cursor-pointer transition-all duration-150 border
+                ${commentSubmitting.value || commentText.value.trim() === ''
+                  ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
+                  : 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
+                }"
+              onClick=${() => submitComment(postId, comment.id)}
+              disabled=${commentSubmitting.value || commentText.value.trim() === ''}
+            >
+              ${commentSubmitting.value ? '...' : '등록'}
+            </button>
+          </div>
+        ` : null}
+      </div>
+      ${replies.length > 0 ? html`
+        <div class="flex flex-col gap-1.5 mt-1.5">
+          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} replies=${[]} />`)}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
+// ── Comment thread ─────────────────────────────────────────────────
+function CommentThread({ comments, postId }: { comments: BoardComment[]; postId: string }) {
+  if (comments.length === 0) return html`<${EmptyState} message="아직 댓글이 없습니다" compact />`
+
+  const { roots, childrenMap } = buildCommentTree(comments)
+  const INITIAL_SHOW = 5
+  const [expanded, setExpanded] = useState(false)
+  const hiddenCount = roots.length - INITIAL_SHOW
+  const visible = expanded || roots.length <= INITIAL_SHOW ? roots : roots.slice(-INITIAL_SHOW)
+
+  return html`
+    <div class="flex flex-col gap-2">
+      <div class="text-[11px] text-[var(--text-muted)] mb-1">댓글 ${comments.length}개</div>
+      ${!expanded && hiddenCount > 0 ? html`
+        <button type="button"
+          class="text-[12px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 text-left py-1"
+          onClick=${() => setExpanded(true)}
+        >이전 댓글 ${hiddenCount}개 더 보기</button>
+      ` : null}
+      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} replies=${childrenMap.get(comment.id) ?? []} />`)}
+      ${expanded && hiddenCount > 0 ? html`
+        <button type="button"
+          class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 text-left py-1"
+          onClick=${() => setExpanded(false)}
+        >접기</button>
+      ` : null}
+    </div>
+  `
+}
+
+// ── Comment form ───────────────────────────────────────────────────
+function CommentForm({ postId }: { postId: string }) {
+  return html`
+    <div class="mt-4 flex gap-2">
+      <${TextInput}
+        class="flex-1"
+        placeholder="댓글 추가..."
+        value=${commentText.value}
+        onInput=${(event: Event) => { commentText.value = (event.target as HTMLInputElement).value }}
+        onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') submitComment(postId) }}
+        disabled=${commentSubmitting.value}
+      />
+      <button type="button"
+        class="py-2 px-4 rounded-lg text-[13px] font-medium font-[inherit] cursor-pointer transition-all duration-150 border
+          ${commentSubmitting.value || commentText.value.trim() === ''
+            ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
+            : 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
+          }"
+        onClick=${() => submitComment(postId)}
+        disabled=${commentSubmitting.value || commentText.value.trim() === ''}
+      >
+        ${commentSubmitting.value ? '...' : '등록'}
+      </button>
+    </div>
+  `
+}
+
+// ── Post detail view ───────────────────────────────────────────────
+export function PostDetail({ post }: { post: BoardPost }) {
+  if (detailPostId.value !== post.id && !detailLoading.value) {
+    loadPostDetail(post.id)
+  }
+
+  const handleVote = async (dir: 'up' | 'down') => {
+    try {
+      await votePost(post.id, dir)
+      refreshBoard()
+    } catch (err) {
+      console.warn(`[board] vote failed (post=${post.id}, dir=${dir})`, err instanceof Error ? err.message : err)
+      showToast('투표에 실패했습니다', 'error')
+    }
+  }
+
+  return html`
+    <div>
+      <button type="button"
+        class="mb-4 px-3 py-1.5 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
+        onClick=${() => navigate('workspace', { section: 'board' })}
+      >← 게시판으로 돌아가기</button>
+
+      <${Card} title=${post.title}>
+        <div class="flex flex-col gap-4">
+          <div class="text-[13px] text-[var(--text-body)] leading-[1.65]">
+            <${Markdown} text=${stripStateBlocks(post.body)} />
+          </div>
+
+          <!-- Author and meta -->
+          <div class="flex gap-2.5 items-center flex-wrap pt-3 border-t border-[var(--border-slate-12)]">
+            <span class="text-[13px]">${authorAvatar(post.author)}</span>
+            <a class="text-[12px] text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('monitoring', { section: 'agents', agent: post.author })}>${post.author}</a>
+            <span class="text-[11px] text-[var(--text-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
+            <span class="text-[11px] text-[var(--text-muted)]">${post.votes ?? 0} votes</span>
+          </div>
+
+          <!-- Badges -->
+          ${(post.hearth || post.visibility || post.expires_at)
+            ? html`
+                <div class="flex gap-1.5 flex-wrap">
+                  ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
+                  ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
+                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(boardPostKind(post))}">${boardPostKind(post) === 'human' ? '사람' : boardPostKind(post)}</span>
+                  ${expiryChip(post)}
+                </div>
+              `
+            : null}
+
+          <!-- Meta details -->
+          ${post.meta
+            ? html`
+                <details class="mt-1">
+                  <summary class="cursor-pointer text-[12px] text-[var(--text-muted)] py-1.5 hover:text-[var(--text-body)] transition-colors">운영 메타</summary>
+                  <div class="mt-2 p-3 rounded-lg bg-[var(--white-3)] border border-[var(--border-slate-12)]">
+                    ${post.meta.source ? html`<div class="text-[12px] text-[var(--text-body)]"><span class="text-[var(--text-muted)]">출처:</span> ${post.meta.source}</div>` : null}
+                    ${post.meta.state_block
+                      ? html`<pre class="whitespace-pre-wrap mt-2 text-[11px] text-[var(--text-muted)] leading-relaxed">${post.meta.state_block}</pre>`
+                      : null}
+                  </div>
+                </details>
+              `
+            : null}
+
+          <!-- Vote buttons -->
+          <div class="flex gap-2">
+            <button type="button"
+              class="vote-btn upvote px-3 py-1.5 rounded-lg text-[12px] font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[#ff4500] hover:border-[rgba(255,69,0,0.3)] hover:bg-[rgba(255,69,0,0.08)] transition-all cursor-pointer"
+              onClick=${() => handleVote('up')}
+            >▲ 추천</button>
+            <button type="button"
+              class="vote-btn downvote px-3 py-1.5 rounded-lg text-[12px] font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[#7193ff] hover:border-[rgba(113,147,255,0.3)] hover:bg-[rgba(113,147,255,0.08)] transition-all cursor-pointer"
+              onClick=${() => handleVote('down')}
+            >▼ 비추천</button>
+          </div>
+        </div>
+      <//>
+
+      <div class="mt-4">
+        <${Card} title="댓글">
+          ${detailLoading.value
+            ? html`<div class="loading-state loading-pulse">댓글 불러오는 중...</div>`
+            : html`<${CommentThread} comments=${detailComments.value} postId=${post.id} />`}
+          <${CommentForm} postId=${post.id} />
+        <//>
+      </div>
+    </div>
+  `
+}

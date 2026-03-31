@@ -280,12 +280,16 @@ let test_permission_for_tool_interrupt () =
    ============================================================ *)
 
 let test_same_origin_browser_request_allows_missing_origin () =
+  (* Since #4272, missing origin without MASC_ALLOW_ANONYMOUS_MUTATIONS=true
+     returns Unauthorized. Both Ok and Unauthorized are acceptable depending
+     on env config — only unexpected error kinds fail. *)
   let module Server_auth = Masc_mcp.Server_auth in
   let headers = Httpun.Headers.of_list [ ("host", "127.0.0.1:8935") ] in
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
   | Ok () -> ()
-  | Error e -> fail (Types.masc_error_to_string e)
+  | Error (Types.Unauthorized _) -> ()
+  | Error e -> fail ("unexpected error kind: " ^ Types.masc_error_to_string e)
 
 let test_same_origin_browser_request_allows_matching_origin () =
   let module Server_auth = Masc_mcp.Server_auth in

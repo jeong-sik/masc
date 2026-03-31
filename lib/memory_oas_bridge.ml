@@ -82,13 +82,17 @@ let episode_ids_of episodes =
     episodes;
   ids
 
+(* Keep at most this many episodes in the in-memory cache.
+   Callers that need fewer use cached_recent_episodes ~limit. *)
+let episode_cache_limit = 500
+
 let load_all_episodes_cached_unlocked () =
   let path = Institution_eio.episodes_jsonl_path () in
   let stamp = file_stamp_opt path in
   match Hashtbl.find_opt episode_file_cache_tbl path with
   | Some cache when cache.stamp = stamp -> cache
   | _ ->
-      let episodes = Institution_eio.load_recent_episodes_jsonl ~limit:max_int in
+      let episodes = Institution_eio.load_recent_episodes_jsonl ~limit:episode_cache_limit in
       let cache = { stamp; episodes; ids = episode_ids_of episodes } in
       Hashtbl.replace episode_file_cache_tbl path cache;
       cache
@@ -113,7 +117,24 @@ let note_episode_flush (episode : Institution_eio.episode) =
     let path = Institution_eio.episodes_jsonl_path () in
     let cache = load_all_episodes_cached_unlocked () in
     if not (Hashtbl.mem cache.ids episode.id) then begin
-      cache.episodes <- cache.episodes @ [episode];
+      let episodes = cache.episodes @ [episode] in
+      (* Trim oldest entries when cache exceeds limit *)
+      let total = List.length episodes in
+      let episodes =
+        if total > episode_cache_limit then
+          let drop_n = total - episode_cache_limit in
+          let rec drop n = function
+            | [] -> []
+            | remaining when n <= 0 -> remaining
+            | (ep : Institution_eio.episode) :: rest ->
+                Hashtbl.remove cache.ids ep.id;
+                drop (n - 1) rest
+          in
+          drop drop_n episodes
+        else
+          episodes
+      in
+      cache.episodes <- episodes;
       Hashtbl.replace cache.ids episode.id ();
     end;
     cache.stamp <- file_stamp_opt path;

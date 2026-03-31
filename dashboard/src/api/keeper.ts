@@ -300,7 +300,7 @@ export async function editKeeperTools(
     `/api/v1/keepers/${encodeURIComponent(name)}/tools`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: jsonHeaders(),
       body: JSON.stringify({ action, tools }),
     },
   )

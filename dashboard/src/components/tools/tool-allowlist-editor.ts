@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { editKeeperTools } from '../../api/keeper'
 import type { ToolEditAction } from '../../api/keeper'
 
@@ -81,6 +82,8 @@ export function ToolAllowlistEditor({
   allToolNames: string[]
   onUpdated: (newAllowlist: string[]) => void
 }) {
+  useEffect(() => { resetEditorState() }, [keeperName])
+
   const removes = pendingRemoves.value
   const adds = pendingAdds.value
   const query = searchTerm.value.toLowerCase().trim()
@@ -155,7 +158,7 @@ export function ToolAllowlistEditor({
         )}
         ${filteredAdds.map(
           (name) => html`
-            <span class="inline-flex items-center gap-1 py-0.5 px-2 rounded-full text-[10px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-400/30 cursor-pointer"
+            <button type="button" class="inline-flex items-center gap-1 py-0.5 px-2 rounded-full text-[10px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-400/30 cursor-pointer"
               onClick=${() => {
                 pendingAdds.value = adds.filter((n) => n !== name)
               }}
@@ -163,7 +166,7 @@ export function ToolAllowlistEditor({
             >
               + ${name}
               <span class="text-[8px] opacity-60">↩</span>
-            </span>
+            </button>
           `,
         )}
       </div>

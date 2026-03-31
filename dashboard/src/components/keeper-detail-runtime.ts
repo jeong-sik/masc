@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { TimeAgo } from './common/time-ago'
 import { missionSnapshot } from '../mission-store'
 import { formatPct } from '../lib/format-number'
@@ -151,6 +152,8 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
 // ── Neighborhood & Tool Audit ────────────────────────────
 
 export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
+  useEffect(() => { showAllowlistEditor.value = false }, [keeper.name])
+
   const room = operatorSnapshot.value?.room ?? {}
   const actions = (operatorSnapshot.value?.available_actions ?? [])
     .filter(action => action.target_type === 'keeper' || action.target_type === 'room')
@@ -224,7 +227,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
             keeperName=${keeper.name}
             currentAllowlist=${allowedTools}
             allToolNames=${(toolsData.value?.tool_inventory?.tools ?? []).map((t: { name: string }) => t.name)}
-            onUpdated=${() => { showAllowlistEditor.value = false }}
+            onUpdated=${() => { showAllowlistEditor.value = false; loadTools() }}
           />`
         : html`
           <span class="text-[11px] text-[var(--text-muted)] leading-snug">이 키퍼 런타임에 현재 허용된 도구.</span>

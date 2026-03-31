@@ -110,6 +110,22 @@ let test_run_argv_with_stdin_and_status_propagates_cancelled () =
   check bool "Cancelled propagated from run_argv_with_stdin_and_status" true
     !raised
 
+let test_run_argv_with_status_cwd_override () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let status, stdout =
+    Process_eio.run_argv_with_status ~cwd:"/tmp" [ "/bin/pwd" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "pwd exit code" 0 code;
+  let trimmed = String.trim stdout in
+  (* /tmp may resolve to /private/tmp on macOS *)
+  check bool "cwd is /tmp or /private/tmp"
+    (trimmed = "/tmp" || trimmed = "/private/tmp") true
+
 let test_reset_for_testing_clears_runtime () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -148,6 +164,8 @@ let () =
             test_run_argv_with_stdin_propagates_cancelled;
           test_case "run_argv_with_stdin_and_status-propagates-cancelled" `Quick
             test_run_argv_with_stdin_and_status_propagates_cancelled;
+          test_case "run_argv_with_status-cwd-override" `Quick
+            test_run_argv_with_status_cwd_override;
           test_case "reset_for_testing-clears-runtime" `Quick
             test_reset_for_testing_clears_runtime;
         ] );

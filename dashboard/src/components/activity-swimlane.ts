@@ -2,7 +2,6 @@
 // Shows horizontal time spans per agent, color-coded by kind.
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState, LoadingState } from './common/feedback-state'
@@ -11,10 +10,9 @@ import { registerActivityRefresh } from '../sse-store'
 import type { SwimlaneResponse, AgentSpan } from '../types'
 import { selectedNodeId, highlightedAgentId } from './activity-graph-view'
 import { formatDurationMs } from '../lib/format-time'
+import { createAsyncResource } from '../lib/async-state'
 
-const swimlaneData = signal<SwimlaneResponse | null>(null)
-const swimlaneLoading = signal(false)
-const swimlaneError = signal<string | null>(null)
+const swimlaneResource = createAsyncResource<SwimlaneResponse | null>()
 
 const LANE_HEIGHT = 32
 const LANE_GAP = 4
@@ -33,17 +31,9 @@ function spanColor(kind: string): string {
   }
 }
 
-async function loadSwimlane(since?: string) {
-  if (swimlaneLoading.value) return
-  swimlaneLoading.value = true
-  swimlaneError.value = null
-  try {
-    swimlaneData.value = await fetchSwimlane(since)
-  } catch (err) {
-    swimlaneError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    swimlaneLoading.value = false
-  }
+function loadSwimlane(since?: string) {
+  swimlaneResource.reset()
+  return swimlaneResource.load(() => fetchSwimlane(since))
 }
 
 interface TooltipInfo {
@@ -223,9 +213,8 @@ export function ActivitySwimlane({ since }: { since?: string }) {
     })
   }, [since])
 
-  const data = swimlaneData.value
-  const loading = swimlaneLoading.value
-  const error = swimlaneError.value
+  const s = swimlaneResource.state.value
+  const data = s.status === 'loaded' ? s.data : undefined
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -316,7 +305,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
     }
   }, [data, highlightedAgentId.value])
 
-  if (loading && !data) {
+  if (s.status === 'loading' || s.status === 'idle') {
     return html`
       <${Card} title="활동 타임라인" testId="activity_swimlane">
         <${LoadingState}>타임라인 불러오는 중...<//>
@@ -324,10 +313,10 @@ export function ActivitySwimlane({ since }: { since?: string }) {
     `
   }
 
-  if (error && !data) {
+  if (s.status === 'error') {
     return html`
       <${Card} title="활동 타임라인" testId="activity_swimlane">
-        <${EmptyState}>타임라인을 불러올 수 없습니다: ${error}<//>
+        <${EmptyState}>타임라인을 불러올 수 없습니다: ${s.message}<//>
       <//>
     `
   }

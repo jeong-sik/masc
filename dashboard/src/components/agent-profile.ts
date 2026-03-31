@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { createAsyncResource } from '../lib/async-state'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
@@ -50,12 +51,14 @@ const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
 type TaskHistoryRow = { taskId: string; text: string }
 
-const loading = signal(false)
-const profileError = signal('')
-const roomActivity = signal<string[]>([])
-const taskHistories = signal<TaskHistoryRow[]>([])
-const agentTimeline = signal<AgentTimelineResponse | null>(null)
-const agentRelations = signal<AgentRelationsResponse | null>(null)
+interface ProfileData {
+  roomActivity: string[]
+  taskHistories: TaskHistoryRow[]
+  agentTimeline: AgentTimelineResponse | null
+  agentRelations: AgentRelationsResponse | null
+}
+
+const profileResource = createAsyncResource<ProfileData>()
 const mentionText = signal('')
 const sendingMention = signal(false)
 
@@ -96,32 +99,23 @@ function workerBrief(name: string) {
   return executionWorkerSupportBriefs.value.find(w => w.name === name) ?? null
 }
 
-async function loadProfile(name: string): Promise<void> {
-  loading.value = true
-  profileError.value = ''
-  roomActivity.value = []
-  taskHistories.value = []
-  agentTimeline.value = null
-  agentRelations.value = null
-
-  try {
+function loadProfile(name: string): Promise<void> {
+  profileResource.reset()
+  return profileResource.load(async () => {
     const [lines, timeline, relations] = await Promise.all([
       fetchRoomMessages(80),
       fetchAgentTimeline(name, 4, 20).catch(() => null),
       fetchAgentRelations(name).catch(() => null),
     ])
 
-    agentRelations.value = relations
-
-    roomActivity.value = lines
+    const activity = lines
       .filter(line => line.includes(name))
       .slice(0, 20)
 
-    agentTimeline.value = timeline
-
     const owned = assignedTasks(name).slice(0, 6)
+    let histories: TaskHistoryRow[] = []
     if (owned.length > 0) {
-      const rows = await Promise.all(
+      histories = await Promise.all(
         owned.map(async task => {
           try {
             const text = await fetchTaskHistory(task.id, 25)
@@ -132,13 +126,15 @@ async function loadProfile(name: string): Promise<void> {
           }
         }),
       )
-      taskHistories.value = rows
     }
-  } catch (err) {
-    profileError.value = err instanceof Error ? err.message : '프로필 로드 실패'
-  } finally {
-    loading.value = false
-  }
+
+    return {
+      roomActivity: activity,
+      taskHistories: histories,
+      agentTimeline: timeline,
+      agentRelations: relations,
+    }
+  })
 }
 
 async function submitMention(target: string): Promise<void> {
@@ -209,7 +205,8 @@ function CharacterPlate({ name }: { name: string }) {
   const workerState = worker?.state
   const workerFocus = worker?.focus
 
-  const timeline = agentTimeline.value
+  const cps = profileResource.state.value
+  const timeline = cps.status === 'loaded' ? cps.data.agentTimeline : null
   const summary = timeline?.summary
 
   return html`
@@ -306,9 +303,13 @@ export function AgentProfile({ name }: { name: string }) {
     void loadProfile(name)
   }, [name])
 
+  const ps = profileResource.state.value
+  const profileData = ps.status === 'loaded' ? ps.data : undefined
+  const profileLoading = ps.status === 'loading'
+
   const owned = assignedTasks(name)
-  const lines = roomActivity.value
-  const timeline = agentTimeline.value
+  const lines = profileData?.roomActivity ?? []
+  const timeline = profileData?.agentTimeline ?? null
   const keeper = findKeeper(name)
   const keeperChatName = keeperChatTargetName(name, keeper)
   const isKeeper = keeper != null
@@ -317,12 +318,12 @@ export function AgentProfile({ name }: { name: string }) {
     <div class="px-1 ${isKeeper ? 'ff-profile--keeper' : ''}">
       <div class="flex gap-2 mb-3">
         <${ActionButton} variant="ghost" onClick=${() => navigate('monitoring', { section: 'agents' })}>← 목록<//>
-        <${ActionButton} variant="ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
-          ${loading.value ? '...' : '새로고침'}
+        <${ActionButton} variant="ghost" onClick=${() => { void loadProfile(name) }} disabled=${profileLoading}>
+          ${profileLoading ? '...' : '새로고침'}
         <//>
       </div>
 
-      ${profileError.value ? html`<div class="council-error rounded-lg">${profileError.value}</div>` : null}
+      ${ps.status === 'error' ? html`<div class="council-error rounded-lg">${ps.message}</div>` : null}
 
       <${CharacterPlate} name=${name} />
 
@@ -344,7 +345,7 @@ export function AgentProfile({ name }: { name: string }) {
         ` : null}
 
         ${(() => {
-          const rel = agentRelations.value
+          const rel = profileData?.agentRelations ?? null
           if (!rel) return null
           const collabs = rel.collaborators ?? []
           const interests = rel.interests ?? []
@@ -406,9 +407,9 @@ export function AgentProfile({ name }: { name: string }) {
                 html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[13px] text-[#c8daf7] leading-[1.4] rounded-lg">${line}</div>`)}</div>`}
         <//>
 
-        ${taskHistories.value.length > 0 ? html`
+        ${(profileData?.taskHistories ?? []).length > 0 ? html`
           <${Card} title="태스크 이력" class="ff-card rounded-xl col-span-full">
-            <div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`
+            <div class="agent-history-list">${(profileData?.taskHistories ?? []).map((row: TaskHistoryRow) => html`
               <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
                 <div class="mb-2"><span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${row.taskId}</span></div>
                 <pre class="m-0 whitespace-pre-wrap text-[13px] leading-[1.5] text-[#cfe0ff] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>

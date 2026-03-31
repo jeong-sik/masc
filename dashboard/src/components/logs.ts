@@ -4,11 +4,14 @@ import { fetchLogs } from '../api/dashboard.js'
 import type { LogEntry } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
 import { TextInput } from './common/input'
+import { createAsyncResource, loaded } from '../lib/async-state'
 
-const logEntries = signal<LogEntry[]>([])
-const logTotal = signal(0)
-const logLoading = signal(false)
-const logError = signal<string | null>(null)
+interface LogData {
+  entries: LogEntry[]
+  total: number
+}
+
+const logResource = createAsyncResource<LogData>()
 const levelFilter = signal('INFO')
 const moduleFilter = signal('')
 const autoRefresh = signal(true)
@@ -97,37 +100,40 @@ function sourceTone(source: string): string {
 
 async function loadLogs(mode: LoadMode = 'reset') {
   const requestId = ++latestRequestId
+
   if (mode === 'reset') {
-    logLoading.value = true
-    logError.value = null
+    return logResource.load(async () => {
+      const resp = await fetchLogs({
+        limit: logLimit.value,
+        level: levelFilter.value,
+        module: moduleFilter.value || undefined,
+      })
+      const entries = sortLogEntries(resp.entries).slice(0, Math.max(1, logLimit.value))
+      latestSeq.value = latestLogSeq(entries)
+      return { entries, total: resp.total }
+    })
   }
 
+  // delta mode — update existing loaded data
   try {
     const resp = await fetchLogs({
       limit: logLimit.value,
       level: levelFilter.value,
       module: moduleFilter.value || undefined,
-      since_seq: mode === 'delta' ? latestSeq.value ?? undefined : undefined,
+      since_seq: latestSeq.value ?? undefined,
     })
     if (requestId !== latestRequestId) return
 
+    const s = logResource.state.value
+    const currentEntries = s.status === 'loaded' ? s.data.entries : []
     const incoming = sortLogEntries(resp.entries)
-    const nextEntries =
-      mode === 'delta'
-        ? mergeLogEntries(logEntries.value, incoming, logLimit.value)
-        : incoming.slice(0, Math.max(1, logLimit.value))
+    const nextEntries = mergeLogEntries(currentEntries, incoming, logLimit.value)
 
-    logEntries.value = nextEntries
     latestSeq.value = latestLogSeq(nextEntries)
-    logTotal.value = resp.total
-    logError.value = null
-  } catch (err) {
+    logResource.state.value = loaded({ entries: nextEntries, total: resp.total })
+  } catch {
     if (requestId !== latestRequestId) return
-    logError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    if (requestId === latestRequestId && mode === 'reset') {
-      logLoading.value = false
-    }
+    // Delta failures don't overwrite loaded state — keep existing data visible
   }
 }
 
@@ -207,6 +213,7 @@ function renderLogRow(entry: LogEntry) {
 
 export function LogViewer() {
   useSignalEffect(() => {
+    logResource.reset()
     void loadLogs('reset')
     if (!autoRefresh.value) return
     const id = setInterval(() => {
@@ -214,6 +221,13 @@ export function LogViewer() {
     }, POLL_INTERVAL_MS)
     return () => clearInterval(id)
   })
+
+  const s = logResource.state.value
+  const logData = s.status === 'loaded' ? s.data : undefined
+  const logEntries = logData?.entries ?? []
+  const logTotal = logData?.total ?? 0
+  const logLoading = s.status === 'loading'
+  const logError = s.status === 'error' ? s.message : null
 
   return html`
     <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
@@ -226,6 +240,7 @@ export function LogViewer() {
               onChange=${(e: Event) => {
                 levelFilter.value = (e.target as HTMLSelectElement).value
                 latestSeq.value = null
+                logResource.reset()
                 void loadLogs('reset')
               }}
             >
@@ -244,6 +259,7 @@ export function LogViewer() {
                 if (moduleDebounceTimer) clearTimeout(moduleDebounceTimer)
                 moduleDebounceTimer = setTimeout(() => {
                   latestSeq.value = null
+                  logResource.reset()
                   void loadLogs('reset')
                 }, 300)
               }}
@@ -251,6 +267,7 @@ export function LogViewer() {
                 if (e.key === 'Enter') {
                   if (moduleDebounceTimer) clearTimeout(moduleDebounceTimer)
                   latestSeq.value = null
+                  logResource.reset()
                   void loadLogs('reset')
                 }
               }}
@@ -262,6 +279,7 @@ export function LogViewer() {
               onChange=${(e: Event) => {
                 logLimit.value = parseInt((e.target as HTMLSelectElement).value, 10)
                 latestSeq.value = null
+                logResource.reset()
                 void loadLogs('reset')
               }}
             >
@@ -274,7 +292,7 @@ export function LogViewer() {
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-[11px] text-[color:var(--text-muted)]">
-            <span class="rounded-full border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-2.5 py-1 tabular-nums">${logEntries.value.length.toLocaleString()} / ${(logTotal.value ?? 0).toLocaleString()}</span>
+            <span class="rounded-full border border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <input
                 type="checkbox"
@@ -288,17 +306,18 @@ export function LogViewer() {
               class="logs-refresh-btn rounded-md border border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.12)] px-3 py-2 text-[11px] font-medium text-[#dff3ff]"
               onClick=${() => {
                 latestSeq.value = null
+                logResource.reset()
                 void loadLogs('reset')
               }}
-              disabled=${logLoading.value}
+              disabled=${logLoading}
             >
-              ${logLoading.value ? '...' : '새로고침'}
+              ${logLoading ? '...' : '새로고침'}
             </button>
           </div>
         </div>
 
-        ${logError.value ? html`
-          <div class="mx-4 mt-4 rounded-md border border-solid border-[#e05050] bg-[rgba(224,80,80,0.12)] px-4 py-3 text-[12px] text-[#ffb3b3]">${logError.value}</div>
+        ${logError ? html`
+          <div class="mx-4 mt-4 rounded-md border border-solid border-[#e05050] bg-[rgba(224,80,80,0.12)] px-4 py-3 text-[12px] text-[#ffb3b3]">${logError}</div>
         ` : null}
 
         <div class="px-3 pt-3">
@@ -311,15 +330,15 @@ export function LogViewer() {
           </div>
         </div>
 
-        ${logEntries.value.length === 0
+        ${logEntries.length === 0
           ? html`
               <div class="flex flex-1 items-center justify-center px-6 text-[13px] text-[var(--text-muted)]">
-                ${logLoading.value ? '로그를 불러오는 중...' : '조건에 맞는 로그가 없습니다.'}
+                ${logLoading ? '로그를 불러오는 중...' : '조건에 맞는 로그가 없습니다.'}
               </div>
             `
           : html`
               <${VirtualList}
-                items=${logEntries.value}
+                items=${logEntries}
                 itemHeight=${LOG_ROW_HEIGHT}
                 overscan=${6}
                 getKey=${(entry: LogEntry) => String(entry.seq)}

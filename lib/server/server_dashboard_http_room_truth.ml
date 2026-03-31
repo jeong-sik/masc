@@ -128,7 +128,7 @@ let room_truth_snapshot_from_caches (state : Mcp_server.server_state) :
     let shell_json =
       if !(Execution_surfaces._shell_warmed) then
         try dashboard_shell_http_json ?clock:state.Mcp_server.clock config
-        with _ -> `Assoc []
+        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> `Assoc []
       else `Assoc []
     in
     let execution_json = cached_surface_json Execution_surfaces._execution_cache in

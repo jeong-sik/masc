@@ -373,6 +373,50 @@ function handleHarnessSSE(): void {
     }))
     scheduleHarnessReload()
   }
+
+  if (type === 'oas:masc:harness:handoff') {
+    const nextItem: HandoffEvent = {
+      timestamp:
+        typeof payload.timestamp === 'number'
+          ? payload.timestamp
+          : Date.now() / 1000,
+      keeper_name: String(payload.keeper_name ?? ''),
+      trace_id: String(payload.trace_id ?? ''),
+      generation: Number(payload.generation ?? 0),
+      next_generation:
+        payload.next_generation == null ? null : Number(payload.next_generation),
+      prev_trace_id:
+        payload.prev_trace_id == null ? null : String(payload.prev_trace_id),
+      new_trace_id:
+        payload.new_trace_id == null ? null : String(payload.new_trace_id),
+      to_model:
+        payload.to_model == null ? null : String(payload.to_model),
+    }
+    updateHarnessData(data => ({
+      ...data,
+      recent_handoffs: {
+        ...data.recent_handoffs,
+        recent_events: mergeRecent(
+          data.recent_handoffs.recent_events,
+          nextItem,
+          (left, right) =>
+            left.timestamp === right.timestamp
+            && left.trace_id === right.trace_id,
+          8,
+        ),
+        total_recent: data.recent_handoffs.total_recent + 1,
+        last_event_at: nextItem.timestamp,
+        empty_reason: null,
+      },
+      overview: {
+        ...data.overview,
+        last_signal_at: nextItem.timestamp,
+        handoff_last_event_at: nextItem.timestamp,
+        latest_handoff_generation: nextItem.next_generation ?? nextItem.generation,
+      },
+    }))
+    scheduleHarnessReload()
+  }
 }
 
 function StatusPill({ status }: { status: RailStatus }) {

@@ -137,6 +137,7 @@ masc_keeper_up(name: "sangsu")
 전제조건:
 - `PERSONAS_ROOT/<name>/profile.json`이 존재해야 한다 (또는 `CONFIG_ROOT/keepers/<name>.toml`)
 - `PERSONAS_ROOT`는 `MASC_PERSONAS_DIR` 우선, 없으면 resolved `CONFIG_ROOT/personas`를 사용한다.
+- 기본적으로 git repo root를 `MASC_BASE_PATH`로 자동 해석한다. `MASC_ME_ROOT` 환경변수로 명시할 수도 있다.
 - `scripts/run-local.sh`는 `<target>/.masc/`를 기본 runtime root로 사용하고, `<target>/.masc/config`를 먼저 본다.
 - shared keeper 상태를 봐야 할 때만 `./start-masc-mcp.sh --http` 또는 explicit `--base-path`를 사용한다.
 - repo-managed config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `<MASC_BASE_PATH>/.masc/config`, 그 다음 `~/.masc/config`, 마지막으로 repo `config/` 자동 탐색을 사용한다.

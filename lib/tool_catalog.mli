@@ -95,6 +95,10 @@ val metadata_to_fields : string -> (string * Yojson.Safe.t) list
 val public_contract_fields : string -> (string * Yojson.Safe.t) list
 (** Minimal metadata for public contract responses. *)
 
+val register_metadata : string -> metadata -> unit
+(** Register runtime metadata for a tool. Called by [Tool_spec.register].
+    Overwrites any previous entry for the same name. *)
+
 val explicit_metadata : (string * metadata) list
 (** Explicitly configured tool metadata entries (for test verification). *)
 

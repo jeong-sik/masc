@@ -244,6 +244,16 @@ let explicit_metadata : (string * metadata) list =
   ]
 
 (* ================================================================ *)
+(* Runtime metadata table (O(1) lookup, seeded from explicit list)  *)
+(* ================================================================ *)
+
+let metadata_table : (string, metadata) Hashtbl.t = Hashtbl.create 256
+let () = List.iter (fun (n, m) -> Hashtbl.replace metadata_table n m) explicit_metadata
+
+let register_metadata name (meta : metadata) =
+  Hashtbl.replace metadata_table name meta
+
+(* ================================================================ *)
 (* Public MCP surface (legacy list, kept for backward compat)       *)
 (* ================================================================ *)
 
@@ -335,7 +345,7 @@ let implementation_allows_public_visibility = function
   | Simulation | Placeholder -> false
 
 let metadata name =
-  match List.assoc_opt name explicit_metadata with
+  match Hashtbl.find_opt metadata_table name with
   | Some meta -> meta
   | None ->
     if is_public_mcp name then default_metadata

@@ -347,6 +347,7 @@
    tool_catalog
    tool_schema_dsl
    tool_result
+   tool_spec
    tool_dispatch
    tool_input_validation
    tool_tag_init

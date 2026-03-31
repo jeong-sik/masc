@@ -27,7 +27,7 @@
 - **Pulse rhythm API** — set_rhythm/get_rhythm for runtime interval (#4063).
 
 ### Fixed
-- **Keeper tool_allowlist** — correct semantics: empty means none (#4059).
+- **Keeper tool_allowlist** — correct runtime semantics: empty list means no tools allowed; JSON deserialization migrates empty to standard_tools for backward compatibility (#4059).
 - **Keeper bridge tests** — update for allowlist semantics + shard bypass (#4088).
 - **Json_util dedup** — consolidate to canonical SSOT (#4085).
 

@@ -257,10 +257,13 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
     - DropLowImportance uses OAS Custom with importance scoring (OAS has no scoring).
     - SummarizeOld uses OAS Custom with extractive summaries plus ToolResult
       structured stubs so ToolUse/ToolResult pairing survives compaction. *)
+(** Max length for tool output before pruning. Shared with keeper_agent_run. *)
+let tool_output_prune_limit = 1500
+
 let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
   | PruneToolOutputs ->
-    Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 1500 }
+    Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = tool_output_prune_limit }
   | MergeContiguous ->
     Agent_sdk.Context_reducer.Merge_contiguous
   | DropLowImportance ->

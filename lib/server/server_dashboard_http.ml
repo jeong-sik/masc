@@ -249,31 +249,34 @@ let warm_shell_cache (state : Mcp_server.server_state) =
 let _last_broadcast_hash : (string, Digestif.SHA256.t) Hashtbl.t =
   Hashtbl.create 8
 
+let _broadcast_hash_mu = Eio.Mutex.create ()
+
 (** Broadcast a single cached surface to all Observer SSE sessions.
     [event_type] becomes the SSE event "type" field.
     Skips broadcast when payload hash matches the previous one (delta push).
-    Safe to call from any fiber — reads only from a cached ref. *)
+    Mutex-protected: safe to call from concurrent fibers. *)
 let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
   let serialized = Yojson.Safe.to_string json in
   let hash = Digestif.SHA256.digest_string serialized in
-  let changed =
-    match Hashtbl.find_opt _last_broadcast_hash event_type with
-    | Some prev -> not (Digestif.SHA256.equal prev hash)
-    | None -> true
-  in
-  if changed then begin
-    Hashtbl.replace _last_broadcast_hash event_type hash;
-    let sse_json =
-      `Assoc
-        [
-          ("type", `String event_type);
-          ("payload", json);
-          ("ts_unix", `Float (Time_compat.now ()));
-        ]
+  Eio.Mutex.use_rw ~protect:true _broadcast_hash_mu (fun () ->
+    let changed =
+      match Hashtbl.find_opt _last_broadcast_hash event_type with
+      | Some prev -> not (Digestif.SHA256.equal prev hash)
+      | None -> true
     in
-    Sse.broadcast_to Observers sse_json
-  end else
-    Log.Dashboard.debug "%s: payload unchanged, skipping broadcast" event_type
+    if changed then begin
+      Hashtbl.replace _last_broadcast_hash event_type hash;
+      let sse_json =
+        `Assoc
+          [
+            ("type", `String event_type);
+            ("payload", json);
+            ("ts_unix", `Float (Time_compat.now ()));
+          ]
+      in
+      Sse.broadcast_to Observers sse_json
+    end else
+      Log.Dashboard.debug "%s: payload unchanged, skipping broadcast" event_type)
 
 (* Wire operator broadcast refs now that Sse is in scope. *)
 let () = _operator_snapshot_broadcast_ref :=
@@ -968,7 +971,7 @@ let room_truth_snapshot_from_caches (state : Mcp_server.server_state) :
     let shell_json =
       if !_shell_warmed then
         try dashboard_shell_http_json ?clock:state.Mcp_server.clock config
-        with _ -> `Assoc []
+        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> `Assoc []
       else `Assoc []
     in
     let execution_json = cached_surface_json _execution_cache in

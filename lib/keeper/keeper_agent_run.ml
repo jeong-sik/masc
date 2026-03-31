@@ -332,7 +332,7 @@ let run_turn
   let reducer = Agent_sdk.Context_reducer.compose [
     Agent_sdk.Context_reducer.keep_last 30;
     { Agent_sdk.Context_reducer.strategy =
-        Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 1500 } };
+        Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = Context_compact_oas.tool_output_prune_limit } };
     { strategy = Agent_sdk.Context_reducer.Merge_contiguous };
   ] in
   (* 8. Run Agent *)

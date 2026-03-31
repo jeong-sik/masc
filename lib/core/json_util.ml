@@ -138,12 +138,15 @@ let bool_opt_to_json : bool option -> Yojson.Safe.t = function
 (** List utilities *)
 
 let dedupe_keep_order xs =
-  let rec loop seen acc = function
+  let seen = Hashtbl.create (List.length xs) in
+  let rec loop acc = function
     | [] -> List.rev acc
     | x :: rest ->
-        if List.mem x seen then
-          loop seen acc rest
-        else
-          loop (x :: seen) (x :: acc) rest
+        if Hashtbl.mem seen x then
+          loop acc rest
+        else begin
+          Hashtbl.replace seen x ();
+          loop (x :: acc) rest
+        end
   in
-  loop [] [] xs
+  loop [] xs

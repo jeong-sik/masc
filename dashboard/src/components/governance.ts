@@ -88,7 +88,7 @@ function JudgeStatusBar() {
     <div class="mb-4 flex items-center gap-3 rounded-lg border border-white/5 bg-white/3 px-3.5 py-2 text-[12px]" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
         <span class="inline-block w-2 h-2 rounded-full ${dotClass}"></span>
-        <span class="font-medium text-text-muted">Judge ${label}</span>
+        <span class="font-medium text-text-muted">평가 모델 ${label}</span>
       </span>
       ${judge.model_used ? html`<span class="text-text-dim">${judge.model_used}</span>` : null}
       ${judge.generated_at || judge.last_error

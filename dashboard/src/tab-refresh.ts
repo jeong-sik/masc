@@ -128,8 +128,13 @@ export function getTabVisitCounts(): Record<string, number> {
   }
 }
 
-export function refreshForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): void {
-  recordTabVisit(routeState.tab, routeState.params.section)
+export function refreshForRoute(
+  routeState: Pick<RouteState, 'tab' | 'params'>,
+  options?: { recordVisit?: boolean },
+): void {
+  if (options?.recordVisit === true) {
+    recordTabVisit(routeState.tab, routeState.params.section)
+  }
   refreshPlanForRoute(routeState).forEach(task => {
     REFRESHERS[task]()
   })

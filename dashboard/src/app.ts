@@ -60,7 +60,7 @@ export function App() {
     // Cancel any pending SSE-triggered refreshes from the previous tab
     // to prevent stale fetch results arriving after navigation (C-4/M-12).
     cancelPendingSSERefreshes()
-    refreshForRoute(route.value)
+    refreshForRoute(route.value, { recordVisit: true })
   }, [route.value.tab, route.value.params.section, route.value.params.q])
 
   const currentTab = route.value.tab

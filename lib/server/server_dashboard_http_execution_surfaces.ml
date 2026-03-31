@@ -36,25 +36,28 @@ let _broadcast_hash_mu = Eio.Mutex.create ()
 let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
   let serialized = Yojson.Safe.to_string json in
   let hash = Digestif.SHA256.digest_string serialized in
-  Eio.Mutex.use_rw ~protect:true _broadcast_hash_mu (fun () ->
-    let changed =
-      match Hashtbl.find_opt _last_broadcast_hash event_type with
-      | Some prev -> not (Digestif.SHA256.equal prev hash)
-      | None -> true
-    in
-    if changed then begin
-      Hashtbl.replace _last_broadcast_hash event_type hash;
-      let sse_json =
-        `Assoc
-          [
-            ("type", `String event_type);
-            ("payload", json);
-            ("ts_unix", `Float (Time_compat.now ()));
-          ]
+  let should_broadcast =
+    Eio.Mutex.use_rw ~protect:true _broadcast_hash_mu (fun () ->
+      let changed =
+        match Hashtbl.find_opt _last_broadcast_hash event_type with
+        | Some prev -> not (Digestif.SHA256.equal prev hash)
+        | None -> true
       in
-      Sse.broadcast_to Observers sse_json
-    end else
-      Log.Dashboard.debug "%s: payload unchanged, skipping broadcast" event_type)
+      if changed then (Hashtbl.replace _last_broadcast_hash event_type hash; true)
+      else false)
+  in
+  if should_broadcast then begin
+    let sse_json =
+      `Assoc
+        [
+          ("type", `String event_type);
+          ("payload", json);
+          ("ts_unix", `Float (Time_compat.now ()));
+        ]
+    in
+    Sse.broadcast_to Observers sse_json
+  end else
+    Log.Dashboard.debug "%s: payload unchanged, skipping broadcast" event_type
 
 (* Wire operator broadcast refs now that Sse is in scope. *)
 let () =

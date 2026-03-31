@@ -106,6 +106,91 @@ let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output
   run_audio_http_request_to_file ~url:request.url ~headers:request.headers
     ~body_json:request.body_json ~output_file
 
+let run_stt_multipart_request (req : Provider_adapter.voice_stt_request) =
+  let header_args =
+    List.concat_map
+      (fun (key, value) -> [ "-H"; Printf.sprintf "%s: %s" key value ])
+      req.headers
+  in
+  let form_args =
+    List.concat_map
+      (fun (key, value) -> [ "-F"; Printf.sprintf "%s=%s" key value ])
+      req.form_fields
+  in
+  let field_name, file_path = req.file_field in
+  let file_arg = [ "-F"; Printf.sprintf "%s=@%s" field_name file_path ] in
+  let argv =
+    [ "curl"; "-sS"; "--max-time"; "30"; "-X"; "POST"; req.url ]
+    @ header_args @ form_args @ file_arg
+  in
+  let status, body =
+    Process_eio.run_argv_with_stdin_and_status ~timeout_sec:35.0
+      ~stdin_content:"" argv
+  in
+  match status with
+  | Unix.WEXITED 0 -> (
+      match Yojson.Safe.from_string body with
+      | json -> Ok json
+      | exception Yojson.Json_error msg ->
+          Error (Printf.sprintf "STT response parse error: %s" msg))
+  | Unix.WEXITED 28 -> Error "STT request timed out"
+  | Unix.WEXITED code -> Error (Printf.sprintf "STT curl exit %d" code)
+  | _ -> Error "STT curl process failed"
+
+let transcribe_via_http_stt endpoint ~audio_file ~model =
+  let* api_key = resolve_api_key endpoint in
+  let* request =
+    Provider_adapter.voice_stt_request_for_endpoint endpoint ~api_key
+      ~audio_file ~model
+  in
+  run_stt_multipart_request request
+
+let available_stt_endpoints () =
+  match load_voice_config () with
+  | Error _ -> []
+  | Ok config ->
+      config.stt.endpoints
+      |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
+
+let transcribe_audio ~audio_file ?language_code () =
+  let model =
+    match load_voice_config () with
+    | Ok config -> config.stt.default_model
+    | Error _ -> "scribe_v2"
+  in
+  let endpoints = available_stt_endpoints () in
+  let rec try_endpoints = function
+    | [] -> Error "no enabled STT endpoints configured"
+    | endpoint :: rest -> (
+        match transcribe_via_http_stt endpoint ~audio_file ~model with
+        | Ok json ->
+            let open Yojson.Safe.Util in
+            let text =
+              match json |> member "text" |> to_string_option with
+              | Some t -> t
+              | None -> Yojson.Safe.to_string json
+            in
+            let lang =
+              match language_code with
+              | Some lc -> lc
+              | None -> (
+                  match json |> member "language_code" |> to_string_option with
+                  | Some lc -> lc
+                  | None -> "unknown")
+            in
+            Ok
+              (`Assoc
+                [
+                  ("status", `String "transcribed");
+                  ("text", `String text);
+                  ("language_code", `String lang);
+                  ("endpoint_id", `String endpoint.id);
+                ])
+        | Error _ when rest <> [] -> try_endpoints rest
+        | Error err -> Error err)
+  in
+  try_endpoints endpoints
+
 let available_tts_endpoints ?provider () =
   match load_voice_config () with
   | Error _ -> []

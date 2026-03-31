@@ -200,12 +200,15 @@ let test_all_keepers_get_full_toolset () =
   check bool "has keeper_board_get" true (List.mem "keeper_board_get" tools);
   check bool "has keeper_shell_readonly" true (List.mem "keeper_shell_readonly" tools);
   check bool "keeper_voice_speak available" true
-    (List.mem "keeper_voice_speak" tools)
+    (List.mem "keeper_voice_speak" tools);
+  check bool "keeper_voice_listen available" true
+    (List.mem "keeper_voice_listen" tools)
 
 let test_voice_enabled () =
   let meta = make_meta ~policy_voice_enabled:true () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_voice_speak" true (List.mem "keeper_voice_speak" tools);
+  check bool "has keeper_voice_listen" true (List.mem "keeper_voice_listen" tools);
   check bool "has keeper_voice_agent" true (List.mem "keeper_voice_agent" tools)
 
 let test_voice_disabled () =

@@ -269,6 +269,17 @@ let voice_tools : Types.tool_schema list = [
     ];
   };
   {
+    name = "keeper_voice_listen";
+    description = "Record user speech via microphone and transcribe to text. Starts recording, waits for speech, stops on silence (2s), then returns transcribed text.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("timeout_seconds", `Assoc [("type", `String "number"); ("description", `String "Max recording duration in seconds (default 15)")]);
+        ("language_code", `Assoc [("type", `String "string"); ("description", `String "ISO language hint, e.g. ko, en")]);
+      ]);
+    ];
+  };
+  {
     name = "keeper_voice_agent";
     description = "Get your own voice configuration (assigned voice, available voices). No network required.";
     input_schema = `Assoc [

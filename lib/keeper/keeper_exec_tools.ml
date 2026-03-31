@@ -47,6 +47,9 @@ let keeper_board_tool_names =
     "keeper_board_comment";
     "keeper_board_vote";
     "keeper_board_list";
+    "keeper_board_stats";
+    "keeper_board_search";
+    "keeper_board_delete";
   ]
 
 let keeper_voice_tool_names =
@@ -356,6 +359,18 @@ let execute_keeper_tool_call
         | other -> other
       in
       let ok, msg = Tool_board.handle_tool "masc_board_vote" board_args in
+      if ok then msg
+      else Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+  | "keeper_board_stats" ->
+      let ok, msg = Tool_board.handle_tool "masc_board_stats" args in
+      if ok then msg
+      else Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+  | "keeper_board_search" ->
+      let ok, msg = Tool_board.handle_tool "masc_board_search" args in
+      if ok then msg
+      else Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+  | "keeper_board_delete" ->
+      let ok, msg = Tool_board.handle_tool "masc_board_delete" args in
       if ok then msg
       else Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
   | "keeper_fs_read" ->

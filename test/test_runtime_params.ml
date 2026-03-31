@@ -282,11 +282,38 @@ let () =
     | None -> Alcotest.fail "keeper_lifecycle surface not found"
     | Some s ->
         Alcotest.(check string) "risk" "medium" s.risk;
-        Alcotest.(check int) "param count" 5 (List.length s.param_keys);
+        Alcotest.(check int) "param count" 6 (List.length s.param_keys);
         Alcotest.(check bool) "has hb_failures"
           true (List.mem "keeper.max_consecutive_hb_failures" s.param_keys);
         Alcotest.(check bool) "has supervisor_max_restarts"
-          true (List.mem "keeper.supervisor_max_restarts" s.param_keys)
+          true (List.mem "keeper.supervisor_max_restarts" s.param_keys);
+        Alcotest.(check bool) "has supervisor_sweep_sec"
+          true (List.mem "keeper.supervisor_sweep_sec" s.param_keys)
+  in
+
+  let test_keeper_diagnostics_surface () =
+    Governance_registry.ensure_init ();
+    let surfaces = Governance_registry.surfaces in
+    let diag_surface =
+      List.find_opt
+        (fun (s : Governance_registry.surface) -> s.id = "keeper_diagnostics")
+        surfaces
+    in
+    match diag_surface with
+    | None -> Alcotest.fail "keeper_diagnostics surface not found"
+    | Some s ->
+        Alcotest.(check string) "risk" "medium" s.risk;
+        Alcotest.(check int) "param count" 5 (List.length s.param_keys);
+        Alcotest.(check bool) "has snapshot_sec"
+          true (List.mem "keeper.snapshot_sec" s.param_keys);
+        Alcotest.(check bool) "has work_as_hb_enabled"
+          true (List.mem "keeper.work_as_hb_enabled" s.param_keys);
+        Alcotest.(check bool) "has work_as_hb_max_silence_sec"
+          true (List.mem "keeper.work_as_hb_max_silence_sec" s.param_keys);
+        Alcotest.(check bool) "has smart_hb_enabled"
+          true (List.mem "keeper.smart_hb_enabled" s.param_keys);
+        Alcotest.(check bool) "has stage_timing_ring_size"
+          true (List.mem "keeper.stage_timing_ring_size" s.param_keys)
   in
 
   let test_keeper_params_meta_shape () =
@@ -490,6 +517,8 @@ let () =
             test_keeper_params_meta_shape;
           Alcotest.test_case "keeper param override persist/restore" `Quick
             test_keeper_param_override_persist_restore;
+          Alcotest.test_case "keeper_diagnostics surface" `Quick
+            test_keeper_diagnostics_surface;
         ] );
       ( "handle_set_param",
         [

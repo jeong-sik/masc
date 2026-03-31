@@ -136,14 +136,17 @@ module Http_negotiation = struct
     | None -> false
     | Some h ->
         exists_accepted h ~check:(fun ~type_ ~subtype ->
-            type_ = "text" && subtype = "event-stream")
+            String.lowercase_ascii type_ = "text"
+            && String.lowercase_ascii subtype = "event-stream")
 
   let accepts_json = function
     | None -> false
     | Some h ->
         exists_accepted h ~check:(fun ~type_ ~subtype ->
-            (type_ = "application" && subtype = "json")
-            || (type_ = "*" && subtype = "*"))
+            let t = String.lowercase_ascii type_ in
+            let s = String.lowercase_ascii subtype in
+            (t = "application" && s = "json")
+            || (t = "*" && s = "*"))
 
   let accepts_streamable_mcp = function
     | None -> false

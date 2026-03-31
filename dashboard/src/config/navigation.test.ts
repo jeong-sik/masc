@@ -12,6 +12,7 @@ describe('lab navigation', () => {
       'tools',
       'autoresearch',
       'harness',
+      'features',
       'config',
     ])
 
@@ -19,6 +20,7 @@ describe('lab navigation', () => {
       '도구',
       '오토리서치',
       '세이프티 하네스',
+      '피처 플래그',
       '서버 설정',
     ])
   })

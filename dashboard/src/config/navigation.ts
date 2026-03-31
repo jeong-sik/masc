@@ -14,6 +14,7 @@ export type SurfaceSectionId =
   | 'tools'
   | 'autoresearch'
   | 'harness'
+  | 'features'
   | 'config'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
@@ -186,6 +187,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '세이프티 하네스',
       description: 'Evaluator, compaction, DNA safety rail 감시 상태.',
       params: { section: 'harness' },
+    },
+    {
+      id: 'features',
+      label: '피처 플래그',
+      description: '서버 피처 플래그 상태와 헬스 모니터링.',
+      params: { section: 'features' },
     },
     {
       id: 'config',

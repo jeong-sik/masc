@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [2.197.0] - 2026-03-31
+
+### Added
+- **E2E test gate** — gate server tests behind MASC_E2E_TESTS env (#4299, #3807).
+
+### Changed
+- **MASC/OAS boundary ownership** — tighten boundary definitions (#4297).
+- **CDAL contract bridge** — remove unused allowed_paths (#4305).
+
+### Fixed
+- **Keeper turn budget** — treat exhaustion as pause, not crash (#4298).
+- **MDAL loop** — remove board posting from MDAL loop (#4302).
+
 ## [2.196.0] - 2026-03-31
 
 ### Added

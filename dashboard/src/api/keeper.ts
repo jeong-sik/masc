@@ -7,6 +7,7 @@ import {
 } from '../keeper-message'
 import type { KeeperConversationDetails } from '../types'
 import { currentDashboardActor, runOperatorAction } from './core'
+import { resolveDashboardActorName } from '../lib/dashboard-actor'
 
 // --- Types ---
 
@@ -76,16 +77,9 @@ function jsonHeaders(): Record<string, string> {
   const params = new URLSearchParams(window.location.search)
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const token = params.get('token')
-  const storedAgent = (() => {
-    try {
-      return localStorage.getItem('masc_dashboard_agent_name')?.trim() || null
-    } catch {
-      return null
-    }
-  })()
-  const agent = params.get('agent') ?? params.get('agent_name') ?? storedAgent
+  const agent = resolveDashboardActorName(window.location.search)
   if (token) headers['Authorization'] = `Bearer ${token}`
-  if (agent) headers['X-MASC-Agent'] = encodeURIComponent(agent)
+  if (agent) headers['X-MASC-Agent'] = agent
   return headers
 }
 

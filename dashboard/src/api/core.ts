@@ -7,6 +7,7 @@ import type {
   OperatorDigest,
   OperatorSnapshot,
 } from '../types'
+import { resolveDashboardActorName, sanitizeDashboardActorName } from '../lib/dashboard-actor'
 
 // --- Auth ---
 
@@ -14,24 +15,8 @@ function getQueryParams(): URLSearchParams {
   return new URLSearchParams(window.location.search)
 }
 
-const DASHBOARD_AGENT_NAME_KEY = 'masc_dashboard_agent_name'
-
-function readStoredAgentName(): string | null {
-  try {
-    return localStorage.getItem(DASHBOARD_AGENT_NAME_KEY)?.trim() || null
-  } catch {
-    return null
-  }
-}
-
 export function currentDashboardActor(): string {
-  const params = getQueryParams()
-  return (
-    params.get('agent')?.trim()
-    || params.get('agent_name')?.trim()
-    || readStoredAgentName()
-    || 'dashboard'
-  )
+  return resolveDashboardActorName() || 'dashboard'
 }
 
 type HeaderOptions = {
@@ -42,11 +27,10 @@ function authHeaders(options: HeaderOptions = {}): Record<string, string> {
   const params = getQueryParams()
   const headers: Record<string, string> = {}
   const token = params.get('token')
-  const storedAgent = readStoredAgentName()
-  const agent = params.get('agent') ?? params.get('agent_name') ?? storedAgent
+  const agent = resolveDashboardActorName(window.location.search)
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (options.includeActor !== false && agent) {
-    headers['X-MASC-Agent'] = encodeURIComponent(agent)
+    headers['X-MASC-Agent'] = agent
   }
   return headers
 }
@@ -131,11 +115,9 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
 
 export function defaultBoardVoter(): string {
   const params = getQueryParams()
-  return (
-    params.get('agent')?.trim() ||
-    params.get('agent_name')?.trim() ||
-    'dashboard-user'
-  )
+  return sanitizeDashboardActorName(params.get('agent'))
+    || sanitizeDashboardActorName(params.get('agent_name'))
+    || 'dashboard-user'
 }
 
 // --- Generic fetcher ---

@@ -144,10 +144,10 @@ let rec find_git_root path =
     (e.g. masc-mcp/) from hijacking the intended base path. *)
 let resolve_masc_base_path path =
   match Env_config_core.base_path_opt () with
-  | Some explicit when explicit = path ->
-      Log.Room.info "MASC base: %s (explicit MASC_BASE_PATH)" path;
-      path
-  | _ ->
+  | Some explicit ->
+      Log.Room.info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
+      explicit
+  | None ->
       match find_git_root path with
       | Some git_root ->
           Log.Room.info "MASC base resolved: %s → %s (git root)" path git_root;

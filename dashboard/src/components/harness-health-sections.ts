@@ -16,7 +16,7 @@ import type {
 
 // ── Helper functions ──
 
-export function statusLabel(status: RailStatus): string {
+export function railStatusLabel(status: RailStatus): string {
   switch (status) {
     case 'healthy':
       return '정상'
@@ -147,7 +147,7 @@ export function railFreshness(data: HarnessHealthData, rail: 'evaluator' | 'pre_
 export function StatusPill({ status }: { status: RailStatus }) {
   return html`
     <span class=${`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusChipClass(status)}`}>
-      ${statusLabel(status)}
+      ${railStatusLabel(status)}
     </span>
   `
 }

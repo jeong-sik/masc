@@ -32,7 +32,6 @@ function spanColor(kind: string): string {
 }
 
 function loadSwimlane(since?: string) {
-  swimlaneResource.reset()
   return swimlaneResource.load(() => fetchSwimlane(since))
 }
 

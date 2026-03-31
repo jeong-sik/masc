@@ -13,6 +13,7 @@ import type { ComponentChildren } from 'preact'
 import type { Signal } from '@preact/signals'
 import type { AsyncState } from '../../lib/async-state'
 import { EmptyState } from './empty-state'
+import { LoadingState } from './feedback-state'
 
 interface AsyncContainerProps<T> {
   state: Signal<AsyncState<T>>
@@ -34,7 +35,7 @@ export function AsyncContainer<T>({
   switch (s.status) {
     case 'idle':
     case 'loading':
-      return html`<${EmptyState} message=${loadingMessage} />`
+      return html`<${LoadingState}>${loadingMessage}<//>`
 
     case 'error':
       return html`

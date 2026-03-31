@@ -14,7 +14,7 @@ import {
   refreshHarnessSurface,
 } from './harness-health-state'
 import {
-  statusLabel,
+  railStatusLabel,
   freshnessLabel,
   formatTimestamp,
   heroTitle,
@@ -204,7 +204,7 @@ export function HarnessHealth() {
               />
               <${StatCard}
                 label="status"
-                value=${statusLabel(data.pre_compact.status)}
+                value=${railStatusLabel(data.pre_compact.status)}
               />
             </div>
             <${PreCompactList} section=${data.pre_compact} />
@@ -235,7 +235,7 @@ export function HarnessHealth() {
               />
               <${StatCard}
                 label="status"
-                value=${statusLabel(data.recent_handoffs.status)}
+                value=${railStatusLabel(data.recent_handoffs.status)}
               />
             </div>
             <${HandoffList} section=${data.recent_handoffs} />

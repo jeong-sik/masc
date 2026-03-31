@@ -60,6 +60,7 @@ export interface AsyncResource<T> {
 export function createAsyncResource<T>(): AsyncResource<T> {
   const state = signal<AsyncState<T>>(idle)
   let inflight: Promise<void> | null = null
+  let generation = 0
 
   return {
     state,
@@ -67,31 +68,35 @@ export function createAsyncResource<T>(): AsyncResource<T> {
     load(fn: () => Promise<T>): Promise<void> {
       if (inflight) return inflight
 
+      const gen = ++generation
       state.value = loading
 
       let promise: Promise<T>
       try {
         promise = fn()
       } catch (e) {
-        state.value = failed(e instanceof Error ? e.message : String(e))
+        if (gen === generation) {
+          state.value = failed(e instanceof Error ? e.message : String(e))
+        }
         return Promise.resolve()
       }
 
       inflight = promise
         .then(data => {
-          state.value = loaded(data)
+          if (gen === generation) state.value = loaded(data)
         })
         .catch(e => {
-          state.value = failed(e instanceof Error ? e.message : String(e))
+          if (gen === generation) state.value = failed(e instanceof Error ? e.message : String(e))
         })
         .finally(() => {
-          inflight = null
+          if (gen === generation) inflight = null
         })
 
       return inflight
     },
 
     reset(): void {
+      ++generation
       state.value = idle
       inflight = null
     },

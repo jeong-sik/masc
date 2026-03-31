@@ -42,7 +42,6 @@ const TIME_RANGES: Array<{ value: string; label: string }> = [
 ]
 
 function loadGraph() {
-  graphResource.reset()
   return graphResource.load(() => {
     const since = selectedTimeRange.value !== 'all' ? selectedTimeRange.value : undefined
     return fetchActivityGraph(since)

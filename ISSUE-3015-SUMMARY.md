@@ -1,8 +1,10 @@
-# Issue #3015 Status Check (2026-03-30)
+# Issue #3015 Status Check (2026-03-30, Updated 2026-03-31)
 
 ## TL;DR
 
 **✅ YES, issue #3015 is ready to progress.**
+
+**⚠️ UPDATE 2026-03-31**: Issue #3015 is now labeled `target:next` (no longer `target:now`), indicating it has been deprioritized relative to other current work.
 
 - **Phase 1 (cascade_inference)**: ✅ COMPLETE
 - **Phase 2 (context_router)**: ✅ COMPLETE (file removed)

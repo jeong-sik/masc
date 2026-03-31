@@ -145,18 +145,6 @@ Use when looking for specific topics, past discussions, or related prior work.";
       ("required", `List [`String "query"]);
     ];
   };
-  {
-    name = "keeper_board_delete";
-    description = "Delete a board post and its associated comments and votes. \
-Use for cleanup of stale, test, or expired posts.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("post_id", `Assoc [("type", `String "string"); ("description", `String "ID of the post to delete")]);
-      ]);
-      ("required", `List [`String "post_id"]);
-    ];
-  };
 ]
 
 let select_named_schemas (names : string list) (schemas : Types.tool_schema list) :
@@ -180,6 +168,21 @@ For searching across files, use keeper_shell_readonly with op=rg instead.";
         ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes to return (default: 20000)")]);
       ]);
       ("required", `List [`String "path"]);
+    ];
+  };
+  {
+    name = "keeper_fs_edit";
+    description = "Write or append to a file in the project. Use to create new files or update \
+existing ones. For small targeted edits prefer this over keeper_bash with echo/cat. \
+Mode 'overwrite' replaces the entire file; 'append' adds to the end.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path to write")]);
+        ("content", `Assoc [("type", `String "string"); ("description", `String "File content to write")]);
+        ("mode", `Assoc [("type", `String "string"); ("description", `String "Write mode: 'overwrite' (default) or 'append'")]);
+      ]);
+      ("required", `List [`String "path"; `String "content"]);
     ];
   };
 ]
@@ -439,7 +442,7 @@ let shard_filesystem : shard = {
   name = "filesystem";
   tools = filesystem_tools;
   removable = true;
-  description = "File I/O: read only";
+  description = "File I/O: read and write";
 }
 
 let shard_shell : shard = {

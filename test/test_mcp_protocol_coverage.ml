@@ -79,6 +79,10 @@ let test_accepts_json_in_list () =
   check bool "json in list" true
     (Http_negotiation.accepts_json (Some "text/html, application/json"))
 
+let test_accepts_json_case_insensitive () =
+  check bool "mixed-case json" true
+    (Http_negotiation.accepts_json (Some "Application/Json"))
+
 (* ============================================================
    accepts_sse_header Tests
    ============================================================ *)
@@ -106,6 +110,10 @@ let test_accepts_sse_with_q () =
 let test_accepts_sse_q_zero () =
   check bool "q=0 rejected" false
     (Http_negotiation.accepts_sse_header (Some "text/event-stream;q=0"))
+
+let test_accepts_sse_case_insensitive () =
+  check bool "mixed-case sse" true
+    (Http_negotiation.accepts_sse_header (Some "Text/Event-Stream"))
 
 (* ============================================================
    accepts_streamable_mcp Tests
@@ -141,6 +149,11 @@ let test_streamable_sse_q_zero () =
   check bool "sse q=0" false
     (Http_negotiation.accepts_streamable_mcp
       (Some "application/json, text/event-stream;q=0"))
+
+let test_streamable_case_insensitive () =
+  check bool "mixed-case streamable" true
+    (Http_negotiation.accepts_streamable_mcp
+      (Some "Application/Json, Text/Event-Stream"))
 
 (* ============================================================
    classify_mcp_accept Tests
@@ -222,6 +235,7 @@ let () =
       test_case "not found" `Quick test_accepts_json_not_found;
       test_case "wildcard */*" `Quick test_accepts_json_wildcard;
       test_case "in list" `Quick test_accepts_json_in_list;
+      test_case "case-insensitive" `Quick test_accepts_json_case_insensitive;
     ];
     "accepts_sse_header", [
       test_case "none" `Quick test_accepts_sse_none;
@@ -230,6 +244,7 @@ let () =
       test_case "exact" `Quick test_accepts_sse_exact;
       test_case "with q" `Quick test_accepts_sse_with_q;
       test_case "q zero" `Quick test_accepts_sse_q_zero;
+      test_case "case-insensitive" `Quick test_accepts_sse_case_insensitive;
     ];
     "accepts_streamable_mcp", [
       test_case "none" `Quick test_streamable_none;
@@ -239,6 +254,7 @@ let () =
       test_case "reversed" `Quick test_streamable_both_reversed;
       test_case "json q=0" `Quick test_streamable_json_q_zero;
       test_case "sse q=0" `Quick test_streamable_sse_q_zero;
+      test_case "case-insensitive" `Quick test_streamable_case_insensitive;
     ];
     "classify_mcp_accept", [
       test_case "streamable" `Quick test_classify_streamable;

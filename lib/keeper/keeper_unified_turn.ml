@@ -699,7 +699,18 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
            | Ok () -> ()
            | Error msg ->
                Log.Keeper.error "write_meta failed after unified turn: %s" msg);
-          (* 8. Reset turn failure counter on success *)
-          Keeper_registry.reset_turn_failures ~base_path:config.base_path
-            meta.name;
+          (* 8. Handle stop reason *)
+          (match result.stop_reason with
+           | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
+             Log.Keeper.warn
+               "keeper:%s turn budget exhausted (%d/%d), checkpoint saved — will resume next cycle"
+               updated_meta.name turns_used limit;
+             (* Do NOT increment turn_failures — this is not a crash.
+                The keeper made progress and saved a checkpoint.
+                Reset failures since the turn itself ran successfully. *)
+             Keeper_registry.reset_turn_failures ~base_path:config.base_path
+               updated_meta.name
+           | Oas_worker.Completed ->
+             Keeper_registry.reset_turn_failures ~base_path:config.base_path
+               updated_meta.name);
           Ok updated_meta

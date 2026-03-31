@@ -441,6 +441,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     tools_used = tools;
     checkpoint = None;
     proof = None;
+    stop_reason = Masc_mcp.Oas_worker.Completed;
   }
 
 let test_metrics_text_response () =

@@ -130,7 +130,10 @@ module Http_negotiation = struct
     Mcp_protocol.Http_negotiation.parse_accept_header h
     |> List.exists
          (fun (mt : Mcp_protocol.Http_negotiation.media_type) ->
-           mt.quality > 0.0 && check ~type_:mt.type_ ~subtype:mt.subtype)
+           mt.quality > 0.0
+           && check
+                ~type_:(String.lowercase_ascii mt.type_)
+                ~subtype:(String.lowercase_ascii mt.subtype))
 
   let accepts_sse_header = function
     | None -> false

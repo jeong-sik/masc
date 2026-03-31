@@ -2,33 +2,28 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
-import { TextInput } from '../common/input'
-import { refreshRoomTruth } from '../../room-truth-store'
-import { RoomTruthStrip } from '../common/room-truth-strip'
+import { CountBadge } from '../common/badge'
+import { TimeAgo } from '../common/time-ago'
 import { route } from '../../router'
 import {
   operatorActionBusy,
   operatorActionLog,
   operatorDigestError,
   operatorError,
-  operatorLoading,
   operatorRoomDigest,
   operatorSessionDigest,
   operatorSnapshot,
-  refreshOperatorRoomDigest,
   refreshOperatorSessionDigest,
-  refreshOperatorSnapshot,
 } from '../../operator-store'
 import {
   workflowActionLabel,
   workflowContextForRoute,
   workflowTargetLabel,
 } from '../../workflow-context'
-import type { OperatorReviewItem } from '../../types'
+import type { OperatorActionLogEntry, OperatorReviewDecision, OperatorReviewItem } from '../../types'
 import { QuickIntervene } from './quick-intervene'
 import {
   actionTypeLabel,
-  actorName,
   confirmPending,
   detailDigestForItem,
   executeRecommendedAction,
@@ -38,7 +33,6 @@ import {
   hydrateOpsWorkflow,
   hydrateRecommendedAction,
   hydratedWorkflowId,
-  persistActorName,
   prettyJson,
   primaryActionForReviewItem,
   relativeAge,
@@ -93,6 +87,151 @@ function pendingConfirmToken(item: OperatorReviewItem | null): string | null {
   const pending = asRecord(friction?.pending_confirm)
   const token = pending?.confirm_token ?? pending?.token
   return typeof token === 'string' && token.trim() !== '' ? token : null
+}
+
+type ActivityTone = 'default' | 'warn' | 'ok' | 'bad' | 'accent'
+
+interface OpsActivityTimelineEntry {
+  key: string
+  kind: 'review' | 'intervention'
+  at: string
+  actor: string
+  label: string
+  target: string
+  detail: string
+  tone: ActivityTone
+}
+
+function parseTimestamp(value?: string | null): number {
+  if (!value) return 0
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+function reviewDecisionLabel(value?: string | null): string {
+  switch ((value ?? '').trim().toLowerCase()) {
+    case 'resolved':
+      return '검토 해결'
+    case 'deferred':
+      return '검토 보류'
+    default:
+      return value?.trim() || '검토 처리'
+  }
+}
+
+function reviewDecisionTone(value?: string | null): ActivityTone {
+  switch ((value ?? '').trim().toLowerCase()) {
+    case 'resolved':
+      return 'ok'
+    case 'deferred':
+      return 'warn'
+    default:
+      return 'accent'
+  }
+}
+
+function actionLogTone(entry: OperatorActionLogEntry): ActivityTone {
+  switch (entry.outcome) {
+    case 'error':
+      return 'bad'
+    case 'preview':
+      return 'warn'
+    case 'confirmed':
+      return 'accent'
+    default:
+      return 'default'
+  }
+}
+
+function targetSummary(targetType?: string | null, targetId?: string | null): string {
+  return `${targetTypeLabel(targetType)}${targetId ? ` · ${targetId}` : ''}`
+}
+
+function prettyTargetLabel(label?: string | null): string {
+  const value = label?.trim()
+  if (!value) return '대상 없음'
+  const separator = value.indexOf(':')
+  if (separator < 0) return targetTypeLabel(value)
+  const type = value.slice(0, separator)
+  const rest = value.slice(separator + 1)
+  return `${targetTypeLabel(type)} · ${rest}`
+}
+
+function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
+  const reviews = (operatorRoomDigest.value?.recent_reviews ?? []).map((item: OperatorReviewDecision) => ({
+    key: `review:${item.item_id}:${item.at}`,
+    kind: 'review' as const,
+    at: item.at,
+    actor: item.actor || 'unknown',
+    label: reviewDecisionLabel(item.decision),
+    target: targetSummary(item.target_type, item.target_id),
+    detail: item.reason || '사유 없음',
+    tone: reviewDecisionTone(item.decision),
+  }))
+
+  const interventions = operatorActionLog.value.map((entry: OperatorActionLogEntry) => ({
+    key: `intervention:${entry.id}`,
+    kind: 'intervention' as const,
+    at: entry.at,
+    actor: entry.actor || 'dashboard',
+    label: actionTypeLabel(entry.action_type),
+    target: prettyTargetLabel(entry.target_label),
+    detail: formatMessageContent(entry.message) || '세부 내용 없음',
+    tone: actionLogTone(entry),
+  }))
+
+  return [...reviews, ...interventions]
+    .sort((left, right) => parseTimestamp(right.at) - parseTimestamp(left.at))
+    .slice(0, limit)
+}
+
+function renderSummaryBadges(activeCount: number, deferredCount: number, recentCount: number) {
+  const roomPaused = operatorSnapshot.value?.room?.paused
+  const roomLabel =
+    typeof roomPaused === 'boolean'
+      ? roomPaused ? '룸 일시정지' : '룸 진행 중'
+      : '룸 확인 필요'
+  const roomTone: ActivityTone =
+    typeof roomPaused !== 'boolean'
+      ? 'default'
+      : roomPaused ? 'warn' : 'ok'
+
+  return html`
+    <section class="${CARD_STANDARD} flex flex-wrap items-center gap-2" data-testid="ops-summary-badges">
+      <${CountBadge} tone=${activeCount > 0 ? 'warn' : 'ok'}>즉시 검토 ${activeCount}<//>
+      <${CountBadge} tone=${deferredCount > 0 ? 'accent' : 'default'}>보류 ${deferredCount}<//>
+      <${CountBadge} tone=${recentCount > 0 ? 'accent' : 'default'}>최근 처리 ${recentCount}<//>
+      <${CountBadge} tone=${roomTone}>${roomLabel}<//>
+    </section>
+  `
+}
+
+function renderActivityTimeline() {
+  const entries = timelineEntries()
+  if (entries.length === 0) {
+    return html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)]">아직 기록된 운영 활동이 없습니다.</div>`
+  }
+
+  return html`
+    <div class="grid gap-2" data-testid="ops-activity-timeline">
+      ${entries.map(entry => html`
+        <article
+          key=${entry.key}
+          data-testid="ops-activity-item"
+          data-activity-kind=${entry.kind}
+          class="rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] p-3"
+        >
+          <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
+            <${CountBadge} tone=${entry.tone}>${entry.label}<//>
+            <span>${entry.target}</span>
+            <span>${entry.actor}</span>
+            <span><${TimeAgo} timestamp=${entry.at} /></span>
+          </div>
+          <div class="mt-2 text-[13px] leading-[1.55] text-[var(--text-body)]">${entry.detail}</div>
+        </article>
+      `)}
+    </div>
+  `
 }
 
 function renderTruth(item: OperatorReviewItem | null) {
@@ -236,12 +375,12 @@ function renderRecentReviews() {
       ${recent.map(item => html`
         <article key=${`${item.item_id}:${item.at}`} class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
           <div class="flex flex-wrap gap-2 text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">
-            <span>${item.decision}</span>
-            <span>${item.target_type}${item.target_id ? ` · ${item.target_id}` : ''}</span>
+            <span>${reviewDecisionLabel(item.decision)}</span>
+            <span>${targetSummary(item.target_type, item.target_id)}</span>
             <span>${item.actor}</span>
           </div>
           <div class="mt-1 text-[13px] text-[var(--text-body)]">${item.reason}</div>
-          <div class="mt-1 text-[12px] text-[var(--text-muted)]">${item.at}</div>
+          <div class="mt-1 text-[12px] text-[var(--text-muted)]"><${TimeAgo} timestamp=${item.at} /></div>
         </article>
       `)}
     </div>
@@ -254,7 +393,6 @@ export function Ops() {
   const roomDigest = operatorRoomDigest.value
   const activeQueue = roomDigest?.review_queue ?? []
   const deferredQueue = roomDigest?.deferred_queue ?? []
-  const currentActor = actorName.value.trim() || 'dashboard'
   const workflowReady = workflowTargetReady(workflowContext, snapshot?.sessions ?? [], snapshot?.keepers ?? [])
   const tab = selectedReviewTab.value
   const currentQueue = reviewListForTab(tab, activeQueue, deferredQueue)
@@ -313,39 +451,8 @@ export function Ops() {
 
   return html`
     <section class="flex flex-col gap-4">
-      <div class="${CARD_STANDARD} flex justify-end items-center gap-4 flex-wrap">
-        <div class="flex items-center gap-3 flex-wrap max-[880px]:w-full">
-          <div class="flex items-center gap-1.5">
-            <${TextInput}
-              class="w-[140px] border-transparent bg-transparent px-1 py-0.5 text-[13px] font-semibold text-[var(--text-strong)] hover:border-[var(--white-8)]"
-              value=${currentActor}
-              name="operator_actor"
-              ariaLabel="메시지 발신자 이름"
-              onInput=${(event: Event) => { persistActorName((event.target as HTMLInputElement).value) }}
-              disabled=${operatorActionBusy.value}
-              autoComplete="off"
-            />
-          </div>
-          <${ActionButton}
-            variant="ghost"
-            size="lg"
-            onClick=${() => {
-              void refreshRoomTruth({ force: true })
-              void refreshOperatorSnapshot({ force: true })
-              void refreshOperatorRoomDigest({ force: true })
-              void refreshOperatorSessionDigest(selectedItem?.target_type === 'team_session' ? selectedItem.target_id ?? null : null, { force: true })
-            }}
-            disabled=${operatorLoading.value || operatorActionBusy.value}
-          >
-            ${operatorLoading.value ? '새로고침 중...' : '새로고침'}
-          <//>
-        </div>
-      </div>
-
       ${operatorError.value ? html`<section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] error">${operatorError.value}</section>` : null}
       ${operatorDigestError.value ? html`<section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] error">${operatorDigestError.value}</section>` : null}
-
-      <${RoomTruthStrip} />
 
       ${workflowContext ? html`
         <section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] ${workflowReady ? 'info' : 'warn'} grid gap-2">
@@ -364,76 +471,36 @@ export function Ops() {
         </section>
       ` : null}
 
-      <${FlowControlPanel} />
-
-      <section class="${CARD_STANDARD} grid grid-cols-4 gap-3 max-[1200px]:grid-cols-2 max-[880px]:grid-cols-1">
-        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Active Queue</div>
-          <strong>${activeCount}</strong>
-          <div class="text-[12px] text-[var(--text-muted)]">지금 바로 사람 검토가 필요한 항목</div>
-        </div>
-        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Deferred</div>
-          <strong>${deferredCount}</strong>
-          <div class="text-[12px] text-[var(--text-muted)]">같은 fingerprint 기준으로 다시 보류 중인 항목</div>
-        </div>
-        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Recent Reviews</div>
-          <strong>${recentCount}</strong>
-          <div class="text-[12px] text-[var(--text-muted)]">최근 운영자가 처리한 review 항목</div>
-        </div>
-        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Mode</div>
-          <strong>${healthy ? 'Healthy Console' : 'Review Queue'}</strong>
-          <div class="text-[12px] text-[var(--text-muted)]">${healthy ? '조용한 운영 상태' : '우선순위 검토 모드'}</div>
-        </div>
-      </section>
+      ${renderSummaryBadges(activeCount, deferredCount, recentCount)}
 
       ${healthy ? html`
-        <section class="${CARD_STANDARD} grid gap-4">
-          <div>
-            <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Healthy Console</h2>
-            <p class="text-[12px] text-[var(--text-muted)] mt-1">active review queue가 비어 있습니다. 지금은 compact 상태와 최근 처리 이력만 보여줍니다.</p>
+        <section class="grid grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)] gap-4 max-[1200px]:grid-cols-1">
+          <div class="grid gap-4 order-1 max-[1200px]:order-2">
+            <${QuickIntervene} />
+            <${FlowControlPanel} />
           </div>
-          <${QuickIntervene} />
-          <div class="grid grid-cols-2 gap-4 max-[1200px]:grid-cols-1">
-            <section class="grid gap-2">
-              <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">최근 Review 처리</h3>
-              <${renderRecentReviews} />
-            </section>
-            <section class="grid gap-2">
-              <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">최근 개입 로그</h3>
-              ${operatorActionLog.value.length === 0
-                ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)]">아직 실행한 개입이 없습니다.</div>`
-                : html`
-                    <div class="grid gap-2">
-                      ${operatorActionLog.value.slice(0, 6).map(entry => html`
-                        <article key=${entry.id} class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-                          <div class="flex flex-wrap gap-2 text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">
-                            <span>${actionTypeLabel(entry.action_type)}</span>
-                            <span>${entry.target_label}</span>
-                            <span>${entry.at}</span>
-                          </div>
-                          <div class="mt-1 text-[13px] text-[var(--text-body)]">${formatMessageContent(entry.message)}</div>
-                        </article>
-                      `)}
-                    </div>
-                  `}
-            </section>
-          </div>
+
+          <section class="${CARD_STANDARD} grid gap-3 order-2 max-[1200px]:order-1">
+            <div>
+              <h2 class="text-sm font-semibold text-[var(--text-strong)]">최근 운영 활동</h2>
+              <p class="mt-1 text-[12px] text-[var(--text-muted)]">최근 처리와 직접 개입을 시간순으로 함께 보여줍니다.</p>
+            </div>
+            <${renderActivityTimeline} />
+          </section>
         </section>
       ` : html`
+        <${FlowControlPanel} />
         <div class="grid grid-cols-[280px_minmax(0,1fr)_360px] gap-4 max-[1280px]:grid-cols-1">
           <section class="${CARD_STANDARD} grid gap-3">
             <div class="flex gap-2 flex-wrap">
               <${ActionButton} variant=${tab === 'active' ? 'primary' : 'ghost'} size="lg" onClick=${() => { selectedReviewTab.value = 'active' }}>
-                Active ${activeCount}
+                즉시 검토 ${activeCount}
               <//>
               <${ActionButton} variant=${tab === 'deferred' ? 'primary' : 'ghost'} size="lg" onClick=${() => { selectedReviewTab.value = 'deferred' }}>
-                Deferred ${deferredCount}
+                보류 ${deferredCount}
               <//>
               <${ActionButton} variant=${tab === 'recent' ? 'primary' : 'ghost'} size="lg" onClick=${() => { selectedReviewTab.value = 'recent' }}>
-                Recent ${recentCount}
+                최근 처리 ${recentCount}
               <//>
             </div>
 
@@ -482,24 +549,24 @@ export function Ops() {
             </div>
 
             <div class="grid gap-2">
-              <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Truth</h3>
+              <h3 class="text-sm font-semibold text-[var(--text-strong)]">현재 상태</h3>
               ${renderTruth(selectedItem)}
             </div>
 
             <div class="grid gap-2">
-              <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Friction</h3>
+              <h3 class="text-sm font-semibold text-[var(--text-strong)]">마찰 요인</h3>
               ${renderFriction(selectedItem)}
             </div>
 
             <div class="grid gap-2">
-              <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Advice</h3>
+              <h3 class="text-sm font-semibold text-[var(--text-strong)]">운영 판단</h3>
               ${renderAdvice(selectedItem)}
             </div>
           </section>
 
           <section class="${CARD_STANDARD} grid gap-4">
             <div>
-              <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Action Workbench</h3>
+              <h3 class="text-sm font-semibold text-[var(--text-strong)]">실행 작업대</h3>
               <p class="text-[12px] text-[var(--text-muted)] mt-1">가장 작은 다음 행동을 실행하거나, review 상태를 resolve/defer로 닫습니다.</p>
             </div>
 
@@ -510,7 +577,7 @@ export function Ops() {
                     ? html`
                         <article class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] grid gap-2">
                           <div class="flex flex-wrap gap-2 text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">
-                            <span>Primary Action</span>
+                            <span>우선 액션</span>
                             <span>${actionTypeLabel(primaryAction.action_type)}</span>
                             <span>${targetTypeLabel(primaryAction.target_type)}${primaryAction.target_id ? ` · ${primaryAction.target_id}` : ''}</span>
                           </div>
@@ -530,7 +597,7 @@ export function Ops() {
                   ${confirmToken
                     ? html`
                         <article class="p-3 rounded-xl border border-[rgba(251,191,36,0.26)] bg-[rgba(251,191,36,0.08)] grid gap-2">
-                          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Pending Confirm</div>
+                          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">승인 대기</div>
                           <div class="text-[13px] text-[var(--text-body)]">${confirmToken}</div>
                           <div class="flex gap-2 flex-wrap">
                             <${ActionButton} variant="primary" size="lg" onClick=${() => { void confirmPending(confirmToken, 'confirm') }} disabled=${operatorActionBusy.value}>
@@ -559,10 +626,10 @@ export function Ops() {
 
                   <div class="flex gap-2 flex-wrap">
                     <${ActionButton} variant="primary" size="lg" onClick=${() => { if (selectedItem) void submitReviewDecision(selectedItem, 'review_resolve') }} disabled=${operatorActionBusy.value || !selectedItem || !reviewDecisionReason.value.trim()}>
-                      Resolve
+                      해결 처리
                     <//>
                     <${ActionButton} variant="ghost" size="lg" onClick=${() => { if (selectedItem) void submitReviewDecision(selectedItem, 'review_defer') }} disabled=${operatorActionBusy.value || !selectedItem || !reviewDecisionReason.value.trim()}>
-                      Defer
+                      보류 처리
                     <//>
                   </div>
 

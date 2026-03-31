@@ -4,130 +4,39 @@
     Legacy handlers have been removed.
 *)
 
-open Result_syntax
+(* JSON-RPC core — canonical definitions live in Mcp_transport_protocol.
+   Aliases here preserve backward compatibility for callers using Mcp_server.*.
+   These are zero-cost: OCaml native compilation inlines module aliases. *)
 
-(** JSON-RPC request *)
-type jsonrpc_request = {
+type jsonrpc_request = Mcp_transport_protocol.jsonrpc_request = {
   jsonrpc : string;
-  id : Yojson.Safe.t option; [@default None]
-  method_ : string; [@key "method"]
-  params : Yojson.Safe.t option; [@default None]
-} [@@deriving yojson { strict = false }]
+  id : Yojson.Safe.t option;
+  method_ : string;
+  params : Yojson.Safe.t option;
+}
 
-let has_field key = function
-  | `Assoc fields -> List.exists (fun (k, _) -> k = key) fields
-  | _ -> false
+let jsonrpc_request_of_yojson = Mcp_transport_protocol.jsonrpc_request_of_yojson
+let jsonrpc_request_to_yojson = Mcp_transport_protocol.jsonrpc_request_to_yojson
+let has_field = Mcp_transport_protocol.has_field
+let get_field = Mcp_transport_protocol.get_field
+let is_jsonrpc_v2 = Mcp_transport_protocol.is_jsonrpc_v2
+let is_jsonrpc_response = Mcp_transport_protocol.is_jsonrpc_response
+let is_notification = Mcp_transport_protocol.is_notification
+let get_id = Mcp_transport_protocol.get_id
+let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
+let validate_initialize_params = Mcp_transport_protocol.validate_initialize_params
+let make_response = Mcp_transport_protocol.make_response
+let make_error = Mcp_transport_protocol.make_error
+let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
 
-let get_field key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
+(* Protocol version — canonical in Mcp_transport_protocol *)
+let supported_protocol_versions = Mcp_transport_protocol.supported_protocol_versions
+let default_protocol_version = Mcp_transport_protocol.default_protocol_version
+let is_supported_protocol_version = Mcp_transport_protocol.is_supported_protocol_version
+let normalize_protocol_version = Mcp_transport_protocol.normalize_protocol_version
+let protocol_version_from_params = Mcp_transport_protocol.protocol_version_from_params
 
-let is_jsonrpc_v2 json =
-  match get_field "jsonrpc" json with
-  | Some (`String "2.0") -> true
-  | _ -> false
-
-let is_jsonrpc_response json =
-  match json with
-  | `Assoc _ ->
-      let has_result = has_field "result" json in
-      let has_error = has_field "error" json in
-      let has_method = has_field "method" json in
-      let has_id = has_field "id" json in
-      is_jsonrpc_v2 json && has_id && (has_result || has_error) && not has_method
-  | _ -> false
-
-(** Check if request is a notification (no id) *)
-let is_notification req = req.id = None
-
-(** Get id or null *)
-let get_id req = match req.id with Some id -> id | None -> `Null
-
-(** JSON-RPC id must be string, number, or null. *)
-let is_valid_request_id = function
-  | `Null
-  | `String _
-  | `Int _
-  | `Intlit _
-  | `Float _ -> true
-  | _ -> false
-
-(** Validate initialize params per MCP spec. *)
-let validate_initialize_params params =
-  let require_string label = function
-    | Some (`String _) -> Ok ()
-    | None | Some `Null -> Error ("Missing " ^ label)
-    | Some _ -> Error ("Invalid " ^ label)
-  in
-  let require_assoc label = function
-    | Some (`Assoc _ as v) -> Ok v
-    | None | Some `Null -> Error ("Missing " ^ label)
-    | Some _ -> Error ("Invalid " ^ label)
-  in
-  match params with
-  | None -> Error "Missing params"
-  | Some (`Assoc _ as p) ->
-      let* () = require_string "protocolVersion" (get_field "protocolVersion" p) in
-      let* client_info = require_assoc "clientInfo" (get_field "clientInfo" p) in
-      let* () = require_string "clientInfo.name" (get_field "name" client_info) in
-      let* () = require_string "clientInfo.version" (get_field "version" client_info) in
-      let* _ = require_assoc "capabilities" (get_field "capabilities" p) in
-      Ok ()
-  | Some _ -> Error "Invalid params: expected object"
-
-(** JSON-RPC response builders *)
-let make_response ~id result =
-  `Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", id);
-    ("result", result);
-  ]
-
-let make_error ?data ~id code message =
-  let error_fields =
-    [("code", `Int code); ("message", `String message)]
-  in
-  let error_fields =
-    match data with
-    | None -> error_fields
-    | Some payload -> error_fields @ [("data", payload)]
-  in
-  `Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", id);
-    ("error", `Assoc error_fields);
-  ]
-
-(** MCP protocol version support (legacy + current) *)
-let supported_protocol_versions = [
-  "2024-11-05";
-  "2025-03-26";
-  "2025-06-18";
-  "2025-11-25";
-]
-
-let default_protocol_version = "2025-11-25"
-
-let is_supported_protocol_version version =
-  List.mem version supported_protocol_versions
-
-let validate_protocol_version version =
-  if is_supported_protocol_version version then
-    Ok version
-  else
-    Error
-      (Printf.sprintf
-         "Unsupported protocolVersion '%s' (supported: %s)" version
-         (String.concat ", " supported_protocol_versions))
-
-let normalize_protocol_version version =
-  if is_supported_protocol_version version then version else default_protocol_version
-
-let protocol_version_from_params params =
-  match params with
-  | Some (`Assoc _ as p) ->
-      Safe_ops.json_string ~default:default_protocol_version "protocolVersion" p
-  | _ -> default_protocol_version
+let validate_protocol_version = Mcp_transport_protocol.validate_protocol_version
 
 (** Server info *)
 type mcp_icon = {

@@ -33,6 +33,38 @@ type run_result = {
   proof : Agent_sdk.Cdal_proof.t option;
 }
 
+let keeper_tool_usage_snapshot ~base_path ~keeper_name : (string * int) list =
+  Keeper_registry.tool_usage_of ~base_path keeper_name
+  |> List.map (fun (tool_name, entry) -> (tool_name, entry.Keeper_types.count))
+  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+
+let tool_usage_delta
+    ~(before : (string * int) list)
+    ~(after : (string * int) list) : string list =
+  let before_counts = Hashtbl.create 16 in
+  List.iter
+    (fun (tool_name, count) -> Hashtbl.replace before_counts tool_name count)
+    before;
+  after
+  |> List.concat_map (fun (tool_name, after_count) ->
+         let before_count =
+           Option.value ~default:0 (Hashtbl.find_opt before_counts tool_name)
+         in
+         List.init (max 0 (after_count - before_count)) (fun _ -> tool_name))
+
+let merge_reported_and_observed_tool_names
+    ~(reported_tool_names : string list)
+    ~(observed_tool_names : string list) : string list =
+  match observed_tool_names with
+  | [] -> reported_tool_names
+  | _ ->
+      let observed = Hashtbl.create 16 in
+      List.iter (fun tool_name -> Hashtbl.replace observed tool_name ()) observed_tool_names;
+      observed_tool_names
+      @ List.filter
+          (fun tool_name -> not (Hashtbl.mem observed tool_name))
+          reported_tool_names
+
 let normalize_response_text
     ~(text : string)
     ~(tool_names : string list)
@@ -187,6 +219,9 @@ let run_turn
   let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
+  let tool_usage_before =
+    keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
+  in
   (* Build BM25 tool index for progressive disclosure.
      Essential tools are always available; others are retrieved
      per-turn based on the goal/context. This prevents the LLM
@@ -358,9 +393,9 @@ let run_turn
   in
   let reducer = Agent_sdk.Context_reducer.compose [
     Agent_sdk.Context_reducer.keep_last 30;
-    { Agent_sdk.Context_reducer.strategy =
-        Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = Context_compact_oas.tool_output_prune_limit } };
-    { strategy = Agent_sdk.Context_reducer.Merge_contiguous };
+    Agent_sdk.Context_reducer.clear_tool_results ~keep_recent:2;
+    Agent_sdk.Context_reducer.merge_contiguous;
+    Agent_sdk.Context_reducer.from_context_config ~max_tokens ();
   ] in
   (* 8. Run Agent *)
   let contract =
@@ -417,10 +452,21 @@ let run_turn
         let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
         let text = Agent_sdk.Types.text_of_content result.response.content in
         let model = result.response.model in
-        let tool_names =
+        let reported_tool_names =
           List.filter_map (function
             | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
             result.response.content
+        in
+        let tool_usage_after =
+          keeper_tool_usage_snapshot ~base_path:config.base_path
+            ~keeper_name:meta.name
+        in
+        let observed_tool_names =
+          tool_usage_delta ~before:tool_usage_before ~after:tool_usage_after
+        in
+        let tool_names =
+          merge_reported_and_observed_tool_names
+            ~reported_tool_names ~observed_tool_names
         in
         let usage = Keeper_exec_context.usage_of_response result.response in
         (match normalize_response_text ~text ~tool_names () with

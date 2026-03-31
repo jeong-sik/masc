@@ -302,6 +302,90 @@ let test_flush_procedures_dedupes_legacy_records () =
     (List.hd final.evidence);
   cleanup_tmp_dir dir
 
+let test_seed_procedures_refreshes_after_external_append () =
+  let dir = setup_tmp_dir () in
+  let agent_name = "test-pr-refresh" in
+  let first : Procedural_memory.procedure = {
+    id = "proc-first";
+    agent_name;
+    pattern = "restart worker";
+    evidence = ["ev-1"; "ev-2"; "ev-3"];
+    success_count = 3;
+    failure_count = 0;
+    confidence = 1.0;
+    created_at = 100.0;
+    last_applied = 110.0;
+  } in
+  let second : Procedural_memory.procedure = {
+    id = "proc-second";
+    agent_name;
+    pattern = "drain queue";
+    evidence = ["ev-4"; "ev-5"; "ev-6"];
+    success_count = 3;
+    failure_count = 0;
+    confidence = 1.0;
+    created_at = 120.0;
+    last_applied = 130.0;
+  } in
+  Procedural_memory.save_procedure ~agent_name first;
+  let memory_before = Memory_oas_bridge.create_memory ~agent_name () in
+  let seeded_before =
+    Memory_oas_bridge.seed_procedures_as_oas ~memory:memory_before ~agent_name ~limit:10
+  in
+  Alcotest.(check int) "initial seed count" 1 seeded_before;
+  Procedural_memory.save_procedure ~agent_name second;
+  let memory_after = Memory_oas_bridge.create_memory ~agent_name () in
+  let seeded_after =
+    Memory_oas_bridge.seed_procedures_as_oas ~memory:memory_after ~agent_name ~limit:10
+  in
+  Alcotest.(check int) "cache invalidated after append" 2 seeded_after;
+  (match Oas.Memory.best_procedure memory_after ~pattern:"drain" with
+   | Some proc -> Alcotest.(check string) "new procedure visible" "proc-second" proc.id
+   | None -> Alcotest.fail "expected appended procedure to be visible after reseed");
+  cleanup_tmp_dir dir
+
+let test_flush_procedures_updates_cache_for_immediate_reseed () =
+  let dir = setup_tmp_dir () in
+  let agent_name = "test-pr-cache-writeback" in
+  let existing : Procedural_memory.procedure = {
+    id = "proc-writeback";
+    agent_name;
+    pattern = "rollback deploy";
+    evidence = ["ev-1"; "ev-2"; "ev-3"];
+    success_count = 3;
+    failure_count = 0;
+    confidence = 1.0;
+    created_at = 100.0;
+    last_applied = 110.0;
+  } in
+  Procedural_memory.save_procedure ~agent_name existing;
+  let memory = Memory_oas_bridge.create_memory ~agent_name () in
+  ignore
+    (Oas.Memory.store_procedure memory
+       {
+         Oas.Memory.id = existing.id;
+         pattern = existing.pattern;
+         action = "rollback and notify";
+         success_count = 7;
+         failure_count = 1;
+         confidence = 0.875;
+         last_used = 210.0;
+         metadata = [];
+       });
+  let flushed = Memory_oas_bridge.flush_procedures ~memory ~agent_name in
+  Alcotest.(check int) "updated procedure flushed" 1 flushed;
+  let memory_reseed = Memory_oas_bridge.create_memory ~agent_name () in
+  let seeded =
+    Memory_oas_bridge.seed_procedures_as_oas ~memory:memory_reseed ~agent_name ~limit:10
+  in
+  Alcotest.(check int) "reseed count" 1 seeded;
+  (match Oas.Memory.best_procedure memory_reseed ~pattern:"rollback" with
+   | Some proc ->
+       Alcotest.(check int) "updated success count visible" 7 proc.success_count;
+       Alcotest.(check int) "updated failure count visible" 1 proc.failure_count
+   | None -> Alcotest.fail "expected rewritten procedure after immediate reseed");
+  cleanup_tmp_dir dir
+
 (* ================================================================ *)
 (* Stats                                                             *)
 (* ================================================================ *)
@@ -506,6 +590,10 @@ let () =
       Alcotest.test_case "record success" `Quick test_procedural_record_success;
       Alcotest.test_case "flush dedupes legacy records" `Quick
         test_flush_procedures_dedupes_legacy_records;
+      Alcotest.test_case "seed refreshes after external append" `Quick
+        test_seed_procedures_refreshes_after_external_append;
+      Alcotest.test_case "flush updates cache for immediate reseed" `Quick
+        test_flush_procedures_updates_cache_for_immediate_reseed;
     ]);
     ("stats", [
       Alcotest.test_case "all tiers" `Quick test_stats_all_tiers;

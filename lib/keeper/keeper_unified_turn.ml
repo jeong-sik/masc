@@ -7,8 +7,7 @@
     @since Unified Keeper Loop *)
 
 open Keeper_types
-open Keeper_memory [@@warning "-33"]
-open Keeper_exec_context [@@warning "-33"]
+open Keeper_exec_context
 module Social = Keeper_social_model
 
 let string_contains_substring ~(needle : string) (haystack : string) : bool =

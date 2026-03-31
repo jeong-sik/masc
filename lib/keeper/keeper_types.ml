@@ -171,23 +171,33 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
       let kind =
         Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
       in
-      let tools =
-        match Yojson.Safe.Util.member "tools" access_json with
-        | `List l ->
-            Ok (List.filter_map (fun v -> match v with `String s -> Some s | _ -> None) l)
-        | `Null -> Ok []
-        | _ -> Error "tool_access.tools must be an array or null"
+      let string_list_field field_name =
+        match Yojson.Safe.Util.member field_name access_json with
+        | `List items ->
+            let rec collect acc index = function
+              | [] -> Ok (List.rev acc)
+              | `String value :: rest -> collect (value :: acc) (index + 1) rest
+              | _ :: _ ->
+                  Error
+                    (Printf.sprintf
+                       "keeper tool_access.%s[%d] must be a string"
+                       field_name index)
+            in
+            collect [] 0 items
+        | `Null ->
+            Error (Printf.sprintf "keeper tool_access.%s must be an array of strings" field_name)
+        | _ ->
+            Error (Printf.sprintf "keeper tool_access.%s must be an array of strings" field_name)
       in
-      match tools with
-      | Error msg -> Error msg
-      | Ok tools -> (
-          match kind with
-          | Some "unrestricted" -> Ok Unrestricted
-          | Some "restricted" ->
-              Ok (normalize_tool_access (Restricted tools))
-          | Some other ->
-              Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
-          | None -> Error "keeper tool_access.kind required"))
+      match kind with
+      | Some "unrestricted" -> Ok Unrestricted
+      | Some "restricted" -> (
+          match string_list_field "tools" with
+          | Ok tools -> Ok (normalize_tool_access (Restricted tools))
+          | Error msg -> Error msg)
+      | Some other ->
+          Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
+      | None -> Error "keeper tool_access.kind required")
   | _ -> Error "keeper tool_access must be an object"
 
 (* -- Updater helpers for nested record updates -- *)
@@ -449,164 +459,168 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     let scope_kind =
       Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
     in
-    let tool_access =
-      match tool_access_of_meta_json json with
-      | Ok access -> access
-      | Error msg -> raise (Invalid_argument msg)
-    in
-    let tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
-    let room_scope =
-      Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope
-    in
-    let mention_targets =
-      Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
-    in
-    let joined_room_ids =
-      Safe_ops.json_string_list "joined_room_ids" json
-      |> List.filter validate_name
-      |> dedupe_keep_order
-    in
-    let last_seen_seq_by_room =
-      Yojson.Safe.Util.member "last_seen_seq_by_room" json |> room_seq_map_of_json
-    in
-    let generation = Safe_ops.json_int ~default:0 "generation" json in
-    let proactive_enabled =
-      Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
-    in
-    let proactive_idle_sec =
-      Safe_ops.json_int ~default:default_proactive_idle_sec "proactive_idle_sec" json
-      |> normalize_proactive_idle_sec
-    in
-    let proactive_cooldown_sec =
-      Safe_ops.json_int ~default:default_proactive_cooldown_sec "proactive_cooldown_sec" json
-      |> normalize_proactive_cooldown_sec
-    in
-    let (env_ratio_gate, env_message_gate, env_token_gate) =
-      keeper_compaction_policy_from_env ()
-    in
-    let compaction_profile =
-      Safe_ops.json_string ~default:default_compaction_profile "compaction_profile" json
-      |> canonical_compaction_profile
-      |> Option.value ~default:default_compaction_profile
-    in
-    let compaction_ratio_gate =
-      Safe_ops.json_float ~default:env_ratio_gate "compaction_ratio_gate" json
-      |> normalize_compaction_ratio_gate
-    in
-    let compaction_message_gate =
-      Safe_ops.json_int ~default:env_message_gate "compaction_message_gate" json
-      |> normalize_compaction_message_gate
-    in
-    let compaction_token_gate =
-      Safe_ops.json_int ~default:env_token_gate "compaction_token_gate" json
-      |> normalize_compaction_token_gate
-    in
-    let continuity_compaction_cooldown_sec =
-      Safe_ops.json_int
-        ~default:(keeper_continuity_compaction_cooldown_sec ())
-        "continuity_compaction_cooldown_sec"
-        json
-      |> normalize_continuity_compaction_cooldown_sec
-    in
-    let auto_handoff = Safe_ops.json_bool ~default:true "auto_handoff" json in
-    let handoff_threshold = Safe_ops.json_float ~default:0.85 "handoff_threshold" json in
-    let handoff_cooldown_sec = Safe_ops.json_int ~default:300 "handoff_cooldown_sec" json in
-    let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
-    let created_at = Safe_ops.json_string ~default:"" "created_at" json in
-    let updated_at = Safe_ops.json_string ~default:"" "updated_at" json in
-    let total_turns = Safe_ops.json_int ~default:0 "total_turns" json in
-    let total_input_tokens = Safe_ops.json_int ~default:0 "total_input_tokens" json in
-    let total_output_tokens = Safe_ops.json_int ~default:0 "total_output_tokens" json in
-    let total_tokens = Safe_ops.json_int ~default:0 "total_tokens" json in
-    let total_cost_usd = Safe_ops.json_float ~default:0.0 "total_cost_usd" json in
-    let last_turn_ts = Safe_ops.json_float ~default:0.0 "last_turn_ts" json in
-    let last_model_used = Safe_ops.json_string ~default:"" "last_model_used" json in
-    let last_input_tokens = Safe_ops.json_int ~default:0 "last_input_tokens" json in
-    let last_output_tokens = Safe_ops.json_int ~default:0 "last_output_tokens" json in
-    let last_total_tokens = Safe_ops.json_int ~default:0 "last_total_tokens" json in
-    let last_latency_ms = Safe_ops.json_int ~default:0 "last_latency_ms" json in
-    let compaction_count = Safe_ops.json_int ~default:0 "compaction_count" json in
-    let last_compaction_ts = Safe_ops.json_float ~default:0.0 "last_compaction_ts" json in
-    let last_compaction_before_tokens =
-      Safe_ops.json_int ~default:0 "last_compaction_before_tokens" json
-    in
-    let last_compaction_after_tokens =
-      Safe_ops.json_int ~default:0 "last_compaction_after_tokens" json
-    in
-    let proactive_count_total = Safe_ops.json_int ~default:0 "proactive_count_total" json in
-    let last_proactive_ts = Safe_ops.json_float ~default:0.0 "last_proactive_ts" json in
-    let last_proactive_reason = Safe_ops.json_string ~default:"" "last_proactive_reason" json in
-    let last_proactive_preview =
-      Safe_ops.json_string ~default:"" "last_proactive_preview" json
-    in
-    let last_compaction_check_ts =
-      Safe_ops.json_float ~default:0.0 "last_compaction_check_ts" json
-    in
-    let last_compaction_decision =
-      Safe_ops.json_string ~default:"uninitialized" "last_compaction_decision" json
-    in
-    let continuity_summary = Safe_ops.json_string ~default:"" "continuity_summary" json in
-    let last_continuity_update_ts =
-      let parsed_ts = Safe_ops.json_float ~default:0.0 "last_continuity_update_ts" json in
-      if parsed_ts <= 0.0 && String.trim continuity_summary <> "" then
-        Time_compat.now ()
-      else
-        parsed_ts
-    in
-    let active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
-    let active_team_session_id =
-      Safe_ops.json_string_opt "active_team_session_id" json
-    in
-    let last_team_session_started_at =
-      Safe_ops.json_string ~default:"" "last_team_session_started_at" json
-    in
-    let team_session_start_count_total =
-      Safe_ops.json_int ~default:0 "team_session_start_count_total" json
-    in
-    let last_autonomous_action_at =
-      Safe_ops.json_string ~default:"" "last_autonomous_action_at" json
-    in
-    let autonomous_action_count =
-      Safe_ops.json_int ~default:0 "autonomous_action_count" json
-    in
-    let autonomous_turn_count =
-      Safe_ops.json_int ~default:0 "autonomous_turn_count" json
-    in
-    let autonomous_text_turn_count =
-      Safe_ops.json_int ~default:0 "autonomous_text_turn_count" json
-    in
-    let autonomous_tool_turn_count =
-      Safe_ops.json_int ~default:0 "autonomous_tool_turn_count" json
-    in
-    let board_reactive_turn_count =
-      Safe_ops.json_int ~default:0 "board_reactive_turn_count" json
-    in
-    let mention_reactive_turn_count =
-      Safe_ops.json_int ~default:0 "mention_reactive_turn_count" json
-    in
-    let noop_turn_count =
-      Safe_ops.json_int ~default:0 "noop_turn_count" json
-    in
-    let last_speech_act =
-      Safe_ops.json_string ~default:"" "last_speech_act" json
-    in
-    let last_blocker =
-      Safe_ops.json_string ~default:"" "last_blocker" json
-    in
-    let last_need =
-      Safe_ops.json_string ~default:"" "last_need" json
-    in
-    let paused =
-      Safe_ops.json_bool ~default:false "paused" json
-    in
-    let current_task_id = Safe_ops.json_string_opt "current_task_id" json in
-    if not (validate_name name) then
-      Error "invalid keeper meta (bad name)"
-    else if not (validate_name trace_id) then
-      Error "invalid keeper meta (bad trace_id)"
-    else
-      Ok
-        {
+    match tool_access_of_meta_json json with
+    | Error msg -> Error ("meta parse error: " ^ msg)
+    | Ok tool_access ->
+        let tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
+        let room_scope =
+          Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope
+        in
+        let mention_targets =
+          Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
+        in
+        let joined_room_ids =
+          Safe_ops.json_string_list "joined_room_ids" json
+          |> List.filter validate_name
+          |> dedupe_keep_order
+        in
+        let last_seen_seq_by_room =
+          Yojson.Safe.Util.member "last_seen_seq_by_room" json |> room_seq_map_of_json
+        in
+        let generation = Safe_ops.json_int ~default:0 "generation" json in
+        let proactive_enabled =
+          Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
+        in
+        let proactive_idle_sec =
+          Safe_ops.json_int ~default:default_proactive_idle_sec "proactive_idle_sec" json
+          |> normalize_proactive_idle_sec
+        in
+        let proactive_cooldown_sec =
+          Safe_ops.json_int ~default:default_proactive_cooldown_sec "proactive_cooldown_sec" json
+          |> normalize_proactive_cooldown_sec
+        in
+        let (env_ratio_gate, env_message_gate, env_token_gate) =
+          keeper_compaction_policy_from_env ()
+        in
+        let compaction_profile =
+          Safe_ops.json_string ~default:default_compaction_profile "compaction_profile" json
+          |> canonical_compaction_profile
+          |> Option.value ~default:default_compaction_profile
+        in
+        let compaction_ratio_gate =
+          Safe_ops.json_float ~default:env_ratio_gate "compaction_ratio_gate" json
+          |> normalize_compaction_ratio_gate
+        in
+        let compaction_message_gate =
+          Safe_ops.json_int ~default:env_message_gate "compaction_message_gate" json
+          |> normalize_compaction_message_gate
+        in
+        let compaction_token_gate =
+          Safe_ops.json_int ~default:env_token_gate "compaction_token_gate" json
+          |> normalize_compaction_token_gate
+        in
+        let continuity_compaction_cooldown_sec =
+          Safe_ops.json_int
+            ~default:(keeper_continuity_compaction_cooldown_sec ())
+            "continuity_compaction_cooldown_sec"
+            json
+          |> normalize_continuity_compaction_cooldown_sec
+        in
+        let auto_handoff = Safe_ops.json_bool ~default:true "auto_handoff" json in
+        let handoff_threshold = Safe_ops.json_float ~default:0.85 "handoff_threshold" json in
+        let handoff_cooldown_sec =
+          Safe_ops.json_int ~default:300 "handoff_cooldown_sec" json
+        in
+        let last_handoff_ts = Safe_ops.json_float ~default:0.0 "last_handoff_ts" json in
+        let created_at = Safe_ops.json_string ~default:"" "created_at" json in
+        let updated_at = Safe_ops.json_string ~default:"" "updated_at" json in
+        let total_turns = Safe_ops.json_int ~default:0 "total_turns" json in
+        let total_input_tokens = Safe_ops.json_int ~default:0 "total_input_tokens" json in
+        let total_output_tokens = Safe_ops.json_int ~default:0 "total_output_tokens" json in
+        let total_tokens = Safe_ops.json_int ~default:0 "total_tokens" json in
+        let total_cost_usd = Safe_ops.json_float ~default:0.0 "total_cost_usd" json in
+        let last_turn_ts = Safe_ops.json_float ~default:0.0 "last_turn_ts" json in
+        let last_model_used = Safe_ops.json_string ~default:"" "last_model_used" json in
+        let last_input_tokens = Safe_ops.json_int ~default:0 "last_input_tokens" json in
+        let last_output_tokens = Safe_ops.json_int ~default:0 "last_output_tokens" json in
+        let last_total_tokens = Safe_ops.json_int ~default:0 "last_total_tokens" json in
+        let last_latency_ms = Safe_ops.json_int ~default:0 "last_latency_ms" json in
+        let compaction_count = Safe_ops.json_int ~default:0 "compaction_count" json in
+        let last_compaction_ts = Safe_ops.json_float ~default:0.0 "last_compaction_ts" json in
+        let last_compaction_before_tokens =
+          Safe_ops.json_int ~default:0 "last_compaction_before_tokens" json
+        in
+        let last_compaction_after_tokens =
+          Safe_ops.json_int ~default:0 "last_compaction_after_tokens" json
+        in
+        let proactive_count_total =
+          Safe_ops.json_int ~default:0 "proactive_count_total" json
+        in
+        let last_proactive_ts = Safe_ops.json_float ~default:0.0 "last_proactive_ts" json in
+        let last_proactive_reason =
+          Safe_ops.json_string ~default:"" "last_proactive_reason" json
+        in
+        let last_proactive_preview =
+          Safe_ops.json_string ~default:"" "last_proactive_preview" json
+        in
+        let last_compaction_check_ts =
+          Safe_ops.json_float ~default:0.0 "last_compaction_check_ts" json
+        in
+        let last_compaction_decision =
+          Safe_ops.json_string ~default:"uninitialized" "last_compaction_decision" json
+        in
+        let continuity_summary = Safe_ops.json_string ~default:"" "continuity_summary" json in
+        let last_continuity_update_ts =
+          let parsed_ts = Safe_ops.json_float ~default:0.0 "last_continuity_update_ts" json in
+          if parsed_ts <= 0.0 && String.trim continuity_summary <> "" then
+            Time_compat.now ()
+          else
+            parsed_ts
+        in
+        let active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
+        let active_team_session_id =
+          Safe_ops.json_string_opt "active_team_session_id" json
+        in
+        let last_team_session_started_at =
+          Safe_ops.json_string ~default:"" "last_team_session_started_at" json
+        in
+        let team_session_start_count_total =
+          Safe_ops.json_int ~default:0 "team_session_start_count_total" json
+        in
+        let last_autonomous_action_at =
+          Safe_ops.json_string ~default:"" "last_autonomous_action_at" json
+        in
+        let autonomous_action_count =
+          Safe_ops.json_int ~default:0 "autonomous_action_count" json
+        in
+        let autonomous_turn_count =
+          Safe_ops.json_int ~default:0 "autonomous_turn_count" json
+        in
+        let autonomous_text_turn_count =
+          Safe_ops.json_int ~default:0 "autonomous_text_turn_count" json
+        in
+        let autonomous_tool_turn_count =
+          Safe_ops.json_int ~default:0 "autonomous_tool_turn_count" json
+        in
+        let board_reactive_turn_count =
+          Safe_ops.json_int ~default:0 "board_reactive_turn_count" json
+        in
+        let mention_reactive_turn_count =
+          Safe_ops.json_int ~default:0 "mention_reactive_turn_count" json
+        in
+        let noop_turn_count =
+          Safe_ops.json_int ~default:0 "noop_turn_count" json
+        in
+        let last_speech_act =
+          Safe_ops.json_string ~default:"" "last_speech_act" json
+        in
+        let last_blocker =
+          Safe_ops.json_string ~default:"" "last_blocker" json
+        in
+        let last_need =
+          Safe_ops.json_string ~default:"" "last_need" json
+        in
+        let paused =
+          Safe_ops.json_bool ~default:false "paused" json
+        in
+        let current_task_id = Safe_ops.json_string_opt "current_task_id" json in
+        if not (validate_name name) then
+          Error "invalid keeper meta (bad name)"
+        else if not (validate_name trace_id) then
+          Error "invalid keeper meta (bad trace_id)"
+        else
+          Ok
+            {
           name;
           agent_name = if agent_name = "" then keeper_agent_name name else agent_name;
           goal;

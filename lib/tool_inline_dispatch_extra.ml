@@ -3,8 +3,6 @@
     (recall, board, conversation).
     Returns [Some (success, message)] if handled, [None] otherwise. *)
 
-open Types [@@warning "-33"]
-
 let activity_room_id (config : Room_utils.config) =
   match config.scope with
   | Default -> "default"

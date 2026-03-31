@@ -37,6 +37,11 @@ val create_server_state :
   fs:Eio.Fs.dir_ty Eio.Path.t ->
   Mcp_server.server_state
 
+val runtime_path_diagnostics :
+  ?input_base_path:string ->
+  Mcp_server.server_state ->
+  Server_base_path_diagnostics.t
+
 val restore_persisted_sessions : Mcp_server.server_state -> unit
 val reconcile_active_agents_gauge : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit

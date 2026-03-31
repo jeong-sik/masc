@@ -471,6 +471,17 @@ let dispatch ctx ~name ~args : tool_result option =
   (* Keepers are bootstrapped lazily on keeper messages as a fallback.
      Server startup also calls bootstrap_existing_keepers for always-on presence. *)
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
+  (* Resolve base_path: dashboard sessions may have a different base_path
+     than the target keeper.  Override ctx once here so all downstream
+     handlers use the correct filesystem paths. *)
+  let ctx =
+    let keeper_name = get_string args "name" "" in
+    if keeper_name = "" then ctx
+    else match Keeper_registry.find_by_name keeper_name with
+    | Some entry when entry.base_path <> ctx.config.base_path ->
+        { ctx with config = { ctx.config with base_path = entry.base_path } }
+    | _ -> ctx
+  in
   match name with
   | "masc_persona_list" -> Some (Persona.handle_persona_list ctx args)
   | "masc_keeper_create_from_persona" -> Some (handle_keeper_create_from_persona ctx args)
@@ -496,6 +507,14 @@ let dispatch ctx ~name ~args : tool_result option =
     Called from server_routes_http_keeper_stream. *)
 let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
+  let ctx =
+    let keeper_name = get_string args "name" "" in
+    if keeper_name = "" then ctx
+    else match Keeper_registry.find_by_name keeper_name with
+    | Some entry when entry.base_path <> ctx.config.base_path ->
+        { ctx with config = { ctx.config with base_path = entry.base_path } }
+    | _ -> ctx
+  in
   match name with
   | "masc_keeper_msg" ->
       Some (handle_keeper_msg_stream ~on_text_delta ctx args)

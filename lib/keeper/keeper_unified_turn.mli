@@ -25,6 +25,8 @@ val update_metrics_from_result :
   Keeper_types.keeper_meta ->
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
+  ?is_autonomous_turn:bool ->
+  ?update_proactive_rt:bool ->
   ?social_state:Keeper_social_model.social_state ->
   Keeper_agent_run.run_result ->
   Keeper_types.keeper_meta
@@ -36,6 +38,32 @@ val update_metrics_from_failure :
   ?social_state:Keeper_social_model.social_state ->
   unit ->
   Keeper_types.keeper_meta
+
+val append_metrics_snapshot :
+  config:Room.config ->
+  meta:Keeper_types.keeper_meta ->
+  observation:Keeper_world_observation.world_observation ->
+  result:Keeper_agent_run.run_result ->
+  latency_ms:int ->
+  turn_cost:float ->
+  turn_generation:int ->
+  channel:string ->
+  snapshot_source:string ->
+  context_ratio:float ->
+  context_tokens:int ->
+  context_max:int ->
+  message_count:int ->
+  compaction:Keeper_exec_context.compaction_event ->
+  handoff_json:Yojson.Safe.t option ->
+  unit ->
+  unit
+
+val broadcast_lifecycle_events :
+  name:string ->
+  turn_generation:int ->
+  compaction:Keeper_exec_context.compaction_event ->
+  handoff_json:Yojson.Safe.t option ->
+  unit
 
 val run_unified_turn :
   config:Room.config ->

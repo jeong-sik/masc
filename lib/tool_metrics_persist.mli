@@ -28,5 +28,13 @@ val flush_now : unit -> unit
     Intended for shutdown hooks and testing. *)
 
 val reset_for_testing : unit -> unit
-(** Clear cached store state and drop any queued records.
-    For test isolation only. *)
+(** Clear cached store state and drop any queued records held in memory.
+
+    This does not cancel or modify any background flush fiber or shutdown
+    hook previously started via [start_flush_fiber]; those may still flush
+    records based on the store instance they captured.
+
+    For reliable test isolation, call this either before
+    [start_flush_fiber] is invoked, or only after the [Eio.Switch.t]
+    passed to [start_flush_fiber] has been cancelled so that no flush
+    fiber is active. *)

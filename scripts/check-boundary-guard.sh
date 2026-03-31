@@ -10,7 +10,7 @@ rc=0
 check() {
   local label="$1" baseline="$2" pattern="$3" path="$4"
   local count
-  count="$(grep -rn "$pattern" "$REPO_ROOT/$path" 2>/dev/null | wc -l | tr -d ' ')"
+  count="$(grep -rn "$pattern" "$REPO_ROOT/$path" 2>/dev/null | wc -l | tr -d ' ' || true)"
   if [[ "$count" -gt "$baseline" ]]; then
     echo "BOUNDARY FAIL: $label — found $count (baseline $baseline)"
     grep -rn "$pattern" "$REPO_ROOT/$path" 2>/dev/null | head -5
@@ -29,7 +29,8 @@ check "V2-importance-scores" 8 \
 
 # V4: MASC domain marker constant definitions (message content pollution)
 # Allowed: keeper_working_context.ml (goal_prefix, state_block_start),
-#          context_compact_oas.ml (memory_summary_prefix)
+#          context_compact_oas.ml (memory_summary_prefix),
+#          tool_goals.ml (goal_prefix)
 check "V4-marker-definitions" 5 \
   'let goal_prefix\|let memory_summary_prefix\|let state_block_start' \
   "lib/"
@@ -37,7 +38,7 @@ check "V4-marker-definitions" 5 \
 # V5: Direct OAS Memory.store calls from MASC bridge code
 # Allowed: memory_oas_bridge.ml (2 actual calls + 5 comments/docs)
 check "V5-memory-store-bypass" 7 \
-  'Memory\.store' \
+  'Memory\.store[^_]' \
   "lib/memory_oas_bridge.ml"
 
 # V6: OAS lifecycle orchestration from keeper_agent_run
@@ -57,7 +58,7 @@ check "V7-masc-hook-gates" 5 \
 # V8: Direct OAS Agent.state mutation from keeper code
 # Allowed: keeper_extend_turns.ml (2 occurrences)
 check "V8-agent-state-mutation" 2 \
-  'Agent\.set_state\|Agent_sdk\.Agent\.state ' \
+  'Agent\.set_state\|Agent_sdk\.Agent\.state[^_]' \
   "lib/keeper/"
 
 if [[ "$rc" -eq 0 ]]; then

@@ -39,6 +39,9 @@ let keeper_internal_tools =
     "keeper_board_list";
     "keeper_board_comment";
     "keeper_board_vote";
+    "keeper_board_stats";
+    "keeper_board_search";
+    "keeper_board_delete";
     "keeper_shell_readonly";
     "keeper_bash";
     "keeper_github";
@@ -60,6 +63,9 @@ let keeper_internal_replacement = function
   | "keeper_board_list" -> Some "masc_board_list"
   | "keeper_board_comment" -> Some "masc_board_comment"
   | "keeper_board_vote" -> Some "masc_board_vote"
+  | "keeper_board_stats" -> Some "masc_board_stats"
+  | "keeper_board_search" -> Some "masc_board_search"
+  | "keeper_board_delete" -> Some "masc_board_delete"
   | "keeper_voice_speak" -> Some "masc_voice_speak"
   | "keeper_voice_agent" -> Some "masc_voice_agent"
   | "keeper_voice_sessions" -> Some "masc_voice_sessions"

@@ -16,7 +16,7 @@
 
 (** Bash-like tools that need destructive pattern screening. *)
 let destructive_check_tools =
-  [ "keeper_bash"; "keeper_fs_edit"; "keeper_edit"; "keeper_github" ]
+  [ "keeper_bash"; "keeper_fs_edit"; "keeper_github" ]
 
 (** Keeper deny list — derived from Tool_catalog surface SSOT.
     Administrative/destructive operations that should only be invoked

@@ -75,7 +75,7 @@ let tool_cost_estimate (tool_name : string) : float =
   | "keeper_board_comment" -> 0.001
   | "keeper_bash" -> 0.0001
   | "keeper_github" -> 0.0001
-  | "keeper_fs_edit" | "keeper_edit" -> 0.0001
+  | "keeper_fs_edit" -> 0.0001
   (* Read-only tools are essentially free *)
   | _ -> 0.0
 

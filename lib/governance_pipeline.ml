@@ -75,7 +75,6 @@ let overwrite_sensitive_tools =
   [
     "masc_code_write";
     "masc_code_edit";
-    "keeper_edit";
     "keeper_fs_edit";
     "keeper_write";
     "edit_text_file";

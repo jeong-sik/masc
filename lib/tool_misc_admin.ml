@@ -86,11 +86,16 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
     in
     if not (List.mem s prev) then Hashtbl.replace surface_map name (s :: prev)
   in
+  Config.raw_all_tool_schemas
+  |> List.iter (fun (schema : Types.tool_schema) ->
+         if Tool_catalog.is_public_mcp schema.name then
+           add_surface schema.name "public_mcp");
   List.iter
     (fun (seed : Capability_registry.capability_seed) ->
       let s = Capability_registry.surface_to_string seed.projection.surface in
-      add_surface seed.projection.tool_name s;
-      add_surface seed.projection.backend_tool_name s)
+      if s <> "public_mcp" then (
+        add_surface seed.projection.tool_name s;
+        add_surface seed.projection.backend_tool_name s))
     (Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas);
   let schemas =
     Config.raw_all_tool_schemas

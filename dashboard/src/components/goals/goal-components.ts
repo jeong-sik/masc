@@ -41,21 +41,31 @@ export function GoalRow({ goal }: { goal: Goal }) {
   }
 
   return html`
-    <div class="goal-row flex justify-between items-start gap-4 p-4 rounded-xl border border-card-border/50 bg-card/40 backdrop-blur-md transition-all duration-200 hover:bg-card/60 hover:border-accent/30 shadow-sm hover:shadow-md hover:-translate-y-0.5 group">
+    <div class="goal-row flex justify-between items-start gap-4 rounded-xl border border-card-border/60 bg-[rgba(8,13,22,0.86)] p-4 group">
       <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 mb-1.5 min-w-0">
-          <span class="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md bg-white/5 border border-white/10 shrink-0" style="color:${horizonColor(goal.horizon)}">
+        <div class="mb-1.5 flex min-w-0 flex-wrap items-center gap-2">
+          <span class="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest" style="color:${horizonColor(goal.horizon)}">
             ${horizonLabel(goal.horizon)}
           </span>
-          <span class="text-[15px] font-bold text-text-strong group-hover:text-accent transition-colors tracking-wide truncate">${goal.title}</span>
+          <span class="truncate text-[15px] font-semibold tracking-[-0.01em] text-text-strong">${goal.title}</span>
         </div>
-        <div class="flex gap-3 flex-wrap items-center mt-2.5 text-[11px] font-medium text-text-muted/90">
-          <span class="text-amber-500 tracking-[1px] text-[13px] drop-shadow-sm" title="우선순위 ${goal.priority}">${priorityStars(goal.priority)}</span>
-          ${goal.metric ? html`<span class="flex items-center gap-1.5 px-2 py-0.5 bg-accent/10 text-accent rounded-md border border-accent/20"><span class="w-1.5 h-1.5 rounded-full bg-accent/60"></span>${goal.metric}${goal.target_value ? ` \u2192 ${goal.target_value}` : ''}</span>` : null}
-          ${goal.due_date ? html`<span class="flex items-center gap-1.5 px-2 py-0.5 bg-bad/10 text-bad rounded-md border border-bad/20"><span>마감:</span><${TimeAgo} timestamp=${goal.due_date} /></span>` : null}
+        <div class="mt-2.5 flex flex-wrap items-center gap-2 text-[11px] font-medium text-text-muted">
+          <span class="rounded-md border border-card-border/60 bg-white/4 px-2 py-1 text-[12px] text-amber-300" title="우선순위 ${goal.priority}">
+            ${priorityStars(goal.priority)}
+          </span>
+          ${goal.metric ? html`
+            <span class="rounded-md border border-accent/20 bg-accent/10 px-2 py-1 text-accent">
+              ${goal.metric}${goal.target_value ? ` \u2192 ${goal.target_value}` : ''}
+            </span>
+          ` : null}
+          ${goal.due_date ? html`
+            <span class="rounded-md border border-bad/20 bg-bad/10 px-2 py-1 text-bad">
+              마감 <${TimeAgo} timestamp=${goal.due_date} />
+            </span>
+          ` : null}
         </div>
         ${goal.last_review_note ? html`
-          <div class="text-[12px] text-text-body/80 italic mt-3 p-2.5 rounded-lg border border-white/5 bg-white/5 leading-relaxed shadow-inner">${goal.last_review_note}</div>
+          <div class="mt-3 rounded-lg border border-card-border/50 bg-white/4 p-3 text-[12px] italic leading-relaxed text-text-body/85">${goal.last_review_note}</div>
         ` : null}
       </div>
       <div class="flex flex-col items-end gap-1.5 shrink-0 pt-0.5">
@@ -64,7 +74,7 @@ export function GoalRow({ goal }: { goal: Goal }) {
           <${TimeAgo} timestamp=${goal.updated_at} />
         </div>
         <button type="button"
-          class="mt-1 px-2.5 py-1 rounded-lg text-[10px] font-semibold border border-bad/30 bg-bad/10 text-bad hover:bg-bad/25 transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="mt-1 rounded-lg border border-bad/25 bg-bad/10 px-2.5 py-1 text-[10px] font-semibold text-bad transition-colors hover:bg-bad/20 disabled:opacity-50 disabled:cursor-not-allowed"
           onClick=${handleDelete}
           disabled=${isDeleting}
         >
@@ -122,28 +132,28 @@ export function GoalsSummary() {
     if (g.horizon in byHorizon) byHorizon[g.horizon as keyof typeof byHorizon]++
   }
   return html`
-    <div class="flex gap-4 flex-wrap pb-2 border-b border-card-border/50">
-      <div class="flex-1 min-w-[70px] text-center py-3 px-2 bg-card/60 backdrop-blur-md rounded-xl border border-card-border/50 shadow-inner">
+    <div class="flex flex-wrap gap-3 border-b border-card-border/50 pb-3">
+      <div class="min-w-[92px] flex-1 rounded-xl border border-card-border/60 bg-[rgba(8,13,22,0.86)] px-3 py-3 text-center">
         <div class="text-2xl font-bold text-text-strong tabular-nums">${all.length}</div>
         <div class="text-[10px] font-semibold tracking-widest uppercase text-text-muted mt-1">전체</div>
       </div>
-      <div class="flex-1 min-w-[70px] text-center py-3 px-2 bg-card/60 backdrop-blur-md rounded-xl border border-card-border/50 shadow-inner">
+      <div class="min-w-[92px] flex-1 rounded-xl border border-card-border/60 bg-[rgba(8,13,22,0.86)] px-3 py-3 text-center">
         <div class="text-2xl font-bold text-ok tabular-nums">${active}</div>
         <div class="text-[10px] font-semibold tracking-widest uppercase text-text-muted mt-1">진행 중</div>
       </div>
-      <div class="flex-1 min-w-[70px] text-center py-3 px-2 bg-card/60 backdrop-blur-md rounded-xl border border-card-border/50 shadow-inner">
+      <div class="min-w-[92px] flex-1 rounded-xl border border-card-border/60 bg-[rgba(8,13,22,0.86)] px-3 py-3 text-center">
         <div class="text-2xl font-bold text-text-dim tabular-nums">${completed}</div>
         <div class="text-[10px] font-semibold tracking-widest uppercase text-text-muted mt-1">완료</div>
       </div>
-      <div class="flex-1 min-w-[70px] text-center py-3 px-2 bg-card/60 backdrop-blur-md rounded-xl border border-card-border/50 shadow-inner">
+      <div class="min-w-[92px] flex-1 rounded-xl border border-card-border/60 bg-[rgba(8,13,22,0.86)] px-3 py-3 text-center">
         <div class="text-2xl font-bold tabular-nums" style="color:${horizonColor('short')}">${byHorizon.short}</div>
         <div class="text-[10px] font-semibold tracking-widest uppercase text-text-muted mt-1">단기</div>
       </div>
-      <div class="flex-1 min-w-[70px] text-center py-3 px-2 bg-card/60 backdrop-blur-md rounded-xl border border-card-border/50 shadow-inner">
+      <div class="min-w-[92px] flex-1 rounded-xl border border-card-border/60 bg-[rgba(8,13,22,0.86)] px-3 py-3 text-center">
         <div class="text-2xl font-bold tabular-nums" style="color:${horizonColor('mid')}">${byHorizon.mid}</div>
         <div class="text-[10px] font-semibold tracking-widest uppercase text-text-muted mt-1">중기</div>
       </div>
-      <div class="flex-1 min-w-[70px] text-center py-3 px-2 bg-card/60 backdrop-blur-md rounded-xl border border-card-border/50 shadow-inner">
+      <div class="min-w-[92px] flex-1 rounded-xl border border-card-border/60 bg-[rgba(8,13,22,0.86)] px-3 py-3 text-center">
         <div class="text-2xl font-bold tabular-nums" style="color:${horizonColor('long')}">${byHorizon.long}</div>
         <div class="text-[10px] font-semibold tracking-widest uppercase text-text-muted mt-1">장기</div>
       </div>

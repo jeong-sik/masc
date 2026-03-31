@@ -203,14 +203,21 @@ let status_summary_string (ctx : context) =
     |> List.sort (fun (a : Types.agent) (b : Types.agent) ->
            String.compare a.name b.name)
   in
-  let shown_agents = take_items max_agents_display agents in
-  let agent_count = List.length agents in
+  let agents_with_state =
+    List.map
+      (fun (agent : Types.agent) ->
+        let is_zombie =
+          safe_is_zombie_agent ~agent_name:agent.name agent.last_seen
+        in
+        (agent, is_zombie))
+      agents
+  in
+  let shown_agents = take_items max_agents_display agents_with_state in
+  let agent_count = List.length agents_with_state in
   let zombie_count =
     List.fold_left
-      (fun acc (agent : Types.agent) ->
-        if safe_is_zombie_agent ~agent_name:agent.name agent.last_seen then acc + 1
-        else acc)
-      0 agents
+      (fun acc (_, is_zombie) -> if is_zombie then acc + 1 else acc)
+      0 agents_with_state
   in
   let active_tasks, todo_count, claimed_count, in_progress_count, done_count,
       cancelled_count =
@@ -317,13 +324,10 @@ let status_summary_string (ctx : context) =
   Buffer.add_string buf "📌 Players:\n";
   (match shown_agents with
   | [] ->
-      Buffer.add_string buf "  (no active agents)\n"
+      Buffer.add_string buf "  (no agents)\n"
   | _ ->
       List.iter
-        (fun (agent : Types.agent) ->
-          let is_zombie =
-            safe_is_zombie_agent ~agent_name:agent.name agent.last_seen
-          in
+        (fun ((agent : Types.agent), is_zombie) ->
           let icon = agent_status_icon ~is_zombie agent.status in
           let you_marker =
             if String.equal agent.name actual_name then " (you)" else ""
@@ -471,14 +475,7 @@ let inspect_state ctx =
   in
   let worktree_active =
     if room_set then
-      let wt_dir = Filename.concat ctx.config.base_path ".worktrees" in
-      (try Sys.file_exists wt_dir && Sys.is_directory wt_dir &&
-           Array.length (Sys.readdir wt_dir) > 0
-       with
-       | Sys_error _ -> false
-       | exn ->
-           Log.Room.warn "worktree_active check failed: %s" (Printexc.to_string exn);
-           false)
+      status_worktree_active ctx
     else false
   in
   { room_set; joined; task_claimed; current_task_set; worktree_active }

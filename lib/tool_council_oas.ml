@@ -319,29 +319,30 @@ let handle_execute ctx args =
           | Some exec -> exec.success
           | None -> false
         in
-        (* Track executor decision in telemetry *)
-        (match ctx.room_config, outcome with
-         | Some config, Some exec ->
-           let tool_name = Printf.sprintf "executor:%s" topic in
-           (try Telemetry_eio.track_tool_called config
-             ~tool_name ~success:exec.success ~duration_ms:elapsed_ms
-             ~source:"council" ()
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | _ -> ());
-           if not exec.success then begin
-             let msg =
-               if String.length exec.output > 512
-               then String.sub exec.output 0 512
-               else exec.output
-             in
-             (try Telemetry_eio.track_error config
-               ~code:"executor_failed" ~message:msg ~context:topic
+        (* Track executor decision in telemetry, gated by toggle *)
+        if Env_config_core.telemetry_enabled () then
+          (match ctx.room_config, outcome with
+           | Some config, Some exec ->
+             let tool_name = Printf.sprintf "executor:%s" topic in
+             (try Telemetry_eio.track_tool_called config
+               ~tool_name ~success:exec.success ~duration_ms:elapsed_ms
+               ~agent_id:ctx.agent_name ~source:"council" ()
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
-             | _ -> ())
-           end
-         | _ -> ());
+             | _ -> ());
+             if not exec.success then begin
+               let msg =
+                 if String.length exec.output > 512
+                 then String.sub exec.output 0 512
+                 else exec.output
+               in
+               (try Telemetry_eio.track_error config
+                 ~code:"executor_failed" ~message:msg ~context:topic
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | _ -> ())
+             end
+           | _ -> ());
         let output =
           match outcome with
           | Some exec when String.trim exec.output <> "" -> exec.output

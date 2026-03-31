@@ -12,24 +12,41 @@ type tool_result = Keeper_types.tool_result
 
 include Keeper_status_bridge
 
+let resolve_config (ctx : _ Keeper_types.context) name : Room.config =
+  match Keeper_registry.find_by_name name with
+  | Some entry when entry.base_path <> ctx.config.base_path ->
+      { ctx.config with base_path = entry.base_path }
+  | _ -> ctx.config
+
 (* Re-export handle_keeper_status from the detail module *)
 let handle_keeper_status = Keeper_status_detail.handle_keeper_status
 
 let handle_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
-  let dir = keeper_dir ctx.config in
-  match Safe_ops.list_dir_safe dir with
-  | Error e -> (false, "❌ " ^ e)
-  | Ok files ->
-    let keeper_names =
-      files
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.map Filename.remove_extension
-      |> List.filter validate_name
-      |> List.sort String.compare
-      |> take limit
-    in
+  (* Prefer registry for keeper names — avoids base_path mismatch
+     when the caller's config points to a different directory.
+     Fall back to filesystem scan if registry is empty. *)
+  let registry_names =
+    Keeper_registry.all ()
+    |> List.map (fun (e : Keeper_registry.registry_entry) -> e.name)
+    |> List.sort_uniq String.compare
+  in
+  let keeper_names =
+    if registry_names <> [] then
+      take limit registry_names
+    else
+      let dir = keeper_dir ctx.config in
+      match Safe_ops.list_dir_safe dir with
+      | Error _ -> []
+      | Ok files ->
+        files
+        |> List.filter (fun f -> Filename.check_suffix f ".json")
+        |> List.map Filename.remove_extension
+        |> List.filter validate_name
+        |> List.sort String.compare
+        |> take limit
+  in
     if not detailed then
       let json = `Assoc [
         ("count", `Int (List.length keeper_names));
@@ -40,7 +57,8 @@ let handle_keeper_list ctx args : tool_result =
       let now_ts = Time_compat.now () in
       let keepers =
         List.filter_map (fun name ->
-          match read_meta ctx.config name with
+          let config = resolve_config ctx name in
+          match read_meta config name with
           | Error _ -> None
           | Ok None -> None
           | Ok (Some m) ->
@@ -278,12 +296,13 @@ let handle_keeper_trajectory ctx args : tool_result =
   if not (validate_name name) then
     (false, "invalid keeper name")
   else
-    match read_meta ctx.config name with
+    let config = resolve_config ctx name in
+    match read_meta config name with
     | Error e -> (false, "read error: " ^ e)
     | Ok None -> (false, Printf.sprintf "keeper not found: %s" name)
     | Ok (Some m) ->
       let limit = get_int args "limit" 20 in
-      let masc_root = Filename.concat ctx.config.base_path ".masc" in
+      let masc_root = Filename.concat config.base_path ".masc" in
       let entries =
         Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:m.runtime.trace_id
       in
@@ -314,12 +333,13 @@ let handle_keeper_eval ctx args : tool_result =
   if not (validate_name name) then
     (false, "invalid keeper name")
   else
-    match read_meta ctx.config name with
+    let config = resolve_config ctx name in
+    match read_meta config name with
     | Error e -> (false, "read error: " ^ e)
     | Ok None -> (false, Printf.sprintf "keeper not found: %s" name)
     | Ok (Some m) ->
       let scenario_file = get_string_opt args "scenario_file" in
-      let masc_root = Filename.concat ctx.config.base_path ".masc" in
+      let masc_root = Filename.concat config.base_path ".masc" in
       let entries =
         Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:m.runtime.trace_id
       in

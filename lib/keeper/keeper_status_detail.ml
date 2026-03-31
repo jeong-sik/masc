@@ -13,11 +13,18 @@ open Keeper_status_bridge
 
 type tool_result = Keeper_types.tool_result
 
+let resolve_config (ctx : _ Keeper_types.context) name : Room.config =
+  match Keeper_registry.find_by_name name with
+  | Some entry when entry.base_path <> ctx.config.base_path ->
+      { ctx.config with base_path = entry.base_path }
+  | _ -> ctx.config
+
 let handle_keeper_status ctx args : tool_result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
     (false, "❌ invalid keeper name")
   else
+    let ctx = { ctx with config = resolve_config ctx name } in
     match read_meta ctx.config name with
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)

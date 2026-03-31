@@ -225,7 +225,7 @@ let run_turn
      Derived from keeper_tools (already per-keeper allow/deny filtered)
      so no phantom tool names leak in. Used when BM25 confidence is low. *)
   let all_tool_names =
-    List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) tools
+    List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   let fallback_tools =
     List.filter (fun name ->
@@ -291,10 +291,11 @@ let run_turn
           else
             List.sort_uniq String.compare base
         in
-        Log.Keeper.info
-          "tool_disclosure keeper=%s top_score=%.3f retrieved=%d allowed=%d fallback=%b query_len=%d"
-          meta.name top_score (List.length retrieved_names)
-          (List.length all_allowed) use_fallback (String.length query_text);
+        if Keeper_types_profile.keeper_debug then
+          Log.Keeper.info
+            "tool_disclosure keeper=%s top_score=%.3f retrieved=%d allowed=%d fallback=%b query_len=%d"
+            meta.name top_score (List.length retrieved_names)
+            (List.length all_allowed) use_fallback (String.length query_text);
         let tool_filter =
           Agent_sdk.Guardrails.AllowList all_allowed
         in

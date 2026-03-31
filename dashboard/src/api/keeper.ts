@@ -265,19 +265,24 @@ export function shutdownKeeper(name: string): Promise<KeeperLifecycleResponse> {
   )
 }
 
-// --- Tool allowlist/denylist editing ---
+// --- Keeper tool policy editing ---
 
-export type ToolEditAction =
-  | 'set_allowlist'
-  | 'set_denylist'
-  | 'add_allow'
-  | 'remove_allow'
-  | 'add_deny'
-  | 'remove_deny'
+export interface KeeperToolPolicyInput {
+  action: 'set_policy'
+  mode: 'preset' | 'custom' | 'full'
+  preset?: 'minimal' | 'messaging' | 'coding' | 'research' | 'full'
+  allow?: string[]
+  also_allow?: string[]
+  deny?: string[]
+}
 
 export interface ToolEditResponse {
   ok: boolean
-  tool_allowlist: string[]
+  tool_policy_mode: 'preset' | 'custom' | string
+  tool_preset?: 'minimal' | 'messaging' | 'coding' | 'research' | 'full' | null
+  tool_also_allow: string[]
+  tool_custom_allowlist: string[]
+  resolved_allowlist: string[]
   tool_denylist: string[]
   active_masc_tool_count: number
   total_active: number
@@ -286,15 +291,14 @@ export interface ToolEditResponse {
 
 export async function editKeeperTools(
   name: string,
-  action: ToolEditAction,
-  tools: string[],
+  payload: KeeperToolPolicyInput,
 ): Promise<ToolEditResponse> {
   const resp = await fetch(
     `/api/v1/keepers/${encodeURIComponent(name)}/tools`,
     {
       method: 'POST',
       headers: jsonHeaders(),
-      body: JSON.stringify({ action, tools }),
+      body: JSON.stringify(payload),
     },
   )
   if (!resp.ok) {

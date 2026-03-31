@@ -1,6 +1,40 @@
 # Changelog
 
 
+## [2.200.0] - 2026-04-01
+
+### Added
+- **BM25 retrieval tests** — keeper tool selection quality harness with 20 scenarios (#4330).
+- **Keeper STATE split** — DONE/NEXT split + budget visibility + metrics (#4328).
+
+### Changed
+- **OAS SDK 0.99.6** — align Cdal_proof.scope + bump pin (#4333).
+- **Keeper KV cache removed** — dead code + boundary violation cleanup (#4327).
+
+## [2.199.0] - 2026-03-31
+
+### Added
+- **Tool_spec module** — unified registration with compile-time safety (#4314).
+- **Keeper persona fold** — soul_profile-aware compaction (#4321).
+
+### Changed
+- **Keeper tool presets** — replace mode/tier policy with presets (#4263).
+- **Team-context projections** — OAS boundary typed projections (#4287).
+
+### Fixed
+- **Dashboard review followup** — type narrowing, mention count, top-N validation (#4322).
+
+## [2.198.0] - 2026-03-31
+
+### Changed
+- **MDAL board cleanup** — remove board posting residue from MDAL loop (#4315).
+- **OTel lazy init** — avoid eager CA store initialization (#4307).
+- **Dashboard MetricsWindow** — expand type, replace duplicated RuntimeSignals (#4311).
+
+### Fixed
+- **GC thrashing** — O(n+ops) tree index + memory retention fix, eliminates 12.7GB thrashing (#4313).
+- **Keeper tool descriptions** — disambiguate overlapping descriptions (#4312).
+
 ## [2.197.0] - 2026-03-31
 
 ### Added

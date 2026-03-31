@@ -232,8 +232,6 @@ let state_to_json ?config (state : Mdal.loop_state) =
       ("history", `List (List.map iter_record_to_json state.history));
     ]
 
-let post_final_summary (_state : Mdal.loop_state) = ()
-
 let terminal_response ?config (state : Mdal.loop_state) ~reason ~error_message =
   assoc_with_fields (state_to_json ?config state)
     [
@@ -318,21 +316,18 @@ let set_terminal_state (state : Mdal.loop_state) ~status ~reason ~error_message 
 let stop_for_reason config (state : Mdal.loop_state) ~reason ~message =
   set_terminal_state state ~status:`Stopped ~reason ~error_message:None;
   persist_loop config state;
-  post_final_summary state;
   emit_stop_event state ~reason;
   terminal_response ~config state ~reason ~error_message:message
 
 let fail_loop config (state : Mdal.loop_state) ~reason ~message =
   set_terminal_state state ~status:`Error ~reason ~error_message:(Some message);
   persist_loop config state;
-  post_final_summary state;
   emit_stop_event state ~reason;
   terminal_response ~config state ~reason ~error_message:message
 
 let interrupt_loop config (state : Mdal.loop_state) ~reason ~message =
   set_interrupted_state state ~reason ~error_message:(Some message);
   persist_loop config state;
-  post_final_summary state;
   emit_stop_event state ~reason;
   terminal_response ~config state ~reason ~error_message:message
 

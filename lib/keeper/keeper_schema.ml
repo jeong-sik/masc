@@ -68,6 +68,18 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
         ]);
+        ("tool_preset", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "minimal"; `String "messaging"; `String "coding"; `String "research"; `String "full"]);
+        ]);
+        ("tool_also_allow", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
+        ("tool_denylist", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+        ]);
       ]);
       ("required", `List [`String "persona_name"]);
     ];
@@ -187,6 +199,21 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Restrict file writes to these path prefixes. Empty list uses computed defaults based on execution_scope. Use [\"*\"] for explicit full access.");
+        ]);
+        ("tool_preset", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "minimal"; `String "messaging"; `String "coding"; `String "research"; `String "full"]);
+          ("description", `String "Base keeper tools preset. Default: full.");
+        ]);
+        ("tool_also_allow", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Additional tool names to add on top of the selected preset.");
+        ]);
+        ("tool_denylist", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Tool names to remove after preset resolution.");
         ]);
       ]);
       ("required", `List [`String "name"]);

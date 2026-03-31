@@ -113,7 +113,7 @@ let () =
   register_module_tag ~schemas:Tool_worktree.schemas ~tag:Mod_worktree;
   register_module_tag ~schemas:Tool_auth.schemas ~tag:Mod_auth;
   register_module_tag ~schemas:Tool_audit.schemas ~tag:Mod_audit;
-  register_module_tag ~schemas:Tool_cost.schemas ~tag:Mod_cost;
+  (* Tool_cost: migrated to Tool_spec.register (tool_cost.ml) *)
   register_module_tag ~schemas:Tool_encryption.schemas ~tag:Mod_encryption;
   register_module_tag ~schemas:Tool_schemas_fire_task.schemas ~tag:Mod_fire_task;
   register_module_tag ~schemas:Tool_agent.schemas ~tag:Mod_agent;
@@ -133,13 +133,13 @@ let () =
   register_module_tag ~schemas:Tool_relay.schemas ~tag:Mod_relay;
   register_module_tag ~schemas:Tool_handover.schemas ~tag:Mod_handover;
   register_module_tag ~schemas:Tool_hat.schemas ~tag:Mod_hat;
-  register_module_tag ~schemas:Tool_cache.schemas ~tag:Mod_cache;
-  register_module_tag ~schemas:Tool_model_catalog.schemas ~tag:Mod_model_catalog;
+  (* Tool_cache: migrated to Tool_spec.register (tool_cache.ml) *)
+  (* Tool_model_catalog: migrated to Tool_spec.register (tool_model_catalog.ml) *)
   register_module_tag ~schemas:Tool_rate_limit.schemas ~tag:Mod_rate_limit;
-  register_module_tag ~schemas:Tool_run.schemas ~tag:Mod_run;
+  (* Tool_run: migrated to Tool_spec.register (tool_run.ml) *)
   register_module_tag ~schemas:Tool_tempo.schemas ~tag:Mod_tempo;
   register_module_tag ~schemas:Tool_goals.schemas ~tag:Mod_goals;
-  register_module_tag ~schemas:Tool_compact.schemas ~tag:Mod_compact;
+  (* Tool_compact: migrated to Tool_spec.register (tool_compact.ml) *)
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
   (* Monolithic schema decomposition: modules that now export their own schemas *)
   register_module_tag ~schemas:Tool_code.schemas ~tag:Mod_code;

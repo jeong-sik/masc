@@ -20,7 +20,7 @@ import {
   toolAuditStateLabel,
 } from './common/tool-audit'
 import { ToolAllowlistEditor } from './tools/tool-allowlist-editor'
-import { toolsData, loadTools } from './tools/tool-state'
+import { loadTools } from './tools/tool-state'
 
 const showAllowlistEditor = signal(false)
 
@@ -113,18 +113,18 @@ function ToolSection({ title, description, tools, fallback }: { title: string; d
 // ── Runtime Signals ──────────────────────────────────────
 
 // Helper: format a 0–1 ratio as percentage or '-'
-function fmtRate(v: unknown): string {
-  return typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '-'
+function fmtRate(v: number | undefined): string {
+  return v != null ? `${(v * 100).toFixed(1)}%` : '-'
 }
 
 // Helper: format a float with fixed decimals or '-'
-function fmtFixed(v: unknown, digits = 3): string {
-  return typeof v === 'number' ? v.toFixed(digits) : '-'
+function fmtFixed(v: number | undefined, digits = 3): string {
+  return v != null ? v.toFixed(digits) : '-'
 }
 
 // Helper: format an integer count or '-'
-function fmtCount(v: unknown): string | number {
-  return typeof v === 'number' ? v : '-'
+function fmtCount(v: number | undefined): string | number {
+  return v != null ? v : '-'
 }
 
 interface SignalGroup {
@@ -200,6 +200,12 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
         { label: '평균', value: fmtRate(mw?.proactive_preview_similarity_avg) },
         { label: '최대', value: fmtRate(mw?.proactive_preview_similarity_max) },
         { label: '경고', value: typeof mw?.proactive_preview_similarity_warn === 'boolean' ? (mw.proactive_preview_similarity_warn ? 'Y' : 'N') : '-' },
+      ],
+    },
+    {
+      title: '반응',
+      rows: [
+        { label: '멘션 반응', value: fmtCount(keeper.mention_reactive_turn_count) },
       ],
     },
   ]
@@ -296,7 +302,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
           class="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
           onClick=${() => {
             showAllowlistEditor.value = !showAllowlistEditor.value
-            if (showAllowlistEditor.value && !toolsData.value) loadTools()
+            if (showAllowlistEditor.value) loadTools()
           }}
         >${showAllowlistEditor.value ? '닫기' : '편집'}</button>
       </div>
@@ -304,8 +310,12 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       ${showAllowlistEditor.value
         ? html`<${ToolAllowlistEditor}
             keeperName=${keeper.name}
-            currentAllowlist=${allowedTools}
-            allToolNames=${(toolsData.value?.tool_inventory?.tools ?? []).map((t: { name: string }) => t.name)}
+            currentMode=${keeper.tool_policy_mode ?? 'preset'}
+            currentPreset=${keeper.tool_preset ?? 'full'}
+            currentAlsoAllow=${keeper.tool_also_allow ?? []}
+            currentCustomAllowlist=${keeper.tool_custom_allowlist ?? []}
+            currentDenylist=${keeper.tool_denylist ?? []}
+            resolvedAllowlist=${allowedTools}
             onUpdated=${() => { showAllowlistEditor.value = false; loadTools() }}
           />`
         : html`

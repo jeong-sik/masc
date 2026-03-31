@@ -98,6 +98,8 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
   let turn_intent_block =
     "Use the world state below as raw context.\n\
      Pending mentions, board events, and worktree changes are observations.\n\
+     Focus on one observation and one action per cycle. \
+     Your checkpoint survives across cycles — do not rush to finish everything now.\n\
      Unclaimed tasks in the backlog are actionable work — if your skills match, \
      claim one with keeper_task_claim and work on it.\n\
      When you have findings, opinions, or status updates worth sharing, post them to the board \
@@ -111,7 +113,12 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
      NEED: <value or none>\n\
      SPEECH_ACT: stay_silent|inform|request_help|claim_task|comment_board|post_board|broadcast|defer\n\
      DELIVERY_SURFACE: silent|visible_reply|board_post|board_comment|task_claim|broadcast\n\
-     If DELIVERY_SURFACE is silent, emit no visible body after the headers."
+     If DELIVERY_SURFACE is silent, emit no visible body after the headers.\n\
+     End every response with a [STATE]...[/STATE] block:\n\
+     DONE: what you accomplished this cycle\n\
+     NEXT: what the next cycle should do\n\
+     Goal: current active goal\n\
+     Decisions: key decisions (semicolon-separated)"
   in
   let system_prompt =
     Printf.sprintf "%s\n\n## Turn Intent\n%s" base_system_prompt turn_intent_block
@@ -163,6 +170,12 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
        (observation.context_ratio *. 100.0)
        observation.idle_seconds);
+  (* Turn budget from previous generation *)
+  (match observation.last_turn_budget with
+   | Some (used, total) when used > 0 ->
+     Buffer.add_string ubuf
+       (Printf.sprintf "- Previous turn budget: %d/%d used\n" used total)
+   | _ -> ());
   (* Economic pressure *)
   (match observation.economic_pressure with
    | Agent_economy.Normal -> ()

@@ -753,10 +753,26 @@ let keeper_config_json (config : Room.config) (name : string)
           allowed
           |> List.filter (fun n -> String.starts_with ~prefix:"masc_" n)
         in
-        let tool_allowlist = Keeper_types.tool_access_allowlist m.tool_access in
+        let tool_preset = Keeper_types.tool_access_preset m.tool_access in
+        let tool_also_allow = Keeper_types.tool_access_also_allowlist m.tool_access in
+        let custom_allowlist = Keeper_types.tool_access_custom_allowlist m.tool_access in
         `Assoc [
           ("tool_access", Keeper_types.tool_access_to_json m.tool_access);
-          ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
+          ("tool_policy_mode",
+            `String
+              (match custom_allowlist with
+               | Some _ -> "custom"
+               | None -> "preset"));
+          ("tool_preset",
+            match tool_preset with
+            | Some preset -> `String (Keeper_types.tool_preset_to_string preset)
+            | None -> `Null);
+          ("tool_also_allow", `List (List.map (fun s -> `String s) tool_also_allow));
+          ("tool_custom_allowlist",
+            `List
+              (List.map (fun s -> `String s)
+                 (Option.value ~default:[] custom_allowlist)));
+          ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
           ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
           ("active_masc_tool_count", `Int (List.length masc_tools));
           ("active_keeper_tool_count",

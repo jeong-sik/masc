@@ -23,6 +23,22 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
   return 'offline'
 }
 
+function normalizeToolPreset(
+  value: unknown,
+): Keeper['tool_preset'] {
+  const raw = typeof value === 'string' ? value : null
+  if (
+    raw === 'minimal'
+    || raw === 'messaging'
+    || raw === 'coding'
+    || raw === 'research'
+    || raw === 'full'
+  ) {
+    return raw
+  }
+  return null
+}
+
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   const status = keeper.status?.toLowerCase() ?? ''
   if (isOfflineStatus(status)) return 'offline'
@@ -114,10 +130,15 @@ function normalizeMetricsWindow(raw: unknown): Keeper['metrics_window'] | undefi
 
   const normalized: Keeper['metrics_window'] = {}
   for (const [key, value] of Object.entries(raw)) {
-    // Top-N lists: array of objects with at least one string field
+    // Top-N lists: array of objects with at least one meaningful value
     if (TOP_LIST_KEYS.has(key)) {
       if (!Array.isArray(value)) continue
-      const items = value.filter(item => isRecord(item))
+      const items = value.filter(item => {
+        if (!isRecord(item)) return false
+        return Object.values(item).some(v =>
+          (typeof v === 'string' && v.trim() !== '') || typeof v === 'number',
+        )
+      })
       if (items.length > 0) normalized[key] = items
       continue
     }
@@ -250,6 +271,11 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         recent_input_preview: asString(row.recent_input_preview) ?? null,
         recent_output_preview: asString(row.recent_output_preview) ?? null,
         recent_tool_names: asStringArray(row.recent_tool_names) ?? [],
+        tool_policy_mode: asString(row.tool_policy_mode) ?? undefined,
+        tool_preset: normalizeToolPreset(row.tool_preset),
+        tool_also_allow: asStringArray(row.tool_also_allow) ?? [],
+        tool_custom_allowlist: asStringArray(row.tool_custom_allowlist) ?? [],
+        tool_denylist: asStringArray(row.tool_denylist) ?? [],
         allowed_tool_names: asStringArray(row.allowed_tool_names) ?? [],
         latest_tool_names: asStringArray(row.latest_tool_names) ?? [],
         latest_tool_call_count: asNumber(row.latest_tool_call_count) ?? null,

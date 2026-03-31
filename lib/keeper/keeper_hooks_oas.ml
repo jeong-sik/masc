@@ -193,6 +193,13 @@ let make_hooks
              ~model ~input_tokens:input_tok ~output_tokens:output_tok
              ~cost_usd:0.0
          | None -> ());
+        let text = Agent_sdk.Types.text_of_content response.content in
+        let has_state_block =
+          Option.is_some (Keeper_memory_policy.find_state_block text)
+        in
+        if not has_state_block && turn > 0 then
+          Log.Keeper.info "keeper:%s turn=%d state_block=absent"
+            meta.name turn;
         (try
            Sse.broadcast
              (`Assoc
@@ -204,6 +211,7 @@ let make_hooks
                  ("model_used", `String model);
                  ("input_tokens", `Int input_tok);
                  ("output_tokens", `Int output_tok);
+                 ("has_state_block", `Bool has_state_block);
                  ("ts_unix", `Float (Unix.gettimeofday ()));
                ])
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());

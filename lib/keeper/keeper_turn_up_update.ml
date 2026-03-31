@@ -9,6 +9,10 @@ open Keeper_keepalive
 open Keeper_turn_up_args
 
 let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result =
+  match old.tool_access, p.tool_preset_opt, p.tool_also_allow_opt with
+  | Custom _, None, Some _ ->
+      (false, "tool_also_allow requires a preset-based keeper policy; set tool_preset first")
+  | _ ->
   let goal_provided = Option.is_some p.goal_opt in
   let goal =
     match p.goal_opt with
@@ -76,6 +80,32 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       ~fallback_message:old.compaction.message_gate
       ~fallback_token:old.compaction.token_gate
   in
+  let tool_access =
+    match old.tool_access with
+    | Preset current ->
+        let preset = Option.value ~default:current.preset p.tool_preset_opt in
+        let also_allow =
+          resolve_tool_name_list
+            ~preferred:p.tool_also_allow_opt
+            ~fallback:(Some current.also_allow)
+        in
+        Preset { preset; also_allow }
+    | Custom names -> (
+        match p.tool_preset_opt with
+        | Some preset ->
+            let also_allow =
+              resolve_tool_name_list
+                ~preferred:p.tool_also_allow_opt
+                ~fallback:p.profile_defaults.tool_also_allow
+            in
+            Preset { preset; also_allow }
+        | None -> Custom names)
+  in
+  let tool_denylist =
+    resolve_tool_name_list
+      ~preferred:p.tool_denylist_opt
+      ~fallback:(Some old.tool_denylist)
+  in
   let updated = { old with
     goal;
     short_goal;
@@ -119,6 +149,8 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     execution_scope =
       Option.value ~default:old.execution_scope p.execution_scope_opt;
     scope_kind;
+    tool_access;
+    tool_denylist;
     room_scope;
     voice_enabled =
       Option.value ~default:old.voice_enabled p.voice_enabled_opt;

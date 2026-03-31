@@ -405,6 +405,12 @@ let handle_keeper_status ctx args : tool_result =
           all_internal_tools
           |> List.filter (fun name -> not (List.mem name allowed_tools))
         in
+        let tool_preset = Keeper_types.tool_access_preset m.tool_access in
+        let tool_also_allow = Keeper_types.tool_access_also_allowlist m.tool_access in
+        let tool_custom_allowlist =
+          Keeper_types.tool_access_custom_allowlist m.tool_access
+          |> Option.value ~default:[]
+        in
 
          let json = `Assoc [
            ("meta", meta_to_json m);
@@ -440,6 +446,18 @@ let handle_keeper_status ctx args : tool_result =
            ("handoff_count_total", `Int trace_history_count);
            ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
            ("allowed_tool_count", `Int (List.length allowed_tools));
+           ("tool_policy_mode",
+             `String
+               (match Keeper_types.tool_access_custom_allowlist m.tool_access with
+                | Some _ -> "custom"
+                | None -> "preset"));
+           ("tool_preset",
+             match tool_preset with
+             | Some preset -> `String (Keeper_types.tool_preset_to_string preset)
+             | None -> `Null);
+           ("tool_also_allow", string_list_to_json tool_also_allow);
+           ("tool_custom_allowlist", string_list_to_json tool_custom_allowlist);
+           ("tool_denylist", string_list_to_json m.tool_denylist);
            ("allowed_tool_names", string_list_to_json allowed_tools);
            ("allowed_tool_preview", string_list_to_json allowed_tool_preview);
            ("latest_tool_names",

@@ -40,6 +40,7 @@ let make_proof
     result_status = Completed;
     started_at = 1000.0;
     ended_at = 1001.0;
+    scope = None;
   }
 
 let setup_store () =
@@ -397,6 +398,7 @@ let make_proof_for_cross_run
     result_status = Completed;
     started_at = ended_at -. 1.0;
     ended_at;
+    scope = None;
   }
 
 let test_project_window_single_run () =

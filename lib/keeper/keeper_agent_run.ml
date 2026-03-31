@@ -221,9 +221,9 @@ let run_turn
     keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
   in
   (* Build BM25 tool index for progressive disclosure.
-     Essential tools are always available; others are retrieved
-     per-turn based on the goal/context. This prevents the LLM
-     from being overwhelmed by 50+ tools and improves selection.
+     The active keeper tool policy defines the candidate surface, and the
+     index retrieves the most relevant tools per-turn based on goal/context.
+     This prevents the LLM from being overwhelmed by 50+ tools and improves selection.
 
      top_k=20 (up from default 10) for better coverage across 60-80 tools.
      Group by prefix so co-retrieval pulls related tools together
@@ -320,7 +320,7 @@ let run_turn
     Agent_sdk.Hooks.empty with
     before_turn_params = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.BeforeTurnParams { current_params; messages; _ } ->
+      | Agent_sdk.Hooks.BeforeTurnParams { turn; current_params; messages; _ } ->
         (* 1. Dynamic context injection *)
         let ctx =
           if String.trim dynamic_context = "" then
@@ -366,6 +366,54 @@ let run_turn
             "tool_disclosure keeper=%s top_score=%.3f retrieved=%d allowed=%d fallback=%b query_len=%d"
             meta.name top_score (List.length retrieved_names)
             (List.length all_allowed) use_fallback (String.length query_text);
+        (* 3. Graceful last-turn: inject budget warnings and restrict
+           tools when approaching the turn limit.
+           - Warning zone (2 turns before limit): inject budget warning
+           - Last turn (1 turn before limit): restrict to safe tools + force [STATE]
+           The keeper can still call extend_turns to escape the limit. *)
+        let is_last_turn = turn >= max_turns - 1 in
+        let is_warning_zone = turn >= max_turns - 2 in
+        let ctx =
+          if is_last_turn then
+            let warning =
+              Printf.sprintf
+                "[LAST TURN] Turn %d/%d. This is your final turn. \
+                 You MUST emit a [STATE]...[/STATE] block now summarizing \
+                 what you accomplished and what the next generation should do. \
+                 Do NOT start new tool work. If you need more turns, call extend_turns."
+                turn max_turns
+            in
+            (match ctx with
+             | None -> Some warning
+             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+          else if is_warning_zone then
+            let warning =
+              Printf.sprintf
+                "[BUDGET] %d/%d turns used. Wrap up current work and emit \
+                 a [STATE] block. Call extend_turns if you need more time."
+                turn max_turns
+            in
+            (match ctx with
+             | None -> Some warning
+             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+          else ctx
+        in
+        let all_allowed =
+          if is_last_turn then
+            (* On last turn, only allow state-preserving and communication tools.
+               Removes filesystem/bash/edit tools to prevent starting unfinishable work. *)
+            List.filter (fun name ->
+              List.mem name
+                [ "keeper_board_post"; "keeper_board_comment";
+                  "keeper_context_status"; "extend_turns";
+                  "keeper_time_now"; "keeper_broadcast" ]
+            ) all_allowed
+          else all_allowed
+        in
+        if is_warning_zone then
+          Log.Keeper.info
+            "keeper:%s turn_budget turn=%d/%d last_turn=%b"
+            meta.name turn max_turns is_last_turn;
         let tool_filter =
           Agent_sdk.Guardrails.AllowList all_allowed
         in
@@ -469,6 +517,31 @@ let run_turn
         (match normalize_response_text ~text ~tool_names () with
          | Error e -> Error e
          | Ok response_text ->
+             (* Ensure every generation has a [STATE] block for continuity.
+                If the model omitted it, synthesize one deterministically
+                from tool usage and stop reason. *)
+             let response_text =
+               match Keeper_memory_policy.find_state_block response_text with
+               | Some _ -> response_text
+               | None ->
+                 let stop_reason_str =
+                   match result.stop_reason with
+                   | Oas_worker.Completed -> "completed"
+                   | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
+                 in
+                 let synth =
+                   Keeper_memory_policy.synthesize_state_from_run_result
+                     ~goal:meta.goal
+                     ~tools_used:tool_names
+                     ~stop_reason:stop_reason_str
+                     ~response_text
+                 in
+                 let block = Keeper_memory_policy.render_state_block synth in
+                 Log.Keeper.info
+                   "keeper:%s [STATE] missing, synthesized from %d tools (stop=%s)"
+                   meta.name (List.length tool_names) stop_reason_str;
+                 response_text ^ "\n" ^ block
+             in
              let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
              Keeper_exec_context.persist_message
                ~source:history_assistant_source

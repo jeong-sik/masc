@@ -33,6 +33,7 @@ type world_observation = {
   unclaimed_task_count : int;
   failed_task_count : int;
   active_agent_count : int;
+  last_turn_budget : (int * int) option;
 }
 
 type board_signal_match = {
@@ -334,6 +335,7 @@ let observe ~(pending_board_events : pending_board_event list option)
     unclaimed_task_count;
     failed_task_count;
     active_agent_count;
+    last_turn_budget = None;
   }
 
 let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observation) =

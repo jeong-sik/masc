@@ -112,6 +112,19 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
         | None -> false)
   |> add_if "coordination.mention_targets"
        (defaults.mention_targets <> [] && defaults.mention_targets <> meta.mention_targets)
+  |> add_if "tools.tool_preset"
+       (match defaults.tool_preset, Keeper_types.tool_access_preset meta.tool_access with
+        | Some authored, Some active -> authored <> Keeper_types.tool_preset_to_string active
+        | _ -> false)
+  |> add_if "tools.tool_also_allow"
+       (match defaults.tool_also_allow with
+        | Some authored ->
+            authored <> Keeper_types.tool_access_also_allowlist meta.tool_access
+        | None -> false)
+  |> add_if "tools.tool_denylist"
+       (match defaults.tool_denylist with
+        | Some authored -> authored <> meta.tool_denylist
+        | None -> false)
   |> add_if "proactive.enabled"
        (match defaults.proactive_enabled with
         | Some value -> value <> meta.proactive.enabled

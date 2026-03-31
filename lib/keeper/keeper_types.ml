@@ -22,9 +22,19 @@ type proactive_policy = {
   cooldown_sec: int;
 }
 
+type tool_preset =
+  | Minimal
+  | Messaging
+  | Coding
+  | Research
+  | Full
+
 type tool_access =
-  | Unrestricted
-  | Restricted of string list
+  | Preset of {
+      preset : tool_preset;
+      also_allow : string list;
+    }
+  | Custom of string list
 
 (* -- Runtime types (moved into agent_runtime_state) -- *)
 
@@ -135,26 +145,66 @@ type keeper_meta = {
 
 let default_social_model = "bdi_speech_v1"
 
-let normalize_tool_access = function
-  | Unrestricted -> Unrestricted
-  | Restricted names ->
-      Restricted
-        (names
-        |> List.filter (fun name -> String.trim name <> "")
-        |> dedupe_keep_order)
+let normalize_tool_names names =
+  names
+  |> List.map String.trim
+  |> List.filter (fun name -> name <> "")
+  |> dedupe_keep_order
 
-let tool_access_allowlist = function
-  | Unrestricted -> []
-  | Restricted names -> names
+let legacy_keeper_internal_tool_names =
+  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+
+let legacy_standard_tool_names = Tool_catalog.standard_tools
+
+let migrate_legacy_restricted_tools names =
+  Custom (normalize_tool_names (legacy_keeper_internal_tool_names @ names))
+
+let tool_preset_to_string = function
+  | Minimal -> "minimal"
+  | Messaging -> "messaging"
+  | Coding -> "coding"
+  | Research -> "research"
+  | Full -> "full"
+
+let tool_preset_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "minimal" -> Some Minimal
+  | "messaging" -> Some Messaging
+  | "coding" -> Some Coding
+  | "research" -> Some Research
+  | "full" -> Some Full
+  | _ -> None
+
+let normalize_tool_access = function
+  | Preset { preset; also_allow } ->
+      Preset { preset; also_allow = normalize_tool_names also_allow }
+  | Custom names -> Custom (normalize_tool_names names)
+
+let tool_access_preset = function
+  | Preset { preset; _ } -> Some preset
+  | Custom _ -> None
+
+let tool_access_custom_allowlist = function
+  | Preset _ -> None
+  | Custom names -> Some names
+
+let tool_access_also_allowlist = function
+  | Preset { also_allow; _ } -> also_allow
+  | Custom _ -> []
 
 let tool_access_to_json access =
   match normalize_tool_access access with
-  | Unrestricted ->
-      `Assoc [ ("kind", `String "unrestricted") ]
-  | Restricted names ->
+  | Preset { preset; also_allow } ->
       `Assoc
         [
-          ("kind", `String "restricted");
+          ("kind", `String "preset");
+          ("preset", `String (tool_preset_to_string preset));
+          ("also_allow", `List (List.map (fun s -> `String s) also_allow));
+        ]
+  | Custom names ->
+      `Assoc
+        [
+          ("kind", `String "custom");
           ("tools", `List (List.map (fun s -> `String s) names));
         ]
 
@@ -163,10 +213,10 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
   | `Null ->
       let legacy_allowlist =
         match Safe_ops.json_string_list "tool_allowlist" json with
-        | [] -> Tool_catalog.standard_tools
+        | [] -> legacy_standard_tool_names
         | names -> names
       in
-      Ok (normalize_tool_access (Restricted legacy_allowlist))
+      Ok (migrate_legacy_restricted_tools legacy_allowlist)
   | `Assoc _ as access_json -> (
       let kind =
         Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
@@ -189,11 +239,42 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
         | _ ->
             Error (Printf.sprintf "keeper tool_access.%s must be an array of strings" field_name)
       in
+      let string_list_field_opt field_name =
+        match Yojson.Safe.Util.member field_name access_json with
+        | `Null -> Ok []
+        | _ -> string_list_field field_name
+      in
       match kind with
-      | Some "unrestricted" -> Ok Unrestricted
+      | Some "unrestricted" ->
+          Ok (Preset { preset = Full; also_allow = [] } |> normalize_tool_access)
       | Some "restricted" -> (
+          match string_list_field_opt "tools" with
+          | Ok tools -> Ok (migrate_legacy_restricted_tools tools)
+          | Error msg -> Error msg)
+      | Some "preset" -> (
+          let preset_raw =
+            Yojson.Safe.Util.member "preset" access_json
+            |> Yojson.Safe.Util.to_string_option
+          in
+          match preset_raw with
+          | None -> Error "keeper tool_access.preset required"
+          | Some raw -> (
+              match tool_preset_of_string raw with
+              | None ->
+                  Error
+                    (Printf.sprintf
+                       "invalid keeper tool_access.preset: %s"
+                       raw)
+              | Some preset -> (
+                  match string_list_field_opt "also_allow" with
+                  | Ok also_allow ->
+                      Ok
+                        (normalize_tool_access
+                           (Preset { preset; also_allow }))
+                  | Error msg -> Error msg)))
+      | Some "custom" -> (
           match string_list_field "tools" with
-          | Ok tools -> Ok (normalize_tool_access (Restricted tools))
+          | Ok tools -> Ok (normalize_tool_access (Custom tools))
           | Error msg -> Error msg)
       | Some other ->
           Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)

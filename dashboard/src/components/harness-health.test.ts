@@ -156,17 +156,17 @@ describe('HarnessHealth', () => {
     await flushUi()
 
     expect(get).toHaveBeenCalledWith('/api/v1/dashboard/harness-health')
-    expect(container.textContent).toContain('Safety Harness')
-    expect(container.textContent).toContain('Harness Flow')
-    expect(container.textContent).toContain('Can I Trust The Experiment Machinery?')
-    expect(container.textContent).toContain('Judge of the Judge')
-    expect(container.textContent).toContain('Continuity Pressure')
-    expect(container.textContent).toContain('Keeper Handoff')
+    expect(container.textContent).toContain('안전 감시')
+    expect(container.textContent).toContain('감시 흐름도')
+    expect(container.textContent).toContain('keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다')
+    expect(container.textContent).toContain('평가 모델 건강도')
+    expect(container.textContent).toContain('컨텍스트 압축 압력')
+    expect(container.textContent).toContain('keeper 세대 교체')
     expect(container.textContent).toContain('오토리서치 열기')
-    expect(container.textContent).toContain('Fallback 비율')
+    expect(container.textContent).toContain('대체 처리율')
     expect(container.textContent).toContain('judge timeout')
     expect(mermaidSource(container)).toContain('flowchart LR')
-    expect(mermaidSource(container)).toContain('verdict_recorded')
+    expect(mermaidSource(container)).toContain('판정 기록')
     expect(mermaidSource(container)).toContain('debounced reload')
 
     const markup = container.innerHTML
@@ -228,7 +228,7 @@ describe('HarnessHealth', () => {
     expect(source).toContain('class preCompact healthyRail;')
     expect(source).toContain('class handoff healthyRail;')
     expect(source).toContain('class evaluator activeRail;')
-    expect(source).toContain('keeper_handoff')
+    expect(source).toContain('교체 신호')
     expect(source).toContain('/api/v1/dashboard/harness-health')
   })
 
@@ -260,7 +260,7 @@ describe('HarnessHealth', () => {
     await flushUi()
 
     expect(container.textContent).toContain('keeper-b')
-    expect(container.textContent).toContain('generation 9')
+    expect(container.textContent).toContain('9세대')
     expect(mermaidSource(container)).toContain('class handoff activeRail;')
 
     await new Promise(resolve => setTimeout(resolve, 1000))

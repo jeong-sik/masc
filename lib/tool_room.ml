@@ -89,6 +89,50 @@ let room_strategy_json config =
 
 (* Handlers *)
 
+let bool_flag value = if value then "yes" else "no"
+
+let option_or_dash = function
+  | Some value when String.trim value <> "" -> value
+  | _ -> "-"
+
+let status_worktree_active (ctx : context) =
+  let wt_dir = Filename.concat ctx.config.base_path ".worktrees" in
+  try
+    Sys.file_exists wt_dir && Sys.is_directory wt_dir
+    && Array.length (Sys.readdir wt_dir) > 0
+  with
+  | Sys_error _ -> false
+  | exn ->
+      Log.Room.warn "worktree_active check failed: %s" (Printexc.to_string exn);
+      false
+
+let task_status_badge = function
+  | Types.Todo -> ("📋", "todo")
+  | Types.Claimed _ -> ("🟡", "claimed")
+  | Types.InProgress _ -> ("🟢", "in_progress")
+  | Types.Done _ -> ("✅", "done")
+  | Types.Cancelled _ -> ("🚫", "cancelled")
+
+let task_assignee = function
+  | Types.Claimed { assignee; _ }
+  | Types.InProgress { assignee; _ }
+  | Types.Done { assignee; _ } -> assignee
+  | Types.Cancelled { cancelled_by; _ } -> cancelled_by
+  | Types.Todo -> "unclaimed"
+
+let agent_status_icon ~is_zombie = function
+  | _ when is_zombie -> "💀"
+  | Types.Busy -> "🔴"
+  | Types.Active -> "🟢"
+  | Types.Listening -> "🎧"
+  | Types.Inactive -> "⚫"
+
+let agent_focus_label ~is_zombie (agent : Types.agent) =
+  if is_zombie then "stale"
+  else option_or_dash agent.current_task |> function
+    | "-" -> Types.agent_status_to_string agent.status
+    | task -> task
+
 let status_summary_string (ctx : context) =
   Room.ensure_initialized ctx.config;
   let state = Room.read_state ctx.config in
@@ -98,27 +142,114 @@ let status_summary_string (ctx : context) =
   let backlog = Room.read_backlog_in_room ctx.config current_room in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
+  let joined =
+    try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name
+    with Sys_error _ | Yojson.Json_error _ -> false
+  in
+  let actual_name =
+    if joined then Room.resolve_agent_name ctx.config ctx.agent_name
+    else ctx.agent_name
+  in
+  let matches_you assignee =
+    String.equal assignee ctx.agent_name || String.equal assignee actual_name
+  in
+  let current_task =
+    if joined then Planning_eio.get_current_task ctx.config else None
+  in
+  let worktree_active = status_worktree_active ctx in
   let cluster_name =
     match ctx.config.backend_config.Backend_types.cluster_name with
     | "" -> state.project
     | name -> name
   in
-  let active_agents =
-    state.active_agents |> List.sort String.compare
+  let agents =
+    Room.get_agents_raw ctx.config
+    |> List.sort (fun (a : Types.agent) (b : Types.agent) ->
+           String.compare a.name b.name)
   in
-  let active_tasks, done_count, cancelled_count =
+  let shown_agents = take_items max_agents_display agents in
+  let agent_count = List.length agents in
+  let zombie_count =
     List.fold_left
-      (fun (active, done_cnt, cancelled_cnt) (task : Types.task) ->
+      (fun acc (agent : Types.agent) ->
+        if Room.is_zombie_agent ~agent_name:agent.name agent.last_seen then acc + 1
+        else acc)
+      0 agents
+  in
+  let active_tasks, todo_count, claimed_count, in_progress_count, done_count,
+      cancelled_count =
+    List.fold_left
+      (fun
+         (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt, cancelled_cnt)
+         (task : Types.task) ->
         match task.task_status with
-        | Types.Done _ -> (active, done_cnt + 1, cancelled_cnt)
-        | Types.Cancelled _ -> (active, done_cnt, cancelled_cnt + 1)
-        | _ -> (task :: active, done_cnt, cancelled_cnt))
-      ([], 0, 0)
+        | Types.Todo ->
+            (task :: active, todo_cnt + 1, claimed_cnt, in_progress_cnt,
+             done_cnt, cancelled_cnt)
+        | Types.Claimed _ ->
+            (task :: active, todo_cnt, claimed_cnt + 1, in_progress_cnt,
+             done_cnt, cancelled_cnt)
+        | Types.InProgress _ ->
+            (task :: active, todo_cnt, claimed_cnt, in_progress_cnt + 1,
+             done_cnt, cancelled_cnt)
+        | Types.Done _ ->
+            (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt + 1,
+             cancelled_cnt)
+        | Types.Cancelled _ ->
+            (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt,
+             cancelled_cnt + 1))
+      ([], 0, 0, 0, 0, 0)
       backlog.tasks
   in
   let active_tasks = List.rev active_tasks in
-  let shown_agents = take_items max_agents_display active_agents in
   let shown_active_tasks = take_items max_active_tasks_display active_tasks in
+  let your_task =
+    active_tasks
+    |> List.find_map (fun (task : Types.task) ->
+           let assignee = task_assignee task.task_status in
+           if matches_you assignee then Some task.id else None)
+  in
+  let guidance =
+    Workflow_guide.current_state_guidance
+      ~room_set:true
+      ~joined
+      ~task_claimed:(Option.is_some your_task)
+      ~current_task_set:(Option.is_some current_task)
+      ~worktree_active ~session_active:false
+  in
+  let suggested_next =
+    guidance.next_steps
+    |> take_items 2
+    |> List.map (fun (step : Workflow_guide.step) -> step.tool)
+  in
+  let attention_items =
+    []
+    |> fun items ->
+    if not joined then
+      items @ [ "You are not joined in this room. Call masc_join." ]
+    else
+      items
+    |> fun items ->
+    if Option.is_some your_task && Option.is_none current_task then
+      items
+      @ [ "You own a task but planning current_task is unset. Call masc_plan_set_task." ]
+    else
+      items
+    |> fun items ->
+    if zombie_count > 0 then
+      items
+      @ [ Printf.sprintf "%d stale agent(s) are still visible in the room."
+            zombie_count ]
+    else
+      items
+    |> fun items ->
+    if todo_count > 0 && Option.is_none your_task then
+      items
+      @ [ Printf.sprintf "%d unclaimed task(s) are available right now."
+            todo_count ]
+    else
+      items
+  in
   let buf = Buffer.create 256 in
   Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" cluster_name);
   if cluster_name <> state.project then
@@ -126,41 +257,58 @@ let status_summary_string (ctx : context) =
   Buffer.add_string buf (Printf.sprintf "📍 Room: %s\n" current_room);
   Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" ctx.config.base_path);
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
+  Buffer.add_string buf
+    (Printf.sprintf
+       "⚡ Snapshot: agents=%d zombies=%d | tasks active=%d todo=%d claimed=%d in_progress=%d | messages=%d\n"
+       agent_count zombie_count (List.length active_tasks) todo_count claimed_count
+       in_progress_count (max 0 state.message_seq));
+  Buffer.add_string buf
+    (Printf.sprintf
+       "🧭 You: agent=%s | joined=%s | owned=%s | current=%s | worktree=%s\n"
+       actual_name (bool_flag joined) (option_or_dash your_task)
+       (option_or_dash current_task) (bool_flag worktree_active));
+  if suggested_next <> [] then
+    Buffer.add_string buf
+      (Printf.sprintf "💡 Suggested next: %s\n"
+         (String.concat " -> " suggested_next));
+  if attention_items <> [] then begin
+    Buffer.add_string buf "\n⚠️ Attention:\n";
+    List.iter
+      (fun item ->
+        Buffer.add_string buf (Printf.sprintf "  - %s\n" item))
+      attention_items
+  end;
   Buffer.add_string buf "📌 Players:\n";
   (match shown_agents with
   | [] ->
       Buffer.add_string buf "  (no active agents)\n"
   | _ ->
       List.iter
-        (fun agent_name ->
-          Buffer.add_string buf (Printf.sprintf "  🟢 %s\n" agent_name))
+        (fun (agent : Types.agent) ->
+          let is_zombie =
+            Room.is_zombie_agent ~agent_name:agent.name agent.last_seen
+          in
+          let icon = agent_status_icon ~is_zombie agent.status in
+          let you_marker =
+            if String.equal agent.name actual_name then " (you)" else ""
+          in
+          Buffer.add_string buf
+            (Printf.sprintf "  %s %s%s -> %s\n" icon agent.name you_marker
+               (agent_focus_label ~is_zombie agent)))
         shown_agents;
-      if List.length active_agents > max_agents_display then
+      if agent_count > max_agents_display then
         Buffer.add_string buf
           (Printf.sprintf
              "  … and %d more agents (use masc_who for full list)\n"
-             (List.length active_agents - max_agents_display)));
+             (agent_count - max_agents_display)));
   Buffer.add_string buf "\n📋 Quest Board:\n";
   List.iter
     (fun (task : Types.task) ->
-      let status_icon =
-        match task.task_status with
-        | Types.Done _ -> "✅"
-        | Types.Claimed _ | Types.InProgress _ -> "🔄"
-        | Types.Todo -> "📋"
-        | Types.Cancelled _ -> "🚫"
-      in
-      let assignee =
-        match task.task_status with
-        | Types.Claimed { assignee; _ }
-        | Types.InProgress { assignee; _ }
-        | Types.Done { assignee; _ } -> assignee
-        | Types.Cancelled { cancelled_by; _ } -> cancelled_by
-        | Types.Todo -> "unclaimed"
-      in
+      let (status_icon, status_label) = task_status_badge task.task_status in
+      let assignee = task_assignee task.task_status in
       Buffer.add_string buf
-        (Printf.sprintf "  %s %s: %s (%s)\n" status_icon task.id task.title
-           assignee))
+        (Printf.sprintf "  %s %s P%d [%s] %s (%s)\n" status_icon task.id
+           task.priority status_label task.title assignee))
     shown_active_tasks;
   if active_tasks = [] then
     Buffer.add_string buf "  (no active tasks)\n";
@@ -183,7 +331,8 @@ let status_summary_string (ctx : context) =
   Buffer.contents buf
 
 let handle_status ctx _args =
-  (true, cached_text_by_key _status_cache ~key:ctx.config.base_path
+  let cache_key = Printf.sprintf "%s::%s" ctx.config.base_path ctx.agent_name in
+  (true, cached_text_by_key _status_cache ~key:cache_key
        ~ttl_s:(status_cache_ttl_s ()) (fun () ->
        status_summary_string ctx))
 

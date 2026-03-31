@@ -60,7 +60,11 @@ let () = test "dispatch_status" (fun () ->
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
   let args = `Assoc [] in
   match Tool_room.dispatch ctx ~name:"masc_status" ~args with
-  | Some (success, _result) -> assert success
+  | Some (success, result) ->
+      assert success;
+      assert (str_contains result "⚡ Snapshot:");
+      assert (str_contains result "🧭 You:");
+      assert (str_contains result "💡 Suggested next:")
   | None -> failwith "dispatch returned None"
 )
 
@@ -75,6 +79,7 @@ let () = test "dispatch_status_summary_and_cap" (fun () ->
   match Tool_room.dispatch ctx ~name:"masc_status" ~args with
   | Some (success, result) ->
       assert success;
+      assert (str_contains result "tasks active=35 todo=35 claimed=0 in_progress=0");
       assert (str_contains result "Summary: active=35, done=0, cancelled=0, total=35");
       assert (str_contains result "and 5 more active tasks")
   | None -> failwith "dispatch returned None"
@@ -91,6 +96,8 @@ let () = test "dispatch_status_done_summary" (fun () ->
   match Tool_room.dispatch ctx ~name:"masc_status" ~args with
   | Some (success, result) ->
       assert success;
+      assert (str_contains result "owned=-");
+      assert (str_contains result "tasks active=0 todo=0 claimed=0 in_progress=0");
       assert (str_contains result "Summary: active=0, done=1, cancelled=0, total=1");
       assert (str_contains result "(no active tasks)")
   | None -> failwith "dispatch returned None"

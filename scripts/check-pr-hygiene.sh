@@ -13,6 +13,7 @@ Usage: scripts/check-pr-hygiene.sh --base <git-ref> [--head <git-ref>] [--recent
 Checks:
   - fails on empty commits in the PR range
   - warns or fails on duplicate patch-ids already present in recent base history
+  - fails on Request_priority type erasure (priority : () patterns in .ml/.mli)
 EOF
 }
 
@@ -134,6 +135,18 @@ fi
 
 if [[ "$duplicate_hits" -ne 0 && "$DUPLICATE_POLICY" == "fail" ]]; then
   echo "PR hygiene check failed: duplicate patches detected." >&2
+  exit 1
+fi
+
+# Guard: detect Request_priority type erasure (priority : () or ~priority:())
+# See #4186 — a bulk rewrite once replaced Request_priority.t with () across OAS files.
+priority_erasure=0
+while IFS= read -r line; do
+  echo "::error title=Priority type erasure::Added line matches erased priority pattern: ${line}"
+  priority_erasure=1
+done < <(git diff "$MERGE_BASE" "$HEAD_REF" -- '*.ml' '*.mli' | grep '^+' | grep -v '^+++' | grep -E 'priority\s*:\s*\(\)|~priority:\(\)' || true)
+if [[ "$priority_erasure" -ne 0 ]]; then
+  echo "PR hygiene check failed: Request_priority type erasure detected. See #4186." >&2
   exit 1
 fi
 

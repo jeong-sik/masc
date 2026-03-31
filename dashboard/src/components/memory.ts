@@ -60,16 +60,6 @@ function defaultCommentAuthor(): string {
 
 const commentAuthor = signal(defaultCommentAuthor())
 
-function previewText(content: string): string {
-  const flattened = content
-    .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
-    .replace(/\[[^\]]+\]\([^)]+\)/g, '$1')
-    .replace(/[`#>*_~-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (!flattened) return '미리보기 없음'
-  return flattened.length > 250 ? `${flattened.slice(0, 247)}...` : flattened
-}
 
 function isUpdated(post: BoardPost): boolean {
   return post.updated_at !== post.created_at
@@ -557,8 +547,11 @@ function PostCard({ post }: { post: BoardPost }) {
         <!-- Title -->
         <div class="text-[14px] font-medium text-[var(--text-strong)] leading-snug mb-1.5 group-hover:text-[var(--accent)] transition-colors">${post.title}</div>
 
-        <!-- Content preview: max 3 lines -->
-        <div class="text-[13px] text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${previewText(stripStateBlocks(post.body))}</div>
+        <!-- Content preview: rendered markdown, height-capped -->
+        <div class="text-[13px] text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden relative max-h-[4.8em]">
+          <${Markdown} text=${stripStateBlocks(post.body)} />
+          <div class="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-[var(--card)] to-transparent pointer-events-none" />
+        </div>
 
         <!-- Footer: author + meta + badges -->
         <div class="flex items-center gap-2 flex-wrap">

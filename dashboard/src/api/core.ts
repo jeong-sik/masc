@@ -11,10 +11,9 @@ import { resolveDashboardActorName, sanitizeDashboardActorName } from '../lib/da
 import { resolveDashboardAuthToken } from '../lib/dashboard-auth'
 
 // --- Auth ---
-
-function getQueryParams(): URLSearchParams {
-  return new URLSearchParams(window.location.search)
-}
+// Token bootstrap (URL -> sessionStorage -> strip) is handled by
+// bootstrapDashboardAuthTokenFromUrl() called in main.ts.
+// resolveDashboardAuthToken() reads from sessionStorage (with URL fallback).
 
 export function currentDashboardActor(): string {
   return resolveDashboardActorName() || 'dashboard'
@@ -26,7 +25,7 @@ type HeaderOptions = {
 
 function authHeaders(options: HeaderOptions = {}): Record<string, string> {
   const headers: Record<string, string> = {}
-  const token = resolveDashboardAuthToken(window.location.search)
+  const token = resolveDashboardAuthToken()
   const agent = resolveDashboardActorName(window.location.search)
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (options.includeActor !== false && agent) {

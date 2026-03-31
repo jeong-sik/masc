@@ -21,7 +21,6 @@ let keeper_internal_tools =
        Dispatch still accepts it for backward compat. See #4120. *)
     "keeper_fs_read";
     "keeper_fs_edit";
-    "keeper_edit";
     "keeper_memory_search";
     "keeper_library_search";
     "keeper_library_read";
@@ -74,6 +73,16 @@ let keeper_internal_replacement = function
   | "keeper_tasks_list" -> Some "masc_tasks"
   | "keeper_broadcast" -> Some "masc_broadcast"
   | _ -> None
+
+(* ================================================================ *)
+(* Workspace mutation classification                                *)
+(* ================================================================ *)
+
+(** Tools that mutate the workspace filesystem. Canonical list shared by
+    cdal_contract_bridge.ml and contract_risk.ml. *)
+let workspace_mutating_tool_names =
+  [ "keeper_fs_edit"; "keeper_write";
+    "create_text_file"; "edit_text_file"; "file_write" ]
 
 (* ================================================================ *)
 (* Surface type + canonical lists                                   *)

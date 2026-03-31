@@ -10,6 +10,7 @@ import {
   oasTotalEvents,
   removeBoardPost,
 } from './store'
+import { readStoredDashboardAuthToken } from './lib/dashboard-auth'
 import {
   defaultJournalSeverity,
   normalizeJournalSeverity,
@@ -141,7 +142,12 @@ export function buildDashboardSseUrl(sessionId: string, locationSearch = window.
   const urlParams = new URLSearchParams(locationSearch)
   const sseParams = new URLSearchParams()
   const agent = urlParams.get('agent') ?? urlParams.get('agent_name')
+  // Token from sessionStorage (moved from URL on init) -- EventSource does not
+  // support custom headers, so query param is the only transport.  The token is
+  // no longer visible in the browser address bar or shareable links.
+  const token = readStoredDashboardAuthToken()
   if (agent) sseParams.set('agent', agent)
+  if (token) sseParams.set('token', token)
   sseParams.set('session_id', sessionId)
   sseParams.set('sse_kind', 'observer')
   return `/mcp?${sseParams.toString()}`

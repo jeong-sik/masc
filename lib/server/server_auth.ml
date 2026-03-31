@@ -166,10 +166,20 @@ let host_port_of_request request =
           host_header (Printexc.to_string exn);
         None)
 
+let allow_anonymous_mutations =
+  lazy (match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
+    | Some ("1" | "true") -> true
+    | _ -> false)
+
 let ensure_same_origin_browser_request request :
     (unit, Types.masc_error) result =
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
-  | None -> Ok ()
+  | None ->
+    if Lazy.force allow_anonymous_mutations then Ok ()
+    else
+      Error (Types.Unauthorized
+        "Authentication required: provide a bearer token or Origin header. \
+         Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development.")
   | Some origin -> (
       match host_port_scheme_of_origin origin, host_port_of_request request with
       | Some (origin_host, origin_port, scheme),

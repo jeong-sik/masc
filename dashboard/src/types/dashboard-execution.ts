@@ -304,6 +304,9 @@ export interface DashboardPlanningResponse {
 export interface ServerStatus {
   room?: string
   room_base_path?: string
+  coordination_root?: string
+  workspace_path?: string
+  workspace_differs?: boolean
   cluster?: string
   project?: string
   paused?: boolean

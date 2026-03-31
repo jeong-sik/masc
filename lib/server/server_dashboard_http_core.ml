@@ -200,6 +200,9 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
           (if Room.is_initialized config then Room.current_room_id config
            else Filename.basename config.base_path) );
       ("room_base_path", `String config.base_path);
+      ("coordination_root", `String config.base_path);
+      ("workspace_path", `String config.workspace_path);
+      ("workspace_differs", `Bool (config.workspace_path <> config.base_path));
       ("cluster", `String (Env_config_core.cluster_name ()));
       ("project", `String room_state.project);
       ("tempo_interval_s", `Float tempo.current_interval_s);
@@ -836,6 +839,9 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
       ("room", `String current_room);
       ("current_room", `String current_room);
       ("room_base_path", `String config.base_path);
+      ("coordination_root", `String config.base_path);
+      ("workspace_path", `String config.workspace_path);
+      ("workspace_differs", `Bool (config.workspace_path <> config.base_path));
       ("cluster", `String (Env_config_core.cluster_name ()));
       ("project", `String room_state.project);
       ("tempo_interval_s", `Float tempo.current_interval_s);
@@ -952,6 +958,8 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
        ~extra:
          [
            ("current_room", `String current_room);
+           ("coordination_root", `String config.base_path);
+           ("workspace_path", `String config.workspace_path);
            ("keeper_count_source", `String "keeper_meta");
            ("status_ms", `Int status_ms);
            ("agents_ms", `Int agents_ms);
@@ -962,7 +970,8 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
 let dashboard_shell_http_json ?clock (config : Room.config) : Yojson.Safe.t =
   let current_room = dashboard_current_room_id config in
   let cache_key =
-    Printf.sprintf "shell:%s:%s" config.base_path current_room
+    Printf.sprintf "shell:coord=%s:workspace=%s:room=%s"
+      config.base_path config.workspace_path current_room
   in
   let compute () =
     (* Shell endpoint is read-only; use config directly without isolation

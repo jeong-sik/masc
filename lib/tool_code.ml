@@ -40,6 +40,8 @@ let is_binary_file path =
 (* Security: Check file size limit (500KB) *)
 let max_file_size = 500 * 1024
 
+(* Security: Lexically normalize path by resolving . and .. segments.
+   Handles both absolute and relative paths. *)
 let lexically_normalize_path path =
   let absolute = String.starts_with ~prefix:"/" path in
   let parts = String.split_on_char '/' path in
@@ -61,6 +63,9 @@ let lexically_normalize_path path =
   | true, _ -> "/" ^ normalized
   | false, _ -> normalized
 
+(* Walk up toward the root until an existing ancestor is found, then
+   resolve that ancestor with realpath and re-attach the remaining tail.
+   This defeats symlink-based traversal even for not-yet-created paths. *)
 let rec resolve_longest_existing path =
   if Sys.file_exists path then Unix.realpath path
   else
@@ -69,6 +74,9 @@ let rec resolve_longest_existing path =
     if parent = path then path
     else Filename.concat (resolve_longest_existing parent) base
 
+(* Canonical path resolution: tries realpath first (resolves symlinks),
+   falls back to resolve_longest_existing for paths that don't exist yet,
+   then lexically normalizes the result. *)
 let normalize_path_for_check path =
   let normalized =
     try Unix.realpath path
@@ -76,12 +84,19 @@ let normalize_path_for_check path =
   in
   lexically_normalize_path normalized
 
+(* Alias for backward compatibility with callers that use the simpler name. *)
+let normalize_path = lexically_normalize_path
+
 let path_within_root ~root ~candidate =
   candidate = root || String.starts_with ~prefix:(root ^ "/") candidate
 
-(* Security: Validate path is within git root *)
+(* Security: Validate path is within git root.
+   Uses canonical path resolution to prevent .. traversal attacks. *)
 let validate_path config path =
   try
+    if String.contains path '\x00' then
+      Error (IoError "Path contains null byte")
+    else
     let git_root = match Room_git.git_root ~base_path:config.Room.base_path with
       | None -> raise (Invalid_argument "Not in a git repository")
       | Some root -> root

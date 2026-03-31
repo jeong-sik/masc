@@ -73,7 +73,7 @@ function emptyReasonText(reason?: string | null): string {
       return '기록은 있지만 최근 신호가 없습니다.'
     case 'no_runtime_activity':
     default:
-      return '아직 이 rail을 통과한 실행이 없습니다.'
+      return '아직 이 감시 채널을 통과한 실행이 없습니다.'
   }
 }
 
@@ -94,40 +94,40 @@ export function heroTitle(data: HarnessHealthData): string {
     data.overview.pre_compact_status,
     data.overview.handoff_status,
   ]
-  if (statuses.includes('warning')) return '실험 기계에 주의가 필요합니다.'
+  if (statuses.includes('warning')) return '감시 채널에 주의가 필요합니다.'
   if (statuses.includes('stale')) return '신호는 있지만 최신성이 떨어집니다.'
-  if (statuses.every(status => status === 'idle')) return '아직 안전 rail 기록이 없습니다.'
-  return '실험 기계는 현재 안정적입니다.'
+  if (statuses.every(status => status === 'idle')) return '아직 감시 기록이 없습니다.'
+  return '감시 채널이 정상 작동 중입니다.'
 }
 
 export function heroBody(data: HarnessHealthData): string {
   if (data.overview.evaluator_status === 'warning') {
     const ratio = Math.round((data.overview.fallback_ratio ?? 0) * 100)
-    return `Evaluator fallback 비중이 ${ratio}%라 verdict를 그대로 신뢰하기 어렵습니다.`
+    return `평가 모델의 대체 처리 비중이 ${ratio}%라 판정을 그대로 신뢰하기 어렵습니다.`
   }
   if (data.overview.handoff_status === 'warning') {
-    return 'Handoff 기록에 누락 필드가 있어 keeper continuity 점검이 필요합니다.'
+    return '세대 교체 기록에 누락 필드가 있어 keeper 연속성 점검이 필요합니다.'
   }
   if (data.overview.pre_compact_status === 'warning') {
-    return 'Compaction 직전 컨텍스트 압력이 높아 keeper continuity가 흔들릴 수 있습니다.'
+    return '압축 직전 컨텍스트 압력이 높아 keeper 연속성이 흔들릴 수 있습니다.'
   }
   if (data.overview.last_signal_at == null) {
-    return 'Autoresearch는 cycle outcome을 보고, Harness는 evaluator와 continuity rail의 건강도를 봅니다.'
+    return 'keeper 장기 실행 중 평가, 압축, 세대 교체가 정상인지 감시합니다.'
   }
   return `마지막 안전 신호는 ${freshnessLabel(data.overview.last_signal_at)}에 들어왔습니다.`
 }
 
 export function railDetail(data: HarnessHealthData, rail: 'evaluator' | 'pre_compact' | 'handoff'): string {
   if (rail === 'evaluator') {
-    if (data.calibration.total_verdicts === 0) return 'verdict 기록 없음'
-    return `${data.calibration.total_verdicts} verdict`
+    if (data.calibration.total_verdicts === 0) return '판정 기록 없음'
+    return `판정 ${data.calibration.total_verdicts}건`
   }
   if (rail === 'pre_compact') {
-    if (data.overview.latest_pre_compact_ratio == null) return '최근 compaction 없음'
-    return `ratio ${data.overview.latest_pre_compact_ratio.toFixed(2)}`
+    if (data.overview.latest_pre_compact_ratio == null) return '최근 압축 없음'
+    return `컨텍스트 ${Math.round(data.overview.latest_pre_compact_ratio * 100)}%`
   }
-  if (data.overview.latest_handoff_generation == null) return '최근 handoff 없음'
-  return `generation ${data.overview.latest_handoff_generation}`
+  if (data.overview.latest_handoff_generation == null) return '최근 교체 없음'
+  return `${data.overview.latest_handoff_generation}세대`
 }
 
 export function railFreshness(data: HarnessHealthData, rail: 'evaluator' | 'pre_compact' | 'handoff'): string {
@@ -216,8 +216,8 @@ export function ScopePairing() {
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Generator Loop</div>
-              <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">Autoresearch가 답하는 것</div>
+              <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">실험 루프</div>
+              <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">오토리서치가 답하는 것</div>
             </div>
             <button
               type="button"
@@ -233,10 +233,10 @@ export function ScopePairing() {
 
       <${SurfaceCard} variant="compact">
         <div class="flex flex-col gap-2">
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Safety Rails</div>
-          <div class="text-sm font-medium text-[var(--text-strong)]">Harness가 답하는 것</div>
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">안전 감시</div>
+          <div class="text-sm font-medium text-[var(--text-strong)]">하네스가 답하는 것</div>
           <div class="text-sm leading-[1.6] text-[var(--text-body)]">
-            evaluator가 건강한지, 장기 keeper turn에서 compaction이 어떻게 걸리는지, handoff가 정상인지 봅니다.
+            평가 모델이 건강한지, 장기 실행 중 압축이 정상인지, 세대 교체가 안전한지 봅니다.
           </div>
         </div>
       <//>
@@ -273,7 +273,7 @@ export function RailHeader({
 
 export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
   if (items.length === 0) {
-    return html`<${EmptySignal} text="최근 evaluator verdict가 없습니다." />`
+    return html`<${EmptySignal} text="최근 평가 판정이 없습니다." />`
   }
 
   return html`
@@ -313,10 +313,10 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
             <div class="text-xs text-[var(--text-muted)]">${formatTimestamp(item.timestamp)}</div>
           </div>
           <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-body)]">
-            <span>ratio ${item.context_ratio.toFixed(3)}</span>
-            <span>messages ${item.message_count}</span>
-            <span>tokens ${item.token_count}</span>
-            <span>${item.model_family || 'model 미상'}</span>
+            <span>컨텍스트 ${Math.round(item.context_ratio * 100)}%</span>
+            <span>메시지 ${item.message_count}건</span>
+            <span>토큰 ${item.token_count.toLocaleString()}</span>
+            <span>${item.model_family || '모델 미확인'}</span>
           </div>
           <div class="mt-2 text-xs text-[var(--text-muted)]">${item.trigger}</div>
           ${item.strategies.length > 0 ? html`
@@ -346,13 +346,13 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
             <div class="text-xs text-[var(--text-muted)]">${formatTimestamp(item.timestamp)}</div>
           </div>
           <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-body)]">
-            <span>generation ${item.generation}</span>
-            <span>next ${item.next_generation ?? '-'}</span>
+            <span>${item.generation}세대</span>
+            <span>다음 ${item.next_generation ?? '-'}세대</span>
             <span class="font-mono">${item.trace_id.slice(0, 8)}</span>
-            <span>${item.to_model ?? 'model 미상'}</span>
+            <span>${item.to_model ?? '모델 미확인'}</span>
           </div>
           ${item.prev_trace_id ? html`
-            <div class="mt-2 text-xs text-[var(--text-muted)]">prev ${item.prev_trace_id.slice(0, 8)} -> new ${item.new_trace_id?.slice(0, 8) ?? '-'}</div>
+            <div class="mt-2 text-xs text-[var(--text-muted)]">이전 ${item.prev_trace_id.slice(0, 8)} → 새 ${item.new_trace_id?.slice(0, 8) ?? '-'}</div>
           ` : null}
         </div>
       `)}

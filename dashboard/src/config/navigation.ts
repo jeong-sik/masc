@@ -159,7 +159,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'planning',
       label: '계획 및 메트릭',
-      description: '장기 목표(Goal Pipeline)와 MDAL(Metric-Driven Agent Loop) 메트릭 기반 추적.',
+      description: 'backlog와 수동 등록형 goal/MDAL 상태를 함께 보는 화면. goal과 MDAL은 자동 생성되지 않습니다.',
       params: { section: 'planning' },
     },
     {

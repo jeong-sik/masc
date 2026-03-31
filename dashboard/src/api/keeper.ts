@@ -76,7 +76,7 @@ export async function sendKeeperMessageDetailed(
 
 function jsonHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = resolveDashboardAuthToken(window.location.search)
+  const token = resolveDashboardAuthToken()
   const agent = resolveDashboardActorName(window.location.search)
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (agent) headers['X-MASC-Agent'] = agent

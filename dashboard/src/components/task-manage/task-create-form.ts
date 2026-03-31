@@ -7,47 +7,98 @@ import { showTaskCreate, taskCreating, createTask } from './task-manage-state'
 
 const title = signal('')
 const description = signal('')
-const priority = signal(2) // numeric priority: 1=low, 2=normal, 3=high, 4=critical
+const priority = signal(3) // MASC priority: 1=P1 highest, 4=P4 lowest
 const PRIORITY_OPTIONS = [
-  { value: '1', label: '낮음' },
-  { value: '2', label: '보통' },
-  { value: '3', label: '높음' },
-  { value: '4', label: '긴급' }
+  { value: '1', label: 'P1 · 긴급' },
+  { value: '2', label: 'P2 · 높음' },
+  { value: '3', label: 'P3 · 보통' },
+  { value: '4', label: 'P4 · 낮음' },
 ]
 
-function resetForm() { title.value = ''; description.value = ''; priority.value = 2 }
+function resetForm() { title.value = ''; description.value = ''; priority.value = 3 }
 
 export function TaskCreateForm() {
   if (!showTaskCreate.value) {
-    return html`<div class="mb-3">
-      <${ActionButton} variant="primary" size="md" onClick=${() => { showTaskCreate.value = true }}>+ 태스크 추가<//>
-    </div>`
-  }
-  return html`
-    <div class="mb-4 rounded-xl border border-[var(--card-border)] bg-[var(--bg-1)] p-4">
-      <h3 class="text-[13px] text-[var(--text-strong)] font-medium mb-3">새 태스크</h3>
+    return html`
       <div class="flex flex-col gap-3">
-        <div class="flex flex-col gap-1">
-          <label class="text-[11px] text-[var(--text-muted)] font-medium">제목<span class="text-[var(--bad)] ml-0.5">*</span></label>
-          <${TextInput} value=${title.value} placeholder="태스크 제목"
-            onInput=${(e: Event) => { title.value = (e.target as HTMLInputElement).value }} />
+        <div class="text-[12px] leading-relaxed text-text-muted">
+          이 방의 백로그에 바로 추가됩니다. 우선순위는 <code class="rounded bg-white/5 px-1 py-0.5 text-[11px] text-text-strong">P1</code>이 가장 높습니다.
         </div>
-        <div class="flex flex-col gap-1">
-          <label class="text-[11px] text-[var(--text-muted)] font-medium">설명</label>
-          <${TextArea} value=${description.value} placeholder="태스크 설명 (선택)" rows=${3}
-            onInput=${(e: Event) => { description.value = (e.target as HTMLTextAreaElement).value }} />
-        </div>
-        <div class="flex flex-col gap-1 max-w-[200px]">
-          <label class="text-[11px] text-[var(--text-muted)] font-medium">우선순위</label>
-          <${Select} value=${String(priority.value)} options=${PRIORITY_OPTIONS} onInput=${(v: string) => { priority.value = Number(v) }} />
-        </div>
-        <div class="flex gap-2 mt-1">
-          <${ActionButton} variant="primary" size="md" disabled=${taskCreating.value || !title.value.trim()}
-            onClick=${() => { void createTask({ title: title.value, description: description.value, priority: priority.value }).then(ok => { if (ok) resetForm() }) }}>
-            ${taskCreating.value ? '생성 중...' : '생성'}<//>
-          <${ActionButton} variant="ghost" size="md" onClick=${() => { showTaskCreate.value = false; resetForm() }}>취소<//>
+        <${ActionButton}
+          variant="primary"
+          size="md"
+          block=${true}
+          onClick=${() => { showTaskCreate.value = true }}
+        >태스크 추가<//>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="rounded-xl border border-card-border/70 bg-[rgba(8,13,22,0.88)] p-4">
+      <div class="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 class="text-[14px] font-semibold text-text-strong">새 태스크</h3>
+          <p class="mt-1 text-[12px] leading-relaxed text-text-muted">
+            간단한 제목만 있어도 backlog에 등록됩니다. 설명은 나중에 보강해도 됩니다.
+          </p>
         </div>
       </div>
-    </div>
-  `
-}
+
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[11px] font-medium text-text-muted">
+            제목<span class="ml-0.5 text-[var(--bad)]">*</span>
+          </label>
+          <${TextInput}
+            value=${title.value}
+            placeholder="예: runtime config introspection 정리"
+            onInput=${(e: Event) => { title.value = (e.target as HTMLInputElement).value }}
+          />
+        </div>
+
+        <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[11px] font-medium text-text-muted">설명</label>
+            <${TextArea}
+              value=${description.value}
+              placeholder="배경, 재현 조건, 원하는 결과를 적으면 backlog 카드에서 바로 보입니다."
+              rows=${4}
+              onInput=${(e: Event) => { description.value = (e.target as HTMLTextAreaElement).value }}
+            />
+          </div>
+
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[11px] font-medium text-text-muted">우선순위</label>
+            <${Select}
+              value=${String(priority.value)}
+              options=${PRIORITY_OPTIONS}
+              onInput=${(v: string) => { priority.value = Number(v) }}
+            />
+            <div class="rounded-lg border border-card-border/60 bg-white/3 px-3 py-2 text-[11px] leading-relaxed text-text-muted">
+              backlog 카드와 동일하게 <strong class="text-text-strong">P1 → P4</strong> 순으로 표시됩니다.
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-1 flex flex-wrap gap-2">
+          <${ActionButton}
+            variant="primary"
+            size="md"
+            disabled=${taskCreating.value || !title.value.trim()}
+            onClick=${() => {
+              void createTask({ title: title.value, description: description.value, priority: priority.value })
+                .then(ok => { if (ok) resetForm() })
+            }}
+          >
+            ${taskCreating.value ? '추가 중...' : 'backlog에 추가'}
+          <//>
+          <${ActionButton}
+            variant="ghost"
+            size="md"
+            onClick=${() => { showTaskCreate.value = false; resetForm() }}
+          >취소<//>
+        </div>
+      </div>
+    </div>`
+  }

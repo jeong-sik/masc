@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import type { ComponentChildren } from 'preact'
 import { EmptyState } from '../common/empty-state'
 import { Card } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
@@ -19,13 +20,50 @@ import {
 } from './goal-helpers'
 
 const deletingTaskId = signal<string | null>(null)
+const REPO_ISSUES_BASE = 'https://github.com/jeong-sik/masc-mcp/issues'
+
+function priorityToneClass(priority: number): string {
+  switch (priority) {
+    case 1: return 'border-l-[#fb7185] bg-[#fb7185]/10 text-[#fecdd3]'
+    case 2: return 'border-l-[#fbbf24] bg-[#f59e0b]/10 text-[#fde68a]'
+    case 3: return 'border-l-[#60a5fa] bg-[#60a5fa]/10 text-[#bfdbfe]'
+    default: return 'border-l-[rgba(148,163,184,0.45)] bg-white/5 text-text-muted'
+  }
+}
+
+function taskScope(task: Task): string | null {
+  const match = task.title.match(/^\[([^\]]+)\]/)
+  if (!match) return null
+  const scope = match[1] ?? ''
+  return /^\#\d+$/.test(scope) ? null : scope || null
+}
+
+function taskLink(task: Task): { href: string; label: string } {
+  const issueMatch = task.title.match(/\[#(\d+)\]/)
+  if (issueMatch) {
+    return {
+      href: `${REPO_ISSUES_BASE}/${issueMatch[1]}`,
+      label: `GitHub #${issueMatch[1]}`,
+    }
+  }
+
+  const query = encodeURIComponent(task.title.replace(/^\[[^\]]+\]\s*/, '').trim())
+  return {
+    href: `${REPO_ISSUES_BASE}?q=${query}`,
+    label: '관련 이슈 검색',
+  }
+}
 
 export function KanbanCard({ task }: { task: Task }) {
   const p = task.priority ?? 4
-  const pClass = p <= 1 ? 'p1' : p === 2 ? 'p2' : p === 3 ? 'p3' : 'p4'
   const isExpanded = expandedTasks.value.has(task.id)
   const hasDescription = Boolean(task.description)
   const isDeleting = deletingTaskId.value === task.id
+  const description = task.description ?? ''
+  const canExpand = description.length > 140
+  const preview = isExpanded || !canExpand ? description : truncate(description, 140)
+  const scope = taskScope(task)
+  const link = taskLink(task)
 
   async function handleDelete(e: Event) {
     e.stopPropagation()
@@ -43,31 +81,85 @@ export function KanbanCard({ task }: { task: Task }) {
   }
 
   return html`
-    <div class="kanban-card rounded-xl ${pClass} group">
-      <div class="kanban-card rounded-xl-header">
-        <span class="priority-badge rounded priority-badge--${pClass}">${priorityLabel(p)}</span>
-        <div class="kanban-card rounded-xl-title flex-1">${task.title}</div>
-        <button type="button"
-          class="px-2 py-0.5 rounded text-[10px] font-semibold border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.1)] text-[#f87171] hover:bg-[rgba(239,68,68,0.2)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+    <article class="flex flex-col gap-3 rounded-xl border border-card-border/60 border-l-4 bg-[rgba(7,12,20,0.92)] p-4 ${priorityToneClass(p)}">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="rounded-md border border-current/20 px-2 py-0.5 text-[11px] font-semibold">${priorityLabel(p)}</span>
+          <span class="rounded-md border border-card-border/70 bg-white/5 px-2 py-0.5 text-[11px] font-mono text-text-muted">${task.id}</span>
+          ${scope ? html`<span class="rounded-md border border-card-border/70 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-body">${scope}</span>` : null}
+        </div>
+        <button
+          type="button"
+          class="rounded-lg border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] px-2 py-1 text-[10px] font-semibold text-[#f87171] transition-colors hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-50 disabled:cursor-not-allowed"
           onClick=${handleDelete}
           disabled=${isDeleting}
         >
-          ${isDeleting ? '...' : 'x'}
+          ${isDeleting ? '삭제 중...' : '삭제'}
         </button>
       </div>
+
+      <div class="text-[14px] font-semibold leading-snug text-text-strong">${task.title}</div>
+
       ${hasDescription ? html`
-        <div
-          class="text-[13px] text-[var(--text-dim)] cursor-pointer transition-colors duration-150 hover:text-[var(--text-body)]"
-          onClick=${() => toggleTaskExpand(task.id)}
-        >
-          ${isExpanded ? task.description : truncate(task.description ?? '', 80)}
+        <div class="flex flex-col gap-2">
+          <div class="text-[13px] leading-relaxed text-text-body">${preview}</div>
+          ${canExpand ? html`
+            <button
+              type="button"
+              class="w-fit rounded-md border border-card-border/70 bg-white/4 px-2 py-1 text-[11px] text-text-muted transition-colors hover:text-text-strong"
+              onClick=${() => toggleTaskExpand(task.id)}
+            >
+              ${isExpanded ? '설명 접기' : '설명 더 보기'}
+            </button>
+          ` : null}
         </div>
-      ` : null}
-      <div class="kanban-card rounded-xl-meta">
-        ${task.created_at ? html`<${TimeAgo} timestamp=${task.created_at} />` : html`<span>-</span>`}
-        ${task.assignee ? html`<span class="inline-flex items-center bg-[rgba(0,240,255,0.1)] text-[var(--accent)] px-2 py-1 gap-1 font-semibold before:content-['@'] rounded-lg">${task.assignee}</span>` : null}
+      ` : html`
+        <div class="text-[12px] text-text-dim">설명 없음</div>
+      `}
+
+      <div class="flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+        ${task.created_at ? html`<span class="rounded-md border border-card-border/70 bg-white/4 px-2 py-1"><${TimeAgo} timestamp=${task.created_at} /></span>` : null}
+        ${task.assignee ? html`<span class="rounded-md border border-accent/20 bg-accent/10 px-2 py-1 text-accent">@${task.assignee}</span>` : null}
+        <a
+          href=${link.href}
+          target="_blank"
+          rel="noreferrer"
+          class="inline-flex items-center gap-1 rounded-md border border-card-border/70 bg-white/4 px-2 py-1 text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+        >
+          ${link.label}
+          <span aria-hidden="true">\u2197</span>
+        </a>
       </div>
-    </div>
+    </article>
+  `
+}
+
+function TaskColumn({
+  title,
+  count,
+  description,
+  badgeClass,
+  children,
+}: {
+  title: string
+  count: number
+  description: string
+  badgeClass: string
+  children: ComponentChildren
+}) {
+  return html`
+    <section class="flex min-h-[240px] flex-col gap-4 rounded-2xl border border-card-border/60 bg-[rgba(9,14,24,0.82)] p-4">
+      <div class="flex items-start justify-between gap-3 border-b border-card-border/50 pb-3">
+        <div>
+          <h3 class="text-[15px] font-semibold text-text-strong">${title}</h3>
+          <p class="mt-1 text-[12px] leading-relaxed text-text-muted">${description}</p>
+        </div>
+        <span class="rounded-lg px-2.5 py-1 text-[12px] font-semibold ${badgeClass}">${count}</span>
+      </div>
+      <div class="flex max-h-[680px] flex-col gap-3 overflow-y-auto pr-1 custom-scrollbar">
+        ${children}
+      </div>
+    </section>
   `
 }
 
@@ -78,38 +170,44 @@ export function TaskBacklog() {
   const sortedDone = [...done].sort(sortByTimeDesc)
 
   return html`
-    <${Card} title="태스크 백로그" class="section mb-4">
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-6 items-start">
-        <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
-          <div class="kanban-header todo">
-            <span>할 일</span>
-            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[13px] font-bold">${todo.length}</span>
-          </div>
+    <${Card} title="태스크 백로그" class="section">
+      <div class="mb-4 text-[12px] leading-relaxed text-text-muted">
+        이 backlog는 현재 room의 실행 큐입니다. 목표 파이프라인이나 MDAL과 별도이므로, 여기만 차 있어도 아래 섹션이 비어 있을 수 있습니다.
+      </div>
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-4 items-start">
+        <${TaskColumn}
+          title="할 일"
+          count=${todo.length}
+          description="아직 claim되지 않은 태스크입니다. 우선순위가 높은 순서대로 위에 옵니다."
+          badgeClass="border border-bad/25 bg-bad/10 text-bad"
+        >
           ${sortedTodo.length === 0
             ? html`<${EmptyState} message="대기 중인 태스크가 없습니다" compact />`
             : sortedTodo.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
-        </div>
-        <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
-          <div class="kanban-header inprogress">
-            <span>진행 중</span>
-            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[13px] font-bold">${inProgress.length}</span>
-          </div>
+        <//>
+        <${TaskColumn}
+          title="진행 중"
+          count=${inProgress.length}
+          description="현재 어떤 작업이 실행 중인지 확인하는 칸입니다."
+          badgeClass="border border-warn/25 bg-warn/10 text-warn"
+        >
           ${sortedInProgress.length === 0
             ? html`<${EmptyState} message="진행 중인 태스크가 없습니다" compact />`
             : sortedInProgress.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
-        </div>
-        <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
-          <div class="kanban-header done">
-            <span>완료</span>
-            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[13px] font-bold">${done.length}</span>
-          </div>
+        <//>
+        <${TaskColumn}
+          title="완료"
+          count=${done.length}
+          description="최근 완료된 태스크만 우선 노출합니다."
+          badgeClass="border border-ok/25 bg-ok/10 text-ok"
+        >
           ${sortedDone.length === 0
             ? html`<${EmptyState} message="완료된 태스크가 없습니다" compact />`
             : sortedDone.slice(0, 20).map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
           ${sortedDone.length > 20
             ? html`<${EmptyState} message=${`...외 ${sortedDone.length - 20}개 더 있음`} compact />`
             : null}
-        </div>
+        <//>
       </div>
     <//>
   `

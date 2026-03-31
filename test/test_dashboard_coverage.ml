@@ -202,18 +202,37 @@ let test_parse_worktrees_missing () =
 let test_parse_worktrees_valid () =
   let json = `Assoc [
     ("worktrees", `List [
-      `Assoc [("worktree", `String "/path/to/wt"); ("branch", `String "feature-x")];
-      `Assoc [("worktree", `String "/path/to/wt2"); ("branch", `String "bugfix")];
+      `Assoc [("path", `String "/path/to/wt"); ("branch", `String "feature-x")];
+      `Assoc [("path", `String "/path/to/wt2"); ("branch", `String "bugfix")];
     ])
   ] in
   let result = Dashboard.parse_worktrees json in
   check int "two worktrees" 2 (List.length result)
 
+let test_parse_worktrees_legacy_worktree_key () =
+  let json = `Assoc [
+    ("worktrees", `List [
+      `Assoc [("worktree", `String "/path/to/wt"); ("branch", `String "feature-x")];
+    ])
+  ] in
+  let result = Dashboard.parse_worktrees json in
+  check int "legacy worktree key still supported" 1 (List.length result)
+
+let test_parse_worktrees_strips_refs_heads_prefix () =
+  let json = `Assoc [
+    ("worktrees", `List [
+      `Assoc [("path", `String "/path/to/wt"); ("branch", `String "refs/heads/feature-x")];
+    ])
+  ] in
+  let result = Dashboard.parse_worktrees json in
+  check (list (pair string string)) "normalizes git refs"
+    [("feature-x", "/path/to/wt")] result
+
 let test_parse_worktrees_skips_head () =
   let json = `Assoc [
     ("worktrees", `List [
-      `Assoc [("worktree", `String "/repo"); ("branch", `String "HEAD")];
-      `Assoc [("worktree", `String "/wt"); ("branch", `String "main")];
+      `Assoc [("path", `String "/repo"); ("branch", `String "HEAD")];
+      `Assoc [("path", `String "/wt"); ("branch", `String "main")];
     ])
   ] in
   let result = Dashboard.parse_worktrees json in
@@ -222,8 +241,8 @@ let test_parse_worktrees_skips_head () =
 let test_parse_worktrees_skips_empty_branch () =
   let json = `Assoc [
     ("worktrees", `List [
-      `Assoc [("worktree", `String "/wt"); ("branch", `String "")];
-      `Assoc [("worktree", `String "/wt2"); ("branch", `String "valid")];
+      `Assoc [("path", `String "/wt"); ("branch", `String "")];
+      `Assoc [("path", `String "/wt2"); ("branch", `String "valid")];
     ])
   ] in
   let result = Dashboard.parse_worktrees json in
@@ -233,7 +252,7 @@ let test_parse_worktrees_malformed_item () =
   let json = `Assoc [
     ("worktrees", `List [
       `String "not an object";
-      `Assoc [("worktree", `String "/wt"); ("branch", `String "ok")];
+      `Assoc [("path", `String "/wt"); ("branch", `String "ok")];
     ])
   ] in
   let result = Dashboard.parse_worktrees json in
@@ -242,8 +261,8 @@ let test_parse_worktrees_malformed_item () =
 let test_parse_worktrees_missing_branch () =
   let json = `Assoc [
     ("worktrees", `List [
-      `Assoc [("worktree", `String "/wt")];
-      `Assoc [("worktree", `String "/wt2"); ("branch", `String "valid")];
+      `Assoc [("path", `String "/wt")];
+      `Assoc [("path", `String "/wt2"); ("branch", `String "valid")];
     ])
   ] in
   let result = Dashboard.parse_worktrees json in
@@ -305,6 +324,8 @@ let () =
       test_case "null" `Quick test_parse_worktrees_null;
       test_case "missing" `Quick test_parse_worktrees_missing;
       test_case "valid" `Quick test_parse_worktrees_valid;
+      test_case "legacy worktree key" `Quick test_parse_worktrees_legacy_worktree_key;
+      test_case "strips refs heads prefix" `Quick test_parse_worktrees_strips_refs_heads_prefix;
       test_case "skips HEAD" `Quick test_parse_worktrees_skips_head;
       test_case "skips empty branch" `Quick test_parse_worktrees_skips_empty_branch;
       test_case "malformed item" `Quick test_parse_worktrees_malformed_item;

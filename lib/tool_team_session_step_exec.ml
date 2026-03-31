@@ -508,10 +508,13 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
 
 let release_prepared_runtime (prepared : prepared_spawn) ~success
     ?error ?latency_ms () =
-  match prepared.runtime_lease with
-  | Some lease ->
-      Local_runtime_pool.release lease ~success ?error ?latency_ms ()
-  | None -> ()
+  if prepared.lease_released then ()
+  else (
+    prepared.lease_released <- true;
+    match prepared.runtime_lease with
+    | Some lease ->
+        Local_runtime_pool.release lease ~success ?error ?latency_ms ()
+    | None -> ())
 
 let release_all_prepared prepareds ~error =
   List.iter
@@ -628,4 +631,5 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
           runtime_model_label;
           runtime_lease;
           assigned_runtime;
+          lease_released = false;
         }

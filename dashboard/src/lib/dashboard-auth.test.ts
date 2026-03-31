@@ -27,7 +27,7 @@ describe('dashboard auth token bootstrap', () => {
   })
 
   it('falls back to stored token when the URL no longer contains one', () => {
-    window.sessionStorage?.setItem?.('masc_dashboard_auth_token', 'stored-secret')
+    window.sessionStorage?.setItem?.('masc_bearer_token', 'stored-secret')
 
     expect(resolveDashboardAuthToken('')).toBe('stored-secret')
   })

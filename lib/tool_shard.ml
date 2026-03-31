@@ -123,6 +123,40 @@ or disagreement with a proposal or finding.";
       ("required", `List [`String "post_id"]);
     ];
   };
+  {
+    name = "keeper_board_stats";
+    description = "Get board activity statistics: total posts, comments, votes, \
+active hearths. Use to understand overall board health and engagement levels.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    name = "keeper_board_search";
+    description = "Search board posts by keyword across titles and content. \
+Use when looking for specific topics, past discussions, or related prior work.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [("type", `String "string"); ("description", `String "Search keyword")]);
+        ("limit", `Assoc [("type", `String "integer"); ("description", `String "Max results (default: 20)")]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
+  {
+    name = "keeper_board_delete";
+    description = "Delete a board post and its associated comments and votes. \
+Use for cleanup of stale, test, or expired posts.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("post_id", `Assoc [("type", `String "string"); ("description", `String "ID of the post to delete")]);
+      ]);
+      ("required", `List [`String "post_id"]);
+    ];
+  };
 ]
 
 let select_named_schemas (names : string list) (schemas : Types.tool_schema list) :

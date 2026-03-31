@@ -1,6 +1,33 @@
 # Changelog
 
 
+## [2.195.0] - 2026-03-31
+
+### Added
+- **Team-session single-agent fallback** — add gate for single-agent sessions (#4289, #3651).
+- **CI priority guard** — add Request_priority type erasure guard to PR hygiene (#4270).
+- **Memory episodic cache bound** — bound episodic cache to 500 entries (#4275).
+
+### Changed
+- **Dashboard harness labels** — replace opaque English jargon with descriptive Korean text (#4278).
+- **Dashboard worktree display** — normalize worktree branch display (#4285).
+- **Version truth sync** — sync opam and ROADMAP version to 2.195.0 (#4290).
+
+### Fixed
+- **Security: HTTP mutation auth** — require auth for HTTP mutations, secure token handling (#4272).
+- **Security: path canonicalization** — canonicalize paths in code tool validation (#4264).
+- **Security: loopback mutation guard** — require loopback for unauthenticated tool mutations (#4271).
+- **Security: token handling** — remove bearer token from URL query string (#4269).
+- **Keeper test isolation** — unique names to prevent registry race (#4273).
+- **Keeper resolve_config** — centralize resolve_config, scoped lookup first (#4274).
+- **Keeper dispatch order** — restore bootstrap-before-resolve dispatch order (#4281).
+- **Team-session lease** — prevent double-release of runtime lease on spawn exception (#4267).
+- **Test http_auth** — update for missing-origin rejection (#4282).
+- **QUICK-START docs** — restore MASC_BASE_PATH auto-resolve sentence (#4277).
+- **Keeper config lookup** — centralize resolve_config with scoped lookup first (#4274).
+- **Auth mutation gate** — require auth for HTTP mutations, secure token handling (#4272).
+- **Code tool path validation** — canonicalize paths in code tool validation (#4264).
+
 ## [2.194.0] - 2026-03-31
 
 ### Added

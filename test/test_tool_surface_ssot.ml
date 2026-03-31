@@ -114,6 +114,52 @@ let test_is_on_surface_consistent () =
     ) tools
   ) Tool_catalog.all_surfaces
 
+(* {1 Cross-classification invariants — independent concern lists stay consistent} *)
+
+let test_destructive_check_tools_are_privileged () =
+  (* Every tool in the destructive pattern check list should also be
+     in the privileged keeper tool list. *)
+  List.iter (fun name ->
+    Alcotest.(check bool) (name ^ " is privileged") true
+      (List.mem name Capability_registry.privileged_keeper_tool_names)
+  ) Keeper_hooks_oas.destructive_check_tools
+
+let test_privileged_keeper_tools_are_internal () =
+  (* Every privileged keeper tool (keeper_* prefixed) should be on the
+     Keeper_internal surface. *)
+  let internal = set_of (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal) in
+  List.iter (fun name ->
+    if String.starts_with ~prefix:"keeper_" name then
+      Alcotest.(check bool) (name ^ " in Keeper_internal") true
+        (SS.mem name internal)
+  ) Capability_registry.privileged_keeper_tool_names
+
+let test_replacement_targets_have_schemas () =
+  (* Every keeper_internal_replacement target should have a registered schema.
+     Not all need to be public — some are hidden but still callable. *)
+  let internal = Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal in
+  let all_schema_names =
+    List.map (fun (s : Types.tool_schema) -> s.name)
+      Config.raw_all_tool_schemas
+  in
+  List.iter (fun name ->
+    match Tool_catalog_surfaces.keeper_internal_replacement name with
+    | Some public_name ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s -> %s has schema" name public_name)
+        true (List.mem public_name all_schema_names)
+    | None -> ()
+  ) internal
+
+let test_workspace_mutating_canonical_used () =
+  (* workspace_mutating_tool_names in tool_catalog_surfaces is the canonical list.
+     Verify no empty or phantom entries. *)
+  Alcotest.(check bool) "non-empty" true
+    (List.length Tool_catalog_surfaces.workspace_mutating_tool_names > 0);
+  List.iter (fun name ->
+    Alcotest.(check bool) (name ^ " non-empty") true (String.length name > 0)
+  ) Tool_catalog_surfaces.workspace_mutating_tool_names
+
 let () =
   Alcotest.run "tool_surface_ssot"
     [
@@ -139,5 +185,16 @@ let () =
             test_keeper_internal_contains_known_tools;
           Alcotest.test_case "is_on_surface consistent" `Quick
             test_is_on_surface_consistent;
+        ] );
+      ( "cross_classification",
+        [
+          Alcotest.test_case "destructive check tools are privileged" `Quick
+            test_destructive_check_tools_are_privileged;
+          Alcotest.test_case "privileged keeper tools are internal" `Quick
+            test_privileged_keeper_tools_are_internal;
+          Alcotest.test_case "replacement targets have schemas" `Quick
+            test_replacement_targets_have_schemas;
+          Alcotest.test_case "workspace_mutating canonical used" `Quick
+            test_workspace_mutating_canonical_used;
         ] );
     ]

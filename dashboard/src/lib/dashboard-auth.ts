@@ -1,4 +1,4 @@
-const DASHBOARD_AUTH_TOKEN_KEY = 'masc_dashboard_auth_token'
+const DASHBOARD_AUTH_TOKEN_KEY = 'masc_bearer_token'
 
 function safeSessionStorage(): Storage | null {
   if (typeof window === 'undefined') return null

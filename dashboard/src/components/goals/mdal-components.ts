@@ -5,6 +5,7 @@ import { signal, computed } from '@preact/signals'
 import { StatusBadge } from '../common/status-badge'
 import { DialogOverlay } from '../common/dialog'
 import { TextInput } from '../common/input'
+import { RouteLink } from '../common/route-link'
 import { showToast } from '../common/toast'
 import { formatElapsedCompact } from '../../lib/format-time'
 import { startMdalLoop, stopMdalLoop, type StartMdalLoopParams } from '../../api/mdal'
@@ -73,10 +74,10 @@ async function handleMdalStartSubmit() {
 export function MdalStartFormButton() {
   return html`
     <button type="button"
-      class="px-3 py-1.5 rounded-lg text-xs font-medium border border-accent/50 text-accent hover:bg-accent/10 transition-colors"
+      class="rounded-lg border border-accent/35 bg-accent/10 px-3 py-1.5 text-[12px] font-medium text-accent transition-colors hover:bg-accent/16"
       onClick=${() => { showMdalStartForm.value = true }}
     >
-      새 MDAL 루프
+      새 루프 시작
     </button>
   `
 }
@@ -183,19 +184,37 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
       : '아직 근거 없음'
 
   return html`
-    <div class="planning-loop-row rounded-xl">
-      <div class="grid gap-3">
-        <div class="flex justify-between gap-3 items-start flex-wrap">
-          <div>
-            <div class="text-[var(--text-strong)] text-lg font-semibold capitalize">${loop.profile}</div>
-            <div class="text-[var(--text-muted)] text-[11px] mt-0.5 font-mono">${loop.loop_id}</div>
+    <div class="rounded-xl border border-card-border/60 bg-[rgba(8,13,22,0.86)] p-4">
+      <div class="grid gap-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-md border border-card-border/70 bg-white/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">
+                ${loop.profile}
+              </span>
+              <${StatusBadge} status=${loop.status} />
+              <span class="rounded-md border border-card-border/70 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-text-body">
+                ${loop.current_iteration}${loop.max_iterations > 0 ? `/${loop.max_iterations}` : ''}
+              </span>
+            </div>
+            <div class="mt-2 text-[16px] font-semibold leading-snug text-text-strong">
+              ${loop.target || '명시된 목표가 없습니다'}
+            </div>
+            <div class="mt-1 text-[11px] font-mono text-text-dim">${loop.loop_id}</div>
           </div>
-          <div class="flex gap-1.5 flex-wrap items-center">
-            <${StatusBadge} status=${loop.status} />
-            <span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${loop.current_iteration}${loop.max_iterations > 0 ? `/${loop.max_iterations}` : ''}</span>
+          <div class="flex flex-wrap items-center gap-1.5">
+            ${loop.session_id ? html`
+              <${RouteLink}
+                tab="monitoring"
+                params=${{ section: 'sessions', session_id: loop.session_id }}
+                class="rounded-lg border border-card-border/70 bg-white/4 px-2.5 py-1 text-[11px] font-medium text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+              >
+                세션 ${loop.session_id}
+              <//>
+            ` : null}
             ${loop.status === 'running' ? html`
               <button type="button"
-                class="text-[10px] py-0.5 px-2 rounded-full border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors cursor-pointer disabled:opacity-50"
+                class="rounded-lg border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] px-2.5 py-1 text-[11px] font-medium text-[#fb7185] transition-colors hover:bg-[rgba(239,68,68,0.15)] cursor-pointer disabled:opacity-50"
                 disabled=${stoppingLoops.value[loop.loop_id] ?? false}
                 onClick=${() => {
                   stoppingLoops.value = { ...stoppingLoops.value, [loop.loop_id]: true }
@@ -215,33 +234,49 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
           </div>
         </div>
 
-        <div class="flex gap-3 flex-wrap text-[#b9c9ea] text-[13px]">
-          <span>기준값 ${formatMetric(loop.baseline_metric)}</span>
-          <span>현재 ${formatMetric(loop.current_metric)}</span>
-          <span class=${formatMetricDelta(loop).startsWith('+') ? 'text-[#9af3ba]' : 'text-[#fda4af]'}>
-            Delta ${formatMetricDelta(loop)}
-          </span>
-          <span>경과 ${formatElapsedCompact(loop.elapsed_seconds)}</span>
+        <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div class="rounded-lg border border-card-border/60 bg-white/4 px-3 py-2">
+            <div class="text-[10px] uppercase tracking-[0.16em] text-text-muted">기준값</div>
+            <div class="mt-1 text-[15px] font-semibold text-text-strong">${formatMetric(loop.baseline_metric)}</div>
+          </div>
+          <div class="rounded-lg border border-card-border/60 bg-white/4 px-3 py-2">
+            <div class="text-[10px] uppercase tracking-[0.16em] text-text-muted">현재값</div>
+            <div class="mt-1 text-[15px] font-semibold text-text-strong">${formatMetric(loop.current_metric)}</div>
+          </div>
+          <div class="rounded-lg border border-card-border/60 bg-white/4 px-3 py-2">
+            <div class="text-[10px] uppercase tracking-[0.16em] text-text-muted">Delta</div>
+            <div class="mt-1 text-[15px] font-semibold ${formatMetricDelta(loop).startsWith('+') ? 'text-ok' : 'text-bad'}">
+              ${formatMetricDelta(loop)}
+            </div>
+          </div>
+          <div class="rounded-lg border border-card-border/60 bg-white/4 px-3 py-2">
+            <div class="text-[10px] uppercase tracking-[0.16em] text-text-muted">경과</div>
+            <div class="mt-1 text-[15px] font-semibold text-text-strong">${formatElapsedCompact(loop.elapsed_seconds)}</div>
+          </div>
         </div>
 
-        <div class="text-[var(--text-body)] text-base leading-[1.5]">${loop.target || '명시된 목표가 없습니다'}</div>
         ${(loop.stop_reason || loop.error_message)
           ? html`
-              <div class="text-[var(--text-muted)] text-[13px] leading-[1.5]">
+              <div class="rounded-lg border border-bad/20 bg-bad/10 px-3 py-2 text-[13px] leading-[1.5] text-bad">
                 ${loop.error_message ?? loop.stop_reason}
               </div>
             `
           : null}
-        <div class="text-[var(--text-muted)] text-[13px] leading-[1.5]">
-          ${loop.strict_mode ? '엄격 근거 모드' : '레거시'} · ${loop.worker_engine ?? '엔진 정보 없음'} · ${latestToolSummary}
+
+        <div class="flex flex-wrap gap-2 text-[11px] text-text-muted">
+          <span class="rounded-md border border-card-border/60 bg-white/4 px-2 py-1">${loop.strict_mode ? '엄격 근거 모드' : '레거시 모드'}</span>
+          <span class="rounded-md border border-card-border/60 bg-white/4 px-2 py-1">${loop.worker_engine ?? '엔진 정보 없음'}</span>
+          ${loop.worker_model ? html`<span class="rounded-md border border-card-border/60 bg-white/4 px-2 py-1">${loop.worker_model}</span>` : null}
+          <span class="rounded-md border border-card-border/60 bg-white/4 px-2 py-1">${latestToolSummary}</span>
         </div>
+
         ${latest
           ? html`
-              <div class="text-[var(--text-muted)] text-[13px] leading-[1.5]">
+              <div class="rounded-lg border border-card-border/60 bg-white/4 px-3 py-2 text-[13px] leading-[1.6] text-text-body">
                 최근 반복 #${latest.iteration}: ${latest.changes || latest.next_suggestion || '서술 정보 없음'}
               </div>
             `
-          : html`<div class="text-[var(--text-muted)] text-[13px] leading-[1.5]">반복 이력이 아직 없습니다</div>`}
+          : html`<div class="text-[13px] leading-[1.5] text-text-muted">반복 이력이 아직 없습니다</div>`}
       </div>
     </div>
   `

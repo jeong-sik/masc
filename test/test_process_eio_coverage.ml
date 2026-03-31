@@ -114,13 +114,23 @@ let test_run_argv_with_status_cwd_override () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let cwd_default = Eio.Stdenv.fs env in
+  (* Use a non-root default cwd (/usr) so the test verifies that an
+     absolute ~cwd:"/tmp" truly replaces it, not just appends to root. *)
+  let cwd_default = Eio.Path.(Eio.Stdenv.fs env / "/usr") in
   Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  (* Without ~cwd, pwd should return /usr *)
+  let status_default, stdout_default =
+    Process_eio.run_argv_with_status [ "/bin/pwd" ]
+  in
+  let code_d = match status_default with Unix.WEXITED c -> c | _ -> 1 in
+  check int "default pwd exit code" 0 code_d;
+  check string "default cwd is /usr" "/usr" (String.trim stdout_default);
+  (* With ~cwd:"/tmp", pwd should return /tmp, not /usr/tmp *)
   let status, stdout =
     Process_eio.run_argv_with_status ~cwd:"/tmp" [ "/bin/pwd" ]
   in
   let code = match status with Unix.WEXITED c -> c | _ -> 1 in
-  check int "pwd exit code" 0 code;
+  check int "override pwd exit code" 0 code;
   let trimmed = String.trim stdout in
   (* /tmp may resolve to /private/tmp on macOS *)
   check bool "cwd is /tmp or /private/tmp"

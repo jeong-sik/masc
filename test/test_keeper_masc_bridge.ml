@@ -179,7 +179,7 @@ let test_tool_access_invalid_kind_rejected () =
   | Error e ->
       Alcotest.(check string)
         "invalid kind error"
-        "invalid keeper tool_access.kind: bogus"
+        "meta parse error: Invalid_argument(\"invalid keeper tool_access.kind: bogus\")"
         e
 
 let test_tool_access_missing_kind_rejected () =
@@ -196,7 +196,7 @@ let test_tool_access_missing_kind_rejected () =
   | Error e ->
       Alcotest.(check string)
         "missing kind error"
-        "keeper tool_access.kind required"
+        "meta parse error: Invalid_argument(\"keeper tool_access.kind required\")"
         e
 
 (** Allowlist also gates shard-sourced masc_* in allowed_tool_names. *)

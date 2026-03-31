@@ -33,7 +33,7 @@ let mdal_iteration_record_json (r : Mdal.iteration_record) : Yojson.Safe.t =
       ("failed_attempts", `String r.failed_attempts);
       ("next_suggestion", `String r.next_suggestion);
       ("elapsed_ms", `Int r.elapsed_ms);
-      ("cost_usd", match r.cost_usd with Some c -> `Float c | None -> `Null);
+      ("cost_usd", Json_util.float_opt_to_json r.cost_usd);
       ("evidence", evidence_json);
     ]
 
@@ -50,12 +50,9 @@ let mdal_loop_json ~(config : Room.config) ~(history_limit : int)
       ("loop_id", `String state.loop_id);
       ("status", `String (mdal_status_string state.status));
       ("strict_mode", `Bool state.strict_mode);
-      ("error_message",
-       match state.error_message with Some msg -> `String msg | None -> `Null);
-      ("error_reason",
-       match state.error_message with Some msg -> `String msg | None -> `Null);
-      ("stop_reason",
-       match state.stop_reason with Some reason -> `String reason | None -> `Null);
+      ("error_message", Json_util.string_opt_to_json state.error_message);
+      ("error_reason", Json_util.string_opt_to_json state.error_message);
+      ("stop_reason", Json_util.string_opt_to_json state.stop_reason);
       ("profile", `String state.profile.name);
       ("current_iteration", `Int state.current_iteration);
       ("max_iterations", `Int state.profile.max_iterations);
@@ -77,10 +74,7 @@ let mdal_loop_json ~(config : Room.config) ~(history_limit : int)
        match state.worker_engine with
        | Some engine -> `String (Mdal.worker_engine_to_string engine)
        | None -> `Null);
-      ("worker_model",
-       match state.worker_model with
-       | Some model -> `String model
-       | None -> `Null);
+      ("worker_model", Json_util.string_opt_to_json state.worker_model);
       ("evidence_policy", if state.strict_mode then `String "hard" else `String "legacy");
       ("latest_tool_call_count",
        `Int
@@ -164,7 +158,7 @@ let mdal_loops_json ~(config : Room.config)
             ("returned", `Int (List.length loops));
             ("limit", `Int limit);
             ("history_limit", `Int history_limit);
-            ("status", match status_filter with Some s -> `String s | None -> `Null);
+            ("status", Json_util.string_opt_to_json status_filter);
           ])
 
 let mdal_loops_error_json (msg : string) : Yojson.Safe.t =

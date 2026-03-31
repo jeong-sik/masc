@@ -261,14 +261,14 @@ let task_status_to_yojson = function
         ("status", `String "done");
         ("assignee", `String assignee);
         ("completed_at", `String completed_at);
-        ("notes", match notes with Some n -> `String n | None -> `Null);
+        ("notes", Json_util.string_opt_to_json notes);
       ]
   | Cancelled { cancelled_by; cancelled_at; reason } ->
       `Assoc [
         ("status", `String "cancelled");
         ("cancelled_by", `String cancelled_by);
         ("cancelled_at", `String cancelled_at);
-        ("reason", match reason with Some r -> `String r | None -> `Null);
+        ("reason", Json_util.string_opt_to_json reason);
       ]
 
 let task_status_of_yojson json =
@@ -483,9 +483,9 @@ let tempo_config_to_yojson c =
   `Assoc [
     ("mode", tempo_mode_to_yojson c.mode);
     ("delay_ms", `Int c.delay_ms);
-    ("reason", match c.reason with Some r -> `String r | None -> `Null);
-    ("set_by", match c.set_by with Some s -> `String s | None -> `Null);
-    ("set_at", match c.set_at with Some t -> `String t | None -> `Null);
+    ("reason", Json_util.string_opt_to_json c.reason);
+    ("set_by", Json_util.string_opt_to_json c.set_by);
+    ("set_at", Json_util.string_opt_to_json c.set_at);
   ]
 
 let tempo_config_of_yojson json =
@@ -598,7 +598,7 @@ let a2a_task_to_yojson t =
     ("to", `String t.to_agent);
     ("message", `String t.a2a_message);
     ("status", a2a_task_status_to_yojson t.a2a_status);
-    ("result", match t.a2a_result with Some r -> `String r | None -> `Null);
+    ("result", Json_util.string_opt_to_json t.a2a_result);
     ("createdAt", `String t.created_at);
     ("updatedAt", `String t.updated_at);
   ]

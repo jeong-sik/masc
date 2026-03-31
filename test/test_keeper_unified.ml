@@ -579,7 +579,7 @@ let test_prompt_prefers_silence_guidance () =
 
 let test_metrics_mixed_response () =
   let result =
-    make_run_result ~text:"Done." ~tools:["keeper_read"]
+    make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
       ~model:"test-model" ~input_tok:150 ~output_tok:60
   in
   let updated =

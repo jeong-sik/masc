@@ -252,15 +252,15 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
       `Assoc [
         ("name", `String a.name);
         ("status", `String (Types.string_of_agent_status a.status));
-        ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
+        ("current_task", Json_util.string_opt_to_json a.current_task);
         ("last_seen", `String a.last_seen);
         ("emoji", `String profile.emoji);
         ("koreanName", `String profile.korean_name);
-        ("model", match profile.model with Some m -> `String m | None -> `Null);
+        ("model", Json_util.string_opt_to_json profile.model);
         ("traits", `List (List.map (fun t -> `String t) profile.traits));
         ("interests", `List (List.map (fun i -> `String i) profile.interests));
-        ("activityLevel", match profile.activity_level with Some v -> `Float v | None -> `Null);
-        ("primaryValue", match profile.primary_value with Some v -> `String v | None -> `Null);
+        ("activityLevel", Json_util.float_opt_to_json profile.activity_level);
+        ("primaryValue", Json_util.string_opt_to_json profile.primary_value);
         ("generation", `Null);
         ("context_ratio", `Null);
         ("turn_count", `Null);
@@ -856,7 +856,7 @@ let dashboard_task_json (task : Types.task) =
       ("description", `String task.description);
       ("status", `String (Types.string_of_task_status task.task_status));
       ("priority", `Int task.priority);
-      ("assignee", match dashboard_task_assignee task with Some v -> `String v | None -> `Null);
+      ("assignee", Json_util.string_opt_to_json (dashboard_task_assignee task));
       ("created_at", `String task.created_at);
     ]
 
@@ -867,17 +867,17 @@ let dashboard_agent_json (agent : Types.agent) =
       ("name", `String agent.name);
       ("agent_type", `String agent.agent_type);
       ("status", `String (Types.string_of_agent_status agent.status));
-      ("current_task", match agent.current_task with Some task -> `String task | None -> `Null);
+      ("current_task", Json_util.string_opt_to_json agent.current_task);
       ("joined_at", `String agent.joined_at);
       ("last_seen", `String agent.last_seen);
       ("capabilities", `List (List.map (fun item -> `String item) agent.capabilities));
       ("emoji", `String profile.emoji);
       ("koreanName", `String profile.korean_name);
-      ("model", match profile.model with Some m -> `String m | None -> `Null);
+      ("model", Json_util.string_opt_to_json profile.model);
       ("traits", `List (List.map (fun t -> `String t) profile.traits));
       ("interests", `List (List.map (fun i -> `String i) profile.interests));
-      ("activityLevel", match profile.activity_level with Some v -> `Float v | None -> `Null);
-      ("primaryValue", match profile.primary_value with Some v -> `String v | None -> `Null);
+      ("activityLevel", Json_util.float_opt_to_json profile.activity_level);
+      ("primaryValue", Json_util.string_opt_to_json profile.primary_value);
     ]
 
 let dashboard_message_json (message : Types.message) =

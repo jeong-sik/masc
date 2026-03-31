@@ -15,11 +15,11 @@ let timeline_json ?session_id ?operation_id events cp_events =
                ("id", `String (Printf.sprintf "session-%04d" (idx + 1)));
                ("seq", `Int (idx + 1));
                ("source", `String "team_session");
-               ("session_id", match session_id with Some value -> `String value | None -> `Null);
-               ("operation_id", match operation_id with Some value -> `String value | None -> `Null);
+               ("session_id", Json_util.string_opt_to_json session_id);
+               ("operation_id", Json_util.string_opt_to_json operation_id);
                ("event_type", `String event_type);
                ("timestamp", `String timestamp);
-               ("actor", match actor with Some value -> `String value | None -> `Null);
+               ("actor", Json_util.string_opt_to_json actor);
                ("summary", `String (Dashboard_proof_events.event_summary json));
                ("detail", detail_of_event json);
              ])
@@ -36,14 +36,13 @@ let timeline_json ?session_id ?operation_id events cp_events =
                    ("id", `String (Printf.sprintf "cp-%04d" (idx + 1)));
                    ("seq", `Int (List.length events + idx + 1));
                    ("source", `String "command_plane");
-                   ("session_id", match session_id with Some value -> `String value | None -> `Null);
+                   ("session_id", Json_util.string_opt_to_json session_id);
                    ( "operation_id",
-                     match string_field "operation_id" event |> option_or_else (fun () -> operation_id) with
-                     | Some value -> `String value
-                     | None -> `Null );
+                     Json_util.string_opt_to_json
+                       (string_field "operation_id" event |> option_or_else (fun () -> operation_id)) );
                    ("event_type", `String event_type);
                    ("timestamp", `String timestamp);
-                   ("actor", match string_field "actor" event with Some value -> `String value | None -> `Null);
+                   ("actor", Json_util.string_opt_to_json (string_field "actor" event));
                    ("summary", `String (Dashboard_proof_events.event_summary event));
                    ("detail", match U.member "detail" event with `Assoc _ as detail -> detail | _ -> `Assoc []);
                  ])
@@ -159,8 +158,7 @@ let session_summary_json session verdict ~planned_actor_count ~active_actor_coun
           ("detail", `String "session_id를 제공하거나 team session을 시작해서 근거를 쌓으세요.");
           ("verdict", `String verdict);
           ("live_verdict", `String live_verdict);
-          ( "historical_verdict",
-            match historical_verdict with Some value -> `String value | None -> `Null );
+          ("historical_verdict", Json_util.string_opt_to_json historical_verdict);
           ("verdict_basis", `String verdict_basis);
           ("actors_count", `Int active_actor_count);
           ("planned_actor_count", `Int planned_actor_count);
@@ -199,8 +197,7 @@ let session_summary_json session verdict ~planned_actor_count ~active_actor_coun
           ("goal", `String session.goal);
           ("verdict", `String verdict);
           ("live_verdict", `String live_verdict);
-          ( "historical_verdict",
-            match historical_verdict with Some value -> `String value | None -> `Null );
+          ("historical_verdict", Json_util.string_opt_to_json historical_verdict);
           ("verdict_basis", `String verdict_basis);
           ("actors_count", `Int active_actor_count);
           ("planned_actor_count", `Int planned_actor_count);
@@ -235,23 +232,16 @@ let selection_json ~requested_session_id ~requested_operation_id ~session ~opera
     [
       ("mode", `String mode);
       ("reason", `String reason);
-      ( "requested_session_id",
-        match requested_session_id with Some value -> `String value | None -> `Null );
-      ( "requested_operation_id",
-        match requested_operation_id with Some value -> `String value | None -> `Null );
+      ("requested_session_id", Json_util.string_opt_to_json requested_session_id);
+      ("requested_operation_id", Json_util.string_opt_to_json requested_operation_id);
       ( "selected_session_id",
-        match session with
-        | Some current -> `String current.Team_session_types.session_id
-        | None -> `Null );
+        Json_util.string_opt_to_json
+          (Option.map (fun c -> c.Team_session_types.session_id) session) );
       ( "selected_goal",
-        match session with
-        | Some current -> `String current.goal
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.map (fun c -> c.Team_session_types.goal) session) );
       ( "selected_created_by",
-        match session with
-        | Some current -> `String current.created_by
-        | None -> `Null );
-      ("selected_operation_id", match operation_id with Some value -> `String value | None -> `Null);
+        Json_util.string_opt_to_json (Option.map (fun c -> c.Team_session_types.created_by) session) );
+      ("selected_operation_id", Json_util.string_opt_to_json operation_id);
       ("available_session_count", `Int session_count);
     ]
 
@@ -260,7 +250,7 @@ let room_json config =
   `Assoc
     [
       ("project", `String state.project);
-      ("current_room", match Room.read_current_room config with Some value -> `String value | None -> `Null);
+      ("current_room", Json_util.string_opt_to_json (Room.read_current_room config));
       ("paused", `Bool state.paused);
       ("message_seq", `Int state.message_seq);
     ]

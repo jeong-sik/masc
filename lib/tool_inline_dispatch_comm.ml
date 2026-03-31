@@ -64,7 +64,7 @@ let handle_broadcast (ctx : context) : result option =
       ("type", `String "masc/broadcast");
       ("from", `String agent_name);
       ("content", `String message);
-      ("mention", match mention with Some m -> `String m | None -> `Null);
+      ("mention", Json_util.string_opt_to_json mention);
       ("timestamp", `Float (Time_compat.now ()));
     ] in
     Mcp_server.sse_broadcast state notification;
@@ -77,7 +77,7 @@ let handle_broadcast (ctx : context) : result option =
       ~agent:agent_name
       ~data:(`Assoc [
         ("message", `String message);
-        ("mention", match mention with Some m -> `String m | None -> `Null);
+        ("mention", Json_util.string_opt_to_json mention);
       ]);
     let _ = Auto_responder.maybe_respond
       ~sw

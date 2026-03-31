@@ -87,7 +87,7 @@ let handover_to_json (h : handover_record) : Yojson.Safe.t =
   `Assoc [
     ("id", `String h.id);
     ("from_agent", `String h.from_agent);
-    ("to_agent", match h.to_agent with Some a -> `String a | None -> `Null);
+    ("to_agent", Json_util.string_opt_to_json h.to_agent);
     ("task_id", `String h.task_id);
     ("session_id", `String h.session_id);
     ("current_goal", `String h.current_goal);
@@ -278,30 +278,4 @@ let format_as_markdown (h : handover_record) : string =
 
   Buffer.contents buf
 
-(** Build a prompt for the successor agent *)
-let build_successor_prompt (h : handover_record) ~additional_instructions : string =
-  let dna = format_as_markdown h in
-  let instructions = match additional_instructions with
-    | Some i -> Printf.sprintf "\n\n## Additional Instructions\n%s" i
-    | None -> ""
-  in
-  Printf.sprintf {|You are continuing work from a previous agent session.
 
-%s%s
-
-## Your Mission
-1. Review the handover capsule above to understand the context
-2. Continue from the pending steps
-3. Use MASC tools (masc_done, masc_broadcast) to coordinate
-4. When finished or hitting limits, create your own handover with masc_handover_create
-
-Begin work now.|} dna instructions
-
-(** Claim a handover and spawn the successor agent. *)
-let claim_and_spawn ~sw:_ ~fs ~proc_mgr:_ config ~handover_id ~agent_name ?additional_instructions ?timeout_seconds:_ ()
-    : (Spawn.spawn_result, string) result =
-  match claim_handover ~fs config ~handover_id ~agent_name with
-  | Error e -> Error e
-  | Ok h ->
-      ignore (build_successor_prompt h ~additional_instructions);
-      Error "spawn_eio removed: use OAS workers for handover spawns"

@@ -156,9 +156,10 @@ let classify_decomposability
     (Team_session_types.Decomposability_high, "manual orchestration — gate skipped")
   else
     let n = List.length planned_workers in
-    if n <= 1 then
-      (Team_session_types.Decomposability_low,
-       Printf.sprintf "single planned worker (n=%d)" n)
+    if n = 0 then
+      (Team_session_types.Decomposability_high, "no planned workers — gate deferred")
+    else if n = 1 then
+      (Team_session_types.Decomposability_low, "single planned worker")
     else
       let classes =
         List.filter_map
@@ -172,7 +173,7 @@ let classify_decomposability
       in
       (* Manager + Executor only → sequential dependency chain *)
       let only_manager_executor =
-        classes <> [] &&
+        List.length classes >= 2 &&
         List.for_all
           (fun c ->
             c = Team_session_types.Worker_manager

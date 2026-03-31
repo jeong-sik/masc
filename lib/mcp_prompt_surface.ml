@@ -171,7 +171,7 @@ let command_truth_text ~config ?operation_id ?run_id () =
           [
             ("scope", `String "run");
             ("run_id", `String value);
-            ("operation_id", match operation_id with Some id -> `String id | None -> `Null);
+            ("operation_id", Json_util.string_opt_to_json operation_id);
             ("traces_filtered", `Bool true);
           ]
     | None -> Cp_snapshot.summary_json config

@@ -20,7 +20,7 @@ Do not assume access to any other MASC tool from this endpoint."
 
 let managed_agent_instructions =
   "MASC managed-agent profile exposes the internal agent control surface. \
-Prefer SDK-style task and room aliases such as masc_room_status, masc_list_tasks, masc_claim_task, masc_set_current_task, masc_complete_task, masc_release_task, masc_cancel_task, masc_send_direct, masc_add_task, masc_batch_add_tasks, masc_broadcast, and masc_heartbeat. \
+Prefer SDK-style task and room aliases such as masc_room_status, masc_list_tasks, masc_claim_task, masc_set_current_task, masc_complete_task, masc_release_task, masc_cancel_task, masc_add_task, masc_batch_add_tasks, masc_broadcast, and masc_heartbeat. \
 Use canonical passthrough tools only when no managed alias exists on this endpoint. \
 Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
 
@@ -295,7 +295,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_complete_task", "Complete Task");
   ("masc_release_task", "Release Task");
   ("masc_cancel_task", "Cancel Task");
-  ("masc_send_direct", "Send Direct Message");
   ("masc_claim_next", "Claim Next Task");
   (* Misc *)
   ("masc_poll_events", "Poll Events");

@@ -234,23 +234,6 @@ let sdk_bindings : sdk_tool_binding list =
         ];
     };
     {
-      sdk_name = "masc_send_direct";
-      canonical_operation = "masc_a2a_delegate";
-      description = "Send a direct message to a specific agent by name.";
-      input_schema =
-        object_schema ~required:[ "target"; "message" ]
-          [
-            assoc_field "target" (string_prop "Name of the target agent");
-            assoc_field "message" (string_prop "The message content");
-          ];
-      arg_bindings =
-        [
-          ("target_agent", Input_field "target");
-          ("task_type", Static (json_string "async"));
-          ("message", Input_field "message");
-        ];
-    };
-    {
       sdk_name = "masc_heartbeat";
       canonical_operation = "masc_heartbeat";
       description =

@@ -44,7 +44,7 @@ let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
     ("failures", `Int !failures);
     ("timeouts", `Int !timeouts);
     ("failure_rate", `Float failure_rate);
-    ("p95_duration_ms", match p95_duration_ms with Some v -> `Int v | None -> `Null);
+    ("p95_duration_ms", Json_util.int_opt_to_json p95_duration_ms);
   ]
 
 let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =

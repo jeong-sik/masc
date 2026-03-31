@@ -391,8 +391,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("last_blocker", `String rt.last_blocker);
       ("last_need", `String rt.last_need);
       ("paused", `Bool m.paused);
-      ("current_task_id",
-        (match m.current_task_id with None -> `Null | Some s -> `String s));
+      ("current_task_id", Json_util.string_opt_to_json m.current_task_id);
     ]
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =

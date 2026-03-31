@@ -105,7 +105,7 @@ let entry_to_json (e : audit_entry) : Yojson.Safe.t =
     ("timestamp", `Float e.timestamp);
     ("agent_id", `String e.agent_id);
     ("action", `String (action_to_string e.action));
-    ("room_id", match e.room_id with Some r -> `String r | None -> `Null);
+    ("room_id", Json_util.string_opt_to_json e.room_id);
     ("details", e.details);
     ("outcome", outcome_to_json e.outcome);
   ] in
@@ -360,6 +360,6 @@ let stats_to_json (s : stats) : Yojson.Safe.t =
   `Assoc [
     ("total_entries", `Int s.total_entries);
     ("file_size_bytes", `Int s.file_size_bytes);
-    ("oldest_timestamp", match s.oldest_timestamp with Some t -> `Float t | None -> `Null);
-    ("newest_timestamp", match s.newest_timestamp with Some t -> `Float t | None -> `Null);
+    ("oldest_timestamp", Json_util.float_opt_to_json s.oldest_timestamp);
+    ("newest_timestamp", Json_util.float_opt_to_json s.newest_timestamp);
   ]

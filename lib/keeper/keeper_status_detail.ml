@@ -65,9 +65,9 @@ let handle_keeper_status ctx args : tool_result =
                `Assoc [
                  ("has_checkpoint", `Bool true);
                  ("context_ratio", `Float (Keeper_exec_context.context_ratio c));
-                 ("context_tokens", `Int c.token_count);
+                 ("context_tokens", `Int (Keeper_exec_context.token_count c));
                  ("context_max", `Int c.max_tokens);
-                 ("message_count", `Int (List.length c.messages));
+                 ("message_count", `Int (Keeper_exec_context.message_count c));
                ]
          in
          let keepalive_running = runtime_keepalive_running ctx.config m in

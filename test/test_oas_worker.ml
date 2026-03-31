@@ -568,7 +568,7 @@ let test_keeper_checkpoint_prefers_oas_checkpoint () =
       | Some loaded ->
           Alcotest.(check string) "system prompt from OAS checkpoint"
             "oas system" loaded.system_prompt;
-          Alcotest.(check int) "max_tokens from OAS sidecar" 4096
+          Alcotest.(check int) "max_tokens from OAS checkpoint" 4096
             loaded.max_tokens;
           Alcotest.(check string) "loaded OAS message" "oas"
             (Agent_sdk.Types.text_of_message (List.hd loaded.messages))
@@ -691,12 +691,15 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
       with
       | Some loaded ->
           let generation =
-            Option.bind loaded.working_context (fun json ->
-                Yojson.Safe.Util.(
-                  json |> member "generation" |> to_int_option))
+            Agent_sdk.Context.get_scoped loaded.context Agent_sdk.Context.Session
+              "keeper_generation"
           in
           Alcotest.(check (option int)) "new checkpoint generation preserved"
-            (Some 1) generation
+            (Some 1)
+            (Option.bind generation (function
+              | `Int value -> Some value
+              | `Intlit raw -> int_of_string_opt raw
+              | _ -> None))
       | None -> Alcotest.fail "expected rollover checkpoint")
 
 let test_keeper_oas_handoff_rollover_below_threshold_noop () =

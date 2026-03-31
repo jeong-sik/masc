@@ -381,9 +381,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                            ("has_checkpoint", `Bool true);
                            ("source", `String "checkpoint");
                            ("context_ratio", `Float (Keeper_exec_context.context_ratio c));
-                           ("context_tokens", `Int c.token_count);
+                           ("context_tokens", `Int (Keeper_exec_context.token_count c));
                            ("context_max", `Int c.max_tokens);
-                           ("message_count", `Int (List.length c.messages));
+                           ("message_count", `Int (Keeper_exec_context.message_count c));
                          ])
           in
 	          let context_source =

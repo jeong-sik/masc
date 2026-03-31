@@ -19,15 +19,22 @@ let make_meta
     ?(policy_voice_enabled = false)
     ?(soul_profile = "default")
     ?(name = "test-keeper")
-    ?(tool_allowlist = [])
+    ?tool_access
+    ?tool_allowlist
     () : Keeper_types.keeper_meta =
+  let tool_access =
+    match tool_access, tool_allowlist with
+    | Some access, _ -> access
+    | None, Some names -> Keeper_types.Restricted names
+    | None, None -> Keeper_types.Unrestricted
+  in
   let json = `Assoc [
     ("name", `String name);
     ("agent_name", `String name);
     ("trace_id", `String "safety-test-trace");
     ("policy_voice_enabled", `Bool policy_voice_enabled);
     ("soul_profile", `String soul_profile);
-    ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
+    ("tool_access", Keeper_types.tool_access_to_json tool_access);
   ] in
   match Keeper_types.meta_of_json json with
   | Ok meta -> meta

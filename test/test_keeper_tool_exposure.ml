@@ -12,7 +12,14 @@ open Masc_mcp
    ============================================================ *)
 
 let make_meta ?(name = "test-keeper") ?(soul_profile = "")
-    ?(policy_voice_enabled = false) ?(tool_allowlist = []) () : Keeper_types.keeper_meta =
+    ?(policy_voice_enabled = false) ?tool_access ?tool_allowlist ()
+    : Keeper_types.keeper_meta =
+  let tool_access =
+    match tool_access, tool_allowlist with
+    | Some access, _ -> access
+    | None, Some names -> Keeper_types.Restricted names
+    | None, None -> Keeper_types.Unrestricted
+  in
   let json =
     `Assoc
       [
@@ -21,7 +28,7 @@ let make_meta ?(name = "test-keeper") ?(soul_profile = "")
         ("trace_id", `String "test-trace-exposure");
         ("soul_profile", `String soul_profile);
         ("policy_voice_enabled", `Bool policy_voice_enabled);
-        ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
+        ("tool_access", Keeper_types.tool_access_to_json tool_access);
       ]
   in
   match Keeper_types.meta_of_json json with
@@ -79,6 +86,14 @@ let test_default_has_research_tools () =
                      "masc_autoresearch_inject"; "masc_autoresearch_stop"] () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has autoresearch" true (has_any_prefix "masc_autoresearch_" tools)
+
+let test_explicit_empty_allowlist_blocks_masc_only () =
+  let meta = make_meta ~tool_access:(Keeper_types.Restricted []) () in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "keeper tool still available" true
+    (has_tool "keeper_time_now" tools);
+  check bool "masc tool blocked" false
+    (has_tool "masc_status" tools)
 
 (* ============================================================
    3. Voice tools are always available
@@ -345,6 +360,8 @@ let () =
       test_case "has voice tools" `Quick test_default_has_voice;
       test_case "has governance tools" `Quick test_default_has_governance_tools;
       test_case "has research tools" `Quick test_default_has_research_tools;
+      test_case "explicit empty allowlist blocks masc only" `Quick
+        test_explicit_empty_allowlist_blocks_masc_only;
     ]);
     ("voice_profile", [
       test_case "enabled adds voice" `Quick test_voice_enabled_adds_voice_tools;

@@ -43,20 +43,42 @@ let handle_keeper_tools_post state req reqd =
                List.fold_left (fun acc x ->
                  if List.mem x acc then acc else x :: acc) [] xs
                |> List.rev in
+             let allowlist_of_meta (meta : Keeper_types.keeper_meta) =
+               Keeper_types.tool_access_allowlist meta.tool_access
+             in
+             let add_allow (meta : Keeper_types.keeper_meta) tools =
+               match meta.tool_access with
+               | Keeper_types.Unrestricted -> meta.tool_access
+               | Keeper_types.Restricted current ->
+                   Keeper_types.Restricted (dedupe (current @ tools))
+             in
+             let remove_allow (meta : Keeper_types.keeper_meta) tools =
+               match meta.tool_access with
+               | Keeper_types.Unrestricted -> meta.tool_access
+               | Keeper_types.Restricted current ->
+                   Keeper_types.Restricted
+                     (List.filter (fun n -> not (List.mem n tools)) current)
+             in
              let updated_meta = match action with
                | "set_allowlist" ->
-                   Ok { meta with tool_allowlist = dedupe tools; updated_at = Keeper_types.now_iso () }
+                   Ok { meta with
+                        tool_access = Keeper_types.Restricted (dedupe tools);
+                        updated_at = Keeper_types.now_iso () }
+               | "set_unrestricted" ->
+                   Ok { meta with
+                        tool_access = Keeper_types.Unrestricted;
+                        updated_at = Keeper_types.now_iso () }
                | "set_denylist" ->
                    Ok { meta with tool_denylist = dedupe tools; updated_at = Keeper_types.now_iso () }
                | "add_allow" ->
-                   Ok { meta with tool_allowlist = dedupe (meta.tool_allowlist @ tools); updated_at = Keeper_types.now_iso () }
+                   Ok { meta with tool_access = add_allow meta tools; updated_at = Keeper_types.now_iso () }
                | "remove_allow" ->
-                   Ok { meta with tool_allowlist = List.filter (fun n -> not (List.mem n tools)) meta.tool_allowlist; updated_at = Keeper_types.now_iso () }
+                   Ok { meta with tool_access = remove_allow meta tools; updated_at = Keeper_types.now_iso () }
                | "add_deny" ->
                    Ok { meta with tool_denylist = dedupe (meta.tool_denylist @ tools); updated_at = Keeper_types.now_iso () }
                | "remove_deny" ->
                    Ok { meta with tool_denylist = List.filter (fun n -> not (List.mem n tools)) meta.tool_denylist; updated_at = Keeper_types.now_iso () }
-               | "" -> Error "action required (set_allowlist|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
+               | "" -> Error "action required (set_allowlist|set_unrestricted|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
                | other -> Error (Printf.sprintf "unknown action: %s" other) in
              (match updated_meta with
              | Error msg ->
@@ -67,10 +89,12 @@ let handle_keeper_tools_post state req reqd =
                   | Ok () ->
                       let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta' in
                       let masc_count = List.length (List.filter (fun n -> String.starts_with ~prefix:"masc_" n) allowed) in
+                      let tool_allowlist = allowlist_of_meta meta' in
                       Http.Response.json ~compress:true ~request:req
                         (Yojson.Safe.to_string (`Assoc [
                            ("ok", `Bool true);
-                           ("tool_allowlist", `List (List.map (fun s -> `String s) meta'.tool_allowlist));
+                           ("tool_access", Keeper_types.tool_access_to_json meta'.tool_access);
+                           ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
                            ("tool_denylist", `List (List.map (fun s -> `String s) meta'.tool_denylist));
                            ("active_masc_tool_count", `Int masc_count);
                            ("total_active", `Int (List.length allowed))])) reqd
@@ -518,20 +542,42 @@ let add_routes ~sw ~clock router =
                         List.fold_left (fun acc x ->
                           if List.mem x acc then acc else x :: acc) [] xs
                         |> List.rev in
+                      let allowlist_of_meta (meta : Keeper_types.keeper_meta) =
+                        Keeper_types.tool_access_allowlist meta.tool_access
+                      in
+                      let add_allow (meta : Keeper_types.keeper_meta) tools =
+                        match meta.tool_access with
+                        | Keeper_types.Unrestricted -> meta.tool_access
+                        | Keeper_types.Restricted current ->
+                            Keeper_types.Restricted (dedupe (current @ tools))
+                      in
+                      let remove_allow (meta : Keeper_types.keeper_meta) tools =
+                        match meta.tool_access with
+                        | Keeper_types.Unrestricted -> meta.tool_access
+                        | Keeper_types.Restricted current ->
+                            Keeper_types.Restricted
+                              (List.filter (fun n -> not (List.mem n tools)) current)
+                      in
                       let updated_meta = match action with
                         | "set_allowlist" ->
-                            Ok { meta with tool_allowlist = dedupe tools; updated_at = Keeper_types.now_iso () }
+                            Ok { meta with
+                                   tool_access = Keeper_types.Restricted (dedupe tools);
+                                   updated_at = Keeper_types.now_iso () }
+                        | "set_unrestricted" ->
+                            Ok { meta with
+                                   tool_access = Keeper_types.Unrestricted;
+                                   updated_at = Keeper_types.now_iso () }
                         | "set_denylist" ->
                             Ok { meta with tool_denylist = dedupe tools; updated_at = Keeper_types.now_iso () }
                         | "add_allow" ->
-                            Ok { meta with tool_allowlist = dedupe (meta.tool_allowlist @ tools); updated_at = Keeper_types.now_iso () }
+                            Ok { meta with tool_access = add_allow meta tools; updated_at = Keeper_types.now_iso () }
                         | "remove_allow" ->
-                            Ok { meta with tool_allowlist = List.filter (fun n -> not (List.mem n tools)) meta.tool_allowlist; updated_at = Keeper_types.now_iso () }
+                            Ok { meta with tool_access = remove_allow meta tools; updated_at = Keeper_types.now_iso () }
                         | "add_deny" ->
                             Ok { meta with tool_denylist = dedupe (meta.tool_denylist @ tools); updated_at = Keeper_types.now_iso () }
                         | "remove_deny" ->
                             Ok { meta with tool_denylist = List.filter (fun n -> not (List.mem n tools)) meta.tool_denylist; updated_at = Keeper_types.now_iso () }
-                        | "" -> Error "action required (set_allowlist|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
+                        | "" -> Error "action required (set_allowlist|set_unrestricted|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
                         | other -> Error (Printf.sprintf "unknown action: %s" other) in
                       (match updated_meta with
                       | Error msg ->
@@ -542,10 +588,12 @@ let add_routes ~sw ~clock router =
                            | Ok () ->
                                let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta' in
                                let masc_count = List.length (List.filter (fun n -> String.starts_with ~prefix:"masc_" n) allowed) in
+                               let tool_allowlist = allowlist_of_meta meta' in
                                Http.Response.json ~compress:true ~request:req
                                  (Yojson.Safe.to_string (`Assoc [
                                     ("ok", `Bool true);
-                                    ("tool_allowlist", `List (List.map (fun s -> `String s) meta'.tool_allowlist));
+                                    ("tool_access", Keeper_types.tool_access_to_json meta'.tool_access);
+                                    ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
                                     ("tool_denylist", `List (List.map (fun s -> `String s) meta'.tool_denylist));
                                     ("active_masc_tool_count", `Int masc_count);
                                     ("total_active", `Int (List.length allowed))])) reqd
@@ -668,7 +716,7 @@ let add_routes ~sw ~clock router =
        end)
 
   (* Keeper tools — POST /api/v1/keepers/:name/tools
-     Body: { "action": "set_allowlist"|"set_denylist"|"add_allow"|"remove_allow"|"add_deny"|"remove_deny",
+     Body: { "action": "set_allowlist"|"set_unrestricted"|"set_denylist"|"add_allow"|"remove_allow"|"add_deny"|"remove_deny",
              "tools": ["masc_status", ...] }
      Uses with_tool_auth to allow localhost requests without bearer token. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
@@ -713,20 +761,41 @@ let add_routes ~sw ~clock router =
                           if List.mem x acc then acc else x :: acc) [] xs
                         |> List.rev
                       in
+                      let allowlist_of_meta (meta : Keeper_types.keeper_meta) =
+                        Keeper_types.tool_access_allowlist meta.tool_access
+                      in
+                      let add_allow (meta : Keeper_types.keeper_meta) tools =
+                        match meta.tool_access with
+                        | Keeper_types.Unrestricted -> meta.tool_access
+                        | Keeper_types.Restricted current ->
+                            Keeper_types.Restricted (dedupe (current @ tools))
+                      in
+                      let remove_allow (meta : Keeper_types.keeper_meta) tools =
+                        match meta.tool_access with
+                        | Keeper_types.Unrestricted -> meta.tool_access
+                        | Keeper_types.Restricted current ->
+                            Keeper_types.Restricted
+                              (List.filter (fun n -> not (List.mem n tools)) current)
+                      in
                       let updated_meta = match action with
                         | "set_allowlist" ->
-                            Ok { meta with tool_allowlist = dedupe tools;
+                            Ok { meta with
+                                   tool_access = Keeper_types.Restricted (dedupe tools);
+                                   updated_at = Keeper_types.now_iso () }
+                        | "set_unrestricted" ->
+                            Ok { meta with
+                                   tool_access = Keeper_types.Unrestricted;
                                            updated_at = Keeper_types.now_iso () }
                         | "set_denylist" ->
                             Ok { meta with tool_denylist = dedupe tools;
                                            updated_at = Keeper_types.now_iso () }
                         | "add_allow" ->
-                            Ok { meta with tool_allowlist = dedupe (meta.tool_allowlist @ tools);
+                            Ok { meta with
+                                   tool_access = add_allow meta tools;
                                            updated_at = Keeper_types.now_iso () }
                         | "remove_allow" ->
-                            Ok { meta with tool_allowlist =
-                                             List.filter (fun n -> not (List.mem n tools))
-                                               meta.tool_allowlist;
+                            Ok { meta with
+                                   tool_access = remove_allow meta tools;
                                            updated_at = Keeper_types.now_iso () }
                         | "add_deny" ->
                             Ok { meta with tool_denylist = dedupe (meta.tool_denylist @ tools);
@@ -736,7 +805,7 @@ let add_routes ~sw ~clock router =
                                              List.filter (fun n -> not (List.mem n tools))
                                                meta.tool_denylist;
                                            updated_at = Keeper_types.now_iso () }
-                        | "" -> Error "action required (set_allowlist|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
+                        | "" -> Error "action required (set_allowlist|set_unrestricted|add_allow|remove_allow|set_denylist|add_deny|remove_deny)"
                         | other -> Error (Printf.sprintf "unknown action: %s" other)
                       in
                       match updated_meta with
@@ -752,11 +821,13 @@ let add_routes ~sw ~clock router =
                                  List.length (List.filter
                                    (fun n -> String.starts_with ~prefix:"masc_" n) allowed)
                                in
+                               let tool_allowlist = allowlist_of_meta meta' in
                                Http.Response.json ~compress:true ~request:req
                                  (Yojson.Safe.to_string
                                     (`Assoc [
                                        ("ok", `Bool true);
-                                       ("tool_allowlist", `List (List.map (fun s -> `String s) meta'.tool_allowlist));
+                                       ("tool_access", Keeper_types.tool_access_to_json meta'.tool_access);
+                                       ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
                                        ("tool_denylist", `List (List.map (fun s -> `String s) meta'.tool_denylist));
                                        ("active_masc_tool_count", `Int masc_count);
                                        ("total_active", `Int (List.length allowed));

@@ -11,12 +11,19 @@ let autoresearch_allowlist =
    "masc_autoresearch_search_findings";
    "masc_research_start"; "masc_research_status"]
 
-let make_test_meta ?(name = "test-keeper") ?(tool_allowlist = []) () : Keeper_types.keeper_meta =
+let make_test_meta ?(name = "test-keeper") ?tool_access ?tool_allowlist ()
+    : Keeper_types.keeper_meta =
+  let tool_access =
+    match tool_access, tool_allowlist with
+    | Some access, _ -> access
+    | None, Some names -> Keeper_types.Restricted names
+    | None, None -> Keeper_types.Unrestricted
+  in
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String name); ("agent_name", `String name);
              ("trace_id", `String "test-trace-001");
              ("allowed_paths", `List [`String "*"]);
-             ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist))]) with
+             ("tool_access", Keeper_types.tool_access_to_json tool_access)]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 
@@ -243,14 +250,19 @@ let test_failure_tracking_is_independent_per_args () =
             (is_guardrail_message message)
       | Ok _ -> fail "guardrail should block original failing args")
 
-let make_research_meta ?(tool_allowlist = autoresearch_allowlist) ()
+let make_research_meta ?tool_access ?(tool_allowlist = autoresearch_allowlist) ()
     : Keeper_types.keeper_meta =
+  let tool_access =
+    match tool_access with
+    | Some access -> access
+    | None -> Keeper_types.Restricted tool_allowlist
+  in
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String "test-researcher");
              ("agent_name", `String "test-researcher");
              ("trace_id", `String "test-trace-research");
              ("soul_profile", `String "research");
-             ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist))]) with
+             ("tool_access", Keeper_types.tool_access_to_json tool_access)]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_research_meta failed: %s" e)
 

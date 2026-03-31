@@ -3,14 +3,20 @@
 
 module KET = Masc_mcp.Keeper_exec_tools
 
-let make_meta ?(tool_allowlist = []) ?(tool_denylist = []) () =
+let make_meta ?tool_access ?tool_allowlist ?(tool_denylist = []) () =
+  let tool_access =
+    match tool_access, tool_allowlist with
+    | Some access, _ -> access
+    | None, Some names -> Masc_mcp.Keeper_types.Restricted names
+    | None, None -> Masc_mcp.Keeper_types.Unrestricted
+  in
   match Masc_mcp.Keeper_types.meta_of_json
     (`Assoc
       [
         ("name", `String "keeper-bridge-test");
         ("agent_name", `String "keeper-bridge-test");
         ("trace_id", `String "keeper-bridge-trace");
-        ("tool_allowlist", `List (List.map (fun s -> `String s) tool_allowlist));
+        ("tool_access", Masc_mcp.Keeper_types.tool_access_to_json tool_access);
         ("tool_denylist", `List (List.map (fun s -> `String s) tool_denylist));
       ])
   with
@@ -36,17 +42,16 @@ let test_inject_stores_all_masc () =
   Alcotest.(check bool) "no keeper_time_now" false
     (List.mem "keeper_time_now" names)
 
-(** Default (empty JSON allowlist) migrates to standard_tools via meta_of_json. *)
-let test_default_migrates_to_standard () =
+(** Explicit unrestricted access exposes the full masc_* surface. *)
+let test_unrestricted_exposes_masc () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
-  (* meta_of_json migrates [] -> standard_tools, so tools are available *)
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_governance_status" true
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "count matches standard catalog" true
-    (List.length names > 0)
+  Alcotest.(check bool) "has masc_autoresearch_cycle" true
+    (List.mem "masc_autoresearch_cycle" names)
 
 (** Standard tier: allowed_tool_names with standard_tools exposes shards too. *)
 let test_standard_exposes_shard_masc () =
@@ -100,6 +105,99 @@ let test_denylist_restricts_standard_tier () =
     (List.mem "masc_governance_status" names);
   Alcotest.(check bool) "other standard tools remain" true
     (List.length names > 0)
+
+(** Explicit empty allowlist is restricted, not unrestricted. *)
+let test_restricted_empty_allowlist_blocks_masc () =
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  let meta = make_meta
+    ~tool_access:(Masc_mcp.Keeper_types.Restricted []) () in
+  let names = KET.keeper_masc_tool_names meta in
+  Alcotest.(check int) "no masc tools" 0 (List.length names);
+  Alcotest.(check bool) "masc_status blocked" false
+    (List.mem "masc_status" names)
+
+(** Legacy persisted empty tool_allowlist migrates to standard_tools. *)
+let test_legacy_empty_allowlist_migrates_to_standard () =
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  let meta =
+    match Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String "legacy-keeper");
+          ("agent_name", `String "legacy-keeper");
+          ("trace_id", `String "legacy-trace");
+          ("tool_allowlist", `List []);
+        ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith e
+  in
+  let names = KET.keeper_masc_tool_names meta in
+  Alcotest.(check bool) "legacy empty allowlist keeps masc_status" true
+    (List.mem "masc_status" names);
+  Alcotest.(check bool) "legacy empty allowlist does not become unrestricted" false
+    (List.mem "masc_autoresearch_cycle" names)
+
+(** Restricted JSON preserves an explicit empty tools list. *)
+let test_tool_access_restricted_empty_json_preserved () =
+  let meta =
+    match Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String "restricted-json");
+          ("agent_name", `String "restricted-json");
+          ("trace_id", `String "restricted-json-trace");
+          ( "tool_access",
+            `Assoc
+              [
+                ("kind", `String "restricted");
+                ("tools", `List []);
+              ] );
+        ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith e
+  in
+  match meta.Masc_mcp.Keeper_types.tool_access with
+  | Masc_mcp.Keeper_types.Restricted names ->
+      Alcotest.(check int) "restricted empty preserved" 0 (List.length names)
+  | Masc_mcp.Keeper_types.Unrestricted ->
+      Alcotest.fail "expected Restricted []"
+
+(** Malformed tool_access JSON is rejected. *)
+let test_tool_access_invalid_kind_rejected () =
+  match Masc_mcp.Keeper_types.meta_of_json
+    (`Assoc
+      [
+        ("name", `String "invalid-kind");
+        ("agent_name", `String "invalid-kind");
+        ("trace_id", `String "invalid-kind-trace");
+        ("tool_access", `Assoc [ ("kind", `String "bogus") ]);
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected invalid kind to fail"
+  | Error e ->
+      Alcotest.(check string)
+        "invalid kind error"
+        "meta parse error: Invalid_argument(\"invalid keeper tool_access.kind: bogus\")"
+        e
+
+let test_tool_access_missing_kind_rejected () =
+  match Masc_mcp.Keeper_types.meta_of_json
+    (`Assoc
+      [
+        ("name", `String "missing-kind");
+        ("agent_name", `String "missing-kind");
+        ("trace_id", `String "missing-kind-trace");
+        ("tool_access", `Assoc [ ("tools", `List []) ]);
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected missing kind to fail"
+  | Error e ->
+      Alcotest.(check string)
+        "missing kind error"
+        "meta parse error: Invalid_argument(\"keeper tool_access.kind required\")"
+        e
 
 (** Allowlist also gates shard-sourced masc_* in allowed_tool_names. *)
 let test_allowlist_gates_shard_tools () =
@@ -191,8 +289,8 @@ let () =
         ] );
       ( "unrestricted_by_default",
         [
-          Alcotest.test_case "default migrates to standard" `Quick
-            test_default_migrates_to_standard;
+          Alcotest.test_case "unrestricted exposes masc tools" `Quick
+            test_unrestricted_exposes_masc;
           Alcotest.test_case "standard exposes shard masc_*" `Quick
             test_standard_exposes_shard_masc;
         ] );
@@ -209,6 +307,19 @@ let () =
             test_deny_overrides_allow;
           Alcotest.test_case "deny restricts standard tier" `Quick
             test_denylist_restricts_standard_tier;
+          Alcotest.test_case "restricted empty allowlist blocks masc" `Quick
+            test_restricted_empty_allowlist_blocks_masc;
+        ] );
+      ( "meta_json",
+        [
+          Alcotest.test_case "legacy empty allowlist migrates to standard" `Quick
+            test_legacy_empty_allowlist_migrates_to_standard;
+          Alcotest.test_case "restricted empty json preserved" `Quick
+            test_tool_access_restricted_empty_json_preserved;
+          Alcotest.test_case "invalid kind rejected" `Quick
+            test_tool_access_invalid_kind_rejected;
+          Alcotest.test_case "missing kind rejected" `Quick
+            test_tool_access_missing_kind_rejected;
         ] );
       ( "dispatch",
         [

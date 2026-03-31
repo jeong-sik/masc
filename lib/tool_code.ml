@@ -40,7 +40,9 @@ let is_binary_file path =
 (* Security: Check file size limit (500KB) *)
 let max_file_size = 500 * 1024
 
-(* Security: Validate path is within git root *)
+(* Security: Validate path is within git root.
+   Uses Unix.realpath to resolve symlinks and ".." before comparison,
+   preventing path traversal attacks. *)
 let validate_path config path =
   try
     let git_root = match Room_git.git_root ~base_path:config.Room.base_path with
@@ -53,9 +55,28 @@ let validate_path config path =
       else
         path
     in
-    (* Simple path traversal check *)
-    if String.starts_with ~prefix:git_root absolute_path then
-      Ok absolute_path
+    (* For non-existent paths, resolve the deepest existing ancestor
+       then re-append the remaining segments, rejecting if the ancestor
+       itself escapes. *)
+    let real_root = Unix.realpath git_root in
+    let real_path =
+      try Unix.realpath absolute_path
+      with Unix.Unix_error (Unix.ENOENT, _, _) ->
+        (* Path doesn't exist yet (write case). Resolve parent. *)
+        let parent = Filename.dirname absolute_path in
+        let base = Filename.basename absolute_path in
+        let real_parent =
+          try Unix.realpath parent
+          with Unix.Unix_error _ ->
+            raise (Invalid_argument
+              (Printf.sprintf "Parent directory does not exist: %s" parent))
+        in
+        Filename.concat real_parent base
+    in
+    let prefix = real_root ^ "/" in
+    if real_path = real_root
+       || String.starts_with ~prefix real_path then
+      Ok real_path
     else
       Error (IoError "Path traversal detected: access outside git root")
   with

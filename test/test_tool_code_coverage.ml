@@ -131,6 +131,31 @@ let test_code_read_path_traversal () =
   Alcotest.(check bool) "error mentions security boundary" true has_security_msg;
   cleanup_dir base_dir
 
+let test_code_read_path_traversal_dotdot_in_middle () =
+  let ctx, base_dir = make_ctx () in
+  (* Simulates .worktrees/../../outside — the exact vector from #4241 *)
+  let args = `Assoc [("path", `String ".worktrees/../../outside/secret.txt")] in
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_code_read" ~args in
+  Alcotest.(check bool) "dotdot-in-middle blocked" false ok;
+  let has_security_msg =
+    msg_contains ~needle:"traversal" msg ||
+    msg_contains ~needle:"git" msg ||
+    msg_contains ~needle:"not found" msg in
+  Alcotest.(check bool) "error mentions boundary" true has_security_msg;
+  cleanup_dir base_dir
+
+let test_code_read_absolute_sibling () =
+  let ctx, base_dir = make_ctx () in
+  (* Absolute path outside git root *)
+  let args = `Assoc [("path", `String "/tmp/should-not-read.txt")] in
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_code_read" ~args in
+  Alcotest.(check bool) "absolute sibling blocked" false ok;
+  let has_security_msg =
+    msg_contains ~needle:"traversal" msg ||
+    msg_contains ~needle:"git" msg in
+  Alcotest.(check bool) "error mentions boundary" true has_security_msg;
+  cleanup_dir base_dir
+
 let test_code_read_with_offset_limit () =
   let ctx, base_dir = make_ctx () in
   let args = `Assoc [
@@ -180,6 +205,8 @@ let () =
     ("code_read", [
       Alcotest.test_case "no path" `Quick test_code_read_no_path;
       Alcotest.test_case "path traversal" `Quick test_code_read_path_traversal;
+      Alcotest.test_case "path traversal dotdot-in-middle" `Quick test_code_read_path_traversal_dotdot_in_middle;
+      Alcotest.test_case "absolute sibling path" `Quick test_code_read_absolute_sibling;
       Alcotest.test_case "offset and limit" `Quick test_code_read_with_offset_limit;
     ]);
     ("code_symbols", [

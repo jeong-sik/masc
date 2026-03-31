@@ -21,11 +21,12 @@ type result = bool * string
 
 let max_write_size = 1024 * 1024 (* 1MB *)
 
-(* Security: Validate path is within a .worktrees/ directory *)
+(* Security: Validate path is within a .worktrees/ directory.
+   Uses the already-resolved path from Tool_code.validate_path. *)
 let validate_writable_path config path =
   match Tool_code.validate_path config path with
   | Error e -> Error e
-  | Ok abs_path ->
+  | Ok resolved_path ->
     let git_root = match Room_git.git_root ~base_path:config.Room.base_path with
       | None -> Error (IoError "Not in a git repository")
       | Some root -> Ok root
@@ -33,12 +34,13 @@ let validate_writable_path config path =
     match git_root with
     | Error e -> Error e
     | Ok root ->
-      let worktree_prefix = Filename.concat root ".worktrees" in
-      if String.starts_with ~prefix:worktree_prefix abs_path then
-        Ok abs_path
+      let real_root = try Unix.realpath root with Unix.Unix_error _ -> root in
+      let worktree_prefix = Filename.concat real_root ".worktrees" ^ "/" in
+      if String.starts_with ~prefix:worktree_prefix resolved_path then
+        Ok resolved_path
       else
         Error (IoError (Printf.sprintf
-          "Write restricted to .worktrees/ directory (got: %s)" abs_path))
+          "Write restricted to .worktrees/ directory (got: %s)" resolved_path))
 
 (* Shell command allowlist *)
 let allowed_shell_commands = [

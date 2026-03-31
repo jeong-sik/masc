@@ -63,7 +63,7 @@ let test_basic_compact () =
     check bool "messages_after > 0" true (List.length msgs_after > 0)
 
 let test_prune_tool_outputs () =
-  let long_output = String.make 1000 'x' in
+  let long_output = String.make 2000 'x' in
   let messages = [
     ("user", "Run the command");
     ("tool", long_output);

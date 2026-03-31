@@ -92,7 +92,7 @@ let test_compact_prune_tool_outputs () =
     true (List.length compacted.messages > 0);
   Alcotest.(check bool) "token count positive"
     true (compacted.token_count > 0);
-  (* Short tool output (< 500 chars) should not be truncated *)
+  (* Short tool output (< 1500 chars) should not be truncated *)
   Alcotest.(check int) "message count unchanged for short tool output"
     (List.length (make_test_messages ())) (List.length compacted.messages)
 

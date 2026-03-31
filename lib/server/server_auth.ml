@@ -346,10 +346,37 @@ let authorize_tool_request ~base_path ~tool_name request :
   let token = auth_token_from_request request in
   match
     if Option.is_some token then Ok ()
-    else ensure_same_origin_browser_request request
+    else
+      let origin_result = ensure_same_origin_browser_request request in
+      match origin_result with
+      | Ok () -> Ok ()
+      | Error _ as e ->
+          (* Origin header present but failed same-origin check *)
+          e
   with
   | Error err -> Error err
   | Ok () ->
+      (* When no token is provided and auth is disabled, require loopback.
+         This prevents unauthenticated mutation from non-local processes
+         when room auth is off. *)
+      let loopback_guard =
+        if Option.is_none token && not auth_cfg.Types.enabled then begin
+          if http_auth_bind_is_loopback () then begin
+            Log.Auth.debug
+              "tool %s: allowing unauthenticated mutation on loopback (auth disabled)"
+              tool_name;
+            Ok ()
+          end else
+            Error (Types.Unauthorized
+              (Printf.sprintf
+                "tool %s: unauthenticated mutation requires room auth or loopback binding"
+                tool_name))
+        end else
+          Ok ()
+      in
+      match loopback_guard with
+      | Error err -> Error err
+      | Ok () ->
       (match ensure_strict_http_token_auth
                ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
        with

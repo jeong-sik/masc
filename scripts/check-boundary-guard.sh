@@ -20,10 +20,11 @@ check() {
   fi
 }
 
-# V8: Direct OAS Agent.state mutation from keeper code
-# Allowed: keeper_extend_turns.ml (2 occurrences)
-check "V8-agent-state-mutation" 2 \
-  'Agent\.set_state\|Agent_sdk\.Agent\.state ' \
+# V2: MASC-specific importance_scores in keeper working_context wrapper
+# These wrap OAS Context.t with domain-specific scoring that should
+# be handled by OAS custom closures instead.
+check "V2-importance-scores" 8 \
+  'importance_scores' \
   "lib/keeper/"
 
 # V4: MASC domain marker constant definitions (message content pollution)
@@ -38,6 +39,26 @@ check "V4-marker-definitions" 5 \
 check "V5-memory-store-bypass" 7 \
   'Memory\.store' \
   "lib/memory_oas_bridge.ml"
+
+# V6: OAS lifecycle orchestration from keeper_agent_run
+# Memory_oas_bridge + Oas_worker.run_named calls should be isolated
+# to a thin bridge; currently spread in keeper_agent_run.ml.
+check "V6-oas-orchestration" 4 \
+  'Memory_oas_bridge\|Oas_worker\.run_named' \
+  "lib/keeper/keeper_agent_run.ml"
+
+# V7: MASC-specific safety gates in OAS hook layer
+# Eval_gate destructive detection and keeper deny list should be
+# injected via OAS hook config, not hardcoded in hook callbacks.
+check "V7-masc-hook-gates" 5 \
+  'Eval_gate\.detect_destructive\|keeper_denied_tools' \
+  "lib/keeper/keeper_hooks_oas.ml"
+
+# V8: Direct OAS Agent.state mutation from keeper code
+# Allowed: keeper_extend_turns.ml (2 occurrences)
+check "V8-agent-state-mutation" 2 \
+  'Agent\.set_state\|Agent_sdk\.Agent\.state ' \
+  "lib/keeper/"
 
 if [[ "$rc" -eq 0 ]]; then
   echo "BOUNDARY: all checks within baseline"

@@ -88,9 +88,9 @@ Minimal smoke checks:
 curl -sS http://127.0.0.1:8935/health
 curl -sS http://127.0.0.1:8935/ws
 grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
-bash scripts/harness/transport/verify_ws.sh
-bash scripts/harness/transport/verify_grpc_subscribe.sh
-bash scripts/harness/transport/verify_webrtc_signaling.sh
+MASC_HTTP_PORT=8935 MASC_GRPC_PORT=8936 MASC_WS_PORT=8937 MASC_TRANSPORT_AUTOSTART=0 bash scripts/harness/transport/verify_ws.sh
+MASC_HTTP_PORT=8935 MASC_GRPC_PORT=8936 MASC_WS_PORT=8937 MASC_TRANSPORT_AUTOSTART=0 bash scripts/harness/transport/verify_grpc_subscribe.sh
+MASC_HTTP_PORT=8935 MASC_GRPC_PORT=8936 MASC_WS_PORT=8937 MASC_TRANSPORT_AUTOSTART=0 bash scripts/harness/transport/verify_webrtc_signaling.sh
 ```
 
 Things to watch:

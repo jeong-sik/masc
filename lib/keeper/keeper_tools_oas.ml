@@ -109,6 +109,7 @@ let make_tools
         ~name:td.name
         ~description:td.description
         ~input_schema:td.input_schema
+        ~mutation_class:"workspace"
         (fun input ->
           let key = args_key td.name input in
           let prior_fails =

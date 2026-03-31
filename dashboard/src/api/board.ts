@@ -279,12 +279,49 @@ export function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSu
   }
 }
 
-function derivePostTitle(content: string): string {
+function truncatePostTitle(title: string): string {
+  if (title.length <= 96) return title
+  return `${title.slice(0, 93)}...`
+}
+
+function stripTitleMarkdown(line: string): string {
+  return line
+    .trim()
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^>\s+/, '')
+    .replace(/^[-*+]\s+/, '')
+    .replace(/^\d+\.\s+/, '')
+    .trim()
+}
+
+export function derivePostTitle(content: string): string {
   const trimmed = content.trim()
-  const withoutFlair = trimmed.startsWith('[flair:') ? trimmed.replace(/^\[flair:[^\]]+\]\s*/i, '') : trimmed
-  const firstLine = withoutFlair.split('\n')[0]?.trim() || 'Untitled post'
-  if (firstLine.length <= 96) return firstLine
-  return `${firstLine.slice(0, 93)}...`
+  const withoutFlair = trimmed.startsWith('[flair:')
+    ? trimmed.replace(/^\[flair:[^\]]+\]\s*/i, '')
+    : trimmed
+  const lines = withoutFlair.split('\n')
+  let inFence = false
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) continue
+    if (/^(`{3,}|~{3,})/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence || /^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) continue
+    const title = stripTitleMarkdown(line)
+    if (title) return truncatePostTitle(title)
+  }
+
+  return 'Untitled post'
+}
+
+export function sanitizeBoardTitle(title: string, fallbackBody = ''): string {
+  const firstLine = title.trim().split('\n')[0] ?? ''
+  const normalized = stripTitleMarkdown(firstLine)
+  if (normalized) return truncatePostTitle(normalized)
+  return derivePostTitle(fallbackBody)
 }
 
 function normalizeBoardMeta(raw: unknown): BoardPost['meta'] {
@@ -327,7 +364,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     asString(raw.updated_at_iso, '').trim()
     || (raw.updated_at !== undefined ? toIsoTimestamp(raw.updated_at) : createdAt)
   const titleRaw = asString(raw.title, '').trim()
-  const title = titleRaw || derivePostTitle(body)
+  const title = sanitizeBoardTitle(titleRaw, body)
   const tags = Array.isArray(raw.tags)
     ? raw.tags.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
     : []

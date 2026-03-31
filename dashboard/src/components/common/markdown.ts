@@ -26,10 +26,11 @@ function getMermaid(): Promise<MermaidApi> {
 }
 
 /** Render a markdown string to Preact VDOM nodes */
-export function Markdown({ text }: { text: string }) {
+export function Markdown({ text, class: className }: { text: string; class?: string }) {
   if (!text) return null
   const blocks = parseBlocks(text)
-  return html`<div class="markdown-content">${blocks}</div>`
+  const classes = ['markdown-content', className].filter(Boolean).join(' ')
+  return html`<div class=${classes}>${blocks}</div>`
 }
 
 // ── Mermaid component ────────────────────────────────────

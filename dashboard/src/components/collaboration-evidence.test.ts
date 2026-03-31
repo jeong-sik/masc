@@ -21,7 +21,16 @@ function collaborationEvidenceFixture(): DashboardCollaborationEvidenceResponse 
       mention_count: 0,
       board_interaction_count: 0,
       interaction_event_count: 0,
+      explicit_linked_activity_count: 0,
+      unlinked_activity_count: 0,
       unique_actor_count: 0,
+    },
+    linkage: {
+      policy: 'explicit_first',
+      selected_operation_id: null,
+      explicit_linked_activity_count: 0,
+      unlinked_activity_count: 0,
+      gaps: [],
     },
     proof: {
       available: false,
@@ -34,6 +43,7 @@ function collaborationEvidenceFixture(): DashboardCollaborationEvidenceResponse 
     refs: [],
     artifacts: [],
     recent_events: [],
+    recent_unlinked_activity: [],
   }
 }
 
@@ -47,6 +57,8 @@ describe('visibleCollaborationCountMetrics', () => {
       mention_count: 0,
       board_interaction_count: 0,
       interaction_event_count: 0,
+      explicit_linked_activity_count: 0,
+      unlinked_activity_count: 0,
       unique_actor_count: 3,
     })
 
@@ -65,10 +77,16 @@ describe('collaborationEvidenceSupportRows', () => {
     const fixture = collaborationEvidenceFixture()
     fixture.proof = { available: true, verdict: 'proven' }
     fixture.counts.message_broadcast_count = 4
+    fixture.linkage.selected_operation_id = 'op-1'
+    fixture.linkage.unlinked_activity_count = 2
+    fixture.linkage.gaps = ['room activity exists without explicit session/operation linkage']
 
     expect(collaborationEvidenceSupportRows(fixture)).toEqual([
       'proof verdict · proven · available',
+      'linked operation · op-1',
+      'unlinked room activity · 2',
       'message broadcast count · 4',
+      'linkage gap · room activity exists without explicit session/operation linkage',
     ])
   })
 })

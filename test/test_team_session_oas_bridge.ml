@@ -10,6 +10,13 @@ open Masc_mcp
 module Swarm = Agent_sdk_swarm
 module Oas = Agent_sdk
 
+let execution_scope_testable =
+  Alcotest.testable
+    (fun fmt scope ->
+      Format.pp_print_string fmt
+        (Team_session_types.execution_scope_to_string scope))
+    ( = )
+
 (* ================================================================ *)
 (* Role mapping tests                                               *)
 (* ================================================================ *)
@@ -413,6 +420,50 @@ let test_supported_local_worker_tools_for_observe_only_resolve_subset () =
   Alcotest.(check bool) "scoped schemas block masc_run_log" false
     (List.mem "masc_run_log" names)
 
+let test_effective_planned_worker_execution_scope_defaults_executor () =
+  let worker =
+    { (make_pw ()) with
+      worker_class = Some Team_session_types.Worker_executor;
+      execution_scope = None;
+    }
+  in
+  let scope =
+    Team_session_types.effective_execution_scope_of_planned_worker worker
+  in
+  Alcotest.(check execution_scope_testable)
+    "executor defaults to limited_code_change"
+    Team_session_types.Limited_code_change scope
+
+let test_effective_planned_worker_execution_scope_defaults_observe_only () =
+  let worker = make_pw () in
+  let scope =
+    Team_session_types.effective_execution_scope_of_planned_worker worker
+  in
+  Alcotest.(check execution_scope_testable)
+    "non-executor defaults to observe_only"
+    Team_session_types.Observe_only scope;
+  let names =
+    Team_session_oas_bridge.supported_local_worker_tool_names_for_scope
+      (Some scope)
+  in
+  Alcotest.(check bool) "defaulted observe_only blocks masc_run_init" false
+    (List.mem "masc_run_init" names);
+  Alcotest.(check bool) "defaulted observe_only keeps masc_code_read" true
+    (List.mem "masc_code_read" names)
+
+let test_effective_planned_worker_execution_scope_preserves_explicit_scope () =
+  let worker =
+    { (make_pw ()) with
+      worker_class = Some Team_session_types.Worker_executor;
+      execution_scope = Some Team_session_types.Autonomous;
+    }
+  in
+  let scope =
+    Team_session_types.effective_execution_scope_of_planned_worker worker
+  in
+  Alcotest.(check execution_scope_testable) "explicit scope wins"
+    Team_session_types.Autonomous scope
+
 let test_dispatch_supported_tool_status () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -600,6 +651,12 @@ let () =
         test_supported_local_worker_tools_for_observe_only_filter_mutations;
       Alcotest.test_case "observe_only resolves scoped schemas" `Quick
         test_supported_local_worker_tools_for_observe_only_resolve_subset;
+      Alcotest.test_case "executor default scope" `Quick
+        test_effective_planned_worker_execution_scope_defaults_executor;
+      Alcotest.test_case "non-executor default observe_only scope" `Quick
+        test_effective_planned_worker_execution_scope_defaults_observe_only;
+      Alcotest.test_case "explicit scope preserved" `Quick
+        test_effective_planned_worker_execution_scope_preserves_explicit_scope;
       Alcotest.test_case "status dispatch" `Quick
         test_dispatch_supported_tool_status;
       Alcotest.test_case "heartbeat autojoin" `Quick

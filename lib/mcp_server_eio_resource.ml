@@ -4,8 +4,8 @@
     Handles resources/read JSON-RPC method for MASC resources.
 *)
 
-let make_response = Mcp_server.make_response
-let make_error = Mcp_server.make_error
+let make_response = Mcp_transport_protocol.make_response
+let make_error = Mcp_transport_protocol.make_error
 
 let public_tool_help_schemas () =
   Config.visible_tool_schemas ()

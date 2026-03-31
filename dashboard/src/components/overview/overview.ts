@@ -15,6 +15,7 @@ import { AttentionSpotlight } from './attention-spotlight'
 import { NarrativeTimeline } from './narrative-timeline'
 import { AgentAvatar } from './agent-avatar'
 import { TransportHealthPanel } from '../transport-health'
+import { PerfSnapshotPanel } from '../perf-snapshot'
 import { RouteLink } from '../common/route-link'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type { DashboardMissionSessionBrief } from '../../types'
@@ -304,8 +305,13 @@ export function Overview() {
           `
         : null}
 
-      <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
-        <${TransportHealthPanel} />
+      <div class="grid grid-cols-2 gap-5 max-[1100px]:grid-cols-1">
+        <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
+          <${TransportHealthPanel} />
+        </div>
+        <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
+          <${PerfSnapshotPanel} />
+        </div>
       </div>
 
       ${hasJournal

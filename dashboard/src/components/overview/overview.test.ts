@@ -60,6 +60,9 @@ async function loadOverview() {
   vi.doMock('../transport-health', () => ({
     TransportHealthPanel: () => html`<div>Transport</div>`,
   }))
+  vi.doMock('../perf-snapshot', () => ({
+    PerfSnapshotPanel: () => html`<div>Perf</div>`,
+  }))
   return import('./overview')
 }
 
@@ -104,6 +107,7 @@ describe('Overview freshness strip', () => {
     vi.doUnmock('./narrative-timeline')
     vi.doUnmock('./agent-avatar')
     vi.doUnmock('../transport-health')
+    vi.doUnmock('../perf-snapshot')
   })
 
   it('shows a stale warning when the oldest overview snapshot is over 5 minutes old', async () => {

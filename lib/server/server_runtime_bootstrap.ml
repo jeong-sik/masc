@@ -59,6 +59,15 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   in
   state
 
+let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) =
+  Server_base_path_diagnostics.detect
+    ?input_base_path
+    ?env_masc_base_path:(Env_config_core.base_path_opt ())
+    ?env_me_root:(Env_config_core.me_root_opt ())
+    ~effective_base_path:state.room_config.base_path
+    ~effective_masc_root:(Room.masc_root_dir state.room_config)
+    ()
+
 let restore_persisted_sessions (state : Mcp_server.server_state) =
   Session.restore_from_disk state.session_registry
     ~agents_path:(Room.agents_dir state.room_config)
@@ -345,6 +354,17 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (PG pool) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
+      let path_diagnostics =
+        runtime_path_diagnostics ~input_base_path:base_path state
+      in
+      Server_base_path_diagnostics.log_startup_warning path_diagnostics;
+      if Server_base_path_diagnostics.strict_violation path_diagnostics then begin
+        Log.Server.error "%s\nSet MASC_BASE_PATH explicitly or unset MASC_BASE_PATH_STRICT to recover."
+          (Option.value path_diagnostics.warning
+             ~default:
+               "strict base-path guard triggered without a diagnostic warning");
+        exit 1
+      end;
       Governance_registry.ensure_init ();
       Runtime_params.restore ~base_path;
       Log.Server.info "Runtime_params restored from %s" base_path;
@@ -354,7 +374,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_bootstrap_loops.install_tooling ~governance_level state;
       Server_bootstrap_pg.init_pg_schemas_sequential ();
       Log.Server.info "Tooling + schemas in %.1fs" (Eio.Time.now clock -. t2);
-      state
+      (state, path_diagnostics)
     in
     let run_lazy_task (task_name, task_fn) =
       Log.Server.info "lazy_task: starting %s" task_name;
@@ -414,7 +434,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         Safe_ops.get_env_float_logged "MASC_PG_INIT_TIMEOUT_SEC" ~default:30.0
       in
       Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
-      let state =
+      let state, path_diagnostics =
         if String.equal initial_backend_mode "postgres-native" then
           (try
              Eio.Time.with_timeout_exn clock pg_init_timeout init_state_blocking
@@ -435,7 +455,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
-      Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
+      Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
+        ~masc_dir ~path_diagnostics;
       (* Create Executor_pool for CPU-heavy dashboard compute.
          Runs in separate OS domains, bypassing fiber contention. *)
       let exec_pool = Eio.Executor_pool.create ~sw ~domain_count:2 domain_mgr in

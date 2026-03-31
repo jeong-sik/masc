@@ -1,12 +1,18 @@
 // Tool-related signals, constants, loader, and helper functions
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
+import { signal, computed } from '@preact/signals'
 import { fetchDashboardTools, type DashboardToolsResponse, type DashboardToolInventoryItem } from '../../api'
+import { createAsyncResource, getData } from '../../lib/async-state'
 
-export const toolsData = signal<DashboardToolsResponse | null>(null)
-export const toolsError = signal<string | null>(null)
-export const toolsLoading = signal(false)
+const toolsResource = createAsyncResource<DashboardToolsResponse>()
+
+export const toolsData = computed(() => getData(toolsResource.state.value) ?? null)
+export const toolsError = computed<string | null>(() => {
+  const s = toolsResource.state.value
+  return s.status === 'error' ? s.message : null
+})
+export const toolsLoading = computed(() => toolsResource.state.value.status === 'loading')
 export const searchQuery = signal('')
 export const categoryFilter = signal('all')
 export const enabledOnly = signal(false)
@@ -33,16 +39,7 @@ export const SURFACE_LABELS: Record<SurfaceFilter, string> = {
 }
 
 export async function loadTools() {
-  if (toolsLoading.value) return
-  toolsLoading.value = true
-  toolsError.value = null
-  try {
-    toolsData.value = await fetchDashboardTools()
-  } catch (err) {
-    toolsError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    toolsLoading.value = false
-  }
+  await toolsResource.load(() => fetchDashboardTools())
 }
 
 export function toolMatchesQuery(item: DashboardToolInventoryItem, rawQuery: string): boolean {

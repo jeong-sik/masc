@@ -109,15 +109,10 @@ let default_worker_size_for_class = function
       Some Team_session_types.Worker_lg
   | None -> Some Team_session_types.Worker_lg
 
-let default_execution_scope_for_worker_class = function
-  | Some Team_session_types.Worker_executor ->
-      Some Team_session_types.Limited_code_change
-  | _ -> Some Team_session_types.Observe_only
-
 let effective_execution_scope_of_spec spec =
-  match spec.execution_scope with
-  | Some scope -> Some scope
-  | None -> default_execution_scope_for_worker_class spec.worker_class
+  Some
+    (Team_session_types.effective_execution_scope
+       ~worker_class:spec.worker_class spec.execution_scope)
 
 let explicit_worker_size_of_spec (spec : spawn_spec) =
   match spec.worker_size with

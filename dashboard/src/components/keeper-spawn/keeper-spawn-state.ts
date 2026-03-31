@@ -1,7 +1,8 @@
-import { signal } from '@preact/signals'
+import { signal, computed } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
 import { asString, extractArray, isRecord } from '../common/normalize'
 import { showToast } from '../common/toast'
+import { createAsyncResource, getData } from '../../lib/async-state'
 
 export interface PersonaSummary {
   name: string
@@ -32,23 +33,22 @@ export function normalizePersonaSummaries(raw: unknown): PersonaSummary[] {
     .filter((persona): persona is PersonaSummary => persona !== null)
 }
 
-export const personas = signal<PersonaSummary[]>([])
-export const personasLoading = signal(false)
-export const personasError = signal<string | null>(null)
+const personasResource = createAsyncResource<PersonaSummary[]>()
+
+export const personas = computed(() => getData(personasResource.state.value) ?? [])
+export const personasLoading = computed(() => personasResource.state.value.status === 'loading')
+export const personasError = computed<string | null>(() => {
+  const s = personasResource.state.value
+  return s.status === 'error' ? s.message : null
+})
 
 export async function loadPersonas(): Promise<void> {
-  if (personasLoading.value) return
-  personasLoading.value = true
-  personasError.value = null
-  try {
+  await personasResource.load(async () => {
     const raw = await callMcpTool('masc_persona_list', {})
-    personas.value = normalizePersonaSummaries(JSON.parse(raw))
-  } catch (err) {
-    personasError.value = err instanceof Error ? err.message : String(err)
+    return normalizePersonaSummaries(JSON.parse(raw))
+  }).catch(() => {
     showToast('페르소나 목록 로드 실패', 'error')
-  } finally {
-    personasLoading.value = false
-  }
+  })
 }
 
 export const spawning = signal(false)

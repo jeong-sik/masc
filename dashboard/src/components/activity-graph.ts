@@ -3,6 +3,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { createAsyncResource } from '../lib/async-state'
 import { Card } from './common/card'
 import { EmptyState, LoadingState } from './common/feedback-state'
 import { ActionButton } from './common/button'
@@ -26,9 +27,7 @@ import { fetchActivityGraph } from '../api'
 import { registerActivityRefresh } from '../sse-store'
 import type { ActivityGraphResponse, ActivityGraphNode, ActionTimelineGroup } from '../types'
 
-const graphData = signal<ActivityGraphResponse | null>(null)
-const graphError = signal<string | null>(null)
-const graphLoading = signal(false)
+const graphResource = createAsyncResource<ActivityGraphResponse | null>()
 export const selectedTimeRange = signal<string>('all')
 const actionFilter = signal<ActionTimelineFilter>('all')
 const showLifecycle = signal(false)
@@ -42,18 +41,11 @@ const TIME_RANGES: Array<{ value: string; label: string }> = [
   { value: 'all', label: '전체' },
 ]
 
-async function loadGraph() {
-  if (graphLoading.value) return
-  graphLoading.value = true
-  graphError.value = null
-  try {
+function loadGraph() {
+  return graphResource.load(() => {
     const since = selectedTimeRange.value !== 'all' ? selectedTimeRange.value : undefined
-    graphData.value = await fetchActivityGraph(since)
-  } catch (err) {
-    graphError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    graphLoading.value = false
-  }
+    return fetchActivityGraph(since)
+  })
 }
 
 function TimeRangeSelector() {
@@ -349,19 +341,18 @@ export function ActivityGraphSurface() {
     })
   }, [])
 
-  const data = graphData.value
-  const error = graphError.value
-  const loading = graphLoading.value
+  const s = graphResource.state.value
+  const data = s.status === 'loaded' ? s.data : undefined
 
-  if (loading && !data) {
+  if (s.status === 'loading' || s.status === 'idle') {
     return html`<${LoadingState}>활동 그래프 불러오는 중...<//>`
   }
 
-  if (error && !data) {
+  if (s.status === 'error') {
     return html`
       <div class="flex flex-col gap-5">
         <${Card} title="오류" class="section mb-4" testId="activity_graph.error">
-          <${EmptyState} message=${'활동 그래프를 불러올 수 없습니다: ' + error} compact />
+          <${EmptyState} message=${'활동 그래프를 불러올 수 없습니다: ' + s.message} compact />
           <${ActionButton} variant="ghost" onClick=${loadGraph}>다시 시도<//>
         <//>
       </div>

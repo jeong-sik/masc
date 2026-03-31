@@ -8,7 +8,7 @@
     - Tool_local_runtime_bench  : concurrency benchmark
     - Tool_local_runtime_status : runtime pool status reporting *)
 
-open Types [@@warning "-33"]
+open Types
 
 (* Re-export core types and helpers for backward compatibility *)
 include Tool_local_runtime_core

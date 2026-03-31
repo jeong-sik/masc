@@ -4,8 +4,8 @@
     including nickname resolution, dedup, metadata, and relation materialization. *)
 
 open Types
-open Room_utils [@@warning "-33"]
-open Room_state [@@warning "-33"]
+open Room_utils
+open Room_state
 
 let room_id_of_config (config : Room_utils_backend_setup.config) =
   match config.scope with

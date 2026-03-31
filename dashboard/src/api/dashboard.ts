@@ -183,6 +183,69 @@ export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {
   return get('/api/v1/dashboard/execution')
 }
 
+export interface DashboardPerfRow {
+  benchmark: string
+  avg_ms: number
+  p50_ms: number
+  p95_ms: number
+  max_ms: number
+  notes: string
+  note_tags?: Record<string, string>
+}
+
+export interface DashboardPerfComparisonRow {
+  benchmark: string
+  avg_delta_ms: number
+  avg_delta_pct?: number | null
+  p95_delta_ms: number
+  p95_delta_pct?: number | null
+  max_delta_ms: number
+  verdict: 'improved' | 'stable' | 'mixed' | 'regressed' | string
+}
+
+export interface DashboardPerfResponse {
+  generated_at?: string
+  status: 'ok' | 'empty' | string
+  message?: string
+  candidate_dirs?: string[]
+  source?: {
+    results_dir: string
+    result_file: string
+    meta_file?: string | null
+    baseline_file?: string | null
+  }
+  latest_run?: {
+    timestamp?: string | null
+    started_at?: string | null
+    pattern?: string | null
+    iterations?: number | null
+    warmup_iterations?: number | null
+    session_warmup_iterations?: number | null
+    benchmark_count?: number
+  }
+  highlights?: {
+    session_init?: DashboardPerfRow | null
+    worst_live_mcp?: DashboardPerfRow | null
+    runtime_status?: DashboardPerfRow | null
+    runtime_single?: DashboardPerfRow | null
+  }
+  benchmarks: DashboardPerfRow[]
+  comparison?: {
+    baseline_file?: string | null
+    verdict_counts?: {
+      improved?: number
+      stable?: number
+      mixed?: number
+      regressed?: number
+    }
+    top_changes?: DashboardPerfComparisonRow[]
+  } | null
+}
+
+export function fetchDashboardPerf(): Promise<DashboardPerfResponse> {
+  return get('/api/v1/dashboard/perf')
+}
+
 export function fetchDashboardMemory(
   sortMode: BoardSortMode,
   opts?: { excludeSystem?: boolean; excludeAutomation?: boolean },
@@ -355,7 +418,16 @@ export interface DashboardCollaborationEvidenceResponse {
     mention_count: number
     board_interaction_count: number
     interaction_event_count: number
+    explicit_linked_activity_count: number
+    unlinked_activity_count: number
     unique_actor_count: number
+  }
+  linkage: {
+    policy: string
+    selected_operation_id: string | null
+    explicit_linked_activity_count: number
+    unlinked_activity_count: number
+    gaps: string[]
   }
   proof: {
     available: boolean
@@ -370,6 +442,12 @@ export interface DashboardCollaborationEvidenceResponse {
   recent_events: Array<{
     ts_iso: string | null
     event_type: string
+    actor: string | null
+    summary: string
+  }>
+  recent_unlinked_activity: Array<{
+    ts_iso: string | null
+    kind: string
     actor: string | null
     summary: string
   }>

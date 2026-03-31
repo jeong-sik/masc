@@ -4,7 +4,6 @@
 
 open Keeper_types
 open Keeper_memory
-open Keeper_skill_routing [@@warning "-33"]
 
 (** Case-insensitive substring check. Local copy to break
     Keeper_prompt -> Keeper_alerting -> Keeper_prompt cycle. *)

@@ -4,8 +4,8 @@
     state creation, and pause/resume lifecycle. *)
 
 open Types
-open Room_utils [@@warning "-33"]
-open Room_state [@@warning "-33"]
+open Room_utils
+open Room_state
 
 (** Initialize MASC room *)
 let init config ~agent_name =

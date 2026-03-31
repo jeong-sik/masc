@@ -311,11 +311,15 @@ let execute_team_action (ctx : 'a context) (request : action_request) =
         | `List _ as xs -> Ok xs
         | _ -> Error "payload.spawn_batch is required"
       in
+      let wait_mode =
+        get_string request.payload "wait_mode" "blocking"
+      in
       let args =
         `Assoc
           [
             ("session_id", `String session_id);
             ("actor", `String request.actor);
+            ("wait_mode", `String wait_mode);
             ("spawn_batch", spawn_batch);
           ]
       in

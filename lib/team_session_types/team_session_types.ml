@@ -31,10 +31,14 @@ let default_execution_scope_for_worker_class = function
   | Some Worker_executor -> Some Limited_code_change
   | _ -> Some Observe_only
 
-let effective_execution_scope_of_planned_worker (worker : planned_worker) =
-  match worker.execution_scope with
+let effective_execution_scope ~worker_class execution_scope =
+  match execution_scope with
   | Some scope -> Some scope
-  | None -> default_execution_scope_for_worker_class worker.worker_class
+  | None -> default_execution_scope_for_worker_class worker_class
+
+let effective_execution_scope_of_planned_worker (worker : planned_worker) =
+  effective_execution_scope ~worker_class:worker.worker_class
+    worker.execution_scope
 
 let planned_worker_key (w : planned_worker) =
   match w.runtime_actor with

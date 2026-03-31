@@ -443,6 +443,20 @@ let test_effective_planned_worker_execution_scope_defaults_observe_only () =
   Alcotest.(check bool) "defaulted observe_only keeps masc_code_read" true
     (List.mem "masc_code_read" names)
 
+let test_effective_planned_worker_execution_scope_preserves_explicit_scope () =
+  let worker =
+    { (make_pw ()) with
+      worker_class = Some Team_session_types.Worker_executor;
+      execution_scope = Some Team_session_types.Autonomous;
+    }
+  in
+  let scope =
+    Team_session_types.effective_execution_scope_of_planned_worker worker
+  in
+  Alcotest.(check (option string)) "explicit scope wins"
+    (Some "autonomous")
+    (Option.map Team_session_types.execution_scope_to_string scope)
+
 let test_dispatch_supported_tool_status () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -634,6 +648,8 @@ let () =
         test_effective_planned_worker_execution_scope_defaults_executor;
       Alcotest.test_case "non-executor default observe_only scope" `Quick
         test_effective_planned_worker_execution_scope_defaults_observe_only;
+      Alcotest.test_case "explicit scope preserved" `Quick
+        test_effective_planned_worker_execution_scope_preserves_explicit_scope;
       Alcotest.test_case "status dispatch" `Quick
         test_dispatch_supported_tool_status;
       Alcotest.test_case "heartbeat autojoin" `Quick

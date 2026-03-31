@@ -28,12 +28,12 @@ let infer_session_origin_kind ~created_by ~orchestration_mode =
       if creator_looks_system created_by then Origin_system else Origin_human
 
 let default_execution_scope_for_worker_class = function
-  | Some Worker_executor -> Some Limited_code_change
-  | _ -> Some Observe_only
+  | Some Worker_executor -> Limited_code_change
+  | _ -> Observe_only
 
 let effective_execution_scope ~worker_class execution_scope =
   match execution_scope with
-  | Some scope -> Some scope
+  | Some scope -> scope
   | None -> default_execution_scope_for_worker_class worker_class
 
 let effective_execution_scope_of_planned_worker (worker : planned_worker) =

@@ -555,7 +555,8 @@ let planned_worker_to_entry_with_state
     Team_session_types.effective_execution_scope_of_planned_worker pw
   in
   let scoped_tool_names =
-    supported_local_worker_tool_names_for_scope effective_execution_scope
+    supported_local_worker_tool_names_for_scope
+      (Some effective_execution_scope)
   in
   let scoped_masc_tools =
     List.filter

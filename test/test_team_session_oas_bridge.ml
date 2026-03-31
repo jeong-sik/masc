@@ -10,6 +10,13 @@ open Masc_mcp
 module Swarm = Agent_sdk_swarm
 module Oas = Agent_sdk
 
+let execution_scope_testable =
+  Alcotest.testable
+    (fun fmt scope ->
+      Format.pp_print_string fmt
+        (Team_session_types.execution_scope_to_string scope))
+    ( = )
+
 (* ================================================================ *)
 (* Role mapping tests                                               *)
 (* ================================================================ *)
@@ -423,20 +430,21 @@ let test_effective_planned_worker_execution_scope_defaults_executor () =
   let scope =
     Team_session_types.effective_execution_scope_of_planned_worker worker
   in
-  Alcotest.(check (option string)) "executor defaults to limited_code_change"
-    (Some "limited_code_change")
-    (Option.map Team_session_types.execution_scope_to_string scope)
+  Alcotest.(check execution_scope_testable)
+    "executor defaults to limited_code_change"
+    Team_session_types.Limited_code_change scope
 
 let test_effective_planned_worker_execution_scope_defaults_observe_only () =
   let worker = make_pw () in
   let scope =
     Team_session_types.effective_execution_scope_of_planned_worker worker
   in
-  Alcotest.(check (option string)) "non-executor defaults to observe_only"
-    (Some "observe_only")
-    (Option.map Team_session_types.execution_scope_to_string scope);
+  Alcotest.(check execution_scope_testable)
+    "non-executor defaults to observe_only"
+    Team_session_types.Observe_only scope;
   let names =
-    Team_session_oas_bridge.supported_local_worker_tool_names_for_scope scope
+    Team_session_oas_bridge.supported_local_worker_tool_names_for_scope
+      (Some scope)
   in
   Alcotest.(check bool) "defaulted observe_only blocks masc_run_init" false
     (List.mem "masc_run_init" names);
@@ -453,9 +461,8 @@ let test_effective_planned_worker_execution_scope_preserves_explicit_scope () =
   let scope =
     Team_session_types.effective_execution_scope_of_planned_worker worker
   in
-  Alcotest.(check (option string)) "explicit scope wins"
-    (Some "autonomous")
-    (Option.map Team_session_types.execution_scope_to_string scope)
+  Alcotest.(check execution_scope_testable) "explicit scope wins"
+    Team_session_types.Autonomous scope
 
 let test_dispatch_supported_tool_status () =
   Eio_main.run @@ fun env ->

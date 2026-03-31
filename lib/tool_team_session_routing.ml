@@ -110,8 +110,9 @@ let default_worker_size_for_class = function
   | None -> Some Team_session_types.Worker_lg
 
 let effective_execution_scope_of_spec spec =
-  Team_session_types.effective_execution_scope
-    ~worker_class:spec.worker_class spec.execution_scope
+  Some
+    (Team_session_types.effective_execution_scope
+       ~worker_class:spec.worker_class spec.execution_scope)
 
 let explicit_worker_size_of_spec (spec : spawn_spec) =
   match spec.worker_size with

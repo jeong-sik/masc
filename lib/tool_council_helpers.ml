@@ -105,6 +105,8 @@ let parse_requested_action args =
       match member "action_type" value with
       | `Null | `String "" ->
           Error "requested_action.action_type is required"
+      | `String s when String.trim s = "" ->
+          Error "requested_action.action_type is required"
       | `String _ -> (
           match GV2.action_request_of_yojson value with
           | Error msg -> Error ("requested_action: " ^ msg)

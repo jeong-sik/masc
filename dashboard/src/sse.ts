@@ -141,9 +141,10 @@ export function buildDashboardSseUrl(sessionId: string, locationSearch = window.
   const urlParams = new URLSearchParams(locationSearch)
   const sseParams = new URLSearchParams()
   const agent = urlParams.get('agent') ?? urlParams.get('agent_name')
-  const token = urlParams.get('token')
   if (agent) sseParams.set('agent', agent)
-  if (token) sseParams.set('token', token)
+  // Token is intentionally NOT propagated into the SSE URL.
+  // Bearer credentials in URLs leak to browser history, logs, and screenshots.
+  // The server extracts tokens from Authorization headers, not query params.
   sseParams.set('session_id', sessionId)
   sseParams.set('sse_kind', 'observer')
   return `/mcp?${sseParams.toString()}`

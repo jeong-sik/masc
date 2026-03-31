@@ -141,6 +141,27 @@ type handoff_rollover = {
   message_count : int;
 }
 
+type compaction_event = {
+  applied : bool;
+  trigger : string option;
+  decision : string;
+  before_tokens : int;
+  after_tokens : int;
+  saved_tokens : int;
+}
+
+type post_turn_lifecycle = {
+  updated_meta : keeper_meta;
+  checkpoint : Agent_sdk.Checkpoint.t option;
+  handoff_json : Yojson.Safe.t option;
+  compaction : compaction_event;
+  turn_generation : int;
+  context_ratio : float;
+  context_tokens : int;
+  context_max : int;
+  message_count : int;
+}
+
 let maybe_rollover_oas_handoff
     ~(base_dir : string)
     ~(meta : keeper_meta)
@@ -220,6 +241,7 @@ let maybe_rollover_oas_handoff
                 ("performed", `Bool true);
                 ("from_generation", `Int current_generation);
                 ("to_generation", `Int next_generation);
+                ("new_generation", `Int next_generation);
                 ("prev_trace_id", `String prev_trace_id);
                 ("new_trace_id", `String new_trace_id);
                 ("to_model", `String model);
@@ -398,6 +420,153 @@ let compact_if_needed
             { ctx with messages; token_count; importance_scores = [] }
         in
         (compacted_ctx, Some reason, "applied:" ^ reason)
+
+let apply_post_turn_lifecycle
+    ~(base_dir : string)
+    ~(meta : keeper_meta)
+    ~(model : string)
+    ~(primary_model_max_tokens : int)
+    ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
+  let now_ts = Time_compat.now () in
+  let no_checkpoint_decision = "skipped:no_checkpoint" in
+  let apply_continuity_summary
+      ~(meta : keeper_meta)
+      ~(ctx : working_context) : keeper_meta =
+    match latest_state_snapshot_from_messages ctx.messages with
+    | None -> meta
+    | Some snapshot ->
+        {
+          meta with
+          continuity_summary = keeper_state_snapshot_to_summary_text snapshot;
+          runtime =
+            {
+              meta.runtime with
+              last_continuity_update_ts = now_ts;
+            };
+        }
+  in
+  match checkpoint with
+  | None ->
+      let updated_meta =
+        map_runtime
+          (fun rt ->
+            {
+              rt with
+              compaction_rt =
+                {
+                  rt.compaction_rt with
+                  last_check_ts = now_ts;
+                  last_decision = no_checkpoint_decision;
+                };
+            })
+          meta
+      in
+      {
+        updated_meta;
+        checkpoint = None;
+        handoff_json = None;
+        compaction =
+          {
+            applied = false;
+            trigger = None;
+            decision = no_checkpoint_decision;
+            before_tokens = 0;
+            after_tokens = 0;
+            saved_tokens = 0;
+          };
+        turn_generation = meta.runtime.generation;
+        context_ratio = 0.0;
+        context_tokens = 0;
+        context_max = primary_model_max_tokens;
+        message_count = 0;
+      }
+  | Some cp ->
+      let ctx = context_of_oas_checkpoint cp ~primary_model_max_tokens in
+      let current_generation =
+        sidecar_generation cp ~fallback:meta.runtime.generation
+      in
+      let base_meta =
+        if current_generation = meta.runtime.generation then meta
+        else
+          map_runtime
+            (fun rt -> { rt with generation = current_generation })
+            meta
+      in
+      let before_tokens = ctx.token_count in
+      let compacted_ctx, trigger, decision =
+        compact_if_needed ~meta:base_meta ~now_ts ctx
+      in
+      let compaction_applied =
+        String.starts_with ~prefix:"applied:" decision
+      in
+      let after_tokens = compacted_ctx.token_count in
+      let saved_tokens = max 0 (before_tokens - after_tokens) in
+      let meta_after_compaction =
+        map_runtime
+          (fun rt ->
+            {
+              rt with
+              compaction_rt =
+                {
+                  count =
+                    rt.compaction_rt.count
+                    + if compaction_applied then 1 else 0;
+                  last_ts =
+                    if compaction_applied then now_ts else rt.compaction_rt.last_ts;
+                  last_before_tokens =
+                    if compaction_applied then before_tokens
+                    else rt.compaction_rt.last_before_tokens;
+                  last_after_tokens =
+                    if compaction_applied then after_tokens
+                    else rt.compaction_rt.last_after_tokens;
+                  last_check_ts = now_ts;
+                  last_decision = decision;
+                };
+            })
+          base_meta
+      in
+      let checkpoint =
+        if not compaction_applied then Some cp
+        else
+          let session =
+            create_session ~session_id:meta_after_compaction.runtime.trace_id ~base_dir
+          in
+          Some
+            (save_oas_checkpoint ~session
+               ~agent_name:meta_after_compaction.agent_name
+               ~model ~ctx:compacted_ctx ~generation:current_generation)
+      in
+      let rollover =
+        maybe_rollover_oas_handoff ~base_dir
+          ~meta:meta_after_compaction
+          ~model
+          ~primary_model_max_tokens
+          ~checkpoint
+      in
+      let continuity_meta =
+        apply_continuity_summary
+          ~meta:rollover.updated_meta
+          ~ctx:compacted_ctx
+      in
+      {
+        updated_meta = continuity_meta;
+        checkpoint;
+        handoff_json = rollover.handoff_json;
+        compaction =
+          {
+            applied = compaction_applied;
+            trigger;
+            decision;
+            before_tokens;
+            after_tokens;
+            saved_tokens;
+          };
+        turn_generation = current_generation;
+        context_ratio = rollover.context_ratio;
+        context_tokens = rollover.context_tokens;
+        context_max = rollover.context_max;
+        message_count = rollover.message_count;
+      }
 
 let generate_trace_id = Keeper_identity.generate_trace_id
 

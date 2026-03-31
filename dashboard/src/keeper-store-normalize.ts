@@ -69,6 +69,18 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
       const contextRatio = asNumber(item.context_ratio)
       if (ts == null || contextRatio == null) return null
       const handoffObj = isRecord(item.handoff) ? item.handoff : null
+      const handoffPerformed =
+        handoffObj != null
+          ? (item.handoff_performed === true || handoffObj.performed === true)
+          : item.handoff === true || item.handoff_performed === true
+      const handoffNewGeneration =
+        handoffObj
+          ? (asNumber(handoffObj.new_generation) ?? asNumber(handoffObj.to_generation) ?? null)
+          : (asNumber(item.handoff_new_generation) ?? null)
+      const handoffToModel =
+        handoffObj
+          ? (typeof handoffObj.to_model === 'string' ? handoffObj.to_model : null)
+          : (typeof item.handoff_to_model === 'string' ? item.handoff_to_model : null)
       return {
         ts,
         context_ratio: contextRatio,
@@ -77,14 +89,14 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         latency_ms: asNumber(item.latency_ms) ?? 0,
         generation: asNumber(item.generation) ?? 0,
         channel: typeof item.channel === 'string' ? item.channel : 'turn',
-        is_handoff: handoffObj != null && item.handoff_performed === true,
+        is_handoff: handoffPerformed,
         is_compaction: item.compacted === true,
         compaction_saved_tokens: asNumber(item.compaction_saved_tokens) ?? 0,
         compaction_trigger: typeof item.compaction_trigger === 'string' ? item.compaction_trigger : null,
         model_used: typeof item.model_used === 'string' ? item.model_used : '',
         cost_usd: asNumber(item.cost_usd) ?? Number.NaN,
-        handoff_to_model: handoffObj ? (typeof handoffObj.to_model === 'string' ? handoffObj.to_model : null) : null,
-        handoff_new_generation: handoffObj ? (asNumber(handoffObj.new_generation) ?? null) : null,
+        handoff_to_model: handoffToModel,
+        handoff_new_generation: handoffNewGeneration,
       }
     })
     .filter((item): item is KeeperMetricPoint => item !== null)

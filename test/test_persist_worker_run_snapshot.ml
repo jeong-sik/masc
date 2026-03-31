@@ -60,6 +60,7 @@ let sample_proof ~(run_id : string) : Oas.Cdal_proof.t =
     result_status = Oas.Cdal_proof.Completed;
     started_at = 1000.0;
     ended_at = 1001.0;
+    scope = None;
   }
 
 let with_snapshot_env f =

@@ -40,6 +40,43 @@ let is_binary_file path =
 (* Security: Check file size limit (500KB) *)
 let max_file_size = 500 * 1024
 
+let lexically_normalize_path path =
+  let absolute = String.starts_with ~prefix:"/" path in
+  let parts = String.split_on_char '/' path in
+  let rec fold acc = function
+    | [] -> List.rev acc
+    | "" :: rest
+    | "." :: rest -> fold acc rest
+    | ".." :: rest -> (
+        match acc with
+        | [] when absolute -> fold [] rest
+        | [] -> fold [".."] rest
+        | ".." :: _ -> fold (".." :: acc) rest
+        | _ :: tail -> fold tail rest)
+    | part :: rest -> fold (part :: acc) rest
+  in
+  let normalized = fold [] parts |> String.concat "/" in
+  match absolute, normalized with
+  | true, "" -> "/"
+  | true, _ -> "/" ^ normalized
+  | false, _ -> normalized
+
+let normalize_path_for_check path =
+  let normalized =
+    try Unix.realpath path
+    with Unix.Unix_error _ ->
+      let parent = Filename.dirname path in
+      let parent_norm =
+        try Unix.realpath parent
+        with Unix.Unix_error _ -> parent
+      in
+      Filename.concat parent_norm (Filename.basename path)
+  in
+  lexically_normalize_path normalized
+
+let path_within_root ~root ~candidate =
+  candidate = root || String.starts_with ~prefix:(root ^ "/") candidate
+
 (* Security: Validate path is within git root *)
 let validate_path config path =
   try
@@ -49,13 +86,14 @@ let validate_path config path =
     in
     let absolute_path =
       if Filename.is_relative path then
-        Filename.concat config.Room.base_path path
+        Filename.concat git_root path
       else
         path
     in
-    (* Simple path traversal check *)
-    if String.starts_with ~prefix:git_root absolute_path then
-      Ok absolute_path
+    let root_norm = normalize_path_for_check git_root in
+    let candidate_norm = normalize_path_for_check absolute_path in
+    if path_within_root ~root:root_norm ~candidate:candidate_norm then
+      Ok candidate_norm
     else
       Error (IoError "Path traversal detected: access outside git root")
   with

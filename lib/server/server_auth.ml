@@ -344,12 +344,12 @@ let authorize_tool_request ~base_path ~tool_name request :
     (unit, Types.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
-  match
-    if Option.is_some token then Ok ()
-    else ensure_same_origin_browser_request request
-  with
-  | Error err -> Error err
-  | Ok () ->
+  match token with
+  | None ->
+      Error
+        (Types.Unauthorized
+           "Authentication required. Use 'Authorization: Bearer <token>' header.")
+  | Some _ ->
       (match ensure_strict_http_token_auth
                ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
        with

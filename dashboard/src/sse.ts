@@ -141,9 +141,7 @@ export function buildDashboardSseUrl(sessionId: string, locationSearch = window.
   const urlParams = new URLSearchParams(locationSearch)
   const sseParams = new URLSearchParams()
   const agent = urlParams.get('agent') ?? urlParams.get('agent_name')
-  const token = urlParams.get('token')
   if (agent) sseParams.set('agent', agent)
-  if (token) sseParams.set('token', token)
   sseParams.set('session_id', sessionId)
   sseParams.set('sse_kind', 'observer')
   return `/mcp?${sseParams.toString()}`

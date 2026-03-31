@@ -518,9 +518,9 @@ let add_routes ~sw ~clock router =
              {|{"error":"not found"}|} reqd
        ) request reqd)
 
-  (* Keeper config or tools update.  This prefix_post catches ALL POST
-     /api/v1/keepers/* requests.  We check the suffix BEFORE auth so that
-     /tools gets with_tool_auth (localhost-friendly) while /config keeps
+  (* Keeper config or tools update. This prefix_post catches ALL POST
+     /api/v1/keepers/* requests. We check the suffix BEFORE auth so that
+     /tools stays on per-tool bearer auth while /config keeps
      with_token_permission_auth (admin token required). *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
        let _p = Http.Request.path request in

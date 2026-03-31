@@ -14,6 +14,23 @@ open Alcotest
 module Auth = Masc_mcp.Auth
 module Types = Types
 
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path
+      ) else
+        Sys.remove path
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      try rm dir with _ -> ())
+    (fun () -> f dir)
+
 (* ============================================================
    generate_token Tests
    ============================================================ *)
@@ -397,6 +414,45 @@ let test_http_auth_rejects_query_token_fallback () =
   check (option string) "query token ignored" None
     (Server_auth.auth_token_from_request request)
 
+let test_authorize_tool_request_requires_bearer_token () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  with_temp_dir "auth_tool_req_" @@ fun base_path ->
+  let headers = Httpun.Headers.of_list [ ("host", "127.0.0.1:8935") ] in
+  let request =
+    Httpun.Request.create ~headers `POST "/api/v1/operator/action"
+  in
+  match Server_auth.authorize_tool_request ~base_path
+          ~tool_name:"masc_operator_action" request with
+  | Error (Types.Unauthorized _) -> ()
+  | Error err -> fail (Types.masc_error_to_string err)
+  | Ok () -> fail "expected missing bearer token to be rejected"
+
+let test_authorize_tool_request_accepts_valid_bearer_token () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  with_temp_dir "auth_tool_req_token_" @@ fun base_path ->
+  let (_secret, bootstrap_token) =
+    Auth.enable_auth base_path ~require_token:true ~agent_name:"audit-admin"
+  in
+  let token =
+    match bootstrap_token with
+    | Some value -> value
+    | None -> fail "expected bootstrap token"
+  in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("host", "127.0.0.1:8935");
+        ("authorization", "Bearer " ^ token);
+      ]
+  in
+  let request =
+    Httpun.Request.create ~headers `POST "/api/v1/operator/action"
+  in
+  match Server_auth.authorize_tool_request ~base_path
+          ~tool_name:"masc_operator_action" request with
+  | Ok () -> ()
+  | Error err -> fail (Types.masc_error_to_string err)
+
 let test_permission_for_tool_approve () =
   match Auth.permission_for_tool "masc_approve" with
   | Some Types.CanApprove -> ()
@@ -714,6 +770,10 @@ let () =
       test_case "header token only" `Quick test_http_auth_token_from_header_only;
       test_case "reject query token fallback" `Quick
         test_http_auth_rejects_query_token_fallback;
+      test_case "tool request requires bearer token" `Quick
+        test_authorize_tool_request_requires_bearer_token;
+      test_case "tool request accepts valid bearer token" `Quick
+        test_authorize_tool_request_accepts_valid_bearer_token;
       test_case "same-origin allows missing origin" `Quick
         test_same_origin_browser_request_allows_missing_origin;
       test_case "same-origin allows matching origin" `Quick

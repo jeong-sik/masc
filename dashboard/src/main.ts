@@ -28,8 +28,10 @@ import './styles/tools.css'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { App } from './app'
+import { bootstrapDashboardAuthTokenFromUrl } from './lib/dashboard-auth'
 
 const root = document.getElementById('app')
 if (root) {
+  bootstrapDashboardAuthTokenFromUrl()
   render(html`<${App} />`, root)
 }

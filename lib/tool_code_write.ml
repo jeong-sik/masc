@@ -33,8 +33,10 @@ let validate_writable_path config path =
     match git_root with
     | Error e -> Error e
     | Ok root ->
-      let worktree_prefix = Filename.concat root ".worktrees" in
-      if String.starts_with ~prefix:worktree_prefix abs_path then
+      let worktree_prefix =
+        Filename.concat root ".worktrees" |> Tool_code.normalize_path_for_check
+      in
+      if Tool_code.path_within_root ~root:worktree_prefix ~candidate:abs_path then
         Ok abs_path
       else
         Error (IoError (Printf.sprintf

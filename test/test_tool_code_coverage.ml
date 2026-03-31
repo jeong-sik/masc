@@ -5,6 +5,7 @@
 *)
 
 module Tool_code = Masc_mcp.Tool_code
+module Tool_code_write = Masc_mcp.Tool_code_write
 module Room = Masc_mcp.Room
 
 (* msg_contains: case-insensitive substring check *)
@@ -34,6 +35,12 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let init_git_repo dir =
+  let cmd = Printf.sprintf "git -C %s init -q" (Filename.quote dir) in
+  match Sys.command cmd with
+  | 0 -> ()
+  | code -> failwith (Printf.sprintf "git init failed with exit %d" code)
+
 let make_ctx () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -41,6 +48,26 @@ let make_ctx () =
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "test-agent"));
   let ctx : Tool_code.context = { config; agent_name = "test-agent" } in
+  (ctx, base_dir)
+
+let make_git_ctx () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  init_git_repo base_dir;
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "test-agent"));
+  let ctx : Tool_code.context = { config; agent_name = "test-agent" } in
+  (ctx, base_dir)
+
+let make_git_write_ctx () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  init_git_repo base_dir;
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "test-agent"));
+  let ctx : Tool_code_write.context = { config; agent_name = "test-agent" } in
   (ctx, base_dir)
 
 let dispatch_exn ctx ~name ~args =
@@ -143,6 +170,39 @@ let test_code_read_with_offset_limit () =
   Alcotest.(check bool) "has response" true (String.length msg > 0);
   cleanup_dir base_dir
 
+let test_code_read_blocks_sibling_prefix_escape () =
+  let ctx, base_dir = make_git_ctx () in
+  let sibling_dir = base_dir ^ "-sibling" in
+  let sibling_file = Filename.concat sibling_dir "proof.txt" in
+  Unix.mkdir sibling_dir 0o755;
+  Out_channel.with_open_text sibling_file (fun oc ->
+    output_string oc "outside-root-proof\n");
+  let args = `Assoc [("path", `String sibling_file)] in
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_code_read" ~args in
+  Alcotest.(check bool) "sibling prefix escape blocked" false ok;
+  Alcotest.(check bool) "error mentions traversal" true
+    (msg_contains ~needle:"traversal" msg);
+  cleanup_dir sibling_dir;
+  cleanup_dir base_dir
+
+let test_code_write_blocks_worktree_escape () =
+  let ctx, base_dir = make_git_write_ctx () in
+  let escape_target_dir = Filename.concat (Filename.dirname base_dir) "code_write_escape_target" in
+  let escape_target_file = Filename.concat escape_target_dir "proof.txt" in
+  cleanup_dir escape_target_dir;
+  let args = `Assoc [
+    ("path", `String ".worktrees/../../code_write_escape_target/proof.txt");
+    ("content", `String "escape\n");
+    ("create_dirs", `Bool true);
+  ] in
+  let (ok, msg) = Tool_code_write.handle_code_write ctx args in
+  Alcotest.(check bool) "worktree escape blocked" false ok;
+  Alcotest.(check bool) "error mentions write restriction" true
+    (msg_contains ~needle:"restricted" msg || msg_contains ~needle:"traversal" msg);
+  Alcotest.(check bool) "escape target not created" false (Sys.file_exists escape_target_file);
+  cleanup_dir escape_target_dir;
+  cleanup_dir base_dir
+
 (* ============================================================
    code_symbols validation
    ============================================================ *)
@@ -181,6 +241,12 @@ let () =
       Alcotest.test_case "no path" `Quick test_code_read_no_path;
       Alcotest.test_case "path traversal" `Quick test_code_read_path_traversal;
       Alcotest.test_case "offset and limit" `Quick test_code_read_with_offset_limit;
+      Alcotest.test_case "blocks sibling prefix escape" `Quick
+        test_code_read_blocks_sibling_prefix_escape;
+    ]);
+    ("code_write", [
+      Alcotest.test_case "blocks worktree escape" `Quick
+        test_code_write_blocks_worktree_escape;
     ]);
     ("code_symbols", [
       Alcotest.test_case "empty args" `Quick test_code_symbols_empty;

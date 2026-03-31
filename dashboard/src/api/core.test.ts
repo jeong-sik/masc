@@ -32,6 +32,25 @@ describe('post', () => {
     expect(actorHeader).not.toContain('%')
   })
 
+  it('uses a session-stored auth token after the URL token is scrubbed', async () => {
+    window.sessionStorage?.setItem?.('masc_dashboard_auth_token', 'stored-secret')
+    window.history.replaceState({}, '', '/?agent=dashboard')
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await post('/api/v1/operator/action', { action_type: 'room_resume', target_type: 'room' })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const headers = init.headers as Record<string, string>
+    expect(headers.Authorization).toBe('Bearer stored-secret')
+  })
+
   it('keeps board voter resolution scoped to query params', () => {
     window.localStorage?.setItem?.('masc_dashboard_agent_name', 'stored-agent')
     window.history.replaceState({}, '', '/')

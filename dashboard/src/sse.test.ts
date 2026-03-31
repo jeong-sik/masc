@@ -8,7 +8,7 @@ describe('buildDashboardSseUrl', () => {
         'dash_test',
         '?agent=keeper-a&token=secret',
       ),
-    ).toBe('/mcp?agent=keeper-a&token=secret&session_id=dash_test&sse_kind=observer')
+    ).toBe('/mcp?agent=keeper-a&session_id=dash_test&sse_kind=observer')
   })
 
   it('omits optional params when they are absent', () => {

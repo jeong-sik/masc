@@ -140,9 +140,7 @@ export function chainEventsUrl(): string {
   const query = new URLSearchParams(window.location.search)
   const params = new URLSearchParams()
   const agent = query.get('agent') ?? query.get('agent_name')
-  const token = query.get('token')
   if (agent) params.set('agent', agent)
-  if (token) params.set('token', token)
   return params.toString() ? `/api/v1/chains/events?${params.toString()}` : '/api/v1/chains/events'
 }
 

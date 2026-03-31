@@ -8,6 +8,7 @@ import type {
   OperatorSnapshot,
 } from '../types'
 import { resolveDashboardActorName, sanitizeDashboardActorName } from '../lib/dashboard-actor'
+import { resolveDashboardAuthToken } from '../lib/dashboard-auth'
 
 // --- Auth ---
 
@@ -24,9 +25,8 @@ type HeaderOptions = {
 }
 
 function authHeaders(options: HeaderOptions = {}): Record<string, string> {
-  const params = getQueryParams()
   const headers: Record<string, string> = {}
-  const token = params.get('token')
+  const token = resolveDashboardAuthToken(window.location.search)
   const agent = resolveDashboardActorName(window.location.search)
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (options.includeActor !== false && agent) {

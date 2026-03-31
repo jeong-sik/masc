@@ -8,6 +8,7 @@ import {
 import type { KeeperConversationDetails } from '../types'
 import { currentDashboardActor, runOperatorAction } from './core'
 import { resolveDashboardActorName } from '../lib/dashboard-actor'
+import { resolveDashboardAuthToken } from '../lib/dashboard-auth'
 
 // --- Types ---
 
@@ -74,9 +75,8 @@ export async function sendKeeperMessageDetailed(
 // --- SSE streaming ---
 
 function jsonHeaders(): Record<string, string> {
-  const params = new URLSearchParams(window.location.search)
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = params.get('token')
+  const token = resolveDashboardAuthToken(window.location.search)
   const agent = resolveDashboardActorName(window.location.search)
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (agent) headers['X-MASC-Agent'] = agent

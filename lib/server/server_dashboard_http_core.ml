@@ -216,6 +216,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
         ("board", board_monitor_json);
         ("governance", governance_monitor_json);
         ("room_state", Room_eio.state_health_counters ());
+        ("executor", executor_outcomes_json config);
       ]);
       ("data_quality", `Assoc [
         ("board_contract_ok", `Bool board_contract_ok);

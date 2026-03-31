@@ -144,12 +144,18 @@ let append_many ctx msgs =
 
 let sync_oas_context (ctx : working_context) : working_context =
   let context = ctx.context in
+  let message_count = message_count ctx in
+  let token_count = token_count ctx in
+  let context_ratio =
+    if ctx.max_tokens = 0 then 0.0
+    else float_of_int token_count /. float_of_int ctx.max_tokens
+  in
   Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
-    "message_count" (`Int (message_count ctx));
+    "message_count" (`Int message_count);
   Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
-    "token_count" (`Int (token_count ctx));
+    "token_count" (`Int token_count);
   Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
-    "context_ratio" (`Float (context_ratio ctx));
+    "context_ratio" (`Float context_ratio);
   ctx
 
 (* ================================================================ *)

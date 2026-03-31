@@ -485,6 +485,17 @@ let test_oas_worker_capability_threading_contracts () =
     (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
        "?raw_trace ~proof_ref ?contract ~sw")
 
+let test_team_session_spawn_tool_contracts () =
+  check bool "team session spawn uses explicit masc tools path" true
+    (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
+       "Oas_worker.run_model_with_masc_tools");
+  check bool "team session spawn contract uses scoped tool names" true
+    (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
+       "supported_local_worker_tool_names_for_scope");
+  check bool "team session bridge exposes scoped local worker tools" true
+    (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
+       "supported_local_worker_tool_names_for_scope")
+
 let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
@@ -606,9 +617,11 @@ let () =
            test_case "transport health contracts" `Quick
              test_transport_health_contracts;
            test_case "worktree list contracts" `Quick
-             test_worktree_list_contracts;
+           test_worktree_list_contracts;
            test_case "oas worker capability threading contracts" `Quick
              test_oas_worker_capability_threading_contracts;
+           test_case "team session spawn tool contracts" `Quick
+             test_team_session_spawn_tool_contracts;
            test_case "dashboard timeout guard contracts" `Quick
              test_dashboard_timeout_guard_contracts;
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;

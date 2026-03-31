@@ -147,10 +147,15 @@ let code_mutation_denied_tools =
 let masc_mutating_denied_tools =
   [ "masc_add_task"; "masc_claim_next"; "masc_transition";
     "masc_complete_task";  (* alias of masc_transition *)
+    "masc_board_post"; "masc_board_comment"; "masc_board_vote";
     "masc_worktree_create"; "masc_worktree_remove";
     "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
     "masc_plan_set_task"; "masc_plan_clear_task";
     "masc_set_current_task";  (* alias of masc_plan_set_task *)
+    "masc_run_init"; "masc_run_plan"; "masc_run_log";
+    "masc_run_deliverable";
+    "masc_repair_loop_start"; "masc_repair_loop_iterate";
+    "masc_repair_loop_stop";
     "masc_operator_action"; "masc_operator_confirm";
     "masc_room_delete"; "masc_admin_cleanup"; "masc_admin_reset";
     "masc_gc_force"; "masc_spawn"; "masc_force_leave";

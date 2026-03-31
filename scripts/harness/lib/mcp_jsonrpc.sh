@@ -70,14 +70,8 @@ mcp_extract_result() {
   '
 }
 
-mcp_extract_payload() {
-  jq -c '
-    if ._harness_error? then
-      empty
-    else
-      try (.result.content[0].text | fromjson | .payload) catch empty
-    end
-  '
+mcp_extract_is_error() {
+  jq -r 'try (.result.isError) catch "true"'
 }
 
 mcp_extract_error() {

@@ -123,12 +123,6 @@ extract_result() {
   '
 }
 
-# Extract .payload from MCP tool response content.
-# Usage: echo "$response" | extract_payload
-extract_payload() {
-  jq -c 'if ._harness_error? then empty else try (.result.content[0].text | fromjson | .payload) catch empty end'
-}
-
 # Extract error message from MCP tool response.
 # Usage: echo "$response" | extract_error
 extract_error() {

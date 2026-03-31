@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.186.0] - 2026-03-31
+
+### Fixed
+- **Dashboard harness schema** — align frontend with backend (#4113).
+- **Research List.hd** — replace unsafe List.hd with pattern match (#4116, #4121).
+- **CDAL tool restriction** — remove restriction blocking keeper execution (#4104).
+
+### Changed
+- **JSON helpers consolidation** — deduplicate option helpers to Json_util (#4112).
+- **Harness boilerplate** — extract shared scripts (#4095).
+
 ## [2.185.0] - 2026-03-31
 
 ### Fixed

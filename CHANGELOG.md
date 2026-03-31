@@ -1,6 +1,27 @@
 # Changelog
 
 
+## [2.190.0] - 2026-03-31
+
+### Added
+- **Keeper lossy fold compaction** — structured fold stubs preserving task/outcome/artifact counts (#4183).
+- **Keeper delta checkpoint** — shadow-apply, sidecar write, 6 Prometheus metrics (#4181).
+- **CDAL cross-run window projection** — proof window aggregation + spec alignment (#4176).
+- **Dashboard agent/keeper detail UX overhaul** — redesigned detail pages (#4196).
+- **masc_status visibility improvements** — worktree status, agent zombies, current task (#4177).
+- **Team-session zero-tool guard** — reject completion without tool use in code-change scopes (#4180).
+
+### Changed
+- **Dead tool cleanup** — remove dead schemas, tombstones, and legacy aliases (#4188).
+- **Dashboard internal tools hidden** — hide internal tools by default in Lab/Tools (#4182).
+- **Team-session observe-only scope** — scope local worker tools for observe-only (#4175).
+- **Warning suppressors removed** — unjustified warning suppressors across 13 modules (#4194).
+
+### Fixed
+- **Cdal_proof.scope test breakage** — remove stale scope field from 6 test files (#4199).
+- **OCaml runtime hardening** — harden preconditions and test seams (#4141).
+- **Doc truth fixes** — review follow-up version truth corrections (#4187, #4178).
+
 ## [2.189.0] - 2026-03-31
 
 ### Added

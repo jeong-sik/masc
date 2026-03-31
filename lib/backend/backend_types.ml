@@ -90,7 +90,7 @@ let get_status config : Yojson.Safe.t =
     ("base_path", `String config.base_path);
     ("node_id", `String config.node_id);
     ("cluster_name", `String config.cluster_name);
-    ("postgres_url", match config.postgres_url with Some u -> `String u | None -> `Null);
+    ("postgres_url", Json_util.string_opt_to_json config.postgres_url);
   ]
 
 type pool_stats = {

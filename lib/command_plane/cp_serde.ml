@@ -219,13 +219,10 @@ let intent_state_of_string = function
 let intent_focus_to_json (focus : intent_focus) =
   `Assoc
     [
-      ("stage", match focus.stage with Some value -> `String value | None -> `Null);
+      ("stage", Json_util.string_opt_to_json focus.stage);
       ("artifact_scope", json_list_of_strings focus.artifact_scope);
-      ("unit_id", match focus.unit_id with Some value -> `String value | None -> `Null);
-      ( "verification_state",
-        match focus.verification_state with
-        | Some value -> `String value
-        | None -> `Null );
+      ("unit_id", Json_util.string_opt_to_json focus.unit_id);
+      ("verification_state", Json_util.string_opt_to_json focus.verification_state);
     ]
 
 let intent_focus_of_json json =
@@ -355,9 +352,8 @@ let unit_to_json (unit : unit_record) =
       ("unit_id", `String unit.unit_id);
       ("label", `String unit.label);
       ("kind", `String (string_of_unit_kind unit.kind));
-      ( "parent_unit_id",
-        match unit.parent_unit_id with Some value -> `String value | None -> `Null );
-      ("leader_id", match unit.leader_id with Some value -> `String value | None -> `Null);
+      ("parent_unit_id", Json_util.string_opt_to_json unit.parent_unit_id);
+      ("leader_id", Json_util.string_opt_to_json unit.leader_id);
       ("roster", json_list_of_strings unit.roster);
       ("capability_profile", json_list_of_strings unit.capability_profile);
       ("policy", policy_to_json unit.policy);
@@ -403,27 +399,21 @@ let operation_to_json (operation : operation_record) =
     [
       ("operation_id", `String operation.operation_id);
       ("objective", `String operation.objective);
-      ("intent_id", match operation.intent_id with Some value -> `String value | None -> `Null);
+      ("intent_id", Json_util.string_opt_to_json operation.intent_id);
       ("assigned_unit_id", `String operation.assigned_unit_id);
       ("policy_class", `String operation.policy_class);
       ("budget_class", `String operation.budget_class);
-      ( "workload_template",
-        match operation.workload_template with
-        | Some value -> `String value
-        | None -> `Null );
+      ("workload_template", Json_util.string_opt_to_json operation.workload_template);
       ("workload_profile", `String (operation_workload_profile operation));
-      ("stage", match operation.stage with Some value -> `String value | None -> `Null);
+      ("stage", Json_util.string_opt_to_json operation.stage);
       ("artifact_scope", json_list_of_strings operation.artifact_scope);
       ("depends_on_operation_ids", json_list_of_strings operation.depends_on_operation_ids);
       ("search_strategy", `String operation.search_strategy);
-      ( "detachment_session_id",
-        match operation.detachment_session_id with
-        | Some value -> `String value
-        | None -> `Null );
+      ("detachment_session_id", Json_util.string_opt_to_json operation.detachment_session_id);
       ("trace_id", `String operation.trace_id);
-      ("checkpoint_ref", match operation.checkpoint_ref with Some value -> `String value | None -> `Null);
+      ("checkpoint_ref", Json_util.string_opt_to_json operation.checkpoint_ref);
       ("active_goal_ids", json_list_of_strings operation.active_goal_ids);
-      ("note", match operation.note with Some value -> `String value | None -> `Null);
+      ("note", Json_util.string_opt_to_json operation.note);
       ("created_by", `String operation.created_by);
       ("source", `String operation.source);
       ("status", `String (string_of_operation_status operation.status));
@@ -491,7 +481,7 @@ let intent_to_json (intent : intent_record) =
       ("artifact_priors", json_list_of_strings intent.artifact_priors);
       ("state", `String (string_of_intent_state intent.state));
       ("current_focus", intent_focus_to_json intent.current_focus);
-      ("checkpoint_ref", match intent.checkpoint_ref with Some value -> `String value | None -> `Null);
+      ("checkpoint_ref", Json_util.string_opt_to_json intent.checkpoint_ref);
       ("source", `String intent.source);
       ("created_at", `String intent.created_at);
       ("updated_at", `String intent.updated_at);
@@ -546,9 +536,9 @@ let event_to_json (event : event_record) =
       ("event_id", `String event.event_id);
       ("trace_id", `String event.trace_id);
       ("event_type", `String event.event_type);
-      ("operation_id", match event.operation_id with Some value -> `String value | None -> `Null);
-      ("unit_id", match event.unit_id with Some value -> `String value | None -> `Null);
-      ("actor", match event.actor with Some value -> `String value | None -> `Null);
+      ("operation_id", Json_util.string_opt_to_json event.operation_id);
+      ("unit_id", Json_util.string_opt_to_json event.unit_id);
+      ("actor", Json_util.string_opt_to_json event.actor);
       ("source", `String event.source);
       ("ts", `String event.ts);
       ("detail", event.detail);
@@ -588,19 +578,17 @@ let detachment_to_json (detachment : detachment_record) =
       ("detachment_id", `String detachment.detachment_id);
       ("operation_id", `String detachment.operation_id);
       ("assigned_unit_id", `String detachment.assigned_unit_id);
-      ("leader_id", match detachment.leader_id with Some value -> `String value | None -> `Null);
+      ("leader_id", Json_util.string_opt_to_json detachment.leader_id);
       ("roster", json_list_of_strings detachment.roster);
-      ("session_id", match detachment.session_id with Some value -> `String value | None -> `Null);
-      ( "checkpoint_ref",
-        match detachment.checkpoint_ref with Some value -> `String value | None -> `Null );
-      ("runtime_kind", match detachment.runtime_kind with Some value -> `String value | None -> `Null);
-      ("runtime_ref", match detachment.runtime_ref with Some value -> `String value | None -> `Null);
+      ("session_id", Json_util.string_opt_to_json detachment.session_id);
+      ("checkpoint_ref", Json_util.string_opt_to_json detachment.checkpoint_ref);
+      ("runtime_kind", Json_util.string_opt_to_json detachment.runtime_kind);
+      ("runtime_ref", Json_util.string_opt_to_json detachment.runtime_ref);
       ("source", `String detachment.source);
       ("status", `String detachment.status);
-      ("last_event_at", match detachment.last_event_at with Some value -> `String value | None -> `Null);
-      ("last_progress_at", match detachment.last_progress_at with Some value -> `String value | None -> `Null);
-      ( "heartbeat_deadline",
-        match detachment.heartbeat_deadline with Some value -> `String value | None -> `Null );
+      ("last_event_at", Json_util.string_opt_to_json detachment.last_event_at);
+      ("last_progress_at", Json_util.string_opt_to_json detachment.last_progress_at);
+      ("heartbeat_deadline", Json_util.string_opt_to_json detachment.heartbeat_deadline);
       ("created_at", `String detachment.created_at);
       ("updated_at", `String detachment.updated_at);
     ]
@@ -637,17 +625,16 @@ let policy_decision_to_json (decision : policy_decision_record) =
       ("requested_action", `String decision.requested_action);
       ("scope_type", `String decision.scope_type);
       ("scope_id", `String decision.scope_id);
-      ("operation_id", match decision.operation_id with Some value -> `String value | None -> `Null);
-      ( "target_unit_id",
-        match decision.target_unit_id with Some value -> `String value | None -> `Null );
+      ("operation_id", Json_util.string_opt_to_json decision.operation_id);
+      ("target_unit_id", Json_util.string_opt_to_json decision.target_unit_id);
       ("requested_by", `String decision.requested_by);
       ("status", `String decision.status);
-      ("reason", match decision.reason with Some value -> `String value | None -> `Null);
+      ("reason", Json_util.string_opt_to_json decision.reason);
       ("source", `String decision.source);
       ("detail", decision.detail);
       ("created_at", `String decision.created_at);
-      ("decided_at", match decision.decided_at with Some value -> `String value | None -> `Null);
-      ("expires_at", match decision.expires_at with Some value -> `String value | None -> `Null);
+      ("decided_at", Json_util.string_opt_to_json decision.decided_at);
+      ("expires_at", Json_util.string_opt_to_json decision.expires_at);
     ]
 
 let policy_decision_of_json json =

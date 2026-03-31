@@ -185,7 +185,7 @@ let json_response config ?room_id ?(kinds = []) ~after_seq ~limit () =
       ("after_seq", `Int after_seq);
       ("next_after_seq", `Int next_after_seq);
       ("limit", `Int limit);
-      ("room_id", match room_id with Some value -> `String value | None -> `Null);
+      ("room_id", Json_util.string_opt_to_json room_id);
       ("kinds", `List (List.map (fun value -> `String value) kinds));
       ("latest_seq", `Int (latest_seq config));
     ]

@@ -404,3 +404,19 @@ After masc_code_symbols identifies the relevant line numbers.";
   };
 
 ]
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_code
+           ~input_schema:s.input_schema
+           ()))
+    schemas

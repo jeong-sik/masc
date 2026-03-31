@@ -272,3 +272,19 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
   | "masc_voice_conference_start" -> Some (handle_voice_conference_start ctx args)
   | "masc_voice_conference_end" -> Some (handle_voice_conference_end ctx args)
   | _ -> None
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_voice
+           ~input_schema:s.input_schema
+           ()))
+    schemas

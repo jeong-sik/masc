@@ -480,3 +480,19 @@ Pair with masc_operator_confirm to see the original pending_confirm, or masc_gov
   };
 
 ]
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_audit
+           ~input_schema:s.input_schema
+           ()))
+    schemas

@@ -189,3 +189,22 @@ let dispatch ctx ~name ~args : result option =
   | _ -> None
 
 let schemas = Tool_schemas_plan.schemas
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let _tool_spec_requires_join = [ "masc_plan_set_task"; "masc_plan_clear_task" ]
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_plan
+           ~input_schema:s.input_schema
+           ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ()))
+    schemas

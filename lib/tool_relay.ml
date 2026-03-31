@@ -282,3 +282,19 @@ let dispatch ctx ~name ~args : result option =
   | "masc_relay_now" -> Some (handle_relay_now ctx args)
   | "masc_relay_smart_check" -> Some (handle_relay_smart_check ctx args)
   | _ -> None
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_relay
+           ~input_schema:s.input_schema
+           ()))
+    schemas

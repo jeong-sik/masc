@@ -137,3 +137,19 @@ let dispatch ctx ~name ~args : result option =
   | _ -> None
 
 let schemas = Tool_schemas_auth.schemas
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_auth
+           ~input_schema:s.input_schema
+           ()))
+    schemas

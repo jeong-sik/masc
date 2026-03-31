@@ -151,3 +151,19 @@ let dispatch ctx ~name ~args : result option =
   | "masc_tempo_reset" -> Some (handle_tempo_reset ctx args)
   | "masc_tempo" -> Some (handle_tempo ctx args)
   | _ -> None
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_tempo
+           ~input_schema:s.input_schema
+           ()))
+    schemas

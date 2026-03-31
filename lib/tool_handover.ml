@@ -225,3 +225,19 @@ let dispatch ctx ~name ~args : result option =
   | "masc_handover_claim" -> Some (handle_handover_claim ctx args)
   | "masc_handover_get" -> Some (handle_handover_get ctx args)
   | _ -> None
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_handover
+           ~input_schema:s.input_schema
+           ()))
+    schemas

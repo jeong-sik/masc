@@ -103,51 +103,51 @@ let () = Tool_dispatch.init_requires_join_set requires_join_tools
    Maps tool names to module tags for O(1) dispatch. *)
 let () =
   let open Tool_dispatch in
-  register_module_tag ~schemas:Tool_plan.schemas ~tag:Mod_plan;
-  register_module_tag ~schemas:Tool_operator.schemas ~tag:Mod_operator;
-  register_module_tag ~schemas:Tool_command_plane.schemas ~tag:Mod_command_plane;
-  register_module_tag ~schemas:Tool_local_runtime.schemas ~tag:Mod_local_runtime;
-  register_module_tag ~schemas:Tool_team_session.schemas ~tag:Mod_team_session;
-  register_module_tag ~schemas:Tool_voice.schemas ~tag:Mod_voice;
-  register_module_tag ~schemas:Tool_portal.schemas ~tag:Mod_portal;
-  register_module_tag ~schemas:Tool_worktree.schemas ~tag:Mod_worktree;
-  register_module_tag ~schemas:Tool_auth.schemas ~tag:Mod_auth;
-  register_module_tag ~schemas:Tool_audit.schemas ~tag:Mod_audit;
+  (* Tool_plan: migrated to Tool_spec.register *)
+  (* Tool_operator: migrated to Tool_spec.register *)
+  (* Tool_command_plane: migrated to Tool_spec.register *)
+  (* Tool_local_runtime: migrated to Tool_spec.register *)
+  (* Tool_team_session: migrated to Tool_spec.register *)
+  (* Tool_voice: migrated to Tool_spec.register *)
+  (* Tool_portal: migrated to Tool_spec.register *)
+  (* Tool_worktree: migrated to Tool_spec.register *)
+  (* Tool_auth: migrated to Tool_spec.register *)
+  (* Tool_audit: migrated to Tool_spec.register *)
   (* Tool_cost: migrated to Tool_spec.register (tool_cost.ml) *)
-  register_module_tag ~schemas:Tool_encryption.schemas ~tag:Mod_encryption;
-  register_module_tag ~schemas:Tool_schemas_fire_task.schemas ~tag:Mod_fire_task;
-  register_module_tag ~schemas:Tool_agent.schemas ~tag:Mod_agent;
-  register_module_tag ~schemas:Tool_room.schemas ~tag:Mod_room;
-  register_module_tag ~schemas:Tool_agent_timeline.schemas ~tag:Mod_agent_timeline;
-  register_module_tag ~schemas:Tool_keeper.schemas ~tag:Mod_keeper;
-  register_module_tag ~schemas:Tool_mdal.schemas ~tag:Mod_mdal;
-  register_module_tag ~schemas:Tool_repair_loop.schemas ~tag:Mod_repair_loop;
-  register_module_tag ~schemas:Tool_improve_loop.schemas ~tag:Mod_improve_loop;
-  register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
-  register_module_tag ~schemas:Tool_research.schemas ~tag:Mod_research;
+  (* Tool_encryption: migrated to Tool_spec.register *)
+  (* Tool_schemas_fire_task: migrated to Tool_spec.register *)
+  (* Tool_agent: migrated to Tool_spec.register *)
+  (* Tool_room: migrated to Tool_spec.register *)
+  (* Tool_agent_timeline: migrated to Tool_spec.register *)
+  (* Tool_keeper: migrated to Tool_spec.register *)
+  (* Tool_mdal: migrated to Tool_spec.register *)
+  (* Tool_repair_loop: migrated to Tool_spec.register *)
+  (* Tool_improve_loop: migrated to Tool_spec.register *)
+  (* Tool_autoresearch: migrated to Tool_spec.register *)
+  (* Tool_research: migrated to Tool_spec.register *)
   (* God Schema decomposition: register modules that now own their schemas *)
-  register_module_tag ~schemas:Tool_task.schemas ~tag:Mod_task;
-  register_module_tag ~schemas:Tool_control.schemas ~tag:Mod_control;
-  register_module_tag ~schemas:Tool_suspend.schemas ~tag:Mod_suspend;
-  register_module_tag ~schemas:Tool_council_oas.schemas ~tag:Mod_council;
-  register_module_tag ~schemas:Tool_relay.schemas ~tag:Mod_relay;
-  register_module_tag ~schemas:Tool_handover.schemas ~tag:Mod_handover;
-  register_module_tag ~schemas:Tool_hat.schemas ~tag:Mod_hat;
+  (* Tool_task: migrated to Tool_spec.register *)
+  (* Tool_control: migrated to Tool_spec.register *)
+  (* Tool_suspend: migrated to Tool_spec.register *)
+  (* Tool_council_oas: migrated to Tool_spec.register *)
+  (* Tool_relay: migrated to Tool_spec.register *)
+  (* Tool_handover: migrated to Tool_spec.register *)
+  (* Tool_hat: migrated to Tool_spec.register *)
   (* Tool_cache: migrated to Tool_spec.register (tool_cache.ml) *)
   (* Tool_model_catalog: migrated to Tool_spec.register (tool_model_catalog.ml) *)
-  register_module_tag ~schemas:Tool_rate_limit.schemas ~tag:Mod_rate_limit;
+  (* Tool_rate_limit: migrated to Tool_spec.register *)
   (* Tool_run: migrated to Tool_spec.register (tool_run.ml) *)
-  register_module_tag ~schemas:Tool_tempo.schemas ~tag:Mod_tempo;
-  register_module_tag ~schemas:Tool_goals.schemas ~tag:Mod_goals;
+  (* Tool_tempo: migrated to Tool_spec.register *)
+  (* Tool_goals: migrated to Tool_spec.register *)
   (* Tool_compact: migrated to Tool_spec.register (tool_compact.ml) *)
-  register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
+  register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline; (* sub-library: cannot access Tool_spec *)
   (* Monolithic schema decomposition: modules that now export their own schemas *)
-  register_module_tag ~schemas:Tool_code.schemas ~tag:Mod_code;
-  register_module_tag ~schemas:Tool_code_write.schemas ~tag:Mod_code_write;
-  register_module_tag ~schemas:Tool_library.schemas ~tag:Mod_library;
-  register_module_tag ~schemas:Tool_a2a.schemas ~tag:Mod_a2a;
-  register_module_tag ~schemas:Tool_heartbeat.schemas ~tag:Mod_heartbeat;
-  register_module_tag ~schemas:Tool_misc.schemas ~tag:Mod_misc;
+  (* Tool_code: migrated to Tool_spec.register *)
+  (* Tool_code_write: migrated to Tool_spec.register *)
+  (* Tool_library: migrated to Tool_spec.register *)
+  (* Tool_a2a: migrated to Tool_spec.register *)
+  (* Tool_heartbeat: migrated to Tool_spec.register *)
+  (* Tool_misc: migrated to Tool_spec.register *)
   (* Fix 2: Register modules that lack schema exports.
      Tool_tag_init uses register_name_tag for remaining modules
      that still rely on name-based registration. Called AFTER schema-based

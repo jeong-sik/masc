@@ -186,3 +186,19 @@ let dispatch ctx ~name ~args =
   | _ -> None
 
 let schemas = Tool_schemas_fire_task.schemas
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_fire_task
+           ~input_schema:s.input_schema
+           ()))
+    schemas

@@ -240,3 +240,22 @@ let check_can_join ~agent_id =
       Error (Printf.sprintf
         "Agent '%s' is suspended for %d more seconds. Reason: %s"
         agent_id remaining reason)
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let _tool_spec_requires_join = [ "masc_suspend" ]
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_suspend
+           ~input_schema:s.input_schema
+           ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ()))
+    schemas

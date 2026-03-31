@@ -222,3 +222,25 @@ let dispatch (ctx : _ context) ~name ~args : result option =
   | "masc_improve_loop_resume" -> Some (handle_resume ctx args)
   | "masc_improve_loop_tick" -> Some (tick_with_driver default_driver ctx args)
   | _ -> None
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let _tool_spec_read_only = [ "masc_improve_loop_status" ]
+let _tool_spec_requires_join = [ "masc_improve_loop_start"; "masc_improve_loop_pause"; "masc_improve_loop_resume"; "masc_improve_loop_tick" ]
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_improve_loop
+           ~input_schema:s.input_schema
+           ~is_read_only:(List.mem s.name _tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ()))
+    schemas

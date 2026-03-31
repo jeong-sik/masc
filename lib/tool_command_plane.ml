@@ -16,3 +16,19 @@ let dispatch = Tool_command_plane_dispatch.dispatch
 let schemas : Types.tool_schema list =
   Tool_command_plane_schemas_01.schemas
   @ Tool_command_plane_schemas_02.schemas
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_command_plane
+           ~input_schema:s.input_schema
+           ()))
+    schemas

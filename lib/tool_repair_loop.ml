@@ -381,3 +381,19 @@ let dispatch (ctx : _ context) ~name ~args : tool_result option =
   | "masc_repair_loop_iterate" -> Some (handle_iterate ctx args)
   | "masc_repair_loop_stop" -> Some (handle_stop ctx args)
   | _ -> None
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_repair_loop
+           ~input_schema:s.input_schema
+           ()))
+    schemas

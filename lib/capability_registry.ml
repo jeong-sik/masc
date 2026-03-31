@@ -182,23 +182,12 @@ let privileged_keeper_tool_names : string list =
   [ "keeper_bash"; "keeper_fs_edit"; "keeper_edit"; "keeper_github";
     "masc_worktree_create" ]
 
-let keeper_backend_tool_name = function
-  | "keeper_board_get" -> "masc_board_get"
-  | "keeper_board_post" -> "masc_board_post"
-  | "keeper_board_list" -> "masc_board_list"
-  | "keeper_board_comment" -> "masc_board_comment"
-  | "keeper_board_vote" -> "masc_board_vote"
-  | "keeper_board_stats" -> "masc_board_stats"
-  | "keeper_board_search" -> "masc_board_search"
-  | "keeper_board_delete" -> "masc_board_delete"
-  | "keeper_voice_speak" -> "masc_voice_speak"
-  | "keeper_voice_agent" -> "masc_voice_agent"
-  | "keeper_voice_sessions" -> "masc_voice_sessions"
-  | "keeper_voice_session_start" -> "masc_voice_session_start"
-  | "keeper_voice_session_end" -> "masc_voice_session_end"
-  | "keeper_tasks_list" -> "masc_tasks"
-  | "keeper_broadcast" -> "masc_broadcast"
-  | other -> other
+(* Derived from Tool_catalog_surfaces.keeper_internal_replacement (SSOT).
+   Returns the masc_* backend name for aliased tools, identity otherwise. *)
+let keeper_backend_tool_name name =
+  match Tool_catalog_surfaces.keeper_internal_replacement name with
+  | Some masc_name -> masc_name
+  | None -> name
 
 let public_projection_seeds_from (public_tool_source_schemas : Types.tool_schema list) :
     capability_seed list =

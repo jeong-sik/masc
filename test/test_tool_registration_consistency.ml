@@ -258,6 +258,24 @@ let test_board_delete_tag_registered () =
   | None ->
       Alcotest.fail "masc_board_delete missing from tag registry"
 
+(* ── Test: keeper alias SSOT — capability_registry derives from surfaces ── *)
+
+let test_keeper_alias_ssot_consistency () =
+  let open Tool_catalog_surfaces in
+  List.iter (fun keeper_name ->
+    let from_surfaces = keeper_internal_replacement keeper_name in
+    let from_registry = Capability_registry.keeper_backend_tool_name keeper_name in
+    match from_surfaces with
+    | Some masc_name ->
+        Alcotest.(check string)
+          (Printf.sprintf "%s alias must match" keeper_name)
+          masc_name from_registry
+    | None ->
+        Alcotest.(check string)
+          (Printf.sprintf "%s (native) must be identity" keeper_name)
+          keeper_name from_registry
+  ) keeper_internal_tools
+
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -283,5 +301,7 @@ let () =
             test_no_duplicate_schemas;
           Alcotest.test_case "board delete tag registered" `Quick
             test_board_delete_tag_registered;
+          Alcotest.test_case "keeper_backend_tool_name matches keeper_internal_replacement" `Quick
+            test_keeper_alias_ssot_consistency;
         ] );
     ]

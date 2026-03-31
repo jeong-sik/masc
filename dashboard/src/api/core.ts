@@ -13,7 +13,11 @@ import { resolveDashboardAuthToken } from '../lib/dashboard-auth'
 // --- Auth ---
 // Token bootstrap (URL -> sessionStorage -> strip) is handled by
 // bootstrapDashboardAuthTokenFromUrl() called in main.ts.
-// resolveDashboardAuthToken() reads from sessionStorage (with URL fallback).
+// resolveDashboardAuthToken() only reads the scrubbed sessionStorage copy.
+
+function getQueryParams(): URLSearchParams {
+  return new URLSearchParams(window.location.search)
+}
 
 export function currentDashboardActor(): string {
   return resolveDashboardActorName() || 'dashboard'

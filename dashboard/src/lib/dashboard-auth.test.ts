@@ -31,4 +31,10 @@ describe('dashboard auth token bootstrap', () => {
 
     expect(resolveDashboardAuthToken('')).toBe('stored-secret')
   })
+
+  it('does not read a token directly from the URL after bootstrap time', () => {
+    window.history.replaceState({}, '', '/dashboard?token=url-secret')
+
+    expect(resolveDashboardAuthToken(window.location.search)).toBeNull()
+  })
 })

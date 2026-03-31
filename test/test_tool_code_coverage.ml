@@ -193,6 +193,12 @@ let test_normalize_path_resolves_dotdot () =
   check "dot removal" "/a/./b/./c" "/a/b/c";
   check "trailing slash" "/a/b/" "/a/b"
 
+let test_path_within_root_handles_filesystem_root () =
+  Alcotest.(check bool) "absolute path inside root" true
+    (Tool_code.path_within_root ~root:"/" ~candidate:"/etc/passwd");
+  Alcotest.(check bool) "relative path outside root" false
+    (Tool_code.path_within_root ~root:"/" ~candidate:"relative/path")
+
 let test_code_read_with_offset_limit () =
   let ctx, base_dir = make_ctx () in
   let args = `Assoc [
@@ -235,6 +241,35 @@ let test_code_write_blocks_worktree_escape () =
   Alcotest.(check bool) "error mentions write restriction" true
     (msg_contains ~needle:"restricted" msg || msg_contains ~needle:"traversal" msg);
   Alcotest.(check bool) "escape target not created" false (Sys.file_exists escape_target_file);
+  cleanup_dir escape_target_dir;
+  cleanup_dir base_dir
+
+let test_code_write_blocks_worktree_symlink_escape () =
+  let ctx, base_dir = make_git_write_ctx () in
+  let worktrees_dir = Filename.concat base_dir ".worktrees" in
+  let escape_target_dir =
+    Filename.concat (Filename.dirname base_dir) "code_write_symlink_escape_target"
+  in
+  let symlink_path = Filename.concat worktrees_dir "evil-link" in
+  let escape_target_file = Filename.concat escape_target_dir "newdir/proof.txt" in
+  cleanup_dir escape_target_dir;
+  Unix.mkdir worktrees_dir 0o755;
+  Unix.mkdir escape_target_dir 0o755;
+  Unix.symlink escape_target_dir symlink_path;
+  let args =
+    `Assoc
+      [
+        ("path", `String ".worktrees/evil-link/newdir/proof.txt");
+        ("content", `String "escape\n");
+        ("create_dirs", `Bool true);
+      ]
+  in
+  let (ok, msg) = Tool_code_write.handle_code_write ctx args in
+  Alcotest.(check bool) "symlink escape blocked" false ok;
+  Alcotest.(check bool) "error mentions write restriction" true
+    (msg_contains ~needle:"restricted" msg || msg_contains ~needle:"traversal" msg);
+  Alcotest.(check bool) "escape target not created" false
+    (Sys.file_exists escape_target_file);
   cleanup_dir escape_target_dir;
   cleanup_dir base_dir
 
@@ -285,9 +320,13 @@ let () =
     ("code_write", [
       Alcotest.test_case "blocks worktree escape" `Quick
         test_code_write_blocks_worktree_escape;
+      Alcotest.test_case "blocks worktree symlink escape" `Quick
+        test_code_write_blocks_worktree_symlink_escape;
     ]);
     ("normalize_path", [
       Alcotest.test_case "resolves dotdot" `Quick test_normalize_path_resolves_dotdot;
+      Alcotest.test_case "handles filesystem root" `Quick
+        test_path_within_root_handles_filesystem_root;
     ]);
     ("code_symbols", [
       Alcotest.test_case "empty args" `Quick test_code_symbols_empty;

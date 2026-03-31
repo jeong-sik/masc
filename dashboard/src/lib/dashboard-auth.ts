@@ -39,12 +39,10 @@ export function persistDashboardAuthToken(
 }
 
 export function resolveDashboardAuthToken(
-  search = typeof window === 'undefined' ? '' : window.location.search,
+  _search = typeof window === 'undefined' ? '' : window.location.search,
   storage: Storage | null = safeSessionStorage(),
 ): string | null {
-  const params = new URLSearchParams(search)
-  return sanitizeDashboardAuthToken(params.get('token'))
-    || readStoredDashboardAuthToken(storage)
+  return readStoredDashboardAuthToken(storage)
 }
 
 export function bootstrapDashboardAuthTokenFromUrl(

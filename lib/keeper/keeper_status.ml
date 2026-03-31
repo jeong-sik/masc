@@ -38,7 +38,9 @@ let handle_keeper_list ctx args : tool_result =
     else
       let dir = keeper_dir ctx.config in
       match Safe_ops.list_dir_safe dir with
-      | Error _ -> []
+      | Error err ->
+          Log.Keeper.warn "keeper list fallback failed for %s: %s" dir err;
+          []
       | Ok files ->
         files
         |> List.filter (fun f -> Filename.check_suffix f ".json")
@@ -62,6 +64,7 @@ let handle_keeper_list ctx args : tool_result =
           | Error _ -> None
           | Ok None -> None
           | Ok (Some m) ->
+            let ctx = { ctx with config } in
             let created_ts =
               Resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
             in
@@ -79,34 +82,36 @@ let handle_keeper_list ctx args : tool_result =
             let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
               compaction_policy_of_keeper m
             in
-	            let metrics_store = keeper_metrics_store ctx.config m.name in
-	            let metrics_path = keeper_metrics_path ctx.config m.name in
-	            let metrics_window_lines =
-	              let dated = Dated_jsonl.read_recent_lines metrics_store 120 in
-	              if dated <> [] then dated
-	              else read_file_tail_lines metrics_path ~max_bytes:120000 ~max_lines:120
-	            in
-	            let last_metrics =
-	              match List.rev metrics_window_lines with
-	              | line :: _ -> (try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
-	              | [] -> None
-	            in
-	            let metrics_overview =
-	              summarize_metrics_lines metrics_window_lines ~default_generation:m.runtime.generation
-	            in
-	            let last_skill_metrics =
-	              let rec find_latest = function
-	                | [] -> None
-	                | line :: tl ->
-	                    (try
-	                       let j = Yojson.Safe.from_string line in
-	                       match Safe_ops.json_string_opt "skill_primary" j with
-	                       | Some primary when String.trim primary <> "" -> Some j
-	                       | _ -> find_latest tl
-	                     with Yojson.Json_error _ -> find_latest tl)
-	              in
-	              find_latest (List.rev metrics_window_lines)
-	            in
+            let metrics_store = keeper_metrics_store ctx.config m.name in
+            let metrics_path = keeper_metrics_path ctx.config m.name in
+            let metrics_window_lines =
+              let dated = Dated_jsonl.read_recent_lines metrics_store 120 in
+              if dated <> [] then dated
+              else read_file_tail_lines metrics_path ~max_bytes:120000 ~max_lines:120
+            in
+            let last_metrics =
+              match List.rev metrics_window_lines with
+              | line :: _ ->
+                  (try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
+              | [] -> None
+            in
+            let metrics_overview =
+              summarize_metrics_lines metrics_window_lines
+                ~default_generation:m.runtime.generation
+            in
+            let last_skill_metrics =
+              let rec find_latest = function
+                | [] -> None
+                | line :: tl ->
+                    (try
+                       let j = Yojson.Safe.from_string line in
+                       match Safe_ops.json_string_opt "skill_primary" j with
+                       | Some primary when String.trim primary <> "" -> Some j
+                       | _ -> find_latest tl
+                     with Yojson.Json_error _ -> find_latest tl)
+              in
+              find_latest (List.rev metrics_window_lines)
+            in
             let memory_bank_summary =
               read_keeper_memory_summary
                 ctx.config
@@ -133,11 +138,11 @@ let handle_keeper_list ctx args : tool_result =
                 let elapsed = now_ts -. last_reflection_ts in
                 max 0.0 (cooldown -. elapsed)
             in
-	            let context_json =
-	              match last_metrics with
-	              | None -> `Assoc [("source", `String "none")]
-	              | Some metrics ->
-	                `Assoc [
+            let context_json =
+              match last_metrics with
+              | None -> `Assoc [ ("source", `String "none") ]
+              | Some metrics ->
+                  `Assoc [
 	                  ("source", `String "metrics");
 	                  ("context_ratio", `Float (Safe_ops.json_float "context_ratio" metrics));
 	                  ("context_tokens", `Int (Safe_ops.json_int "context_tokens" metrics));

@@ -33,7 +33,7 @@ describe('post', () => {
   })
 
   it('uses a session-stored auth token after the URL token is scrubbed', async () => {
-    window.sessionStorage?.setItem?.('masc_dashboard_auth_token', 'stored-secret')
+    window.sessionStorage?.setItem?.('masc_bearer_token', 'stored-secret')
     window.history.replaceState({}, '', '/?agent=dashboard')
 
     const fetchMock = vi.fn().mockResolvedValue(

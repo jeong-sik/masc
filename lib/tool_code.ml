@@ -88,7 +88,10 @@ let normalize_path_for_check path =
 let normalize_path = lexically_normalize_path
 
 let path_within_root ~root ~candidate =
-  candidate = root || String.starts_with ~prefix:(root ^ "/") candidate
+  if root = "/" then
+    String.length candidate > 0 && candidate.[0] = '/'
+  else
+    candidate = root || String.starts_with ~prefix:(root ^ "/") candidate
 
 (* Security: Validate path is within git root.
    Uses canonical path resolution to prevent .. traversal attacks. *)

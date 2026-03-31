@@ -27,20 +27,26 @@ let warm_shell_cache (state : Mcp_server.server_state) =
 let _last_broadcast_hash : (string, Digestif.SHA256.t) Hashtbl.t =
   Hashtbl.create 8
 
+let _broadcast_hash_mu = Eio.Mutex.create ()
+
 (** Broadcast a single cached surface to all Observer SSE sessions.
     [event_type] becomes the SSE event "type" field.
     Skips broadcast when payload hash matches the previous one (delta push).
-    Safe to call from any fiber — reads only from a cached ref. *)
+    Mutex-protected: safe to call from concurrent fibers. *)
 let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
   let serialized = Yojson.Safe.to_string json in
   let hash = Digestif.SHA256.digest_string serialized in
-  let changed =
-    match Hashtbl.find_opt _last_broadcast_hash event_type with
-    | Some prev -> not (Digestif.SHA256.equal prev hash)
-    | None -> true
+  let should_broadcast =
+    Eio.Mutex.use_rw ~protect:true _broadcast_hash_mu (fun () ->
+      let changed =
+        match Hashtbl.find_opt _last_broadcast_hash event_type with
+        | Some prev -> not (Digestif.SHA256.equal prev hash)
+        | None -> true
+      in
+      if changed then (Hashtbl.replace _last_broadcast_hash event_type hash; true)
+      else false)
   in
-  if changed then begin
-    Hashtbl.replace _last_broadcast_hash event_type hash;
+  if should_broadcast then begin
     let sse_json =
       `Assoc
         [

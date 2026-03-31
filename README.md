@@ -39,24 +39,25 @@ scripts/opam-pin-external-deps.sh
 opam install . --deps-only
 dune build --root .
 
-./start-masc-mcp.sh --http
-PORT="$(./start-masc-mcp.sh --print-port)"  # query the effective port for this checkout
+scripts/run-local.sh --target-dir "$PWD"
+PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"
 curl "http://127.0.0.1:${PORT}/health"
 ```
 
 Defaults:
 
-- repo root checkout HTTP / MCP port: `8935`
-- git worktree checkout HTTP / MCP port: `9100-9999` 범위에서 checkout path 기준으로 자동 파생
+- local-dev HTTP / MCP port: `9100-9999` 범위에서 target path 기준 자동 파생
 - 기본 bind host: `127.0.0.1`
-- repo-managed config root: `MASC_CONFIG_DIR` 우선, 없으면 `~/.masc/config` 우선, 그 다음 repo `config/` 자동 탐색
+- local-dev data root: `<target>/.masc/`
+- local-dev config root: `<target>/.masc/config`
+- local-dev personas root: `<target>/.masc/config/personas`
+- local-dev transports: HTTP on, gRPC/WS/WebRTC off
 
 메모:
 
-- 현재 checkout의 기본 포트 확인: `./start-masc-mcp.sh --print-port`
-- worktree에서 `--port`를 생략하면 script가 worktree별 기본 포트를 자동 선택한다.
-- 고정 포트가 필요하면 `MASC_MCP_PORT=94xx` 또는 `--port 94xx`로 덮어쓴다.
-- `--print-port`는 현재 checkout의 기본 포트 조회용이다. 서버 시작은 보통 `./start-masc-mcp.sh --http`로 충분하다.
+- target 기준 기본 포트 확인: `scripts/run-local.sh --print-port --target-dir /path/to/project`
+- 고정 포트가 필요하면 `scripts/run-local.sh --target-dir /path/to/project --port 94xx`
+- shared repo/full-runtime 경로는 `./start-masc-mcp.sh --http`를 계속 사용한다.
 
 If you bind to a non-loopback address such as `0.0.0.0`, treat that as a remote exposure path and configure auth first. See [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 
@@ -75,7 +76,7 @@ Local full-surface MCP example:
 }
 ```
 
-worktree에서는 `8935` 대신 `./start-masc-mcp.sh --print-port` 출력값으로 바꾼다.
+dir-local local-dev에서는 `8935` 대신 `scripts/run-local.sh --print-port --target-dir ...` 출력값으로 바꾼다.
 
 메모:
 
@@ -122,8 +123,9 @@ Common entrypoints:
 The dashboard is a read / operate UI. Canonical write and control paths remain MCP tools.
 
 - 대시보드는 read/operate UI이고, canonical write/control path는 MCP입니다.
+- `scripts/run-local.sh`는 dashboard를 자동으로 빌드하지 않습니다. 필요할 때만 `--build-dashboard`를 붙이세요.
 - `start-masc-mcp.sh`는 `pnpm` 또는 `corepack pnpm`이 있을 때 dashboard SPA를 자동으로 빌드합니다.
-- dev server를 따로 띄울 때는 `PORT="$(./start-masc-mcp.sh --print-port)"` 후 `cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" pnpm run dev`를 사용하세요.
+- dev server를 따로 띄울 때는 `PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"` 후 `cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" pnpm run dev`를 사용하세요.
 - 수동 재빌드가 필요하면 `cd dashboard && pnpm run build`를 실행하세요.
 
 ## Verification

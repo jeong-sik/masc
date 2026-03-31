@@ -52,7 +52,7 @@
 | `LIBDATACHANNEL_PATH` | string | 자동 탐색 | WebRTC 라이브러리 경로 |
 
 작업공간 루트 해석 체인: `MASC_WORKSPACE_ROOT` -> `ME_ROOT` -> `DUNE_SOURCEROOT`. 세 곳 모두 미설정 시 `failwith`.
-repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `~/.masc/config` -> `cwd/config` -> executable-relative `config/` -> legacy `ME_ROOT/workspace/yousleepwhen/masc-mcp/config`.
+repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `<MASC_BASE_PATH>/.masc/config` -> `~/.masc/config` -> `cwd/config` -> executable-relative `config/` -> legacy `ME_ROOT/workspace/yousleepwhen/masc-mcp/config`.
 
 ### 3.2 Runtime (Env_config_runtime)
 
@@ -425,6 +425,8 @@ $MASC_PERSONAS_DIR
 > resolved config root의 personas/
 > where resolved config root =
   $MASC_CONFIG_DIR
+  > $MASC_BASE_PATH/.masc/config
+  > ~/.masc/config
   > executable-relative config/
   > cwd/config
   > legacy ME_ROOT/workspace/yousleepwhen/masc-mcp/config
@@ -439,11 +441,11 @@ Template 변경은 기존 keeper에 자동 전파되지 않는다. 반영 방법
 
 ### 12.5 `--base-path`와 `.masc/` 의존성
 
-`--base-path` CLI 인자가 `.masc/` 디렉토리 위치를 결정한다. 기본값은 repo root.
+`--base-path` CLI 인자가 `.masc/` 디렉토리 위치를 결정한다. `scripts/run-local.sh`는 `<target>/.masc/`를 기본으로 사용하고, shared/full-runtime 경로는 별도 launcher가 유지한다.
 
-worktree에서 서버를 실행하면 `.masc/`가 worktree 내부를 가리키므로 main repo의 keeper 상태에 접근할 수 없다. keeper가 보이지 않는 가장 흔한 원인.
+dir-local local-dev에서는 `.masc/`가 target 디렉토리 내부를 가리키므로 shared repo keeper 상태와 분리된다. shared state가 필요하면 canonical shared launcher를 사용해야 한다.
 
-이 값은 runtime data root에만 영향을 준다. repo-managed config root는 `MASC_CONFIG_DIR` 또는 config resolver fallback chain으로 별도 해석한다.
+이 값은 runtime data root를 결정하고, explicit `MASC_CONFIG_DIR`가 없을 때는 `<MASC_BASE_PATH>/.masc/config`를 repo-managed config의 첫 fallback으로도 사용한다.
 
 ### 12.6 모델 실행
 

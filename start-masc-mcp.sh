@@ -1,7 +1,8 @@
 #!/bin/bash
-# MASC MCP Server (OCaml) - Start Script (HTTP/SSE default)
+# MASC MCP Server (OCaml) - Shared/full-runtime start script (HTTP/SSE default)
 # Usage: ./start-masc-mcp.sh [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]
 # Note: Eio is the default runtime; --lwt exits with an error.
+# For dir-local local-dev startup, prefer scripts/run-local.sh.
 
 set -e
 
@@ -352,6 +353,7 @@ while [[ $# -gt 0 ]]; do
         *)
             echo "Unknown option: $1" >&2
             echo "Usage: $0 [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]" >&2
+            echo "Dir-local local-dev launcher: scripts/run-local.sh" >&2
             echo "Note: Eio is the default runtime; --lwt exits with an error." >&2
             exit 1
             ;;

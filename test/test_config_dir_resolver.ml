@@ -37,12 +37,13 @@ let make_config_root root =
   write_file (Filename.concat config "cascade.json") "{}";
   config
 
-let make_inputs ?env_config_dir ?env_personas_dir ?env_me_root ?env_workspace_root
+let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir ?env_me_root ?env_workspace_root
     ?env_dune_sourceroot ?env_home ?(cwd = "/tmp/cwd") ?(executable_name = "/tmp/bin/masc-mcp") () =
   Lib.Config_dir_resolver.
     {
       cwd;
       executable_name;
+      env_base_path;
       env_config_dir;
       env_personas_dir;
       env_home;
@@ -108,6 +109,23 @@ let test_home_masc_fallback () =
   check string "root path" config resolution.config_root.path;
   check bool "prompts exists" true resolution.prompts.exists
 
+let test_local_masc_fallback_precedes_home_masc () =
+  with_temp_dir "config-dir-local" @@ fun root ->
+  let target = Filename.concat root "target" in
+  let local_config = make_config_root (Filename.concat target ".masc") in
+  let home = Filename.concat root "home" in
+  ignore (make_config_root (Filename.concat home ".masc"));
+  let resolution =
+    Lib.Config_dir_resolver.resolve_with
+      (make_inputs ~cwd:root ~env_base_path:target ~env_home:home
+         ~executable_name:"/tmp/nonexistent-masc" ())
+  in
+  check string "status" "ready"
+    (Lib.Config_dir_resolver.status_to_string resolution.status);
+  check string "root source" "local_masc"
+    (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check string "root path" local_config resolution.config_root.path
+
 let test_legacy_me_root_fallback () =
   with_temp_dir "config-dir-legacy" @@ fun me_root ->
   let repo_root =
@@ -135,6 +153,8 @@ let () =
           test_case "env override invalid does not fallback" `Quick
             test_env_override_invalid_no_fallback;
           test_case "cwd fallback" `Quick test_cwd_fallback;
+          test_case "local masc fallback precedes home masc" `Quick
+            test_local_masc_fallback_precedes_home_masc;
           test_case "home masc fallback" `Quick test_home_masc_fallback;
           test_case "legacy me_root fallback" `Quick
             test_legacy_me_root_fallback;

@@ -132,10 +132,14 @@ let test_error_json_is_returned_as_tool_error () =
       with
       | Error { Agent_sdk.Types.message; _ } ->
           let json = Yojson.Safe.from_string message in
-          check bool "error field preserved" true
+          (* After normalization, error results follow {"ok":false,"error":"...","detail":{...}} *)
+          check bool "ok is false" false
+            (Yojson.Safe.Util.(member "ok" json |> to_bool));
+          check bool "error field present" true
             (Option.is_some (Safe_ops.json_string_opt "error" json));
-          check bool "path field preserved" true
-            (Option.is_some (Safe_ops.json_string_opt "path" json))
+          let detail = Yojson.Safe.Util.member "detail" json in
+          check bool "detail preserves path" true
+            (Option.is_some (Safe_ops.json_string_opt "path" detail))
       | Ok _ -> fail "missing file should be surfaced as tool error")
 
 let test_repeated_error_results_are_blocked () =
@@ -373,6 +377,64 @@ let test_library_read_missing_topic () =
     (`Assoc [("topic", `String "nonexistent-topic-xyz-999")]) in
   check bool "missing topic fails" false ok
 
+(* ── normalize_tool_result tests ──────────────────────────── *)
+
+let parse json_str =
+  Yojson.Safe.from_string json_str
+
+let json_bool key json =
+  Yojson.Safe.Util.(member key json |> to_bool)
+
+let json_string key json =
+  Yojson.Safe.Util.(member key json |> to_string)
+
+let test_normalize_success_json () =
+  let raw = {|{"ok":true,"path":"/tmp/a.ml","bytes":42}|} in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:true raw in
+  let json = parse normalized in
+  check bool "ok is true" true (json_bool "ok" json);
+  let result = Yojson.Safe.Util.member "result" json in
+  check string "path preserved" "/tmp/a.ml"
+    Yojson.Safe.Util.(member "path" result |> to_string)
+
+let test_normalize_success_plain_text () =
+  let raw = "📋 No tasks yet." in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:true raw in
+  let json = parse normalized in
+  check bool "ok is true" true (json_bool "ok" json);
+  check string "result is text" "📋 No tasks yet." (json_string "result" json)
+
+let test_normalize_failure_error_field () =
+  let raw = {|{"error":"file not found","path":"/tmp/missing"}|} in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
+  let json = parse normalized in
+  check bool "ok is false" false (json_bool "ok" json);
+  check string "error extracted" "file not found" (json_string "error" json);
+  let detail = Yojson.Safe.Util.member "detail" json in
+  check string "detail preserves path" "/tmp/missing"
+    Yojson.Safe.Util.(member "path" detail |> to_string)
+
+let test_normalize_failure_status_error () =
+  let raw = {|{"status":"error","agent_id":"v1","message":"voice unavailable"}|} in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
+  let json = parse normalized in
+  check bool "ok is false" false (json_bool "ok" json);
+  check string "error from message" "voice unavailable" (json_string "error" json)
+
+let test_normalize_failure_ok_false () =
+  let raw = {|{"ok":false,"error":"command_blocked","reason":"not in allowlist"}|} in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
+  let json = parse normalized in
+  check bool "ok is false" false (json_bool "ok" json);
+  check string "error extracted" "command_blocked" (json_string "error" json)
+
+let test_normalize_failure_plain_text () =
+  let raw = "tool keeper_bash failed (3/5): Unix_error(ENOENT)" in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
+  let json = parse normalized in
+  check bool "ok is false" false (json_bool "ok" json);
+  check string "error is raw text" raw (json_string "error" json)
+
 let () =
   run "Keeper_tools_oas" [
     "make_tools", [
@@ -383,6 +445,14 @@ let () =
       test_case "repeated errors are blocked" `Quick test_repeated_error_results_are_blocked;
       test_case "failure count resets after success" `Quick test_failure_count_resets_after_success;
       test_case "failure tracking is independent per args" `Quick test_failure_tracking_is_independent_per_args;
+    ];
+    "normalize_tool_result", [
+      test_case "success JSON wraps under result" `Quick test_normalize_success_json;
+      test_case "success plain text wraps as string" `Quick test_normalize_success_plain_text;
+      test_case "failure extracts error field" `Quick test_normalize_failure_error_field;
+      test_case "failure extracts message from status:error" `Quick test_normalize_failure_status_error;
+      test_case "failure handles ok:false hybrid" `Quick test_normalize_failure_ok_false;
+      test_case "failure plain text wraps as error" `Quick test_normalize_failure_plain_text;
     ];
     "research_profile", [
       test_case "has autoresearch tools" `Quick test_research_keeper_has_autoresearch_tools;

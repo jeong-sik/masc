@@ -135,8 +135,9 @@ let parse_spawn_spec_from_object ?(default_timeout = 300)
             (match get_optional_execution_scope "execution_scope" with
             | Some _ as explicit -> explicit
             | None ->
-                default_execution_scope_for_worker_class
-                  (get_optional_worker_class "worker_class"));
+                Some
+                  (Team_session_types.default_execution_scope_for_worker_class
+                     (get_optional_worker_class "worker_class")));
           thinking_enabled = policy_bool "thinking";
           thinking_budget = policy_int "thinking_budget";
           max_turns = policy_int "max_turns";
@@ -497,4 +498,3 @@ let status_of_engine_status_json (json : Yojson.Safe.t) =
   match Yojson.Safe.Util.member "session" json |> Yojson.Safe.Util.member "status" with
   | `String s -> s
   | _ -> "unknown"
-

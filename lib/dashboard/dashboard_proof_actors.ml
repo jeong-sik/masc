@@ -111,6 +111,8 @@ let worker_run_summary_json json =
   let summary = U.member "trace_summary" json in
   let base_fields =
     [
+      ("session_id", U.member "session_id" json);
+      ("operation_id", U.member "operation_id" json);
       ("worker_run_id", U.member "worker_run_id" json);
       ("cdal_run_id", U.member "cdal_run_id" json);
       ("contract_id", U.member "contract_id" json);
@@ -149,6 +151,7 @@ let worker_run_summary_json json =
       ("tool_trace_refs", U.member "tool_trace_refs" json);
       ("raw_evidence_refs", U.member "raw_evidence_refs" json);
       ("checkpoint_ref", U.member "checkpoint_ref" json);
+      ("evidence_refs", U.member "evidence_refs" json);
       ("session_conformance", U.member "session_conformance" json);
       ("ts_iso", U.member "ts_iso" json);
     ]

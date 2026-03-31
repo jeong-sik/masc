@@ -105,7 +105,9 @@ let compute_metrics_window
                   Safe_ops.json_string_opt "new_trace_id" handoff_obj
                 in
                 let handoff_new_generation =
-                  Safe_ops.json_int_opt "new_generation" handoff_obj
+                  match Safe_ops.json_int_opt "new_generation" handoff_obj with
+                  | Some value -> Some value
+                  | None -> Safe_ops.json_int_opt "to_generation" handoff_obj
                 in
                 let usage_obj = j |> member "usage" in
                 let input_tokens = Safe_ops.json_int ~default:0 "input_tokens" usage_obj in
@@ -425,7 +427,34 @@ let compute_metrics_window
                     ("context_max", `Int context_max);
                     ("message_count", `Int message_count);
                     ("compacted", `Bool compacted);
-                    ("handoff", `Bool handoff_performed);
+                    ("handoff_performed", `Bool handoff_performed);
+                    ("handoff",
+                      if handoff_performed then
+                        `Assoc [
+                          ("performed", `Bool true);
+                          ("to_model",
+                            match handoff_to_model with
+                            | Some s when s <> "" -> `String s
+                            | _ -> `Null);
+                          ("prev_trace_id",
+                            match handoff_prev_trace_id with
+                            | Some s when s <> "" -> `String s
+                            | _ -> `Null);
+                          ("new_trace_id",
+                            match handoff_new_trace_id with
+                            | Some s when s <> "" -> `String s
+                            | _ -> `Null);
+                          ("new_generation",
+                            match handoff_new_generation with
+                            | Some g -> `Int g
+                            | None -> `Null);
+                          ("to_generation",
+                            match handoff_new_generation with
+                            | Some g -> `Int g
+                            | None -> `Null);
+                        ]
+                      else
+                        `Null);
                     ("handoff_to_model",
                       Json_util.string_opt_to_json
                         (match handoff_to_model with

@@ -78,175 +78,53 @@ let execute_spawn_pipeline
                    fail_all_prepared prepared_spawns ~error:msg;
                    Some (`Assoc [ ("error", `String msg) ])
                | Ok () ->
-                   let execution_scope_of_prepared prepared =
-                     deps.effective_execution_scope_of_spec prepared.spec
-                   in
-                   let worker_backend_of_prepared prepared =
-                     if deps.is_local_spawn_agent prepared.spec.spawn_agent then
-                       Some "local"
-                     else None
-                   in
-                   let normalize_spawn_tool_args prepared ~tool_name
-                       (args : Yojson.Safe.t) =
-                     let add_string_field_if_missing key value fields =
-                       if String.trim value = "" || List.mem_assoc key fields then
-                         fields
-                       else
-                         (key, `String value) :: fields
-                     in
-                     match args with
-                     | `Assoc fields ->
-                         let fields =
-                           add_string_field_if_missing "agent_name"
-                             prepared.spec.spawn_agent fields
-                         in
-                         let fields =
-                           match tool_name with
-                           | "masc_board_post" | "masc_board_comment" ->
-                               add_string_field_if_missing "author"
-                                 prepared.spec.spawn_agent fields
-                           | "masc_board_vote" ->
-                               add_string_field_if_missing "voter"
-                                 prepared.spec.spawn_agent fields
-                           | _ -> fields
-                         in
-                         `Assoc fields
-                     | _ -> args
-                   in
-                   let record_spawn_exception index prepared ~started_at exn =
-                     let error = Printexc.to_string exn in
-                     let elapsed_ms =
-                       int_of_float
-                         ((Time_compat.now () -. started_at) *. 1000.0)
-                     in
-                     let output_preview = deps.truncate_for_event error in
-                     let worker_name =
-                       Option.value
-                         ~default:(Printf.sprintf "spawn-%d" index)
-                         prepared.runtime_actor_name
-                     in
-                     release_prepared_runtime prepared ~success:false ~error
-                       ~latency_ms:elapsed_ms ();
-                     persist_worker_run_snapshot
-                       ~worker_run_id:prepared.worker_run_id
-                       ~worker_name ~mode:"spawn" ~wait_mode
-                       ~status:`Failed
-                       ?execution_scope:(execution_scope_of_prepared prepared)
-                       ?requested_worker_class:prepared.spec.worker_class
-                       ?requested_worker_size:(deps.worker_size_of_spec prepared.spec)
-                       ?resolved_runtime:prepared.assigned_runtime
-                       ~resolved_model:prepared.runtime_model_label
-                       ?routing_reason:prepared.spec.routing_reason
-                       ~tool_names:[]
-                       ~tool_call_count:0
-                       ~success:false ~output_preview ~error
-                       ();
-                     append_spawn_event
-                       ~worker_run_id:prepared.worker_run_id
-                       ~spawn_agent:prepared.spec.spawn_agent
-                       ?runtime_actor:prepared.runtime_actor_name
-                       ?spawn_role:prepared.spec.spawn_role
-                       ?spawn_model:prepared.spec.spawn_model
-                       ?execution_scope:(execution_scope_of_prepared prepared)
-                       ?worker_class:prepared.spec.worker_class
-                       ?worker_size:(deps.worker_size_of_spec prepared.spec)
-                       ?worker_backend:(worker_backend_of_prepared prepared)
-                       ~wait_mode:
-                         (Team_session_types.wait_mode_to_string wait_mode)
-                       ?parent_actor:prepared.spec.parent_actor
-                       ?capsule_mode:prepared.spec.capsule_mode
-                       ?runtime_pool:prepared.spec.runtime_pool
-                       ?lane_id:prepared.spec.lane_id
-                       ?controller_level:
-                         (deps.inferred_controller_level_of_spec prepared.spec)
-                       ?control_domain:prepared.spec.control_domain
-                       ?supervisor_actor:prepared.spec.supervisor_actor
-                       ?model_tier:prepared.spec.model_tier
-                       ?task_profile:prepared.spec.task_profile
-                       ?risk_level:prepared.spec.risk_level
-                       ?routing_confidence:prepared.spec.routing_confidence
-                       ?routing_reason:prepared.spec.routing_reason
-                       ?assigned_runtime:prepared.assigned_runtime
-                       ?spawn_selection_note:
-                         prepared.spec.spawn_selection_note
-                       ~tool_names:[]
-                       ~tool_call_count:0
-                       ~success:false ~exit_code:1
-                       ~elapsed_ms ~output_preview ~error ();
-                     (match prepared.runtime_actor_name with
-                     | Some worker_actor ->
-                         ignore
-                           (deps.reconcile_failed_spawn_actor ctx.config
-                              session_id worker_actor)
-                     | None -> ());
-                     `Assoc
-                       [
-                         ("worker_run_id", `String prepared.worker_run_id);
-                         ( "runtime_actor",
-                           Option.fold ~none:`Null
-                             ~some:(fun s -> `String s)
-                             prepared.runtime_actor_name );
-                         ( "spawn_role",
-                           Option.fold ~none:`Null
-                             ~some:(fun s -> `String s)
-                             prepared.spec.spawn_role );
-                         ( "execution_scope",
-                           Option.fold ~none:`Null
-                             ~some:(fun scope ->
-                               `String
-                                 (Team_session_types.execution_scope_to_string
-                                    scope))
-                             (execution_scope_of_prepared prepared) );
-                         ( "worker_class",
-                           Option.fold ~none:`Null
-                             ~some:(fun kind ->
-                               `String
-                                 (Team_session_types.worker_class_to_string
-                                    kind))
-                             prepared.spec.worker_class );
-                         ( "worker_size",
-                           Option.fold ~none:`Null
-                             ~some:(fun size ->
-                               `String
-                                 (Team_session_types.worker_size_to_string
-                                    size))
-                             (deps.worker_size_of_spec prepared.spec) );
-                         ( "worker_backend",
-                           Option.fold ~none:`Null
-                             ~some:(fun value -> `String value)
-                             (worker_backend_of_prepared prepared) );
-                         ( "wait_mode",
-                           `String
-                             (Team_session_types.wait_mode_to_string wait_mode)
-                         );
-                         ("status", `String "failed");
-                         ( "resolved_runtime",
-                           Option.fold ~none:`Null
-                             ~some:(fun s -> `String s)
-                             prepared.assigned_runtime );
-                         ("resolved_model", `String prepared.runtime_model_label);
-                         ( "routing_reason",
-                           Option.fold ~none:`Null
-                             ~some:(fun s -> `String s)
-                             prepared.spec.routing_reason );
-                         ("tool_call_count", `Int 0);
-                         ("tool_names", `List []);
-                         ("success", `Bool false);
-                         ("elapsed_ms", `Int elapsed_ms);
-                         ("output_preview", `String output_preview);
-                       ]
-                   in
-                   let execute_spawn index prepared =
-                   (* Phase C-3a: Route spawn through OAS Agent.run via Oas_worker.
-                       This replaces the old Spawn.spawn subprocess call, giving us
-                       trace data, tool_names, and tool_call_count for free. *)
+                   let execute_spawn ~run_sw index prepared =
                     let start_time = Time_compat.now () in
-                    let execution_scope =
-                      execution_scope_of_prepared prepared
+                    let worker_name =
+                      Option.value
+                        ~default:(Printf.sprintf "spawn-%d-%s" index prepared.worker_run_id)
+                        prepared.runtime_actor_name
                     in
-                    let max_turns =
-                      match prepared.spec.max_turns with
-                      | Some n -> n | None -> 10
+                    let execution_scope =
+                      deps.effective_execution_scope_of_spec prepared.spec
+                    in
+                    let local_worker_tool_names =
+                      let all_local_worker_tools =
+                        Team_session_oas_bridge.supported_local_worker_tool_names
+                      in
+                      match execution_scope with
+                      | Some Team_session_types.Observe_only ->
+                          let denied_observe_only_tools =
+                            [
+                              "masc_claim_next";
+                              "masc_transition";
+                              "masc_add_task";
+                              "masc_heartbeat";
+                              "masc_board_post";
+                              "masc_board_comment";
+                              "masc_board_vote";
+                              "masc_worktree_create";
+                              "masc_worktree_remove";
+                              "masc_run_init";
+                              "masc_run_plan";
+                              "masc_run_log";
+                              "masc_run_deliverable";
+                              "masc_repair_loop_start";
+                              "masc_repair_loop_iterate";
+                              "masc_repair_loop_stop";
+                            ]
+                          in
+                          List.filter
+                            (fun name ->
+                              not (List.mem name denied_observe_only_tools))
+                            all_local_worker_tools
+                      | _ -> all_local_worker_tools
+                    in
+                    let local_shell_tool_names =
+                      match execution_scope with
+                      | Some Team_session_types.Observe_only ->
+                          [ "file_read"; "shell_exec" ]
+                      | _ -> [ "file_read"; "file_write"; "shell_exec" ]
                     in
                     let delivery_contract =
                       Tool_team_session_step_exec.delivery_contract_for_session
@@ -255,211 +133,275 @@ let execute_spawn_pipeline
                     let contract =
                       Option.map
                         (fun delivery_contract ->
-                          let tool_names =
-                            if deps.is_local_spawn_agent
-                                 prepared.spec.spawn_agent
-                            then
-                              Team_session_oas_bridge
-                              .supported_local_worker_tool_names_for_scope
-                                execution_scope
-                            else []
-                          in
                           Contract_composer.compose ~delivery_contract
-                            ~tool_names)
+                            ~execution_scope
+                            ~tool_names:
+                              (List.sort_uniq String.compare
+                                 (local_worker_tool_names @ local_shell_tool_names)))
                         delivery_contract
                     in
-                    let oas_result =
-                      if deps.is_local_spawn_agent prepared.spec.spawn_agent then
-                        match
-                          Team_session_oas_bridge
-                          .supported_local_worker_tools_for_scope execution_scope
-                        with
-                        | Error msg ->
-                            Error
-                              (Printf.sprintf
-                                 "team session local worker tools unavailable: %s"
-                                 msg)
-                        | Ok masc_tools ->
-                            Oas_worker.run_model_with_masc_tools
-                              ~model_label:prepared.runtime_model_label
-                              ~goal:prepared.spec.spawn_prompt
-                              ~system_prompt:(Printf.sprintf
-                                "You are agent '%s'. Execute the task and return a clear result."
-                                 prepared.spec.spawn_agent)
-                              ~masc_tools
-                              ~dispatch:(fun ~name ~args ->
-                                Team_session_oas_bridge.dispatch_supported_tool
-                                  ~sw:ctx.sw ~clock:ctx.clock
-                                  ~config:ctx.config ~name
-                                  ~args:
-                                    (normalize_spawn_tool_args prepared
-                                       ~tool_name:name args))
-                              ~max_turns
-                              ~temperature:(Safe_ops.get_env_float_logged
-                                "MASC_SPAWN_TEMPERATURE" ~default:0.3)
-                              ~max_tokens:(Safe_ops.get_env_int_logged
-                                "MASC_SPAWN_MAX_TOKENS" ~default:4096)
-                              ~priority:
-                                Llm_provider.Request_priority.Interactive
-                              ?enable_thinking:prepared.spec.thinking_enabled
-                              ?contract ?net:ctx.net ~sw:ctx.sw
-                              ()
-                      else
-                        Oas_worker.run_model_by_label
-                          ~model_label:prepared.runtime_model_label
-                          ~goal:prepared.spec.spawn_prompt
-                          ~system_prompt:(Printf.sprintf
-                            "You are agent '%s'. Execute the task and return a clear result."
-                             prepared.spec.spawn_agent)
-                          ~max_turns
-                          ~temperature:(Safe_ops.get_env_float_logged
-                            "MASC_SPAWN_TEMPERATURE" ~default:0.3)
-                          ~max_tokens:(Safe_ops.get_env_int_logged
-                            "MASC_SPAWN_MAX_TOKENS" ~default:4096)
-                          ~priority:Llm_provider.Request_priority.Interactive
-                          ?contract ?net:ctx.net ~sw:ctx.sw
-                          ()
+                    let worker_backend =
+                      if deps.is_local_spawn_agent prepared.spec.spawn_agent
+                      then Some "local"
+                      else None
                     in
-                     let elapsed_ms =
-                       int_of_float ((Time_compat.now () -. start_time) *. 1000.0)
-                     in
-                     let resolved_model =
-                       match oas_result with
-                       | Ok result ->
-                           let model =
-                             String.trim
-                               (Oas_response.model_used result.response)
-                           in
-                           if model <> "" then model
-                           else prepared.runtime_model_label
-                       | Error _ -> prepared.runtime_model_label
-                     in
-                     let spawn_result, oas_trace_ref, oas_tool_names, oas_tool_call_count,
-                         trace_summary_json, trace_validation_json =
-                       match oas_result with
-                       | Ok result ->
-                         let text = Agent_sdk.Types.text_of_content result.response.content in
-                         let tool_names =
-                           List.filter_map (function
-                             | Agent_sdk.Types.ToolUse { name; _ } -> Some name
-                             | _ -> None)
-                             result.response.content
-                         in
-                         let usage = result.response.usage in
-                         let cost_usd =
-                           Option.map (fun (cp : Agent_sdk.Checkpoint.t) ->
-                             cp.usage.estimated_cost_usd) result.checkpoint
-                         in
-                         let trace_summary =
-                           Some (`Assoc [
-                             ("oas_session_id", `String result.session_id);
-                             ("turns", `Int result.turns);
-                             ("model", `String resolved_model);
-                             ("tool_names", `List (List.map (fun n -> `String n) tool_names));
-                             ("tool_call_count", `Int (List.length tool_names));
-                             ("input_tokens",
-                               Option.fold ~none:`Null
-                                 ~some:(fun (u : Agent_sdk.Types.api_usage) -> `Int u.input_tokens) usage);
-                             ("output_tokens",
-                               Option.fold ~none:`Null
-                                 ~some:(fun (u : Agent_sdk.Types.api_usage) -> `Int u.output_tokens) usage);
-                           ])
-                         in
-                         let scope =
-                           deps.effective_execution_scope_of_spec prepared.spec
-                         in
-                         let requires_tools = match scope with
-                           | Some Team_session_types.Limited_code_change
-                           | Some Team_session_types.Autonomous -> true
-                           | _ -> false
-                         in
-                         let actual_success =
-                           if requires_tools && List.length tool_names = 0 then false
-                           else true
-                         in
-                         let output =
-                           if not actual_success then
-                             text ^ "\n[contract-violation] Worker completed without tool use in " ^
-                             (Option.fold ~none:"unknown"
-                                ~some:Team_session_types.execution_scope_to_string scope) ^
-                             " scope."
-                           else text
-                         in
-                         ({ Spawn.success = actual_success;
-                            output;
-                            exit_code = (if actual_success then 0 else 1);
-                            elapsed_ms;
-                            input_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.input_tokens) usage;
-                            output_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.output_tokens) usage;
-                            cache_creation_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.cache_creation_input_tokens) usage;
-                            cache_read_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.cache_read_input_tokens) usage;
-                            cost_usd;
-                          },
-                          Some { Agent_sdk.Raw_trace.worker_run_id = prepared.worker_run_id;
-                                path = result.session_id; start_seq = 0; end_seq = result.turns;
-                                agent_name = prepared.spec.spawn_agent;
-                                session_id = Some result.session_id },
-                          tool_names,
-                          List.length tool_names,
-                          trace_summary,
-                          (None : Yojson.Safe.t option))
-                       | Error e ->
-                         ({ Spawn.success = false;
-                            output = e;
-                            exit_code = 1;
-                            elapsed_ms;
-                            input_tokens = None;
-                            output_tokens = None;
-                            cache_creation_tokens = None;
-                            cache_read_tokens = None;
-                            cost_usd = None;
-                          },
-                          None,
-                          [],
-                          0,
-                          None,
-                          None)
-                     in
-                     let output_preview =
-                       deps.truncate_for_event spawn_result.output
-                     in
-                     let proof =
-                       match oas_result with
-                       | Ok result -> result.proof
-                       | Error _ -> None
-                     in
-                     let verification_outcome =
-                       match oas_result with
-                       | Ok result ->
-                           let run_result : Worker_container_types.run_result =
-                             {
-                               output = spawn_result.output;
-                               model_used = resolved_model;
-                               input_tokens = spawn_result.input_tokens;
-                               output_tokens = spawn_result.output_tokens;
-                               cost_usd = spawn_result.cost_usd;
-                               tool_call_count = oas_tool_call_count;
-                               tool_names = oas_tool_names;
-                               session_id = result.session_id;
-                               raw_trace_run = oas_trace_ref;
-                               api_response = Some result.response;
-                               proof = result.proof;
-                             }
-                           in
-                           let goal =
-                             match
-                               Team_session_store.load_session ctx.config
-                                 session_id
-                             with
-                             | Some session -> session.goal
-                             | None -> prepared.spec.spawn_prompt
-                           in
-                           Some
-                             (Worker_verification.verify_worker_result
-                                ?delivery_contract
-                                ~goal run_result)
-                       | Error _ -> None
-                     in
+                    let unexpected_failure ~elapsed_ms error =
+                      let output_preview = deps.truncate_for_event error in
+                      Log.Spawn.error
+                        "spawn worker failed (worker_run_id=%s, agent=%s): %s"
+                        prepared.worker_run_id worker_name error;
+                      release_prepared_runtime prepared ~success:false ~error
+                        ~latency_ms:elapsed_ms ();
+                      persist_worker_run_snapshot
+                        ~worker_run_id:prepared.worker_run_id
+                        ~worker_name
+                        ~mode:"spawn" ~wait_mode
+                        ~status:`Failed
+                        ?execution_scope
+                        ?requested_worker_class:prepared.spec.worker_class
+                        ?requested_worker_size:
+                          (deps.worker_size_of_spec prepared.spec)
+                        ?resolved_runtime:prepared.assigned_runtime
+                        ~resolved_model:prepared.runtime_model_label
+                        ?routing_reason:prepared.spec.routing_reason
+                        ~tool_names:[]
+                        ~tool_call_count:0
+                        ~success:false
+                        ~output_preview
+                        ~evidence_session_id:
+                          (Worker_runtime.oas_worker_evidence_session_id
+                             ~worker_run_id:prepared.worker_run_id)
+                        ~trace_capability:"summary_only"
+                        ();
+                      append_spawn_event
+                        ~worker_run_id:prepared.worker_run_id
+                        ~spawn_agent:prepared.spec.spawn_agent
+                        ?runtime_actor:prepared.runtime_actor_name
+                        ?spawn_role:prepared.spec.spawn_role
+                        ?spawn_model:prepared.spec.spawn_model
+                        ?execution_scope
+                        ?worker_class:prepared.spec.worker_class
+                        ?worker_size:(deps.worker_size_of_spec prepared.spec)
+                        ?worker_backend
+                        ~wait_mode:
+                          (Team_session_types.wait_mode_to_string wait_mode)
+                        ~trace_capability:"summary_only"
+                        ?parent_actor:prepared.spec.parent_actor
+                        ?capsule_mode:prepared.spec.capsule_mode
+                        ?runtime_pool:prepared.spec.runtime_pool
+                        ?lane_id:prepared.spec.lane_id
+                        ?controller_level:
+                          (deps.inferred_controller_level_of_spec prepared.spec)
+                        ?control_domain:prepared.spec.control_domain
+                        ?supervisor_actor:prepared.spec.supervisor_actor
+                        ?model_tier:prepared.spec.model_tier
+                        ?task_profile:prepared.spec.task_profile
+                        ?risk_level:prepared.spec.risk_level
+                        ?routing_confidence:prepared.spec.routing_confidence
+                        ?routing_reason:prepared.spec.routing_reason
+                        ?assigned_runtime:prepared.assigned_runtime
+                        ?spawn_selection_note:prepared.spec.spawn_selection_note
+                        ~tool_names:[]
+                        ~tool_call_count:0
+                        ~success:false
+                        ~exit_code:1
+                        ~elapsed_ms
+                        ~output_preview
+                        ~error
+                        ();
+                      (match prepared.runtime_actor_name with
+                      | Some worker_actor ->
+                          ignore
+                            (deps.reconcile_failed_spawn_actor ctx.config
+                               session_id worker_actor)
+                      | None -> ());
+                      `Assoc
+                        [
+                          ("worker_run_id", `String prepared.worker_run_id);
+                          ( "runtime_actor",
+                            Option.fold ~none:`Null
+                              ~some:(fun s -> `String s)
+                              prepared.runtime_actor_name );
+                          ( "spawn_role",
+                            Option.fold ~none:`Null
+                              ~some:(fun s -> `String s)
+                              prepared.spec.spawn_role );
+                          ( "execution_scope",
+                            Option.fold ~none:`Null
+                              ~some:(fun scope ->
+                                `String
+                                  (Team_session_types
+                                   .execution_scope_to_string scope))
+                              execution_scope );
+                          ( "thinking_enabled",
+                            Option.fold ~none:`Null
+                              ~some:(fun v -> `Bool v)
+                              prepared.spec.thinking_enabled );
+                          ( "max_turns",
+                            Option.fold ~none:`Null
+                              ~some:(fun n -> `Int n)
+                              prepared.spec.max_turns );
+                          ( "worker_class",
+                            Option.fold ~none:`Null
+                              ~some:(fun kind ->
+                                `String
+                                  (Team_session_types
+                                   .worker_class_to_string kind))
+                              prepared.spec.worker_class );
+                          ( "worker_size",
+                            Option.fold ~none:`Null
+                              ~some:(fun size ->
+                                `String
+                                  (Team_session_types
+                                   .worker_size_to_string size))
+                              (deps.worker_size_of_spec prepared.spec) );
+                          ( "worker_backend",
+                            Option.fold ~none:`Null
+                              ~some:(fun s -> `String s)
+                              worker_backend );
+                          ( "wait_mode",
+                            `String
+                              (Team_session_types.wait_mode_to_string wait_mode)
+                          );
+                          ("status", `String "failed");
+                          ("trace_capability", `String "summary_only");
+                          ( "resolved_runtime",
+                            Option.fold ~none:`Null
+                              ~some:(fun s -> `String s)
+                              prepared.assigned_runtime );
+                          ("resolved_model", `String prepared.runtime_model_label);
+                          ( "routing_reason",
+                            Option.fold ~none:`Null
+                              ~some:(fun s -> `String s)
+                              prepared.spec.routing_reason );
+                          ("tool_call_count", `Int 0);
+                          ("tool_names", `List []);
+                          ("success", `Bool false);
+                          ("error", `String error);
+                          ("exit_code", `Int 1);
+                          ("elapsed_ms", `Int elapsed_ms);
+                          ("output_preview", `String output_preview);
+                        ]
+                    in
+                    try
+                      let worker_result =
+                        Worker_runtime.run_worker ~sw:run_sw ?net:ctx.net
+                          ~base_path:ctx.config.base_path ~worker_name
+                          ~model_label:prepared.runtime_model_label
+                          ~team_session_id:(Some session_id)
+                          ~room_config:(Some ctx.config)
+                          ?worker_class:prepared.spec.worker_class
+                          ?worker_size:(deps.worker_size_of_spec prepared.spec)
+                          ?execution_scope
+                          ?thinking_enabled:prepared.spec.thinking_enabled
+                          ~max_turns:(Option.value ~default:10 prepared.spec.max_turns)
+                          ~worker_run_id:prepared.worker_run_id
+                          ~role:prepared.spec.spawn_role
+                          ~selection_note:prepared.spec.spawn_selection_note
+                          ~prompt:prepared.spec.spawn_prompt
+                          ~allowed_tools:local_worker_tool_names
+                          ~timeout_sec:prepared.spec.spawn_timeout_seconds
+                          ?contract
+                          ()
+                      in
+                      let elapsed_ms =
+                        int_of_float
+                          ((Time_compat.now () -. start_time) *. 1000.0)
+                      in
+                      let spawn_result, run_result =
+                        match worker_result with
+                        | Ok run_result ->
+                            ( { Spawn.success = true;
+                                output = run_result.output;
+                                exit_code = 0;
+                                elapsed_ms;
+                                input_tokens = run_result.input_tokens;
+                                output_tokens = run_result.output_tokens;
+                                cache_creation_tokens = None;
+                                cache_read_tokens = None;
+                                cost_usd = run_result.cost_usd;
+                              },
+                              Some run_result )
+                        | Error e ->
+                            ( { Spawn.success = false;
+                                output = e;
+                                exit_code = 1;
+                                elapsed_ms;
+                                input_tokens = None;
+                                output_tokens = None;
+                                cache_creation_tokens = None;
+                                cache_read_tokens = None;
+                                cost_usd = None;
+                              },
+                              None )
+                      in
+                    let output_preview =
+                      deps.truncate_for_event spawn_result.output
+                    in
+                    let oas_trace_ref =
+                      Option.bind run_result
+                        (fun (result : Worker_container_types.run_result) ->
+                          result.raw_trace_run)
+                    in
+                    let oas_tool_names =
+                      Option.value ~default:[]
+                        (Option.map
+                           (fun (result : Worker_container_types.run_result) ->
+                             result.tool_names)
+                           run_result)
+                    in
+                    let oas_tool_call_count =
+                      Option.value ~default:0
+                        (Option.map
+                           (fun (result : Worker_container_types.run_result) ->
+                             result.tool_call_count)
+                           run_result)
+                    in
+                    let resolved_model =
+                      Option.value ~default:prepared.runtime_model_label
+                        (Option.map
+                           (fun (result : Worker_container_types.run_result) ->
+                             result.model_used)
+                           run_result)
+                    in
+                    let trace_summary_json, trace_validation_json =
+                      match oas_trace_ref with
+                      | Some run_ref -> (
+                          match
+                            deps.raw_trace_session_payloads
+                              ~config:ctx.config
+                              ~fallback_session_id:session_id run_ref
+                          with
+                          | Some pair -> (Some (fst pair), Some (snd pair))
+                          | None -> (None, None))
+                      | None -> (None, None)
+                    in
+                      let proof =
+                      Option.bind run_result
+                        (fun (result : Worker_container_types.run_result) ->
+                          result.proof)
+                    in
+                      let verification_outcome =
+                      match run_result with
+                      | Some run_result ->
+                          let goal =
+                            match
+                              Team_session_store.load_session ctx.config
+                                session_id
+                            with
+                            | Some session -> session.goal
+                            | None -> prepared.spec.spawn_prompt
+                          in
+                          Some
+                            (Worker_verification.verify_worker_result
+                               ?delivery_contract
+                               ~goal run_result)
+                      | None -> None
+                      in
+                      let trace_capability =
+                        if Option.is_some oas_trace_ref then "raw"
+                        else "summary_only"
+                      in
                      Option.iter
                        (Tool_team_session_step_exec
                         .record_delivery_verdict_for_worker_run
@@ -483,14 +425,11 @@ let execute_spawn_pipeline
                            ~latency_ms:spawn_result.elapsed_ms ());
                      persist_worker_run_snapshot
                        ~worker_run_id:prepared.worker_run_id
-                       ~worker_name:
-                         (Option.value
-                            ~default:(Printf.sprintf "spawn-%d" index)
-                            prepared.runtime_actor_name)
+                       ~worker_name
                        ~mode:"spawn" ~wait_mode
                        ~status:
                          (if spawn_result.success then `Completed else `Failed)
-                       ?execution_scope:execution_scope
+                       ?execution_scope
                        ?requested_worker_class:prepared.spec.worker_class
                        ?requested_worker_size:(deps.worker_size_of_spec prepared.spec)
                        ?resolved_runtime:prepared.assigned_runtime
@@ -509,7 +448,7 @@ let execute_spawn_pipeline
                        ?trace_summary:trace_summary_json
                        ?trace_validation:trace_validation_json
                        ?proof
-                         ~trace_capability:"raw"
+                        ~trace_capability
                        ();
                      append_spawn_event
                        ~worker_run_id:prepared.worker_run_id
@@ -517,12 +456,12 @@ let execute_spawn_pipeline
                        ?runtime_actor:prepared.runtime_actor_name
                        ?spawn_role:prepared.spec.spawn_role
                        ?spawn_model:prepared.spec.spawn_model
-                       ?execution_scope:execution_scope
+                       ?execution_scope
                        ?worker_class:prepared.spec.worker_class
                        ?worker_size:(deps.worker_size_of_spec prepared.spec)
-                       ?worker_backend:(worker_backend_of_prepared prepared)
+                       ?worker_backend
                        ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
-                       ~trace_capability:"raw"
+                       ~trace_capability
                        ?parent_actor:prepared.spec.parent_actor
                        ?capsule_mode:prepared.spec.capsule_mode
                        ?runtime_pool:prepared.spec.runtime_pool
@@ -600,12 +539,12 @@ let execute_spawn_pipeline
                          ("worker_run_id", `String prepared.worker_run_id);
                          ("runtime_actor", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.runtime_actor_name);
                          ("spawn_role", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.spawn_role);
-                         ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
+                         ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) (deps.effective_execution_scope_of_spec prepared.spec));
                          ("thinking_enabled", Option.fold ~none:`Null ~some:(fun v -> `Bool v) prepared.spec.thinking_enabled);
                          ("max_turns", Option.fold ~none:`Null ~some:(fun n -> `Int n) prepared.spec.max_turns);
                          ("worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) prepared.spec.worker_class);
                          ("worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) (deps.worker_size_of_spec prepared.spec));
-                         ("worker_backend", Option.fold ~none:`Null ~some:(fun value -> `String value) (worker_backend_of_prepared prepared));
+                         ("worker_backend", if deps.is_local_spawn_agent prepared.spec.spawn_agent then `String "local" else `Null);
                          ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
                          ("status", `String "completed");
                          ("trace_capability", `String (if Option.is_some oas_trace_ref then "raw" else "summary_only"));
@@ -619,7 +558,16 @@ let execute_spawn_pipeline
                          ("output_preview", `String output_preview);
                          ("delivery_verdict", Option.value ~default:`Null delivery_verdict_json);
                        ]
-                   in
+                    with
+                    | Eio.Cancel.Cancelled _ as exn -> raise exn
+                    | exn ->
+                        let elapsed_ms =
+                          int_of_float
+                            ((Time_compat.now () -. start_time) *. 1000.0)
+                        in
+                        unexpected_failure ~elapsed_ms
+                          (Printexc.to_string exn)
+                  in
                    (match wait_mode with
                    | Team_session_types.Wait_background ->
                        let sw_bg =
@@ -628,23 +576,11 @@ let execute_spawn_pipeline
                        in
                        List.iteri
                          (fun index prepared ->
-                           let started_at = Time_compat.now () in
                            append_spawn_requested_event
                              ~worker_run_id:prepared.worker_run_id
                              prepared;
                            Eio.Fiber.fork ~sw:sw_bg (fun () ->
-                               try ignore (execute_spawn index prepared)
-                               with
-                               | Eio.Cancel.Cancelled _ as exn -> raise exn
-                               | exn ->
-                                 Log.Spawn.error
-                                   "background spawn failed (worker_run_id=%s, agent=%s): %s"
-                                   prepared.worker_run_id
-                                   prepared.spec.spawn_agent
-                                   (Printexc.to_string exn);
-                                 ignore
-                                   (record_spawn_exception index prepared
-                                      ~started_at exn)))
+                             ignore (execute_spawn ~run_sw:sw_bg index prepared)))
                          prepared_spawns;
                        let accepted =
                          prepared_spawns
@@ -675,13 +611,13 @@ let execute_spawn_pipeline
                                 ("results", `List accepted);
                               ])
                    | Team_session_types.Wait_blocking ->
-                       let results =
-                         Array.make (List.length prepared_spawns) None
-                       in
-                       Eio.Fiber.all
+                      let results =
+                        Array.make (List.length prepared_spawns) None
+                      in
+                      Eio.Fiber.all
                          (List.mapi
                             (fun index prepared () ->
-                              results.(index) <- Some (execute_spawn index prepared))
+                              results.(index) <- Some (execute_spawn ~run_sw:ctx.sw index prepared))
                             prepared_spawns);
                        let spawn_results =
                          results |> Array.to_list

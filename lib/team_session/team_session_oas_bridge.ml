@@ -551,8 +551,12 @@ let planned_worker_to_entry_with_state
   let cascade_name = cascade_of_worker ~session_cascade pw in
   let max_turns = Option.value ~default:10 pw.max_turns in
   let telemetry_ref = ref Swarm.Swarm_types.empty_telemetry in
+  let effective_execution_scope =
+    Team_session_types.effective_execution_scope_of_planned_worker pw
+  in
   let scoped_tool_names =
-    supported_local_worker_tool_names_for_scope pw.execution_scope
+    supported_local_worker_tool_names_for_scope
+      (Some effective_execution_scope)
   in
   let scoped_masc_tools =
     List.filter
@@ -579,7 +583,8 @@ let planned_worker_to_entry_with_state
       let tool_names =
         List.map (fun (t : Types.tool_schema) -> t.name) scoped_masc_tools
       in
-      Contract_composer.compose ~delivery_contract:dc ~tool_names
+      Contract_composer.compose ~delivery_contract:dc
+        ~execution_scope:pw.execution_scope ~tool_names
     ) delivery_contract in
     match
       Oas_worker.run_named_with_masc_tools

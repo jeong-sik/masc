@@ -9,7 +9,7 @@ import {
   keepers,
   tasks,
 } from '../store'
-import { fetchRoomMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineResponse } from '../api'
+import { currentDashboardActor, fetchRoomMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineResponse } from '../api'
 import { callMcpTool } from '../api/mcp'
 import { journal } from '../sse'
 import { route, navigate } from '../router'
@@ -22,8 +22,6 @@ import type {
   Keeper,
   Task,
 } from '../types'
-
-const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
 export type TaskHistoryRow = {
   taskId: string
@@ -200,11 +198,9 @@ export async function submitMention(): Promise<void> {
   const text = mentionText.value.trim()
   if (!target || !text) return
 
-  const sender = localStorage.getItem(AGENT_NAME_KEY)?.trim() || 'dashboard'
-
   sendingMention.value = true
   try {
-    await sendBroadcast(sender, `@${target} ${text}`)
+    await sendBroadcast(currentDashboardActor(), `@${target} ${text}`)
     mentionText.value = ''
     showToast(`${target}에게 멘션 전송 완료`, 'success')
     void refreshAgentDetail()

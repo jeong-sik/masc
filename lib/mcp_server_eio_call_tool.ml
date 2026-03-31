@@ -169,7 +169,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ~broadcast_tools_list_changed ~sw ~clock ?(profile = Full) ?mcp_session_id
     ?auth_token state id params =
   let module U = Yojson.Safe.Util in
-  let make_response = Mcp_server.make_response in
+  let make_response = Mcp_transport_protocol.make_response in
   let (name, arguments) =
     match profile with
     | Managed_agent -> (

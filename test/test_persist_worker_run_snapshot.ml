@@ -173,6 +173,12 @@ let test_persist_worker_run_snapshot_with_proof () =
   let proof = sample_proof ~run_id:"proof-run-123" in
   persist_snapshot ~proof step_env;
   let json = read_worker_meta config "wr-proof-snapshot" in
+  check string "session_id injected" "ts-proof-snapshot"
+    (json |> U.member "session_id" |> U.to_string);
+  check string "worker_run_id preserved" "wr-proof-snapshot"
+    (json |> U.member "worker_run_id" |> U.to_string);
+  check bool "evidence refs normalized" true
+    ((json |> U.member "evidence_refs" |> U.to_list) <> []);
   check string "proof run id" "proof-run-123"
     (json |> U.member "proof_run_id" |> U.to_string);
   check string "proof status" "completed"
@@ -188,6 +194,8 @@ let test_persist_worker_run_snapshot_without_proof () =
   with_snapshot_env @@ fun config step_env ->
   persist_snapshot step_env;
   let json = read_worker_meta config "wr-proof-snapshot" in
+  check string "session_id injected without proof" "ts-proof-snapshot"
+    (json |> U.member "session_id" |> U.to_string);
   check bool "proof_run_id null" true
     (json |> U.member "proof_run_id" = `Null);
   check bool "proof_status null" true

@@ -65,6 +65,27 @@ type handoff_rollover = {
   message_count : int;
 }
 
+type compaction_event = {
+  applied : bool;
+  trigger : string option;
+  decision : string;
+  before_tokens : int;
+  after_tokens : int;
+  saved_tokens : int;
+}
+
+type post_turn_lifecycle = {
+  updated_meta : keeper_meta;
+  checkpoint : Agent_sdk.Checkpoint.t option;
+  handoff_json : Yojson.Safe.t option;
+  compaction : compaction_event;
+  turn_generation : int;
+  context_ratio : float;
+  context_tokens : int;
+  context_max : int;
+  message_count : int;
+}
+
 val maybe_rollover_oas_handoff :
   base_dir:string ->
   meta:keeper_meta ->
@@ -93,6 +114,14 @@ val compact_if_needed :
   now_ts:float ->
   working_context ->
   working_context * string option * string
+
+val apply_post_turn_lifecycle :
+  base_dir:string ->
+  meta:keeper_meta ->
+  model:string ->
+  primary_model_max_tokens:int ->
+  checkpoint:Agent_sdk.Checkpoint.t option ->
+  post_turn_lifecycle
 
 (** {1 Trace and Board Utilities} *)
 

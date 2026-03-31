@@ -14,6 +14,7 @@ type risk_axes = {
 }
 
 val assess :
+  execution_scope:Team_session_types.execution_scope option ->
   delivery_contract:Team_session_types.delivery_contract ->
   tool_names:string list ->
   risk_axes
@@ -21,6 +22,7 @@ val assess :
 val to_risk_class : risk_axes -> Agent_sdk.Risk_class.t
 
 val of_delivery_contract :
+  execution_scope:Team_session_types.execution_scope option ->
   delivery_contract:Team_session_types.delivery_contract ->
   tool_names:string list ->
   Agent_sdk.Risk_class.t

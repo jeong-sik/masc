@@ -24,6 +24,83 @@ type tool_result = Keeper_types.tool_result
 let handle_keeper_up = Keeper_turn_up.handle_keeper_up
 let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
+let resolved_model_id_for_result ~(meta : keeper_meta)
+    (result : Keeper_agent_run.run_result) : string =
+  let strip_latest s =
+    if String.length s > 7 && String.sub s (String.length s - 7) 7 = ":latest"
+    then String.sub s 0 (String.length s - 7)
+    else s
+  in
+  let used = strip_latest result.model_used in
+  let cascade_models = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
+  let cfgs = Llm_provider.Cascade_config.parse_model_strings cascade_models in
+  match
+    List.find_opt
+      (fun (c : Llm_provider.Provider_config.t) ->
+        c.model_id = result.model_used || c.model_id = used)
+      cfgs
+  with
+  | Some c -> c.model_id
+  | None -> (match cfgs with c :: _ -> c.model_id | [] -> result.model_used)
+
+let turn_cost_for_result ~(meta : keeper_meta)
+    (result : Keeper_agent_run.run_result) : float =
+  let pricing =
+    Llm_provider.Pricing.pricing_for_model
+      (resolved_model_id_for_result ~meta result)
+  in
+  Llm_provider.Pricing.estimate_cost ~pricing
+    ~input_tokens:result.usage.input_tokens
+    ~output_tokens:result.usage.output_tokens ()
+
+let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
+    (result : Keeper_agent_run.run_result) : keeper_meta =
+  let now_ts = Time_compat.now () in
+  let turn_cost = turn_cost_for_result ~meta result in
+  {
+    meta with
+    updated_at = now_iso ();
+    runtime =
+      {
+        meta.runtime with
+        usage =
+          {
+            total_turns = meta.runtime.usage.total_turns + 1;
+            total_input_tokens =
+              meta.runtime.usage.total_input_tokens + result.usage.input_tokens;
+            total_output_tokens =
+              meta.runtime.usage.total_output_tokens + result.usage.output_tokens;
+            total_tokens =
+              meta.runtime.usage.total_tokens
+              + Keeper_exec_context.total_tokens result.usage;
+            total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
+            last_turn_ts = now_ts;
+            last_model_used = result.model_used;
+            last_input_tokens = result.usage.input_tokens;
+            last_output_tokens = result.usage.output_tokens;
+            last_total_tokens =
+              Keeper_exec_context.total_tokens result.usage;
+            last_latency_ms = latency_ms;
+          };
+      };
+  }
+
+let direct_turn_observation (meta : keeper_meta) :
+    Keeper_world_observation.world_observation =
+  {
+    pending_mentions = [];
+    pending_board_events = [];
+    idle_seconds = 0;
+    active_goals = meta.active_goal_ids;
+    continuity_summary = meta.continuity_summary;
+    worktree_change_summary = None;
+    context_ratio = 0.0;
+    economic_pressure = Agent_economy.Normal;
+    unclaimed_task_count = 0;
+    failed_task_count = 0;
+    active_agent_count = 0;
+  }
+
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
 let handle_keeper_msg ?on_text_delta ctx args : tool_result =
@@ -192,19 +269,21 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
-            match
-              Keeper_agent_run.run_turn
-                ~config:ctx.config ~meta ~base_dir
-                ~max_context:primary_max_context
-                ~build_turn_prompt
-                ~user_message:message
-                ~cascade_name:turn_cascade_name
-                ~generation:meta.runtime.generation
-                ?on_event
-                ~trajectory_acc
-                ~priority:Llm_provider.Request_priority.Interactive
-                ()
-            with
+            let run_result, latency_ms =
+              Keeper_exec_context.timed (fun () ->
+                  Keeper_agent_run.run_turn
+                    ~config:ctx.config ~meta ~base_dir
+                    ~max_context:primary_max_context
+                    ~build_turn_prompt
+                    ~user_message:message
+                    ~cascade_name:turn_cascade_name
+                    ~generation:meta.runtime.generation
+                    ?on_event
+                    ~trajectory_acc
+                    ~priority:Llm_provider.Request_priority.Interactive
+                    ())
+            in
+            match run_result with
             | Error e ->
               (try ignore (Trajectory.finalize trajectory_acc
                  (Trajectory.Failed e))
@@ -218,15 +297,61 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                  Trajectory.Completed)
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
-              start_keepalive ctx meta;
+              let lifecycle =
+                Keeper_exec_context.apply_post_turn_lifecycle ~base_dir
+                  ~meta
+                  ~model:result.model_used
+                  ~primary_model_max_tokens:primary_max_context
+                  ~checkpoint:result.checkpoint
+              in
+              let updated_meta =
+                update_direct_turn_meta lifecycle.updated_meta ~latency_ms result
+              in
+              (match write_meta ctx.config updated_meta with
+               | Ok () -> ()
+               | Error msg ->
+                   Log.Keeper.error "write_meta failed after keeper_msg turn: %s" msg);
+              (try
+                 Keeper_unified_turn.append_metrics_snapshot
+                   ~config:ctx.config
+                   ~meta:updated_meta
+                   ~observation:(direct_turn_observation updated_meta)
+                   ~result
+                   ~latency_ms
+                   ~turn_cost:(turn_cost_for_result ~meta:updated_meta result)
+                   ~turn_generation:lifecycle.turn_generation
+                   ~channel:"turn"
+                   ~snapshot_source:"keeper_turn_msg"
+                   ~context_ratio:lifecycle.context_ratio
+                   ~context_tokens:lifecycle.context_tokens
+                   ~context_max:lifecycle.context_max
+                   ~message_count:lifecycle.message_count
+                   ~compaction:lifecycle.compaction
+                   ~handoff_json:lifecycle.handoff_json
+                   ()
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                   Log.Keeper.error
+                     "write metrics snapshot failed after keeper_msg turn: %s"
+                     (Printexc.to_string exn));
+              Keeper_unified_turn.broadcast_lifecycle_events
+                ~name:updated_meta.name
+                ~turn_generation:lifecycle.turn_generation
+                ~compaction:lifecycle.compaction
+                ~handoff_json:lifecycle.handoff_json;
+              start_keepalive ctx updated_meta;
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" result.tool_calls_made) ();
-              let reply_json = `Assoc [
-                ("reply", `String result.response_text);
-                ("model", `String result.model_used);
-                ("turns", `Int result.turn_count);
-                ("tool_calls", `Int result.tool_calls_made);
-              ] in
+              let reply_json =
+                `Assoc
+                  [
+                    ("reply", `String result.response_text);
+                    ("model", `String result.model_used);
+                    ("turns", `Int result.turn_count);
+                    ("tool_calls", `Int result.tool_calls_made);
+                  ]
+              in
               (true, Yojson.Safe.to_string reply_json)
 
 ))))

@@ -7,13 +7,20 @@ let workspace_mutating_tools =
     "keeper_write";
     "create_text_file";
     "edit_text_file";
+    "file_write";
   ]
 
-let is_workspace_mutating name =
-  List.mem name workspace_mutating_tools
+let workspace_mutating_tools_for_scope = function
+  | Some Team_session_types.Observe_only ->
+      List.filter (fun name -> not (String.equal name "file_write"))
+        workspace_mutating_tools
+  | _ -> workspace_mutating_tools
 
-let allowed_mutations_of_tool_names tool_names =
-  List.filter is_workspace_mutating tool_names
+let is_workspace_mutating ~execution_scope name =
+  List.mem name (workspace_mutating_tools_for_scope execution_scope)
+
+let allowed_mutations_of_tool_names ~execution_scope tool_names =
+  List.filter (is_workspace_mutating ~execution_scope) tool_names
 
 let review_requirement_of_risk_class = function
   | Oas.Risk_class.High | Oas.Risk_class.Critical -> Some "human_review"
@@ -36,10 +43,12 @@ let requested_mode_of_repair_budget repair_budget =
   else Oas.Execution_mode.Draft
 
 let of_delivery_contract
+    ~execution_scope
     ~(delivery_contract : Team_session_types.delivery_contract)
     ~(tool_names : string list) : Oas.Risk_contract.t =
   let risk_class =
-    Contract_risk.of_delivery_contract ~delivery_contract ~tool_names
+    Contract_risk.of_delivery_contract ~execution_scope ~delivery_contract
+      ~tool_names
   in
   {
     Oas.Risk_contract.runtime_constraints =
@@ -47,7 +56,8 @@ let of_delivery_contract
         requested_execution_mode =
           requested_mode_of_repair_budget delivery_contract.repair_budget;
         risk_class;
-        allowed_mutations = allowed_mutations_of_tool_names tool_names;
+        allowed_mutations =
+          allowed_mutations_of_tool_names ~execution_scope tool_names;
         review_requirement = review_requirement_of_risk_class risk_class;
       };
     eval_criteria = build_delivery_eval_criteria delivery_contract;

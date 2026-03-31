@@ -5,4 +5,5 @@
  (public_name masc_mcp.mcp_transport_protocol)
  (modules mcp_transport_protocol)
  (wrapped false)
- (libraries mcp_protocol yojson))
+ (libraries mcp_protocol yojson)
+ (preprocess (pps ppx_deriving_yojson)))

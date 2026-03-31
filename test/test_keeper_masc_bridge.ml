@@ -179,7 +179,7 @@ let test_tool_access_invalid_kind_rejected () =
   | Error e ->
       Alcotest.(check string)
         "invalid kind error"
-        "meta parse error: Invalid_argument(\"invalid keeper tool_access.kind: bogus\")"
+        "meta parse error: invalid keeper tool_access.kind: bogus"
         e
 
 let test_tool_access_missing_kind_rejected () =
@@ -196,8 +196,67 @@ let test_tool_access_missing_kind_rejected () =
   | Error e ->
       Alcotest.(check string)
         "missing kind error"
-        "meta parse error: Invalid_argument(\"keeper tool_access.kind required\")"
+        "meta parse error: keeper tool_access.kind required"
         e
+
+let test_tool_access_missing_tools_rejected () =
+  match Masc_mcp.Keeper_types.meta_of_json
+    (`Assoc
+      [
+        ("name", `String "missing-tools");
+        ("agent_name", `String "missing-tools");
+        ("trace_id", `String "missing-tools-trace");
+        ("tool_access", `Assoc [ ("kind", `String "restricted") ]);
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected missing tools to fail"
+  | Error e ->
+      Alcotest.(check string)
+        "missing tools error"
+        "meta parse error: keeper tool_access.tools must be an array of strings"
+        e
+
+let test_tool_access_invalid_tool_member_rejected () =
+  match Masc_mcp.Keeper_types.meta_of_json
+    (`Assoc
+      [
+        ("name", `String "invalid-tool-member");
+        ("agent_name", `String "invalid-tool-member");
+        ("trace_id", `String "invalid-tool-member-trace");
+        ( "tool_access",
+          `Assoc
+            [
+              ("kind", `String "restricted");
+              ("tools", `List [ `String "masc_status"; `Int 1 ]);
+            ] );
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected invalid tool member to fail"
+  | Error e ->
+      Alcotest.(check string)
+        "invalid tool member error"
+        "meta parse error: keeper tool_access.tools[1] must be a string"
+        e
+
+let test_legacy_nonempty_allowlist_normalizes_to_restricted_empty () =
+  let meta =
+    match Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String "legacy-blank-allowlist");
+          ("agent_name", `String "legacy-blank-allowlist");
+          ("trace_id", `String "legacy-blank-allowlist-trace");
+          ("tool_allowlist", `List [ `String " "; `String "" ]);
+        ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith e
+  in
+  match meta.Masc_mcp.Keeper_types.tool_access with
+  | Masc_mcp.Keeper_types.Restricted names ->
+      Alcotest.(check int) "normalized empty remains restricted" 0 (List.length names)
+  | Masc_mcp.Keeper_types.Unrestricted ->
+      Alcotest.fail "legacy non-empty allowlist must not become unrestricted"
 
 (** Allowlist also gates shard-sourced masc_* in allowed_tool_names. *)
 let test_allowlist_gates_shard_tools () =
@@ -279,6 +338,32 @@ let test_denied_excluded_from_allowed_names () =
   Alcotest.(check bool) "masc_status still present" true
     (List.mem "masc_status" names)
 
+let test_dashboard_add_allow_restricts_unrestricted () =
+  let updated =
+    Masc_mcp.Server_routes_http_routes_dashboard.keeper_tools_add_allow
+      Masc_mcp.Keeper_types.Unrestricted
+      [ "masc_status"; "masc_status"; "masc_join" ]
+  in
+  match updated with
+  | Masc_mcp.Keeper_types.Restricted names ->
+      Alcotest.(check (list string))
+        "deduped restricted allowlist"
+        [ "masc_status"; "masc_join" ]
+        names
+  | Masc_mcp.Keeper_types.Unrestricted ->
+      Alcotest.fail "add_allow should restrict unrestricted access"
+
+let test_dashboard_add_allow_empty_keeps_unrestricted () =
+  let updated =
+    Masc_mcp.Server_routes_http_routes_dashboard.keeper_tools_add_allow
+      Masc_mcp.Keeper_types.Unrestricted
+      [ " "; "" ]
+  in
+  match updated with
+  | Masc_mcp.Keeper_types.Unrestricted -> ()
+  | Masc_mcp.Keeper_types.Restricted _ ->
+      Alcotest.fail "empty add_allow should not lock unrestricted keeper down"
+
 let () =
   Alcotest.run "Keeper masc bridge"
     [
@@ -314,12 +399,18 @@ let () =
         [
           Alcotest.test_case "legacy empty allowlist migrates to standard" `Quick
             test_legacy_empty_allowlist_migrates_to_standard;
+          Alcotest.test_case "legacy non-empty allowlist stays restricted" `Quick
+            test_legacy_nonempty_allowlist_normalizes_to_restricted_empty;
           Alcotest.test_case "restricted empty json preserved" `Quick
             test_tool_access_restricted_empty_json_preserved;
           Alcotest.test_case "invalid kind rejected" `Quick
             test_tool_access_invalid_kind_rejected;
           Alcotest.test_case "missing kind rejected" `Quick
             test_tool_access_missing_kind_rejected;
+          Alcotest.test_case "missing tools rejected" `Quick
+            test_tool_access_missing_tools_rejected;
+          Alcotest.test_case "invalid tool member rejected" `Quick
+            test_tool_access_invalid_tool_member_rejected;
         ] );
       ( "dispatch",
         [
@@ -338,5 +429,9 @@ let () =
             test_is_keeper_denied;
           Alcotest.test_case "denied excluded from allowed_names" `Quick
             test_denied_excluded_from_allowed_names;
+          Alcotest.test_case "dashboard add_allow restricts unrestricted" `Quick
+            test_dashboard_add_allow_restricts_unrestricted;
+          Alcotest.test_case "dashboard add_allow empty keeps unrestricted" `Quick
+            test_dashboard_add_allow_empty_keeps_unrestricted;
         ] );
     ]

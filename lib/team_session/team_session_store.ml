@@ -1,6 +1,7 @@
 (** Team session persistence helpers. *)
 
 open Room_utils
+module U = Yojson.Safe.Util
 
 let sessions_root config =
   Filename.concat (masc_dir config) "team-sessions"
@@ -160,6 +161,137 @@ let load_session_or_error config session_id =
   | Some s -> Ok s
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
 
+let json_string_member_opt key json =
+  match U.member key json with
+  | `String value when String.trim value <> "" -> Some (String.trim value)
+  | _ -> None
+
+let json_string_list_member key json =
+  match U.member key json with
+  | `List items ->
+      items
+      |> List.filter_map (function
+           | `String value when String.trim value <> "" ->
+               Some (String.trim value)
+           | _ -> None)
+  | _ -> []
+
+let assoc_remove key fields =
+  List.filter (fun (candidate, _) -> not (String.equal candidate key)) fields
+
+let assoc_put key value fields = (key, value) :: assoc_remove key fields
+
+let assoc_put_opt_string key value fields =
+  match value with
+  | Some value when String.trim value <> "" ->
+      assoc_put key (`String (String.trim value)) fields
+  | _ -> fields
+
+let assoc_put_string_list key values fields =
+  match Team_session_types.dedup_strings values with
+  | [] -> fields
+  | values ->
+      assoc_put key (`List (List.map (fun value -> `String value) values)) fields
+
+let option_or_else fallback opt =
+  match opt with
+  | Some _ -> opt
+  | None -> fallback ()
+
+let operation_id_for_session config session_id =
+  match load_session config session_id with
+  | Some session -> session.Team_session_types.operation_id
+  | None -> None
+
+let trace_ref_json_session_worker ~session_id ~worker_run_id json =
+  match json with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        |> assoc_put_opt_string "session_id"
+             (option_or_else (fun () -> Some session_id)
+                (json_string_member_opt "session_id" json))
+        |> assoc_put_opt_string "worker_run_id"
+             (json_string_member_opt "worker_run_id" json
+             |> option_or_else (fun () -> Some worker_run_id)))
+  | _ -> json
+
+let evidence_refs_of_json json =
+  let trace_ref_path =
+    match U.member "trace_ref" json with
+    | `Assoc _ as trace_ref -> (
+        match json_string_member_opt "path" trace_ref with
+        | Some path -> [ path ]
+        | None -> [])
+    | _ -> []
+  in
+  Team_session_types.dedup_strings
+    (json_string_list_member "evidence_refs" json
+    @ json_string_list_member "tool_trace_refs" json
+    @ json_string_list_member "raw_evidence_refs" json
+    @
+    (match json_string_member_opt "checkpoint_ref" json with
+    | Some value -> [ value ]
+    | None -> [])
+    @ trace_ref_path)
+
+let normalize_session_event_detail config ~session_id detail =
+  let detail =
+    match detail with
+    | `Assoc _ -> detail
+    | _ -> `Assoc []
+  in
+  let operation_id =
+    json_string_member_opt "operation_id" detail
+    |> option_or_else (fun () -> operation_id_for_session config session_id)
+  in
+  let worker_run_id =
+    json_string_member_opt "worker_run_id" detail
+    |> option_or_else (fun () ->
+           match U.member "trace_ref" detail with
+           | `Assoc _ as trace_ref -> json_string_member_opt "worker_run_id" trace_ref
+           | _ -> None)
+  in
+  let evidence_refs = evidence_refs_of_json detail in
+  match detail with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        |> assoc_put "session_id" (`String session_id)
+        |> assoc_put_opt_string "operation_id" operation_id
+        |> assoc_put_opt_string "worker_run_id" worker_run_id
+        |> assoc_put_string_list "evidence_refs" evidence_refs)
+  | _ -> detail
+
+let normalize_worker_run_meta_json config ~session_id ~worker_run_id json =
+  let json =
+    match json with
+    | `Assoc _ -> json
+    | _ -> `Assoc []
+  in
+  let operation_id =
+    json_string_member_opt "operation_id" json
+    |> option_or_else (fun () -> operation_id_for_session config session_id)
+  in
+  let evidence_refs = evidence_refs_of_json json in
+  match json with
+  | `Assoc fields ->
+      let fields =
+        match U.member "trace_ref" json with
+        | `Assoc _ as trace_ref ->
+            assoc_put "trace_ref"
+              (trace_ref_json_session_worker ~session_id ~worker_run_id trace_ref)
+              fields
+        | _ -> fields
+      in
+      `Assoc
+        (fields
+        |> assoc_put "session_id" (`String session_id)
+        |> assoc_put "worker_run_id" (`String worker_run_id)
+        |> assoc_put_opt_string "operation_id" operation_id
+        |> assoc_put_string_list "evidence_refs" evidence_refs)
+  | _ -> json
+
 let activity_room_id (config : Room_utils.config) =
   match config.scope with
   | Default -> "default"
@@ -174,6 +306,64 @@ let emit_activity_event config ~session_id ~(event_type : string)
     ~(detail : Yojson.Safe.t) =
   let session_subject = Activity_graph.entity ~kind:"operation" session_id in
   let actor_entity name = Activity_graph.entity ~kind:"agent" name in
+  let actor_name detail =
+    detail_string "actor" detail
+    |> option_or_else (fun () -> detail_string "created_by" detail)
+    |> option_or_else (fun () -> detail_string "agent" detail)
+  in
+  let activity_kind_and_tags =
+    match event_type with
+    | "session_started" ->
+        Some
+          ( "operation.started",
+            [ "team_session"; "operation.started" ] )
+    | "session_finalized" ->
+        Some
+          ( "operation.finalized",
+            [ "team_session"; "operation.finalized" ] )
+    | "recovered_after_restart" ->
+        Some
+          ( "operation.resumed",
+            [ "team_session"; "operation.resumed" ] )
+    | "team_turn" ->
+        Some ("team.turn", [ "team_session"; "team.turn" ])
+    | "team_turn_failed" ->
+        Some ("team.turn_failed", [ "team_session"; "team.turn_failed" ])
+    | "team_step_spawn" ->
+        Some ("team.spawn", [ "team_session"; "team.spawn" ])
+    | "team_step_spawn_requested" ->
+        Some
+          ( "team.spawn_requested",
+            [ "team_session"; "team.spawn_requested" ] )
+    | "team_step_delegate" ->
+        Some ("team.delegate", [ "team_session"; "team.delegate" ])
+    | "team_step_delegate_requested" ->
+        Some
+          ( "team.delegate_requested",
+            [ "team_session"; "team.delegate_requested" ] )
+    | "team_run_deliverable" ->
+        Some ("team.deliverable", [ "team_session"; "team.deliverable" ])
+    | "swarm_iteration_start" ->
+        Some
+          ( "swarm.iteration_start",
+            [ "team_session"; "swarm.iteration_start" ] )
+    | "swarm_iteration_end" ->
+        Some
+          ( "swarm.iteration_end",
+            [ "team_session"; "swarm.iteration_end" ] )
+    | "swarm_agent_start" ->
+        Some ("swarm.agent_start", [ "team_session"; "swarm.agent_start" ])
+    | "swarm_agent_done" ->
+        Some ("swarm.agent_done", [ "team_session"; "swarm.agent_done" ])
+    | "swarm_converged" ->
+        Some ("swarm.converged", [ "team_session"; "swarm.converged" ])
+    | "swarm_error" ->
+        Some ("swarm.error", [ "team_session"; "swarm.error" ])
+    | other ->
+        Some
+          ( "team_session." ^ other,
+            [ "team_session"; other ] )
+  in
   let emit ?actor ?subject ~kind ~tags () =
     try
       ignore
@@ -185,33 +375,15 @@ let emit_activity_event config ~session_id ~(event_type : string)
         Log.Session.warn "team session activity emit failed (%s): %s" kind
           (Printexc.to_string exn)
   in
-  match event_type with
-  | "session_started" ->
+  match activity_kind_and_tags with
+  | Some (kind, tags) ->
       emit
-        ?actor:(Option.map actor_entity (detail_string "created_by" detail))
-        ~subject:session_subject ~kind:"operation.started"
-        ~tags:[ "team_session"; "operation.started" ] ()
-  | "session_finalized" ->
-      emit ~actor:(actor_entity "team-session") ~subject:session_subject
-        ~kind:"operation.finalized"
-        ~tags:[ "team_session"; "operation.finalized" ] ()
-  | "recovered_after_restart" ->
-      emit ~actor:(actor_entity "team-session") ~subject:session_subject
-        ~kind:"operation.resumed"
-        ~tags:[ "team_session"; "operation.resumed" ] ()
-  | "team_turn" ->
-      emit
-        ?actor:(Option.map actor_entity (detail_string "actor" detail))
-        ~subject:session_subject ~kind:"team.turn"
-        ~tags:[ "team_session"; "team.turn" ] ()
-  | "team_turn_failed" ->
-      emit
-        ?actor:(Option.map actor_entity (detail_string "actor" detail))
-        ~subject:session_subject ~kind:"team.turn_failed"
-        ~tags:[ "team_session"; "team.turn_failed" ] ()
-  | _ -> ()
+        ?actor:(Option.map actor_entity (actor_name detail))
+        ~subject:session_subject ~kind ~tags ()
+  | None -> ()
 
 let append_event config session_id ~(event_type : string) ~(detail : Yojson.Safe.t) =
+  let detail = normalize_session_event_detail config ~session_id detail in
   let ts = Time_compat.now () in
   let entry : Team_session_types.event_entry =
     { ts; ts_iso = now_iso (); event_type; detail }
@@ -335,7 +507,8 @@ let save_worker_run_checkpoint_text config session_id worker_run_id content =
 
 let save_worker_run_meta_json config session_id worker_run_id json =
   let path = worker_run_meta_path config session_id worker_run_id in
-  write_json config path json
+  write_json config path
+    (normalize_worker_run_meta_json config ~session_id ~worker_run_id json)
 
 let save_worker_run_proof_json config session_id worker_run_id json =
   let path = worker_run_proof_path config session_id worker_run_id in

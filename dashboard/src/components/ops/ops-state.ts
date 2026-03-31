@@ -1,26 +1,11 @@
 import { signal } from '@preact/signals'
-
-const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
-
-function safeStorage(): Storage | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const storage = window.localStorage
-    return storage && typeof storage.getItem === 'function' ? storage : null
-  } catch {
-    return null
-  }
-}
+import {
+  persistDashboardActorName,
+  resolveDashboardActorName,
+} from '../../lib/dashboard-actor'
 
 function initialActorName(): string {
-  const params = new URLSearchParams(window.location.search)
-  const storage = safeStorage()
-  return (
-    params.get('agent')?.trim()
-    || params.get('agent_name')?.trim()
-    || storage?.getItem(AGENT_NAME_KEY)?.trim()
-    || 'dashboard'
-  )
+  return resolveDashboardActorName() || 'dashboard'
 }
 
 export type OpsTeamTurnKind =
@@ -56,7 +41,5 @@ export const quickTarget = signal('room')
 export const quickMessage = signal('')
 
 export function persistActorName(value: string): void {
-  const trimmed = value.trim() || 'dashboard'
-  actorName.value = trimmed
-  safeStorage()?.setItem(AGENT_NAME_KEY, trimmed)
+  actorName.value = persistDashboardActorName(value)
 }

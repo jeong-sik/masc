@@ -218,6 +218,8 @@ let append_decision_record
     No action_taken type — we observe what the agent did, not classify it. *)
 let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
+    ?(is_autonomous_turn = true)
+    ?(update_proactive_rt = true)
     ?social_state
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
@@ -242,10 +244,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ~output_tokens:result.usage.output_tokens ()
   in
   let has_tool_calls = result.tools_used <> [] in
-  let has_text =
-    String.trim result.response_text <> ""
-  in
-  let is_autonomous_turn = true in
+  let has_text = String.trim result.response_text <> "" in
   let is_board_reactive = observation.pending_board_events <> [] in
   let is_mention_reactive = observation.pending_mentions <> [] in
   let rt = meta.runtime in
@@ -285,24 +284,29 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       (* Proactive count: any turn that produced text or tools *)
       proactive_rt = {
         count_total =
-          rt.proactive_rt.count_total + (if has_text || has_tool_calls then 1 else 0);
+          rt.proactive_rt.count_total
+          + (if update_proactive_rt && (has_text || has_tool_calls) then 1 else 0);
         last_ts =
-          (if has_text || has_tool_calls then now_ts else rt.proactive_rt.last_ts);
+          (if update_proactive_rt && (has_text || has_tool_calls) then now_ts
+           else rt.proactive_rt.last_ts);
         last_reason =
-          (if has_tool_calls then
+          (if not update_proactive_rt then rt.proactive_rt.last_reason
+           else if has_tool_calls then
              Printf.sprintf "unified:tools=[%s]"
                (String.concat "," result.tools_used)
            else if has_text then "unified:text_response"
            else rt.proactive_rt.last_reason);
         last_preview =
-          (if has_text then short_preview result.response_text
+          (if not update_proactive_rt then rt.proactive_rt.last_preview
+           else if has_text then short_preview result.response_text
            else if has_tool_calls then
              Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
            else rt.proactive_rt.last_preview);
       };
       (* Autonomous action tracking from tool calls *)
       autonomous_action_count =
-        rt.autonomous_action_count + List.length result.tools_used;
+        rt.autonomous_action_count
+        + (if is_autonomous_turn then List.length result.tools_used else 0);
       autonomous_turn_count =
         rt.autonomous_turn_count + (if is_autonomous_turn then 1 else 0);
       autonomous_text_turn_count =
@@ -319,7 +323,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         rt.noop_turn_count
         + (if is_autonomous_turn && not has_text && not has_tool_calls then 1 else 0);
       last_autonomous_action_at =
-        (if has_tool_calls then now_iso () else rt.last_autonomous_action_at);
+        (if is_autonomous_turn && has_tool_calls then now_iso ()
+         else rt.last_autonomous_action_at);
       last_speech_act = Social.speech_act_to_string social_state.speech_act;
       last_blocker = Option.value ~default:"" social_state.blocker;
       last_need = Option.value ~default:"" social_state.need;
@@ -330,17 +335,17 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
     ~(turn_cost : float)
+    ~(turn_generation : int)
+    ~(channel : string)
+    ~(snapshot_source : string)
     ~(context_ratio : float)
     ~(context_tokens : int)
     ~(context_max : int)
     ~(message_count : int)
-    ~(handoff_json : Yojson.Safe.t option) : unit =
+    ~(compaction : Keeper_exec_context.compaction_event)
+    ~(handoff_json : Yojson.Safe.t option) () : unit =
   let now_ts = Time_compat.now () in
-  let channel =
-    if observation.pending_mentions <> [] || observation.pending_board_events <> [] then
-      "turn"
-    else "proactive"
-  in
+  let _observation = observation in
   let work_kind =
     if result.tools_used <> [] then "tool_use"
     else if String.trim result.response_text <> "" then "text_turn"
@@ -356,7 +361,7 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("name", `String meta.name);
         ("agent_name", `String meta.agent_name);
         ("trace_id", `String meta.runtime.trace_id);
-        ("generation", `Int meta.runtime.generation);
+        ("generation", `Int turn_generation);
         ("model_used", `String result.model_used);
         ( "usage",
           `Assoc
@@ -374,14 +379,25 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("message_count", `Int message_count);
         ("continuity_state", `Null);
         ("continuity_summary", `String meta.continuity_summary);
-        ("compacted", `Bool false);
-        ("compaction_before_tokens", `Int context_tokens);
-        ("compaction_after_tokens", `Int context_tokens);
+        ("compacted", `Bool compaction.applied);
+        ("compaction_before_tokens", `Int compaction.before_tokens);
+        ("compaction_after_tokens", `Int compaction.after_tokens);
+        ("compaction_saved_tokens", `Int compaction.saved_tokens);
+        ("compaction_trigger",
+          match compaction.trigger with
+          | Some reason -> `String reason
+          | None -> `Null);
         ("work_kind", `String work_kind);
         ("tool_call_count", `Int result.tool_calls_made);
         ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
-        ("snapshot_source", `String "keeper_unified_turn");
+        ("snapshot_source", `String snapshot_source);
         ("memory_check", memory_check_default_json ());
+        ("handoff_performed",
+         `Bool
+           (match handoff_json with
+            | Some (`Assoc fields) ->
+                Safe_ops.json_bool ~default:false "performed" (`Assoc fields)
+            | _ -> false));
         ("handoff",
          match handoff_json with
          | Some value -> value
@@ -405,6 +421,62 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
       ]
   in
   Dated_jsonl.append metrics_store snapshot
+
+let broadcast_lifecycle_events ~(name : string)
+    ~(turn_generation : int)
+    ~(compaction : Keeper_exec_context.compaction_event)
+    ~(handoff_json : Yojson.Safe.t option) : unit =
+  let now_ts = Time_compat.now () in
+  (if compaction.applied then
+     try
+       Sse.broadcast
+         (`Assoc
+           [
+             ("type", `String "keeper_compaction");
+             ("name", `String name);
+             ("generation", `Int turn_generation);
+             ("before_tokens", `Int compaction.before_tokens);
+             ("after_tokens", `Int compaction.after_tokens);
+             ("saved_tokens", `Int compaction.saved_tokens);
+             ( "trigger",
+               match compaction.trigger with
+               | Some reason -> `String reason
+               | None -> `String compaction.decision );
+             ("ts_unix", `Float now_ts);
+           ])
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+         Log.Keeper.error "compaction SSE broadcast failed: %s"
+           (Printexc.to_string exn));
+  match handoff_json with
+  | Some ((`Assoc _ as handoff)) ->
+      let from_generation =
+        Safe_ops.json_int ~default:turn_generation "from_generation" handoff
+      in
+      let to_generation =
+        Safe_ops.json_int ~default:(from_generation + 1) "to_generation" handoff
+      in
+      let to_model = Safe_ops.json_string ~default:"" "to_model" handoff in
+      (try
+         Sse.broadcast
+           (`Assoc
+             [
+               ("type", `String "keeper_handoff");
+               ("name", `String name);
+               ("from_generation", `Int from_generation);
+               ("to_generation", `Int to_generation);
+               ("from_model", `Null);
+               ("to_model",
+                if String.trim to_model = "" then `Null else `String to_model);
+               ("ts_unix", `Float now_ts);
+             ])
+       with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Log.Keeper.error "handoff SSE broadcast failed: %s"
+            (Printexc.to_string exn));
+  | _ -> ()
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(reason : string) ?social_state () : keeper_meta =
@@ -576,8 +648,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~input_tokens:result.usage.input_tokens
               ~output_tokens:result.usage.output_tokens ()
           in
-          let rollover =
-            maybe_rollover_oas_handoff ~base_dir
+          let lifecycle =
+            apply_post_turn_lifecycle ~base_dir
               ~meta
               ~model:result.model_used
               ~primary_model_max_tokens:primary_max_context
@@ -585,23 +657,38 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           in
           (* 6. Observe result and update metrics *)
           let updated_meta =
-            update_metrics_from_result rollover.updated_meta ~latency_ms
+            update_metrics_from_result lifecycle.updated_meta ~latency_ms
               ~observation ~social_state result
           in
           (try
+             let channel =
+               if observation.pending_mentions <> [] || observation.pending_board_events <> [] then
+                 "turn"
+               else
+                 "proactive"
+             in
              append_metrics_snapshot ~config ~meta:updated_meta ~observation
                ~result ~latency_ms ~turn_cost
-               ~context_ratio:rollover.context_ratio
-               ~context_tokens:rollover.context_tokens
-               ~context_max:rollover.context_max
-               ~message_count:rollover.message_count
-               ~handoff_json:rollover.handoff_json
+               ~turn_generation:lifecycle.turn_generation
+               ~channel
+               ~snapshot_source:"keeper_unified_turn"
+               ~context_ratio:lifecycle.context_ratio
+               ~context_tokens:lifecycle.context_tokens
+               ~context_max:lifecycle.context_max
+               ~message_count:lifecycle.message_count
+               ~compaction:lifecycle.compaction
+               ~handoff_json:lifecycle.handoff_json
+               ()
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
                Log.Keeper.error
                  "write metrics snapshot failed after unified turn: %s"
                  (Printexc.to_string exn));
+          broadcast_lifecycle_events ~name:updated_meta.name
+            ~turn_generation:lifecycle.turn_generation
+            ~compaction:lifecycle.compaction
+            ~handoff_json:lifecycle.handoff_json;
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~outcome:"success"
             ~selected_mode:(selected_mode_of_result result)

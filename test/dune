@@ -42,6 +42,7 @@
         test_post_verifier test_mdal
         test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
         test_keeper_memory
+        test_keeper_lifecycle
         test_keeper_deliberation
         test_keeper_registry
         test_keeper_supervisor
@@ -92,6 +93,7 @@
           test_post_verifier test_mdal
           test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
           test_keeper_memory
+          test_keeper_lifecycle
           test_keeper_deliberation
           test_keeper_registry
           test_keeper_supervisor

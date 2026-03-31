@@ -44,6 +44,22 @@ type room_state = {
   pause_reason: string option;
 }
 
+(** {1 Health Counters} *)
+
+let state_update_attempts = Atomic.make 0
+let state_update_failures = Atomic.make 0
+
+let state_health_counters () =
+  let attempts = Atomic.get state_update_attempts in
+  let failures = Atomic.get state_update_failures in
+  `Assoc [
+    ("state_update_attempts", `Int attempts);
+    ("state_update_failures", `Int failures);
+    ("failure_rate",
+      `Float (if attempts = 0 then 0.0
+              else float_of_int failures /. float_of_int (max 1 attempts)));
+  ]
+
 (** {1 Helpers} *)
 
 let now_iso () =
@@ -286,6 +302,7 @@ let write_state config state =
     Returns [Ok new_state] on success.
 *)
 let atomic_update_state config ~f =
+  Atomic.incr state_update_attempts;
   let transform json_opt =
     let current_state =
       match json_opt with
@@ -311,6 +328,7 @@ let atomic_update_state config ~f =
         room_state_of_json json
       with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
   | Error e ->
+      Atomic.incr state_update_failures;
       Error (match e with
         | Backend.IOError msg -> msg
         | Backend.NotFound k -> "Not found: " ^ k

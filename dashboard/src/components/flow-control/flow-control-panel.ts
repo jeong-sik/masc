@@ -36,7 +36,6 @@ export function FlowControlPanel() {
           ${loading && isPaused ? '...' : '재개'}<//>
         <${ActionButton} variant="danger" size="md" disabled=${loading}
           onClick=${() => { showInterruptConfirm.value = !showInterruptConfirm.value }}>인터럽트<//>
-        <${ActionButton} variant="subtle" size="sm" class="ml-auto" onClick=${() => void fetchPauseStatus()}>새로고침<//>
       </div>
       ${showInterruptConfirm.value ? html`
         <div class="mt-3 rounded-lg border border-[rgba(251,113,133,0.4)] bg-[rgba(251,113,133,0.06)] p-3">

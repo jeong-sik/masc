@@ -73,9 +73,9 @@ graph TB
 
 | Document | Description | Related Spec |
 |----------|-------------|--------------|
-| `docs/rfc/RFC-dashboard-control-plane.md` | Dashboard MCP tool executor, schema-based form builder, keeper/task UI | `10-dashboard.md` |
+| `docs/ADR-002-DASHBOARD-OPERATOR-CONTROL-SURFACE.md` | Dashboard operator control surface and review queue UX | `10-dashboard.md` |
 | `docs/design/keeper-continuity-product-rfc.md` | Keeper continuity contract and promise level | `05-keeper-agent.md` |
-| `docs/design/LLM-JUDGE-DESIGN.md` | LLM judge for contract verification | `15-testing.md` |
+| `docs/design/check-evaluation-spec.md` | Deterministic check evaluation for contract verification | `15-testing.md` |
 | `docs/design/contract-driven-agent-loop-rfc.md` | Contract-driven agent loop (CDAL) framework | `05-keeper-agent.md` |
 
 ## Conventions
@@ -114,9 +114,9 @@ graph TB
 ### Cross-Reference Format
 
 - Spec 간: `./NN-filename.md#section-anchor`
-- 코드: `lib/module_name.ml:L123`
+- 코드: `lib/<module-name>.ml:L123`
 - Invariant: `INV-ROOM-001`
-- 외부 문서: `docs/DOCUMENT-NAME.md`
+- 외부 문서: `docs/<document-name>.md`
 
 ### Supersession
 

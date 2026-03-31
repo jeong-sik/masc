@@ -73,6 +73,9 @@ bootstrap_local_config() {
   local target="$1"
   local local_masc_dir="$target/.masc"
   local local_config_dir="$local_masc_dir/config"
+  if [ "${MASC_CONFIG_DIR+x}" = "x" ]; then
+    return 0
+  fi
   if [ -d "$local_config_dir" ]; then
     return 0
   fi
@@ -178,8 +181,8 @@ if lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
 fi
 
 export MASC_BASE_PATH="$TARGET_DIR"
-export MASC_CONFIG_DIR="$LOCAL_CONFIG_DIR"
-export MASC_PERSONAS_DIR="$LOCAL_PERSONAS_DIR"
+set_default_env MASC_CONFIG_DIR "$LOCAL_CONFIG_DIR"
+set_default_env MASC_PERSONAS_DIR "$LOCAL_PERSONAS_DIR"
 set_default_env MASC_GRPC_ENABLED "0"
 set_default_env MASC_WS_ENABLED "0"
 set_default_env MASC_WEBRTC_ENABLED "0"

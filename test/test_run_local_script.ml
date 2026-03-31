@@ -53,17 +53,29 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let run_shell ?(env = []) ~cwd cmd =
+let run_shell ?(env = []) ?(unset_env = []) ~cwd cmd =
+  let unset_prefix =
+    unset_env
+    |> List.map (fun name -> Printf.sprintf "-u %s" (quote name))
+    |> String.concat " "
+  in
   let env_prefix =
     env
     |> List.map (fun (k, v) -> Printf.sprintf "%s=%s" k (quote v))
     |> String.concat " "
   in
+  let shell_prefix =
+    match (String.trim unset_prefix, String.trim env_prefix) with
+    | "", "" -> ""
+    | unset_prefix, "" -> Printf.sprintf "env %s" unset_prefix
+    | "", env_prefix -> env_prefix
+    | unset_prefix, env_prefix -> Printf.sprintf "env %s %s" unset_prefix env_prefix
+  in
   let full =
-    if env_prefix = "" then
+    if shell_prefix = "" then
       Printf.sprintf "cd %s && %s" (quote cwd) cmd
     else
-      Printf.sprintf "cd %s && %s %s" (quote cwd) env_prefix cmd
+      Printf.sprintf "cd %s && %s %s" (quote cwd) shell_prefix cmd
   in
   let out = Filename.temp_file "run-local-out" ".txt" in
   let err = Filename.temp_file "run-local-err" ".txt" in
@@ -127,6 +139,8 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
       let code, stdout, stderr =
         run_shell ~cwd:repo_root
           ~env:[ ("FAKE_CAPTURE_FILE", capture) ]
+          ~unset_env:
+            [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ]
           (Printf.sprintf "%s --target-dir %s --port 9955"
              (quote script) (quote target))
       in
@@ -228,6 +242,38 @@ let test_existing_target_config_is_not_overwritten () =
       let cascade = read_file (Filename.concat target_config "cascade.json") in
       check string "target config preserved" "{\"seed\":\"target\"}" cascade)
 
+let test_explicit_config_env_is_preserved_without_bootstrap () =
+  with_temp_dir "run-local-script" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      let override_root = Filename.concat dir "override-config" in
+      let override_personas = Filename.concat override_root "personas" in
+      mkdir_p target;
+      mkdir_p override_personas;
+      let capture = Filename.concat dir "captured-env.txt" in
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_shell ~cwd:repo_root
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("MASC_CONFIG_DIR", override_root);
+              ("MASC_PERSONAS_DIR", override_personas);
+            ]
+          (Printf.sprintf "%s --target-dir %s --port 9959"
+             (quote script) (quote target))
+      in
+      if code <> 0 then
+        failf "run-local with explicit config env failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      let captured = read_file capture in
+      check bool "explicit config dir preserved" true
+        (contains_substring captured ("MASC_CONFIG_DIR=" ^ override_root));
+      check bool "explicit personas dir preserved" true
+        (contains_substring captured ("MASC_PERSONAS_DIR=" ^ override_personas));
+      check bool "target config not bootstrapped" false
+        (Sys.file_exists (Filename.concat target ".masc/config/cascade.json")))
+
 let () =
   run "run_local_script"
     [
@@ -241,5 +287,7 @@ let () =
             test_build_dashboard_flag_is_opt_in;
           test_case "existing target config is not overwritten" `Quick
             test_existing_target_config_is_not_overwritten;
+          test_case "explicit config env is preserved without bootstrap" `Quick
+            test_explicit_config_env_is_preserved_without_bootstrap;
         ] );
     ]

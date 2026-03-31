@@ -427,8 +427,8 @@ $MASC_PERSONAS_DIR
   $MASC_CONFIG_DIR
   > $MASC_BASE_PATH/.masc/config
   > ~/.masc/config
-  > executable-relative config/
   > cwd/config
+  > executable-relative config/
   > legacy ME_ROOT/workspace/yousleepwhen/masc-mcp/config
 ```
 

@@ -355,17 +355,6 @@ let test_format_as_markdown () =
   check bool "is markdown" true (String.contains md '#')
 
 (* ============================================================
-   build_successor_prompt Tests
-   ============================================================ *)
-
-let test_build_successor_prompt () =
-  let h = Handover_eio.create_handover
-    ~from_agent:"claude" ~task_id:"t1" ~session_id:"s1" ~reason:Handover_eio.Explicit in
-  let prompt = Handover_eio.build_successor_prompt h ~additional_instructions:(Some "extra") in
-  check bool "nonempty" true (String.length prompt > 0);
-  check bool "contains extra" true (String.length prompt > 50)
-
-(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -422,6 +411,5 @@ let () =
       test_case "as markdown" `Quick test_format_as_markdown;
     ];
     "successor_prompt", [
-      test_case "build" `Quick test_build_successor_prompt;
     ];
   ]

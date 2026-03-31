@@ -21,7 +21,7 @@ let external_effect_tools =
 
 (* Tools that mutate workspace but have no external effect. *)
 let workspace_mutating_tools =
-  [ "keeper_fs_edit"; "keeper_edit"; "keeper_write";
+  [ "keeper_fs_edit"; "keeper_write";
     "create_text_file"; "edit_text_file"; "file_write" ]
 
 let has_any tools patterns =

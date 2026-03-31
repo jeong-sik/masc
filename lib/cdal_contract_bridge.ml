@@ -3,7 +3,6 @@ module Oas = Agent_sdk
 let workspace_mutating_tools =
   [
     "keeper_fs_edit";
-    "keeper_edit";
     "keeper_write";
     "create_text_file";
     "edit_text_file";

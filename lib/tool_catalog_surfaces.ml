@@ -21,7 +21,6 @@ let keeper_internal_tools =
        Dispatch still accepts it for backward compat. See #4120. *)
     "keeper_fs_read";
     "keeper_fs_edit";
-    "keeper_edit";
     "keeper_memory_search";
     "keeper_library_search";
     "keeper_library_read";

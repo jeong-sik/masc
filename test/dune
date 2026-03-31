@@ -14,7 +14,10 @@
    (SB_PG_URL "")
    ; Avoid non-deterministic external network calls during unit tests.
    (GRAPHQL_API_KEY "")
-   (ZAI_API_KEY ""))))
+   (ZAI_API_KEY "")
+   ; Prevent inherited shell MASC_BASE_PATH from binding tests to real
+   ; workspace state. Tests that need a base path pass it explicitly.
+   (MASC_BASE_PATH ""))))
 
 ; ============================================================
 ; All standard tests share the masc_test_deps wrapper library

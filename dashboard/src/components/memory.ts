@@ -50,6 +50,10 @@ import {
 } from './memory-state'
 import type { BoardPost } from './memory-state'
 
+function hasRichMarkdownPreview(text: string): boolean {
+  return /(^|\n)(`{3,}|~{3,}|#{1,6}\s+|[-*+]\s+|\d+\.\s+|>\s+)/m.test(text)
+}
+
 // ── Render section (paginated group) ───────────────────────────────
 function renderSection(
   title: string,
@@ -244,6 +248,8 @@ function MemorySummary() {
 function PostCard({ post }: { post: BoardPost }) {
   const kind = boardPostKind(post)
   const isDeleting = deletingPostId.value === post.id
+  const previewBody = stripStateBlocks(post.body)
+  const richPreview = hasRichMarkdownPreview(previewBody)
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
     event.stopPropagation()
@@ -302,12 +308,12 @@ function PostCard({ post }: { post: BoardPost }) {
       <!-- Post body -->
       <div class="flex-1 min-w-0">
         <!-- Title -->
-        <div class="text-[14px] font-medium text-[var(--text-strong)] leading-snug mb-1.5 group-hover:text-[var(--accent)] transition-colors">${post.title}</div>
+        <div class="text-[15px] font-semibold text-[var(--text-strong)] leading-snug mb-1.5 group-hover:text-[var(--accent)] transition-colors">${post.title}</div>
 
         <!-- Content preview: rendered markdown, height-capped -->
-        <div class="text-[13px] text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden relative max-h-[4.8em]">
-          <${Markdown} text=${stripStateBlocks(post.body)} />
-          <div class="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-[var(--card)] to-transparent pointer-events-none" />
+        <div class="board-post-preview text-[13px] text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden relative ${richPreview ? 'max-h-[12rem]' : 'max-h-[4.8em]'}">
+          <${Markdown} text=${previewBody} class="board-post-preview__content" />
+          <div class="absolute bottom-0 left-0 right-0 ${richPreview ? 'h-10' : 'h-6'} bg-gradient-to-t from-[var(--card)] to-transparent pointer-events-none" />
         </div>
 
         <!-- Footer: author + meta + badges -->

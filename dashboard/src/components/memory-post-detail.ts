@@ -196,8 +196,12 @@ export function PostDetail({ post }: { post: BoardPost }) {
         onClick=${() => navigate('workspace', { section: 'board' })}
       >← 게시판으로 돌아가기</button>
 
-      <${Card} title=${post.title}>
+      <${Card}>
         <div class="flex flex-col gap-4">
+          <div>
+            <h1 class="m-0 text-[20px] font-semibold leading-tight text-[var(--text-strong)]">${post.title}</h1>
+          </div>
+
           <div class="text-[13px] text-[var(--text-body)] leading-[1.65]">
             <${Markdown} text=${stripStateBlocks(post.body)} />
           </div>

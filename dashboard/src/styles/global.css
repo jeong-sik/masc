@@ -1238,6 +1238,37 @@ tbody tr:hover {
 .board-comment .comment-text.expanded { max-height: none; }
 .board-comment .comment-expand-btn:hover { text-decoration: underline; }
 
+.board-post-preview .markdown-content {
+  overflow-wrap: anywhere;
+}
+
+.board-post-preview .markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.board-post-preview .markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.board-post-preview .markdown-content p,
+.board-post-preview .markdown-content ul,
+.board-post-preview .markdown-content ol,
+.board-post-preview .markdown-content blockquote,
+.board-post-preview .markdown-content pre {
+  margin: 0.35rem 0;
+}
+
+.board-post-preview .markdown-content h1,
+.board-post-preview .markdown-content h2,
+.board-post-preview .markdown-content h3 {
+  margin-top: 0;
+  margin-bottom: 0.35rem;
+}
+
+.board-post-preview .markdown-content pre {
+  max-height: 8rem;
+}
+
 /* ── Goals ────────────────────────────────────── */
 
 @utility goal-filter-btn {

@@ -395,12 +395,13 @@ let run_experiment ~sw ~net ~clock ~(config : Research_config.t)
          Log.Server.info "research: creating PR for kept experiment %s" experiment_id;
          let branch = Printf.sprintf "research/exp-%s" experiment_id in
          let run_git args timeout =
+           let command_label = match args with cmd :: _ -> cmd | [] -> "git" in
            let status, out = Process_eio.run_argv_with_status ~timeout_sec:timeout args in
            match status with
            | Unix.WEXITED 0 -> Ok out
-           | Unix.WEXITED n -> Error (Printf.sprintf "%s exited %d" (List.hd args) n)
-           | Unix.WSIGNALED n -> Error (Printf.sprintf "%s killed by signal %d" (List.hd args) n)
-           | Unix.WSTOPPED n -> Error (Printf.sprintf "%s stopped by signal %d" (List.hd args) n)
+           | Unix.WEXITED n -> Error (Printf.sprintf "%s exited %d" command_label n)
+           | Unix.WSIGNALED n -> Error (Printf.sprintf "%s killed by signal %d" command_label n)
+           | Unix.WSTOPPED n -> Error (Printf.sprintf "%s stopped by signal %d" command_label n)
          in
          (try
            let msg = Printf.sprintf "research(%s): %s" experiment_id

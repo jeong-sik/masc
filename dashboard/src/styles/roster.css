@@ -1,37 +1,3 @@
 /* MASC Dashboard -- Roster (stateful variants + gradients) */
-
-/* ── Status Badges ── */
-.roster-badge--active {
-  background: rgba(61, 204, 94, 0.12);
-  color: var(--ok);
-  border: 1px solid rgba(61, 204, 94, 0.25);
-}
-
-.roster-badge--idle {
-  background: rgba(212, 169, 75, 0.1);
-  color: var(--ff-gold);
-  border: 1px solid rgba(212, 169, 75, 0.2);
-}
-
-.roster-badge--offline {
-  background: rgba(100, 100, 120, 0.1);
-  color: #667;
-  border: 1px solid rgba(100, 100, 120, 0.15);
-}
-
-/* ── Pressure bar gradients ── */
-.pressure--ok {
-  background: linear-gradient(90deg, #1a9c3a, #3dcc5e);
-}
-
-.pressure--amber {
-  background: linear-gradient(90deg, #c98a0a, #f5c542);
-}
-
-.pressure--orange {
-  background: linear-gradient(90deg, #c65d0a, var(--warn-bright));
-}
-
-.pressure--red {
-  background: linear-gradient(90deg, #b91c1c, var(--bad));
-}
+/* Extracted from global.css for #3915.
+   roster-badge--*, pressure--* → @utility definitions in roster-detail.css. */

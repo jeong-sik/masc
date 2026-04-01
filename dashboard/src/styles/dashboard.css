@@ -147,10 +147,7 @@
   font-size: var(--fs-sm);
   color: var(--text-muted);
 }
-@keyframes loadingPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
+/* @keyframes loadingPulse → keyframes.css (canonical) */
 @utility loading-pulse {
   animation: loadingPulse 1.5s ease-in-out infinite;
 }

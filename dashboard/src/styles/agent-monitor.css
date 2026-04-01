@@ -1,31 +1,10 @@
-/* Agent Monitor — runtime strip, event kind badge variants. Extracted from global.css for #3915. */
+/* Agent Monitor — runtime strip, live timeline, event kind badge variants.
+   Extracted from global.css for #3915.
+   Runtime strip + ctx-fill + event badges → canonical definitions in ui.css. */
 
 /* ── Agent Monitor — runtime strip + live timeline ──────────── */
 
-/* ── Runtime Strip ─────────────────────────────────────────── */
-@utility agent-runtime-strip {
-  background: linear-gradient(
-    90deg,
-    rgba(10, 22, 40, 0.85) 0%,
-    rgba(16, 28, 48, 0.7) 100%
-  );
-}
+/* agent-runtime-strip, agent-runtime-ctx-fill, agent-event-badge--* → ui.css (single definition) */
 
-@utility agent-runtime-ctx-fill {
-  transition: width 0.3s ease;
-  &.warn { background: var(--warn); }
-  &.bad { background: var(--bad-light); }
-}
-
-/* ── Live Timeline — see agent-monitor.css ─────────────────── */
-
-/* Event kind badge variants */
-@utility agent-event-badge--heartbeat { background: var(--ok-12); color: var(--ok); }
-@utility agent-event-badge--lifecycle { background: var(--accent-12); color: var(--accent); }
-@utility agent-event-badge--keeper { background: var(--ff-gold-15); color: var(--ff-gold-bright); }
-@utility agent-event-badge--error { background: rgba(248, 113, 113, 0.14); color: var(--bad-light); }
-@utility agent-event-badge--broadcast { background: rgba(167, 139, 250, 0.12); color: var(--purple, var(--purple)); }
-@utility agent-event-badge--task { background: var(--warn-12); color: var(--warn, var(--warn)); }
-@utility agent-event-badge--board { background: var(--cyan-12); color: var(--cyan, var(--cyan)); }
-@utility agent-event-badge--default { background: var(--border-slate-12); color: var(--text-muted, var(--text-muted)); }
+/* ── Live Timeline — see live-monitor.css ──────────────────── */
 

@@ -2,13 +2,6 @@
 
 /* ── Tools (merged from tools.css) ─────────────────────── */
 
-@utility tool-inventory-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
-  margin: 18px 0;
-}
-
 @utility tool-inventory-desc {
   display: -webkit-box;
   -webkit-line-clamp: 2;

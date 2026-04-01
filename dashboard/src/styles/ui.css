@@ -4,10 +4,7 @@
 /* ═══ UI ═══ */
 
 /* ── Toast Notifications (styling moved to component Tailwind) ── */
-@keyframes slideInRight {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
+/* @keyframes slideInRight → keyframes.css (canonical) */
 
 /* ── Markdown Rendered Content ─────────────────────────────── */
 @utility markdown-content {
@@ -61,8 +58,7 @@ button.monitor-row {
 /* status-badge state variants: folded into @utility status-badge above */
 
 /* ── Agent List (Overview) ─────────────────────────────────── */
-/* agent-card:hover: uses compound selector, kept as raw CSS */
-.agent-card:hover { border-color: var(--white-20); }
+/* agent-card:hover → dashboard.css (canonical, includes box-shadow + transform) */
 
 /* ── Agents Unified Tab (chip toggle) ────────── */
 @utility agents-chip {

@@ -81,11 +81,14 @@ let _execution_cache =
 
 (** Invalidate the execution surface cache so the next
     [/api/v1/dashboard/execution] request recomputes fresh data.
-    Call after task mutations (add, transition, cancel) to avoid
-    serving stale backlog state for up to [ttl] seconds. *)
+    Called via [Room_hooks.on_task_mutation_fn] after task add,
+    batch_add, and all transitions (claim, start, done, cancel,
+    release) routed through [observe_task_transition].
+    Best-effort: never raises — cache staleness must not break
+    the mutation path. *)
 let invalidate_execution_cache () =
-  invalidate_cached_surface _execution_cache;
-  Dashboard_cache.invalidate "execution:default:light"
+  (try invalidate_cached_surface _execution_cache with _ -> ());
+  (try Dashboard_cache.invalidate "execution:default:light" with _ -> ())
 
 (** Bypass the proactive warm-up guard so tests that call
     [dashboard_room_truth_http_json] get the full response instead of

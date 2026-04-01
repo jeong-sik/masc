@@ -166,6 +166,8 @@ let pre_compact_record_json (event : pre_compact_event) =
       ("token_count", `Int event.token_count);
       ("strategies", `List (List.map (fun value -> `String value) event.strategies));
       ("model_family", `String event.model_family);
+      ("context_window", `Int event.context_window);
+      ("is_local_model", `Bool event.is_local_model);
       ("trigger", `String event.trigger);
     ]
 
@@ -179,6 +181,8 @@ let pre_compact_event_json (event : pre_compact_event) =
       ("token_count", `Int event.token_count);
       ("strategies", `List (List.map (fun value -> `String value) event.strategies));
       ("model_family", `String event.model_family);
+      ("context_window", `Int event.context_window);
+      ("is_local_model", `Bool event.is_local_model);
       ("trigger", `String event.trigger);
     ]
 

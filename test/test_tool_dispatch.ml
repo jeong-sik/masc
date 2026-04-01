@@ -15,6 +15,13 @@ let echo_handler ~name ~args:_ = Some (true, "ok:" ^ name)
 (** Helper: a handler that returns (false, "fail"). *)
 let fail_handler ~name:_ ~args:_ = Some (false, "fail")
 
+(** Helper: register a tool in both handler and tag registries.
+    mint_token validates against tag_registry, so tests that mint
+    must register in both. *)
+let register_full ~tool_name ~handler =
+  Tool_dispatch.register ~tool_name ~handler;
+  Tool_dispatch.register_name_tag ~tool_name ~tag:Mod_misc
+
 let () =
   let open Alcotest in
   run "Tool_dispatch"
@@ -23,7 +30,7 @@ let () =
         [
           test_case "register single tool and dispatch" `Quick (fun () ->
               let tool = "__test_dispatch_single" in
-              Tool_dispatch.register ~tool_name:tool ~handler:echo_handler;
+              register_full ~tool_name:tool ~handler:echo_handler;
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let result = Tool_dispatch.dispatch ~token ~args:`Null in
               check bool "found" true (Option.is_some result);
@@ -42,6 +49,7 @@ let () =
                   [ "__test_bulk_a"; "__test_bulk_b"; "__test_bulk_c" ]
               in
               Tool_dispatch.register_module ~schemas ~handler:echo_handler;
+              List.iter (fun s -> Tool_dispatch.register_name_tag ~tool_name:s.Types.name ~tag:Mod_misc) schemas;
               List.iter
                 (fun name ->
                   check bool (name ^ " registered") true
@@ -60,13 +68,13 @@ let () =
         [
           test_case "re-register replaces handler" `Quick (fun () ->
               let tool = "__test_dispatch_replace" in
-              Tool_dispatch.register ~tool_name:tool ~handler:echo_handler;
+              register_full ~tool_name:tool ~handler:echo_handler;
               let token1 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let (ok1, _) =
                 Option.get (Tool_dispatch.dispatch ~token:token1 ~args:`Null)
               in
               check bool "first ok" true ok1;
-              Tool_dispatch.register ~tool_name:tool ~handler:fail_handler;
+              register_full ~tool_name:tool ~handler:fail_handler;
               let token2 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let (ok2, msg2) =
                 Option.get (Tool_dispatch.dispatch ~token:token2 ~args:`Null)
@@ -135,7 +143,7 @@ let () =
                 received_args := args;
                 Some (true, "captured")
               in
-              Tool_dispatch.register ~tool_name:tool ~handler:capture_handler;
+              register_full ~tool_name:tool ~handler:capture_handler;
               let test_args = `Assoc [("key", `String "value")] in
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let _ = Tool_dispatch.dispatch ~token ~args:test_args in
@@ -148,7 +156,7 @@ let () =
               let throwing_handler ~name:_ ~args:_ =
                 failwith "boom"
               in
-              Tool_dispatch.register ~tool_name:tool ~handler:throwing_handler;
+              register_full ~tool_name:tool ~handler:throwing_handler;
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let result = Tool_dispatch.dispatch ~token ~args:`Null in
               check bool "still returns Some" true (Option.is_some result);

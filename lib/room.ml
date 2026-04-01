@@ -192,9 +192,9 @@ let () = Room_hooks.observe_agent_lifecycle_fn :=
 
 let () = Room_hooks.observe_task_transition_fn :=
   (fun config ~agent_name ~room_id ~task_id ~transition ~details ->
+    !Room_hooks.on_task_mutation_fn ();
     observe_task_transition_event config ~agent_name ~room_id ~task_id
-      ~transition ~details;
-    !Room_hooks.on_task_mutation_fn ())
+      ~transition ~details)
 
 (* Board artifact cleanup — wraps Board_dispatch for GC *)
 let () = Room_hooks.cleanup_board_artifacts_fn := (fun () ->

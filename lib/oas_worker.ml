@@ -341,6 +341,8 @@ let run
   (try
     let result, proof = match contract with
       | Some c ->
+        (* on_yield/on_resume not forwarded: Contract_runner.run does not
+           expose yield hooks. Slot yielding is inactive during contract runs. *)
         let cr = Oas.Contract_runner.run ~sw ~contract:c agent goal in
         (cr.response, Some cr.proof)
       | None ->

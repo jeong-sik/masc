@@ -22,6 +22,7 @@ let test_pre_hook_observes () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       Some (true, "ok"));
+  Tool_dispatch.register_name_tag ~tool_name:"__hook_test" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
     None);
@@ -39,6 +40,7 @@ let test_pre_hook_short_circuits () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       Some (true, "should not reach"));
+  Tool_dispatch.register_name_tag ~tool_name:"__hook_blocked" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
     log_call "pre_block";
     Some { Tool_result.success = false;
@@ -62,6 +64,7 @@ let test_multiple_pre_hooks_first_wins () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       Some (true, "ok"));
+  Tool_dispatch.register_name_tag ~tool_name:"__hook_multi" ~tag:Mod_misc;
   (* First hook: observe only *)
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre1";
@@ -92,6 +95,7 @@ let test_post_hook_observes () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       Some (true, "original"));
+  Tool_dispatch.register_name_tag ~tool_name:"__hook_post" ~tag:Mod_misc;
   Tool_dispatch.register_post_hook (fun r ->
     log_call "post";
     r);
@@ -109,6 +113,7 @@ let test_post_hook_transforms () =
     ~tool_name:"__hook_transform"
     ~handler:(fun ~name:_ ~args:_ ->
       Some (true, "original"));
+  Tool_dispatch.register_name_tag ~tool_name:"__hook_transform" ~tag:Mod_misc;
   Tool_dispatch.register_post_hook (fun r ->
     { r with Tool_result.data = `String "transformed" });
   let token = match Tool_dispatch.mint_token ~name:"__hook_transform" with Ok t -> t | Error e -> Alcotest.fail e in
@@ -125,6 +130,7 @@ let test_post_hooks_chain () =
     ~tool_name:"__hook_chain"
     ~handler:(fun ~name:_ ~args:_ ->
       Some (true, "0"));
+  Tool_dispatch.register_name_tag ~tool_name:"__hook_chain" ~tag:Mod_misc;
   Tool_dispatch.register_post_hook (fun r ->
     log_call "post1";
     { r with Tool_result.data = `String "1" });
@@ -149,6 +155,7 @@ let test_full_lifecycle () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       Some (true, "data"));
+  Tool_dispatch.register_name_tag ~tool_name:"__hook_full" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
     None);
@@ -166,6 +173,7 @@ let test_no_hooks_default () =
   Tool_dispatch.register
     ~tool_name:"__hook_none"
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "plain"));
+  Tool_dispatch.register_name_tag ~tool_name:"__hook_none" ~tag:Mod_misc;
   let token = match Tool_dispatch.mint_token ~name:"__hook_none" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.dispatch_structured ~token ~args:`Null with
   | Some r ->

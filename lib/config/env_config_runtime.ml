@@ -325,10 +325,14 @@ module Cdal = struct
     get_bool ~default:false "MASC_CDAL_PROOF_AGGREGATION"
 end
 
-(** Release LLM slot during tool execution so other agents can use it.
-    Default: false. Set MASC_SLOT_YIELD_ENABLED=true to enable. *)
-let slot_yield_enabled () =
-  get_bool ~default:false "MASC_SLOT_YIELD_ENABLED"
+(** {1 Slot Scheduling} *)
+
+module Slot = struct
+  (** Release LLM slot during tool execution so other agents can use it.
+      Default: false. Set MASC_SLOT_YIELD_ENABLED=true to enable. *)
+  let yield_enabled () =
+    get_bool ~default:false "MASC_SLOT_YIELD_ENABLED"
+end
 
 (** {1 Board Configuration} *)
 

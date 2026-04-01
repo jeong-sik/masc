@@ -255,36 +255,8 @@ let handle_set_param ctx args =
   end
 
 (* ================================================================ *)
-(* Chain route/execute — delegate to Council.Router/Executor         *)
+(* Execute/voting — delegate to Council.Executor                     *)
 (* ================================================================ *)
-
-let handle_route _ctx args =
-  let query =
-    let by_schema = get_string args "query" "" in
-    if by_schema <> "" then by_schema else get_string args "input" ""
-  in
-  let decision = Council.Router.route query in
-  let r = decision.requirements in
-  json_ok (`Assoc [
-    ("reason", `String decision.reason);
-    ("estimated_cost", `Float decision.estimated_cost);
-    ("complexity_score", `Float decision.complexity_score);
-    ("agents", `List (List.map (fun (a : Council.Router.agent_spec) ->
-      `Assoc [
-        ("name", `String a.name);
-        ("model", `String a.model);
-        ("cost_per_1k", `Float a.cost_per_1k);
-      ]) decision.agents));
-    ("requirements", `Assoc [
-      ("reasoning_depth", `Float r.reasoning_depth);
-      ("code_ability", `Float r.code_ability);
-      ("creativity", `Float r.creativity);
-      ("factual_precision", `Float r.factual_precision);
-      ("speed_priority", `Float r.speed_priority);
-    ]);
-    ("match_scores", `Assoc (List.map (fun (name, score) ->
-      (name, `Float score)) decision.match_scores));
-  ])
 
 let voting_result_of_args args =
   let raw =
@@ -424,7 +396,6 @@ let dispatch (ctx : context) ~name ~args : result option =
     | "masc_case_brief_submit" -> Some handle_case_brief_submit
     | "masc_cases" -> Some handle_cases
     | "masc_case_status" -> Some handle_case_status
-    | "masc_route" -> Some handle_route
     | "masc_execute" -> Some handle_execute
     | "masc_execute_dry_run" -> Some handle_execute_dry_run
     | "masc_petition_submit" -> Some handle_petition_submit

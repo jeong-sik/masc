@@ -63,7 +63,7 @@ let prune ~(session_dir : string) ~(keep : int) : int =
 
 let save
     ~(session_dir : string)
-    (ckpt : Keeper_working_context.checkpoint) : unit =
+    (ckpt : Keeper_types.checkpoint) : unit =
   let path = Filename.concat session_dir
     (sprintf "%s%s" ckpt.checkpoint_id checkpoint_suffix) in
   let context_json =
@@ -87,7 +87,7 @@ let save
 (* Load Latest                                                        *)
 (* ================================================================ *)
 
-let parse_checkpoint_file (path : string) : Keeper_working_context.checkpoint =
+let parse_checkpoint_file (path : string) : Keeper_types.checkpoint =
   let content = Fs_compat.load_file path in
   let json =
     content
@@ -104,7 +104,7 @@ let parse_checkpoint_file (path : string) : Keeper_working_context.checkpoint =
       json |> member "serialized" |> to_string
   in
   {
-    Keeper_working_context.checkpoint_id =
+    Keeper_types.checkpoint_id =
       json |> member "checkpoint_id" |> to_string;
     timestamp = json |> member "timestamp" |> to_number;
     generation = json |> member "generation" |> to_int;
@@ -113,7 +113,7 @@ let parse_checkpoint_file (path : string) : Keeper_working_context.checkpoint =
     serialized;
   }
 
-let load_latest ~(session_dir : string) : Keeper_working_context.checkpoint option =
+let load_latest ~(session_dir : string) : Keeper_types.checkpoint option =
   match list_checkpoints ~session_dir with
   | [] -> None
   | latest :: _ ->

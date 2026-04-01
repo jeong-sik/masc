@@ -339,7 +339,7 @@ let lines_to_json ?(limit = max_int) (text : string) : Yojson.Safe.t =
 let execute_keeper_tool_call
     ~(config : Room.config)
     ~(meta : keeper_meta)
-    ~(ctx_work : Keeper_working_context.working_context)
+    ~(ctx_work : working_context)
     ~(name : string) ~(input : Yojson.Safe.t) : string =
   let args = input in
   let now_ts = Time_compat.now () in
@@ -369,10 +369,17 @@ let execute_keeper_tool_call
             ("name", `String meta.name);
             ("trace_id", `String meta.runtime.trace_id);
             ("generation", `Int meta.runtime.generation);
-            ("context_ratio", `Float (Keeper_working_context.context_ratio ctx_work));
-            ("context_tokens", `Int (Keeper_working_context.token_count ctx_work));
+            ("context_ratio",
+              `Float (if ctx_work.max_tokens = 0 then 0.0
+                      else float_of_int
+                        (Agent_sdk.Context_reducer.estimate_char_tokens ctx_work.system_prompt
+                         + List.fold_left (fun acc m -> acc + Agent_sdk.Context_reducer.estimate_message_tokens m) 0 ctx_work.messages)
+                      /. float_of_int ctx_work.max_tokens));
+            ("context_tokens",
+              `Int (Agent_sdk.Context_reducer.estimate_char_tokens ctx_work.system_prompt
+                    + List.fold_left (fun acc m -> acc + Agent_sdk.Context_reducer.estimate_message_tokens m) 0 ctx_work.messages));
             ("context_max", `Int ctx_work.max_tokens);
-            ("message_count", `Int (Keeper_working_context.message_count ctx_work));
+            ("message_count", `Int (List.length ctx_work.messages));
             ("last_model_used", `String meta.runtime.usage.last_model_used);
             ( "continuity_state",
               match continuity with

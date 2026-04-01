@@ -475,7 +475,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
             }
           in
           info_ref := Some info;
-          Hashtbl.replace sse_conn_by_session session_id info;
+          register_sse_conn ~session_id ~info;
           ignore (send_raw info (sse_prime_event ()));
           (match legacy_messages_endpoint with
           | None -> ()

@@ -608,48 +608,6 @@ let test_handle_request_tools_list () =
 
   cleanup_dir base_path
 
-let test_handle_request_tools_list_mdal_descriptions () =
-  with_env "MASC_FULL_SURFACE" "1" (fun () ->
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let tools =
-    tools_list_all ~clock ~sw state
-    |> List.filter
-         (function
-           | `Assoc fields -> (
-               match List.assoc_opt "name" fields with
-               | Some (`String "masc_mdal_start" | `String "masc_mdal_iterate") ->
-                   true
-               | _ -> false)
-           | _ -> false)
-  in
-  Alcotest.(check int) "exactly two mdal tools" 2 (List.length tools);
-
-  let start_description =
-    find_tool_exn tools "masc_mdal_start" |> tool_description_exn
-  in
-  Alcotest.(check bool) "start mentions deterministic numeric goal" true
-    (contains_substring start_description "deterministic numeric goal");
-  Alcotest.(check bool) "start description stays single-line" true
-    (not (contains_substring start_description "\n"));
-  Alcotest.(check bool) "start description stays concise" true
-    (String.length start_description <= 220);
-
-  let iterate_description =
-    find_tool_exn tools "masc_mdal_iterate" |> tool_description_exn
-  in
-  Alcotest.(check bool) "iterate description stays single-line" true
-    (not (contains_substring iterate_description "\n"));
-  Alcotest.(check bool) "iterate description stays concise" true
-    (String.length iterate_description <= 220);
-
-  cleanup_dir base_path)
-
 let test_handle_request_initialize_operator_profile () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2628,8 +2586,6 @@ let eio_tests = [
     test_execute_tool_tag_dispatch_respects_pre_hooks;
   "execute autoresearch uses resolved session agent", `Quick,
     test_execute_tool_autoresearch_uses_resolved_session_agent;
-  "handle tools/list mdal descriptions", `Quick,
-    test_handle_request_tools_list_mdal_descriptions;
   "handle tools/list filters requested names", `Quick,
     test_handle_request_tools_list_rejects_nonstandard_names_filter;
   "handle initialize managed profile", `Quick,

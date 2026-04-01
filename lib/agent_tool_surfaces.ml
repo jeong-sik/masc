@@ -31,15 +31,27 @@ let spawned_agent_prefixed_tools : string list =
 
 let local_worker_public_tool_names : string list =
   unique_preserve_order
-    ([
+    [
        "masc_board_get";
        "masc_board_list";
        "masc_board_search";
        "masc_board_comment";
        "masc_board_vote";
        "masc_board_post";
-     ]
-    )
+       "masc_code_search";
+       "masc_code_symbols";
+       "masc_code_read";
+       "masc_worktree_create";
+       "masc_worktree_list";
+       "masc_worktree_remove";
+       "masc_run_init";
+       "masc_run_plan";
+       "masc_run_log";
+       "masc_run_deliverable";
+       "masc_run_get";
+       "masc_run_list";
+       "masc_spawn";
+    ]
 
 let local_worker_contract_schemas : Types.tool_schema list =
   Sdk_tool_contract.sdk_tool_schemas

@@ -226,7 +226,20 @@ export interface KeeperLifecycleResponse {
 
 async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promise<T> {
   try {
-    return await resp.json() as T
+    const body = await resp.text()
+    if (!body.trim()) {
+      return resp.ok
+        ? ({ ok: true } as T)
+        : ({ ok: false, error: `${fallbackError} (HTTP ${resp.status})` } as T)
+    }
+
+    try {
+      return JSON.parse(body) as T
+    } catch {
+      return resp.ok
+        ? ({ ok: true, detail: body } as T)
+        : ({ ok: false, error: `${fallbackError} (HTTP ${resp.status}): ${body}` } as T)
+    }
   } catch {
     return { ok: false, error: `${fallbackError} (HTTP ${resp.status})` } as T
   }

@@ -11,24 +11,16 @@ type session = {
   mutable message_queue: Yojson.Safe.t list;  (* Pending messages *)
 }
 
-(** Rate limit tracking per category
+(** Rate limit tracking per category.
 
-    OCaml 5.4 Atomic Fields: burst_used and last_burst_reset use [@atomic]
-    for lock-free concurrent access. This enables safe updates from multiple
-    domains without explicit locks, using compare-and-set semantics.
-
-    Access pattern:
-    - Read:  Atomic.Loc.get [%atomic.loc tracker.burst_used]
-    - Write: Atomic.Loc.set [%atomic.loc tracker.burst_used] value
-    - CAS:   Atomic.Loc.compare_and_set [%atomic.loc tracker.field] old new
-    - Incr:  Atomic.Loc.fetch_and_add [%atomic.loc tracker.burst_used] 1
-*)
+    All fields are mutable and accessed exclusively under [registry.lock].
+    No lock-free access — the mutex is the single synchronization mechanism. *)
 type rate_tracker = {
   mutable general_timestamps: float list;
   mutable broadcast_timestamps: float list;
   mutable task_ops_timestamps: float list;
-  mutable burst_used: int [@atomic];  (* Atomic: concurrent burst tracking *)
-  mutable last_burst_reset: float [@atomic];  (* Atomic: timestamp for reset *)
+  mutable burst_used: int;
+  mutable last_burst_reset: float;
 }
 
 (** Session registry - manages all connected agents *)
@@ -102,25 +94,9 @@ let create_tracker () = {
   general_timestamps = [];
   broadcast_timestamps = [];
   task_ops_timestamps = [];
-  burst_used = 0;  (* Initial value for atomic field *)
-  last_burst_reset = Time_compat.now ();  (* Initial value for atomic field *)
+  burst_used = 0;
+  last_burst_reset = Time_compat.now ();
 }
-
-(** Atomic helpers for rate tracker - OCaml 5.4+ *)
-let get_burst_used tracker =
-  Atomic.Loc.get [%atomic.loc tracker.burst_used]
-
-let set_burst_used tracker v =
-  Atomic.Loc.set [%atomic.loc tracker.burst_used] v
-
-let incr_burst_used tracker =
-  ignore (Atomic.Loc.fetch_and_add [%atomic.loc tracker.burst_used] 1)
-
-let get_last_burst_reset tracker =
-  Atomic.Loc.get [%atomic.loc tracker.last_burst_reset]
-
-let set_last_burst_reset tracker v =
-  Atomic.Loc.set [%atomic.loc tracker.last_burst_reset] v
 
 (** Get timestamps for category *)
 let get_timestamps tracker = function
@@ -152,10 +128,10 @@ let check_rate_limit_ex registry ~agent_name ~category ~role =
     in
 
     (* Reset burst if a minute has passed - atomic compare-and-set *)
-    let last_reset = get_last_burst_reset tracker in
+    let last_reset = tracker.last_burst_reset in
     if now -. last_reset > 60.0 then begin
-      set_burst_used tracker 0;
-      set_last_burst_reset tracker now
+      tracker.burst_used <- 0;
+      tracker.last_burst_reset <- now
     end;
 
     (* Filter to last minute only *)
@@ -175,9 +151,9 @@ let check_rate_limit_ex registry ~agent_name ~category ~role =
 
     if current >= limit then begin
       (* Check if burst is available - using atomic read/increment *)
-      let burst = get_burst_used tracker in
+      let burst = tracker.burst_used in
       if burst < registry.config.burst_allowed then begin
-        incr_burst_used tracker;  (* Atomic increment *)
+        tracker.burst_used <- burst + 1;
         set_timestamps tracker category (now :: recent);
         (true, 0)  (* Burst allowed *)
       end else begin
@@ -220,7 +196,7 @@ let get_rate_limit_status registry ~agent_name ~role =
       ]
     in
 
-    let burst = get_burst_used tracker in  (* Atomic read *)
+    let burst = tracker.burst_used in
     `Assoc [
       ("agent", `String agent_name);
       ("role", `String (agent_role_to_string role));

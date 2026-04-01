@@ -170,14 +170,14 @@ let test_is_spawnable_unknown () =
   check bool "unknown" false (Auto_responder.is_spawnable "unknown-agent-xyz")
 
 (* ============================================================
-   chain_limit and chain_window Tests
+   chain_limit and chain_window_sec Tests
    ============================================================ *)
 
 let test_chain_limit_positive () =
   check bool "positive" true (Auto_responder.chain_limit > 0)
 
 let test_chain_window_positive () =
-  check bool "positive" true (Auto_responder.chain_window > 0.0)
+  check bool "positive" true (Auto_responder.chain_window_sec > 0.0)
 
 (* ============================================================
    is_enabled Tests

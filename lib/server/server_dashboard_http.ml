@@ -7,6 +7,11 @@ include Server_dashboard_http_room_truth
 open Types
 open Server_utils
 
+(* Wire task mutation hook: invalidate execution cache on any task
+   add/transition so the dashboard serves fresh backlog data. *)
+let () =
+  Room_hooks.on_task_mutation_fn := invalidate_execution_cache
+
 let dashboard_room_truth_focus_json =
   Server_dashboard_http_room_truth_support.dashboard_room_truth_focus_json
 

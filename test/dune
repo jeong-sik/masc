@@ -230,6 +230,7 @@
         test_tool_keeper
         test_keeper_tools_oas
         test_keeper_tool_exposure
+        test_keeper_voice_loop
         test_keeper_task_dispatch
         test_autoresearch_knowledge
         test_mcp_server_eio
@@ -377,6 +378,7 @@
         test_tool_keeper
         test_keeper_tools_oas
         test_keeper_tool_exposure
+        test_keeper_voice_loop
         test_keeper_task_dispatch
         test_autoresearch_knowledge
         test_mcp_server_eio

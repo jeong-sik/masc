@@ -38,10 +38,12 @@ let is_stop_command (text : string) : bool =
 (** Single voice turn: listen → send_message → speak.
     @param send_message takes text, returns [(success, result_json_string)]
     @param speak takes text, returns [(Yojson.Safe.t, string) result] *)
+let default_record ~agent_id ?language_code () =
+  Voice_bridge.record_and_transcribe ~agent_id ?language_code ()
+
 let run_one_voice_turn ~agent_id ~send_message ~speak
-    ?language_code () =
-  match Voice_bridge.record_and_transcribe
-          ~agent_id ?language_code () with
+    ?(record = default_record) ?language_code () =
+  match record ~agent_id ?language_code () with
   | Error err ->
       Log.Keeper.warn "voice_loop: listen failed: %s" err;
       Error (Printf.sprintf "listen failed: %s" err)
@@ -78,6 +80,7 @@ let run_one_voice_turn ~agent_id ~send_message ~speak
 let max_consecutive_empty = 5
 
 let run ~agent_id ~send_message ~speak
+    ?(record = default_record)
     ?(max_turns = 50) ?language_code () : bool * string =
   let rec loop turn_count empty_count =
     if turn_count >= max_turns then
@@ -85,7 +88,7 @@ let run ~agent_id ~send_message ~speak
          max_turns)
     else
       match run_one_voice_turn ~agent_id ~send_message ~speak
-              ?language_code () with
+              ~record ?language_code () with
       | Error err ->
           if turn_count = 0 then
             (false, Printf.sprintf "voice loop failed on first turn: %s" err)

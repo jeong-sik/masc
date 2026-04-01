@@ -21,6 +21,8 @@ val run :
   agent_id:string ->
   send_message:(string -> bool * string) ->
   speak:(string -> (Yojson.Safe.t, string) result) ->
+  ?record:(agent_id:string -> ?language_code:string -> unit ->
+           (Yojson.Safe.t, string) result) ->
   ?max_turns:int ->
   ?language_code:string ->
   unit ->

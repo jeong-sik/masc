@@ -16,10 +16,15 @@ open Masc_mcp
     permission_for_tool(tool) → permission option
     has_permission(role, permission) → bool
 
-    In non-strict mode, None → allowed (fail-open). *)
+    Tests at the POLICY level (not authorization level).
+    Strict mode checks happen in authorize_tool_v2, not in the policy.
+    For mapped tools, this matches both strict and non-strict behavior.
+    For unmapped tools (None), the policy allows them (All-based),
+    matching the non-strict fail-open path. Strict mode is an
+    authorization-level overlay tested separately. *)
 let old_allows (role : Types.agent_role) (tool_name : string) : bool =
   match Auth.permission_for_tool tool_name with
-  | None -> true  (* Legacy fail-open in non-strict mode *)
+  | None -> true  (* Policy level: fail-open for unmapped tools *)
   | Some perm -> Types.has_permission role perm
 
 (* ================================================================ *)

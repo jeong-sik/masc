@@ -392,14 +392,36 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
 
 (** Policy-based tool authorization.
     Replaces authorize_tool with a single Tool_access_policy check.
-    Invalid/expired tokens are rejected (not silently downgraded). *)
+    Invalid/expired tokens are rejected (not silently downgraded).
+
+    Strict mode (MASC_TOOL_AUTH_STRICT, default=true):
+    Tools not mapped by permission_for_tool are subject to additional
+    checks — unmapped masc_* tools require at least Worker, and
+    unmapped non-masc tools are forbidden. *)
 let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match resolve_role config ~agent_name ~token with
   | Error e -> Error e
   | Ok role ->
       let policy = Tool_access_role.policy_for_role role in
-      if Tool_access_policy.allows_name policy tool_name then Ok ()
-      else Error (Forbidden { agent = agent_name; action = tool_name })
+      if not (Tool_access_policy.allows_name policy tool_name) then
+        Error (Forbidden { agent = agent_name; action = tool_name })
+      else if not (is_tool_auth_strict_enabled ()) then
+        Ok ()  (* Non-strict: policy check is sufficient *)
+      else
+        (* Strict mode: additional gate for unmapped tools *)
+        match permission_for_tool tool_name with
+        | Some _ -> Ok ()  (* Mapped tool — policy already checked *)
+        | None ->
+            if is_masc_tool_name tool_name
+               || is_protocol_canonical_tool_name tool_name then
+              (* Unmapped internal tool: require at least Worker *)
+              if has_permission role CanBroadcast then Ok ()
+              else Error (Forbidden { agent = agent_name; action = tool_name })
+            else
+              Error (Forbidden {
+                agent = agent_name;
+                action = "use unknown non-masc tool: " ^ tool_name
+              })
 
 (* ============================================ *)
 (* Room secret (for room-level auth)            *)

@@ -20,6 +20,8 @@ type t = {
   evidence_ref : Yojson.Safe.t;
 }
 
+let tool_host_log_module_name = "ToolHost"
+
 let severity_to_string = function
   | Warn -> "warn"
   | Bad -> "bad"
@@ -50,25 +52,15 @@ let trim_to_option value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop idx =
-    if idx + needle_len > haystack_len then false
-    else if String.sub haystack idx needle_len = needle then true
-    else loop (idx + 1)
-  in
-  needle_len > 0 && haystack_len >= needle_len && loop 0
-
 let tool_host_cause_code ?timeout_ms message =
   let lower = String.lowercase_ascii message in
   if Option.is_some timeout_ms
-     || contains_substring ~needle:"timed out" lower
-     || contains_substring ~needle:"timeout" lower then
+     || String_util.contains_substring lower "timed out"
+     || String_util.contains_substring lower "timeout" then
     "tool_host_timeout"
-  else if contains_substring ~needle:"port already in use" lower
-          || contains_substring ~needle:"connection refused" lower
-          || contains_substring ~needle:"transport unavailable" lower then
+  else if String_util.contains_substring lower "port already in use"
+          || String_util.contains_substring lower "connection refused"
+          || String_util.contains_substring lower "transport unavailable" then
     "tool_host_transport_unavailable"
   else
     "tool_host_failure"
@@ -76,7 +68,6 @@ let tool_host_cause_code ?timeout_ms message =
 let operator_action_for_cause_code = function
   | "tool_host_timeout" -> Some "masc_operator_digest"
   | "tool_host_transport_unavailable" -> Some "masc_operator_digest"
-  | "tool_host_failure" -> Some "masc_operator_digest"
   | _ -> None
 
 let summary_for_tool_host ~client_name ~tool_name ~transport = function

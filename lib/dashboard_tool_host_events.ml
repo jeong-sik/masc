@@ -118,7 +118,9 @@ let ring_message (report : report) =
 
 let record ?fs config (report : report) =
   let details = details_json report in
-  Log.client_tool_host_error ~details (ring_message report);
+  Log.client_tool_host_error
+    ~module_name:Failure_envelope.tool_host_log_module_name ~details
+    (ring_message report);
   Audit_log.log_client_tool_host_failure config ~agent_id:report.agent_name
     ~client_name:report.client_name ~tool_name:report.tool_name
     ~transport:report.transport ~message:report.message ?phase:report.phase

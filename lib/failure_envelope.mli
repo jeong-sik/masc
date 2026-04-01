@@ -20,6 +20,7 @@ type t = {
   evidence_ref : Yojson.Safe.t;
 }
 
+val tool_host_log_module_name : string
 val severity_to_string : severity -> string
 val recoverability_to_string : recoverability -> string
 val to_yojson : t -> Yojson.Safe.t

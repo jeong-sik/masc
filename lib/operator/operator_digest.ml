@@ -14,7 +14,7 @@ let recent_tool_host_failures ~now () =
         let fresh =
           match Types.parse_iso8601_opt entry.ts with
           | Some ts -> now -. ts <= tool_host_attention_window_sec
-          | None -> true
+          | None -> false
         in
         if not fresh then
           dedup seen acc rest
@@ -54,7 +54,7 @@ let recent_tool_host_failures ~now () =
                 in
                 dedup (fingerprint :: seen) (item :: acc) rest
   in
-  Log.Ring.recent ~limit:12 ~module_filter:"ToolHost" ()
+  Log.Ring.recent ~limit:12 ~module_filter:Failure_envelope.tool_host_log_module_name ()
   |> dedup [] []
 
 let build_room_attention_items ?command_plane_summary config =

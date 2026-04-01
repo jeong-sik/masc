@@ -13,6 +13,26 @@ let compute_context_ratio (meta : Keeper_types.keeper_meta) : float option =
       if max_ctx = 0 then None
       else Some (float_of_int input_tokens /. float_of_int max_ctx)
 
+type action_result_status = ActionOk | ActionError
+
+let action_result_status_to_string = function
+  | ActionOk -> "ok"
+  | ActionError -> "error"
+
+type confirmation_state =
+  | Preview
+  | Immediate
+  | Expired
+  | Denied
+  | Confirmed
+
+let confirmation_state_to_string = function
+  | Preview -> "preview"
+  | Immediate -> "immediate"
+  | Expired -> "expired"
+  | Denied -> "denied"
+  | Confirmed -> "confirmed"
+
 type action_log_entry = {
   trace_id : string;
   actor : string;
@@ -22,8 +42,8 @@ type action_log_entry = {
   target_type : string;
   target_id : string option;
   delegated_tool : string;
-  confirmation_state : string;
-  result_status : string;
+  confirmation_state : confirmation_state;
+  result_status : action_result_status;
   latency_ms : int;
   created_at : string;
 }
@@ -76,8 +96,8 @@ let action_log_entry_to_yojson (entry : action_log_entry) =
       ("target_type", `String entry.target_type);
       ("target_id", string_option_to_json entry.target_id);
       ("delegated_tool", `String entry.delegated_tool);
-      ("confirmation_state", `String entry.confirmation_state);
-      ("result_status", `String entry.result_status);
+      ("confirmation_state", `String (confirmation_state_to_string entry.confirmation_state));
+      ("result_status", `String (action_result_status_to_string entry.result_status));
       ("latency_ms", `Int entry.latency_ms);
       ("created_at", `String entry.created_at);
     ]

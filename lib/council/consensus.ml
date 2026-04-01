@@ -82,10 +82,10 @@ let sessions : (string, session) Hashtbl.t = Hashtbl.create 16
 let sessions_mutex : Eio.Mutex.t = Eio.Mutex.create ()
 
 let with_sessions_lock f =
-  Eio.Mutex.use_rw ~protect:true sessions_mutex f
+  Eio_guard.with_mutex sessions_mutex f
 
 let with_sessions_ro f =
-  Eio.Mutex.use_ro sessions_mutex f
+  Eio_guard.with_mutex_ro sessions_mutex f
 
 (** {1 File-based Persistence} *)
 
@@ -360,7 +360,7 @@ let cleanup_closed ?(max_age_s = 3600.0) () =
 let consensus_rng = Random.State.make_self_init ()
 let rng_mutex : Eio.Mutex.t = Eio.Mutex.create ()
 let generate_id () =
-  let uuid = Eio.Mutex.use_rw ~protect:true rng_mutex (fun () ->
+  let uuid = Eio_guard.with_mutex rng_mutex (fun () ->
     Uuidm.v4_gen consensus_rng ()) in
   Uuidm.to_string uuid
 

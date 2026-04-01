@@ -368,7 +368,7 @@ module Stats = struct
   let stats_mutex : Eio.Mutex.t = Eio.Mutex.create ()
 
   let record (decision : route_decision) : unit =
-    Eio.Mutex.use_rw ~protect:true stats_mutex (fun () ->
+    Eio_guard.with_mutex stats_mutex (fun () ->
       global_stats.total_queries <- global_stats.total_queries + 1;
       let has_costly = List.exists (fun a ->
         a.cost_per_1k >= 0.005
@@ -378,7 +378,7 @@ module Stats = struct
       else global_stats.cheap_only <- global_stats.cheap_only + 1)
 
   let get_ratio () : float * float =
-    Eio.Mutex.use_ro stats_mutex (fun () ->
+    Eio_guard.with_mutex_ro stats_mutex (fun () ->
       let total = float_of_int global_stats.total_queries in
       if total = 0.0 then (0.0, 0.0)
       else (
@@ -387,7 +387,7 @@ module Stats = struct
       ))
 
   let reset () : unit =
-    Eio.Mutex.use_rw ~protect:true stats_mutex (fun () ->
+    Eio_guard.with_mutex stats_mutex (fun () ->
       global_stats.total_queries <- 0;
       global_stats.cheap_only <- 0;
       global_stats.has_expensive <- 0)

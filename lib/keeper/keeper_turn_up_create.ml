@@ -165,211 +165,202 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ~fallback_message:env_message_gate
         ~fallback_token:env_token_gate
     in
-    Progress.Tracker.step tracker ~message:"Validating API keys for cascade" ();
     let cascade_models = Oas_model_resolve.models_of_cascade_name "keeper_unified" in
-    (match ensure_api_keys_for_labels cascade_models with
-     | Error e ->
-       Log.Keeper.error "create_keeper failed: API key validation error for name=%s: %s" p.name e;
-       Progress.stop_tracking task_id;
-       (false, e)
-     | Ok () ->
-       Log.Keeper.debug "create_keeper: API keys validated for name=%s cascade=%s"
-         p.name "keeper_unified";
-       Progress.Tracker.step tracker ~message:"Initializing session directory" ();
-       let primary_max_context = Oas_model_resolve.resolve_primary_max_context cascade_models in
-       let trace_id = generate_trace_id () in
-         let base_dir = session_base_dir ctx.config in
-         (* Ensure full session dir tree, not just base_dir (issue #3019) *)
-         ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
-         let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
-           let persona_extended =
-             Keeper_types_profile.load_persona_extended p.name
-             |> Option.value ~default:""
-           in
-           let system_prompt =
-             build_keeper_system_prompt
-               ~goal
-               ~short_goal
-               ~mid_goal
-               ~long_goal
-               ~soul_profile
-               ~will
-               ~needs
-               ~desires
-               ~instructions
-               ~persona_extended
-               ()
-         in
-         let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary_max_context in
-         let meta = {
-           name = p.name;
-           agent_name = keeper_agent_name p.name;
-           goal;
-           short_goal;
-           mid_goal;
-           long_goal;
-           soul_profile;
-           social_model = default_social_model;
-           cascade_name = "keeper_unified";
-           will;
-           needs;
-           desires;
-           instructions;
-           policy_voice_enabled;
-           execution_scope;
-           allowed_paths;
-           scope_kind;
-           tool_access = Preset { preset = tool_preset; also_allow = tool_also_allow };
-           tool_denylist;
-           room_scope;
-           voice_enabled;
-           voice_channel;
-           voice_agent_id;
-           mention_targets;
-           joined_room_ids = [];
-           last_seen_seq_by_room = [];
-           proactive = {
-             enabled = proactive_enabled;
-             idle_sec = proactive_idle_sec;
-             cooldown_sec = proactive_cooldown_sec;
-           };
-           compaction = {
-             profile = compaction_profile;
-             ratio_gate = compaction_ratio_gate;
-             message_gate = compaction_message_gate;
-             token_gate = compaction_token_gate;
-             cooldown_sec = continuity_compaction_cooldown_sec;
-           };
-           auto_handoff;
-           handoff_threshold;
-           handoff_cooldown_sec;
-           created_at = now_iso ();
-           updated_at = now_iso ();
-           continuity_summary = "";
-           active_goal_ids = [];
-           active_team_session_id = None;
-           last_team_session_started_at = "";
-           team_session_start_count_total = 0;
-           paused = false;
-           current_task_id = None;
-           runtime = {
-             usage = {
-               total_turns = 0;
-               total_input_tokens = 0;
-               total_output_tokens = 0;
-               total_tokens = 0;
-               total_cost_usd = 0.0;
-               last_turn_ts = 0.0;
-               last_model_used = "";
-               last_input_tokens = 0;
-               last_output_tokens = 0;
-               last_total_tokens = 0;
-               last_latency_ms = 0;
-             };
-             compaction_rt = {
-               count = 0;
-               last_ts = 0.0;
-               last_before_tokens = 0;
-               last_after_tokens = 0;
-               last_check_ts = now_ts;
-               last_decision = "initialized";
-             };
-             proactive_rt = {
-               count_total = 0;
-               last_ts = 0.0;
-               last_reason = "";
-               last_preview = "";
-             };
-             generation = 0;
-             trace_id;
-             trace_history = [];
-             last_handoff_ts = 0.0;
-             last_continuity_update_ts = now_ts;
-             last_autonomous_action_at = "";
-             autonomous_action_count = 0;
-             autonomous_turn_count = 0;
-             autonomous_text_turn_count = 0;
-             autonomous_tool_turn_count = 0;
-             board_reactive_turn_count = 0;
-             mention_reactive_turn_count = 0;
-             noop_turn_count = 0;
-             last_speech_act = "";
-             last_blocker = "";
-             last_need = "";
-           };
-         } in
-         Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
-         (try
-            ignore
-              (Keeper_exec_context.save_oas_checkpoint
-                 ~session
-                 ~agent_name:meta.agent_name
-                 ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
-                 ~ctx:ctx0
-                 ~generation:0)
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-              log_keeper_exn ~label:"save_oas_checkpoint (init) failed" exn);
-         Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
-         match write_meta ctx.config meta with
-         | Error e ->
-           Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
-           Progress.stop_tracking task_id;
-           (false, e)
-         | Ok () ->
-           Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
-             p.name meta.runtime.trace_id;
-           Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
-           Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
-           start_keepalive ctx meta;
-           (* Apply per-persona shard configuration if present *)
-           (match p.profile_defaults.shards with
-            | Some (_ :: _ as shard_names) ->
-                Log.Keeper.debug "create_keeper: applying shard config for name=%s shards=%d"
-                  p.name (List.length shard_names);
-                Tool_shard.set_agent_shards p.name shard_names
-            | Some [] | None -> ());
-           Progress.Tracker.complete tracker ~message:"Keeper created" ();
-           Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name meta.runtime.trace_id;
-           let json = `Assoc [
-             ("name", `String meta.name);
-             ("agent_name", `String meta.agent_name);
-             ("trace_id", `String meta.runtime.trace_id);
-             ("generation", `Int meta.runtime.generation);
-             ("goal", `String meta.goal);
-             ("short_goal", `String meta.short_goal);
-             ("mid_goal", `String meta.mid_goal);
-             ("long_goal", `String meta.long_goal);
-             ("soul_profile", `String meta.soul_profile);
-             ("will", `String meta.will);
-             ("needs", `String meta.needs);
-             ("desires", `String meta.desires);
-             ("instructions", `String meta.instructions);
-             ("cascade_name", `String meta.cascade_name);
-             ("voice_enabled", `Bool meta.voice_enabled);
-             ("voice_channel", `String meta.voice_channel);
-             ("voice_agent_id", `String meta.voice_agent_id);
-             ("social_model", `String meta.social_model);
-             ("tool_access", tool_access_to_json meta.tool_access);
-             ("tool_preset",
-               match tool_access_preset meta.tool_access with
-               | Some preset -> `String (tool_preset_to_string preset)
-               | None -> `Null);
-             ("tool_also_allow",
-               `List
-                 (List.map (fun value -> `String value)
-                    (tool_access_also_allowlist meta.tool_access)));
-             ("tool_denylist",
-               `List (List.map (fun value -> `String value) meta.tool_denylist));
-             ("proactive_enabled", `Bool meta.proactive.enabled);
-             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
-             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-             ("compaction_profile", `String meta.compaction.profile);
-             ("compaction_ratio_gate", `Float meta.compaction.ratio_gate);
-             ("compaction_message_gate", `Int meta.compaction.message_gate);
-             ("compaction_token_gate", `Int meta.compaction.token_gate);
-             ("auto_handoff", `Bool meta.auto_handoff);
-             ("handoff_threshold", `Float meta.handoff_threshold);
-           ] in
-           (true, Yojson.Safe.pretty_to_string json))
+    let primary_max_context = Oas_model_resolve.resolve_primary_max_context cascade_models in
+    Progress.Tracker.step tracker ~message:"Initializing session directory" ();
+    let trace_id = generate_trace_id () in
+      let base_dir = session_base_dir ctx.config in
+      (* Ensure full session dir tree, not just base_dir (issue #3019) *)
+      ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
+      let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
+        let persona_extended =
+          Keeper_types_profile.load_persona_extended p.name
+          |> Option.value ~default:""
+        in
+        let system_prompt =
+          build_keeper_system_prompt
+            ~goal
+            ~short_goal
+            ~mid_goal
+            ~long_goal
+            ~soul_profile
+            ~will
+            ~needs
+            ~desires
+            ~instructions
+            ~persona_extended
+            ()
+      in
+      let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary_max_context in
+      let meta = {
+        name = p.name;
+        agent_name = keeper_agent_name p.name;
+        goal;
+        short_goal;
+        mid_goal;
+        long_goal;
+        soul_profile;
+        social_model = default_social_model;
+        cascade_name = "keeper_unified";
+        will;
+        needs;
+        desires;
+        instructions;
+        policy_voice_enabled;
+        execution_scope;
+        allowed_paths;
+        scope_kind;
+        tool_access = Preset { preset = tool_preset; also_allow = tool_also_allow };
+        tool_denylist;
+        room_scope;
+        voice_enabled;
+        voice_channel;
+        voice_agent_id;
+        mention_targets;
+        joined_room_ids = [];
+        last_seen_seq_by_room = [];
+        proactive = {
+          enabled = proactive_enabled;
+          idle_sec = proactive_idle_sec;
+          cooldown_sec = proactive_cooldown_sec;
+        };
+        compaction = {
+          profile = compaction_profile;
+          ratio_gate = compaction_ratio_gate;
+          message_gate = compaction_message_gate;
+          token_gate = compaction_token_gate;
+          cooldown_sec = continuity_compaction_cooldown_sec;
+        };
+        auto_handoff;
+        handoff_threshold;
+        handoff_cooldown_sec;
+        created_at = now_iso ();
+        updated_at = now_iso ();
+        continuity_summary = "";
+        active_goal_ids = [];
+        active_team_session_id = None;
+        last_team_session_started_at = "";
+        team_session_start_count_total = 0;
+        paused = false;
+        current_task_id = None;
+        runtime = {
+          usage = {
+            total_turns = 0;
+            total_input_tokens = 0;
+            total_output_tokens = 0;
+            total_tokens = 0;
+            total_cost_usd = 0.0;
+            last_turn_ts = 0.0;
+            last_model_used = "";
+            last_input_tokens = 0;
+            last_output_tokens = 0;
+            last_total_tokens = 0;
+            last_latency_ms = 0;
+          };
+          compaction_rt = {
+            count = 0;
+            last_ts = 0.0;
+            last_before_tokens = 0;
+            last_after_tokens = 0;
+            last_check_ts = now_ts;
+            last_decision = "initialized";
+          };
+          proactive_rt = {
+            count_total = 0;
+            last_ts = 0.0;
+            last_reason = "";
+            last_preview = "";
+          };
+          generation = 0;
+          trace_id;
+          trace_history = [];
+          last_handoff_ts = 0.0;
+          last_continuity_update_ts = now_ts;
+          last_autonomous_action_at = "";
+          autonomous_action_count = 0;
+          autonomous_turn_count = 0;
+          autonomous_text_turn_count = 0;
+          autonomous_tool_turn_count = 0;
+          board_reactive_turn_count = 0;
+          mention_reactive_turn_count = 0;
+          noop_turn_count = 0;
+          last_speech_act = "";
+          last_blocker = "";
+          last_need = "";
+        };
+      } in
+      Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
+      (try
+         ignore
+           (Keeper_exec_context.save_oas_checkpoint
+              ~session
+              ~agent_name:meta.agent_name
+              ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
+              ~ctx:ctx0
+              ~generation:0)
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           log_keeper_exn ~label:"save_oas_checkpoint (init) failed" exn);
+      Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
+      match write_meta ctx.config meta with
+      | Error e ->
+        Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
+        Progress.stop_tracking task_id;
+        (false, e)
+      | Ok () ->
+        Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
+          p.name meta.runtime.trace_id;
+        Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
+        Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
+        start_keepalive ctx meta;
+        (* Apply per-persona shard configuration if present *)
+        (match p.profile_defaults.shards with
+         | Some (_ :: _ as shard_names) ->
+             Log.Keeper.debug "create_keeper: applying shard config for name=%s shards=%d"
+               p.name (List.length shard_names);
+             Tool_shard.set_agent_shards p.name shard_names
+         | Some [] | None -> ());
+        Progress.Tracker.complete tracker ~message:"Keeper created" ();
+        Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name meta.runtime.trace_id;
+        let json = `Assoc [
+          ("name", `String meta.name);
+          ("agent_name", `String meta.agent_name);
+          ("trace_id", `String meta.runtime.trace_id);
+          ("generation", `Int meta.runtime.generation);
+          ("goal", `String meta.goal);
+          ("short_goal", `String meta.short_goal);
+          ("mid_goal", `String meta.mid_goal);
+          ("long_goal", `String meta.long_goal);
+          ("soul_profile", `String meta.soul_profile);
+          ("will", `String meta.will);
+          ("needs", `String meta.needs);
+          ("desires", `String meta.desires);
+          ("instructions", `String meta.instructions);
+          ("cascade_name", `String meta.cascade_name);
+          ("voice_enabled", `Bool meta.voice_enabled);
+          ("voice_channel", `String meta.voice_channel);
+          ("voice_agent_id", `String meta.voice_agent_id);
+          ("social_model", `String meta.social_model);
+          ("tool_access", tool_access_to_json meta.tool_access);
+          ("tool_preset",
+            match tool_access_preset meta.tool_access with
+            | Some preset -> `String (tool_preset_to_string preset)
+            | None -> `Null);
+          ("tool_also_allow",
+            `List
+              (List.map (fun value -> `String value)
+                 (tool_access_also_allowlist meta.tool_access)));
+          ("tool_denylist",
+            `List (List.map (fun value -> `String value) meta.tool_denylist));
+          ("proactive_enabled", `Bool meta.proactive.enabled);
+          ("proactive_idle_sec", `Int meta.proactive.idle_sec);
+          ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
+          ("compaction_profile", `String meta.compaction.profile);
+          ("compaction_ratio_gate", `Float meta.compaction.ratio_gate);
+          ("compaction_message_gate", `Int meta.compaction.message_gate);
+          ("compaction_token_gate", `Int meta.compaction.token_gate);
+          ("auto_handoff", `Bool meta.auto_handoff);
+          ("handoff_threshold", `Float meta.handoff_threshold);
+        ] in
+        (true, Yojson.Safe.pretty_to_string json)

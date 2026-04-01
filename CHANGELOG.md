@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [2.206.0] - 2026-04-01
+
+### Changed
+- **MCP test matching** — body-based call matching for MCP tests (#4403).
+- **Keeper Model_meta** — replace model_family tier with OAS Model_meta (#4400).
+
+### Fixed
+- **Agent_id colon** — allow colon in Agent_id for keeper namespacing (#4401).
+- **Keeper voice PR review** — validation, no_audio handling, public surface (#4405).
+- **Review followup** — address comments from #4379 and #4386 (#4406).
+- **GC reason field** — preserve reason + clarify dual-write comment (#4409).
+
 ## [2.205.0] - 2026-04-01
 
 ### Added

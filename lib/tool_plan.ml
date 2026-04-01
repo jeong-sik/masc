@@ -194,6 +194,7 @@ let schemas = Tool_schemas_plan.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
+let _tool_spec_read_only = [ "masc_plan_get" ]
 let _tool_spec_requires_join = [ "masc_plan_set_task"; "masc_plan_clear_task" ]
 
 let () =
@@ -205,6 +206,8 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_plan
            ~input_schema:s.input_schema
+           ~is_read_only:(List.mem s.name _tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ~requires_join:(List.mem s.name _tool_spec_requires_join)
            ()))
     schemas

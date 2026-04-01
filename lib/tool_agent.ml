@@ -367,20 +367,27 @@ let schemas = Tool_schemas_agent.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_agents" ]
-let _tool_spec_requires_join = [ "masc_heartbeat"; "masc_register_capabilities" ]
+let _tool_spec_read_only = [ "masc_agents"; "masc_agent_card" ]
+let _tool_spec_requires_join = [ "masc_register_capabilities" ]
+
+(* Heartbeat tools are dispatched by Tool_heartbeat, not Tool_agent.
+   Registering them here under Mod_agent would create a module_tag conflict.
+   Derived from Tool_heartbeat.schemas to stay in sync automatically. *)
+let _heartbeat_tool_names =
+  List.map (fun (s : Types.tool_schema) -> s.name) Tool_heartbeat.schemas
 
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_agent
-           ~input_schema:s.input_schema
-           ~is_read_only:(List.mem s.name _tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
-           ~requires_join:(List.mem s.name _tool_spec_requires_join)
-           ()))
+      if not (List.mem s.name _heartbeat_tool_names) then
+        Tool_spec.register
+          (Tool_spec.create
+             ~name:s.name
+             ~description:s.description
+             ~module_tag:Tool_dispatch.Mod_agent
+             ~input_schema:s.input_schema
+             ~is_read_only:(List.mem s.name _tool_spec_read_only)
+             ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+             ~requires_join:(List.mem s.name _tool_spec_requires_join)
+             ()))
     schemas

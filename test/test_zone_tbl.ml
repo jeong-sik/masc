@@ -305,6 +305,20 @@ let test_base_tools_invariant () =
         (Zone_tbl.current_tools zt_back)
   | Error e -> Alcotest.fail e
 
+let test_empty_base () =
+  let zt = Zone_tbl.create ~base_tools:[] in
+  Alcotest.(check int) "depth 0" 0 (Zone_tbl.depth zt);
+  Alcotest.(check bool) "is_base" true (Zone_tbl.is_base zt);
+  Alcotest.(check str_list) "empty current" [] (Zone_tbl.current_tools zt);
+  Alcotest.(check bool) "nothing allowed" false
+    (Zone_tbl.is_tool_allowed zt "anything");
+  (* enter on empty base *)
+  let _zid, zt1 = Zone_tbl.enter ~op:(Add ["x"]) zt in
+  Alcotest.(check str_list) "added to empty" ["x"]
+    (Zone_tbl.current_tools zt1);
+  Alcotest.(check bool) "x allowed" true
+    (Zone_tbl.is_tool_allowed zt1 "x")
+
 (* ================================================================ *)
 (* Test registration                                                 *)
 (* ================================================================ *)
@@ -363,5 +377,6 @@ let () =
       ( "invariance",
         [
           Alcotest.test_case "base_tools invariant" `Quick test_base_tools_invariant;
+          Alcotest.test_case "empty base" `Quick test_empty_base;
         ] );
     ]

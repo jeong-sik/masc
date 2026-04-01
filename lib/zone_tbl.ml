@@ -32,28 +32,14 @@ let set_of_list names =
   List.iter (fun n -> Hashtbl.replace tbl n ()) names;
   tbl
 
-(** Normalize: trim whitespace, drop empty strings, deduplicate.
-    Same contract as Tool_gate.apply's input normalization. *)
-let normalize names =
-  let seen = Hashtbl.create (max 16 (List.length names)) in
-  let rec loop acc = function
-    | [] -> List.rev acc
-    | n :: rest ->
-        let n = String.trim n in
-        if n = "" || Hashtbl.mem seen n then loop acc rest
-        else begin
-          Hashtbl.replace seen n ();
-          loop (n :: acc) rest
-        end
-  in
-  loop [] names
-
 (* ================================================================ *)
 (* create                                                            *)
 (* ================================================================ *)
 
 let create ~base_tools =
-  let base = normalize base_tools in
+  (* Delegate normalization to Tool_gate.apply Keep_all to avoid
+     duplicating trim/dedup logic (GLM-5.1 review P2.2). *)
+  let base = Tool_gate.apply Tool_gate.Keep_all base_tools in
   {
     base;
     base_lookup = set_of_list base;

@@ -187,21 +187,21 @@ let inferred_lead_model () =
       | Some _ as env_model -> env_model
       | None ->
           runtime_inventory_models ()
-          |> List.find_opt (fun model -> contains_ci model "35b"))
+          |> List.find_opt (fun model -> contains_size_token_ci model "35b"))
 
 let inferred_middle_model () =
   match explicit_middle_model () with
   | Some _ as explicit -> explicit
   | None ->
       runtime_inventory_models ()
-      |> List.find_opt (fun model -> contains_ci model "27b")
+      |> List.find_opt (fun model -> contains_size_token_ci model "27b")
 
 let inferred_worker_model () =
   match explicit_worker_model () with
   | Some _ as explicit -> explicit
   | None ->
       runtime_inventory_models ()
-      |> List.find_opt (fun model -> contains_ci model "9b")
+      |> List.find_opt (fun model -> contains_size_token_ci model "9b")
 
 let infer_model_tier_from_model_name model_name =
   match trim_opt model_name with

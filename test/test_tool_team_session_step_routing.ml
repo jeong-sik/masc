@@ -1,6 +1,31 @@
 open Masc_mcp
 open Test_tool_team_session_support
 
+let make_runtime ?model ?(max_concurrency = 2) id base_url =
+  {
+    Local_runtime_pool.id;
+    base_url;
+    model;
+    max_concurrency;
+    active_slots = 0;
+    queue_depth = 0;
+    latency_ema_ms = None;
+    failure_streak = 0;
+    cooldown_until = None;
+    last_error = None;
+    total_started = 0;
+    total_success = 0;
+    total_failure = 0;
+  }
+
+let install_runtime_pool runtimes =
+  Local_runtime_pool.pool :=
+    {
+      Local_runtime_pool.empty_pool with
+      runtimes;
+      fingerprint = Local_runtime_pool.current_fingerprint ();
+    }
+
 let test_step_spawn_batch_records_planned_workers () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -447,3 +472,41 @@ let test_step_spawn_batch_infers_exact_env_model_tiers () =
         (Some "27b")
         (Option.map Team_session_types.model_tier_to_string
            exact_middle.model_tier))
+
+let test_runtime_inventory_uses_token_boundaries_for_model_tiers () =
+  Fun.protect
+    ~finally:(fun () -> Local_runtime_pool.reset ())
+    (fun () ->
+      with_env "LLAMA_SWARM_MODEL" None @@ fun () ->
+      with_env "MASC_TEAM_SESSION_MODEL_35B" None @@ fun () ->
+      with_env "MASC_TEAM_SESSION_MODEL_27B" None @@ fun () ->
+      with_env "MASC_TEAM_SESSION_MODEL_9B" None @@ fun () ->
+      install_runtime_pool
+        [
+          make_runtime "runtime-109b" "http://127.0.0.1:9185"
+            ~model:"llama-109b-instruct";
+          make_runtime "runtime-35b" "http://127.0.0.1:9186"
+            ~model:"qwen3.5-35b-a3b-ud-q8-xl";
+          make_runtime "runtime-27b" "http://127.0.0.1:9187"
+            ~model:"qwen2.5-27b-instruct";
+          make_runtime "runtime-9b" "http://127.0.0.1:9188"
+            ~model:"qwen2.5-9b-instruct";
+        ];
+      Alcotest.(check (option string)) "lead runtime ignores 109b false positive"
+        (Some "qwen3.5-35b-a3b-ud-q8-xl")
+        (Tool_team_session_routing.inferred_lead_model ());
+      Alcotest.(check (option string)) "middle runtime inferred from 27b token"
+        (Some "qwen2.5-27b-instruct")
+        (Tool_team_session_routing.inferred_middle_model ());
+      Alcotest.(check (option string)) "worker runtime inferred from 9b token"
+        (Some "qwen2.5-9b-instruct")
+        (Tool_team_session_routing.inferred_worker_model ());
+      Alcotest.(check (option string)) "109b does not infer as 9b tier" None
+        (Tool_team_session_routing.infer_model_tier_from_model_name
+           (Some "llama-109b-instruct")
+        |> Option.map Team_session_types.model_tier_to_string);
+      Alcotest.(check (option string)) "35b token still infers exact tier"
+        (Some "35b")
+        (Tool_team_session_routing.infer_model_tier_from_model_name
+           (Some "qwen3.5-35b-a3b-ud-q8-xl")
+        |> Option.map Team_session_types.model_tier_to_string))

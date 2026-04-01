@@ -11,27 +11,11 @@ open Keeper_memory
 
 (** {1 Working Context Types (re-exported from Keeper_types)} *)
 
-type nonrec working_context = working_context = {
-  system_prompt : string;
-  messages : Agent_sdk.Types.message list;
-  max_tokens : int;
-  context : Agent_sdk.Context.t;
-}
+type working_context = Keeper_types.working_context
 
-type nonrec checkpoint = checkpoint = {
-  checkpoint_id : string;
-  timestamp : float;
-  generation : int;
-  message_count : int;
-  token_count : int;
-  serialized : string;
-}
+type checkpoint = Keeper_types.checkpoint
 
-type nonrec session_context = session_context = {
-  session_id : string;
-  session_dir : string;
-  mutable checkpoints : checkpoint list;
-}
+type session_context = Keeper_types.session_context
 
 (** {1 Working Context Operations} *)
 

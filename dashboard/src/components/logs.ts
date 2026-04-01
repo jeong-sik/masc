@@ -20,7 +20,7 @@ const logLimit = signal(200)
 const latestSeq = signal<number | null>(null)
 
 const POLL_INTERVAL_MS = 3000
-const LOG_ROW_HEIGHT = 76
+const LOG_ROW_HEIGHT = 92
 
 let moduleDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let latestRequestId = 0
@@ -41,6 +41,17 @@ const SOURCE_LABELS: Record<string, string> = {
 }
 
 type LoadMode = 'reset' | 'delta'
+type FailureEnvelope = {
+  surface: string
+  entity_kind: string
+  entity_id: string | null
+  cause_code: string
+  severity: string
+  summary: string
+  recoverability: string
+  operator_action: string | null
+  evidence_ref: Record<string, unknown> | null
+}
 
 function normalizedLevel(entry: LogEntry): string {
   return (entry.normalized_level || entry.level || 'INFO').toUpperCase()
@@ -84,6 +95,46 @@ function detailLabel(details: Record<string, unknown> | null, key: string): stri
   if (typeof value === 'string' && value.trim() !== '') return value.trim()
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return null
+}
+
+function nestedRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function nestedString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+export function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
+  const details = entryDetails(entry)
+  const envelope = nestedRecord(details?.failure_envelope)
+  if (!envelope) return null
+
+  const surface = nestedString(envelope.surface)
+  const entityKind = nestedString(envelope.entity_kind)
+  const causeCode = nestedString(envelope.cause_code)
+  const severity = nestedString(envelope.severity)
+  const summary = nestedString(envelope.summary)
+  const recoverability = nestedString(envelope.recoverability)
+
+  if (!surface || !entityKind || !causeCode || !severity || !summary || !recoverability) {
+    return null
+  }
+
+  return {
+    surface,
+    entity_kind: entityKind,
+    entity_id: nestedString(envelope.entity_id),
+    cause_code: causeCode,
+    severity,
+    summary,
+    recoverability,
+    operator_action: nestedString(envelope.operator_action),
+    evidence_ref: nestedRecord(envelope.evidence_ref),
+  }
 }
 
 function sourceTone(source: string): string {
@@ -148,6 +199,7 @@ function renderLogRow(entry: LogEntry) {
   const phase = detailLabel(details, 'phase')
   const requestId = detailLabel(details, 'request_id')
   const sessionId = detailLabel(details, 'session_id')
+  const failure = failureEnvelope(entry)
   const sourceClass = sourceTone(source)
   const backgroundClass =
     level === 'ERROR'
@@ -195,10 +247,19 @@ function renderLogRow(entry: LogEntry) {
         ${sessionId
           ? html`<span class="rounded-full border border-[rgba(255,255,255,0.08)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">session ${sessionId}</span>`
           : null}
+        ${failure
+          ? html`<span class="rounded-full border border-[rgba(224,80,80,0.24)] bg-[rgba(224,80,80,0.12)] px-2 py-0.5 text-[10px] text-[#ffb4b4]">${failure.cause_code}</span>`
+          : null}
+        ${failure
+          ? html`<span class="rounded-full border border-[rgba(255,255,255,0.08)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${failure.recoverability}</span>`
+          : null}
+        ${failure?.operator_action
+          ? html`<span class="rounded-full border border-[rgba(71,184,255,0.18)] bg-[rgba(71,184,255,0.08)] px-2 py-0.5 text-[10px] text-[#dff3ff]">next ${failure.operator_action}</span>`
+          : null}
       </div>
       <div
         class="text-[12px] leading-relaxed text-[var(--text-body)]"
-        title=${entry.message}
+        title=${failure ? `${entry.message}\n${failure.summary}` : entry.message}
         style=${{
           display: '-webkit-box',
           overflow: 'hidden',
@@ -206,7 +267,7 @@ function renderLogRow(entry: LogEntry) {
           WebkitLineClamp: 2,
         }}
       >
-        ${entry.message}
+        ${failure ? `${entry.message} (${failure.summary})` : entry.message}
       </div>
     </div>
   `

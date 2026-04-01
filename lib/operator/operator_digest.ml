@@ -5,6 +5,58 @@ include Operator_digest_types
 include Operator_digest_session
 open Operator_digest_guidance
 
+let tool_host_attention_window_sec = 900.0
+
+let recent_tool_host_failures ~now () =
+  let rec dedup seen acc = function
+    | [] -> List.rev acc
+    | (entry : Log.Ring.entry) :: rest ->
+        let fresh =
+          match Types.parse_iso8601_opt entry.ts with
+          | Some ts -> now -. ts <= tool_host_attention_window_sec
+          | None -> true
+        in
+        if not fresh then
+          dedup seen acc rest
+        else
+          match Failure_envelope.find_in_json entry.details with
+          | None -> dedup seen acc rest
+          | Some envelope ->
+              let fingerprint =
+                String.concat "|"
+                  [
+                    envelope.cause_code;
+                    Option.value ~default:"" envelope.entity_id;
+                    envelope.summary;
+                  ]
+              in
+              if List.mem fingerprint seen then
+                dedup seen acc rest
+              else
+                let item =
+                  {
+                    kind = envelope.cause_code;
+                    severity =
+                      Failure_envelope.severity_to_string envelope.severity;
+                    summary = envelope.summary;
+                    target_type = "room";
+                    target_id = None;
+                    actor = None;
+                    evidence =
+                      `Assoc
+                        [
+                          ("log_seq", `Int entry.seq);
+                          ("log_ts", `String entry.ts);
+                          ( "failure_envelope",
+                            Failure_envelope.to_yojson envelope );
+                        ];
+                  }
+                in
+                dedup (fingerprint :: seen) (item :: acc) rest
+  in
+  Log.Ring.recent ~limit:12 ~module_filter:"ToolHost" ()
+  |> dedup [] []
+
 let build_room_attention_items ?command_plane_summary config =
   let command_plane_summary =
     match command_plane_summary with
@@ -126,7 +178,9 @@ let build_room_attention_items ?command_plane_summary config =
         };
       ]
   in
-  List.sort compare_attention (pending_items @ signal_items @ intent_items)
+  List.sort compare_attention
+    (recent_tool_host_failures ~now:(Time_compat.now ()) ()
+    @ pending_items @ signal_items @ intent_items)
 
 let room_recommendations ?command_plane_summary config =
   let command_plane_summary =

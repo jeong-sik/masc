@@ -83,19 +83,29 @@ let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :
   | _ -> Error "request body must be a JSON object"
 
 let details_json (report : report) =
-  `Assoc
-    (List.filter_map
-       Fun.id
-       [
-         Some ("client_name", `String report.client_name);
-         Some ("tool_name", `String report.tool_name);
-         Some ("transport", `String report.transport);
-         Option.map (fun value -> ("phase", `String value)) report.phase;
-         Option.map (fun value -> ("request_id", `String value)) report.request_id;
-         Option.map (fun value -> ("session_id", `String value)) report.session_id;
-         Option.map (fun value -> ("trace_id", `String value)) report.trace_id;
-         Option.map (fun value -> ("timeout_ms", `Int value)) report.timeout_ms;
-       ])
+  let envelope =
+    Failure_envelope.tool_host_failure ~agent_name:report.agent_name
+      ~client_name:report.client_name ~tool_name:report.tool_name
+      ~transport:report.transport ?phase:report.phase
+      ?request_id:report.request_id ?session_id:report.session_id
+      ?trace_id:report.trace_id ?timeout_ms:report.timeout_ms
+      ~message:report.message ()
+  in
+  Failure_envelope.attach_to_details
+    (`Assoc
+      (List.filter_map
+         Fun.id
+         [
+           Some ("client_name", `String report.client_name);
+           Some ("tool_name", `String report.tool_name);
+           Some ("transport", `String report.transport);
+           Option.map (fun value -> ("phase", `String value)) report.phase;
+           Option.map (fun value -> ("request_id", `String value)) report.request_id;
+           Option.map (fun value -> ("session_id", `String value)) report.session_id;
+           Option.map (fun value -> ("trace_id", `String value)) report.trace_id;
+           Option.map (fun value -> ("timeout_ms", `Int value)) report.timeout_ms;
+         ]))
+    envelope
 
 let ring_message (report : report) =
   let phase =

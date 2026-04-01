@@ -400,6 +400,63 @@ let test_digest_team_session_shape () =
         | `List _ -> true
         | _ -> false))
 
+let test_digest_room_includes_tool_host_failure_attention () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      Dashboard_tool_host_events.record ~fs:() config
+        {
+          Dashboard_tool_host_events.agent_name = "codex";
+          client_name = "codex";
+          tool_name = "masc_keeper_msg";
+          transport = "mcp_http";
+          phase = Some "tools/call";
+          message = "timed out awaiting tools/call after 90s";
+          request_id = Some "opsd-toolhost-1";
+          session_id = Some "sess-toolhost-1";
+          trace_id = Some "trace-toolhost-1";
+          timeout_ms = Some 90000;
+        };
+      let digest =
+        match Operator_control.digest_json ~actor:"dashboard"
+                (operator_ctx env sw config "dashboard")
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
+      let attention_items =
+        Yojson.Safe.Util.(digest |> member "attention_items" |> to_list)
+      in
+      let tool_host_attention =
+        List.find_opt
+          (fun item ->
+            Yojson.Safe.Util.(item |> member "kind" |> to_string)
+            = "tool_host_timeout"
+            && Yojson.Safe.Util.
+                 (item |> member "evidence" |> member "failure_envelope"
+                |> member "evidence_ref" |> member "request_id" |> to_string)
+               = "opsd-toolhost-1")
+          attention_items
+      in
+      let item =
+        match tool_host_attention with
+        | Some item -> item
+        | None -> Alcotest.fail "expected tool host attention item"
+      in
+      Alcotest.(check string) "tool host severity" "bad"
+        Yojson.Safe.Util.(item |> member "severity" |> to_string);
+      Alcotest.(check string) "tool host operator action" "masc_operator_digest"
+        Yojson.Safe.Util.
+          (item |> member "evidence" |> member "failure_envelope"
+         |> member "operator_action" |> to_string))
+
 let test_digest_team_session_can_skip_workers () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

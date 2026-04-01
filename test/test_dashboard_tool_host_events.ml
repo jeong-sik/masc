@@ -105,6 +105,21 @@ let test_record_writes_audit_ring_and_telemetry () =
       check string "ring module" "ToolHost" latest.module_name;
       check bool "ring details object" true
         (match latest.details with `Assoc _ -> true | _ -> false);
+      let failure_envelope =
+        Yojson.Safe.Util.member "failure_envelope" latest.details
+      in
+      check string "failure cause code" "tool_host_timeout"
+        Yojson.Safe.Util.(failure_envelope |> member "cause_code" |> to_string);
+      check string "failure recoverability" "operator_action_required"
+        Yojson.Safe.Util.
+          (failure_envelope |> member "recoverability" |> to_string);
+      check string "failure operator action" "masc_operator_digest"
+        Yojson.Safe.Util.
+          (failure_envelope |> member "operator_action" |> to_string);
+      check string "failure evidence request_id" "99"
+        Yojson.Safe.Util.
+          (failure_envelope |> member "evidence_ref" |> member "request_id"
+         |> to_string);
       let telemetry_events = Telemetry_eio.read_all_events config in
       let has_client_error =
         List.exists

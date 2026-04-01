@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LogEntry } from '../api/dashboard'
-import { mergeLogEntries } from './logs'
+import { failureEnvelope, mergeLogEntries } from './logs'
 
 function entry(seq: number, overrides: Partial<LogEntry> = {}): LogEntry {
   return {
@@ -35,5 +35,60 @@ describe('mergeLogEntries', () => {
     const incoming = [entry(5), entry(1)]
 
     expect(mergeLogEntries(current, incoming, 3).map(item => item.seq)).toEqual([5, 4, 3])
+  })
+})
+
+describe('failureEnvelope', () => {
+  it('parses a valid envelope from log details', () => {
+    const parsed = failureEnvelope(
+      entry(7, {
+        details: {
+          failure_envelope: {
+            surface: 'tool_host',
+            entity_kind: 'tool_call',
+            entity_id: 'req-7',
+            cause_code: 'tool_host_timeout',
+            severity: 'bad',
+            summary: 'codex masc_keeper_msg failed during tools/call on mcp_http',
+            recoverability: 'operator_action_required',
+            operator_action: 'masc_operator_digest',
+            evidence_ref: {
+              request_id: 'req-7',
+              tool_name: 'masc_keeper_msg',
+            },
+          },
+        },
+      }),
+    )
+
+    expect(parsed).toEqual({
+      surface: 'tool_host',
+      entity_kind: 'tool_call',
+      entity_id: 'req-7',
+      cause_code: 'tool_host_timeout',
+      severity: 'bad',
+      summary: 'codex masc_keeper_msg failed during tools/call on mcp_http',
+      recoverability: 'operator_action_required',
+      operator_action: 'masc_operator_digest',
+      evidence_ref: {
+        request_id: 'req-7',
+        tool_name: 'masc_keeper_msg',
+      },
+    })
+  })
+
+  it('returns null for malformed envelopes', () => {
+    expect(
+      failureEnvelope(
+        entry(8, {
+          details: {
+            failure_envelope: {
+              surface: 'tool_host',
+              cause_code: 'tool_host_timeout',
+            },
+          },
+        }),
+      ),
+    ).toBeNull()
   })
 })

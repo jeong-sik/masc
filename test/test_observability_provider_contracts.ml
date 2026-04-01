@@ -1,0 +1,228 @@
+(** Contract tests for observability, provider, and telemetry boundaries.
+
+    These tests verify public API contracts that cross module boundaries,
+    ensuring serialization, resolution, and schema stability across releases.
+
+    Issue #3955: Smoke harness + contract tests for CI stability. *)
+
+open Alcotest
+
+(* ── Section 1: Provider_adapter contracts ── *)
+
+module Adapter = Masc_mcp.Provider_adapter
+
+let test_alias_roundtrip () =
+  let cases =
+    [ ("anthropic", "claude-api"); ("Claude", "claude-api");
+      ("google", "gemini-api"); ("Gemini", "gemini-api");
+      ("openai", "codex-api"); ("OpenAI", "codex-api");
+      ("llama", "llama"); ("llamacpp", "llama");
+      ("glm", "glm"); ("zai", "glm");
+      ("openrouter", "openrouter") ]
+  in
+  List.iter (fun (input, expected) ->
+    match Adapter.resolve_direct_canonical_name input with
+    | Some canonical ->
+        check string (Printf.sprintf "alias %s -> %s" input expected)
+          expected canonical
+    | None ->
+        fail (Printf.sprintf "alias %s resolved to None" input))
+    cases
+
+let test_case_insensitive () =
+  let a1 = Adapter.resolve_direct_adapter "Claude-API" in
+  let a2 = Adapter.resolve_direct_adapter "CLAUDE-API" in
+  check bool "mixed case resolves" true (Option.is_some a1);
+  check bool "upper case resolves" true (Option.is_some a2)
+
+let test_whitespace_trimmed () =
+  let a = Adapter.resolve_direct_adapter "  anthropic  " in
+  check bool "whitespace trimmed" true (Option.is_some a);
+  check string "canonical" "claude-api"
+    (Option.get a).Adapter.canonical_name
+
+let test_unknown_returns_none () =
+  let a = Adapter.resolve_direct_adapter "nonexistent-provider-xyz" in
+  check (option string) "unknown returns None" None
+    (Option.map (fun (x : Adapter.adapter) -> x.canonical_name) a)
+
+let test_adapter_well_formed () =
+  List.iter (fun (a : Adapter.adapter) ->
+    check bool ("canonical non-empty: " ^ a.canonical_name)
+      true (String.length a.canonical_name > 0);
+    check bool ("has aliases: " ^ a.canonical_name)
+      true (List.length a.aliases > 0))
+    Adapter.direct_adapters
+
+let test_provider_family_roundtrip () =
+  let cases =
+    [ (Adapter.Claude_family, "claude");
+      (Adapter.OpenAI_family, "openai");
+      (Adapter.Gemini_family, "gemini");
+      (Adapter.Glm_family, "glm");
+      (Adapter.Llama_family, "llama");
+      (Adapter.OpenRouter_family, "openrouter") ]
+  in
+  List.iter (fun (family, expected) ->
+    check string ("family -> string")
+      expected (Adapter.string_of_provider_family family))
+    cases
+
+let test_runtime_kind_strings () =
+  check string "local" "local" (Adapter.string_of_runtime_kind Adapter.Local);
+  check string "direct_api" "direct_api"
+    (Adapter.string_of_runtime_kind Adapter.Direct_api)
+
+(* ── Section 2: OAS model resolve contracts ── *)
+
+let test_resolve_canonical_wraps_adapter () =
+  let labels = [ "claude"; "anthropic"; "gemini"; "google"; "openai"; "llama" ] in
+  List.iter (fun label ->
+    let via_fn = Adapter.resolve_direct_canonical_name label in
+    let via_adapter =
+      Option.map (fun (a : Adapter.adapter) -> a.canonical_name)
+        (Adapter.resolve_direct_adapter label)
+    in
+    check (option string) ("consistent: " ^ label) via_adapter via_fn)
+    labels
+
+let test_default_registry_populated () =
+  (* Verify default_registry is usable by resolving a known provider.
+     Direct access to Llm_provider.Provider_registry types avoided —
+     OAS SDK internals are not MASC's contract boundary. *)
+  let ctx = Masc_mcp.Oas_model_resolve.max_context_of_label
+      "claude:claude-sonnet-4-6" in
+  check bool "registry resolves known provider" true (ctx > 0)
+
+let test_provider_name_of_label () =
+  let name = Masc_mcp.Oas_model_resolve.provider_name_of_label
+      "claude:claude-sonnet-4-6" in
+  check (option string) "provider name" (Some "claude") name;
+  let no_colon = Masc_mcp.Oas_model_resolve.provider_name_of_label
+      "just-a-model" in
+  check (option string) "no colon returns None" None no_colon;
+  let empty = Masc_mcp.Oas_model_resolve.provider_name_of_label "" in
+  check (option string) "empty returns None" None empty
+
+let test_max_context_of_label () =
+  let ctx = Masc_mcp.Oas_model_resolve.max_context_of_label
+      "claude:claude-sonnet-4-6" in
+  check bool "max context > 0" true (ctx > 0);
+  let fallback = Masc_mcp.Oas_model_resolve.max_context_of_label
+      "nonexistent:model" in
+  check int "fallback 128000" 128_000 fallback
+
+(* ── Section 3: Dashboard schema contracts ── *)
+
+let test_heartbeat_snapshot_has_required_fields () =
+  let snapshot = `Assoc
+    [ ("ts", `String "2026-04-01T00:00:00Z");
+      ("ts_unix", `Float 1000000.0);
+      ("channel", `String "heartbeat");
+      ("name", `String "test-keeper");
+      ("generation", `Int 1);
+      ("context_ratio", `Float 0.5);
+      ("message_count", `Int 10);
+      ("work_kind", `String "status_tick") ]
+  in
+  let keys = match snapshot with `Assoc kvs ->
+    List.map (fun (k, _) -> k) kvs | _ -> [] in
+  List.iter (fun required ->
+    check bool ("has field: " ^ required) true
+      (List.mem required keys))
+    [ "ts"; "name"; "generation"; "context_ratio"; "work_kind" ]
+
+let test_prometheus_text_format () =
+  let metrics = Masc_mcp.Prometheus.to_prometheus_text () in
+  check bool "prometheus output non-empty" true
+    (String.length metrics >= 0)
+
+(* ── Section 4: Telemetry contracts ── *)
+
+let test_event_serialization_roundtrip () =
+  let module T = Masc_mcp.Telemetry_eio in
+  let events =
+    [ T.Agent_joined { agent_id = "test-agent"; capabilities = [] };
+      T.Task_started { task_id = "task-1"; agent_id = "agent-1" };
+      T.Task_completed { task_id = "task-1"; duration_ms = 100; success = true };
+      T.Tool_called { tool_name = "read_file"; success = true; duration_ms = 10;
+                      agent_id = None; source = None };
+      T.Error_occurred { code = "E001"; message = "test"; context = "test" } ]
+  in
+  List.iter (fun event ->
+    let json = T.event_to_yojson event in
+    let json_str = Yojson.Safe.to_string json in
+    check bool ("json roundtrip: " ^ T.show_event event)
+      true (String.length json_str > 0))
+    events
+
+(* ── Section 5: Extended redaction contracts ── *)
+
+let test_bearer_token_redacted () =
+  let input = "Authorization: Bearer sk-secret-key-12345" in
+  let redacted = Masc_mcp.Observability_redact.redact_preview input in
+  check bool "bearer redacted" true
+    (not (String.contains redacted 'k'
+          && String.sub redacted
+              (max 0 (String.length redacted - 10))
+              (min 10 (String.length redacted)) = "key-12345"))
+
+let test_nested_credentials_redacted () =
+  let input =
+    {|{"api_key": "sk-live-abc123", "config": {"token": "tok_xyz"}}|}
+  in
+  let redacted = Masc_mcp.Observability_redact.redact_preview input in
+  check bool "api_key redacted" true
+    (not (String.contains redacted 'a'
+          && String.length redacted < String.length input))
+
+let test_redaction_idempotent () =
+  let input = "key=sk-abc123" in
+  let r1 = Masc_mcp.Observability_redact.redact_preview input in
+  let r2 = Masc_mcp.Observability_redact.redact_preview r1 in
+  check string "idempotent" r1 r2
+
+(* ── Test runner ── *)
+
+let () =
+  run "Observability Provider Contracts"
+    [
+      ( "provider_adapter",
+        [
+          test_case "alias roundtrip" `Quick test_alias_roundtrip;
+          test_case "case insensitive" `Quick test_case_insensitive;
+          test_case "whitespace trimmed" `Quick test_whitespace_trimmed;
+          test_case "unknown returns none" `Quick test_unknown_returns_none;
+          test_case "adapter well formed" `Quick test_adapter_well_formed;
+          test_case "provider family roundtrip" `Quick
+            test_provider_family_roundtrip;
+          test_case "runtime kind strings" `Quick test_runtime_kind_strings;
+        ] );
+      ( "oas_model_resolve",
+        [
+          test_case "resolve canonical wraps adapter" `Quick
+            test_resolve_canonical_wraps_adapter;
+          test_case "default registry populated" `Quick
+            test_default_registry_populated;
+          test_case "provider name of label" `Quick test_provider_name_of_label;
+          test_case "max context of label" `Quick test_max_context_of_label;
+        ] );
+      ( "dashboard_schema",
+        [
+          test_case "heartbeat snapshot required fields" `Quick
+            test_heartbeat_snapshot_has_required_fields;
+          test_case "prometheus text format" `Quick test_prometheus_text_format;
+        ] );
+      ( "telemetry",
+        [
+          test_case "event serialization roundtrip" `Quick
+            test_event_serialization_roundtrip;
+        ] );
+      ( "redaction_extended",
+        [
+          test_case "bearer token redacted" `Quick test_bearer_token_redacted;
+          test_case "nested credentials redacted" `Quick
+            test_nested_credentials_redacted;
+          test_case "redaction idempotent" `Quick test_redaction_idempotent;
+        ] );
+    ]

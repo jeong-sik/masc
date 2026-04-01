@@ -98,6 +98,15 @@ let test_apply_replace_with_normalization () =
   check sl "normalized" ["x"; "y"]
     (Tool_gate.apply (Replace_with ["x"; " x "; "y"]) base)
 
+(* Copilot review: current with duplicates must be normalized *)
+let test_apply_keep_all_normalizes_current () =
+  check sl "deduped" ["a"; "b"]
+    (Tool_gate.apply Keep_all ["a"; "b"; "a"])
+
+let test_apply_remove_normalizes_current () =
+  check sl "deduped" ["a"]
+    (Tool_gate.apply (Remove ["b"]) ["a"; "b"; "a"])
+
 (* ================================================================ *)
 (* inverse                                                           *)
 (* ================================================================ *)
@@ -357,6 +366,8 @@ let () =
           test_case "Intersect on empty" `Quick test_apply_intersect_on_empty;
           test_case "Add whitespace" `Quick test_apply_add_whitespace;
           test_case "Replace_with normalization" `Quick test_apply_replace_with_normalization;
+          test_case "Keep_all normalizes current" `Quick test_apply_keep_all_normalizes_current;
+          test_case "Remove normalizes current" `Quick test_apply_remove_normalizes_current;
         ] );
       ( "inverse",
         [

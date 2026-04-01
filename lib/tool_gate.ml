@@ -47,6 +47,7 @@ let normalize names =
 (* ================================================================ *)
 
 let rec apply op current =
+  let current = normalize current in
   match op with
   | Keep_all -> current
   | Clear_all -> []
@@ -56,7 +57,7 @@ let rec apply op current =
         normalize names
         |> List.filter (fun n -> not (Hashtbl.mem set n))
       in
-      dedupe_keep_order (current @ new_names)
+      current @ new_names
   | Remove names ->
       let rm = set_of_list (normalize names) in
       List.filter (fun n -> not (Hashtbl.mem rm n)) current
@@ -101,15 +102,17 @@ let rec inverse op =
 (* ================================================================ *)
 
 let compose ops =
-  let rec flatten = function
-    | [] -> []
-    | Seq inner :: rest -> flatten inner @ flatten rest
-    | Keep_all :: rest -> flatten rest
-    | Add [] :: rest -> flatten rest
-    | Remove [] :: rest -> flatten rest
-    | op :: rest -> op :: flatten rest
+  let rec flatten acc = function
+    | [] -> acc
+    | Seq inner :: rest ->
+        let acc = flatten acc inner in
+        flatten acc rest
+    | Keep_all :: rest -> flatten acc rest
+    | Add [] :: rest -> flatten acc rest
+    | Remove [] :: rest -> flatten acc rest
+    | op :: rest -> flatten (op :: acc) rest
   in
-  match flatten ops with
+  match List.rev (flatten [] ops) with
   | [] -> Keep_all
   | [ x ] -> x
   | many -> Seq many

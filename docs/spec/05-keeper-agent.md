@@ -15,7 +15,7 @@
 
 ## 1. Purpose
 
-Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, 장기 실행(perpetual) 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession), 검증(verification)을 담당한다.
+Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, always-on keeper loop, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession), 검증(verification)을 담당한다.
 
 Keeper 하나는 다음을 소유한다:
 - **identity**: `keeper_meta` 레코드 (이름, 목표, soul profile, will/needs/desires)
@@ -422,7 +422,7 @@ Destructive check 대상 도구: `keeper_bash`, `keeper_fs_edit`, `keeper_edit`,
 
 ### 9.3 Keeper Runtime Spec
 
-keeper 선언과 런타임 상태는 `.masc/perpetual-keepers/{name}.json`에 영속화된다. keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, persona defaults를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
+keeper 선언과 런타임 상태는 `.masc/keepers/{name}.json`에 영속화된다. keeper는 always-on runtime으로 취급되며, `keeper_up`은 inline args, TOML, persona defaults를 합쳐 초기 `keeper_meta`를 생성한다. legacy keeper-meta 경로는 부팅 시 `.masc/keepers/`로 마이그레이션된다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
 
 ---
 

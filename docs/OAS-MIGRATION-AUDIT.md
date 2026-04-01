@@ -48,7 +48,7 @@ Deep integration, no OAS equivalent, or requires redesign.
 
 | File | Line | Reason |
 |------|------|--------|
-| perpetual_loop.ml | 494 | Deep cascade + handoff logic |
+| legacy autonomy loop | 494 | Deep cascade + handoff logic |
 | autoresearch.ml | 807 | Code generation + validation pipeline |
 | keeper_turn.ml | 1765 | Conditional cascade with keeper state |
 | keeper_execution.ml | 717,1067,2273,2441 | Multi-phase cascade, tightly coupled |
@@ -71,7 +71,7 @@ Deep integration, no OAS equivalent, or requires redesign.
 2. **Phase 2**: Dashboard judges — 3 sites
 3. **Phase 3**: context_router — 2 sites
 4. **Phase 4**: Keeper (heaviest, last) — 6 sites
-5. **Retain**: perpetual_loop, autoresearch, verifier, trpg — 8 sites
+5. **Retain**: legacy autonomy loop, autoresearch, verifier, trpg — 8 sites
 
 Bridge module: `Oas_worker.ml` — adapts MASC cascade_name → OAS Provider.cascade,
 wraps accept predicate as post-parse validation.

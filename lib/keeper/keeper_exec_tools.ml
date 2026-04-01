@@ -1070,7 +1070,14 @@ let execute_keeper_tool_call
       | Some err ->
           Yojson.Safe.to_string (`Assoc [ ("error", `String err) ])
       | None ->
-      let result = Tool_dispatch.dispatch ~name ~args in
+      (match Tool_dispatch.mint_token ~name with
+       | Error reason ->
+           Yojson.Safe.to_string
+             (`Assoc [ ("error", `String "unregistered_masc_tool");
+                       ("tool", `String name);
+                       ("reason", `String reason) ])
+       | Ok token ->
+      let result = Tool_dispatch.dispatch ~token ~args in
       (match result with
         | Some (true, msg) -> msg
         | Some (false, msg) ->
@@ -1078,7 +1085,7 @@ let execute_keeper_tool_call
         | None ->
             Yojson.Safe.to_string
               (`Assoc [ ("error", `String "unregistered_masc_tool");
-                        ("tool", `String name) ])))
+                        ("tool", `String name) ]))))
   | other ->
       Yojson.Safe.to_string
         (`Assoc [ ("error", `String "unknown_tool"); ("tool", `String other) ])

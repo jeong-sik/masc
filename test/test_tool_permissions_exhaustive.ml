@@ -64,7 +64,8 @@ let test_dispatch_blocks_all_admin_no_identity () =
     Tool_dispatch.register ~tool_name
       ~handler:(fun ~name:_ ~args:_ -> Some (true, "should not reach"));
     Tool_permissions.install ~get_agent_name:(fun () -> None);
-    match Tool_dispatch.dispatch_structured ~name:tool_name ~args:`Null with
+    let token = match Tool_dispatch.mint_token ~name:tool_name with Ok t -> t | Error e -> Alcotest.fail e in
+    match Tool_dispatch.dispatch_structured ~token ~args:`Null with
     | Some r ->
       Alcotest.(check bool)
         (tool_name ^ " blocked at dispatch")
@@ -104,7 +105,8 @@ let test_non_admin_dispatch_passthrough () =
     Tool_dispatch.register ~tool_name
       ~handler:(fun ~name:_ ~args:_ -> Some (true, "reached handler"));
     Tool_permissions.install ~get_agent_name:(fun () -> Some "regular_agent");
-    match Tool_dispatch.dispatch_structured ~name:tool_name ~args:`Null with
+    let token = match Tool_dispatch.mint_token ~name:tool_name with Ok t -> t | Error e -> Alcotest.fail e in
+    match Tool_dispatch.dispatch_structured ~token ~args:`Null with
     | Some r ->
       Alcotest.(check bool)
         (tool_name ^ " handler reached")

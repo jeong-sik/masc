@@ -19,9 +19,14 @@ val register_module : schemas:Types.tool_schema list -> handler:handler -> unit
 
 (** {1 Dispatch} *)
 
-val dispatch : name:string -> args:Yojson.Safe.t -> (bool * string) option
-(** O(1) dispatch. Returns [Some (success, message)] when a handler is
-    found, [None] when the tool name is unknown to the registry. *)
+val dispatch : token:Tool_token.t -> args:Yojson.Safe.t -> (bool * string) option
+(** O(1) dispatch using a validated token. Returns [Some (success, message)]
+    when a handler is found, [None] when the tool name is unknown.
+    The token guarantees the name was validated at the I/O boundary. *)
+
+val mint_token : name:string -> (Tool_token.t, string) result
+(** Mint a [Tool_token.t] validated against both tag and handler registries.
+    Returns [Error] when the tool name is unknown to the dispatch system. *)
 
 (** {2 Dispatch Hooks}
 
@@ -49,9 +54,10 @@ val run_pre_hooks : name:string -> args:Yojson.Safe.t -> Tool_result.t option
 (** Execute registered pre-hooks in order.
     Returns the first short-circuit result, if any. *)
 
-val dispatch_structured : name:string -> args:Yojson.Safe.t -> Tool_result.t option
+val dispatch_structured : token:Tool_token.t -> args:Yojson.Safe.t -> Tool_result.t option
 (** Structured dispatch with hook support.
-    Execution order: pre-hooks -> handler -> post-hooks. *)
+    Execution order: pre-hooks -> handler -> post-hooks.
+    Requires a validated [Tool_token.t]. *)
 
 (** {1 Feature Flag and Introspection} *)
 

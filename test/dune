@@ -56,6 +56,7 @@
         test_tool_tier
         test_tool_access_policy
         test_tool_access_role
+        test_tool_token
         test_tool_budget
         test_tool_exposure
         test_code_swarm
@@ -111,6 +112,7 @@
           test_tool_tier
           test_tool_access_policy
         test_tool_access_role
+          test_tool_token
           test_tool_budget
           test_tool_exposure
           test_code_swarm

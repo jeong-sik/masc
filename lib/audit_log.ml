@@ -49,6 +49,10 @@ type audit_entry = {
   trace_id: string option;
 }
 
+let preview ?(max_len = 200) (value : string) =
+  let len = String.length value in
+  if len <= max_len then value else String.sub value 0 max_len ^ "..."
+
 (** {1 Serialization} *)
 
 let action_to_string = function
@@ -123,8 +127,9 @@ let entry_to_json (e : audit_entry) : Yojson.Safe.t =
   in
   `Assoc with_trace
 
-(** Parse a JSON object back into an audit_entry *)
-let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
+(** Parse a JSON object back into an audit_entry.
+    Returns Error with reason on parse failure (never silently drops). *)
+let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
   try
     let module U = Yojson.Safe.Util in
     let timestamp = json |> U.member "timestamp" |> U.to_float in
@@ -147,10 +152,28 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
     let cost_estimate = Safe_ops.json_float_opt "cost_estimate" json in
     let token_count = Safe_ops.json_int_opt "token_count" json in
     let trace_id = Safe_ops.json_string_opt "trace_id" json in
-    Some { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count; trace_id }
+    Ok { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count; trace_id }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Misc.warn "audit_log: entry parse failed: %s" (Printexc.to_string exn);
-    None
+    (* Redact details field to prevent sensitive content leaking into logs *)
+    let redacted = match json with
+      | `Assoc fields ->
+        let safe_fields = List.filter_map (fun (k, v) ->
+          if k = "details" then Some (k, `String "<redacted>")
+          else Some (k, v)
+        ) fields in
+        `Assoc safe_fields
+      | _ -> `String "<non-object>"
+    in
+    let snippet = preview (Yojson.Safe.to_string redacted) in
+    Error (Printf.sprintf "%s | json: %s" (Printexc.to_string exn) snippet)
+
+(** Lenient wrapper: logs warning and returns option for backward compat *)
+let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
+  match entry_of_json_r json with
+  | Ok entry -> Some entry
+  | Error reason ->
+      Log.Misc.warn "audit_log: entry parse failed: %s" reason;
+      None
 
 (** {1 File Operations} *)
 
@@ -174,24 +197,62 @@ let get_audit_store (config : config) : Dated_jsonl.t =
     Hashtbl.replace audit_store_cache base store;
     store
 
+(** Parse JSON list into audit entries. Logs first 5 failures individually,
+    then a summary. Returns only successfully parsed entries. *)
+let max_logged_errors = 5
+
+let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
+  let ok = ref [] in
+  let err_count = ref 0 in
+  List.iter (fun json ->
+    match entry_of_json_r json with
+    | Ok entry -> ok := entry :: !ok
+    | Error reason ->
+        incr err_count;
+        if !err_count <= max_logged_errors then
+          Log.Misc.error "audit_log: corrupt entry (#%d): %s" !err_count reason
+  ) jsons;
+  if !err_count > 0 then
+    Log.Misc.error "audit_log: %d/%d entries failed to parse (possible corruption)%s"
+      !err_count (List.length jsons)
+      (if !err_count > max_logged_errors
+       then Printf.sprintf " (%d more suppressed)" (!err_count - max_logged_errors)
+       else "");
+  List.rev !ok
+
 (** Read recent audit entries.
-    Tries date-split store first; falls back to legacy single file. *)
+    Tries date-split store first; falls back to legacy single file.
+    Legacy JSON parse failures are logged at WARN (rate-limited, first N only).
+    Structural parse failures go through [parse_entries] ERROR path. *)
 let read_entries ?(n = 10_000) (config : config) : audit_entry list =
   let store = get_audit_store config in
   let entries = Dated_jsonl.read_recent store n in
   if entries <> [] then
-    List.filter_map entry_of_json entries
+    parse_entries entries
   else
-    (* Legacy fallback: single .masc/audit.jsonl *)
     let path = legacy_audit_path config in
     if not (Sys.file_exists path) then []
     else
       let content = Fs_compat.load_file path in
-      String.split_on_char '\n' content
-      |> List.filter (fun line -> String.trim line <> "")
-      |> List.filter_map (fun line ->
-          try entry_of_json (Yojson.Safe.from_string line)
-          with Yojson.Json_error _ -> None)
+      let invalid_count = ref 0 in
+      let jsons = String.split_on_char '\n' content
+        |> List.filter (fun line -> String.trim line <> "")
+        |> List.filter_map (fun line ->
+            match Yojson.Safe.from_string line with
+            | json -> Some json
+            | exception Yojson.Json_error msg ->
+                incr invalid_count;
+                if !invalid_count <= max_logged_errors then
+                  Log.Misc.warn "audit_log: invalid JSON line (#%d): %s | line: %s"
+                    !invalid_count msg (preview ~max_len:100 line);
+                None) in
+      if !invalid_count > 0 then
+        Log.Misc.warn "audit_log: %d invalid JSON line(s) in legacy audit log%s"
+          !invalid_count
+          (if !invalid_count > max_logged_errors
+           then Printf.sprintf " (%d more suppressed)" (!invalid_count - max_logged_errors)
+           else "");
+      parse_entries jsons
 
 (** Append a single entry to the audit log (thread-safe via Dated_jsonl). *)
 let append_entry (config : config) (entry : audit_entry) =
@@ -254,9 +315,7 @@ let log_cancel_task config ~agent_id ~room_id ~task_id ~reason ?cost_estimate ?t
 
 let log_broadcast config ~agent_id ~room_id ~message_preview ?cost_estimate ?token_count () =
   (* Truncate message for privacy/size *)
-  let preview = if String.length message_preview > 100
-    then String.sub message_preview 0 100 ^ "..."
-    else message_preview in
+  let preview = preview ~max_len:100 message_preview in
   log_action config ~agent_id ~action:Broadcast ~room_id
     ~details:(`Assoc [("preview", `String preview)])
     ?cost_estimate ?token_count ~outcome:Success ()

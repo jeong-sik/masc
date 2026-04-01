@@ -243,6 +243,167 @@ let test_of_allowlist_empty () =
     (Tool_access_policy.resolve policy = [])
 
 (* ================================================================ *)
+(* Inter selector                                                    *)
+(* ================================================================ *)
+
+let test_inter_matches_common_only () =
+  let sel =
+    Tool_access_policy.Inter
+      [ Names [ "a"; "b"; "c" ]; Names [ "b"; "c"; "d" ] ]
+  in
+  check bool "a only in first" false
+    (Tool_access_policy.selector_matches_name sel "a");
+  check bool "b in both" true
+    (Tool_access_policy.selector_matches_name sel "b");
+  check bool "c in both" true
+    (Tool_access_policy.selector_matches_name sel "c");
+  check bool "d only in second" false
+    (Tool_access_policy.selector_matches_name sel "d")
+
+let test_inter_empty_list_is_all () =
+  let sel = Tool_access_policy.inter [] in
+  check bool "inter [] matches anything" true
+    (Tool_access_policy.selector_matches_name sel "anything")
+
+let test_inter_single_unwraps () =
+  let inner = Tool_access_policy.Names [ "a"; "b" ] in
+  let sel = Tool_access_policy.inter [ inner ] in
+  check bool "matches a" true
+    (Tool_access_policy.selector_matches_name sel "a");
+  check bool "rejects c" false
+    (Tool_access_policy.selector_matches_name sel "c")
+
+let test_inter_with_empty_yields_nothing () =
+  let sel =
+    Tool_access_policy.Inter [ Names [ "a"; "b" ]; Empty ]
+  in
+  check bool "Empty kills intersection" false
+    (Tool_access_policy.selector_matches_name sel "a")
+
+let test_inter_is_commutative () =
+  let s1 = Tool_access_policy.Names [ "a"; "b"; "c" ] in
+  let s2 = Tool_access_policy.Names [ "b"; "c"; "d" ] in
+  let forward = Tool_access_policy.Inter [ s1; s2 ] in
+  let reverse = Tool_access_policy.Inter [ s2; s1 ] in
+  List.iter
+    (fun name ->
+      check bool
+        (Printf.sprintf "%s: forward = reverse" name)
+        (Tool_access_policy.selector_matches_name forward name)
+        (Tool_access_policy.selector_matches_name reverse name))
+    [ "a"; "b"; "c"; "d"; "e" ]
+
+let test_resolve_inter_computes_intersection () =
+  let sel =
+    Tool_access_policy.Inter
+      [ Names [ "a"; "b"; "c" ]; Names [ "b"; "c"; "d" ] ]
+  in
+  let resolved = Tool_access_policy.resolve_selector sel in
+  check (list string) "intersection of two sets" [ "b"; "c" ] resolved
+
+let test_resolve_inter_three_way () =
+  let sel =
+    Tool_access_policy.Inter
+      [
+        Names [ "a"; "b"; "c"; "d" ];
+        Names [ "b"; "c"; "d"; "e" ];
+        Names [ "c"; "d"; "e"; "f" ];
+      ]
+  in
+  let resolved = Tool_access_policy.resolve_selector sel in
+  check (list string) "three-way intersection" [ "c"; "d" ] resolved
+
+(* ================================================================ *)
+(* Diff selector                                                     *)
+(* ================================================================ *)
+
+let test_diff_subtracts_exclude () =
+  let sel =
+    Tool_access_policy.Diff
+      { base = Names [ "a"; "b"; "c" ]; exclude = Names [ "b" ] }
+  in
+  check bool "a kept" true
+    (Tool_access_policy.selector_matches_name sel "a");
+  check bool "b excluded" false
+    (Tool_access_policy.selector_matches_name sel "b");
+  check bool "c kept" true
+    (Tool_access_policy.selector_matches_name sel "c")
+
+let test_diff_empty_exclude_is_identity () =
+  let base = Tool_access_policy.Names [ "a"; "b" ] in
+  let sel = Tool_access_policy.diff ~base ~exclude:Empty in
+  check bool "a kept" true
+    (Tool_access_policy.selector_matches_name sel "a");
+  check bool "b kept" true
+    (Tool_access_policy.selector_matches_name sel "b")
+
+let test_diff_empty_base_is_empty () =
+  let sel =
+    Tool_access_policy.diff ~base:Empty ~exclude:(Names [ "a" ])
+  in
+  check bool "empty base -> nothing" false
+    (Tool_access_policy.selector_matches_name sel "a")
+
+let test_diff_with_surface () =
+  let sel =
+    Tool_access_policy.Diff
+      {
+        base = Surface Tool_catalog.Public_mcp;
+        exclude = Names [ "masc_board_delete" ];
+      }
+  in
+  check bool "status still in public" true
+    (Tool_access_policy.selector_matches_name sel "masc_status");
+  check bool "board_delete excluded" false
+    (Tool_access_policy.selector_matches_name sel "masc_board_delete")
+
+let test_resolve_diff () =
+  let sel =
+    Tool_access_policy.Diff
+      { base = Names [ "a"; "b"; "c"; "d" ]; exclude = Names [ "b"; "d" ] }
+  in
+  let resolved = Tool_access_policy.resolve_selector sel in
+  check (list string) "base minus exclude" [ "a"; "c" ] resolved
+
+let test_resolve_diff_disjoint_is_base () =
+  let sel =
+    Tool_access_policy.Diff
+      { base = Names [ "a"; "b" ]; exclude = Names [ "x"; "y" ] }
+  in
+  let resolved = Tool_access_policy.resolve_selector sel in
+  check (list string) "disjoint exclude = base unchanged" [ "a"; "b" ] resolved
+
+(* ================================================================ *)
+(* Inter + Diff composition                                          *)
+(* ================================================================ *)
+
+let test_inter_then_diff () =
+  let sel =
+    Tool_access_policy.Diff
+      {
+        base = Inter [ Names [ "a"; "b"; "c" ]; Names [ "b"; "c"; "d" ] ];
+        exclude = Names [ "c" ];
+      }
+  in
+  let resolved = Tool_access_policy.resolve_selector sel in
+  check (list string) "inter then diff" [ "b" ] resolved
+
+let test_diff_in_policy_deny () =
+  let policy =
+    {
+      Tool_access_policy.allow =
+        Diff
+          {
+            base = Names [ "a"; "b"; "c"; "d" ];
+            exclude = Names [ "c"; "d" ];
+          };
+      deny = Names [ "b" ];
+    }
+  in
+  let resolved = Tool_access_policy.resolve policy in
+  check (list string) "diff allow + deny" [ "a" ] resolved
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -320,5 +481,44 @@ let () =
         [
           test_case "no deny" `Quick test_of_allowlist_no_deny;
           test_case "empty allowlist" `Quick test_of_allowlist_empty;
+        ] );
+      ( "inter",
+        [
+          test_case "matches common only" `Quick
+            test_inter_matches_common_only;
+          test_case "empty list is All" `Quick
+            test_inter_empty_list_is_all;
+          test_case "single element unwraps" `Quick
+            test_inter_single_unwraps;
+          test_case "with Empty yields nothing" `Quick
+            test_inter_with_empty_yields_nothing;
+          test_case "is commutative" `Quick
+            test_inter_is_commutative;
+          test_case "resolve computes intersection" `Quick
+            test_resolve_inter_computes_intersection;
+          test_case "resolve three-way" `Quick
+            test_resolve_inter_three_way;
+        ] );
+      ( "diff",
+        [
+          test_case "subtracts exclude" `Quick
+            test_diff_subtracts_exclude;
+          test_case "empty exclude is identity" `Quick
+            test_diff_empty_exclude_is_identity;
+          test_case "empty base is empty" `Quick
+            test_diff_empty_base_is_empty;
+          test_case "with surface" `Quick
+            test_diff_with_surface;
+          test_case "resolve diff" `Quick
+            test_resolve_diff;
+          test_case "resolve disjoint is base" `Quick
+            test_resolve_diff_disjoint_is_base;
+        ] );
+      ( "inter_diff_composition",
+        [
+          test_case "inter then diff" `Quick
+            test_inter_then_diff;
+          test_case "diff in policy deny" `Quick
+            test_diff_in_policy_deny;
         ] );
     ]

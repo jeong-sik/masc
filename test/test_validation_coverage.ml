@@ -82,6 +82,26 @@ let test_agent_id_reject_space () =
   | Ok _ -> fail "should reject space"
   | Error e -> check bool "error exists" true (String.length e > 0)
 
+let test_agent_id_reject_bare_colon () =
+  match Validation.Agent_id.validate ":" with
+  | Ok _ -> fail "should reject bare colon"
+  | Error _ -> ()
+
+let test_agent_id_reject_multi_colon () =
+  match Validation.Agent_id.validate "a:b:c" with
+  | Ok _ -> fail "should reject multiple colons"
+  | Error _ -> ()
+
+let test_agent_id_reject_leading_colon () =
+  match Validation.Agent_id.validate ":foo" with
+  | Ok _ -> fail "should reject leading colon"
+  | Error _ -> ()
+
+let test_agent_id_reject_trailing_colon () =
+  match Validation.Agent_id.validate "foo:" with
+  | Ok _ -> fail "should reject trailing colon"
+  | Error _ -> ()
+
 let test_agent_id_of_string_unsafe () =
   let t = Validation.Agent_id.of_string_unsafe "unsafe-input" in
   check string "unsafe" "unsafe-input" (Validation.Agent_id.to_string t)
@@ -228,6 +248,10 @@ let () =
       test_case "path traversal" `Quick test_agent_id_reject_path_traversal;
       test_case "special chars" `Quick test_agent_id_reject_special_chars;
       test_case "space" `Quick test_agent_id_reject_space;
+      test_case "bare colon" `Quick test_agent_id_reject_bare_colon;
+      test_case "multi colon" `Quick test_agent_id_reject_multi_colon;
+      test_case "leading colon" `Quick test_agent_id_reject_leading_colon;
+      test_case "trailing colon" `Quick test_agent_id_reject_trailing_colon;
     ];
     "agent_id.unsafe", [
       test_case "of_string_unsafe" `Quick test_agent_id_of_string_unsafe;

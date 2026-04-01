@@ -46,8 +46,10 @@ module Agent_id : sig
 end = struct
   type t = string
 
-  (* Allow alphanumeric, dash, underscore, colon (for namespacing e.g. keeper:name) *)
-  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_:-]+$|} |> Re.compile
+  (* Allow alphanumeric, dash, underscore, with optional single colon for namespacing
+     e.g. keeper:keeper-test-98295-0. Bare colons, multiple colons, or leading colons
+     are rejected. *)
+  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+(:[a-zA-Z0-9_-]+)?$|} |> Re.compile
 
   let validate s =
     let reject reason =

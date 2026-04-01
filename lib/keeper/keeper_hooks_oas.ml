@@ -140,8 +140,8 @@ let emit_cost_event
 let make_hooks
     ~config:(_config : Room.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
-    ~session:(_session : Keeper_working_context.session_context)
-    ~ctx_ref:(_ctx_ref : Keeper_working_context.working_context ref)
+    ~session:(_session : Keeper_exec_context.session_context)
+    ~ctx_ref:(_ctx_ref : Keeper_exec_context.working_context ref)
     ~(generation : int)
     ?(max_cost_usd : float option)
     ?(destructive_check : bool = true)

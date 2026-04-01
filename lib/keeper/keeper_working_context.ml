@@ -48,36 +48,6 @@ type session_context = {
 (* Memory Formats                                                    *)
 (* ================================================================ *)
 
-let goal_prefix = "[GOAL]"
-
-let state_block_start = "[STATE]"
-let state_block_end = "[/STATE]"
-
-let find_substring ~needle haystack ~from =
-  let n_len = String.length needle in
-  let h_len = String.length haystack in
-  let rec loop i =
-    if i < 0 || i + n_len > h_len then None
-    else if String.sub haystack i n_len = needle then Some i
-    else loop (i + 1)
-  in
-  loop from
-
-let extract_state_blocks (s : string) : string list =
-  let rec loop from acc =
-    match find_substring ~needle:state_block_start s ~from with
-    | None -> List.rev acc
-    | Some i ->
-      let j_from = i + String.length state_block_start in
-      (match find_substring ~needle:state_block_end s ~from:j_from with
-       | None -> List.rev acc
-       | Some j ->
-         let body = String.sub s j_from (j - j_from) |> String.trim in
-         let next_from = j + String.length state_block_end in
-         loop next_from (body :: acc))
-  in
-  loop 0 []
-
 (* ================================================================ *)
 (* Filesystem Utilities                                              *)
 (* ================================================================ *)
@@ -157,57 +127,6 @@ let sync_oas_context (ctx : working_context) : working_context =
   Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
     "context_ratio" (`Float context_ratio);
   ctx
-
-(* ================================================================ *)
-(* Conversation History Offload                                      *)
-(* ================================================================ *)
-
-let format_message_readable (m : Agent_sdk.Types.message) : string =
-  let role_str = match m.role with
-    | Agent_sdk.Types.System -> "system"
-    | Agent_sdk.Types.User -> "user"
-    | Agent_sdk.Types.Assistant -> "assistant"
-    | Agent_sdk.Types.Tool -> "tool"
-  in
-  let tool_suffix = match m.role with
-    | Agent_sdk.Types.Tool ->
-      let tool_id = List.find_map (function
-        | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
-        | _ -> None) m.content in
-      (match tool_id with Some id -> sprintf " (%s)" id | None -> "")
-    | _ -> ""
-  in
-  sprintf "%s%s: %s" role_str tool_suffix (text_of_message m)
-
-let offload_messages
-    ~(session_dir : string)
-    ~(compaction_count : int)
-    (messages : Agent_sdk.Types.message list) : string option =
-  try
-    let offload_dir = Filename.concat session_dir "offloaded" in
-    ensure_dir offload_dir;
-    let path = Filename.concat offload_dir
-      (sprintf "%d.md" compaction_count) in
-    let timestamp =
-      let t = Time_compat.now () in
-      let open Unix in
-      let tm = gmtime t in
-      sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-        (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-        tm.tm_hour tm.tm_min tm.tm_sec
-    in
-    let rendered =
-      messages
-      |> List.map format_message_readable
-      |> String.concat "\n\n"
-    in
-    let content = sprintf "## Compacted at %s\n\n%s\n\n" timestamp rendered in
-    Fs_compat.save_file path content;
-    Some path
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Memory.error "offload_messages failed: %s"
-      (Printexc.to_string exn);
-    None
 
 (* ================================================================ *)
 (* Checkpointing                                                     *)

@@ -70,12 +70,16 @@ let summary_report () : Yojson.Safe.t =
   let essential_count = Tool_catalog.tier_tool_count Tool_catalog.Essential in
   let standard_count = Tool_catalog.tier_tool_count Tool_catalog.Standard in
   let full_count = List.length all_names in
+  let visible_count = List.length visible_names in
+  let hidden_count = full_count - visible_count in
   let tier_dist =
     `Assoc [
       ("essential", `Int essential_count);
       ("standard_only", `Int (standard_count - essential_count));
       ("full_only", `Int (full_count - standard_count));
       ("total", `Int full_count);
+      ("visible", `Int visible_count);
+      ("hidden", `Int hidden_count);
     ]
   in
   `Assoc [

@@ -214,7 +214,14 @@ let run_turn
   let agent_name = Printf.sprintf "keeper-%s" meta.name in
   let meta_ref = ref meta in
   let agent_ref : Agent_sdk.Agent.t option ref = ref None in
-  let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
+  (* Phase 2B: zone table for tool boundary management.
+     Created per-turn with the keeper's allowed tools as base.
+     No zones entered by default; zone_enter/exit triggers are Phase 2C. *)
+  let zone =
+    Zone_tbl.create
+      ~base_tools:(Keeper_exec_tools.keeper_allowed_tool_names meta)
+  in
+  let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref ~zone () in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =

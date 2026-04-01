@@ -935,7 +935,7 @@ let execute_keeper_tool_call
         Yojson.Safe.to_string
           (`Assoc [ ("error", `String "task_id required") ])
       else
-        let agent = Printf.sprintf "keeper:%s" meta.name in
+        let agent = Printf.sprintf "keeper-%s" meta.name in
         let _ =
           Room.broadcast config ~from_agent:agent
             ~content:
@@ -962,7 +962,7 @@ let execute_keeper_tool_call
         Yojson.Safe.to_string
           (`Assoc [ ("error", `String "task_id required") ])
       else
-        let agent = Printf.sprintf "keeper:%s" meta.name in
+        let agent = Printf.sprintf "keeper-%s" meta.name in
         (match
            Room.force_done_task_r config ~agent_name:agent ~task_id ~notes ()
          with
@@ -984,7 +984,7 @@ let execute_keeper_tool_call
         Yojson.Safe.to_string
           (`Assoc [ ("error", `String "message required") ])
       else
-        let agent = Printf.sprintf "keeper:%s" meta.name in
+        let agent = Printf.sprintf "keeper-%s" meta.name in
         let _ = Room.broadcast config ~from_agent:agent ~content:message in
         Yojson.Safe.to_string
           (`Assoc [ ("ok", `Bool true); ("broadcast", `String message) ])
@@ -1003,7 +1003,7 @@ let execute_keeper_tool_call
       if task_id = "" then
         Yojson.Safe.to_string (`Assoc [ ("error", `String "task_id required") ])
       else
-        let agent = Printf.sprintf "keeper:%s" meta.name in
+        let agent = Printf.sprintf "keeper-%s" meta.name in
         let notes = if result_text = "" then "" else result_text in
         (match
            Room.force_done_task_r config ~agent_name:agent ~task_id ~notes ()

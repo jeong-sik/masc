@@ -55,7 +55,7 @@ let register_all () =
 
   (* ── Mod_council: non-schema tools ──────────────────────────── *)
   reg Mod_council [
-    "masc_route"; "masc_execute"; "masc_execute_dry_run";
+    "masc_execute"; "masc_execute_dry_run";
   ];
 
   (* ── Mod_a2a: Tool_a2a ───────────────────────────────────────── *)

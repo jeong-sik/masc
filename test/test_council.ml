@@ -3,7 +3,6 @@
     Tests for multi-agent governance system:
     - Debate: create, argue, close
     - Consensus: start, vote, result
-    - Router: query classification, agent selection
     - Balance: dominance check, participation rate
 *)
 
@@ -12,7 +11,6 @@ open Alcotest
 module Council = Council
 module Debate = Council.Debate
 module Consensus = Council.Consensus
-module Router = Council.Router
 module Balance = Council.Balance
 
 (* ============================================================
@@ -231,42 +229,6 @@ let test_consensus_deadlock () =
       Consensus.clear_sessions ()
 
 (* ============================================================
-   Router Tests
-   ============================================================ *)
-
-let test_router_classify_code () =
-  let classes = Router.classify_query "implement a function in OCaml" in
-  let top_class, _ = List.hd classes in
-  check bool "code query" (top_class = Router.Code) true
-
-let test_router_classify_analysis () =
-  let classes = Router.classify_query "analyze the performance metrics and evaluate results" in
-  (* Check if Analysis is in top 3 classes *)
-  let top3 = List.filteri (fun i _ -> i < 3) classes in
-  let has_analysis = List.exists (fun (c, _) -> c = Router.Analysis) top3 in
-  check bool "analysis in top 3" has_analysis true
-
-let test_router_complexity_simple () =
-  let c = Router.calculate_complexity "hello" in
-  check bool "low complexity" (c < 0.3) true
-
-let test_router_complexity_complex () =
-  let c = Router.calculate_complexity 
-    "implement a distributed consensus algorithm with byzantine fault tolerance and analyze its performance characteristics" in
-  (* Just check it's non-zero, exact threshold depends on implementation *)
-  check bool "non-zero complexity" (c > 0.0) true
-
-let test_router_agent_selection () =
-  let decision = Router.route ~max_agents:2 "write a simple function" in
-  check bool "agents selected" (List.length decision.Router.agents <= 2) true;
-  check bool "has reason" (String.length decision.reason > 0) true
-
-let test_router_reason_mentions_heuristic () =
-  let decision = Router.route "implement a function in OCaml" in
-  check bool "heuristic reason prefix"
-    (String.starts_with ~prefix:"Heuristic query class:" decision.reason) true
-
-(* ============================================================
    Balance Tests
    ============================================================ *)
 
@@ -429,64 +391,6 @@ let consensus_tests = [
   test_consensus_persist_start_failure_is_atomic;
   "persistence vote failure is atomic", `Quick,
   test_consensus_persist_vote_failure_is_atomic;
-]
-
-(* --- New capability-aware router tests --- *)
-
-let test_router_short_complex_query () =
-  let r = Router.extract_requirements "OCaml mutex deadlock analysis" in
-  check bool "reasoning > 0.3" (r.reasoning_depth > 0.3) true;
-  check bool "code > 0.3" (r.code_ability > 0.3) true
-
-let test_router_deep_reasoning () =
-  let r = Router.extract_requirements "why is the halting problem undecidable" in
-  check bool "reasoning > 0.3" (r.reasoning_depth > 0.3) true
-
-let test_router_speed_priority () =
-  let r = Router.extract_requirements "quick one-liner to reverse a string" in
-  check bool "speed > 0.3" (r.speed_priority > 0.3) true
-
-let test_router_complex_selects_large_tier () =
-  let decision = Router.route
-    "prove that this distributed algorithm satisfies safety and liveness under partial synchrony" in
-  let has_expensive = List.exists (fun (a : Router.agent_spec) ->
-    a.cost_per_1k >= 0.005
-  ) decision.agents in
-  check bool "complex selects expensive model" has_expensive true
-
-let test_router_simple_prefers_cheap () =
-  let decision = Router.route "what is 2+2" in
-  let top = List.hd decision.agents in
-  check bool "cheap top agent" (top.cost_per_1k < 0.01) true
-
-let test_router_dot_product_correctness () =
-  let r = Router.extract_requirements "debug this OCaml concurrent mutex issue" in
-  let complexity = Router.calculate_complexity "debug this OCaml concurrent mutex issue" in
-  let opus_cap = { Router.reasoning_score = 0.95; code_score = 0.9;
-                   creativity_score = 0.9; factual_score = 0.9; speed_score = 0.3 } in
-  let tiny_cap = { Router.reasoning_score = 0.3; code_score = 0.4;
-                   creativity_score = 0.3; factual_score = 0.5; speed_score = 1.0 } in
-  let opus_agent = { Router.name = "opus"; model = "opus";
-                     capabilities = opus_cap; cost_per_1k = 0.015 } in
-  let tiny_agent = { Router.name = "tiny"; model = "tiny";
-                     capabilities = tiny_cap; cost_per_1k = 0.0 } in
-  let opus_score = Router.score_agent ~requirements:r ~complexity opus_agent in
-  let tiny_score = Router.score_agent ~requirements:r ~complexity tiny_agent in
-  check bool "opus > tiny for complex+code" (opus_score > tiny_score) true
-
-let router_tests = [
-  "classify code", `Quick, test_router_classify_code;
-  "classify analysis", `Quick, test_router_classify_analysis;
-  "complexity simple", `Quick, test_router_complexity_simple;
-  "complexity complex", `Quick, test_router_complexity_complex;
-  "agent selection", `Quick, test_router_agent_selection;
-  "reason mentions heuristic", `Quick, test_router_reason_mentions_heuristic;
-  "short complex query", `Quick, test_router_short_complex_query;
-  "deep reasoning", `Quick, test_router_deep_reasoning;
-  "speed priority", `Quick, test_router_speed_priority;
-  "complex selects large tier", `Quick, test_router_complex_selects_large_tier;
-  "simple prefers cheap", `Quick, test_router_simple_prefers_cheap;
-  "dot product correctness", `Quick, test_router_dot_product_correctness;
 ]
 
 let balance_tests = [
@@ -989,7 +893,6 @@ let () =
   run "Council" [
     "Debate", debate_tests;
     "Consensus", consensus_tests;
-    "Router", router_tests;
     "Balance", balance_tests;
     "Executor", executor_tests;
     "Conversation", conversation_tests;

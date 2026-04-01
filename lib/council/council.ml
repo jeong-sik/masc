@@ -3,7 +3,6 @@
     통합 인터페이스:
     - Debate: 구조화된 토론 (파일 기반)
     - Consensus: 투표/합의 (파일 영속성 + 메모리 캐시)
-    - Router: 휴리스틱 에이전트 라우팅
     - Balance: 공정성 정책
     - Conversation: 영속적 대화 (파일 + Neo4j)
 
@@ -14,7 +13,6 @@
 
 module Debate = Debate
 module Consensus = Consensus
-module Router = Router
 module Balance = Balance
 module Executor = Executor
 module Conversation = Conversation
@@ -104,30 +102,6 @@ module ConsensusApi = struct
   (** Cancel a session *)
   let cancel ~session_id =
     Consensus.cancel_session ~session_id
-end
-
-(** {1 Router API} *)
-
-module RouterApi = struct
-  (** Route a query to appropriate agents *)
-  let route ?(max_agents=3) ?(input_tokens=1000) ?(output_tokens=500) query =
-    Router.route ~max_agents ~input_tokens ~output_tokens query
-
-  (** Extract multi-dimensional requirements from query text *)
-  let extract_requirements query =
-    Router.extract_requirements query
-
-  (** Classify a query into heuristic categories with confidence *)
-  let classify query =
-    Router.classify_query query
-
-  (** Calculate heuristic query complexity score *)
-  let complexity query =
-    Router.calculate_complexity query
-
-  (** Get default agent specs *)
-  let default_agents () =
-    Router.default_agents
 end
 
 (** {1 Balance API} *)

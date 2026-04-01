@@ -318,7 +318,6 @@ masc_operator_action(action_type=X) ->
 | `masc_governance_feed` | 거버넌스 피드 |
 | `masc_runtime_params` | 런타임 파라미터 조회 |
 | `masc_set_param` | 런타임 파라미터 변경 (청원 자동 생성) |
-| `masc_route` | MoE 라우팅 쿼리 |
 | `masc_execute` | 토픽 매칭 기반 액션 실행 |
 | `masc_execute_dry_run` | 실행 시뮬레이션 |
 

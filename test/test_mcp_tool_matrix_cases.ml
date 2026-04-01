@@ -253,7 +253,6 @@ let all_known_tool_names =
     "masc_resume";
     "masc_room_strategy_get";
     "masc_room_strategy_set";
-    "masc_route";
     "masc_ruling_status";
     "masc_run_deliverable";
     "masc_run_get";

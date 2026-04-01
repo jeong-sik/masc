@@ -9,7 +9,7 @@ type context = {
 type result = bool * string
 
 let handle_encryption_status ctx _args =
-  let status = Encryption.get_status ctx.state.Mcp_server.encryption_config in
+  let status = Encryption.get_status (Atomic.get ctx.state.Mcp_server.encryption_config) in
   let msg = Printf.sprintf "🔐 Encryption Status\n%s"
     (Yojson.Safe.pretty_to_string status) in
   (true, msg)
@@ -49,7 +49,8 @@ let handle_encryption_enable ctx args =
   match generated_key_opt with
   | Some (Error e) -> (false, Printf.sprintf "❌ %s" e)
   | _ ->
-      let new_config = { ctx.state.Mcp_server.encryption_config with
+      let current_config = Atomic.get ctx.state.Mcp_server.encryption_config in
+      let new_config = { current_config with
         Encryption.enabled = true;
         key_source = key_source_variant;
       } in
@@ -57,7 +58,7 @@ let handle_encryption_enable ctx args =
        | Error e ->
            (false, Printf.sprintf "❌ Failed: %s" (Encryption.show_encryption_error e))
        | Ok _ ->
-           ctx.state.Mcp_server.encryption_config <- new_config;
+           Atomic.set ctx.state.Mcp_server.encryption_config new_config;
            let msg =
              match generated_key_opt with
              | Some (Ok hex) ->
@@ -67,7 +68,8 @@ let handle_encryption_enable ctx args =
            (true, msg))
 
 let handle_encryption_disable ctx _args =
-  ctx.state.Mcp_server.encryption_config <- { ctx.state.Mcp_server.encryption_config with Encryption.enabled = false };
+  let current = Atomic.get ctx.state.Mcp_server.encryption_config in
+  Atomic.set ctx.state.Mcp_server.encryption_config { current with Encryption.enabled = false };
   (true, "🔓 Encryption disabled. New data will be stored in plain text.")
 
 let handle_generate_key _ctx args =

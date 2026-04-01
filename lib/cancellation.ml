@@ -6,10 +6,14 @@
     MCP Spec MAY: Support for client request cancellation
 *)
 
-(** Cancellation token state *)
+(** Cancellation token state.
+    [cancelled] uses [Atomic.t] for fiber-safe cross-fiber visibility in OCaml 5.
+    [reason] is written before [cancelled] transitions to [true], ensuring fibers that
+    observe cancelled=true also see the reason. [callbacks] may be modified via [on_cancel]
+    at any time, but are only executed when [cancelled] transitions to [true]. *)
 type token = {
   id: string;
-  mutable cancelled: bool;
+  cancelled: bool Atomic.t;
   mutable reason: string option;
   mutable callbacks: (unit -> unit) list;
   created_at: float;
@@ -67,7 +71,7 @@ module TokenStore = struct
       maybe_auto_cleanup ();
       let token = {
         id = generate_id ();
-        cancelled = false;
+        cancelled = Atomic.make false;
         reason = None;
         callbacks = [];
         created_at = Time_compat.now ();
@@ -103,7 +107,7 @@ module TokenStore = struct
       if not (Hashtbl.mem tokens id) then begin
         let token = {
           id;
-          cancelled = false;
+          cancelled = Atomic.make false;
           reason = None;
           callbacks = [];
           created_at = Time_compat.now ();
@@ -116,7 +120,7 @@ module TokenStore = struct
   let is_cancelled (id : string) : bool =
     with_lock (fun () ->
       match Hashtbl.find_opt tokens id with
-      | Some t -> t.cancelled
+      | Some t -> Atomic.get t.cancelled
       | None -> false
     )
 
@@ -125,8 +129,8 @@ module TokenStore = struct
     with_lock (fun () ->
       match Hashtbl.find_opt tokens id with
       | Some t ->
-        if not t.cancelled then begin
-          t.cancelled <- true;
+        if not (Atomic.get t.cancelled) then begin
+          Atomic.set t.cancelled true;
           List.iter (fun cb ->
             try cb () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Cancel.error "Callback failed: %s" (Printexc.to_string exn)
@@ -138,13 +142,14 @@ end
 
 (** Check if token is cancelled *)
 let is_cancelled (token : token) : bool =
-  token.cancelled
+  Atomic.get token.cancelled
 
 (** Cancel a token - triggers all callbacks *)
 let cancel ?(reason : string option) (token : token) : unit =
-  if not token.cancelled then begin
-    token.cancelled <- true;
-    token.reason <- reason;
+  (* Write reason first, then atomically transition cancelled to true.
+     This ensures other fibers observing cancelled=true also see the reason. *)
+  token.reason <- reason;
+  if Atomic.compare_and_set token.cancelled false true then begin
     (* Execute callbacks in reverse order (LIFO) *)
     List.iter (fun cb ->
       try cb () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -177,7 +182,7 @@ let create_for_task ~(task_id : string) : token =
 let token_to_json (t : token) : Yojson.Safe.t =
   `Assoc [
     ("id", `String t.id);
-    ("cancelled", `Bool t.cancelled);
+    ("cancelled", `Bool (Atomic.get t.cancelled));
     ("reason", Json_util.string_opt_to_json t.reason);
     ("created_at", `Float t.created_at);
     ("callback_count", `Int (List.length t.callbacks));

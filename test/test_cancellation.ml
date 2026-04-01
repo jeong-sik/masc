@@ -17,7 +17,7 @@ let contains s1 s2 =
 (** Token creation tests *)
 let test_token_create () =
   let token = Cancellation.TokenStore.create () in
-  check bool "not cancelled initially" false token.cancelled;
+  check bool "not cancelled initially" false (Atomic.get token.cancelled);
   check (option string) "no reason initially" None token.reason;
   check bool "has id" true (String.length token.id > 0);
   check bool "id starts with cancel_" true (String.sub token.id 0 7 = "cancel_")
@@ -25,13 +25,13 @@ let test_token_create () =
 let test_token_cancel () =
   let token = Cancellation.TokenStore.create () in
   Cancellation.cancel token;
-  check bool "is cancelled" true token.cancelled;
+  check bool "is cancelled" true (Atomic.get token.cancelled);
   check (option string) "no reason" None token.reason
 
 let test_token_cancel_with_reason () =
   let token = Cancellation.TokenStore.create () in
   Cancellation.cancel ~reason:"timeout" token;
-  check bool "is cancelled" true token.cancelled;
+  check bool "is cancelled" true (Atomic.get token.cancelled);
   check (option string) "has reason" (Some "timeout") token.reason
 
 let test_token_callback () =
@@ -78,7 +78,7 @@ let test_cancel_by_id () =
   let token = Cancellation.TokenStore.create () in
   let result = Cancellation.cancel_by_id token.id in
   check bool "cancel succeeded" true result;
-  check bool "token is cancelled" true token.cancelled
+  check bool "token is cancelled" true (Atomic.get token.cancelled)
 
 let test_cancel_by_id_not_found () =
   let result = Cancellation.cancel_by_id "nonexistent_id" in
@@ -105,7 +105,7 @@ let test_tool_cancel () =
   ] in
   let (success, _) = Cancellation.handle_cancellation_tool args in
   check bool "cancel success" true success;
-  check bool "token cancelled" true token.cancelled
+  check bool "token cancelled" true (Atomic.get token.cancelled)
 
 let test_tool_check () =
   let token = Cancellation.TokenStore.create () in

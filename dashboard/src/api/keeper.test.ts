@@ -116,4 +116,19 @@ describe('keeper lifecycle', () => {
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Failed to boot keeper-test (HTTP 502)')
   })
+
+  it('falls back to the HTTP status when boot failure payload is not JSON', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('null', {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await bootKeeper('keeper-test')
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toBe('Failed to boot keeper-test (HTTP 502)')
+  })
 })

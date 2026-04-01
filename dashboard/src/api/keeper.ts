@@ -239,7 +239,9 @@ async function safeKeeperLifecycle(url: string, fallbackError: string): Promise<
     if (resp.ok) return payload
 
     const error =
-      typeof payload.error === 'string' && payload.error.trim() !== ''
+      isRecord(payload) &&
+      typeof payload.error === 'string' &&
+      payload.error.trim() !== ''
         ? payload.error
         : `${fallbackError} (HTTP ${resp.status})`
 

@@ -76,7 +76,15 @@ async function runSocialSweep(): Promise<void> {
 
 async function refreshAfterRuntimeAction(): Promise<void> {
   invalidateDashboardCache()
-  await refreshDashboard({ force: true })
+  try {
+    await refreshDashboard({ force: true })
+  } catch (err) {
+    const message =
+      err instanceof Error && err.message.trim() !== ''
+        ? err.message
+        : '대시보드 새로고침에 실패했습니다. 잠시 후 다시 시도해 주세요.'
+    showToast(message, 'error')
+  }
 }
 
 // ── Status Badge (colored pill) ──────────────────────────

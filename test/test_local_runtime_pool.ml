@@ -54,6 +54,7 @@ let test_parse_runtime_env () =
 
 let test_parse_llm_endpoints_env () =
   Local_runtime_pool.reset ();
+  with_env "MASC_LOCAL_RUNTIMES_JSON" None @@ fun () ->
   with_env "MASC_LLAMA_RUNTIMES_JSON" None @@ fun () ->
   with_env "LLM_ENDPOINTS"
     (Some "http://127.0.0.1:8085, http://127.0.0.1:8086")
@@ -136,7 +137,7 @@ let test_acquire_rejects_mismatched_preferred_model_pool () =
   | Ok _ -> Alcotest.fail "preferred pool with mismatched model should fail"
   | Error message ->
       Alcotest.(check string) "mismatch error"
-        "no local llama runtime configured for model qwen9-worker in runtime pool lead"
+        "no local runtime configured for model qwen9-worker in runtime pool lead"
         message
 
 let test_select_runtime_from_empty_returns_error () =
@@ -144,7 +145,7 @@ let test_select_runtime_from_empty_returns_error () =
   | Ok _ -> Alcotest.fail "empty runtime list should be rejected"
   | Error message ->
       Alcotest.(check string) "empty runtime error"
-        "no local llama runtimes configured" message
+        "no local runtimes configured" message
 
 let test_acquire_requires_explicit_or_runtime_model () =
   Local_runtime_pool.reset ();
@@ -154,7 +155,7 @@ let test_acquire_requires_explicit_or_runtime_model () =
   | Ok _ -> Alcotest.fail "runtime without model should reject implicit acquire"
   | Error message ->
       Alcotest.(check string) "explicit model error"
-        "no explicit llama model provided for runtime local-no-model; set spawn_model or runtime.model"
+        "no explicit model provided for local runtime local-no-model; set spawn_model or runtime.model"
         message
 
 let test_record_measured_ceiling () =
@@ -166,7 +167,7 @@ let test_record_measured_ceiling () =
 
 let test_failure_cooldown_from_env () =
   Local_runtime_pool.reset ();
-  with_env "MASC_LLAMA_RUNTIME_COOLDOWN_SEC" (Some "120") @@ fun () ->
+  with_env "MASC_LOCAL_RUNTIME_COOLDOWN_SEC" (Some "120") @@ fun () ->
   install_pool
     [ make_runtime "local-c" "http://127.0.0.1:9085" ~model:"qwen-c" ~max_concurrency:1 ];
   let fail_once () =

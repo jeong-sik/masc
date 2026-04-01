@@ -66,6 +66,13 @@ check "V8-agent-state-mutation" 2 \
   'Agent\.set_state\|Agent_sdk\.Agent\.state[^_]' \
   "lib/keeper/"
 
+# V9: MASC_LLAMA env var coupling (should migrate to MASC_LOCAL_*)
+# 7 remaining: 6 backward-compat fallbacks in env_config_runtime.ml
+# + 1 Deprecated registry entry in feature_flag_registry.ml.
+check "V9-masc-llama-envvar" 7 \
+  'MASC_LLAMA' \
+  "lib/"
+
 if [[ "$rc" -eq 0 ]]; then
   echo "BOUNDARY: all checks within baseline"
 fi

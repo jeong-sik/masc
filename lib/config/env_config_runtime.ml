@@ -156,10 +156,13 @@ module Local_runtime = struct
   let default_model =
     get_string ~default:"explicit-model-required" "LLAMA_DEFAULT_MODEL"
 
-  (** Upper bound for local llama-provider requests.
-      Callers may request less, but never more than this cap. *)
+  (** Upper bound for local runtime requests.
+      Callers may request less, but never more than this cap.
+      Falls back to MASC_LLAMA_MAX_TOKENS for backward compatibility. *)
   let max_tokens =
-    get_int ~default:32768 "MASC_LLAMA_MAX_TOKENS"
+    let primary = get_int ~default:0 "MASC_LOCAL_MAX_TOKENS" in
+    if primary > 0 then primary
+    else get_int ~default:32768 "MASC_LLAMA_MAX_TOKENS"
 
   (** Llama swarm model override (formerly in Chain module). *)
   let llama_swarm_model_opt () =
@@ -398,12 +401,25 @@ end
 (** {1 Worker / Local Runtime Configuration} *)
 
 module Worker = struct
-  (** Enable llama runtime debug logging. Default: false. *)
-  let llama_runtime_debug = get_bool ~default:false "MASC_LLAMA_RUNTIME_DEBUG"
+  (** Enable local runtime debug logging. Default: false.
+      Falls back to MASC_LLAMA_RUNTIME_DEBUG for backward compatibility. *)
+  let local_runtime_debug =
+    let primary = get_bool ~default:false "MASC_LOCAL_RUNTIME_DEBUG" in
+    if primary then true
+    else get_bool ~default:false "MASC_LLAMA_RUNTIME_DEBUG"
 
-  (** Llama runtime cooldown (seconds). *)
-  let llama_runtime_cooldown_sec_opt () =
-    Sys.getenv_opt "MASC_LLAMA_RUNTIME_COOLDOWN_SEC" |> trim_opt
+  (** @deprecated Use {!local_runtime_debug}. *)
+  let llama_runtime_debug = local_runtime_debug
+
+  (** Local runtime cooldown (seconds).
+      Falls back to MASC_LLAMA_RUNTIME_COOLDOWN_SEC for backward compatibility. *)
+  let local_runtime_cooldown_sec_opt () =
+    match Sys.getenv_opt "MASC_LOCAL_RUNTIME_COOLDOWN_SEC" |> trim_opt with
+    | Some _ as v -> v
+    | None -> Sys.getenv_opt "MASC_LLAMA_RUNTIME_COOLDOWN_SEC" |> trim_opt
+
+  (** @deprecated Use {!local_runtime_cooldown_sec_opt}. *)
+  let llama_runtime_cooldown_sec_opt = local_runtime_cooldown_sec_opt
 
   (** Local worker max tokens per request. Default: 1024. *)
   let local_worker_max_tokens = max 1 (get_int ~default:1024 "MASC_LOCAL_WORKER_MAX_TOKENS")

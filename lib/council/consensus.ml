@@ -77,6 +77,16 @@ type error =
 (** In-memory session store *)
 let sessions : (string, session) Hashtbl.t = Hashtbl.create 16
 
+(** Module-level mutex protecting [sessions] Hashtbl.
+    All reads/writes to [sessions] must go through this lock. *)
+let sessions_mutex : Eio.Mutex.t = Eio.Mutex.create ()
+
+let with_sessions_lock f =
+  Eio.Mutex.use_rw ~protect:true sessions_mutex f
+
+let with_sessions_ro f =
+  Eio.Mutex.use_ro sessions_mutex f
+
 (** {1 File-based Persistence} *)
 
 (** Optional base_path for file storage — set via [init] *)
@@ -294,7 +304,8 @@ let commit_session (s : session) : (session, error) result =
   match persist_session s with
   | Error _ as err -> err
   | Ok () ->
-    Hashtbl.replace sessions s.id s;
+    with_sessions_lock (fun () ->
+      Hashtbl.replace sessions s.id s);
     Ok s
 
 (** Load all sessions from disk into memory *)
@@ -313,7 +324,9 @@ let load_sessions base =
                 (try
                    let json = Yojson.Safe.from_string content in
                    match full_session_of_yojson json with
-                   | Ok session -> Hashtbl.replace sessions session.id session
+                   | Ok session ->
+                     with_sessions_lock (fun () ->
+                       Hashtbl.replace sessions session.id session)
                    | Error e -> Log.Council.debug "consensus session parse failed %s: %s" filename e
                  with Yojson.Json_error msg -> Log.Council.debug "consensus JSON error %s: %s" filename msg
                     | Failure msg -> Log.Council.debug "consensus failure %s: %s" filename msg)
@@ -330,21 +343,25 @@ let init ~base_path =
     Returns the count of removed sessions. *)
 let cleanup_closed ?(max_age_s = 3600.0) () =
   let now = Time_compat.now () in
-  let stale = Hashtbl.fold (fun id session acc ->
-    match session.state with
-    | Closed | Cancelled ->
-      (match session.closed_at with
-       | Some t when now -. t > max_age_s -> id :: acc
-       | _ -> acc)
-    | Open -> acc
-  ) sessions [] in
-  List.iter (Hashtbl.remove sessions) stale;
+  let stale = with_sessions_ro (fun () ->
+    Hashtbl.fold (fun id session acc ->
+      match session.state with
+      | Closed | Cancelled ->
+        (match session.closed_at with
+         | Some t when now -. t > max_age_s -> id :: acc
+         | _ -> acc)
+      | Open -> acc
+    ) sessions []) in
+  with_sessions_lock (fun () ->
+    List.iter (Hashtbl.remove sessions) stale);
   List.length stale
 
 (** Generate unique session ID *)
 let consensus_rng = Random.State.make_self_init ()
+let rng_mutex : Eio.Mutex.t = Eio.Mutex.create ()
 let generate_id () =
-  let uuid = Uuidm.v4_gen consensus_rng () in
+  let uuid = Eio.Mutex.use_rw ~protect:true rng_mutex (fun () ->
+    Uuidm.v4_gen consensus_rng ()) in
   Uuidm.to_string uuid
 
 (** Start a new voting session *)
@@ -369,7 +386,9 @@ let start_voting ~topic ~initiator ?(quorum = 2) ?(threshold = 0.5)
 
 (** Cast a vote in a session *)
 let cast_vote ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.0) () : (session, error) Result.t =
-  match Hashtbl.find_opt sessions session_id with
+  let session_opt = with_sessions_ro (fun () ->
+    Hashtbl.find_opt sessions session_id) in
+  match session_opt with
   | None -> Error (Session_not_found session_id)
   | Some session ->
     if session.state <> Open then
@@ -419,7 +438,9 @@ let quorum_met session : bool =
 
 (** Get voting result *)
 let get_result ~session_id : (voting_result, error) Result.t =
-  match Hashtbl.find_opt sessions session_id with
+  let session_opt = with_sessions_ro (fun () ->
+    Hashtbl.find_opt sessions session_id) in
+  match session_opt with
   | None -> Error (Session_not_found session_id)
   | Some session ->
     let votes = session.votes in
@@ -455,7 +476,9 @@ let get_result ~session_id : (voting_result, error) Result.t =
 
 (** Close a voting session *)
 let close_session ~session_id : (session, error) Result.t =
-  match Hashtbl.find_opt sessions session_id with
+  let session_opt = with_sessions_ro (fun () ->
+    Hashtbl.find_opt sessions session_id) in
+  match session_opt with
   | None -> Error (Session_not_found session_id)
   | Some session ->
     let updated = {
@@ -467,7 +490,9 @@ let close_session ~session_id : (session, error) Result.t =
 
 (** Cancel a voting session *)
 let cancel_session ~session_id : (session, error) Result.t =
-  match Hashtbl.find_opt sessions session_id with
+  let session_opt = with_sessions_ro (fun () ->
+    Hashtbl.find_opt sessions session_id) in
+  match session_opt with
   | None -> Error (Session_not_found session_id)
   | Some session ->
     let updated = {
@@ -479,20 +504,24 @@ let cancel_session ~session_id : (session, error) Result.t =
 
 (** Get session by ID *)
 let get_session ~session_id : session option =
-  Hashtbl.find_opt sessions session_id
+  with_sessions_ro (fun () ->
+    Hashtbl.find_opt sessions session_id)
 
 (** List all active sessions *)
 let list_active_sessions () : session list =
-  Hashtbl.to_seq_values sessions
-  |> Seq.filter (fun s -> s.state = Open)
-  |> List.of_seq
+  with_sessions_ro (fun () ->
+    Hashtbl.to_seq_values sessions
+    |> Seq.filter (fun s -> s.state = Open)
+    |> List.of_seq)
 
 let list_all_sessions () : session list =
-  Hashtbl.to_seq_values sessions |> List.of_seq
+  with_sessions_ro (fun () ->
+    Hashtbl.to_seq_values sessions |> List.of_seq)
 
 (** Clear all sessions (for testing) *)
 let clear_sessions () =
-  Hashtbl.clear sessions
+  with_sessions_lock (fun () ->
+    Hashtbl.clear sessions)
 
 (** Session to JSON *)
 let session_to_json session : Yojson.Safe.t =

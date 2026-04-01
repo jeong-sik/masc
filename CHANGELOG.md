@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.212.0] - 2026-04-01
+
+### Fixed
+- **Encryption hex parsing** — bounds check, `int_of_string_opt`, Buffer instead of O(n^2) concat (#4452, #4432).
+- **Exception swallowing** — `entry_of_json_r` returns Result, rate-limited error logging (#4453, #4431).
+- **Session registry atomicity** — remove `[@atomic]` antipattern, unify on mutex-only sync (#4461, #4422).
+- **A2A Random.State** — protect shared RNG with `Eio.Mutex` for fiber safety (#4455).
+
+### Changed
+- **Dashboard markdown** — replace inline renderer with `marked` library (#4451).
+
 ## [2.211.0] - 2026-04-01
 
 ### Changed

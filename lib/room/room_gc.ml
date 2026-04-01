@@ -97,7 +97,7 @@ let cleanup_zombies
                  (* delete_path only removes the backend entry for dual-write
                     backends; the local mirror file must be removed separately
                     to prevent repeated GC warnings on each scan cycle. *)
-                 if Sys.file_exists path then Sys.remove path
+                 (try Sys.remove path with Sys_error _ -> ())
                with exn ->
                  Log.Gc.warn "failed to remove broken agent %s: %s"
                    path (Printexc.to_string exn))

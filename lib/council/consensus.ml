@@ -384,28 +384,32 @@ let start_voting ~topic ~initiator ?(quorum = 2) ?(threshold = 0.5)
     } in
     commit_session session
 
-(** Cast a vote in a session *)
+(** Cast a vote in a session.
+    Read-validate-persist-replace within a single write lock to prevent TOCTOU. *)
 let cast_vote ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.0) () : (session, error) Result.t =
-  let session_opt = with_sessions_ro (fun () ->
-    Hashtbl.find_opt sessions session_id) in
-  match session_opt with
-  | None -> Error (Session_not_found session_id)
-  | Some session ->
-    if session.state <> Open then
-      Error (Session_closed session_id)
-    else if List.exists (fun v -> v.agent = agent) session.votes then
-      Error (Already_voted agent)
-    else
-      let vote = {
-        agent;
-        decision;
-        reason;
-        timestamp = Time_compat.now ();
-        archetype;
-        weight;
-      } in
-      let updated = { session with votes = vote :: session.votes } in
-      commit_session updated
+  with_sessions_lock (fun () ->
+    match Hashtbl.find_opt sessions session_id with
+    | None -> Error (Session_not_found session_id)
+    | Some session ->
+      if session.state <> Open then
+        Error (Session_closed session_id)
+      else if List.exists (fun v -> v.agent = agent) session.votes then
+        Error (Already_voted agent)
+      else
+        let vote = {
+          agent;
+          decision;
+          reason;
+          timestamp = Time_compat.now ();
+          archetype;
+          weight;
+        } in
+        let updated = { session with votes = vote :: session.votes } in
+        match persist_session updated with
+        | Error _ as err -> err
+        | Ok () ->
+          Hashtbl.replace sessions updated.id updated;
+          Ok updated)
 
 (** Count votes by decision type *)
 let count_by_decision votes decision =
@@ -474,33 +478,41 @@ let get_result ~session_id : (voting_result, error) Result.t =
         else
           Ok Escalate
 
-(** Close a voting session *)
+(** Close a voting session.
+    Read-validate-persist-replace within a single write lock to prevent TOCTOU. *)
 let close_session ~session_id : (session, error) Result.t =
-  let session_opt = with_sessions_ro (fun () ->
-    Hashtbl.find_opt sessions session_id) in
-  match session_opt with
-  | None -> Error (Session_not_found session_id)
-  | Some session ->
-    let updated = {
-      session with
-      state = Closed;
-      closed_at = Some (Time_compat.now ());
-    } in
-    commit_session updated
+  with_sessions_lock (fun () ->
+    match Hashtbl.find_opt sessions session_id with
+    | None -> Error (Session_not_found session_id)
+    | Some session ->
+      let updated = {
+        session with
+        state = Closed;
+        closed_at = Some (Time_compat.now ());
+      } in
+      match persist_session updated with
+      | Error _ as err -> err
+      | Ok () ->
+        Hashtbl.replace sessions updated.id updated;
+        Ok updated)
 
-(** Cancel a voting session *)
+(** Cancel a voting session.
+    Read-validate-persist-replace within a single write lock to prevent TOCTOU. *)
 let cancel_session ~session_id : (session, error) Result.t =
-  let session_opt = with_sessions_ro (fun () ->
-    Hashtbl.find_opt sessions session_id) in
-  match session_opt with
-  | None -> Error (Session_not_found session_id)
-  | Some session ->
-    let updated = {
-      session with
-      state = Cancelled;
-      closed_at = Some (Time_compat.now ());
-    } in
-    commit_session updated
+  with_sessions_lock (fun () ->
+    match Hashtbl.find_opt sessions session_id with
+    | None -> Error (Session_not_found session_id)
+    | Some session ->
+      let updated = {
+        session with
+        state = Cancelled;
+        closed_at = Some (Time_compat.now ());
+      } in
+      match persist_session updated with
+      | Error _ as err -> err
+      | Ok () ->
+        Hashtbl.replace sessions updated.id updated;
+        Ok updated)
 
 (** Get session by ID *)
 let get_session ~session_id : session option =

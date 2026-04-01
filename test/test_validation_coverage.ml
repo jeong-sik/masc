@@ -226,6 +226,16 @@ let test_agent_id_dot_only () =
   | Ok _ -> fail "should reject dot"
   | Error _ -> ()
 
+let test_agent_id_single_dot () =
+  match Validation.Agent_id.validate "." with
+  | Ok _ -> fail "should reject single dot"
+  | Error _ -> ()
+
+let test_agent_id_double_dot () =
+  match Validation.Agent_id.validate ".." with
+  | Ok _ -> fail "should reject double dot"
+  | Error _ -> ()
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -285,5 +295,7 @@ let () =
       test_case "agent unicode rejected" `Quick test_agent_id_unicode_rejected;
       test_case "task unicode rejected" `Quick test_task_id_unicode_rejected;
       test_case "agent dot only" `Quick test_agent_id_dot_only;
+      test_case "agent single dot" `Quick test_agent_id_single_dot;
+      test_case "agent double dot" `Quick test_agent_id_double_dot;
     ];
   ]

@@ -27,6 +27,9 @@ let () =
           Alcotest.test_case "digest room pending confirm attention" `Quick
             Test_operator_control_snapshot
             .test_digest_room_exposes_pending_confirm_attention;
+          Alcotest.test_case "digest room tool host attention" `Quick
+            Test_operator_control_snapshot
+            .test_digest_room_includes_tool_host_failure_attention;
           Alcotest.test_case "digest room prefers fresh operator judgment"
             `Quick
             Test_operator_control_judgment

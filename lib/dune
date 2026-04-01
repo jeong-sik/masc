@@ -49,6 +49,7 @@
    config
    config_dir_resolver
    dashboard
+   failure_envelope
    dashboard_labels
    dashboard_agent_relations
    dashboard_attention

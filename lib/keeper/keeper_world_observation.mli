@@ -97,5 +97,11 @@ val observe :
   meta:Keeper_types.keeper_meta ->
   world_observation
 
+(** Compute effective proactive cooldown with idle decay.
+    After extended idle (> base cooldown), halve the cooldown each
+    additional period, down to a configurable floor. *)
+val effective_proactive_cooldown :
+  base_cooldown:int -> since_last:int -> int
+
 val should_run_unified_turn :
   meta:Keeper_types.keeper_meta -> world_observation -> bool

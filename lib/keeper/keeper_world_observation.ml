@@ -338,6 +338,22 @@ let observe ~(pending_board_events : pending_board_event list option)
     last_turn_budget = None;
   }
 
+(** Compute effective proactive cooldown with idle decay.
+    After extended idle (> base cooldown), halve the cooldown each
+    additional period, down to a configurable floor.  This prevents
+    permanent silence when no external events arrive. *)
+let effective_proactive_cooldown ~(base_cooldown : int) ~(since_last : int) : int =
+  let min_cooldown = Keeper_config.keeper_proactive_min_cooldown_sec () in
+  (* Floor must not exceed the base cooldown — otherwise decay would
+     paradoxically increase a short cooldown. *)
+  let floor = min min_cooldown base_cooldown in
+  if since_last <= base_cooldown then base_cooldown
+  else
+    let decay_periods = (since_last - base_cooldown) / (max 1 base_cooldown) in
+    let capped_periods = min decay_periods 4 in
+    let factor = 1.0 /. (Float.pow 2.0 (float_of_int capped_periods)) in
+    max floor (int_of_float (float_of_int base_cooldown *. factor))
+
 let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observation) =
   let has_external_event =
     observation.pending_mentions <> [] || observation.pending_board_events <> []
@@ -351,13 +367,18 @@ let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observati
     in
     if not meta.proactive.enabled then false
     else
-      let cooldown_elapsed = since_last_proactive >= meta.proactive.cooldown_sec in
+      let effective_cooldown =
+        effective_proactive_cooldown
+          ~base_cooldown:meta.proactive.cooldown_sec
+          ~since_last:since_last_proactive
+      in
+      let cooldown_elapsed = since_last_proactive >= effective_cooldown in
       let has_actionable_tasks =
         observation.unclaimed_task_count > 0 || observation.failed_task_count > 0
       in
       (* When actionable tasks sit in the backlog, use a shorter cooldown
          (1/3 of normal, floor 60s) so the keeper reacts faster to work.
-         Regular proactive turns still fire on the full cooldown. *)
-      let task_reactive_cooldown = max 60 (meta.proactive.cooldown_sec / 3) in
+         Regular proactive turns still fire on the effective cooldown. *)
+      let task_reactive_cooldown = max 60 (effective_cooldown / 3) in
       cooldown_elapsed
       || (has_actionable_tasks && since_last_proactive >= task_reactive_cooldown)

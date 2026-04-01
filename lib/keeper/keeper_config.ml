@@ -304,6 +304,20 @@ let keeper_bootstrap_proactive_warmup_sec () : int =
     ~min_v:0
     ~max_v:172800
 
+let keeper_bootstrap_stagger_step_sec () : int =
+  int_of_env_default
+    "MASC_KEEPER_BOOTSTRAP_STAGGER_STEP_SEC"
+    ~default:15
+    ~min_v:0
+    ~max_v:120
+
+let keeper_proactive_min_cooldown_sec () : int =
+  int_of_env_default
+    "MASC_KEEPER_PROACTIVE_MIN_COOLDOWN_SEC"
+    ~default:300
+    ~min_v:60
+    ~max_v:1800
+
 let keeper_compaction_policy_from_env () : (float * int * int) =
   ( keeper_compact_ratio (),
     keeper_compact_max_messages (),

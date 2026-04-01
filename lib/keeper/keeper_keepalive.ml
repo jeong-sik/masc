@@ -177,7 +177,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
   let timing_filled = ref 0 in
   (* Phase 1: work-as-heartbeat freshness tracking.
      Updated ONLY on Room.heartbeat_in_room success after turn. *)
-  let last_successful_heartbeat_ts = ref 0.0 in
+  let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
   let work_as_hb () =
     Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
   let max_silence () =
@@ -444,32 +444,40 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
               last_snapshot_ts := now_ts);
             let t_snapshot_end = Time_compat.now () in
             let t_board_start = t_snapshot_end in
-            let pending_board_events, meta_after_triage =
-              let pending_board_events =
-                (try
-                   let events, _new_count, _mention_count =
-                     Keeper_world_observation.collect_board_events
-                       ~base_path:ctx.config.base_path
-                       ~meta:meta_current
-                       ~continuity_summary:meta_current.continuity_summary
-                   in
-                   events
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn ->
-                     Log.Keeper.warn "keepalive: board count query failed: %s"
-                       (Printexc.to_string exn);
-                     [])
-              in
-              (pending_board_events, meta_current)
-            in
-            let t_board_end = Time_compat.now () in
-            let t_turn_start = t_board_end in
+            (* Compute warmup state BEFORE board collection so cursor
+               is not advanced while keeper cannot act on events. *)
             let proactive_warmup_elapsed =
               proactive_warmup_sec <= 0
               || now_ts -. keepalive_started_ts
                  >= float_of_int proactive_warmup_sec
             in
+            let pending_board_events, meta_after_triage =
+              if not proactive_warmup_elapsed then
+                (* During warmup: skip board collection to preserve cursor.
+                   First post-warmup cycle will pick up the full bootstrap
+                   window (300s) of board events. *)
+                ([], meta_current)
+              else
+                let pending_board_events =
+                  (try
+                     let events, _new_count, _mention_count =
+                       Keeper_world_observation.collect_board_events
+                         ~base_path:ctx.config.base_path
+                         ~meta:meta_current
+                         ~continuity_summary:meta_current.continuity_summary
+                     in
+                     events
+                   with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
+                       Log.Keeper.warn "keepalive: board count query failed: %s"
+                         (Printexc.to_string exn);
+                       [])
+                in
+                (pending_board_events, meta_current)
+            in
+            let t_board_end = Time_compat.now () in
+            let t_turn_start = t_board_end in
             let meta_after_proactive =
               if proactive_warmup_elapsed then
                 (try

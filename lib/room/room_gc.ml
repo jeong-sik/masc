@@ -92,7 +92,12 @@ let cleanup_zombies
           | Ok _ -> () (* not a zombie, skip *)
           | Error err ->
               Log.Gc.warn "removing broken agent file %s: %s" name err;
-              (try delete_path config path
+              (try
+                 delete_path config path;
+                 (* delete_path only removes the backend entry for dual-write
+                    backends; the local mirror file must be removed separately
+                    to prevent repeated GC warnings on each scan cycle. *)
+                 if Sys.file_exists path then Sys.remove path
                with exn ->
                  Log.Gc.warn "failed to remove broken agent %s: %s"
                    path (Printexc.to_string exn))

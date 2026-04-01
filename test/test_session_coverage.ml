@@ -5,7 +5,7 @@
     - rate_tracker type
     - create_tracker function
     - get_timestamps / set_timestamps
-    - Atomic helpers: get_burst_used, set_burst_used, incr_burst_used
+    - Burst counters: burst_used, last_burst_reset (direct field access)
     - McpSessionStore: generate_id, to_json
     - extract_mcp_session_id
 *)
@@ -132,46 +132,40 @@ let test_set_get_roundtrip () =
   check (list (float 0.1)) "roundtrip" ts ts'
 
 (* ============================================================
-   Atomic Helpers Tests
+   Burst Counters Tests
    ============================================================ *)
 
-let test_get_burst_used_initial () =
+let test_burst_used_initial () =
   let rt = Session.create_tracker () in
-  let burst = Session.get_burst_used rt in
-  check int "initial burst" 0 burst
+  check int "initial burst" 0 rt.burst_used
 
-let test_set_burst_used () =
+let test_burst_used_set () =
   let rt = Session.create_tracker () in
-  Session.set_burst_used rt 5;
-  let burst = Session.get_burst_used rt in
-  check int "set burst" 5 burst
+  rt.burst_used <- 5;
+  check int "set burst" 5 rt.burst_used
 
-let test_incr_burst_used () =
+let test_burst_used_incr () =
   let rt = Session.create_tracker () in
-  Session.set_burst_used rt 3;
-  Session.incr_burst_used rt;
-  let burst = Session.get_burst_used rt in
-  check int "incr burst" 4 burst
+  rt.burst_used <- 3;
+  rt.burst_used <- rt.burst_used + 1;
+  check int "incr burst" 4 rt.burst_used
 
-let test_incr_burst_used_multiple () =
+let test_burst_used_incr_multiple () =
   let rt = Session.create_tracker () in
-  Session.incr_burst_used rt;
-  Session.incr_burst_used rt;
-  Session.incr_burst_used rt;
-  let burst = Session.get_burst_used rt in
-  check int "incr 3 times" 3 burst
+  rt.burst_used <- rt.burst_used + 1;
+  rt.burst_used <- rt.burst_used + 1;
+  rt.burst_used <- rt.burst_used + 1;
+  check int "incr 3 times" 3 rt.burst_used
 
-let test_get_last_burst_reset () =
+let test_last_burst_reset () =
   let rt = Session.create_tracker () in
-  let reset = Session.get_last_burst_reset rt in
-  check bool "positive reset time" true (reset > 0.0)
+  check bool "positive reset time" true (rt.last_burst_reset > 0.0)
 
-let test_set_last_burst_reset () =
+let test_last_burst_reset_set () =
   let rt = Session.create_tracker () in
   let new_time = 12345.0 in
-  Session.set_last_burst_reset rt new_time;
-  let reset = Session.get_last_burst_reset rt in
-  check (float 0.1) "set reset time" new_time reset
+  rt.last_burst_reset <- new_time;
+  check (float 0.1) "set reset time" new_time rt.last_burst_reset
 
 (* ============================================================
    McpSessionStore Tests
@@ -431,13 +425,13 @@ let () =
       test_case "task_ops" `Quick test_set_timestamps_task_ops;
       test_case "roundtrip" `Quick test_set_get_roundtrip;
     ];
-    "atomic_helpers", [
-      test_case "get_burst_used initial" `Quick test_get_burst_used_initial;
-      test_case "set_burst_used" `Quick test_set_burst_used;
-      test_case "incr_burst_used" `Quick test_incr_burst_used;
-      test_case "incr_burst_used multiple" `Quick test_incr_burst_used_multiple;
-      test_case "get_last_burst_reset" `Quick test_get_last_burst_reset;
-      test_case "set_last_burst_reset" `Quick test_set_last_burst_reset;
+    "burst_counters", [
+      test_case "burst_used initial" `Quick test_burst_used_initial;
+      test_case "burst_used set" `Quick test_burst_used_set;
+      test_case "burst_used incr" `Quick test_burst_used_incr;
+      test_case "burst_used incr multiple" `Quick test_burst_used_incr_multiple;
+      test_case "last_burst_reset" `Quick test_last_burst_reset;
+      test_case "last_burst_reset set" `Quick test_last_burst_reset_set;
     ];
     "mcp_session_store", [
       test_case "generate_id prefix" `Quick test_generate_id_prefix;

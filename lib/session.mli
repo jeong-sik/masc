@@ -19,14 +19,15 @@ type session = {
 
 (** Rate-limit tracking per category.
 
-    Uses OCaml 5.4 [[@atomic]] fields for lock-free concurrent access
-    to burst counters. *)
+    All fields are mutable and accessed exclusively under [registry.lock].
+    No lock-free access — the mutex is the single synchronization mechanism.
+    Callers must hold [registry.lock] before reading or writing any field. *)
 type rate_tracker = {
   mutable general_timestamps: float list;
   mutable broadcast_timestamps: float list;
   mutable task_ops_timestamps: float list;
-  mutable burst_used: int; [@atomic]
-  mutable last_burst_reset: float; [@atomic]
+  mutable burst_used: int;
+  mutable last_burst_reset: float;
 }
 
 (** Session registry managing all connected agents. *)
@@ -65,21 +66,6 @@ val update_activity :
 
 (** Create an empty rate tracker. *)
 val create_tracker : unit -> rate_tracker
-
-(** Atomic read of [burst_used]. *)
-val get_burst_used : rate_tracker -> int
-
-(** Atomic write of [burst_used]. *)
-val set_burst_used : rate_tracker -> int -> unit
-
-(** Atomic increment of [burst_used] (fetch-and-add). *)
-val incr_burst_used : rate_tracker -> unit
-
-(** Atomic read of [last_burst_reset]. *)
-val get_last_burst_reset : rate_tracker -> float
-
-(** Atomic write of [last_burst_reset]. *)
-val set_last_burst_reset : rate_tracker -> float -> unit
 
 (** Get timestamps for a given rate-limit category. *)
 val get_timestamps : rate_tracker -> rate_limit_category -> float list

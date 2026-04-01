@@ -90,7 +90,12 @@ let cleanup_zombies
                   Resilience.Zombie.is_zombie ~threshold agent.last_seen) ->
               zombie_entries := (agent.name, path) :: !zombie_entries
           | Ok _ -> () (* not a zombie, skip *)
-          | Error err -> Log.Gc.warn "skipping agent %s: parse error: %s" name err
+          | Error err ->
+              Log.Gc.warn "removing broken agent file %s: %s" name err;
+              (try delete_path config path
+               with exn ->
+                 Log.Gc.warn "failed to remove broken agent %s: %s"
+                   path (Printexc.to_string exn))
         end
       )
     ) scan_paths;

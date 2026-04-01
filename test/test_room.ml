@@ -697,6 +697,34 @@ let test_cleanup_zombies_spares_recent_keeper () =
       true (not (str_contains result "keeper-active-agent"))
   )
 
+let test_cleanup_zombies_removes_broken_agent_file () =
+  with_test_env (fun config ->
+    (* Write an empty JSON object — unparseable as agent *)
+    let agents_path = Filename.concat (Room.masc_dir config) "agents" in
+    let path = Filename.concat agents_path "broken-agent.json" in
+    Room.write_json config path (Yojson.Safe.from_string "{}");
+    Alcotest.(check bool) "broken file exists before GC"
+      true (Sys.file_exists path);
+    let _result = Room.cleanup_zombies config in
+    Alcotest.(check bool) "broken file removed by GC"
+      false (Sys.file_exists path)
+  )
+
+let test_cleanup_zombies_preserves_non_json_files () =
+  with_test_env (fun config ->
+    (* Place a non-JSON file in the agents directory *)
+    let agents_path = Filename.concat (Room.masc_dir config) "agents" in
+    let path = Filename.concat agents_path ".gitkeep" in
+    let oc = open_out path in
+    output_string oc "";
+    close_out oc;
+    Alcotest.(check bool) "non-json file exists before GC"
+      true (Sys.file_exists path);
+    let _result = Room.cleanup_zombies config in
+    Alcotest.(check bool) "non-json file preserved by GC"
+      true (Sys.file_exists path)
+  )
+
 (* ============================================================ *)
 (* Agent Discovery / Capability Tests                           *)
 (* ============================================================ *)
@@ -1567,6 +1595,8 @@ let () =
       Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
       Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;
       Alcotest.test_case "cleanup spares recent keeper" `Quick test_cleanup_zombies_spares_recent_keeper;
+      Alcotest.test_case "cleanup removes broken agent file" `Quick test_cleanup_zombies_removes_broken_agent_file;
+      Alcotest.test_case "cleanup preserves non-json files" `Quick test_cleanup_zombies_preserves_non_json_files;
     ];
 
     (* === Agent Discovery / Capability Tests === *)

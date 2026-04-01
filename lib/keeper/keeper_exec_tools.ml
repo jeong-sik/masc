@@ -162,6 +162,7 @@ let keeper_coding_masc_tool_names =
 let keeper_all_candidate_tool_names () =
   dedupe_tool_names
     ( keeper_internal_candidate_tool_names
+    @ keeper_voice_tool_names
     @ keeper_governance_tool_names
     @ keeper_coding_shard_tool_names
     @ keeper_coding_tool_names

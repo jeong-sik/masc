@@ -95,7 +95,7 @@ let () =
   Tool_board.register ();
   mark_tag_registry_initialized ();
   (* Inject masc_* schemas into keeper bridge for tier-based filtering.
-     Uses Config.raw_all_tool_schemas which includes Board/MDAL schemas
+     Uses Config.raw_all_tool_schemas which includes Board schemas
      not present in Tools.all_schemas_extended. *)
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
   (* Wire keeper-internal tool call recording to break Config dependency cycle.

@@ -42,7 +42,6 @@ let state_dashboard_runtime_caps (state : Mcp_server.server_state) =
 include Dashboard_http_helpers
 include Dashboard_http_monitoring
 include Dashboard_http_keeper
-include Dashboard_http_mdal
 
 let _dashboard_request_timeout_s =
   float_of_env_default "MASC_DASHBOARD_REQUEST_TIMEOUT_S"

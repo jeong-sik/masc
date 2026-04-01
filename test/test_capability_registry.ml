@@ -79,13 +79,6 @@ let test_privileged_keeper_surface_is_split () =
     (List.mem "keeper_board_post"
        Lib.Capability_registry.keeper_privileged_tool_names)
 
-let test_mdal_auditable_tools_stay_curated () =
-  let names = Lib.Capability_registry.mdal_auditable_tool_names in
-  check bool "contains masc_code_search" true
-    (List.mem "masc_code_search" names);
-  check bool "contains masc_run_plan" true
-    (List.mem "masc_run_plan" names)
-
 let () =
   Alcotest.run "capability_registry"
     [
@@ -106,7 +99,5 @@ let () =
             test_spawned_agent_surface_stays_curated;
           test_case "privileged keeper surface is split" `Quick
             test_privileged_keeper_surface_is_split;
-          test_case "mdal auditable tools stay curated" `Quick
-            test_mdal_auditable_tools_stay_curated;
         ] );
     ]

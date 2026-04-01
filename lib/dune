@@ -86,7 +86,6 @@
    dashboard_http_keeper_metrics
    dashboard_http_keeper_detail
    dashboard_http_keeper
-   dashboard_http_mdal
    dashboard_http_autoresearch
    dashboard_harness_health
    dashboard_feature_health
@@ -187,9 +186,6 @@
    relation_materializer
    prometheus
    rate_limit
-   mdal
-   mdal_swarm
-   mdal_worker
    mcp_prompt_surface
    mcp_sdk_adapter_masc
    mcp_server
@@ -204,7 +200,6 @@
    mcp_server_eio_tool_profile
    mcp_server_eio_protocol
    metrics_store_eio
-   mdal_store
    verification
    operator_approval
    operator_pending_confirm
@@ -344,9 +339,6 @@
    tool_command_plane_dispatch
    tool_command_plane_schemas_01
    tool_command_plane_schemas_02
-   tool_mdal
-   tool_mdal_schemas
-   tool_mdal_handlers
    tool_library
    tool_deep_review
    tool_budget
@@ -548,7 +540,6 @@
  dashboard_http_helpers
  dashboard_http_monitoring
  dashboard_http_keeper
- dashboard_http_mdal
  dashboard_http_autoresearch
  dashboard_harness_health
  server_routes_http_common
@@ -572,7 +563,6 @@
  server_command_plane_http_support
  server_command_plane_http_mutations
  server_command_plane_http_help
- tool_mdal_handlers
  tool_command_plane_support
  tool_command_plane_mutations
  tool_command_plane_operations

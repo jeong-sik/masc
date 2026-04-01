@@ -273,7 +273,9 @@ let handle_voice_ping_pong ctx args : tool_result =
     | Some lc when lc <> "" -> Some lc | _ -> None
   in
   if keeper_name = "" then
-    (false, "Error: keeper name is required")
+    (false, "❌ Error: keeper name is required")
+  else if not (Keeper_config.validate_name keeper_name) then
+    (false, "❌ Error: invalid keeper name (must be alphanumeric, dots, dashes, underscores)")
   else
     let trimmed_args = match args with
       | `Assoc fields ->
@@ -282,10 +284,10 @@ let handle_voice_ping_pong ctx args : tool_result =
       | other -> other
     in
     if ctx.net = None then
-      (false, "Error: voice ping-pong requires network for TTS")
+      (false, "❌ Error: voice ping-pong requires network for TTS")
     else
     match ensure_keeper_exists ctx trimmed_args with
-    | Error err -> (false, err)
+    | Error err -> (false, "❌ " ^ err)
     | Ok _ ->
         let send_message text =
           let msg_args = `Assoc [

@@ -258,6 +258,12 @@ do
     restore_env_override "$env_name"
 done
 
+# Did caller provide --base-path explicitly on CLI?
+BASE_PATH_EXPLICIT=0
+
+# Track whether MASC_BASE_PATH came from caller environment after shell/env-file restoration.
+MASC_BASE_PATH_WAS_SET="${__PRESERVE_MASC_BASE_PATH_SET:-0}"
+
 raise_open_file_limit() {
     local desired="${MASC_NOFILE_TARGET:-4096}"
     local current hard target
@@ -348,6 +354,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --base-path|--path)
             BASE_PATH="$2"
+            BASE_PATH_EXPLICIT=1
             shift 2
             ;;
         *)
@@ -359,6 +366,16 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [ "$BASE_PATH_EXPLICIT" != "1" ] && \
+   [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && \
+   [ -n "$BASE_PATH" ] && \
+   [ "$BASE_PATH" != "$SCRIPT_DIR" ]; then
+    if [ -d "$SCRIPT_DIR/.masc" ] && [ -d "$BASE_PATH/.masc" ]; then
+        echo "WARN: Ignoring inherited MASC_BASE_PATH=$BASE_PATH because both repo and inherited root have .masc. Using $SCRIPT_DIR for server state." >&2
+        BASE_PATH="$SCRIPT_DIR"
+    fi
+fi
 
 if [ "$PORT_EXPLICIT" != "1" ]; then
     PORT="$(default_port_for_path "$SCRIPT_DIR")"

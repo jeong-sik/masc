@@ -1581,7 +1581,7 @@ let test_keeper_up_persists_allowed_paths_to_status_policy () =
 
 (* Issue #3019: session dir must be created from scratch in filesystem fallback.
    When PG is unavailable and keeper_up only registers in-memory, the session
-   directory under .masc/perpetual/<trace_id> might not exist. The fix ensures
+   directory under .masc/traces/<trace_id> might not exist. The fix ensures
    all callers create the full directory tree before file I/O. *)
 let test_session_dir_mkdir_p_creates_full_tree () =
   let base_dir = temp_dir () in
@@ -1589,9 +1589,9 @@ let test_session_dir_mkdir_p_creates_full_tree () =
     ~finally:(fun () -> rm_rf base_dir)
     (fun () ->
       (* Simulate the path that session_base_dir returns:
-         <base_path>/.masc/perpetual *)
+         <base_path>/.masc/traces *)
       let session_base = Filename.concat
-        (Filename.concat base_dir ".masc") "perpetual" in
+        (Filename.concat base_dir ".masc") "traces" in
       let trace_id = "trace-test-3019" in
       let session_dir = Filename.concat session_base trace_id in
       (* Before fix: only base_dir was mkdir_p'd, not session_dir.

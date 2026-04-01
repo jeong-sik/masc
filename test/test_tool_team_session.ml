@@ -75,6 +75,11 @@ let () =
           Alcotest.test_case "step-spawn-batch-infers-exact-env-model-tiers"
             `Quick Test_tool_team_session_step_routing.test_step_spawn_batch_infers_exact_env_model_tiers;
           Alcotest.test_case
+            "runtime-inventory-uses-token-boundaries-for-model-tiers"
+            `Quick
+            Test_tool_team_session_step_routing
+              .test_runtime_inventory_uses_token_boundaries_for_model_tiers;
+          Alcotest.test_case
             "step-spawn-batch-preserves-explicit-hierarchical-assignments"
             `Quick Test_tool_team_session_step_followup.test_step_spawn_batch_preserves_explicit_hierarchical_assignments;
           Alcotest.test_case "reconcile-failed-spawn-actor-detaches-without-turn"

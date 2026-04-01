@@ -560,21 +560,16 @@ let test_http_client_fd_safety_contracts () =
        "Masc_http_client.make_closing_client")
 
 let test_router_contract_alignment () =
-  check bool "router schema describes heuristic routing" true
+  (* Petition schema uses subject_type as canonical field *)
+  check bool "petition schema accepts subject_type field" true
     (file_contains_pattern "lib/tool_council_internal_schemas.ml"
-       "deterministic heuristic classification and sparse tier selection");
-  check bool "router schema no longer claims MoE" true
-    (file_not_contains_pattern "lib/tool_council_internal_schemas.ml"
-       "MoE-style selection");
-  check bool "router handler accepts schema query field" true
+       {|("subject_type", `Assoc|});
+  check bool "petition handler reads subject_type from args" true
     (file_contains_pattern "lib/tool_council_oas.ml"
-       {|let by_schema = get_string args "query" ""|});
-  check bool "router handler keeps legacy input fallback" true
+       {|let by_schema = get_string args "subject_type" ""|});
+  check bool "petition handler keeps legacy subject fallback" true
     (file_contains_pattern "lib/tool_council_oas.ml"
-       {|else get_string args "input" ""|});
-  check bool "router module declares heuristic implementation" true
-    (file_contains_pattern "lib/council/router.ml"
-       "LLM-routed MoE system.")
+       {|else get_string args "subject" ""|})
 
 let test_runtime_precondition_contracts () =
   check bool "team session support resolves start env via helper" true

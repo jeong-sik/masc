@@ -96,7 +96,6 @@ for ml_file in "$LIB_DIR"/*.ml; do
     trpg_*) category="trpg" ;;
     a2a_*) category="a2a" ;;
     agent_swarm*) category="agent_swarm" ;;
-    perpetual*) category="perpetual" ;;
     mitosis*) category="lifecycle" ;;
     oas_*) category="oas_bridge" ;;
     context_*) category="context" ;;

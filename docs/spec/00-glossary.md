@@ -421,7 +421,7 @@ MASC에서 OAS 기반 모델 호출을 수행하는 통합 진입점. cascade_na
 OAS에서 LLM 제공자를 구분하는 타입. MASC에서는 `llama`(local), `glm`(GLM Cloud), `claude`, `gemini` 등이 사용된다.
 
 **Agent.run**
-OAS의 에이전트 실행 진입점. MASC는 자체 perpetual loop을 구현하지 않고 이 API를 통해 에이전트를 실행한다. Keeper 포함 모든 자율 에이전트 루프가 이 경로를 사용한다.
+OAS의 에이전트 실행 진입점. MASC의 always-on keeper loop은 이 API 위에서 실행된다. Keeper 포함 모든 자율 에이전트 루프가 이 경로를 사용한다.
 
 **OAS SSE Bridge**
 OAS 이벤트를 MASC SSE 스트림으로 전달하는 브릿지. OAS 에이전트 실행 중 발생하는 이벤트를 Room의 SSE 구독자에게 전달한다. `-> lib/oas_sse_bridge.mli`
@@ -454,7 +454,6 @@ Preact + HTM 기반 SPA. `/dashboard` 경로에서 제공된다. Hash 기반 라
 | persona | Agent | 에이전트 시스템에서 persona 개념 삭제됨. Agent만 존재 |
 | model_spec | cascade_name | LLM-Free Cascade 전환으로 model_spec 타입 제거. 문자열 cascade_name으로 대체 |
 | Cascade module (OCaml) | OAS Worker | Cascade.call 모듈 삭제됨. OAS Worker의 run_named으로 대체 |
-| perpetual loop | Agent.run | MASC 자체 perpetual loop 제거. OAS Agent.run 사용 |
 | completion_response | api_response | OAS 통합 시 api_response로 직접 반환 |
 
 ---

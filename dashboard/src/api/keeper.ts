@@ -235,7 +235,21 @@ async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promi
 async function safeKeeperLifecycle(url: string, fallbackError: string): Promise<KeeperLifecycleResponse> {
   try {
     const resp = await fetch(url, { method: 'POST', headers: jsonHeaders() })
-    return await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
+    const payload = await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
+    if (resp.ok) return payload
+
+    const error =
+      isRecord(payload) &&
+      typeof payload.error === 'string' &&
+      payload.error.trim() !== ''
+        ? payload.error
+        : `${fallbackError} (HTTP ${resp.status})`
+
+    if (isRecord(payload)) {
+      return { ...payload, ok: false, error }
+    }
+
+    return { ok: false, error }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : fallbackError }
   }

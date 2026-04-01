@@ -25,7 +25,7 @@ let () = test "create returns not-alive engine" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 1.0; min_s = 0.5; max_s = 5.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Perpetual
+    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   assert (not (Pulse.is_alive t));
@@ -50,7 +50,7 @@ let () = test "run fires startup demand beat and can shutdown" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 0.1; min_s = 0.05; max_s = 1.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Perpetual
+    ~lifecycle:Pulse.Always_on
     ~consumers:[consumer]
   in
   Eio.Switch.run @@ fun sw ->
@@ -87,7 +87,7 @@ let () = test "nudge triggers immediate beat" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 10.0; min_s = 5.0; max_s = 20.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Perpetual
+    ~lifecycle:Pulse.Always_on
     ~consumers:[consumer]
   in
   Eio.Switch.run @@ fun sw ->
@@ -159,7 +159,7 @@ let () = test "consumer error doesn't crash pulse" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.03; max_s = 1.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Perpetual
+    ~lifecycle:Pulse.Always_on
     ~consumers:[bad_consumer; good_consumer]
   in
   Eio.Switch.run @@ fun sw ->
@@ -207,7 +207,7 @@ let () = test "add and remove consumer dynamically" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.03; max_s = 1.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Perpetual
+    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   Eio.Switch.run @@ fun sw ->
@@ -257,7 +257,7 @@ let () = test "stats tracks beats and nudges" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 10.0; min_s = 5.0; max_s = 20.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Perpetual
+    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   Eio.Switch.run @@ fun sw ->
@@ -362,7 +362,7 @@ let () = test "nudge_coalescing" (fun () ->
     ~clock
     ~rhythm:{ Pulse.base_s = 100.0; min_s = 50.0; max_s = 200.0;
               quiet = (1, 6) }
-    ~lifecycle:Pulse.Perpetual
+    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   Eio.Switch.run @@ fun sw ->
@@ -436,7 +436,7 @@ let () = test "reenable previously disabled consumer" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.01; max_s = 1.0; quiet = (1, 6) }
-    ~lifecycle:Pulse.Perpetual
+    ~lifecycle:Pulse.Always_on
     ~consumers:[consumer]
   in
   Eio.Switch.run @@ fun sw ->
@@ -525,7 +525,7 @@ let () = test "set_rhythm changes interval" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:{ Pulse.base_s = 100.0; min_s = 50.0; max_s = 200.0; quiet = (0, 0) }
-    ~lifecycle:Pulse.Perpetual
+    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   Eio.Switch.run @@ fun sw ->
@@ -554,7 +554,7 @@ let () = test "get_rhythm returns current rhythm" (fun () ->
   let t = Pulse.create
     ~clock
     ~rhythm:Pulse.default_rhythm
-    ~lifecycle:Pulse.Perpetual
+    ~lifecycle:Pulse.Always_on
     ~consumers:[]
   in
   let r = Pulse.get_rhythm t in

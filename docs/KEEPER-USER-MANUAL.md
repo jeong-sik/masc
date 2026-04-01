@@ -510,7 +510,7 @@ OAS `Checkpoint.t`를 통해 keeper 상태가 저장된다.
 - compaction 시 (checkpoint 갱신)
 - heartbeat snapshot 시 (주기적)
 
-**저장 내용** (OAS Checkpoint 생성, perpetual_loop.ml / perpetual_oas.ml에 인라인):
+**저장 내용** (OAS Checkpoint 생성, keeper runtime 경로에 인라인):
 - `session_id`, `generation`, `turn_count`, `trace_id` (MASC 메타데이터 → OAS Context Session scope)
 - `messages` (MASC 메시지 → OAS 메시지 변환)
 - `system_prompt`
@@ -614,9 +614,9 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는 `docs/
 |------|------|------|
 | Persona template | `<PERSONAS_ROOT>/<name>/profile.json` | Blueprint (goal, instructions, soul_profile 등) |
 | TOML declaration | `<CONFIG_ROOT>/keepers/<name>.toml` | Persona 없이 선언적 정의 |
-| Persistent meta | `.masc/perpetual-keepers/<name>.json` | 런타임 상태 (turn 카운트, context ratio 등) |
+| Persistent meta | `.masc/keepers/<name>.json` | 런타임 상태 (turn 카운트, context ratio 등) |
 
-별도 keepalive 등록 레지스트리는 없다. keeper의 선언과 런타임 상태는 `.masc/perpetual-keepers/<name>.json`에 함께 저장되고, keeper는 durable always-on으로 취급된다. 멈춤은 설정값이 아니라 `paused` 또는 `keeper_down` 상태 전이로 표현한다.
+별도 keepalive 등록 레지스트리는 없다. keeper의 선언과 런타임 상태는 `.masc/keepers/<name>.json`에 함께 저장되고, keeper는 always-on runtime으로 취급된다. legacy keeper-meta 경로가 있으면 부팅 시 `.masc/keepers/`로 마이그레이션된다. 멈춤은 설정값이 아니라 `paused` 또는 `keeper_down` 상태 전이로 표현한다.
 
 repo-managed config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `<MASC_BASE_PATH>/.masc/config`, 그 다음 `~/.masc/config`, 마지막으로 repo `config/` fallback chain을 사용한다. `MASC_PERSONAS_DIR`는 persona만 별도 override한다. 즉 웹/대시보드는 파일을 직접 읽지 않고, 서버가 해석한 config root와 persona root를 사용한다.
 

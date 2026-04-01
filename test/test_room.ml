@@ -710,6 +710,21 @@ let test_cleanup_zombies_removes_broken_agent_file () =
       false (Sys.file_exists path)
   )
 
+let test_cleanup_zombies_preserves_non_json_files () =
+  with_test_env (fun config ->
+    (* Place a non-JSON file in the agents directory *)
+    let agents_path = Filename.concat (Room.masc_dir config) "agents" in
+    let path = Filename.concat agents_path ".gitkeep" in
+    let oc = open_out path in
+    output_string oc "";
+    close_out oc;
+    Alcotest.(check bool) "non-json file exists before GC"
+      true (Sys.file_exists path);
+    let _result = Room.cleanup_zombies config in
+    Alcotest.(check bool) "non-json file preserved by GC"
+      true (Sys.file_exists path)
+  )
+
 (* ============================================================ *)
 (* Agent Discovery / Capability Tests                           *)
 (* ============================================================ *)
@@ -1581,6 +1596,7 @@ let () =
       Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;
       Alcotest.test_case "cleanup spares recent keeper" `Quick test_cleanup_zombies_spares_recent_keeper;
       Alcotest.test_case "cleanup removes broken agent file" `Quick test_cleanup_zombies_removes_broken_agent_file;
+      Alcotest.test_case "cleanup preserves non-json files" `Quick test_cleanup_zombies_preserves_non_json_files;
     ];
 
     (* === Agent Discovery / Capability Tests === *)

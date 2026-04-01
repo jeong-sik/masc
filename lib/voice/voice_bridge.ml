@@ -885,7 +885,9 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0)
       | Unix.WEXITED 0 -> Ok ()
       | Unix.WEXITED code -> Error (Printf.sprintf "rec exit %d" code)
       | _ -> Error "rec process failed"
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
       Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
   in
   play_tone 440.0;

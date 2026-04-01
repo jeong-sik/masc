@@ -265,7 +265,7 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
 
 let handle_voice_ping_pong ctx args : tool_result =
   let keeper_name = get_string args "name" "" |> String.trim in
-  let max_turns = max 1 (get_int args "max_turns" 50) in
+  let max_turns = min 200 (max 1 (get_int args "max_turns" 50)) in
   let language_code =
     get_string_opt args "language_code" |> Option.map String.trim
   in
@@ -275,7 +275,13 @@ let handle_voice_ping_pong ctx args : tool_result =
   if keeper_name = "" then
     (false, "Error: keeper name is required")
   else
-    match ensure_keeper_exists ctx args with
+    let trimmed_args = match args with
+      | `Assoc fields ->
+          `Assoc (List.map (fun (k, v) ->
+            if k = "name" then (k, `String keeper_name) else (k, v)) fields)
+      | other -> other
+    in
+    match ensure_keeper_exists ctx trimmed_args with
     | Error err -> (false, err)
     | Ok _ ->
         let send_message text =

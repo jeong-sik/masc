@@ -5,7 +5,11 @@
 
 let default_max_len = 200
 
-(** Tools whose input/output must never be previewed. *)
+(** Tools whose input/output must never be previewed.
+
+    This uses substring (infix) matching, not [Tool_access_policy] exact-name
+    matching, because redaction must catch tool name variants and prefixed
+    aliases (e.g. [mcp__foo_auth_bar]) without enumerating every name. *)
 let denied_tool_infixes =
   ["_auth"; "_encryption"; "_credential"; "_secret"]
 

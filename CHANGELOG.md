@@ -1,6 +1,22 @@
 # Changelog
 
 
+## [2.202.0] - 2026-04-01
+
+### Added
+- **Observability provider contracts** — live contract tests for tool/provider (#4364, #3955).
+- **TUI god file split** — masc_tui.ml 1510줄 → 5 sub-modules (#4353).
+
+### Changed
+- **Dashboard nav overhaul** — navigation-first sidebar, remove SnapshotCard (#4363).
+- **Dashboard CSS cleanup** — remove duplicate chat.css (#4349, #3915 phase 1).
+- **README i18n** — translate Korean notes to English (#4354).
+- **MASC_LLAMA rename** — MASC_LLAMA_* → MASC_LOCAL_* env vars (#4350).
+
+### Fixed
+- **Voice listen surface** — add keeper_voice_listen to Keeper_internal surface (#4359).
+- **Dashboard bearer token** — include token in MCP protocol requests (#4362).
+
 ## [2.201.0] - 2026-04-01
 
 ### Added

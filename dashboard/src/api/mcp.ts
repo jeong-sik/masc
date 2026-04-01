@@ -7,10 +7,11 @@ import {
   MCP_INITIALIZED_NOTIFY_TIMEOUT_MS,
 } from '../config/constants'
 import { reportToolHostFailure } from './dashboard'
+import { showActionToast } from '../components/common/toast'
 
 // --- MCP Session Management ---
 
-const MCP_BLOCKED_MESSAGE = 'MCP 연결이 차단되었습니다. 로컬 환경에서만 사용할 수 있는 기능입니다.'
+const MCP_BLOCKED_MESSAGE = 'MCP 연결이 차단되었습니다.'
 const MCP_SESSION_BLOCKED = '__blocked__'
 
 let mcpSessionId: string | null = null
@@ -84,8 +85,19 @@ async function mcpPost(body: unknown, timeoutMs = DEFAULT_MCP_TIMEOUT_MS): Promi
   return res.text()
 }
 
+let blockedToastShown = false
+
 async function ensureSession(): Promise<void> {
   if (mcpSessionId === MCP_SESSION_BLOCKED) {
+    if (!blockedToastShown) {
+      blockedToastShown = true
+      showActionToast(
+        'MCP 연결이 차단되었습니다.',
+        { label: '재연결', onClick: () => { resetMcpClientState(); blockedToastShown = false } },
+        'error',
+        15000,
+      )
+    }
     throw new Error(MCP_BLOCKED_MESSAGE)
   }
   if (mcpSessionId) return

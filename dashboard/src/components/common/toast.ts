@@ -8,10 +8,16 @@ import { signal } from '@preact/signals'
 
 type ToastType = 'success' | 'warning' | 'error'
 
+interface ToastAction {
+  label: string
+  onClick: () => void
+}
+
 interface Toast {
   id: number
   message: string
   type: ToastType
+  action?: ToastAction
 }
 
 let _nextId = 0
@@ -43,6 +49,14 @@ export function showToast(message: string, type: ToastType = 'success', duration
   }, durationMs)
 }
 
+export function showActionToast(message: string, action: ToastAction, type: ToastType = 'error', durationMs = 12000): void {
+  const id = ++_nextId
+  toasts.value = [...toasts.value, { id, message, type, action }]
+  setTimeout(() => {
+    toasts.value = toasts.value.filter(t => t.id !== id)
+  }, durationMs)
+}
+
 function dismissToast(id: number) {
   toasts.value = toasts.value.filter(t => t.id !== id)
 }
@@ -60,6 +74,12 @@ export function ToastContainer() {
         >
           <span class="text-xs shrink-0 ${ICON_COLOR[t.type]}">${ICON[t.type]}</span>
           <span class="flex-1 text-[12px] text-[var(--text-body)] leading-[1.4]">${t.message}</span>
+          ${t.action ? html`
+            <button type="button"
+              class="shrink-0 text-[11px] px-2 py-0.5 rounded border border-[var(--card-border)] bg-[var(--white-6)] text-[var(--accent)] hover:bg-[var(--white-10)] cursor-pointer transition-colors duration-150"
+              onClick=${(e: Event) => { e.stopPropagation(); t.action!.onClick(); dismissToast(t.id) }}
+            >${t.action.label}</button>
+          ` : null}
           <button type="button"
             class="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer text-[11px] p-0.5 transition-colors duration-150"
             aria-label="알림 닫기"

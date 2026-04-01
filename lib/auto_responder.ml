@@ -142,17 +142,16 @@ let cascade_name_for_agent_type agent_type =
 
 (** Validate model response using structural fields, not text heuristics.
     Guardrail principle: accept unless there is a clear structural reason to reject.
-    - stop_reason=EndTurn with non-empty content → valid
-    - stop_reason=MaxTokens with non-empty content → valid (truncated but usable)
-    - Unknown stop reason with content → valid (permissive: give autonomy)
-    - Empty content → reject *)
+    Permissive by default: any non-empty content with any stop_reason is valid.
+    Invariant: API errors are caught upstream by Oas_worker.run_named returning Error;
+    the accept callback only receives responses where the API call succeeded. *)
 let model_response_is_valid (resp : Oas_response.api_response) =
   let text = String.trim (Oas_response.text_of_response resp) in
   String.length text > 0
   && (match resp.stop_reason with
       | Agent_sdk.Types.EndTurn | Agent_sdk.Types.MaxTokens
-      | Agent_sdk.Types.StopSequence | Agent_sdk.Types.StopToolUse -> true
-      | Agent_sdk.Types.Unknown _ -> String.length text > 5)
+      | Agent_sdk.Types.StopSequence | Agent_sdk.Types.StopToolUse
+      | Agent_sdk.Types.Unknown _ -> true)
 
 let call_model_direct_sync ~agent_type ~prompt =
   let cascade_name = cascade_name_for_agent_type agent_type in

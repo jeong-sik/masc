@@ -509,6 +509,30 @@ let nonempty_env name =
 
 let env_present name = Option.is_some (nonempty_env name)
 
+(** Extract the env var name from an adapter's auth_mode, if any. *)
+let auth_env_var_of_adapter (adapter : adapter) =
+  match adapter.auth_mode with
+  | Api_key env_name -> Some env_name
+  | _ -> None
+
+(** Check whether a provider (by canonical name or alias) has its
+    auth credential configured.  Returns [true] for [No_auth] providers
+    (e.g. llama). *)
+let provider_auth_available label =
+  match resolve_direct_adapter label with
+  | Some adapter ->
+      (match auth_env_var_of_adapter adapter with
+       | Some env_name -> env_present env_name
+       | None -> true)
+  | None -> false
+
+(** Derive the auth_kind string for a provider by looking up its
+    adapter config, instead of hardcoding vendor env var names. *)
+let auth_kind_for_canonical_name name =
+  match resolve_direct_adapter name with
+  | Some adapter -> string_of_auth_mode adapter.auth_mode
+  | None -> "unknown"
+
 let bare_ollama_migration_message () =
   "Bare `ollama` is no longer supported. Use `default` for normal selection, or `llama:<model>` / another explicit provider:model label as an override."
 
@@ -589,39 +613,61 @@ let default_model_label_for_family = function
   | Custom_family _ ->
       Error "Custom provider requires explicit runtime_model"
 
-let cloud_provider_auto_labels_opt () =
-  [
-    (if env_present "ZAI_API_KEY" then Some "glm:auto" else None);
-    (if gemini_direct_available () then Some "gemini:auto" else None);
-    (if env_present "ANTHROPIC_API_KEY" then Some "claude:auto" else None);
-    (if env_present "OPENAI_API_KEY" then Some "openai:auto" else None);
-  ]
+(** Build the "provider:auto" label for each adapter that has auth
+    credentials present.  Used by preferred_*_model_labels to avoid
+    hardcoding vendor env var names. *)
+let auto_label_for_adapter (adapter : adapter) =
+  let is_available =
+    match auth_env_var_of_adapter adapter with
+    | Some env_name -> env_present env_name
+    | None -> true  (* No_auth providers always available *)
+  in
+  if not is_available then None
+  else
+    match default_model_label_for_family adapter.provider_family with
+    | Ok label -> Some label
+    | Error _ -> None
+
+(** Cloud adapters that participate in auto-detection (excludes llama
+    which requires explicit model config, and openrouter which requires
+    explicit runtime_model). *)
+let auto_detect_adapters =
+  List.filter
+    (fun (adapter : adapter) ->
+      adapter.runtime_kind = Direct_api
+      && adapter.provider_family <> OpenRouter_family)
+    direct_adapters
 
 let preferred_execution_model_labels () =
+  let explicit = [
+    (match configured_default_model_label_result () with
+    | Ok label -> Some label
+    | Error _ -> None);
+    (match explicit_llama_model_label_result () with
+    | Ok label -> Some label
+    | Error _ -> None);
+    (* Provider auto-detection: iterate adapters, check auth
+       availability from config, delegate model selection to
+       OAS cascade via "provider:auto". *)
+    (if gemini_direct_available () then Some "gemini:auto" else None);
+  ] in
   Json_util.dedupe_keep_order
-    (List.filter_map
-       Fun.id
-       ([
-         (match configured_default_model_label_result () with
-         | Ok label -> Some label
-         | Error _ -> None);
-         (match explicit_llama_model_label_result () with
-         | Ok label -> Some label
-         | Error _ -> None);
-       ] @ cloud_provider_auto_labels_opt ()))
+    (List.filter_map Fun.id explicit
+     @ List.filter_map auto_label_for_adapter auto_detect_adapters)
 
 let preferred_verifier_model_labels () =
+  let explicit = [
+    (match configured_verifier_model_label_result () with
+    | Ok label -> Some label
+    | Error _ -> None);
+    (match explicit_llama_model_label_result () with
+    | Ok label -> Some label
+    | Error _ -> None);
+    (if gemini_direct_available () then Some "gemini:auto" else None);
+  ] in
   Json_util.dedupe_keep_order
-    (List.filter_map
-       Fun.id
-       ([
-         (match configured_verifier_model_label_result () with
-         | Ok label -> Some label
-         | Error _ -> None);
-         (match explicit_llama_model_label_result () with
-         | Ok label -> Some label
-         | Error _ -> None);
-       ] @ cloud_provider_auto_labels_opt ()))
+    (List.filter_map Fun.id explicit
+     @ List.filter_map auto_label_for_adapter auto_detect_adapters)
 
 let default_model_labels_result () =
   let labels = preferred_execution_model_labels () in

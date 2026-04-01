@@ -124,6 +124,13 @@ let governance_purge_fn
   : (string -> int * int) ref
   = ref (fun _base_path -> (0, 0))
 
+(** Invalidate dashboard execution cache on task mutation (add, transition).
+    Wired by server bootstrap to avoid circular dependency between
+    Room sub-modules and server dashboard surfaces. *)
+let on_task_mutation_fn
+  : (unit -> unit) ref
+  = ref (fun () -> ())
+
 (** Auto-subscribe agent to messages on join — wraps Subscriptions.SubscriptionStore. *)
 let subscribe_messages_fn
   : (subscriber:string -> unit) ref

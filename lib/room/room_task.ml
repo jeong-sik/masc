@@ -101,6 +101,7 @@ let add_task config ~title ~priority ~description =
           ]);
 
     let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
+    !Room_hooks.on_task_mutation_fn ();
     Printf.sprintf "✅ Added %s: %s" task_id title)
 
 (** Add task with a required role constraint — file-locked *)
@@ -190,6 +191,7 @@ let batch_add_tasks config tasks =
       let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
       let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
       let _ = broadcast config ~from_agent:"system" ~content:msg in
+      !Room_hooks.on_task_mutation_fn ();
       Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

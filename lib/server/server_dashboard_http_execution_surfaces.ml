@@ -79,6 +79,14 @@ let _execution_cache =
         );
       ])
 
+(** Invalidate the execution surface cache so the next
+    [/api/v1/dashboard/execution] request recomputes fresh data.
+    Call after task mutations (add, transition, cancel) to avoid
+    serving stale backlog state for up to [ttl] seconds. *)
+let invalidate_execution_cache () =
+  invalidate_cached_surface _execution_cache;
+  Dashboard_cache.invalidate "execution:default:light"
+
 (** Bypass the proactive warm-up guard so tests that call
     [dashboard_room_truth_http_json] get the full response instead of
     the "initializing" short-circuit. *)

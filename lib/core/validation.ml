@@ -46,8 +46,8 @@ module Agent_id : sig
 end = struct
   type t = string
 
-  (* Only allow alphanumeric, dash, underscore *)
-  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+  (* Allow alphanumeric, dash, underscore, colon (for namespacing e.g. keeper:name) *)
+  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_:-]+$|} |> Re.compile
 
   let validate s =
     let reject reason =
@@ -63,7 +63,7 @@ end = struct
     else if String.contains s '.' && String.sub s 0 2 = ".." then
       reject "agent_id cannot contain path traversal"
     else if not (Re.execp valid_pattern s) then
-      reject (Printf.sprintf "agent_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, - allowed)" s)
+      reject (Printf.sprintf "agent_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
     else
       Ok s
 

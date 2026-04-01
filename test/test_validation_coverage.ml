@@ -41,6 +41,11 @@ let test_agent_id_valid_mixed () =
   | Ok t -> check string "mixed" "Agent-X_42" (Validation.Agent_id.to_string t)
   | Error e -> fail e
 
+let test_agent_id_valid_colon_namespace () =
+  match Validation.Agent_id.validate "keeper:keeper-test-98295-0" with
+  | Ok t -> check string "colon namespace" "keeper:keeper-test-98295-0" (Validation.Agent_id.to_string t)
+  | Error e -> fail e
+
 let test_agent_id_reject_empty () =
   match Validation.Agent_id.validate "" with
   | Ok _ -> fail "should reject empty"
@@ -213,6 +218,7 @@ let () =
       test_case "with underscore" `Quick test_agent_id_valid_with_underscore;
       test_case "numeric" `Quick test_agent_id_valid_numeric;
       test_case "mixed" `Quick test_agent_id_valid_mixed;
+      test_case "colon namespace" `Quick test_agent_id_valid_colon_namespace;
     ];
     "agent_id.reject", [
       test_case "empty" `Quick test_agent_id_reject_empty;

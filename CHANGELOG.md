@@ -1,6 +1,16 @@
 # Changelog
 
 
+## [2.213.0] - 2026-04-01
+
+### Fixed
+- **Council mutex** — `Eio.Mutex` for consensus sessions Hashtbl and router Stats (#4472, #4433).
+- **Encryption tests** — `decode_hex_key` extracted, `InvalidHexFormat` error type, 7 tests (#4465).
+- **Voice review** — `no_audio` status handling, `Eio.Cancel.Cancelled` re-raise, keeper name validation (#4456).
+
+### Changed
+- **Tool gate OAS migration** — `tool_gate.ml`/`zone_tbl.ml` deleted, migrated to OAS `Tool_op` (-1,327 lines) (#4471).
+
 ## [2.212.0] - 2026-04-01
 
 ### Fixed

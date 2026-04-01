@@ -23,16 +23,19 @@ let test_relevance_pass () =
   check bool "relevance passes for normal content" true (is_pass result.relevance)
 
 let test_relevance_too_short () =
+  (* Short but non-empty content passes — agents should not be penalized
+     for concise responses like "ok", "done", "hi". Only empty/whitespace fails. *)
   let result = Pv.verify ~content:"hi" in
-  check bool "too short fails relevance" true (is_fail result.relevance)
+  check bool "short content passes relevance" true (is_pass result.relevance)
 
 let test_relevance_whitespace_only () =
   let result = Pv.verify ~content:"       \n\n\t\t   " in
   check bool "whitespace only fails relevance" true (is_fail result.relevance)
 
 let test_relevance_filler_short () =
+  (* Short filler now warns instead of failing — reduced Thompson Sampling penalty. *)
   let result = Pv.verify ~content:"hello world" in
-  check bool "short filler fails relevance" true (is_fail result.relevance)
+  check bool "short filler warns relevance" true (is_warn result.relevance)
 
 let test_relevance_filler_long () =
   let result = Pv.verify ~content:"This is a hello world test with more text around it to pass length check." in
@@ -94,7 +97,8 @@ let test_overall_pass () =
   check bool "acceptable" true (Pv.is_acceptable result)
 
 let test_overall_fail_propagation () =
-  let result = Pv.verify ~content:"hi" in
+  (* Use empty content (only whitespace) to trigger a real Fail. *)
+  let result = Pv.verify ~content:"   \t\n  " in
   check bool "fail propagates to overall" true (is_fail result.overall);
   check bool "not acceptable" false (Pv.is_acceptable result)
 

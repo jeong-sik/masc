@@ -53,7 +53,7 @@ const PURIFY_CONFIG = {
   ],
   ALLOWED_ATTR: [
     'href', 'title', 'target', 'rel', 'src', 'alt', 'class',
-    'align', 'style',
+    'align',
   ],
 }
 
@@ -71,7 +71,7 @@ function sanitizeMermaidSvg(raw: string): SVGElement | null {
   const parsed = new DOMParser().parseFromString(safeSvg, 'image/svg+xml')
   const svg = parsed.documentElement
   if (!svg || svg.tagName.toLowerCase() !== 'svg') return null
-  return document.importNode(svg, true) as SVGElement
+  return document.importNode(svg, true) as unknown as SVGElement
 }
 
 // ── Parse markdown with <think> block extraction ─────────────
@@ -130,12 +130,8 @@ export function Markdown({ text, class: className }: { text: string; class?: str
             const div = document.createElement('div')
             div.className = 'mermaid-rendered'
             const safeSvg = sanitizeMermaidSvg(svg)
-            if (safeSvg) {
-              div.appendChild(safeSvg)
-            } else {
-              pre.replaceWith(div)
-              continue
-            }
+            if (!safeSvg) continue // keep original code block on sanitization failure
+            div.appendChild(safeSvg)
             pre.replaceWith(div)
           }
         } catch {

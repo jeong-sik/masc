@@ -14,7 +14,6 @@ import type {
   BoardSortMode,
   KeeperLifecycleState,
   Goal,
-  MdalLoop,
   DashboardExecutionSummary,
   DashboardExecutionQueueItem,
   DashboardExecutionSessionBrief,
@@ -49,7 +48,6 @@ import {
   normalizeExecutionContinuityBrief,
   mergeMessages,
   normalizeServerStatus, mergeServerStatus,
-  normalizeMdalLoop,
 } from './store-normalizers'
 
 // --- Shell counts (lightweight fallback from /dashboard/shell) ---
@@ -160,24 +158,16 @@ export const oasHealthSummary: ReadonlySignal<{
   totalEvents: oasTotalEvents.value,
 }))
 
-// --- MDAL state ---
-
-export const mdalLoops = signal<Map<string, MdalLoop>>(new Map())
-export const mdalSnapshotState = signal<'unknown' | 'idle' | 'ready' | 'error'>('unknown')
-export const lastMdalError = signal<string | null>(null)
-
 // --- Loading flags ---
 
 export const dashboardLoading = signal(false)
 export const boardLoading = signal(false)
-export const mdalLoading = signal(false)
 
 // --- Refresh timestamps ---
 
 export const lastDashboardRefreshAt = signal<string | null>(null)
 export const lastBoardRefreshAt = signal<string | null>(null)
 export const lastGoalsRefreshAt = signal<string | null>(null)
-export const lastMdalRefreshAt = signal<string | null>(null)
 
 // --- Execution TTL guard (Phase 1C) ---
 
@@ -301,10 +291,6 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
 
 function applyPlanningEnvelope(data: {
   goals?: unknown[]
-  mdal?: {
-    loops?: unknown[]
-    error?: string
-  }
 }): void {
   goals.value = (Array.isArray(data.goals) ? data.goals : [])
     .map((row): Goal | null => {
@@ -333,22 +319,6 @@ function applyPlanningEnvelope(data: {
       }
     })
     .filter((row): row is Goal => row !== null)
-
-  const nextLoops = new Map<string, MdalLoop>()
-  const rows = Array.isArray(data.mdal?.loops) ? data.mdal.loops : []
-  for (const row of rows) {
-    const loop = normalizeMdalLoop(row)
-    if (!loop) continue
-    nextLoops.set(loop.loop_id, loop)
-  }
-  mdalLoops.value = nextLoops
-  lastMdalError.value = typeof data.mdal?.error === 'string' ? data.mdal.error : null
-  mdalSnapshotState.value =
-    lastMdalError.value
-      ? 'error'
-      : nextLoops.size === 0
-        ? 'idle'
-        : 'ready'
 }
 
 export async function refreshShell(opts?: RefreshOptions): Promise<void> {
@@ -485,24 +455,15 @@ export async function refreshBoard(): Promise<void> {
 
 export async function refreshGoals(): Promise<void> {
   goalsLoading.value = true
-  mdalLoading.value = true
   try {
     const data = await fetchDashboardPlanning()
     applyPlanningEnvelope(data)
     lastGoalsRefreshAt.value = new Date().toISOString()
-    lastMdalRefreshAt.value = new Date().toISOString()
   } catch (err) {
     console.warn('[Planning] fetch error:', err)
-    mdalSnapshotState.value = 'error'
-    lastMdalError.value = err instanceof Error ? err.message : String(err)
   } finally {
     goalsLoading.value = false
-    mdalLoading.value = false
   }
-}
-
-export async function refreshMdal(): Promise<void> {
-  return refreshGoals()
 }
 
 export * from './store-normalizers'

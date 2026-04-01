@@ -22,10 +22,6 @@ export type SSEEventType =
   | 'client_input_approved'
   | 'client_input_rejected'
   | 'client_input_updated'
-  | 'mdal_started'
-  | 'mdal_iteration'
-  | 'mdal_completed'
-  | 'mdal_stopped'
   | 'governance_param_changed'
   // OAS bridge events (relayed from Event_bus via oas_sse_bridge)
   | 'oas:masc:autonomy:agent_selected'
@@ -79,17 +75,6 @@ export interface SSEEvent {
   reason?: string
   // OAS bridge payload (generic container for Event_bus events)
   payload?: Record<string, unknown>
-  // MDAL event fields
-  loop_id?: string
-  profile?: string
-  baseline?: number
-  target?: string
-  final_metric?: number
-  iterations?: number
-  iteration?: number
-  metric_before?: number
-  metric_after?: number
-  delta?: number
 }
 
 // --- Journal ---

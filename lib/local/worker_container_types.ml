@@ -60,11 +60,9 @@ type worker_container_meta = {
 
 let worker_container_version = 1
 
-let jsonrpc_id = ref 1000
-
+let jsonrpc_id = Atomic.make 1000
 let next_jsonrpc_id () =
-  incr jsonrpc_id;
-  !jsonrpc_id
+  Atomic.fetch_and_add jsonrpc_id 1
 
 let strip_mcp_prefix name =
   let prefix = "mcp__masc__" in

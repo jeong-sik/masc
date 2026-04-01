@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { KeeperConversationEntry } from '../../types'
-import { ChatTranscript } from './primitives'
+import { ChatComposer, ChatTranscript } from './primitives'
 
 function entry(
   overrides: Partial<KeeperConversationEntry> & Pick<KeeperConversationEntry, 'id' | 'text'>,
@@ -99,5 +99,26 @@ describe('ChatTranscript', () => {
     const bodies = [...container.querySelectorAll('.whitespace-pre-wrap')]
     const latestBody = (bodies[bodies.length - 1]?.textContent ?? '').trim()
     expect(latestBody).toBe('')
+  })
+
+  it('does not show streaming ellipsis before elapsed time starts', () => {
+    render(
+      html`<${ChatComposer}
+        draft="안녕"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${true}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    const buttons = [...container.querySelectorAll('button')]
+    const sendButton = buttons.find(button => button.textContent?.includes('보내기') || button.textContent?.includes('응답 중'))
+    expect(sendButton).not.toBeUndefined()
+    const label = sendButton?.textContent ?? ''
+    expect(label).toContain('응답 중')
+    expect(label).not.toContain('...')
   })
 })

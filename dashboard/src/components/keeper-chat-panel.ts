@@ -73,11 +73,11 @@ export function normalizeKeeperChatErrorValue(value: unknown): string {
 }
 
 function cancelStream(): void {
-  if (activeAbort) {
-    activeAbort.abort()
-    activeAbort = null
-    streaming.value = false
-  }
+  if (activeAbort) activeAbort.abort()
+  activeAbort = null
+  streaming.value = false
+  streamBuffer.value = ''
+  streamStartedAt.value = null
 }
 
 async function sendChat(keeperName: string): Promise<void> {

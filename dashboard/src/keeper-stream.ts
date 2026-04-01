@@ -39,6 +39,11 @@ export function applyKeeperStreamEvent(
   assistantEntryId: string,
   event: KeeperChatStreamEvent,
 ): string | null {
+  const applyTextDelta = (payload: unknown): void => {
+    if (typeof payload !== 'string') return
+    if (payload) appendAssistantDelta(keeperName, assistantEntryId, payload)
+  }
+
   switch (event.type) {
     case 'RUN_STARTED':
       setAssistantStreamState(keeperName, assistantEntryId, 'opening', 'sending')
@@ -47,8 +52,11 @@ export function applyKeeperStreamEvent(
       setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
       return null
     case 'TEXT_MESSAGE_CONTENT': {
-      const delta = typeof event.delta === 'string' ? event.delta : ''
-      if (delta) appendAssistantDelta(keeperName, assistantEntryId, delta)
+      applyTextDelta(event.delta)
+      return null
+    }
+    case 'TEXT_DELTA': {
+      applyTextDelta(event.delta)
       return null
     }
     case 'TEXT_MESSAGE_END':

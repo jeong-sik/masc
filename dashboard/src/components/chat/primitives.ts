@@ -375,7 +375,7 @@ export function ChatComposer({
   }, [streaming, streamStartedAt])
 
   const streamLabel = streaming
-    ? `응답 중${elapsed > 0 ? ` ${elapsed}s` : '...'}`
+    ? `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
     : '보내기'
   const isStreamWarning = streaming && elapsed > 60
 

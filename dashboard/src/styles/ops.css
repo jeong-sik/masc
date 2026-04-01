@@ -1,71 +1,48 @@
-/* ── Ops Tab ───────────────────────────────────────────────── */
+/* Ops Tab — ops-banner, ops-action-guide, ops-priority, ops-lane, ops-stat, ops-controls, ops-guidance. Extracted for #3915. */
 
-.ops-banner.error {
-  background: var(--bad-12);
-  border-color: rgba(239, 68, 68, 0.34);
-  color: #fecaca;
+/* ── Ops Tab (merged from ops.css) ─────────────────────── */
+
+@utility ops-banner {
+  &.error { background: var(--bad-12); border-color: rgba(239, 68, 68, 0.34); color: #fecaca; }
+  &.warn { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.28); color: #fde68a; }
+  &.info { background: var(--cyan-12); border-color: rgba(34, 211, 238, 0.26); color: #cffafe; }
 }
 
-.ops-banner.warn {
-  background: rgba(245, 158, 11, 0.12);
-  border-color: rgba(245, 158, 11, 0.28);
-  color: #fde68a;
-}
+/* ops-action-guide-item hover/tone variants: folded into @utility ops-action-guide-item above */
+/* ops-priority-card tone variants: folded into @utility ops-priority-card above */
 
-.ops-banner.info {
-  background: var(--cyan-12);
-  border-color: rgba(34, 211, 238, 0.26);
-  color: #cffafe;
-}
-
-.ops-action-guide-item {
-  transition: filter 0.15s;
-}
-
-.ops-action-guide-item:hover {
-  filter: brightness(1.15);
-}
-
-.ops-action-guide-item.bad { background: var(--bad-12); color: #fca5a5; }
-.ops-action-guide-item.warn { background: var(--warn-12); color: var(--warn); }
-.ops-action-guide-item.ok { background: var(--ok-8); color: var(--ok); }
-
-.ops-priority-card.ok { border-color: var(--ok-24); }
-.ops-priority-card.warn { border-color: var(--warn-28); }
-.ops-priority-card.bad { border-color: rgba(248, 113, 113, 0.34); }
-
-.ops-lane-panel {
+@utility ops-lane-panel {
   background:
-    linear-gradient(180deg, rgba(13, 22, 40, 0.76), rgba(13, 22, 40, 0.62)),
+    linear-gradient(180deg, rgba(13, 22, 40, 0.82), rgba(13, 22, 40, 0.65)),
     radial-gradient(circle at top right, var(--accent-10), transparent 42%);
+  border: 1px solid var(--border-slate-12);
+  border-radius: var(--radius-md);
+  padding: 16px;
 }
 
-.ops-stat.ok { border-color: var(--ok-35); }
-.ops-stat.warn { border-color: rgba(251, 191, 36, 0.35); }
+/* ops-stat tone variants: folded into @utility ops-stat above */
 
-.ops-control-summary::-webkit-details-marker {
-  display: none;
+.ops-control-summary::-webkit-details-marker,
+.ops-archive-panel[open] .ops-archive-summary::before {
+  transform: rotate(90deg);
 }
 
-.ops-guidance-card.ok {
-  border-color: var(--ok-35);
-  background: rgba(74, 222, 128, 0.06);
+@utility ops-guidance-card {
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  transition: border-color 0.15s, background 0.15s;
+  &.ok { border-color: var(--ok-35); background: rgba(74, 222, 128, 0.06); border-left: 3px solid var(--ok); }
+  &.warn { border-color: var(--warn-30); background: rgba(251, 191, 36, 0.06); border-left: 3px solid var(--warn); }
+  &.bad { border-color: var(--bad-30); background: rgba(248, 113, 113, 0.06); border-left: 3px solid var(--bad-light); }
 }
 
-.ops-guidance-card.warn {
-  border-color: var(--warn-30);
-  background: rgba(251, 191, 36, 0.06);
-}
-
-.ops-guidance-card.bad {
-  border-color: var(--bad-30);
-  background: rgba(248, 113, 113, 0.06);
-}
-
-.ops-entity-card:hover,
-.ops-entity-card.active {
-  border-color: rgba(71, 184, 255, 0.42);
-  background: var(--accent-8);
+@utility ops-entity-card {
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  &:hover, &.active {
+    border-color: rgba(71, 184, 255, 0.42);
+    background: var(--accent-8);
+    box-shadow: 0 0 0 1px rgba(71, 184, 255, 0.12);
+  }
 }
 
 @media (max-width: 1200px) {

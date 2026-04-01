@@ -1,22 +1,26 @@
-/* ── Command Swarm + Orchestra ────────────────────────────── */
+/* Command Swarm — swarm-story-card, orchestra SVG fills/strokes/nodes,
+   swarm-health-seg, swarm-lane-strip, swarm-motion-dot, swarm-event-dot.
+   Extracted from global.css for #3915. */
 
-.swarm-story-card {
+/* ═══ Command Swarm ═══ */
+
+@utility swarm-story-card {
   background:
     linear-gradient(180deg, rgba(15,23,42,0.96), rgba(15,23,42,0.78)),
     linear-gradient(135deg, var(--cyan-16), transparent 55%);
+  &.ok { border-color: var(--ok-20); }
+  &.warn { border-color: var(--warn-soft); }
+  &.bad { border-color: rgba(248,113,113,0.24); }
 }
 
-.swarm-story-card.ok { border-color: var(--ok-20); }
-.swarm-story-card.warn { border-color: var(--warn-soft); }
-.swarm-story-card.bad { border-color: rgba(248,113,113,0.24); }
-
-.orchestra-canvas-wrap {
+@utility orchestra-canvas-wrap {
   background:
     radial-gradient(circle at top, var(--cyan-12), transparent 42%),
     radial-gradient(circle at 20% 80%, var(--blue-400-8), transparent 35%),
     linear-gradient(180deg, rgba(15,23,42,0.98), rgba(2,6,23,0.98));
 }
 
+/* orchestra-canvas-wrap::after: pseudo-element, kept as raw CSS */
 .orchestra-canvas-wrap::after {
   content: '';
   position: absolute;
@@ -26,28 +30,29 @@
 }
 
 /* SVG fills/strokes */
-.orchestra-grid { fill: rgba(255,255,255,0.015); }
-.orchestra-grid-line { stroke: rgba(125,211,252,0.06); stroke-width: 1; }
+@utility orchestra-grid { fill: rgba(255,255,255,0.015); }
+@utility orchestra-grid-line { stroke: rgba(125,211,252,0.06); stroke-width: 1; }
 
-.orchestra-edge {
+@utility orchestra-edge {
   fill: none;
   stroke: rgba(148,163,184,0.28);
   stroke-width: 2;
   transition: stroke-width 0.2s ease, opacity 0.2s ease;
   opacity: 0.62;
+  &.ok { stroke: var(--ok-35); }
+  &.warn { stroke: rgba(251,191,36,0.42); }
+  &.bad { stroke: rgba(248,113,113,0.5); }
+  &.active { stroke-width: 3; opacity: 0.96; }
+  &.animated { stroke-dasharray: 10 10; animation: orchestraFlow 3.2s linear infinite; }
 }
 
-.orchestra-edge.ok { stroke: var(--ok-35); }
-.orchestra-edge.warn { stroke: rgba(251,191,36,0.42); }
-.orchestra-edge.bad { stroke: rgba(248,113,113,0.5); }
-.orchestra-edge.active { stroke-width: 3; opacity: 0.96; }
-.orchestra-edge.animated {
-  stroke-dasharray: 10 10;
-  animation: orchestraFlow 3.2s linear infinite;
+@utility orchestra-node-body {
+  fill: rgba(15,23,42,0.88);
+  stroke: rgba(148,163,184,0.26);
+  stroke-width: 1.5;
 }
 
-.orchestra-node-body,
-.orchestra-room-ring {
+@utility orchestra-room-ring {
   fill: rgba(15,23,42,0.88);
   stroke: rgba(148,163,184,0.26);
   stroke-width: 1.5;
@@ -68,21 +73,23 @@
   filter: drop-shadow(0 0 10px rgba(34,211,238,0.25));
 }
 
+/* orchestra-room-ring variants and orchestra node styles: these need raw CSS for compound selectors */
 .orchestra-room-ring.outer { fill: rgba(15,23,42,0.9); }
 .orchestra-room-ring.inner { fill: rgba(14,116,144,0.12); }
-.orchestra-room-glyph { font-size: 30px; fill: #67e8f9; font-weight: 700; }
-.orchestra-room-label,
-.orchestra-node-label { fill: var(--text-near-white); font-size: var(--fs-base); font-weight: 600; }
-.orchestra-node-subtitle,
-.orchestra-node-status { fill: rgba(226,232,240,0.62); font-size: var(--fs-2xs); }
-.orchestra-node-glyph { fill: #7dd3fc; font-size: var(--fs-lg); }
+@utility orchestra-room-glyph { font-size: 30px; fill: #67e8f9; font-weight: 700; }
+@utility orchestra-room-label { fill: var(--text-near-white); font-size: var(--fs-base); font-weight: 600; }
+@utility orchestra-node-label { fill: var(--text-near-white); font-size: var(--fs-base); font-weight: 600; }
+@utility orchestra-node-subtitle { fill: rgba(226,232,240,0.62); font-size: var(--fs-2xs); }
+@utility orchestra-node-status { fill: rgba(226,232,240,0.62); font-size: var(--fs-2xs); }
+@utility orchestra-node-glyph { fill: #7dd3fc; font-size: var(--fs-lg); }
+/* orchestra-node compound selectors: raw CSS */
 .orchestra-node.worker .orchestra-node-body { rx: 20px; }
 .orchestra-node.session .orchestra-node-body { fill: rgba(15,23,42,0.88); }
 .orchestra-node.lane .orchestra-node-body { fill: rgba(8,47,73,0.72); }
 .orchestra-node.keeper .orchestra-node-body { fill: rgba(48,16,96,0.34); }
 
-.orchestra-signal-link { stroke: var(--warn-20); stroke-dasharray: 5 5; }
-.orchestra-signal-dot {
+@utility orchestra-signal-link { stroke: var(--warn-20); stroke-dasharray: 5 5; }
+@utility orchestra-signal-dot {
   fill: rgba(15,23,42,0.94);
   stroke: rgba(251,191,36,0.42);
   stroke-width: 2;
@@ -94,33 +101,30 @@
 .orchestra-signal-node.warn .orchestra-signal-dot {
   animation: orchestraPulse 1.4s ease-in-out infinite;
 }
-.orchestra-signal-glyph { fill: var(--text-near-white); font-size: var(--fs-xs); font-weight: 700; }
-
-@keyframes orchestraFlow {
-  to { stroke-dashoffset: -40; }
-}
-
-@keyframes orchestraPulse {
-  0%, 100% { transform: scale(1); opacity: 0.92; }
-  50% { transform: scale(1.06); opacity: 1; }
-}
+@utility orchestra-signal-glyph { fill: var(--text-near-white); font-size: var(--fs-xs); font-weight: 700; }
 
 /* ── SwarmHealthBar ────────────────────────────── */
-.swarm-health-seg { transition: flex 0.3s ease; }
-.swarm-health-seg.moving { background: var(--ok); }
-.swarm-health-seg.waiting { background: var(--warn); }
-.swarm-health-seg.stalled { background: var(--bad); }
-.swarm-health-seg.terminal { background: #556; }
+@utility swarm-health-seg {
+  transition: flex 0.3s ease;
+  &.moving { background: var(--ok); }
+  &.waiting { background: var(--warn); }
+  &.stalled { background: var(--bad); }
+  &.terminal { background: #556; }
+}
 
 /* ── SwarmLaneStrip ────────────────────────────── */
-.swarm-lane-strip.ok { border-left-color: var(--ok); }
-.swarm-lane-strip.warn { border-left-color: var(--warn); }
-.swarm-lane-strip.bad { border-left-color: var(--bad); }
+@utility swarm-lane-strip {
+  &.ok { border-left-color: var(--ok); }
+  &.warn { border-left-color: var(--warn); }
+  &.bad { border-left-color: var(--bad); }
+}
 
-.swarm-motion-dot.moving { animation: workingPulse 1.5s ease-in-out infinite; background: var(--ok); }
-.swarm-motion-dot.stalled { animation: warnBlink 1s ease-in-out infinite; background: var(--bad); }
-.swarm-motion-dot.waiting { background: var(--warn); }
-.swarm-motion-dot.terminal { background: #556; }
+@utility swarm-motion-dot {
+  &.moving { animation: workingPulse 1.5s ease-in-out infinite; background: var(--ok); }
+  &.stalled { animation: warnBlink 1s ease-in-out infinite; background: var(--bad); }
+  &.waiting { background: var(--warn); }
+  &.terminal { background: #556; }
+}
 
 .swarm-lane-track span {
   display: block;
@@ -137,6 +141,9 @@
 }
 
 /* ── SwarmEventRail ────────────────────────────── */
-.swarm-event-dot.ok { background: var(--ok); }
-.swarm-event-dot.warn { background: var(--warn); }
-.swarm-event-dot.bad { background: var(--bad); }
+@utility swarm-event-dot {
+  &.ok { background: var(--ok); }
+  &.warn { background: var(--warn); }
+  &.bad { background: var(--bad); }
+}
+

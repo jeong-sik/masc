@@ -1,0 +1,69 @@
+/* Live Monitor — pulse-*, activity-*, focus-agent-*, live-stat-*. Extracted from global.css for #3915. */
+
+/* ── Live Monitor (merged from live.css) ───────────────── */
+
+@utility pulse-bubble {
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  &:hover { background: var(--white-8); }
+}
+
+@utility pulse-working {
+  border-color: var(--ok-35);
+  animation: livePulse 2s ease-in-out infinite;
+}
+
+@utility pulse-selected {
+  border-color: rgba(96,165,250,0.6);
+  background: var(--blue-400-8);
+  box-shadow: 0 0 8px var(--blue-400-15);
+}
+
+@utility activity-filter-btn {
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  &.active { color: rgba(255,255,255,0.85); border-color: var(--white-20); background: var(--white-6); }
+  &.live-event-broadcast.active { border-color: rgba(96,165,250,0.4); color: var(--accent); }
+  &.live-event-task.active { border-color: var(--ok-40); color: var(--ok); }
+  &.live-event-keeper.active { border-color: rgba(168,85,247,0.4); color: #a855f7; }
+  &.live-event-system.active { border-color: var(--white-20); color: var(--white-70); }
+}
+
+@utility activity-item {
+  transition: background 0.15s;
+  &:hover { background: var(--white-4); }
+  &.live-event-broadcast { border-left-color: rgba(96,165,250,0.5); }
+  &.live-event-task { border-left-color: rgba(74,222,128,0.5); }
+  &.live-event-keeper { border-left-color: rgba(168,85,247,0.5); }
+  &.live-event-system { border-left-color: rgba(255,255,255,0.15); }
+}
+
+@utility activity-item-new {
+  animation: activityFadeIn 0.3s ease-out;
+}
+
+@utility activity-kind-chip {
+  &.live-event-broadcast { background: var(--blue-400-15); color: var(--accent); }
+  &.live-event-task { background: var(--ok-soft); color: var(--ok); }
+  &.live-event-keeper { background: rgba(168,85,247,0.15); color: #a855f7; }
+  &.live-event-system { background: var(--white-6); color: var(--white-50); }
+}
+
+@utility focus-agent-card {
+  transition: background 0.15s, border-color 0.15s;
+  &:hover { background: var(--white-4); border-color: var(--white-10); }
+}
+
+@utility focus-agent-selected {
+  border-color: rgba(96,165,250,0.4);
+  background: rgba(96,165,250,0.05);
+}
+
+@utility live-stat-dot {
+  &.connected { background: var(--ok); box-shadow: 0 0 4px rgba(74,222,128,0.6); }
+  &.disconnected { background: var(--bad); }
+}
+
+@media (max-width: 1100px) {
+  .live-panels {
+    grid-template-columns: 1fr;
+  }
+}

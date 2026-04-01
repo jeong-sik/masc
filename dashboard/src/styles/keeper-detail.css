@@ -1,0 +1,24 @@
+/* Keeper detail — keeper-* utilities. Extracted from global.css for #3915. */
+
+/* ── Keeper (merged from keeper.css) ───────────────────── */
+
+@utility keeper-detail-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  z-index: var(--z-overlay-keeper, 3020);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate;
+}
+
+@utility keeper-field-search {
+  &:focus { outline: none; border-color: var(--ok-40); }
+}
+
+@utility keeper-chat__cursor {
+  animation: keeper-blink 0.8s step-end infinite;
+  color: var(--ff-gold);
+}

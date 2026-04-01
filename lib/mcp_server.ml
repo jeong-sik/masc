@@ -459,8 +459,8 @@ let schema_markdown =
 type server_state = {
   mutable room_config: Room.config;
   session_registry: Session.registry;
-  mutable on_sse_broadcast: (Yojson.Safe.t -> unit) option;  (* SSE push callback *)
-  mutable encryption_config: Encryption.config;  (* P3: Data encryption *)
+  on_sse_broadcast: (Yojson.Safe.t -> unit) option Atomic.t;  (* SSE push callback, Atomic for cross-fiber visibility *)
+  encryption_config: Encryption.config Atomic.t;  (* P3: Data encryption, Atomic for cross-fiber visibility *)
   sw: Eio.Switch.t option; (* Request/runtime fibers for HTTP/MCP handlers *)
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option; (* For agent spawning *)
   fs: Eio.Fs.dir_ty Eio.Path.t option; (* For filesystem access *)
@@ -483,8 +483,8 @@ let create_state ~base_path =
   let state = {
     room_config = config;
     session_registry = registry;
-    on_sse_broadcast = None;
-    encryption_config = Encryption.default_config;
+    on_sse_broadcast = Atomic.make None;
+    encryption_config = Atomic.make Encryption.default_config;
     sw = None;
     proc_mgr = None;
     fs = None;
@@ -532,8 +532,8 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   let state = {
     room_config = config;
     session_registry = registry;
-    on_sse_broadcast = None;
-    encryption_config = Encryption.default_config;
+    on_sse_broadcast = Atomic.make None;
+    encryption_config = Atomic.make Encryption.default_config;
     sw = Some sw;
     proc_mgr = Some proc_mgr;
     fs = Some fs;
@@ -551,10 +551,10 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
 
 (** Register SSE broadcast callback *)
 let set_sse_callback state callback =
-  state.on_sse_broadcast <- Some callback
+  Atomic.set state.on_sse_broadcast (Some callback)
 
 (** Broadcast to all SSE clients *)
 let sse_broadcast state notification =
-  match state.on_sse_broadcast with
+  match Atomic.get state.on_sse_broadcast with
   | Some push -> push notification
   | None -> ()

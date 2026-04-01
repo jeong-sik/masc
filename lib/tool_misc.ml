@@ -214,3 +214,23 @@ let dispatch ctx ~name ~args : result option =
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let _tool_spec_read_only = [ "masc_transport_status"; "masc_websocket_discovery"; "masc_verify_handoff"; "masc_tool_help" ]
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_misc
+           ~input_schema:s.input_schema
+           ~is_read_only:(List.mem s.name _tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ()))
+    schemas

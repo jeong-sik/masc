@@ -362,3 +362,25 @@ let dispatch ctx ~name ~args =
   | _ -> None
 
 let schemas = Tool_schemas_agent.schemas
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let _tool_spec_read_only = [ "masc_agents" ]
+let _tool_spec_requires_join = [ "masc_heartbeat"; "masc_register_capabilities" ]
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_agent
+           ~input_schema:s.input_schema
+           ~is_read_only:(List.mem s.name _tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ()))
+    schemas

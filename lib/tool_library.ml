@@ -425,3 +425,19 @@ Pair with masc_library_read to fetch matching documents in full.";
   };
 
 ]
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_library
+           ~input_schema:s.input_schema
+           ()))
+    schemas

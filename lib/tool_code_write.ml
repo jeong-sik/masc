@@ -475,3 +475,19 @@ Returns git command output.";
 (** Tool names for keeper gating *)
 let tool_names : string list =
   schemas |> List.map (fun (t : Types.tool_schema) -> t.name)
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_code_write
+           ~input_schema:s.input_schema
+           ()))
+    schemas

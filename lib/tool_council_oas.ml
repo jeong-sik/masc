@@ -452,3 +452,19 @@ let dispatch (ctx : context) ~name ~args : result option =
         ~detail:(`Assoc [("result_ok", `Bool (fst result))])
         ~verdict () ;
       Some result
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_council
+           ~input_schema:s.input_schema
+           ()))
+    schemas

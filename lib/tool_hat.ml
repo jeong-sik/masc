@@ -81,3 +81,19 @@ let dispatch ctx ~name ~args : result option =
   | "masc_hat_wear" -> Some (handle_hat_wear ctx args)
   | "masc_hat_status" -> Some (handle_hat_status ctx args)
   | _ -> None
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let () =
+  List.iter
+    (fun (s : Types.tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_hat
+           ~input_schema:s.input_schema
+           ()))
+    schemas

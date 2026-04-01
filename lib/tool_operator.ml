@@ -363,3 +363,25 @@ let remote_schemas : tool_schema list =
 
 let remote_tool_names : string list =
   List.map (fun (schema : tool_schema) -> schema.name) remote_schemas
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let _tool_spec_read_only = [ "masc_operator_snapshot"; "masc_operator_digest"; "masc_surface_audit"; "masc_collaboration_evidence" ]
+let _tool_spec_requires_join = [ "masc_operator_action"; "masc_operator_confirm" ]
+
+let () =
+  List.iter
+    (fun (s : tool_schema) ->
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_operator
+           ~input_schema:s.input_schema
+           ~is_read_only:(List.mem s.name _tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ()))
+    schemas

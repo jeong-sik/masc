@@ -292,13 +292,12 @@ let run_turn
       "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
       "keeper_tasks_list"; "keeper_fs_read"; "keeper_shell_readonly";
       "keeper_board_get"; "keeper_board_post";
-      "keeper_extend_turns" ]
+      "extend_turns" ]
   in
-  (* Fallback: all keeper tool names minus always_include.
-     Derived from keeper_tools (already per-keeper allow/deny filtered)
-     so no phantom tool names leak in. Used when BM25 confidence is low. *)
+  (* All tool names including extend_turns (added separately from keeper_tools). *)
   let all_tool_names =
-    List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
+    "extend_turns"
+    :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   let fallback_tools =
     List.filter (fun name ->

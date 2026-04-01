@@ -377,6 +377,66 @@ let test_resolve_diff_disjoint_is_base () =
 (* Inter + Diff composition                                          *)
 (* ================================================================ *)
 
+let test_inter_with_all_narrows_to_other () =
+  let sel =
+    Tool_access_policy.Inter [ All; Names [ "a"; "b" ] ]
+  in
+  check bool "a in both" true
+    (Tool_access_policy.selector_matches_name sel "a");
+  check bool "c not in Names" false
+    (Tool_access_policy.selector_matches_name sel "c")
+
+let test_resolve_inter_with_all () =
+  let sel =
+    Tool_access_policy.Inter
+      [ All; Names [ "x"; "y" ] ]
+  in
+  let resolved =
+    Tool_access_policy.resolve_selector ~candidates:[ "x"; "y"; "z" ] sel
+  in
+  check (list string) "All ∩ Names = Names" [ "x"; "y" ] resolved
+
+let test_deny_with_inter () =
+  let policy =
+    {
+      Tool_access_policy.allow = Names [ "a"; "b"; "c"; "d" ];
+      deny = Inter [ Names [ "b"; "c"; "d" ]; Names [ "c"; "d"; "e" ] ];
+    }
+  in
+  check bool "a allowed (not in deny inter)" true
+    (Tool_access_policy.allows_name policy "a");
+  check bool "b allowed (only in one deny arm)" true
+    (Tool_access_policy.allows_name policy "b");
+  check bool "c denied (in both deny arms)" false
+    (Tool_access_policy.allows_name policy "c");
+  check bool "d denied (in both deny arms)" false
+    (Tool_access_policy.allows_name policy "d")
+
+let test_deny_with_diff () =
+  let policy =
+    {
+      Tool_access_policy.allow = Names [ "a"; "b"; "c" ];
+      deny =
+        Diff
+          { base = Names [ "a"; "b"; "c" ]; exclude = Names [ "a" ] };
+    }
+  in
+  check bool "a survives (excluded from deny)" true
+    (Tool_access_policy.allows_name policy "a");
+  check bool "b denied" false
+    (Tool_access_policy.allows_name policy "b");
+  check bool "c denied" false
+    (Tool_access_policy.allows_name policy "c")
+
+let test_diff_constructor_bypass_empty_exclude () =
+  let sel =
+    Tool_access_policy.Diff { base = Names [ "a"; "b" ]; exclude = Empty }
+  in
+  check bool "a matches through raw Diff" true
+    (Tool_access_policy.selector_matches_name sel "a");
+  check bool "c rejected" false
+    (Tool_access_policy.selector_matches_name sel "c")
+
 let test_inter_then_diff () =
   let sel =
     Tool_access_policy.Diff
@@ -516,6 +576,16 @@ let () =
         ] );
       ( "inter_diff_composition",
         [
+          test_case "Inter with All narrows" `Quick
+            test_inter_with_all_narrows_to_other;
+          test_case "resolve Inter with All" `Quick
+            test_resolve_inter_with_all;
+          test_case "deny with Inter" `Quick
+            test_deny_with_inter;
+          test_case "deny with Diff" `Quick
+            test_deny_with_diff;
+          test_case "Diff bypass empty exclude" `Quick
+            test_diff_constructor_bypass_empty_exclude;
           test_case "inter then diff" `Quick
             test_inter_then_diff;
           test_case "diff in policy deny" `Quick

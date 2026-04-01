@@ -68,14 +68,21 @@ let load_key config : (GCM.key, encryption_error) result =
     | `File path ->
         if Sys.file_exists path then
           let content = Fs_compat.load_file path in
-          let content = String.sub content 0 (min 64 (String.length content)) in (* hex-encoded 32 bytes *)
-          (* Decode hex to bytes *)
-          let bytes = ref "" in
-          for i = 0 to 31 do
-            let hex = String.sub content (i * 2) 2 in
-            bytes := !bytes ^ String.make 1 (Char.chr (int_of_string ("0x" ^ hex)))
-          done;
-          Some !bytes
+          let content = String.trim content in
+          if String.length content <> 64 then
+            None  (* hex-encoded 32 bytes requires exactly 64 chars *)
+          else
+            let buf = Buffer.create 32 in
+            let valid = ref true in
+            for i = 0 to 31 do
+              if !valid then
+                let hex = String.sub content (i * 2) 2 in
+                match int_of_string_opt ("0x" ^ hex) with
+                | Some v when v >= 0 && v <= 255 ->
+                    Buffer.add_char buf (Char.chr v)
+                | _ -> valid := false
+            done;
+            if !valid then Some (Buffer.contents buf) else None
         else None
     | `Direct key -> Some key
   in

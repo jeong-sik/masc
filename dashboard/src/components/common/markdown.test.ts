@@ -118,6 +118,16 @@ describe('Markdown', () => {
     expect(container.innerHTML).not.toContain('onerror')
   })
 
+  it('sanitizes javascript: URLs in links', () => {
+    const md = '[blocked](javascript:alert(1))'
+    render(html`<${Markdown} text=${md} />`, container)
+    const anchor = container.querySelector('a')
+    if (!anchor) return // DOMPurify removed entire tag — safe
+    const href = anchor.getAttribute('href')
+    if (!href) return // DOMPurify removed href attribute — safe
+    expect(href.toLowerCase()).not.toMatch(/^javascript:/)
+  })
+
   it('handles think block with trailing whitespace in close tag', () => {
     const md = '<think>reasoning</think >'
     render(html`<${Markdown} text=${md} />`, container)

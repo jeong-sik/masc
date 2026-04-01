@@ -61,6 +61,19 @@ function sanitize(raw: string): string {
   return DOMPurify.sanitize(raw, PURIFY_CONFIG)
 }
 
+function sanitizeMermaidSvg(raw: string): SVGElement | null {
+  const safeSvg = DOMPurify.sanitize(raw, {
+    USE_PROFILES: { svg: true },
+  })
+  if (!safeSvg || !safeSvg.includes('<svg')) {
+    return null
+  }
+  const parsed = new DOMParser().parseFromString(safeSvg, 'image/svg+xml')
+  const svg = parsed.documentElement
+  if (!svg || svg.tagName.toLowerCase() !== 'svg') return null
+  return document.importNode(svg, true) as SVGElement
+}
+
 // ── Parse markdown with <think> block extraction ─────────────
 // Think blocks are extracted first, their content is parsed
 // separately as markdown, then reassembled as <details>.
@@ -116,7 +129,13 @@ export function Markdown({ text, class: className }: { text: string; class?: str
           if (!cancelled && pre.parentElement) {
             const div = document.createElement('div')
             div.className = 'mermaid-rendered'
-            div.innerHTML = svg
+            const safeSvg = sanitizeMermaidSvg(svg)
+            if (safeSvg) {
+              div.appendChild(safeSvg)
+            } else {
+              pre.replaceWith(div)
+              continue
+            }
             pre.replaceWith(div)
           }
         } catch {

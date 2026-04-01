@@ -226,7 +226,7 @@ export function ChatMessageBubble({
         : null}
 
       <div class="whitespace-pre-wrap break-words text-[14px] leading-[1.7] text-[var(--text-body)]">
-        ${entry.text || (entry.delivery === 'streaming' ? '…' : '(empty reply)')}
+        ${entry.text || (entry.delivery === 'streaming' ? '' : '(empty reply)')}
       </div>
       ${entry.error
         ? html`
@@ -375,7 +375,7 @@ export function ChatComposer({
   }, [streaming, streamStartedAt])
 
   const streamLabel = streaming
-    ? `응답 중${elapsed > 0 ? ` ${elapsed}s` : '...'}`
+    ? `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
     : '보내기'
   const isStreamWarning = streaming && elapsed > 60
 

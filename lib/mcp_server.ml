@@ -520,6 +520,10 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
       base_path
     |> Room.config_with_resolved_scope
   in
+  (* Board post kind auto-classification: agent registry lookup *)
+  Tool_board.set_agent_lookup (fun name ->
+    try Room.is_agent_joined config ~agent_name:name
+    with Sys_error _ | Not_found -> false);
   let registry = Session.create () in
   (* Wire notification harness: subscription events → session queues *)
   Subscriptions.set_session_push_fn (fun event ->

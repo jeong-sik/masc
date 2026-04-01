@@ -40,9 +40,9 @@ Two distinct layers exist. Understanding which is which prevents confusion.
 
 The state layer tracks metadata about swarm runs. The execution layer's `on_complete` callback writes results back to the state layer's fitness model.
 
-## Archived
+## Removed
 
-| Module | Location | Reason |
-|--------|----------|--------|
-| `swarm_behaviors_eio.ml` | `lab/swarm-behaviors/` | 2D flocking vectors. No consumers. |
+| Module | Prior location | Reason |
+|--------|----------------|--------|
+| `swarm_behaviors_eio.ml` | `lab/swarm-behaviors/` | Archived experiment with no consumers; removed in the stale sweep. |
 | `tool_swarm.mli` | Deleted | Orphaned interface, no implementation. |

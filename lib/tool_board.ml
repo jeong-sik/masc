@@ -87,16 +87,19 @@ let agent_lookup_hook : (string -> bool) option ref = ref None
 
 let set_agent_lookup f = agent_lookup_hook := Some f
 
-(** Heuristic fallback: agent names have no spaces and are lowercase. *)
+(** Heuristic fallback: agent names have no spaces and are lowercase.
+    "anonymous" is excluded — it is the default author for unauthenticated posts. *)
 let is_agent_heuristic name =
-  name <> "" && not (String.contains name ' ') && String.lowercase_ascii name = name
+  name <> "" && name <> "anonymous"
+  && not (String.contains name ' ')
+  && String.lowercase_ascii name = name
 
 (** Check whether [name] is a registered agent.  Prefers the registry
     lookup (Room.is_agent_joined) when available; falls back to the
     name-shape heuristic so standalone / test usage still works. *)
 let is_agent name =
   match !agent_lookup_hook with
-  | Some lookup -> (try lookup name with Sys_error _ | Not_found -> false)
+  | Some lookup -> lookup name
   | None -> is_agent_heuristic name
 
 let resolve_board_post_kind ~author (raw_kind : string option) :

@@ -365,27 +365,32 @@ module Stats = struct
     has_expensive = 0;
   }
 
+  let stats_mutex : Eio.Mutex.t = Eio.Mutex.create ()
+
   let record (decision : route_decision) : unit =
-    global_stats.total_queries <- global_stats.total_queries + 1;
-    let has_costly = List.exists (fun a ->
-      a.cost_per_1k >= 0.005
-    ) decision.agents in
-    if has_costly
-    then global_stats.has_expensive <- global_stats.has_expensive + 1
-    else global_stats.cheap_only <- global_stats.cheap_only + 1
+    Eio_guard.with_mutex stats_mutex (fun () ->
+      global_stats.total_queries <- global_stats.total_queries + 1;
+      let has_costly = List.exists (fun a ->
+        a.cost_per_1k >= 0.005
+      ) decision.agents in
+      if has_costly
+      then global_stats.has_expensive <- global_stats.has_expensive + 1
+      else global_stats.cheap_only <- global_stats.cheap_only + 1)
 
   let get_ratio () : float * float =
-    let total = float_of_int global_stats.total_queries in
-    if total = 0.0 then (0.0, 0.0)
-    else (
-      float_of_int global_stats.cheap_only /. total,
-      float_of_int global_stats.has_expensive /. total
-    )
+    Eio_guard.with_mutex_ro stats_mutex (fun () ->
+      let total = float_of_int global_stats.total_queries in
+      if total = 0.0 then (0.0, 0.0)
+      else (
+        float_of_int global_stats.cheap_only /. total,
+        float_of_int global_stats.has_expensive /. total
+      ))
 
   let reset () : unit =
-    global_stats.total_queries <- 0;
-    global_stats.cheap_only <- 0;
-    global_stats.has_expensive <- 0
+    Eio_guard.with_mutex stats_mutex (fun () ->
+      global_stats.total_queries <- 0;
+      global_stats.cheap_only <- 0;
+      global_stats.has_expensive <- 0)
 end
 
 (** Route and record stats *)

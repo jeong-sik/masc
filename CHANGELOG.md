@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [2.207.0] - 2026-04-01
+
+### Added
+- **Auth funnel Phase 0** — unified Tool_access_policy authorization (#4408).
+
+### Changed
+- **CSS dedup** — remove duplicate definitions from split files (#4398, #3915).
+
+### Fixed
+- **Dashboard orphans** — orphan removal + health indicator null safety (#4384).
+- **MCP 403 tests** — dashboard blocking + non-2xx initialize coverage (#4397).
+
 ## [2.206.0] - 2026-04-01
 
 ### Changed

@@ -8,8 +8,9 @@
 
 (** Cancellation token state.
     [cancelled] uses [Atomic.t] for fiber-safe cross-fiber visibility in OCaml 5.
-    [reason] and [callbacks] are only modified when [cancelled] transitions to [true],
-    so the atomic barrier on [cancelled] provides sufficient synchronization. *)
+    [reason] is written before [cancelled] transitions to [true], ensuring fibers that
+    observe cancelled=true also see the reason. [callbacks] may be modified via [on_cancel]
+    at any time, but are only executed when [cancelled] transitions to [true]. *)
 type token = {
   id: string;
   cancelled: bool Atomic.t;
@@ -145,9 +146,10 @@ let is_cancelled (token : token) : bool =
 
 (** Cancel a token - triggers all callbacks *)
 let cancel ?(reason : string option) (token : token) : unit =
-  if not (Atomic.get token.cancelled) then begin
-    Atomic.set token.cancelled true;
-    token.reason <- reason;
+  (* Write reason first, then atomically transition cancelled to true.
+     This ensures other fibers observing cancelled=true also see the reason. *)
+  token.reason <- reason;
+  if Atomic.compare_and_set token.cancelled false true then begin
     (* Execute callbacks in reverse order (LIFO) *)
     List.iter (fun cb ->
       try cb () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

@@ -46,6 +46,7 @@ let keeper_internal_tools =
     "keeper_bash";
     "keeper_github";
     "keeper_voice_speak";
+    "keeper_voice_listen";
     "keeper_voice_agent";
     "keeper_voice_sessions";
     "keeper_voice_session_start";
@@ -66,6 +67,7 @@ let keeper_internal_replacement = function
   | "keeper_board_stats" -> Some "masc_board_stats"
   | "keeper_board_search" -> Some "masc_board_search"
   | "keeper_voice_speak" -> Some "masc_voice_speak"
+  | "keeper_voice_listen" -> Some "masc_voice_listen"
   | "keeper_voice_agent" -> Some "masc_voice_agent"
   | "keeper_voice_sessions" -> Some "masc_voice_sessions"
   | "keeper_voice_session_start" -> Some "masc_voice_session_start"

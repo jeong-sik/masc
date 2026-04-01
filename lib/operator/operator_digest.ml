@@ -689,7 +689,7 @@ let keeper_review_item ~now keeper_json =
       let context_ratio = json_float_opt keeper_json "context_ratio" in
       let reasons =
         [
-          (if List.mem status [ "offline"; "inactive"; "error" ] then Some "오프라인" else None);
+          (if Dashboard_utils.is_keeper_offline status then Some "오프라인" else None);
           (if status = "" || status = "unknown" then Some "상태 미수집" else None);
           (match context_ratio with
           | Some value when value >= 0.8 -> Some "컨텍스트 80%+"

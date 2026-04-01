@@ -1,5 +1,20 @@
 include Dashboard_execution_sessions
 
+(** Signal-age guardrail thresholds (seconds).
+    Named constants instead of magic numbers scattered in match arms. *)
+let signal_stale_sec = 1200.0   (** 20 min — no fresh signal = "quiet/bad" *)
+let signal_quiet_sec = 600.0    (** 10 min — borderline = "quiet/warn" *)
+let signal_live_sec  = 300.0    (** 5 min  — recent enough to count as "live" *)
+
+(** Keeper context-ratio lifecycle thresholds.
+    Higher ratio = closer to context limit = more urgency. *)
+let ctx_handoff_imminent = 0.85
+let ctx_preparing        = 0.70
+let ctx_compacting       = 0.50
+
+(** Keeper action-age threshold (seconds). *)
+let keeper_action_stale_sec = 3600.0  (** 1 hour — last autonomous action too old *)
+
 let task_assignee (task : Types.task) =
   match task.task_status with
   | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } ->
@@ -59,7 +74,7 @@ let worker_state_of_agent
   let signal_truth =
     if last_signal_ts <= 0.0 then
       "absent"
-    else if signal_age_s <= 300.0 then
+    else if signal_age_s <= signal_live_sec then
       "live"
     else
       "stale"
@@ -90,16 +105,16 @@ let worker_state_of_agent
           "bad",
           if last_signal_ts > 0.0 then "Offline or inactive" else "No recent presence" )
     | Types.Busy | Types.Active | Types.Listening ->
-        if signal_age_s > 1200.0 then
+        if signal_age_s > signal_stale_sec then
           ( "quiet",
             "bad",
             if has_work then "Working without a fresh signal" else "No fresh agent signal" )
         else if has_work then
-          if signal_age_s > 600.0 then
+          if signal_age_s > signal_quiet_sec then
             ("quiet", "warn", "Execution looks quiet for too long")
           else
             ("working", "ok", "Task and live signal aligned")
-        else if signal_age_s > 600.0 then
+        else if signal_age_s > signal_quiet_sec then
           ("quiet", "warn", "Quiet but still reachable")
         else
           ("watching", "ok", "Standing by for the next task")
@@ -183,16 +198,16 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let generation = int_field "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
   let lifecycle =
-    if List.mem status [ "offline"; "inactive"; "error" ] then "offline"
-    else if Option.value ~default:0.0 context_ratio >= 0.85 then "handoff-imminent"
-    else if Option.value ~default:0.0 context_ratio >= 0.70 then "preparing"
-    else if Option.value ~default:0.0 context_ratio >= 0.50 then "compacting"
+    if is_keeper_offline status then "offline"
+    else if Option.value ~default:0.0 context_ratio >= ctx_handoff_imminent then "handoff-imminent"
+    else if Option.value ~default:0.0 context_ratio >= ctx_preparing then "preparing"
+    else if Option.value ~default:0.0 context_ratio >= ctx_compacting then "compacting"
     else if last_action_ts > 0.0 then "active"
     else if last_signal_ts > 0.0 then "idle"
     else "idle"
   in
   let (state, tone, note) =
-    if List.mem status [ "offline"; "inactive"; "error" ] then
+    if is_keeper_offline status then
       ("critical", "bad", "keeper 오프라인")
     else if lifecycle = "handoff-imminent" then
       ("critical", "bad", "핸드오프 임박")
@@ -201,7 +216,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     else if autonomous_turn_count = 0 && turn_count > 0 then
       ("warning", "warn",
        Printf.sprintf "자율 턴 없음 (턴 %d회 수행)" turn_count)
-    else if last_action_age_s >= 3600.0 then
+    else if last_action_age_s >= keeper_action_stale_sec then
       ("warning", "warn",
        Printf.sprintf "마지막 행동 %.0f시간 전" (last_action_age_s /. 3600.0))
     else

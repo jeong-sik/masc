@@ -54,25 +54,27 @@ let activity_log ~mode ~from_agent ~mention ~status ~detail =
 
 (* --- Loop prevention / throttling --- *)
 
-let recent_responses : (string, float) Hashtbl.t = Hashtbl.create 16
+(** Per-agent-type timestamp list for rate limiting.
+    Key = agent_type, Value = recent response timestamps (newest first).
+    O(1) lookup per agent_type — no string prefix scanning. *)
+let response_times : (string, float list) Hashtbl.t = Hashtbl.create 8
 let chain_limit = 3
-let chain_window = 60.0
+let chain_window_sec = 60.0
 
 let should_throttle ~agent_type =
   let now = Time_compat.now () in
-  Hashtbl.filter_map_inplace (fun _ ts -> if now -. ts < chain_window then Some ts else None) recent_responses;
-  let count =
-    Hashtbl.fold (fun k _ acc ->
-      if String.length k >= String.length agent_type
-         && String.sub k 0 (String.length agent_type) = agent_type
-      then acc + 1 else acc
-    ) recent_responses 0
+  let recent =
+    (match Hashtbl.find_opt response_times agent_type with
+     | None -> []
+     | Some times -> List.filter (fun ts -> now -. ts < chain_window_sec) times)
   in
-  if count >= chain_limit then (
-    debug_log (Printf.sprintf "THROTTLE: %s has %d responses in last %.0fs" agent_type count chain_window);
+  if List.length recent >= chain_limit then (
+    debug_log (Printf.sprintf "THROTTLE: %s has %d responses in last %.0fs"
+      agent_type (List.length recent) chain_window_sec);
+    Hashtbl.replace response_times agent_type recent;
     true
   ) else (
-    Hashtbl.add recent_responses (Printf.sprintf "%s-%f" agent_type now) now;
+    Hashtbl.replace response_times agent_type (now :: recent);
     false
   )
 
@@ -140,14 +142,18 @@ let run_cli_agent ~agent_type ~prompt =
 let cascade_name_for_agent_type agent_type =
   Printf.sprintf "auto_responder_%s" agent_type
 
+(** Validate model response using structural fields, not text heuristics.
+    Guardrail principle: accept unless there is a clear structural reason to reject.
+    Permissive by default: any non-empty content with any stop_reason is valid.
+    Invariant: API errors are caught upstream by Oas_worker.run_named returning Error;
+    the accept callback only receives responses where the API call succeeded. *)
 let model_response_is_valid (resp : Oas_response.api_response) =
-  let s = String.trim (Oas_response.text_of_response resp) in
-  let s_lower = String.lowercase_ascii s in
-  let len = String.length s in
-  len > 0
-  && not (len >= 5 && String.sub s_lower 0 5 = "error")
-  && not (len >= 14 && String.sub s 0 14 = "Empty response")
-  && not (len >= 9 && String.sub s 0 9 = "{\"error\":")
+  let text = String.trim (Oas_response.text_of_response resp) in
+  String.length text > 0
+  && (match resp.stop_reason with
+      | Agent_sdk.Types.EndTurn | Agent_sdk.Types.MaxTokens
+      | Agent_sdk.Types.StopSequence | Agent_sdk.Types.StopToolUse
+      | Agent_sdk.Types.Unknown _ -> true)
 
 let call_model_direct_sync ~agent_type ~prompt =
   let cascade_name = cascade_name_for_agent_type agent_type in
@@ -313,7 +319,7 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
       ) else if should_throttle ~agent_type:mention_base then (
         debug_log "EXIT: Throttled";
         activity_log ~mode ~from_agent ~mention:m ~status:"THROTTLE"
-          ~detail:(Printf.sprintf "Max %d responses per %.0fs" chain_limit chain_window);
+          ~detail:(Printf.sprintf "Max %d responses per %.0fs" chain_limit chain_window_sec);
         Log.AutoResponder.info "Throttled @%s (chain limit)" m;
         None
       ) else (

@@ -8,7 +8,7 @@ val activity_log_file : unit -> string
 val build_response_prompt : from_agent:string -> content:string -> mention:string -> string
 val extract_nickname : string -> string option
 val chain_limit : int
-val chain_window : float
+val chain_window_sec : float
 
 (** Mention helpers (re-exported from Mention) *)
 val spawnable_agents : string list

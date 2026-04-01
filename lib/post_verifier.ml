@@ -48,18 +48,27 @@ let is_whitespace c =
 let content_length s =
   String.fold_left (fun acc c -> if is_whitespace c then acc else acc + 1) 0 s
 
-(** Detect runs of the same character >= threshold. *)
+(** Characters commonly repeated in markdown/code formatting.
+    These are not gibberish — they are structural separators. *)
+let is_formatting_char = function
+  | '=' | '-' | '_' | '*' | '#' | '~' | '`' -> true
+  | _ -> false
+
+(** Detect runs of the same character >= threshold.
+    Excludes common formatting characters (markdown separators, code fences)
+    to avoid penalizing agents for legitimate structured output. *)
 let has_char_repetition ?(threshold = 5) s =
   let len = String.length s in
   if len < threshold then false
   else
     let rec scan i run_char run_len =
-      if i >= len then run_len >= threshold
+      if i >= len then
+        run_len >= threshold && not (is_formatting_char run_char)
       else
         let c = s.[i] in
         if c = run_char then
           let new_len = run_len + 1 in
-          if new_len >= threshold then true
+          if new_len >= threshold && not (is_formatting_char c) then true
           else scan (i + 1) run_char new_len
         else
           scan (i + 1) c 1
@@ -133,11 +142,13 @@ let url_density s =
 (* Dimension 1: Relevance                                           *)
 (* ================================================================ *)
 
-(** Filler phrases that indicate low-substance content. *)
+(** Filler phrases that indicate low-substance content.
+    Removed Korean informal expressions (ㅋㅋ, ㅎㅎ, ㅠㅠ) — these are valid
+    social communication in agent broadcasts, not filler. Penalizing them
+    via Thompson Sampling suppresses agent autonomy for legitimate expression. *)
 let filler_phrases = [
-  "i don't know"; "nothing to say"; "no comment"; "test post";
+  "nothing to say"; "no comment"; "test post";
   "hello world"; "asdf"; "qwerty"; "lorem ipsum";
-  "ㅋㅋㅋㅋ"; "ㅎㅎㅎㅎ"; "ㅠㅠㅠㅠ";
 ]
 
 let contains_filler s =
@@ -155,16 +166,23 @@ let contains_filler s =
       search 0
   ) filler_phrases
 
+(** Relevance guardrail thresholds.
+    Principle: "give as much autonomy as possible, limit with guardrails."
+    Short responses like "ok", "done", "acknowledged" are valid agent communication.
+    Only truly empty or filler-only content should Fail. *)
+let min_content_chars = 1         (** Reject only empty content, not concise responses *)
+let warn_long_content_chars = 8000
+
 let check_relevance ~content =
   let clen = content_length content in
-  if clen < 10 then
-    Fail "content too short (< 10 meaningful characters)"
-  else if clen > 8000 then
-    Warn "content unusually long (> 8000 characters)"
-  else if String.length (String.trim content) = 0 then
+  if String.length (String.trim content) = 0 then
     Fail "content is only whitespace"
+  else if clen < min_content_chars then
+    Fail "content is empty"
   else if contains_filler content && clen < 30 then
-    Fail "content appears to be filler/placeholder"
+    Warn "content may be filler/placeholder"
+  else if clen > warn_long_content_chars then
+    Warn "content unusually long"
   else if contains_filler content then
     Warn "content may contain filler phrases"
   else

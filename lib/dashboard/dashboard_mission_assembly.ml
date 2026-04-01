@@ -193,7 +193,7 @@ let build_keeper_briefs config (keepers : Yojson.Safe.t list) =
              | _ -> None
            in
            let pressure_rank =
-             if List.mem status [ "offline"; "inactive"; "error" ] then 3
+             if Dashboard_utils.is_keeper_offline status then 3
              else if Option.value ~default:0.0 context_ratio >= 0.80 then 2
              else if status = "idle" then 1
              else 0

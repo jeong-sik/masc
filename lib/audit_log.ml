@@ -222,7 +222,8 @@ let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
 
 (** Read recent audit entries.
     Tries date-split store first; falls back to legacy single file.
-    Parse failures are logged at ERROR level with raw JSON snippet. *)
+    Legacy JSON parse failures are logged at WARN (rate-limited, first N only).
+    Structural parse failures go through [parse_entries] ERROR path. *)
 let read_entries ?(n = 10_000) (config : config) : audit_entry list =
   let store = get_audit_store config in
   let entries = Dated_jsonl.read_recent store n in
@@ -233,15 +234,24 @@ let read_entries ?(n = 10_000) (config : config) : audit_entry list =
     if not (Sys.file_exists path) then []
     else
       let content = Fs_compat.load_file path in
+      let invalid_count = ref 0 in
       let jsons = String.split_on_char '\n' content
         |> List.filter (fun line -> String.trim line <> "")
         |> List.filter_map (fun line ->
             match Yojson.Safe.from_string line with
             | json -> Some json
             | exception Yojson.Json_error msg ->
-                Log.Misc.error "audit_log: invalid JSON line: %s | line: %s"
-                  msg (preview ~max_len:100 line);
+                incr invalid_count;
+                if !invalid_count <= max_logged_errors then
+                  Log.Misc.warn "audit_log: invalid JSON line (#%d): %s | line: %s"
+                    !invalid_count msg (preview ~max_len:100 line);
                 None) in
+      if !invalid_count > 0 then
+        Log.Misc.warn "audit_log: %d invalid JSON line(s) in legacy audit log%s"
+          !invalid_count
+          (if !invalid_count > max_logged_errors
+           then Printf.sprintf " (%d more suppressed)" (!invalid_count - max_logged_errors)
+           else "");
       parse_entries jsons
 
 (** Append a single entry to the audit log (thread-safe via Dated_jsonl). *)

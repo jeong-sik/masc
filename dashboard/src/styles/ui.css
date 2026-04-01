@@ -6,11 +6,76 @@
 /* ── Toast Notifications (styling moved to component Tailwind) ── */
 /* @keyframes slideInRight → keyframes.css (canonical) */
 
-/* ── Markdown Rendered Content ─────────────────────────────── */
+/* ── Markdown Rendered Content (marked GFM output) ────────── */
 @utility markdown-content {
-  & code { background: var(--white-8); padding: 1px 5px; font-size: var(--fs-sm); }
-  & pre { background: rgba(0,0,0,0.3); padding: 12px; overflow-x: auto; font-size: var(--fs-sm); }
-  & blockquote { border-left: 3px solid var(--cyan); padding-left: 12px; color: #aaa; }
+  line-height: 1.55;
+  color: var(--text-body);
+
+  & p { margin: 6px 0; }
+
+  & h1 { font-size: 16px; font-weight: 700; margin: 16px 0 8px; color: var(--text-heading); }
+  & h2 { font-size: 14px; font-weight: 600; margin: 12px 0 6px; color: var(--text-heading); }
+  & h3 { font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: var(--text-body); }
+
+  & code {
+    background: var(--white-8);
+    color: var(--ff-gold-bright);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+
+  & pre {
+    background: var(--white-3);
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border-slate-12);
+    overflow-x: auto;
+    font-size: var(--fs-sm);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    line-height: 1.6;
+    margin: 8px 0;
+  }
+
+  & pre code {
+    background: none;
+    color: inherit;
+    padding: 0;
+    font-size: inherit;
+    border-radius: 0;
+  }
+
+  & blockquote {
+    border-left: 3px solid var(--ff-gold-40);
+    padding-left: 12px;
+    color: var(--text-muted);
+    margin: 8px 0;
+  }
+
+  & ul { list-style: disc; padding-left: 20px; margin: 6px 0; }
+  & ol { list-style: decimal; padding-left: 20px; margin: 6px 0; }
+  & li { margin: 2px 0; }
+  & li > ul, & li > ol { margin: 2px 0; }
+
+  & hr { border: none; border-top: 1px solid var(--border-slate-16); margin: 12px 0; }
+
+  & a { color: var(--accent); &:hover { text-decoration: underline; } }
+  & strong { font-weight: 600; }
+  & del { color: var(--text-muted); }
+
+  & table { margin: 8px 0; }
+
+  & img { max-width: 100%; height: auto; border-radius: 8px; margin: 4px 0; }
+}
+
+/* ── Mermaid rendered output ──────────────────────────────── */
+.mermaid-rendered {
+  border-radius: 8px;
+  padding: 16px;
+  margin: 8px 0;
+  background: var(--white-3);
+  border: 1px solid var(--border-slate-12);
+  overflow-x: auto;
 }
 
 /* ── Think Block (collapsible) ─────────────────────────────── */

@@ -109,11 +109,14 @@ let event_buffers_mutex = Eio.Mutex.create ()
 (* Max events per subscription to prevent memory bloat *)
 let max_buffered_events = Env_config_governance.Timeouts.event_buffer_size
 
-(** Generate stable UUIDv4 identifiers for subscriptions and delegated tasks. *)
+(** Generate stable UUIDv4 identifiers for subscriptions and delegated tasks.
+    Mutex-protected for fiber safety (Random.State is mutable). *)
 let a2a_rng = Random.State.make_self_init ()
+let a2a_rng_mutex = Eio.Mutex.create ()
 let generate_uuid () =
-  let uuid = Uuidm.v4_gen a2a_rng () in
-  Uuidm.to_string uuid
+  Eio.Mutex.use_ro a2a_rng_mutex (fun () ->
+    let uuid = Uuidm.v4_gen a2a_rng () in
+    Uuidm.to_string uuid)
 
 (** Get current ISO8601 timestamp *)
 let now_iso8601 () : string =

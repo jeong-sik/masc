@@ -153,7 +153,7 @@ let handle_keeper_tools_post state req reqd =
              Http.Response.json ~status:`Bad_request
                (Printf.sprintf {|{"error":"invalid json: %s"}|} (String.escaped e)) reqd))
 
-let add_routes ~sw ~clock router =
+let rec add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
        (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
@@ -797,6 +797,14 @@ let add_routes ~sw ~clock router =
          ) request reqd
        end)
 
+  |> add_agent_api_routes
+  |> add_autoresearch_routes
+  |> add_repo_synthesis_routes
+
+(* ── Agent API routes ─────────────────────────────────────────── *)
+
+and add_agent_api_routes router =
+  router
   (* Agent activity — per-agent tool call stats from telemetry *)
   |> Http.Router.get "/api/v1/agent-activity" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -880,6 +888,10 @@ let add_routes ~sw ~clock router =
              (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+(* ── Autoresearch routes ───────────────────────────────────────── *)
+
+and add_autoresearch_routes router =
+  router
   (* Autoresearch loops list — all active + persisted loops *)
   |> Http.Router.get "/api/v1/autoresearch/loops" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -1025,6 +1037,10 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
+(* ── Repo synthesis routes ─────────────────────────────────────── *)
+
+and add_repo_synthesis_routes router =
+  router
   |> Http.Router.get "/api/v1/dashboard/repo-synthesis" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = state.Mcp_server.room_config.base_path in

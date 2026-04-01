@@ -175,26 +175,13 @@ let default_model_for_provider provider =
           (match trim_nonempty Env_config_runtime.Llama.default_model with
           | Some value when value <> "explicit-model-required" -> Some value
           | _ -> None))
-  | "claude-api" -> trim_nonempty Env_config_governance.Claude.default_model
-  | "codex-api" -> trim_nonempty Env_config_governance.OpenAI.default_model
-  | "gemini-api" -> trim_nonempty Env_config_governance.Gemini.default_model
-  | "glm" -> Some "auto"
+  | "claude-api" | "codex-api" | "gemini-api" | "glm" -> Some "auto"
   | _ -> None
 
 let candidate_models_for_provider provider =
   match provider with
   | "llama" -> []
-  | "claude-api" ->
-      dedupe_keep_order [ Env_config_governance.Claude.default_model ]
-  | "codex-api" ->
-      dedupe_keep_order [ Env_config_governance.OpenAI.default_model ]
-  | "gemini-api" ->
-      dedupe_keep_order
-        [
-          Env_config_governance.Gemini.default_model;
-          Env_config_governance.Gemini.flash_model;
-        ]
-  | "glm" -> ["auto"]
+  | "claude-api" | "codex-api" | "gemini-api" | "glm" -> ["auto"]
   | _ -> []
 
 let llama_snapshot () =

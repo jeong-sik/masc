@@ -232,6 +232,7 @@ let test_inherited_base_path_with_dual_masc_roots_is_sanitized () =
       copy_script (script_path ()) script;
       make_fake_eio_exe dir;
       let stale_root = Filename.concat dir "stale-root" in
+      mkdir_p (Filename.concat dir ".masc");
       mkdir_p (Filename.concat stale_root ".masc");
       let capture = Filename.concat dir "captured-sanitized.txt" in
       let code, stdout, stderr =

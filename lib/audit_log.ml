@@ -187,8 +187,11 @@ let get_audit_store (config : config) : Dated_jsonl.t =
     Hashtbl.replace audit_store_cache base store;
     store
 
-(** Partition parsed audit entries, logging and counting failures. *)
-let partition_entries (jsons : Yojson.Safe.t list) : audit_entry list =
+(** Parse JSON list into audit entries. Logs first 5 failures individually,
+    then a summary. Returns only successfully parsed entries. *)
+let max_logged_errors = 5
+
+let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
   let ok = ref [] in
   let err_count = ref 0 in
   List.iter (fun json ->
@@ -196,11 +199,15 @@ let partition_entries (jsons : Yojson.Safe.t list) : audit_entry list =
     | Ok entry -> ok := entry :: !ok
     | Error reason ->
         incr err_count;
-        Log.Misc.error "audit_log: corrupt entry (#%d): %s" !err_count reason
+        if !err_count <= max_logged_errors then
+          Log.Misc.error "audit_log: corrupt entry (#%d): %s" !err_count reason
   ) jsons;
   if !err_count > 0 then
-    Log.Misc.error "audit_log: %d/%d entries failed to parse (possible corruption)"
-      !err_count (List.length jsons);
+    Log.Misc.error "audit_log: %d/%d entries failed to parse (possible corruption)%s"
+      !err_count (List.length jsons)
+      (if !err_count > max_logged_errors
+       then Printf.sprintf " (%d more suppressed)" (!err_count - max_logged_errors)
+       else "");
   List.rev !ok
 
 (** Read recent audit entries.
@@ -210,7 +217,7 @@ let read_entries ?(n = 10_000) (config : config) : audit_entry list =
   let store = get_audit_store config in
   let entries = Dated_jsonl.read_recent store n in
   if entries <> [] then
-    partition_entries entries
+    parse_entries entries
   else
     let path = legacy_audit_path config in
     if not (Sys.file_exists path) then []
@@ -225,7 +232,7 @@ let read_entries ?(n = 10_000) (config : config) : audit_entry list =
                 Log.Misc.error "audit_log: invalid JSON line: %s | line: %s"
                   msg (preview ~max_len:100 line);
                 None) in
-      partition_entries jsons
+      parse_entries jsons
 
 (** Append a single entry to the audit log (thread-safe via Dated_jsonl). *)
 let append_entry (config : config) (entry : audit_entry) =

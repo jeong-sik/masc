@@ -4,10 +4,7 @@
 /* ═══ UI ═══ */
 
 /* ── Toast Notifications (styling moved to component Tailwind) ── */
-@keyframes slideInRight {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
+/* @keyframes slideInRight → keyframes.css (canonical) */
 
 /* ── Markdown Rendered Content ─────────────────────────────── */
 @utility markdown-content {

@@ -1,8 +1,5 @@
 /* ── Keeper Rich Card (Overview) ──────────────────────────── */
-@keyframes keeperPulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--ok-40); }
-  50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(74,222,128,0); }
-}
+/* @keyframes keeperPulse → keyframes.css (canonical) */
 
 /* ── Metric explain tooltip ──────────────────────────────── */
 .metric-tip-pop {

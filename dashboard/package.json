@@ -19,6 +19,7 @@
   "dependencies": {
     "@preact/signals": "^2.0.2",
     "dompurify": "^3.3.3",
+    "downshift": "^9.3.2",
     "htm": "^3.1.1",
     "marked": "^17.0.5",
     "mermaid": "^11.12.0",

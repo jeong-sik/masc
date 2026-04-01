@@ -29,7 +29,7 @@
 ;; TUI Dashboard - Terminal interface for multi-agent coordination
 (executable
  (name masc_tui)
- (modules masc_tui)
+ (modules masc_tui masc_tui_types masc_tui_ansi masc_tui_render masc_tui_loader)
  (public_name masc-tui)
  (package masc_mcp)
  (libraries masc_mcp masc_mcp.config unix yojson masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process masc_eio_context fmt str eio_main eio mirage-crypto-rng.unix caqti-eio httpun cohttp cohttp-eio masc_mcp.team_session_types masc_mcp.prompt_registry masc_mcp.mcp_transport_protocol agent_sdk agent_sdk.llm_provider agent_sdk.swarm))

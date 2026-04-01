@@ -155,7 +155,7 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   }
 
   return html`
-    <div class="flex items-center gap-2 px-1">
+    <div class="flex items-center gap-2 px-1" role="status" aria-label=${label}>
       ${dot}
       <span class="text-[11px] text-[var(--text-muted)] truncate">${label}</span>
     </div>

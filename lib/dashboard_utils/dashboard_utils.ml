@@ -107,3 +107,25 @@ let string_list_json values =
 
 let normalized_text_key text =
   compact_text ~max_len:512 text |> String.trim |> String.lowercase_ascii
+
+(** Status/health classification predicates — single source of truth.
+    Used across dashboard, briefing, operator, command_plane modules.
+    Adding a new status/health value? Update here, not at each call site. *)
+
+let is_keeper_offline status =
+  List.mem status [ "offline"; "inactive"; "error" ]
+
+let is_health_critical health =
+  List.mem health [ "bad"; "critical" ]
+
+let is_health_warning health =
+  List.mem health [ "warn"; "degraded" ]
+
+let is_health_at_risk health =
+  List.mem health [ "bad"; "risk"; "critical" ]
+
+let is_session_terminal status =
+  List.mem status [ "completed"; "cancelled"; "failed" ]
+
+let is_session_blocked status =
+  List.mem status [ "failed"; "cancelled"; "interrupted" ]

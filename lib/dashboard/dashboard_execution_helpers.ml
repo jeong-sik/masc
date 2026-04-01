@@ -132,6 +132,14 @@ let string_list_json values =
 let string_list_of_field key json =
   member_assoc key json |> string_list_of_json
 
+(** Status/health predicates — re-exported from Dashboard_utils (SSOT). *)
+let is_keeper_offline = Dashboard_utils.is_keeper_offline
+let is_health_critical = Dashboard_utils.is_health_critical
+let is_health_warning = Dashboard_utils.is_health_warning
+let is_health_at_risk = Dashboard_utils.is_health_at_risk
+let is_session_terminal = Dashboard_utils.is_session_terminal
+let is_session_blocked = Dashboard_utils.is_session_blocked
+
 let execution_tool_preview_limit = 8
 
 let cap_string_list ?(limit = execution_tool_preview_limit) values =

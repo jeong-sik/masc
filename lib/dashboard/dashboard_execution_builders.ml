@@ -198,7 +198,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let generation = int_field "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
   let lifecycle =
-    if List.mem status [ "offline"; "inactive"; "error" ] then "offline"
+    if is_keeper_offline status then "offline"
     else if Option.value ~default:0.0 context_ratio >= ctx_handoff_imminent then "handoff-imminent"
     else if Option.value ~default:0.0 context_ratio >= ctx_preparing then "preparing"
     else if Option.value ~default:0.0 context_ratio >= ctx_compacting then "compacting"
@@ -207,7 +207,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     else "idle"
   in
   let (state, tone, note) =
-    if List.mem status [ "offline"; "inactive"; "error" ] then
+    if is_keeper_offline status then
       ("critical", "bad", "keeper 오프라인")
     else if lifecycle = "handoff-imminent" then
       ("critical", "bad", "핸드오프 임박")

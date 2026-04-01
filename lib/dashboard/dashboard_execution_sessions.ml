@@ -66,15 +66,12 @@ let event_summary event_json =
 
 let session_severity ~health ~status ~runtime_blocker =
   if status = "completed" then
-    if List.mem health [ "bad"; "critical" ] then "warn"
-    else if List.mem health [ "warn"; "degraded" ] then "warn"
+    if is_health_critical health || is_health_warning health then "warn"
     else "ok"
-  else if List.mem health [ "bad"; "critical" ]
-          || List.mem status [ "failed"; "cancelled"; "interrupted" ]
-  then
+  else if is_health_critical health || is_session_blocked status then
     "bad"
-  else if List.mem health [ "warn"; "degraded" ]
-          || List.mem status [ "paused" ]
+  else if is_health_warning health
+          || status = "paused"
           || Option.is_some runtime_blocker
   then
     "warn"

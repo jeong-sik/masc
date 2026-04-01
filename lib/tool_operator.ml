@@ -371,9 +371,15 @@ let remote_tool_names : string list =
 let _tool_spec_read_only = [ "masc_operator_snapshot"; "masc_operator_digest"; "masc_surface_audit"; "masc_collaboration_evidence" ]
 let _tool_spec_requires_join = [ "masc_operator_action"; "masc_operator_confirm" ]
 
+(* Tools with explicit catalog metadata that must be preserved. *)
+let _tool_spec_hidden = [ "masc_operator_judgment_write"; "masc_operator_judgment_latest" ]
+let _tool_spec_hidden_destructive = [ "masc_operator_action" ]
+
 let () =
   List.iter
     (fun (s : tool_schema) ->
+      let is_destructive = List.mem s.name _tool_spec_hidden_destructive in
+      let is_hidden = List.mem s.name _tool_spec_hidden || is_destructive in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -383,5 +389,8 @@ let () =
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ~visibility:(if is_hidden then Tool_catalog.Hidden else Tool_catalog.Default)
+           ~is_destructive
+           ~allow_direct_call_when_hidden:is_hidden
            ()))
     schemas

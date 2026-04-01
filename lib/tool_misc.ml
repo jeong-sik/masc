@@ -219,7 +219,7 @@ let schemas = Tool_schemas_misc.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_transport_status"; "masc_websocket_discovery"; "masc_verify_handoff"; "masc_tool_help" ]
+let _tool_spec_read_only = [ "masc_transport_status"; "masc_websocket_discovery"; "masc_verify_handoff"; "masc_tool_help"; "masc_dashboard" ]
 
 let () =
   List.iter

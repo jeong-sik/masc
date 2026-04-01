@@ -279,7 +279,7 @@ let test_migrate_resident_keeper_dirs_promotes_valid_meta () =
       let keepers_dir = Filename.concat masc_root "keepers" in
       let legacy_dir = Filename.concat masc_root "resident-keepers" in
       let quarantine_dir =
-        Filename.concat masc_root "_quarantine/_replaced/perpetual-keepers"
+        Filename.concat masc_root "_quarantine/_replaced/resident-keepers"
       in
       Fs_compat.mkdir_p keepers_dir;
       Fs_compat.mkdir_p legacy_dir;
@@ -318,7 +318,7 @@ let test_migrate_resident_keeper_dirs_keeps_fresher_current_meta () =
       let keepers_dir = Filename.concat masc_root "keepers" in
       let legacy_dir = Filename.concat masc_root "resident-keepers" in
       let quarantine_path =
-        Filename.concat masc_root "_quarantine/perpetual-keepers/sangsu.json"
+        Filename.concat masc_root "_quarantine/resident-keepers/sangsu.json"
       in
       Fs_compat.mkdir_p keepers_dir;
       Fs_compat.mkdir_p legacy_dir;
@@ -341,27 +341,19 @@ let test_migrate_resident_keeper_dirs_keeps_fresher_current_meta () =
       Alcotest.(check bool) "older legacy keeper quarantined" true
         (Sys.file_exists quarantine_path))
 
-let test_migrate_legacy_keeper_dirs_uses_source_scoped_quarantine_paths () =
-  with_temp_dir "startup-legacy-keepers-quarantine-sources" (fun dir ->
+let test_migrate_resident_keeper_dirs_use_source_scoped_quarantine_path () =
+  with_temp_dir "startup-resident-keepers-quarantine-source" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
       let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
       let keepers_dir = Filename.concat masc_root "keepers" in
-      let perpetual_dir = Filename.concat masc_root "perpetual-keepers" in
-      let resident_dir = Filename.concat masc_root "resident-keepers" in
+      let legacy_dir = Filename.concat masc_root "resident-keepers" in
       Fs_compat.mkdir_p keepers_dir;
-      Fs_compat.mkdir_p perpetual_dir;
-      Fs_compat.mkdir_p resident_dir;
+      Fs_compat.mkdir_p legacy_dir;
       write_file (Filename.concat keepers_dir "sangsu.json")
         (make_keeper_meta_json ~updated_at:"2026-03-29T12:36:57Z" ());
-      write_file (Filename.concat perpetual_dir "sangsu.json")
-        (make_keeper_meta_json ~updated_at:"2026-03-29T10:36:57Z" ());
-      write_file (Filename.concat resident_dir "sangsu.json")
+      write_file (Filename.concat legacy_dir "sangsu.json")
         (make_keeper_meta_json ~updated_at:"2026-03-29T11:36:57Z" ());
       Server_runtime_bootstrap.migrate_legacy_dirs state;
-      Alcotest.(check bool) "perpetual keeper quarantined under source dir" true
-        (Sys.file_exists
-           (Filename.concat masc_root
-              "_quarantine/perpetual-keepers/sangsu.json"));
       Alcotest.(check bool) "resident keeper quarantined under source dir" true
         (Sys.file_exists
            (Filename.concat masc_root
@@ -371,7 +363,7 @@ let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
   with_temp_dir "startup-blocking-legacy-keepers" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
       let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
-      let legacy_dir = Filename.concat masc_root "perpetual-keepers" in
+      let legacy_dir = Filename.concat masc_root "resident-keepers" in
       let legacy_trace_dir = Filename.concat masc_root "perpetual" in
       Fs_compat.mkdir_p legacy_dir;
       Fs_compat.mkdir_p legacy_trace_dir;
@@ -558,7 +550,7 @@ let () =
           Alcotest.test_case
             "legacy keeper migration uses source-scoped quarantine paths"
             `Quick
-            test_migrate_legacy_keeper_dirs_uses_source_scoped_quarantine_paths;
+            test_migrate_resident_keeper_dirs_use_source_scoped_quarantine_path;
           Alcotest.test_case
             "blocking bootstrap promotes legacy keeper meta"
             `Quick

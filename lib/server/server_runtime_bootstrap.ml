@@ -75,7 +75,7 @@ let restore_persisted_sessions (state : Mcp_server.server_state) =
 let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
   Prometheus.reconcile_active_agents_gauge (Room.masc_dir state.room_config)
 
-(** Migrate legacy directory names: perpetual->traces, perpetual-keepers->keepers.
+(** Migrate legacy directory names: perpetual->traces, resident-keepers->keepers.
     Moves contents via recursive merge. Conflicting files go to _quarantine/,
     except keeper meta files where a fresher valid legacy record may replace a
     stale or invalid current record. *)
@@ -166,14 +166,10 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
 
 let migrate_legacy_dirs (state : Mcp_server.server_state) =
   migrate_legacy_dirs_with_renames state
-    [ ("perpetual", "traces");
-      ("perpetual-keepers", "keepers");
-      ("resident-keepers", "keepers") ]
+    [ ("perpetual", "traces"); ("resident-keepers", "keepers") ]
 
 let migrate_legacy_keeper_dirs_blocking (state : Mcp_server.server_state) =
-  migrate_legacy_dirs_with_renames state
-    [ ("perpetual-keepers", "keepers");
-      ("resident-keepers", "keepers") ]
+  migrate_legacy_dirs_with_renames state [ ("resident-keepers", "keepers") ]
 
 let migrate_legacy_trace_dirs (state : Mcp_server.server_state) =
   migrate_legacy_dirs_with_renames state [ ("perpetual", "traces") ]

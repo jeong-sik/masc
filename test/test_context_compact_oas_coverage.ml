@@ -166,7 +166,7 @@ let test_scoring_ssot () =
 
 let test_scoring_sticky_memory () =
   let msgs = [
-    msg Agent_sdk.Types.Assistant "[MASC_MEMORY_SUMMARY v1] important summary";
+    msg Agent_sdk.Types.Assistant "[MEMORY_SUMMARY] important summary";
     msg Agent_sdk.Types.Assistant "normal message";
   ] in
   let scores = Scoring.score_messages msgs in
@@ -177,7 +177,7 @@ let test_scoring_sticky_memory () =
 
 let test_scoring_goal_sticky () =
   let msgs = [
-    msg Agent_sdk.Types.User "[MASC_GOAL] Monitor CI";
+    msg Agent_sdk.Types.User "[GOAL] Monitor CI";
   ] in
   let scores = Scoring.score_messages msgs in
   let score = List.assoc 0 scores in

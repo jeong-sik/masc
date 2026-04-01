@@ -57,7 +57,7 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
 (* Importance Scoring (inlined from Context_scoring)                 *)
 (* ================================================================ *)
 
-let memory_summary_prefix = "[MASC_MEMORY_SUMMARY v1]"
+let memory_summary_prefix = "[MEMORY_SUMMARY]"
 
 let goal_prefix = Keeper_working_context.goal_prefix
 

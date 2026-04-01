@@ -341,6 +341,13 @@ let run_turn
            || name = "keeper_bash"
            || name = "keeper_write" then Some "filesystem"
       else if name = "keeper_github" then Some "vcs"
+      else if String.starts_with ~prefix:"masc_board_" name then Some "masc_board"
+      else if String.starts_with ~prefix:"masc_keeper_" name then Some "masc_keeper"
+      else if String.starts_with ~prefix:"masc_plan_" name then Some "masc_plan"
+      else if String.starts_with ~prefix:"masc_team_session_" name then Some "masc_session"
+      else if String.starts_with ~prefix:"masc_worktree_" name then Some "masc_worktree"
+      else if String.starts_with ~prefix:"masc_code_" name then Some "masc_code"
+      else if String.starts_with ~prefix:"masc_" name then Some "masc_core"
       else None
     in
     let kr_kw = match List.assoc_opt name korean_keywords with
@@ -350,21 +357,34 @@ let run_turn
     Agent_sdk.Tool_index.{ name; description = t.schema.description ^ kr_kw; group }
   ) keeper_tools in
   let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
+  (* Layer 0: Core tools — always visible to the LLM regardless of preset.
+     Includes survival-critical masc_* tools so even Minimal keepers
+     can report status, broadcast, and extend turns. *)
   let always_include_tools =
-    [ "keeper_time_now"; "keeper_context_status";
-      "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
-      "keeper_tasks_list"; "keeper_fs_read"; "keeper_shell_readonly";
-      "keeper_board_get"; "keeper_board_post";
-      "extend_turns" ]
+    Keeper_exec_tools.core_always_tools
+    @ [ "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
+        "keeper_tasks_list"; "keeper_fs_read"; "keeper_shell_readonly";
+        "keeper_board_get"; "keeper_board_post" ]
+    |> Keeper_exec_tools.dedupe_tool_names
   in
-  (* All tool names including extend_turns (added separately from keeper_tools). *)
+  (* Layer 2: Universe — all tool names that the dispatch can handle.
+     keeper_tools is now built from the universe (not just policy), so
+     this includes all candidate tools minus denied.  BM25 retrieval
+     and Tool_op.Add operate within this scope. *)
   let all_tool_names =
     "extend_turns"
     :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
+  (* Layer 1: Policy fallback — when BM25 confidence is low, fall back
+     to the preset/custom-allowed set (not the full universe).
+     This prevents overwhelming the LLM with 80+ tools on every turn. *)
+  let policy_allowed =
+    Keeper_exec_tools.keeper_allowed_tool_names !meta_ref
+  in
   let fallback_tools =
     List.filter (fun name ->
       not (List.mem name always_include_tools)
+      && List.mem name policy_allowed
     ) all_tool_names
   in
   let confidence_threshold = 0.5 in

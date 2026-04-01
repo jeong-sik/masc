@@ -157,6 +157,25 @@ let keeper_core_masc_tool_names =
     "masc_tool_help";
   ]
 
+(* ── Layer 0: Core tools (always executable, always visible) ───── *)
+
+(** Tools that bypass policy restrictions.  A keeper with Minimal
+    preset still needs masc_status/broadcast/heartbeat to function.
+    These are the survival-critical tools. *)
+let core_always_tools =
+  [ "keeper_time_now"; "keeper_context_status";
+    "masc_status"; "masc_broadcast"; "masc_heartbeat";
+    "masc_messages"; "masc_who"; "masc_tool_help";
+    "extend_turns" ]
+
+let core_always_set : (string, unit) Hashtbl.t =
+  let tbl = Hashtbl.create (List.length core_always_tools) in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) core_always_tools;
+  tbl
+
+let is_core_always_tool (name : string) : bool =
+  Hashtbl.mem core_always_set name
+
 let keeper_coding_masc_tool_names =
   [
     "masc_code_search";
@@ -266,6 +285,19 @@ let filter_by_access ~(lookup : tool_access_lookup) (name : string) : bool =
   && Hashtbl.mem lookup.allow_set name
   && not (Hashtbl.mem lookup.deny_set name)
 
+(** Universe check: candidate minus denied, ignoring policy allowlist.
+    Core tools and BM25-discovered tools use this gate at execution time. *)
+let filter_by_universe ~(lookup : tool_access_lookup) (name : string) : bool =
+  Hashtbl.mem lookup.candidate_set name
+  && not (Hashtbl.mem lookup.deny_set name)
+
+(** Execution gate: core tools bypass policy, others require policy allowlist. *)
+let can_execute ~(lookup : tool_access_lookup) (name : string) : bool =
+  if is_core_always_tool name then
+    filter_by_universe ~lookup name
+  else
+    filter_by_access ~lookup name
+
 let keeper_masc_tool_names (meta : keeper_meta) : string list =
   let lookup = tool_access_lookup_of_meta meta in
   !masc_schemas_ref
@@ -278,6 +310,16 @@ let keeper_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
   let lookup = tool_access_lookup_of_meta meta in
   !masc_schemas_ref
   |> List.filter (fun (schema : Types.tool_schema) -> filter_by_access ~lookup schema.name)
+
+(* ── Layer 2: Universe (all executable tools, policy-independent) ── *)
+
+(** Universe masc_* schemas: candidate minus denied, no policy filter.
+    Used by make_tools to build Tool.t for BM25 retrieval scope. *)
+let keeper_universe_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
+  let lookup = tool_access_lookup_of_meta meta in
+  !masc_schemas_ref
+  |> List.filter (fun (schema : Types.tool_schema) ->
+    filter_by_universe ~lookup schema.name)
 
 let keeper_default_model_tools (_meta : keeper_meta) : Types.tool_schema list =
   keeper_model_tools @ keeper_voice_tool_schemas
@@ -292,6 +334,38 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     lookup.candidate_names
     |> List.filter (fun name -> filter_by_access ~lookup name)
     |> dedupe_tool_names
+
+(** Universe tool names: candidates minus denied, no policy filter.
+    Superset of keeper_allowed_tool_names.  BM25 indexes this set so
+    progressive disclosure can discover tools beyond the active preset.
+    Core tools are always included even if masc_schemas haven't been
+    injected yet (startup race) or the tool is not in any preset. *)
+let keeper_universe_tool_names (meta : keeper_meta) : string list =
+  let lookup = tool_access_lookup_of_meta meta in
+  let from_candidates =
+    lookup.candidate_names
+    |> List.filter (fun name -> filter_by_universe ~lookup name)
+  in
+  let from_core =
+    core_always_tools
+    |> List.filter (fun name -> not (Hashtbl.mem lookup.deny_set name))
+  in
+  dedupe_tool_names (from_candidates @ from_core)
+
+(** Universe model tool schemas for make_tools.
+    Returns schemas for all universe tools so Agent.run() can call them. *)
+let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
+  let universe = keeper_universe_tool_names meta in
+  let all_schemas =
+    (keeper_default_model_tools meta)
+    @ Tool_research.schemas
+    @ Tool_shard.autoresearch_keeper_tools
+    @ Tool_shard.coding_tools
+    @ Tool_code_write.schemas
+    @ (keeper_universe_masc_tool_schemas meta)
+  in
+  all_schemas
+  |> List.filter (fun tool -> List.mem tool.Types.name universe)
 
 (** Return keeper model tool schemas under the active preset/custom policy. *)
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
@@ -352,7 +426,7 @@ let execute_keeper_tool_call
   let args = input in
   let now_ts = Time_compat.now () in
   let lookup = tool_access_lookup_of_meta meta in
-  if not (filter_by_access ~lookup name) then
+  if not (can_execute ~lookup name) then
     Yojson.Safe.to_string
       (`Assoc [ ("error", `String "tool_not_allowed");
                 ("tool", `String name) ])

@@ -151,9 +151,13 @@ let make_tools
     ~(ctx_ref : Keeper_types.working_context ref)
     ()
   : Agent_sdk.Tool.t list =
-  let allowed_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  (* Build Tool.t for the full universe so BM25 and Tool_op can
+     discover tools beyond the active preset.  Progressive disclosure
+     (AllowList filter in before_turn_hook) controls LLM visibility;
+     execute_keeper_tool_call uses can_execute for the execution gate. *)
+  let universe_names = Keeper_exec_tools.keeper_universe_tool_names meta in
   let tool_defs =
-    Keeper_exec_tools.keeper_allowed_model_tools meta
+    Keeper_exec_tools.keeper_universe_model_tools meta
   in
   let failure_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
   (* No mutex: Hashtbl ops are non-yielding, single domain. *)
@@ -162,7 +166,7 @@ let make_tools
     Printf.sprintf "%s:%d" name h
   in
   List.filter_map (fun (td : Types.tool_schema) ->
-    if List.mem td.name allowed_names then
+    if List.mem td.name universe_names then
       Some (Tool_bridge.oas_tool_of_masc
         ~name:td.name
         ~description:td.description

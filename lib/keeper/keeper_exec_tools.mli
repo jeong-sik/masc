@@ -7,6 +7,25 @@ val keeper_allowed_tool_names : ?write_done:bool -> keeper_meta -> string list
 val keeper_allowed_model_tools :
   ?write_done:bool -> keeper_meta -> Types.tool_schema list
 
+(** Universe tool names: candidates minus denied, no policy filter.
+    Superset of [keeper_allowed_tool_names].  Used as the BM25 retrieval
+    scope so progressive disclosure can surface tools beyond the preset. *)
+val keeper_universe_tool_names : keeper_meta -> string list
+
+(** Universe model tool schemas.  Returns schemas for all universe tools
+    so [make_tools] can build Agent_sdk.Tool.t for the full search scope. *)
+val keeper_universe_model_tools : keeper_meta -> Types.tool_schema list
+
+(** Core tools that are always executable and visible regardless of preset.
+    E.g. masc_status, masc_broadcast, masc_heartbeat, extend_turns. *)
+val core_always_tools : string list
+
+(** [is_core_always_tool name] — true if [name] bypasses policy restrictions. *)
+val is_core_always_tool : string -> bool
+
+(** Deduplicate tool names, preserving order. *)
+val dedupe_tool_names : string list -> string list
+
 (** Inject all masc_* schemas for keeper allowlist/denylist filtering.
     Must be called once during server initialization.
     Keeper_denied tools are excluded at injection time. *)

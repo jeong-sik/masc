@@ -311,6 +311,7 @@ let all_known_tool_names =
     "masc_voice_agent";
     "masc_voice_conference_end";
     "masc_voice_conference_start";
+    "masc_voice_ping_pong";
     "masc_voice_session_end";
     "masc_voice_session_start";
     "masc_voice_sessions";

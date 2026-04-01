@@ -112,8 +112,9 @@ let test_decode_hex_key_invalid_chars () =
   let hex = "GG" ^ String.make 62 '0' in
   match Encryption.decode_hex_key hex with
   | Error (Encryption.InvalidHexFormat msg) ->
-      check bool "mentions position" true (String.length msg > 0);
-      check bool "does NOT mention invalid chars (security)" false (String.contains msg 'G')
+      check bool "mentions position index" true
+        (String.starts_with ~prefix:"invalid hex byte at position" msg);
+      check bool "does NOT leak invalid chars (security)" false (String.contains msg 'G')
   | _ -> fail "Expected InvalidHexFormat for invalid hex chars"
 
 (* ============================================================

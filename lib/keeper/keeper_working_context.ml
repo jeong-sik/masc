@@ -48,7 +48,7 @@ type session_context = {
 (* Memory Formats                                                    *)
 (* ================================================================ *)
 
-let goal_prefix = "[MASC_GOAL]"
+let goal_prefix = "[GOAL]"
 
 let state_block_start = "[STATE]"
 let state_block_end = "[/STATE]"

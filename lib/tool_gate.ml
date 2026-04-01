@@ -92,6 +92,7 @@ let rec inverse op =
           (Some []) ops
       in
       (match rev_inverses with
+       | Some [] -> Reversible Keep_all
        | Some invs -> Reversible (Seq invs)
        | None -> Irreversible)
 

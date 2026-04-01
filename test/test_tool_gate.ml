@@ -94,6 +94,10 @@ let test_apply_add_whitespace () =
   check sl "trimmed" ["a"; "b"; "c"; "d"]
     (Tool_gate.apply (Add [" d "; "d"]) base)
 
+let test_apply_replace_with_normalization () =
+  check sl "normalized" ["x"; "y"]
+    (Tool_gate.apply (Replace_with ["x"; " x "; "y"]) base)
+
 (* ================================================================ *)
 (* inverse                                                           *)
 (* ================================================================ *)
@@ -144,6 +148,14 @@ let test_inverse_seq_irreversible () =
   match Tool_gate.inverse op with
   | Irreversible -> ()
   | _ -> fail "expected Irreversible"
+
+let test_inverse_seq_empty () =
+  match Tool_gate.inverse (Seq []) with
+  | Reversible Keep_all -> ()
+  | Reversible other ->
+      fail (Printf.sprintf "expected Reversible Keep_all, got %s"
+        (Yojson.Safe.to_string (Tool_gate.to_yojson other)))
+  | Irreversible -> fail "expected Reversible"
 
 (* roundtrip: apply inverse undoes effective op *)
 let test_roundtrip_add () =
@@ -278,6 +290,10 @@ let test_equal_add_order () =
   check bool "normalized" true
     (Tool_gate.equal (Add ["a"; "b"]) (Add ["b"; "a"]))
 
+let test_equal_intersect_dedup () =
+  check bool "deduped" true
+    (Tool_gate.equal (Intersect_with ["a"; "a"]) (Intersect_with ["a"]))
+
 let test_equal_structural () =
   check bool "different structure" false
     (Tool_gate.equal (Add ["a"]) (Seq [Add ["a"]]))
@@ -340,6 +356,7 @@ let () =
           test_case "Remove from empty" `Quick test_apply_remove_from_empty;
           test_case "Intersect on empty" `Quick test_apply_intersect_on_empty;
           test_case "Add whitespace" `Quick test_apply_add_whitespace;
+          test_case "Replace_with normalization" `Quick test_apply_replace_with_normalization;
         ] );
       ( "inverse",
         [
@@ -351,6 +368,7 @@ let () =
           test_case "Intersect_with" `Quick test_inverse_intersect_with;
           test_case "Seq reversible" `Quick test_inverse_seq_reversible;
           test_case "Seq irreversible" `Quick test_inverse_seq_irreversible;
+          test_case "Seq empty" `Quick test_inverse_seq_empty;
           test_case "roundtrip Add" `Quick test_roundtrip_add;
           test_case "roundtrip Remove" `Quick test_roundtrip_remove;
           test_case "roundtrip phantom" `Quick test_roundtrip_phantom;
@@ -386,6 +404,7 @@ let () =
       ( "equal",
         [
           test_case "Add order" `Quick test_equal_add_order;
+          test_case "Intersect_with dedup" `Quick test_equal_intersect_dedup;
           test_case "structural" `Quick test_equal_structural;
           test_case "Keep_all" `Quick test_equal_keep_all;
           test_case "different variant" `Quick test_equal_different_variant;

@@ -180,6 +180,11 @@ let all_flags : flag list = [
     default = false; category = "runtime";
     lifecycle = Deprecated "use MASC_LOCAL_RUNTIME_DEBUG"; since = "2.100.0" };
 
+  { env_name = "MASC_SLOT_YIELD_ENABLED";
+    description = "Release LLM slot during tool execution so other agents can use it";
+    default = false; category = "runtime";
+    lifecycle = Active; since = "2.208.0" };
+
   (* ── CDAL (Contract-Driven Agent Loop) ───────────────────── *)
   { env_name = "MASC_CDAL_ENABLED";
     description = "Contract-driven agent loop: proof capture and verdict evaluation";

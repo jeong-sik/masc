@@ -375,6 +375,7 @@
    agent_reputation
    activity_feed
    transport
+   transport_read_model
    transport_metrics
    ;; gRPC coordination transport (grpc-direct)
    masc_grpc_types

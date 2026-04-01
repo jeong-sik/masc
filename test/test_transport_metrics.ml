@@ -243,6 +243,12 @@ let test_transport_health_json () =
     (match ws_json with `Assoc _ -> true | _ -> false);
   check bool "webrtc section exists" true
     (match webrtc_json with `Assoc _ -> true | _ -> false);
+  check bool "webrtc configured field exists" true
+    (match webrtc_json |> U.member "configured" with `Bool _ -> true | _ -> false);
+  check bool "webrtc signaling_available field exists" true
+    (match webrtc_json |> U.member "signaling_available" with `Bool _ -> true | _ -> false);
+  check bool "webrtc signaling_mode field exists" true
+    (match webrtc_json |> U.member "signaling_mode" with `String _ -> true | _ -> false);
   check string "room id" "default"
     (cluster_json |> U.member "room_id" |> U.to_string);
   check bool "summary primary path exists" true

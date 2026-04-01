@@ -55,100 +55,30 @@ let configured_http_host () =
   Env_config_core.masc_host ()
 
 let advertised_host_port request =
-  parse_host_port
-    (Httpun.Headers.get request.Httpun.Request.headers "host")
-    (configured_http_host ()) (configured_http_port ())
+  let (host, port) =
+    parse_host_port
+      (Httpun.Headers.get request.Httpun.Request.headers "host")
+      (configured_http_host ()) (configured_http_port ())
+  in
+  (Transport_read_model.normalize_advertised_host host, port)
 
 let websocket_discovery_json request =
-  let (host, _) = advertised_host_port request in
-  let configured = Server_ws_standalone.is_enabled () in
-  let port = Server_ws_standalone.configured_port () in
-  let listening = Transport_metrics.ws_listening () in
-  let listen_status = Atomic.get Transport_metrics.ws_listen_status in
-  let base_fields =
-    [
-      ("enabled", `Bool configured);
-      ("configured", `Bool configured);
-      ("listening", `Bool listening);
-      ("listen_status", `String listen_status);
-      ("mode", `String "standalone");
-      ("discovery_path", `String "/ws");
-      ("session_count", `Int (Server_mcp_transport_ws.session_count ()));
-    ]
+  let (host, port) = advertised_host_port request in
+  let ctx =
+    Transport_read_model.make_http_context ~include_configured:true
+      ~allow_legacy_accept ~host
+      ~base_url:(Printf.sprintf "http://%s:%d" host port) ()
   in
-  let fields =
-    if configured then
-      base_fields
-      @ [
-          ("ws_port", `Int port);
-          ("ws_url", `String (Printf.sprintf "ws://%s:%d/" host port));
-        ]
-    else
-      base_fields
-  in
-  `Assoc fields
+  Transport_read_model.websocket_discovery_json ctx
 
 let transport_json request =
   let (host, port) = advertised_host_port request in
-  let base_url = Printf.sprintf "http://%s:%d" host port in
-  let grpc_enabled = Masc_grpc_server.is_enabled () in
-  let grpc_port = Masc_grpc_server.configured_port () in
-  let grpc_listening = Transport_metrics.grpc_listening () in
-  (* Note: listen_status is read separately from listening — brief tearing is
-     possible but acceptable for this diagnostic-only endpoint. *)
-  let grpc_listen_status = Atomic.get Transport_metrics.grpc_listen_status in
-  let webrtc_enabled = Server_webrtc_transport.is_enabled () in
-  `Assoc
-    [
-      ("streamable_http_default", `Bool true);
-      ("allow_legacy_accept", `Bool allow_legacy_accept);
-      ("legacy_endpoints_deprecated", `Bool true);
-      ( "http",
-        `Assoc
-          [
-            ("enabled", `Bool true);
-            ("base_url", `String base_url);
-            ("mcp_url", `String (base_url ^ "/mcp"));
-            ("sse_url", `String (base_url ^ "/sse"));
-          ] );
-      ( "grpc",
-        `Assoc
-          ([
-             ("enabled", `Bool grpc_enabled);
-             ("configured", `Bool grpc_enabled);
-             ("listening", `Bool grpc_listening);
-             ("listen_status", `String grpc_listen_status);
-             ("port", `Int grpc_port);
-             ("service", `String Masc_grpc_service.service_name);
-             ("health_service", `String Masc_grpc_server.health_service_name);
-           ]
-          @ if grpc_enabled then
-              [ ("url", `String (Printf.sprintf "grpc://%s:%d" host grpc_port)) ]
-            else
-              []) );
-      ("websocket", websocket_discovery_json request);
-      ( "webrtc",
-        `Assoc
-          ([
-             ("enabled", `Bool webrtc_enabled);
-             ("signaling_path", `String "/webrtc");
-             ("offer_path", `String "/webrtc/offer");
-             ("answer_path", `String "/webrtc/answer");
-             ( "ice_server_urls",
-               `List
-                 (List.map
-                    (fun url -> `String url)
-                    (Server_webrtc_transport.configured_ice_server_urls ())) );
-             ("pending_offers", `Int (Server_webrtc_transport.pending_offer_count ()));
-             ("active_peers", `Int (Server_webrtc_transport.active_peer_count ()));
-             ("live_connections", `Int (Server_webrtc_transport.live_webrtc_count ()));
-             ("connected_channels", `Int (Server_webrtc_transport.connected_channel_count ()));
-           ]
-          @ if webrtc_enabled then
-              [ ("signaling_url", `String (base_url ^ "/webrtc")) ]
-            else
-              []) );
-    ]
+  let ctx =
+    Transport_read_model.make_http_context ~include_configured:true
+      ~allow_legacy_accept ~host
+      ~base_url:(Printf.sprintf "http://%s:%d" host port) ()
+  in
+  Transport_read_model.transport_status_json ctx
 
 let health_path_diagnostics () =
   match current_server_state_opt () with

@@ -14,7 +14,7 @@ vi.mock('./core', async (importOriginal) => {
   }
 })
 
-import { sendKeeperMessageDetailed, streamKeeperMessage } from './keeper'
+import { bootKeeper, sendKeeperMessageDetailed, shutdownKeeper, streamKeeperMessage } from './keeper'
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -83,5 +83,37 @@ describe('streamKeeperMessage', () => {
     expect(actorHeader).toBe('dashboard-eager-manta')
     expect(actorHeader).not.toContain('%')
     expect(events).toEqual(['RUN_FINISHED'])
+  })
+})
+
+describe('keeper lifecycle', () => {
+  it('treats unauthorized shutdown responses as failures', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Token required' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await shutdownKeeper('keeper-test')
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toBe('Token required')
+  })
+
+  it('falls back to the HTTP status when boot failure payload is not json', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('auth gateway failed', {
+        status: 502,
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await bootKeeper('keeper-test')
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toBe('Failed to boot keeper-test (HTTP 502)')
   })
 })

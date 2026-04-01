@@ -74,6 +74,11 @@ async function runSocialSweep(): Promise<void> {
   }
 }
 
+async function refreshAfterRuntimeAction(): Promise<void> {
+  invalidateDashboardCache()
+  await refreshDashboard({ force: true })
+}
+
 // ── Status Badge (colored pill) ──────────────────────────
 
 function statusColor(status: string): { bg: string; text: string; dot: string } {
@@ -344,12 +349,19 @@ export function KeeperDetailOverlay() {
                 <button type="button"
                   class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[#4ade80] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
                   onClick=${() => {
-                    void bootKeeper(keeper.name).then(res => {
-                      if (res.ok) {
-                        showToast(keeper.name + ' 기동됨', 'success')
-                        void refreshDashboard({ force: true })
-                      } else showToast(res.error ?? '기동 실패', 'error')
-                    }).catch(() => showToast('기동 실패', 'error'))
+                    void (async () => {
+                      try {
+                        const res = await bootKeeper(keeper.name)
+                        if (res.ok) {
+                          showToast(keeper.name + ' 기동됨', 'success')
+                          await refreshAfterRuntimeAction()
+                        } else {
+                          showToast(res.error ?? '기동 실패', 'error')
+                        }
+                      } catch {
+                        showToast('기동 실패', 'error')
+                      }
+                    })()
                   }}
                 >기동</button>`
               if (isRunning) return html`
@@ -357,10 +369,19 @@ export function KeeperDetailOverlay() {
                   class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
                   onClick=${() => {
                     if (confirm(keeper.name + ' 키퍼를 종료합니까?')) {
-                      void shutdownKeeper(keeper.name).then(() => {
-                        showToast(keeper.name + ' 종료됨', 'success')
-                        void refreshDashboard({ force: true })
-                      }).catch(() => showToast('종료 실패', 'error'))
+                      void (async () => {
+                        try {
+                          const res = await shutdownKeeper(keeper.name)
+                          if (res.ok) {
+                            showToast(keeper.name + ' 종료됨', 'success')
+                            await refreshAfterRuntimeAction()
+                          } else {
+                            showToast(res.error ?? '종료 실패', 'error')
+                          }
+                        } catch {
+                          showToast('종료 실패', 'error')
+                        }
+                      })()
                     }
                   }}
                 >종료</button>`

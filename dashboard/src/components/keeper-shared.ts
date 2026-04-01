@@ -23,6 +23,7 @@ import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import { showToast } from './common/toast'
 import { signal } from '@preact/signals'
+import { invalidateDashboardCache, refreshDashboard } from '../store'
 
 const keeperBooting = signal<Record<string, boolean>>({})
 const keeperShuttingDown = signal<Record<string, boolean>>({})
@@ -390,6 +391,44 @@ export function KeeperRuntimeActions({
   const canRecover = diagnostic?.recoverable === true
   const isOffline = isOfflineStatus(keeper.status)
   const isRunning = keeper.status === 'active' || keeper.status === 'running' || keeper.status === 'idle' || keeper.status === 'watching' || keeper.status === 'listening'
+  const refreshKeeperRuntime = async () => {
+    invalidateDashboardCache()
+    await refreshDashboard({ force: true })
+  }
+  const runBoot = async () => {
+    keeperBooting.value = { ...keeperBooting.value, [keeper.name]: true }
+    try {
+      const response = await bootKeeper(keeper.name)
+      if (!response.ok) {
+        throw new Error(response.error ?? `${keeper.name} 기동 실패`)
+      }
+      showToast(`${keeper.name} 기동됨`, 'success')
+      await refreshKeeperRuntime()
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : `${keeper.name} 기동 실패`, 'error')
+    } finally {
+      keeperBooting.value = { ...keeperBooting.value, [keeper.name]: false }
+    }
+  }
+  const runShutdown = async () => {
+    if (!confirm(`${keeper.name} 키퍼를 종료합니까?`)) return
+    keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: true }
+    try {
+      const response = await shutdownKeeper(keeper.name)
+      if (!response.ok) {
+        throw new Error(response.error ?? `${keeper.name} 종료 실패`)
+      }
+      showToast(`${keeper.name} 종료됨`, 'success')
+      await refreshKeeperRuntime()
+      setTimeout(() => {
+        void refreshKeeperRuntime()
+      }, 900)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : `${keeper.name} 종료 실패`, 'error')
+    } finally {
+      keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: false }
+    }
+  }
 
   const btnBase = 'py-1.5 px-4 rounded-lg text-xs font-medium cursor-pointer transition-colors border'
   const ghostBtn = `${btnBase} border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]`
@@ -404,17 +443,7 @@ export function KeeperRuntimeActions({
       ${isOffline ? html`
         <button type="button"
           class=${bootBtn}
-          onClick=${() => {
-            keeperBooting.value = { ...keeperBooting.value, [keeper.name]: true }
-            void bootKeeper(keeper.name).then(res => {
-              if (res.ok) showToast(`${keeper.name} 기동됨`, 'success')
-              else showToast(res.error ?? '기동 실패', 'error')
-            }).catch(err => {
-              showToast(err instanceof Error ? err.message : `${keeper.name} 기동 실패`, 'error')
-            }).finally(() => {
-              keeperBooting.value = { ...keeperBooting.value, [keeper.name]: false }
-            })
-          }}
+          onClick=${() => { void runBoot() }}
           disabled=${booting}
         >
           ${booting ? '기동 중...' : '기동'}
@@ -423,12 +452,7 @@ export function KeeperRuntimeActions({
       ${isRunning ? html`
         <button type="button"
           class=${shutdownBtn}
-          onClick=${() => {
-            keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: true }
-            void shutdownKeeper(keeper.name).finally(() => {
-              keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: false }
-            })
-          }}
+          onClick=${() => { void runShutdown() }}
           disabled=${shuttingDown}
         >
           ${shuttingDown ? '종료 중...' : '종료'}
@@ -463,16 +487,6 @@ export function KeeperRuntimeActions({
         onClick=${onSocialSweep}
       >
         Social sweep
-      </button>
-      <button type="button"
-        class="${btnBase} border-[rgba(251,113,133,0.3)] bg-[rgba(251,113,133,0.06)] text-[#fda4af] hover:bg-[rgba(251,113,133,0.12)]"
-        onClick=${() => {
-          if (confirm('키퍼를 종료합니까?')) {
-            void shutdownKeeper(keeper.name)
-          }
-        }}
-      >
-        종료
       </button>
     </div>
   `

@@ -114,7 +114,7 @@ let max_buffered_events = Env_config_governance.Timeouts.event_buffer_size
 let a2a_rng = Random.State.make_self_init ()
 let a2a_rng_mutex = Eio.Mutex.create ()
 let generate_uuid () =
-  Eio.Mutex.use_ro a2a_rng_mutex (fun () ->
+  Eio_guard.with_mutex a2a_rng_mutex (fun () ->
     let uuid = Uuidm.v4_gen a2a_rng () in
     Uuidm.to_string uuid)
 

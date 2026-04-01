@@ -85,7 +85,7 @@ let execute_keeper_tool_call
   let args = input in
   let now_ts = Time_compat.now () in
   let lookup = tool_access_lookup_of_meta meta in
-  if not (filter_by_access ~lookup name) then
+  if not (can_execute ~lookup name) then
     Yojson.Safe.to_string
       (`Assoc [ ("error", `String "tool_not_allowed");
                 ("tool", `String name) ])

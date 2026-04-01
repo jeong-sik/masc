@@ -274,7 +274,10 @@ let run_turn
       else if String.starts_with ~prefix:"keeper_voice_" name then Some "voice"
       else if String.starts_with ~prefix:"keeper_fs_" name
            || name = "keeper_shell_readonly"
-           || name = "keeper_bash" then Some "filesystem"
+           || name = "keeper_bash"
+           || name = "keeper_edit"
+           || name = "keeper_write" then Some "filesystem"
+      else if name = "keeper_github" then Some "vcs"
       else None
     in
     let kr_kw = match List.assoc_opt name korean_keywords with

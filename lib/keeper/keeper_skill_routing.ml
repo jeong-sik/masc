@@ -41,6 +41,7 @@ let keeper_allowed_skills = [
 let canonical_keeper_skill_token (raw : string) : string option =
   match String.lowercase_ascii (String.trim raw) with
   | "masc-heartbeat" | "masc_heartbeat" | "heartbeat" -> Some "masc-heartbeat"
+  | "masc-keeper-autonomy" | "masc_keeper_autonomy" | "autonomy" -> Some "masc-keeper-autonomy"
   | _ -> None
 
 let unique_skills_preserve_order (xs : string list) : string list =

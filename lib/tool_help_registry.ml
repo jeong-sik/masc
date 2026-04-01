@@ -260,7 +260,7 @@ let manual_help_entry name =
             "Use when you need to change auth settings, update a unit policy envelope, or adjust keeper policy without bouncing between multiple tools.";
           key_constraints =
             [
-              "Section must be one of auth, unit_policy, keeper_policy, or persistent_agent_policy.";
+              "Section must be one of: auth | unit_policy.";
               "Unit tool/model allowlists are stored and surfaced, but remain advisory until runtime enforcement is added.";
             ];
           details_markdown =

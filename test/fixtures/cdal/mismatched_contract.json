@@ -2,7 +2,7 @@
   "runtime_constraints": {
     "requested_execution_mode": "draft",
     "risk_class": "medium",
-    "allowed_mutations": ["keeper_read"],
+    "allowed_mutations": ["keeper_fs_read"],
     "review_requirement": "human"
   },
   "eval_criteria": {

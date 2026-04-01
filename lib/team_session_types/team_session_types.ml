@@ -174,109 +174,50 @@ let counts_to_json counts =
     |> List.map (fun (label, count) -> (label, `Int count))
     |> List.sort (fun (a, _) (b, _) -> compare a b))
 
-let worker_class_counts workers =
+(** Generic counting: given a key extractor, count occurrences in a list. *)
+let count_by (key_of : planned_worker -> string option) (workers : planned_worker list) : (string * int) list =
   let tbl = Hashtbl.create 8 in
-  List.iter
-    (fun (worker : planned_worker) ->
-      match worker.worker_class with
-      | None -> ()
-      | Some kind ->
-          let key = worker_class_to_string kind in
-          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
-          Hashtbl.replace tbl key (prev + 1))
+  List.iter (fun (worker : planned_worker) ->
+    match key_of worker with
+    | None -> ()
+    | Some key ->
+        let trimmed = String.trim key in
+        if trimmed <> "" then
+          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl trimmed) in
+          Hashtbl.replace tbl trimmed (prev + 1))
     workers;
   Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+
+let worker_class_counts workers =
+  count_by (fun (w : planned_worker) ->
+    Option.map worker_class_to_string w.worker_class) workers
 
 let runtime_pool_counts workers =
-  let tbl = Hashtbl.create 8 in
-  List.iter
-    (fun (worker : planned_worker) ->
-      match worker.runtime_pool with
-      | Some pool when String.trim pool <> "" ->
-          let key = String.trim pool in
-          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
-          Hashtbl.replace tbl key (prev + 1)
-      | _ -> ())
-    workers;
-  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+  count_by (fun (w : planned_worker) -> w.runtime_pool) workers
 
 let lane_counts workers =
-  let tbl = Hashtbl.create 8 in
-  List.iter
-    (fun (worker : planned_worker) ->
-      match worker.lane_id with
-      | Some lane when String.trim lane <> "" ->
-          let key = String.trim lane in
-          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
-          Hashtbl.replace tbl key (prev + 1)
-      | _ -> ())
-    workers;
-  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+  count_by (fun (w : planned_worker) -> w.lane_id) workers
 
 let controller_level_counts workers =
-  let tbl = Hashtbl.create 4 in
-  List.iter
-    (fun (worker : planned_worker) ->
-      match worker.controller_level with
-      | Some level ->
-          let key = controller_level_to_string level in
-          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
-          Hashtbl.replace tbl key (prev + 1)
-      | None -> ())
-    workers;
-  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+  count_by (fun (w : planned_worker) ->
+    Option.map controller_level_to_string w.controller_level) workers
 
 let control_domain_counts workers =
-  let tbl = Hashtbl.create 8 in
-  List.iter
-    (fun (worker : planned_worker) ->
-      match worker.control_domain with
-      | Some domain ->
-          let key = control_domain_to_string domain in
-          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
-          Hashtbl.replace tbl key (prev + 1)
-      | None -> ())
-    workers;
-  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+  count_by (fun (w : planned_worker) ->
+    Option.map control_domain_to_string w.control_domain) workers
 
 let model_tier_counts workers =
-  let tbl = Hashtbl.create 4 in
-  List.iter
-    (fun (worker : planned_worker) ->
-      match worker.model_tier with
-      | None -> ()
-      | Some tier ->
-          let key = model_tier_to_string tier in
-          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
-          Hashtbl.replace tbl key (prev + 1))
-    workers;
-  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+  count_by (fun (w : planned_worker) ->
+    Option.map model_tier_to_string w.model_tier) workers
 
 let worker_size_counts workers =
-  let tbl = Hashtbl.create 4 in
-  List.iter
-    (fun (worker : planned_worker) ->
-      match Option.bind worker.model_tier worker_size_of_model_tier with
-      | None -> ()
-      | Some size ->
-          let key = worker_size_to_string size in
-          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
-          Hashtbl.replace tbl key (prev + 1))
-    workers;
-  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+  count_by (fun (w : planned_worker) ->
+    Option.map worker_size_to_string
+      (Option.bind w.model_tier worker_size_of_model_tier)) workers
 
 let task_profile_counts workers =
-  let tbl = Hashtbl.create 8 in
-  List.iter
-    (fun (worker : planned_worker) ->
-      match worker.task_profile with
-      | None -> ()
-      | Some profile ->
-          let key = task_profile_to_string profile in
-          let prev = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
-          Hashtbl.replace tbl key (prev + 1))
-    workers;
-  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+  count_by (fun (w : planned_worker) ->
+    Option.map task_profile_to_string w.task_profile) workers
 
 let escalation_count workers =
   List.fold_left

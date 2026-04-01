@@ -686,4 +686,56 @@ let () =
           Alcotest.test_case "unique names" `Quick test_tools_names_unique;
           Alcotest.test_case "all have descriptions" `Quick test_tools_all_have_descriptions;
         ] );
+      ( "post_kind_registry",
+        [
+          Alcotest.test_case "no hook: defaults to human" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Tool_board.set_agent_lookup_none ();
+            let (ok, msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "test"); ("content", `String "hello");
+              ("author", `String "claude-agent")
+            ]) in
+            Alcotest.(check bool) "post created" true ok;
+            Alcotest.(check bool) "classified as human" true
+              (contains_substring msg {|"post_kind": "human"|}));
+          Alcotest.test_case "with hook: agent classified as automation" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Tool_board.set_agent_lookup (fun name -> name = "claude-agent");
+            let (ok, msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "test"); ("content", `String "hello");
+              ("author", `String "claude-agent")
+            ]) in
+            Alcotest.(check bool) "post created" true ok;
+            Alcotest.(check bool) "classified as automation" true
+              (contains_substring msg {|"post_kind": "automation"|}));
+          Alcotest.test_case "with hook: non-agent stays human" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Tool_board.set_agent_lookup (fun _name -> false);
+            let (ok, msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "test"); ("content", `String "hello");
+              ("author", `String "sangsu")
+            ]) in
+            Alcotest.(check bool) "post created" true ok;
+            Alcotest.(check bool) "classified as human" true
+              (contains_substring msg {|"post_kind": "human"|}));
+          Alcotest.test_case "explicit override respected" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Tool_board.set_agent_lookup (fun _name -> true);
+            let (ok, msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "test"); ("content", `String "hello");
+              ("author", `String "claude-agent");
+              ("post_kind", `String "human")
+            ]) in
+            Alcotest.(check bool) "post created" true ok;
+            Alcotest.(check bool) "explicit human override" true
+              (contains_substring msg {|"post_kind": "human"|}));
+        ] );
     ]

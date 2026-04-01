@@ -80,40 +80,46 @@ let visibility_of_string = function
   | "direct" -> Some Board.Direct
   | _ -> None
 
-let meta_source = function
-  | Some (`Assoc fields) -> (
-      match List.assoc_opt "source" fields with
-      | Some (`String source) ->
-          let trimmed = String.lowercase_ascii (String.trim source) in
-          if trimmed = "" then None else Some trimmed
-      | _ -> None)
-  | _ -> None
+(** Agent lookup callback — set once at server startup with the real
+    Room.is_agent_joined check so that board posts are auto-classified
+    without requiring callers to pass config or post_kind. *)
+let agent_lookup_hook : (string -> bool) option ref = ref None
 
-let resolve_board_post_kind ~author ~(meta_json : Yojson.Safe.t option)
-    (raw_kind : string option) :
+let set_agent_lookup f = agent_lookup_hook := Some f
+let set_agent_lookup_none () = agent_lookup_hook := None
+
+(** Heuristic fallback: agent names have no spaces and are lowercase.
+    "anonymous" is excluded — it is the default author for unauthenticated posts. *)
+let is_agent_heuristic name =
+  name <> "" && name <> "anonymous"
+  && not (String.contains name ' ')
+  && String.lowercase_ascii name = name
+
+(** Check whether [name] is a registered agent.  Prefers the registry
+    lookup (Room.is_agent_joined) when available; falls back to the
+    name-shape heuristic so standalone / test usage still works. *)
+let is_agent name =
+  match !agent_lookup_hook with
+  | Some lookup -> lookup name
+  | None -> is_agent_heuristic name
+
+let resolve_board_post_kind ~author (raw_kind : string option) :
     (Board.post_kind, string) Stdlib.result =
-  let author = String.lowercase_ascii (String.trim author) in
-  let source = meta_source meta_json in
-  let requested =
-    match raw_kind with
-    | Some raw -> Board.post_kind_of_string (String.lowercase_ascii (String.trim raw))
-    | None -> None
-  in
-  match source, requested with
-  | Some "keeper_board_post", Some Board.Automation_post
-  | Some "keeper_board_post", None ->
-      Ok Board.Automation_post
-  | Some "keeper_board_post", Some _ ->
-      Error "keeper board posts must use post_kind=automation"
-  | _, Some Board.Human_post
-  | _, None when author <> "anonymous" ->
-      Ok Board.Human_post
-  | _, Some Board.Automation_post ->
-      Ok Board.Automation_post
-  | _, Some Board.System_post ->
-      Error "system posts are reserved for internal surfaces (keeper, operator)"
-  | _ ->
-      Ok Board.Human_post
+  match raw_kind with
+  | Some raw ->
+      (match Board.post_kind_of_string (String.lowercase_ascii (String.trim raw)) with
+       | Some Board.System_post ->
+           Error "system posts are reserved for internal surfaces (keeper, operator)"
+       | Some kind -> Ok kind
+       | None -> Error (Printf.sprintf "unknown post_kind: %s" raw))
+  | None ->
+      (* Auto-classify only when registry hook is available.
+         Without a registry, default to Human_post to avoid
+         false positives from the name-shape heuristic. *)
+      let author_lc = String.lowercase_ascii (String.trim author) in
+      (match !agent_lookup_hook with
+       | Some _ when is_agent author_lc -> Ok Board.Automation_post
+       | _ -> Ok Board.Human_post)
 
 (** {1 Formatters} *)
 
@@ -212,7 +218,7 @@ let handle_post_create args =
     | Some v -> v
     | None -> Board.Internal
   in
-  match resolve_board_post_kind ~author ~meta_json raw_post_kind with
+  match resolve_board_post_kind ~author raw_post_kind with
   | Error msg -> (false, "❌ " ^ msg)
   | Ok post_kind ->
       match
@@ -367,11 +373,6 @@ let handle_comment_add args =
       (true, Printf.sprintf "✅ Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
-
-(** Check if a name looks like an agent (not a human user) *)
-let is_agent name =
-  (* Agent names don't contain spaces and are lowercase *)
-  name <> "" && not (String.contains name ' ') && String.lowercase_ascii name = name
 
 (** SOUL Evolution callback - registered at startup to break dependency cycle *)
 type evolution_callback = {

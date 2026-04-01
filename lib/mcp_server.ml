@@ -480,7 +480,7 @@ let create_state ~base_path =
   Subscriptions.set_session_push_fn (fun event ->
     Session.push_notification_to_active_agents registry ~event
   );
-  {
+  let state = {
     room_config = config;
     session_registry = registry;
     on_sse_broadcast = None;
@@ -492,7 +492,11 @@ let create_state ~base_path =
     mono_clock = None;
     env = None;
     net = None;
-  }
+  } in
+  Tool_board.set_agent_lookup (fun name ->
+    try Room.is_agent_joined state.room_config ~agent_name:name
+    with Sys_error _ | Not_found | Invalid_argument _ -> false);
+  state
 
 (** Create state with Eio context - required for PostgresNative backend *)
 let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
@@ -525,7 +529,7 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   Subscriptions.set_session_push_fn (fun event ->
     Session.push_notification_to_active_agents registry ~event
   );
-  {
+  let state = {
     room_config = config;
     session_registry = registry;
     on_sse_broadcast = None;
@@ -537,7 +541,13 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     mono_clock = Some mono_clock;
     env = Some env;
     net = Some net;
-  }
+  } in
+  (* Board post kind auto-classification: reads state.room_config so
+     room changes via set_room are reflected automatically. *)
+  Tool_board.set_agent_lookup (fun name ->
+    try Room.is_agent_joined state.room_config ~agent_name:name
+    with Sys_error _ | Not_found | Invalid_argument _ -> false);
+  state
 
 (** Register SSE broadcast callback *)
 let set_sse_callback state callback =

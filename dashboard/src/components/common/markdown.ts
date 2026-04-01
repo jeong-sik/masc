@@ -7,6 +7,7 @@
 import { html } from 'htm/preact'
 import { useRef, useEffect, useMemo } from 'preact/hooks'
 import { Marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 // ── Lazy mermaid loader ──────────────────────────────────────
 type MermaidApi = typeof import('mermaid')['default']
@@ -29,13 +30,35 @@ function getMermaid(): Promise<MermaidApi> {
 // ── Marked instance (GFM tables + line-break support) ────────
 const md = new Marked({ gfm: true, breaks: true })
 
-// ── Minimal sanitization (strip script/iframe/event handlers) ─
+// Custom renderer: links open in new tab with noopener
+md.use({
+  renderer: {
+    link({ href, title, text }) {
+      const titleAttr = title ? ` title="${title}"` : ''
+      return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`
+    }
+  }
+})
+
+// ── HTML sanitization via DOMPurify ──────────────────────────
+// VDOM→innerHTML migration requires explicit sanitization.
+// DOMPurify handles script/iframe/event handler/SVG attacks.
+const PURIFY_CONFIG = {
+  ALLOWED_TAGS: [
+    'p', 'br', 'strong', 'em', 'del', 'code', 'pre', 'blockquote',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'ul', 'ol', 'li', 'hr', 'a', 'img',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    'details', 'summary', 'div', 'span',
+  ],
+  ALLOWED_ATTR: [
+    'href', 'title', 'target', 'rel', 'src', 'alt', 'class',
+    'align', 'style',
+  ],
+}
+
 function sanitize(raw: string): string {
-  return raw
-    .replace(/<script\b[^]*?<\/script>/gi, '')
-    .replace(/<iframe\b[^]*?<\/iframe>/gi, '')
-    .replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, '')
-    .replace(/\bon\w+\s*=\s*[^\s>]+/gi, '')
+  return DOMPurify.sanitize(raw, PURIFY_CONFIG)
 }
 
 // ── Parse markdown with <think> block extraction ─────────────
@@ -44,7 +67,7 @@ function sanitize(raw: string): string {
 function renderMarkdown(text: string): string {
   const parts: string[] = []
   let lastIdx = 0
-  const thinkRe = /<think>([\s\S]*?)<\/think>/g
+  const thinkRe = /<think>([\s\S]*?)<\/think\s*>/g
   let m: RegExpExecArray | null
 
   while ((m = thinkRe.exec(text)) !== null) {

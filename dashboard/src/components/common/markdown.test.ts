@@ -103,4 +103,25 @@ describe('Markdown', () => {
     render(html`<${Markdown} text="~~deleted~~" />`, container)
     expect(container.querySelector('del')?.textContent).toBe('deleted')
   })
+
+  it('adds target="_blank" and rel="noopener noreferrer" to links', () => {
+    render(html`<${Markdown} text="[example](https://example.com)" />`, container)
+    const a = container.querySelector('a')
+    expect(a).not.toBeNull()
+    expect(a?.getAttribute('target')).toBe('_blank')
+    expect(a?.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it('sanitizes event handlers via DOMPurify', () => {
+    const md = '<img src=x onerror="alert(1)">'
+    render(html`<${Markdown} text=${md} />`, container)
+    expect(container.innerHTML).not.toContain('onerror')
+  })
+
+  it('handles think block with trailing whitespace in close tag', () => {
+    const md = '<think>reasoning</think >'
+    render(html`<${Markdown} text=${md} />`, container)
+    const details = container.querySelector('details.think-block')
+    expect(details).not.toBeNull()
+  })
 })

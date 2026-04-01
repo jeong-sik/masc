@@ -137,7 +137,8 @@ let rec is_irreversible = function
 (* serialization                                                     *)
 (* ================================================================ *)
 
-let names_to_json names = `List (List.map (fun n -> `String n) names)
+let names_to_json names =
+  `List (List.map (fun n -> `String n) (normalize names))
 
 let rec to_yojson = function
   | Keep_all -> `Assoc [("op", `String "keep_all")]

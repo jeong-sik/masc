@@ -25,7 +25,12 @@ type inverse_result =
 (** {1 Core Operations} *)
 
 val apply : tool_op -> string list -> string list
-(** Apply op to a tool set. Result is deduplicated, order-preserving. *)
+(** Apply [op] to a tool-name set.
+
+    Names are normalized: surrounding whitespace is trimmed, entries that
+    are empty after trimming are discarded. The same normalization is applied
+    to both the input set and any names embedded in [op]. The resulting set
+    is deduplicated while preserving first-occurrence order. *)
 
 val inverse : tool_op -> inverse_result
 (** Compute algebraic inverse. Structural -- does NOT need the current set.

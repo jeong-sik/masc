@@ -464,6 +464,61 @@ let test_diff_in_policy_deny () =
   check (list string) "diff allow + deny" [ "a" ] resolved
 
 (* ================================================================ *)
+(* 3-Layer Tool Gate tests                                           *)
+(* ================================================================ *)
+
+let make_gate_test_meta ?(name = "test-gate") () : Keeper_types.keeper_meta =
+  match Keeper_types.meta_of_json
+    (`Assoc [("name", `String name); ("agent_name", `String name);
+             ("trace_id", `String "test-trace-gate")]) with
+  | Ok meta -> meta
+  | Error e -> failwith (Printf.sprintf "make_gate_test_meta failed: %s" e)
+
+let test_core_tools_are_core () =
+  let core = Keeper_exec_tools.core_always_tools in
+  check bool "masc_status is core" true
+    (List.mem "masc_status" core);
+  check bool "masc_broadcast is core" true
+    (List.mem "masc_broadcast" core);
+  check bool "masc_heartbeat is core" true
+    (List.mem "masc_heartbeat" core);
+  check bool "extend_turns is core" true
+    (List.mem "extend_turns" core);
+  check bool "is_core_always_tool masc_status" true
+    (Keeper_exec_tools.is_core_always_tool "masc_status");
+  check bool "non-core tool" false
+    (Keeper_exec_tools.is_core_always_tool "keeper_bash")
+
+let test_universe_superset_of_policy () =
+  let base = make_gate_test_meta () in
+  let meta = { base with
+    tool_access = Preset { preset = Minimal; also_allow = [] };
+    tool_denylist = [];
+  } in
+  let policy = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let universe = Keeper_exec_tools.keeper_universe_tool_names meta in
+  let missing =
+    List.filter (fun name -> not (List.mem name universe)) policy
+  in
+  check (list string) "all policy tools in universe" [] missing;
+  check bool "universe >= policy" true
+    (List.length universe >= List.length policy)
+
+let test_minimal_preset_includes_core_masc () =
+  let base = make_gate_test_meta ~name:"test-minimal" () in
+  let meta = { base with
+    tool_access = Preset { preset = Minimal; also_allow = [] };
+    tool_denylist = [];
+  } in
+  let universe = Keeper_exec_tools.keeper_universe_tool_names meta in
+  check bool "masc_status in universe" true
+    (List.mem "masc_status" universe);
+  check bool "masc_broadcast in universe" true
+    (List.mem "masc_broadcast" universe);
+  check bool "masc_heartbeat in universe" true
+    (List.mem "masc_heartbeat" universe)
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -590,5 +645,17 @@ let () =
             test_inter_then_diff;
           test_case "diff in policy deny" `Quick
             test_diff_in_policy_deny;
+        ] );
+      (* ======================================================== *)
+      (* 3-Layer Tool Gate: core / universe / policy               *)
+      (* ======================================================== *)
+      ( "tool_gate_3layer",
+        [
+          test_case "core tools are core" `Quick
+            test_core_tools_are_core;
+          test_case "universe superset of policy" `Quick
+            test_universe_superset_of_policy;
+          test_case "minimal preset includes core masc" `Quick
+            test_minimal_preset_includes_core_masc;
         ] );
     ]

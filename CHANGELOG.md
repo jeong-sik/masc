@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [2.203.0] - 2026-04-01
+
+### Added
+- **Tool_access_policy tests** — comprehensive coverage for ADT (#4370).
+
+### Changed
+- **Boundary env vars** — remove vendor-specific model env vars (#4367).
+- **Tool_spec migration** — migrate all modules to Tool_spec registration (#4329).
+
+### Fixed
+- **GC agent files** — auto-remove broken agent files instead of skipping (#4368).
+- **Dashboard MCP 403** — harden blocked detection, extract constants (#4369).
+
 ## [2.202.0] - 2026-04-01
 
 ### Added

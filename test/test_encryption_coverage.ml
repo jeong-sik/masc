@@ -76,10 +76,36 @@ let test_error_invalid_envelope () =
   let s = Encryption.show_encryption_error e in
   check bool "contains Invalid" true (String.sub s 0 15 = "InvalidEnvelope")
 
+let test_error_invalid_hex_format () =
+  let e = Encryption.InvalidHexFormat "bad hex" in
+  let s = Encryption.show_encryption_error e in
+  check bool "contains InvalidHexFormat" true (String.sub s 0 16 = "InvalidHexFormat")
+
 let test_error_rng_not_initialized () =
   let e = Encryption.RngNotInitialized in
   let s = Encryption.show_encryption_error e in
   check bool "contains RNG" true (String.sub s 0 17 = "RngNotInitialized")
+
+let test_decode_hex_key_valid () =
+  let hex = String.init 64 (fun i ->
+    let byte_val = i / 2 in
+    let nibble = if i mod 2 = 0 then byte_val / 16 else byte_val mod 16 in
+    "0123456789abcdef".[nibble]) in
+  match Encryption.decode_hex_key hex with
+  | Ok bytes -> check int "decoded length" 32 (String.length bytes)
+  | Error e -> fail (Encryption.show_encryption_error e)
+
+let test_decode_hex_key_too_short () =
+  match Encryption.decode_hex_key "aabb" with
+  | Error (Encryption.InvalidHexFormat _) -> ()
+  | _ -> fail "Expected InvalidHexFormat for short input"
+
+let test_decode_hex_key_invalid_chars () =
+  let hex = "GG" ^ String.make 62 '0' in
+  match Encryption.decode_hex_key hex with
+  | Error (Encryption.InvalidHexFormat msg) ->
+      check bool "mentions position" true (String.length msg > 0)
+  | _ -> fail "Expected InvalidHexFormat for invalid hex chars"
 
 (* ============================================================
    envelope Tests
@@ -503,9 +529,15 @@ let () =
     "encryption_error", [
       test_case "key not found" `Quick test_error_key_not_found;
       test_case "invalid key length" `Quick test_error_invalid_key_length;
+      test_case "invalid hex format" `Quick test_error_invalid_hex_format;
       test_case "decryption failed" `Quick test_error_decryption_failed;
       test_case "invalid envelope" `Quick test_error_invalid_envelope;
       test_case "rng not initialized" `Quick test_error_rng_not_initialized;
+    ];
+    "decode_hex_key", [
+      test_case "valid hex" `Quick test_decode_hex_key_valid;
+      test_case "too short" `Quick test_decode_hex_key_too_short;
+      test_case "invalid chars" `Quick test_decode_hex_key_invalid_chars;
     ];
     "envelope", [
       test_case "creation" `Quick test_envelope_creation;

@@ -10,6 +10,9 @@ import { reportToolHostFailure } from './dashboard'
 
 // --- MCP Session Management ---
 
+const MCP_BLOCKED_MESSAGE = 'MCP 연결이 차단되었습니다. 로컬 환경에서만 사용할 수 있는 기능입니다.'
+const MCP_SESSION_BLOCKED = '__blocked__'
+
 let mcpSessionId: string | null = null
 let initPromise: Promise<void> | null = null
 let initCooldownTimer: ReturnType<typeof setTimeout> | null = null
@@ -76,7 +79,8 @@ async function mcpPost(body: unknown, timeoutMs = DEFAULT_MCP_TIMEOUT_MS): Promi
   if (sid) mcpSessionId = sid
   if (!res.ok) {
     if (res.status === 403) {
-      throw new Error('MCP 연결이 차단되었습니다. 로컬 환경에서만 사용할 수 있는 기능입니다.')
+      mcpSessionId = MCP_SESSION_BLOCKED
+      throw new Error(MCP_BLOCKED_MESSAGE)
     }
     throw new Error(`POST /mcp: ${res.status} ${res.statusText}`)
   }
@@ -84,8 +88,8 @@ async function mcpPost(body: unknown, timeoutMs = DEFAULT_MCP_TIMEOUT_MS): Promi
 }
 
 async function ensureSession(): Promise<void> {
-  if (mcpSessionId === '__blocked__') {
-    throw new Error('MCP 연결이 차단되었습니다. 로컬 환경에서만 사용할 수 있는 기능입니다.')
+  if (mcpSessionId === MCP_SESSION_BLOCKED) {
+    throw new Error(MCP_BLOCKED_MESSAGE)
   }
   if (mcpSessionId) return
   if (initPromise) return initPromise
@@ -105,6 +109,13 @@ async function ensureSession(): Promise<void> {
           id: 0,
         }),
       }, MCP_INITIALIZE_TIMEOUT_MS)
+      if (!res.ok) {
+        if (res.status === 403) {
+          mcpSessionId = MCP_SESSION_BLOCKED
+          throw new Error(MCP_BLOCKED_MESSAGE)
+        }
+        throw new Error(`POST /mcp initialize: ${res.status} ${res.statusText}`)
+      }
       const sid = res.headers.get('Mcp-Session-Id')
       if (sid) mcpSessionId = sid
       // Send initialized notification
@@ -120,9 +131,6 @@ async function ensureSession(): Promise<void> {
       }
       initPromise = null
     } catch (err) {
-      if (err instanceof Error && err.message.includes('403')) {
-        mcpSessionId = '__blocked__'
-      }
       // Keep initPromise alive briefly to prevent retry storms
       if (initCooldownTimer) {
         clearTimeout(initCooldownTimer)

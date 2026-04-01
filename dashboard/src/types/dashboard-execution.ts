@@ -287,10 +287,6 @@ export interface DashboardPlanningResponse {
   generated_at?: string
   goals?: unknown[]
   rollup?: Record<string, unknown>
-  mdal?: {
-    loops?: unknown[]
-    error?: string
-  }
   task_backlog?: {
     todo?: number
     claimed?: number

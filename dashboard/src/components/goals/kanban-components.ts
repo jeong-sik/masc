@@ -172,7 +172,7 @@ export function TaskBacklog() {
   return html`
     <${Card} title="태스크 백로그" class="section">
       <div class="mb-4 text-[12px] leading-relaxed text-text-muted">
-        이 backlog는 현재 room의 실행 큐입니다. 목표 파이프라인이나 MDAL과 별도이므로, 여기만 차 있어도 아래 섹션이 비어 있을 수 있습니다.
+        이 backlog는 현재 room의 실행 큐입니다. 목표 파이프라인과 별도이므로, 여기만 차 있어도 아래 섹션이 비어 있을 수 있습니다.
       </div>
       <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-4 items-start">
         <${TaskColumn}

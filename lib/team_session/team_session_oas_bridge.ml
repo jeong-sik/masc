@@ -129,6 +129,11 @@ let ensure_agent_joined ~(config : Room.config) ~(agent_name : string) =
 
 let dispatch_supported_tool ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
     ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
+  (* Mint token at team-session I/O boundary (Parse, Don't Validate). *)
+  match Tool_dispatch.mint_token ~name with
+  | Error reason ->
+    (false, Printf.sprintf "team-session: unknown tool '%s' (%s)" name reason)
+  | Ok _token ->
   let agent_name =
     match string_field "agent_name" args with
     | Some agent_name -> agent_name

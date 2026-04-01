@@ -41,7 +41,8 @@ let register_module ~(schemas : Types.tool_schema list) ~(handler : handler) =
     found, [None] when the tool name is unknown to the registry.
     Handler exceptions are caught and returned as error tuples so the
     caller gets a consistent result shape. *)
-let dispatch ~name ~args : (bool * string) option =
+let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
+  let name = token.name in
   match Hashtbl.find_opt registry name with
   | Some handler -> (
       try handler ~name ~args
@@ -105,13 +106,14 @@ let run_post_hooks result =
     and the pre-hook's result is returned directly.
 
     Returns [None] when the tool is unknown to the registry. *)
-let dispatch_structured ~name ~args : Tool_result.t option =
+let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
+  let name = token.name in
   (* Pre-hooks: may short-circuit *)
   match run_pre_hooks ~name ~args with
   | Some _ as blocked -> blocked
   | None ->
     let start_time = Time_compat.now () in
-    (match dispatch ~name ~args with
+    (match dispatch ~token ~args with
      | Some (success, message) ->
        let result = Tool_result.wrap ~tool_name:name ~start_time (success, message) in
        Some (run_post_hooks result)
@@ -195,3 +197,11 @@ let tag_registry_count () = with_dispatch_ro (fun () -> Hashtbl.length tag_regis
 
 let mark_tag_registry_initialized () = with_dispatch_rw (fun () -> tag_registry_initialized := true)
 let is_tag_registry_initialized () = with_dispatch_ro (fun () -> !tag_registry_initialized)
+
+(** Mint a [Tool_token.t] validated against both tag and handler registries.
+    Checks tag_registry first (primary), falls back to handler registry.
+    Convenience wrapper for callers without direct table access. *)
+let mint_token ~name =
+  Tool_token.mint_with
+    ~validate:(fun n -> Hashtbl.mem tag_registry n || Hashtbl.mem registry n)
+    ~name

@@ -85,7 +85,8 @@ let test_dispatch_structured () =
   Tool_dispatch.register
     ~tool_name:"__test_tool"
     ~handler:(fun ~name:_ ~args:_ -> Some (true, {|{"result":"ok"}|}));
-  match Tool_dispatch.dispatch_structured ~name:"__test_tool" ~args:`Null with
+  let token = match Tool_dispatch.mint_token ~name:"__test_tool" with Ok t -> t | Error e -> Alcotest.fail e in
+  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
   | Some r ->
     Alcotest.(check bool) "success" true r.success;
     Alcotest.(check string) "tool_name" "__test_tool" r.tool_name;
@@ -93,9 +94,9 @@ let test_dispatch_structured () =
   | None -> Alcotest.fail "dispatch_structured returned None for registered tool"
 
 let test_dispatch_structured_unknown () =
-  match Tool_dispatch.dispatch_structured ~name:"__nonexistent" ~args:`Null with
-  | None -> ()
-  | Some _ -> Alcotest.fail "should return None for unknown tool"
+  match Tool_dispatch.mint_token ~name:"__nonexistent" with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "mint_token should return Error for unknown tool"
 
 let () =
   Alcotest.run "Tool_result" [

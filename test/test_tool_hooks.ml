@@ -2,6 +2,7 @@
 
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Masc_mcp.Tool_result
+module Tool_token = Masc_mcp.Tool_token
 
 (* Track hook execution order *)
 let call_log : string list ref = ref []
@@ -24,7 +25,8 @@ let test_pre_hook_observes () =
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
     None);
-  let result = Tool_dispatch.dispatch_structured ~name:"__hook_test" ~args:`Null in
+  let token = match Tool_dispatch.mint_token ~name:"__hook_test" with Ok t -> t | Error e -> Alcotest.fail e in
+  let result = Tool_dispatch.dispatch_structured ~token ~args:`Null in
   (* Pre-hook ran, then handler *)
   Alcotest.(check (list string)) "execution order"
     ["pre"; "handler"] !call_log;
@@ -43,7 +45,8 @@ let test_pre_hook_short_circuits () =
            data = `String "blocked";
            tool_name = name;
            duration_ms = 0.0 });
-  let result = Tool_dispatch.dispatch_structured ~name:"__hook_blocked" ~args:`Null in
+  let token = match Tool_dispatch.mint_token ~name:"__hook_blocked" with Ok t -> t | Error e -> Alcotest.fail e in
+  let result = Tool_dispatch.dispatch_structured ~token ~args:`Null in
   (* Handler should NOT have been called *)
   Alcotest.(check (list string)) "only pre ran" ["pre_block"] !call_log;
   match result with
@@ -74,7 +77,8 @@ let test_multiple_pre_hooks_first_wins () =
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre3";
     None);
-  let _ = Tool_dispatch.dispatch_structured ~name:"__hook_multi" ~args:`Null in
+  let token = match Tool_dispatch.mint_token ~name:"__hook_multi" with Ok t -> t | Error e -> Alcotest.fail e in
+  let _ = Tool_dispatch.dispatch_structured ~token ~args:`Null in
   (* pre1 passes, pre2 blocks, pre3 and handler never called *)
   Alcotest.(check (list string)) "chain stops at blocker"
     ["pre1"; "pre2_block"] !call_log
@@ -91,7 +95,8 @@ let test_post_hook_observes () =
   Tool_dispatch.register_post_hook (fun r ->
     log_call "post";
     r);
-  let result = Tool_dispatch.dispatch_structured ~name:"__hook_post" ~args:`Null in
+  let token = match Tool_dispatch.mint_token ~name:"__hook_post" with Ok t -> t | Error e -> Alcotest.fail e in
+  let result = Tool_dispatch.dispatch_structured ~token ~args:`Null in
   Alcotest.(check (list string)) "handler then post"
     ["handler"; "post"] !call_log;
   match result with
@@ -106,7 +111,8 @@ let test_post_hook_transforms () =
       Some (true, "original"));
   Tool_dispatch.register_post_hook (fun r ->
     { r with Tool_result.data = `String "transformed" });
-  match Tool_dispatch.dispatch_structured ~name:"__hook_transform" ~args:`Null with
+  let token = match Tool_dispatch.mint_token ~name:"__hook_transform" with Ok t -> t | Error e -> Alcotest.fail e in
+  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
   | Some r ->
     (match r.data with
      | `String "transformed" -> ()
@@ -125,7 +131,8 @@ let test_post_hooks_chain () =
   Tool_dispatch.register_post_hook (fun r ->
     log_call "post2";
     { r with Tool_result.data = `String "2" });
-  match Tool_dispatch.dispatch_structured ~name:"__hook_chain" ~args:`Null with
+  let token = match Tool_dispatch.mint_token ~name:"__hook_chain" with Ok t -> t | Error e -> Alcotest.fail e in
+  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
   | Some r ->
     Alcotest.(check (list string)) "post order" ["post1"; "post2"] !call_log;
     (match r.data with
@@ -148,7 +155,8 @@ let test_full_lifecycle () =
   Tool_dispatch.register_post_hook (fun r ->
     log_call "post";
     r);
-  let _ = Tool_dispatch.dispatch_structured ~name:"__hook_full" ~args:`Null in
+  let token = match Tool_dispatch.mint_token ~name:"__hook_full" with Ok t -> t | Error e -> Alcotest.fail e in
+  let _ = Tool_dispatch.dispatch_structured ~token ~args:`Null in
   Alcotest.(check (list string)) "pre → handler → post"
     ["pre"; "handler"; "post"] !call_log
 
@@ -158,7 +166,8 @@ let test_no_hooks_default () =
   Tool_dispatch.register
     ~tool_name:"__hook_none"
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "plain"));
-  match Tool_dispatch.dispatch_structured ~name:"__hook_none" ~args:`Null with
+  let token = match Tool_dispatch.mint_token ~name:"__hook_none" with Ok t -> t | Error e -> Alcotest.fail e in
+  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
   | Some r ->
     Alcotest.(check bool) "success" true r.success;
     Alcotest.(check string) "tool_name" "__hook_none" r.tool_name
@@ -167,17 +176,16 @@ let test_no_hooks_default () =
 let test_unknown_tool_skips_hooks () =
   setup ();
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
-    log_call "pre_should_run";
+    log_call "pre_should_not_run";
     None);
   Tool_dispatch.register_post_hook (fun r ->
     log_call "post_should_not_run";
     r);
-  match Tool_dispatch.dispatch_structured ~name:"__nonexistent_hook" ~args:`Null with
-  | None ->
-    (* Pre-hook runs (it doesn't know the tool is missing), post-hook does not *)
-    Alcotest.(check (list string)) "only pre ran"
-      ["pre_should_run"] !call_log
-  | Some _ -> Alcotest.fail "should be None for unknown tool"
+  match Tool_dispatch.mint_token ~name:"__nonexistent_hook" with
+  | Error _ ->
+    (* mint_token rejects unregistered tools; no hooks run *)
+    Alcotest.(check (list string)) "no hooks ran" [] !call_log
+  | Ok _ -> Alcotest.fail "mint_token should return Error for unknown tool"
 
 let () =
   Alcotest.run "Tool_hooks" [

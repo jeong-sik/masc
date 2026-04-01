@@ -24,17 +24,18 @@ let () =
           test_case "register single tool and dispatch" `Quick (fun () ->
               let tool = "__test_dispatch_single" in
               Tool_dispatch.register ~tool_name:tool ~handler:echo_handler;
-              let result = Tool_dispatch.dispatch ~name:tool ~args:`Null in
+              let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
+              let result = Tool_dispatch.dispatch ~token ~args:`Null in
               check bool "found" true (Option.is_some result);
               let (ok, msg) = Option.get result in
               check bool "success" true ok;
               check string "message" ("ok:" ^ tool) msg);
-          test_case "dispatch unknown tool returns None" `Quick (fun () ->
+          test_case "mint_token unknown tool returns Error" `Quick (fun () ->
               let result =
-                Tool_dispatch.dispatch
-                  ~name:"__test_dispatch_nonexistent_xyz" ~args:`Null
+                Tool_dispatch.mint_token
+                  ~name:"__test_dispatch_nonexistent_xyz"
               in
-              check bool "not found" true (Option.is_none result));
+              check bool "is Error" true (Result.is_error result));
           test_case "register_module bulk registers" `Quick (fun () ->
               let schemas =
                 List.map make_schema
@@ -47,8 +48,9 @@ let () =
                     (Tool_dispatch.is_registered name))
                 [ "__test_bulk_a"; "__test_bulk_b"; "__test_bulk_c" ]);
           test_case "register_module dispatches each name" `Quick (fun () ->
+              let token = match Tool_dispatch.mint_token ~name:"__test_bulk_b" with Ok t -> t | Error e -> Alcotest.fail e in
               let result =
-                Tool_dispatch.dispatch ~name:"__test_bulk_b" ~args:`Null
+                Tool_dispatch.dispatch ~token ~args:`Null
               in
               let (ok, msg) = Option.get result in
               check bool "ok" true ok;
@@ -59,13 +61,15 @@ let () =
           test_case "re-register replaces handler" `Quick (fun () ->
               let tool = "__test_dispatch_replace" in
               Tool_dispatch.register ~tool_name:tool ~handler:echo_handler;
+              let token1 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let (ok1, _) =
-                Option.get (Tool_dispatch.dispatch ~name:tool ~args:`Null)
+                Option.get (Tool_dispatch.dispatch ~token:token1 ~args:`Null)
               in
               check bool "first ok" true ok1;
               Tool_dispatch.register ~tool_name:tool ~handler:fail_handler;
+              let token2 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let (ok2, msg2) =
-                Option.get (Tool_dispatch.dispatch ~name:tool ~args:`Null)
+                Option.get (Tool_dispatch.dispatch ~token:token2 ~args:`Null)
               in
               check bool "replaced fail" false ok2;
               check string "fail msg" "fail" msg2);
@@ -133,7 +137,8 @@ let () =
               in
               Tool_dispatch.register ~tool_name:tool ~handler:capture_handler;
               let test_args = `Assoc [("key", `String "value")] in
-              let _ = Tool_dispatch.dispatch ~name:tool ~args:test_args in
+              let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
+              let _ = Tool_dispatch.dispatch ~token ~args:test_args in
               check bool "args match" true (!received_args = test_args));
         ] );
       ( "handler_exception_safety",
@@ -144,7 +149,8 @@ let () =
                 failwith "boom"
               in
               Tool_dispatch.register ~tool_name:tool ~handler:throwing_handler;
-              let result = Tool_dispatch.dispatch ~name:tool ~args:`Null in
+              let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
+              let result = Tool_dispatch.dispatch ~token ~args:`Null in
               check bool "still returns Some" true (Option.is_some result);
               let (ok, msg) = Option.get result in
               check bool "marked as failure" false ok;

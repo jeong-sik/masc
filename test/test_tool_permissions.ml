@@ -74,8 +74,8 @@ let test_hook_blocks_admin_no_identity () =
     ~tool_name:"masc_tool_admin_update"
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "should not reach"));
   Tool_permissions.install ~get_agent_name:(fun () -> None);
-  match Tool_dispatch.dispatch_structured
-          ~name:"masc_tool_admin_update" ~args:`Null with
+  let token = match Tool_dispatch.mint_token ~name:"masc_tool_admin_update" with Ok t -> t | Error e -> Alcotest.fail e in
+  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
   | Some r ->
     Alcotest.(check bool) "blocked" false r.success
   | None -> Alcotest.fail "expected Some from short-circuit"
@@ -87,8 +87,8 @@ let test_hook_blocks_admin_no_cap () =
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "should not reach"));
   Tool_permissions.set_capability_checker (fun _agent _cap -> false);
   Tool_permissions.install ~get_agent_name:(fun () -> Some "normal");
-  match Tool_dispatch.dispatch_structured
-          ~name:"masc_tool_admin_update" ~args:`Null with
+  let token = match Tool_dispatch.mint_token ~name:"masc_tool_admin_update" with Ok t -> t | Error e -> Alcotest.fail e in
+  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
   | Some r ->
     Alcotest.(check bool) "blocked" false r.success
   | None -> Alcotest.fail "expected Some from short-circuit"
@@ -100,8 +100,8 @@ let test_hook_allows_admin_with_cap () =
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "allowed"));
   Tool_permissions.set_capability_checker (fun _agent cap -> cap = "admin");
   Tool_permissions.install ~get_agent_name:(fun () -> Some "admin_agent");
-  match Tool_dispatch.dispatch_structured
-          ~name:"masc_tool_admin_update" ~args:`Null with
+  let token = match Tool_dispatch.mint_token ~name:"masc_tool_admin_update" with Ok t -> t | Error e -> Alcotest.fail e in
+  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
   | Some r ->
     Alcotest.(check bool) "allowed" true r.success
   | None -> Alcotest.fail "expected Some"
@@ -112,7 +112,8 @@ let test_hook_allows_non_admin () =
     ~tool_name:"masc_status"
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "ok"));
   Tool_permissions.install ~get_agent_name:(fun () -> Some "anyone");
-  match Tool_dispatch.dispatch_structured ~name:"masc_status" ~args:`Null with
+  let token = match Tool_dispatch.mint_token ~name:"masc_status" with Ok t -> t | Error e -> Alcotest.fail e in
+  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
   | Some r ->
     Alcotest.(check bool) "allowed" true r.success
   | None -> Alcotest.fail "expected Some"
@@ -125,8 +126,9 @@ let test_hook_uses_agent_name_from_args () =
   Tool_permissions.set_capability_checker
     (fun agent cap -> String.equal agent "admin_agent" && cap = "admin");
   Tool_permissions.install ~get_agent_name:(fun () -> None);
+  let token = match Tool_dispatch.mint_token ~name:"masc_autoresearch_start" with Ok t -> t | Error e -> Alcotest.fail e in
   match
-    Tool_dispatch.dispatch_structured ~name:"masc_autoresearch_start"
+    Tool_dispatch.dispatch_structured ~token
       ~args:(`Assoc [ ("agent_name", `String "admin_agent") ])
   with
   | Some r ->

@@ -375,9 +375,9 @@ let test_allowlist_gates_shard_tools () =
 
 let test_dispatch_unregistered () =
   let result =
-    Masc_mcp.Tool_dispatch.dispatch ~name:"masc_nonexistent_xyz" ~args:(`Assoc [])
+    Masc_mcp.Tool_dispatch.mint_token ~name:"masc_nonexistent_xyz"
   in
-  Alcotest.(check bool) "unregistered returns None" true (result = None)
+  Alcotest.(check bool) "unregistered mint_token returns Error" true (Result.is_error result)
 
 let test_schemas_match_names () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;

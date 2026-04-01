@@ -26,7 +26,7 @@ let test_event_bus_heartbeat () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let bus = Event_bus.create () in
   let sub = Event_bus.subscribe bus in
-  Oas_events.publish_heartbeat bus ~agent_name:"keeper-runtime" ~turn:5 ~context_pct:0.42;
+  Oas_events.publish_heartbeat bus ~agent_name:"perpetual" ~turn:5 ~context_pct:0.42;
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
   match List.hd events with

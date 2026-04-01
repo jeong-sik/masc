@@ -10,7 +10,7 @@ Two distinct layers exist. Understanding which is which prevents confusion.
 | `agent_swarm_fleet.ml` | Fleet orchestrator. Planner + N workers via `agent_swarm_swarm.run_agent`. | `run_full ~sw ~net ~clock ~proc_mgr ...` |
 | `agent_swarm_runner.ml` | CLI runner. Parses args, calls `Agent_swarm_fleet.run_full`. | `bin/agent_swarm_runner.exe --goal "..." --fleet` |
 | `agent_swarm_live_harness.ml` | Live harness. Seeds tasks, runs swarm, collects results. | Called by `masc_swarm_live_run` MCP tool |
-| `oas_worker.ml` | OAS agent builder/runner via `Oas.Builder.*`. | Used by keeper runtime |
+| `oas_worker.ml` | OAS agent builder/runner via `Oas.Builder.*`. | Used by perpetual runtime |
 
 ### MCP Tools
 

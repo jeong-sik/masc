@@ -395,7 +395,10 @@ let ensure_room_bootstrap config room_id =
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
   let root_keepers_dir = Filename.concat root_dir "keepers" in
-  let root_traces_dir = Filename.concat root_dir "traces" in
+  let root_perpetual_keepers_dir =
+    Filename.concat root_dir "perpetual-keepers"
+  in
+  let root_perpetual_dir = Filename.concat root_dir "perpetual" in
   let root_tasks_dir = Filename.concat root_dir "tasks" in
   let root_messages_dir = Filename.concat root_dir "messages" in
   let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
@@ -403,7 +406,8 @@ let ensure_room_bootstrap config room_id =
     [
       root_agents_dir;
       root_keepers_dir;
-      root_traces_dir;
+      root_perpetual_keepers_dir;
+      root_perpetual_dir;
       root_tasks_dir;
       root_messages_dir;
       rooms_root_dir config;

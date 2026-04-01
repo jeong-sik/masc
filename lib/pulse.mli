@@ -41,7 +41,7 @@ type rhythm = {
 
 (** Space lifecycle. The only difference between spaces. *)
 type lifecycle =
-  | Always_on             (** Never stops (Keeper Autonomy). Runs until explicit shutdown. *)
+  | Perpetual             (** Never stops (Keeper Autonomy). Runs until explicit shutdown. *)
   | Bounded of (beat -> bool)
     (** Stops when predicate returns true (TRPG session end, time limit, etc.) *)
 
@@ -83,7 +83,7 @@ type t
     @param recovery Consumer failure recovery config (default: 3 consecutive failures to disable)
     @param clock Eio clock for sleeping and timestamps
     @param rhythm Adaptive rhythm configuration
-    @param lifecycle Always_on or Bounded
+    @param lifecycle Perpetual or Bounded
     @param consumers First-class consumer modules to notify on each beat *)
 val create :
   clock:_ Eio.Time.clock ->

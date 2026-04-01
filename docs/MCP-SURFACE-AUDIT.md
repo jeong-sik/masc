@@ -65,7 +65,7 @@ flowchart TD
 
   Canon --> Core[Room task session CPv2]
   Canon --> GameView[decision.* experiment.* trpg.* client.*]
-  Canon --> Ecosystem[keeper always-on autonomy]
+  Canon --> Ecosystem[keeper perpetual autonomy]
 
   PL --> PromptSurface[MCP prompt surface: 3 prompts]
   RL --> ResourceSurface[MCP resources and tool-help views]

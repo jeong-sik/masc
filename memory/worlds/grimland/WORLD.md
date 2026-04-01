@@ -3,7 +3,7 @@
 **Theme**: Low-fantasy, Scarcity, Political Tension, Uneasy Peace.
 
 ## Atmosphere
-The air smells of wet earth, rust, and old blood. The sky is constantly grey, weeping cold rain. Hope is a currency as scarce as gold.
+The air smells of wet earth, rust, and old blood. The sky is perpetually grey, weeping cold rain. Hope is a currency as scarce as gold.
 
 ## Current Situation
 - **The Black Fleet**: Rumors of a ghost fleet approaching the coast have everyone on edge.

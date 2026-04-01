@@ -39,7 +39,7 @@ TOOLS=(
   "masc_tasks"
   "masc_agents"
   "masc_board_list"
-  "masc_keeper_list"
+  "masc_perpetual_status"
 )
 
 AGENT_NAME="eval-ratchet-${ITERATION}"

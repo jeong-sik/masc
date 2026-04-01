@@ -119,6 +119,9 @@ while IFS=$'\t' read -r file lines last_date days_since has_oas ref_count catego
       command_plane)
         action="active"; reason="command_plane"
         ;;
+      perpetual)
+        action="active"; reason="perpetual_runtime"
+        ;;
       lifecycle)
         action="active"; reason="lifecycle_system"
         ;;

@@ -226,22 +226,15 @@ let test_room_init_bootstraps_keeper_runtime_dirs () =
       let config = Room.default_config dir |> Room.config_with_resolved_scope in
       ignore (Room.init config ~agent_name:None);
       let root_dir = Room.masc_root_dir config in
-      let keepers_dir = Filename.concat root_dir "keepers" in
-      let traces_dir = Filename.concat root_dir "traces" in
-      let legacy_keepers_dir =
-        Filename.concat root_dir Server_runtime_bootstrap.legacy_keeper_meta_dir_alias
-      in
-      let legacy_trace_dir =
-        Filename.concat root_dir Server_runtime_bootstrap.legacy_trace_dir_alias
-      in
-      Alcotest.(check bool) "keepers dir exists" true
-        (Sys.file_exists keepers_dir && Sys.is_directory keepers_dir);
-      Alcotest.(check bool) "traces dir exists" true
-        (Sys.file_exists traces_dir && Sys.is_directory traces_dir);
-      Alcotest.(check bool) "legacy keeper alias not created" false
-        (Sys.file_exists legacy_keepers_dir);
-      Alcotest.(check bool) "legacy trace alias not created" false
-        (Sys.file_exists legacy_trace_dir))
+      let legacy_keepers_dir = Filename.concat root_dir "keepers" in
+      let keeper_dir = Filename.concat root_dir "perpetual-keepers" in
+      let perpetual_dir = Filename.concat root_dir "perpetual" in
+      Alcotest.(check bool) "legacy keeper dir exists" true
+        (Sys.file_exists legacy_keepers_dir && Sys.is_directory legacy_keepers_dir);
+      Alcotest.(check bool) "keeper dir exists" true
+        (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir);
+      Alcotest.(check bool) "perpetual dir exists" true
+        (Sys.file_exists perpetual_dir && Sys.is_directory perpetual_dir))
 
 let test_otel_exporter_setup_failure_is_soft () =
   Otel_spans.shutdown ~enabled:true ();
@@ -287,9 +280,7 @@ let test_migrate_legacy_keeper_dirs_promotes_valid_meta () =
       let state = Mcp_server.create_state ~base_path:dir in
       let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
       let keepers_dir = Filename.concat masc_root "keepers" in
-      let legacy_dir =
-        Filename.concat masc_root Server_runtime_bootstrap.legacy_keeper_meta_dir_alias
-      in
+      let legacy_dir = Filename.concat masc_root "perpetual-keepers" in
       let quarantine_dir =
         Filename.concat masc_root "_quarantine/_replaced"
       in
@@ -314,9 +305,9 @@ let test_migrate_legacy_keeper_dirs_promotes_valid_meta () =
       let other_meta =
         read_meta_exn (Filename.concat keepers_dir "other.json")
       in
-      Alcotest.(check string) "sangsu trace promoted from legacy keeper alias"
+      Alcotest.(check string) "sangsu trace promoted from perpetual-keepers"
         "trace-sangsu-live" sangsu_meta.runtime.trace_id;
-      Alcotest.(check string) "other keeper migrated from legacy keeper alias"
+      Alcotest.(check string) "other keeper migrated from perpetual-keepers"
         "trace-other-live" other_meta.runtime.trace_id;
       Alcotest.(check bool) "legacy dir removed after merge" false
         (Sys.file_exists legacy_dir);
@@ -328,9 +319,7 @@ let test_migrate_legacy_keeper_dirs_keeps_fresher_current_meta () =
       let state = Mcp_server.create_state ~base_path:dir in
       let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
       let keepers_dir = Filename.concat masc_root "keepers" in
-      let legacy_dir =
-        Filename.concat masc_root Server_runtime_bootstrap.legacy_keeper_meta_dir_alias
-      in
+      let legacy_dir = Filename.concat masc_root "perpetual-keepers" in
       let quarantine_path =
         Filename.concat masc_root "_quarantine/sangsu.json"
       in
@@ -512,7 +501,7 @@ let () =
           Alcotest.test_case "otel exporter setup failure is soft" `Quick
             test_otel_exporter_setup_failure_is_soft;
           Alcotest.test_case
-            "legacy keeper migration promotes valid meta"
+            "legacy keeper migration promotes valid perpetual meta"
             `Quick test_migrate_legacy_keeper_dirs_promotes_valid_meta;
           Alcotest.test_case
             "legacy keeper migration keeps fresher current meta"

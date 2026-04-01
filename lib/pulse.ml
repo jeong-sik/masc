@@ -29,7 +29,7 @@ type rhythm = {
 }
 
 type lifecycle =
-  | Always_on
+  | Perpetual
   | Bounded of (beat -> bool)
 
 type stats = {
@@ -184,7 +184,7 @@ let tick t trigger =
   dispatch_consumers_with_recovery t beat;
   (* Check bounded lifecycle *)
   (match t.lifecycle with
-   | Always_on -> ()
+   | Perpetual -> ()
    | Bounded pred ->
      if pred beat && not (is_shutdown t) then begin
        Log.Pulse.info "bounded lifecycle condition met at beat #%d" beat.seq;
@@ -261,7 +261,7 @@ let run ~sw t =
   t.alive    <- true;
   t.start_ts <- now t.clock;
   match t.lifecycle with
-  | Always_on ->
+  | Perpetual ->
     Eio.Fiber.fork_daemon ~sw (fun () ->
       (* Safe: finally is mutable field write — no I/O, no exception risk *)
       Fun.protect

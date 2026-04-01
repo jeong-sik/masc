@@ -170,7 +170,7 @@ let start_supervisor_sweep ctx =
                  min_s = sweep_sec;
                  max_s = sweep_sec;
                  quiet = (0, 0) }
-      ~lifecycle:Always_on
+      ~lifecycle:Perpetual
       ~consumers:[consumer]
     in
     with_sweeps_rw (fun () ->

@@ -263,6 +263,54 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
            (annotate_keeper_json ~runtime_class:"keeper" json))
       end
 
+let handle_voice_ping_pong ctx args : tool_result =
+  let keeper_name = get_string args "name" "" |> String.trim in
+  let max_turns = min 200 (max 1 (get_int args "max_turns" 50)) in
+  let language_code =
+    get_string_opt args "language_code" |> Option.map String.trim
+  in
+  let language_code = match language_code with
+    | Some lc when lc <> "" -> Some lc | _ -> None
+  in
+  if keeper_name = "" then
+    (false, "Error: keeper name is required")
+  else
+    let trimmed_args = match args with
+      | `Assoc fields ->
+          `Assoc (List.map (fun (k, v) ->
+            if k = "name" then (k, `String keeper_name) else (k, v)) fields)
+      | other -> other
+    in
+    if ctx.net = None then
+      (false, "Error: voice ping-pong requires network for TTS")
+    else
+    match ensure_keeper_exists ctx trimmed_args with
+    | Error err -> (false, err)
+    | Ok _ ->
+        let send_message text =
+          let msg_args = `Assoc [
+            ("name", `String keeper_name);
+            ("message", `String text);
+          ] in
+          Turn.handle_keeper_msg ctx msg_args
+        in
+        let speak text =
+          match ctx.net with
+          | Some net ->
+              Voice_bridge.agent_speak ~sw:ctx.sw ~clock:ctx.clock ~net
+                ~agent_id:keeper_name ~message:text ()
+          | None -> Error "no network for TTS"
+        in
+        let (success, summary) =
+          Keeper_voice_loop.run ~agent_id:keeper_name
+            ~send_message ~speak ~max_turns ?language_code ()
+        in
+        (success, Yojson.Safe.to_string
+           (`Assoc
+             [ ("status", `String (if success then "ok" else "error"));
+               ("agent_id", `String keeper_name);
+               ("summary", `String summary) ]))
+
 let resolve_keeper_meta ctx args =
   let name = get_string args "name" "" in
   match read_meta ctx.config name with
@@ -495,6 +543,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_up" -> Some (handle_keeper_up ctx args)
   | "masc_keeper_status" -> Some (handle_keeper_status ctx args)
   | "masc_keeper_msg" -> Some (handle_keeper_msg ctx args)
+  | "masc_voice_ping_pong" -> Some (handle_voice_ping_pong ctx args)
   | "masc_keeper_repair" -> Some (handle_keeper_repair ctx args)
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)

@@ -120,7 +120,8 @@ let run_stt_multipart_request (req : Provider_adapter.voice_stt_request) =
   let field_name, file_path = req.file_field in
   let file_arg = [ "-F"; Printf.sprintf "%s=@%s" field_name file_path ] in
   let argv =
-    [ "curl"; "-sS"; "--max-time"; "30"; "-X"; "POST"; req.url ]
+    [ "curl"; "-sS"; "--fail-with-body"; "--max-time"; "30";
+      "-X"; "POST"; req.url ]
     @ header_args @ form_args @ file_arg
   in
   let status, body =
@@ -133,6 +134,9 @@ let run_stt_multipart_request (req : Provider_adapter.voice_stt_request) =
       | json -> Ok json
       | exception Yojson.Json_error msg ->
           Error (Printf.sprintf "STT response parse error: %s" msg))
+  | Unix.WEXITED 22 ->
+      Error (Printf.sprintf "STT HTTP error: %s"
+        (if String.length body > 200 then String.sub body 0 200 else body))
   | Unix.WEXITED 28 -> Error "STT request timed out"
   | Unix.WEXITED code -> Error (Printf.sprintf "STT curl exit %d" code)
   | _ -> Error "STT curl process failed"
@@ -843,3 +847,58 @@ let health_check ~sw:_ ~clock:_ ~net () =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Error (Printf.sprintf "Not reachable: %s" (Printexc.to_string exn))
+
+(** {1 Microphone record + transcribe} *)
+
+let play_tone freq =
+  try
+    ignore (Process_eio.run_argv_with_stdin_and_status
+      ~timeout_sec:2.0 ~stdin_content:""
+      [ "play"; "-qn"; "synth"; "0.15"; "sine";
+        Printf.sprintf "%.0f" freq ])
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> ()
+
+let record_and_transcribe ~agent_id ?(timeout_sec = 15.0)
+    ?language_code () =
+  let audio_file =
+    Filename.temp_file
+      (Printf.sprintf "masc_stt_%s_" (safe_agent_id agent_id))
+      ".wav"
+  in
+  let rec_argv =
+    [ "rec"; "-q"; "-t"; "wav"; audio_file;
+      "rate"; "16k"; "channels"; "1";
+      "silence"; "1"; "0.5"; "1%"; "1"; "2.0"; "1%" ]
+  in
+  let cleanup () = try Sys.remove audio_file with Sys_error _ -> () in
+  play_tone 880.0;
+  Fun.protect ~finally:cleanup (fun () ->
+    let record_result =
+      try
+        let status, _output =
+          Process_eio.run_argv_with_stdin_and_status
+            ~timeout_sec:(timeout_sec +. 5.0)
+            ~stdin_content:"" rec_argv
+        in
+        match status with
+        | Unix.WEXITED 0 -> Ok ()
+        | Unix.WEXITED code -> Error (Printf.sprintf "rec exit %d" code)
+        | _ -> Error "rec process failed"
+      with exn ->
+        Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
+    in
+    play_tone 440.0;
+    match record_result with
+    | Error err -> Error err
+    | Ok () ->
+        let file_exists =
+          try (Unix.stat audio_file).st_size > 100
+          with Unix.Unix_error _ -> false
+        in
+        if not file_exists then
+          Error "no speech detected or recording too short"
+        else
+          transcribe_audio ~audio_file ?language_code ()
+  )

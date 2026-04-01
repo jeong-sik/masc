@@ -128,3 +128,17 @@ val health_check :
   net:_ Eio.Net.t ->
   unit ->
   (Yojson.Safe.t, string) result
+
+(** {1 Microphone record + transcribe} *)
+
+val play_tone : float -> unit
+(** Play a short sine beep at the given frequency. *)
+
+val record_and_transcribe :
+  agent_id:string ->
+  ?timeout_sec:float ->
+  ?language_code:string ->
+  unit ->
+  (Yojson.Safe.t, string) result
+(** Record from microphone (with beep tones), transcribe via STT.
+    Returns transcription JSON on success. *)

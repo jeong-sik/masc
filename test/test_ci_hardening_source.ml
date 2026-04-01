@@ -456,8 +456,8 @@ let test_transport_health_contracts () =
 
 let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true
-    (file_contains_pattern "lib/mcp_server_eio.ml"
-       {|"masc_worktree_list"; "masc_pending_interrupts";|});
+    (file_contains_pattern "lib/tool_worktree.ml"
+       {|let _tool_spec_read_only = [ "masc_worktree_list" ]|});
   check bool "worker oas no longer reads global net directly" true
     (file_not_contains_pattern "lib/worker_oas.ml"
        "Eio_context.get_net_opt ()");
@@ -468,13 +468,14 @@ let test_worktree_list_contracts () =
     (file_not_contains_pattern "lib/mcp_server_eio_execute.ml"
        "Eio_context.get_net ()");
   check bool "worktree create/remove still require join" true
-    (file_contains_pattern "lib/mcp_server_eio.ml"
-       {|"masc_worktree_create"; "masc_worktree_remove";
-  "masc_portal_open"; "masc_portal_send"; "masc_portal_close";|});
+    (file_contains_pattern "lib/tool_worktree.ml"
+       {|let _tool_spec_requires_join = [ "masc_worktree_create"; "masc_worktree_remove" ]|});
   check bool "worktree list excluded from join-required list" true
-    (file_not_contains_pattern "lib/mcp_server_eio.ml"
-       {|"masc_worktree_remove"; "masc_worktree_list";
-  "masc_portal_open";|})
+    (file_not_contains_pattern "lib/tool_worktree.ml"
+       {|_tool_spec_requires_join = [|} ||
+     file_not_contains_pattern "lib/tool_worktree.ml"
+       {|"masc_worktree_remove"; "masc_worktree_list"|})
+
 
 let test_oas_worker_capability_threading_contracts () =
   check bool "oas worker model-by-label accepts threaded sw capability" true

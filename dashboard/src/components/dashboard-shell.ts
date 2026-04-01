@@ -124,7 +124,10 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   const live = connected.value
   const snap = missionSnapshot.value
   const sessions = snap?.sessions ?? snap?.session_briefs ?? []
-  const blockers = sessions.filter(s => s.blocker_summary).length
+  let blockers = 0
+  for (let i = 0; i < sessions.length; i++) {
+    if (sessions[i]?.blocker_summary) blockers++
+  }
   const attentionCount = (snap?.attention_queue ?? []).length
 
   let dotClass: string
@@ -133,9 +136,9 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   if (!live) {
     dotClass = 'bg-[var(--bad)]'
     label = '신호 없음'
-  } else if (!snap && missionLoading.value) {
+  } else if (!snap) {
     dotClass = 'bg-[var(--text-muted)]'
-    label = '로딩 중'
+    label = missionLoading.value ? '로딩 중' : '대기 중'
   } else if (blockers > 0 || attentionCount > 0) {
     dotClass = 'bg-[var(--warn)]'
     const total = blockers + attentionCount
@@ -148,7 +151,7 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   const dot = html`<span class="block size-2 shrink-0 rounded-full ${dotClass} shadow-[0_0_6px_rgba(0,0,0,0.4)]"></span>`
 
   if (collapsed) {
-    return html`<div class="flex justify-center" title=${label}>${dot}</div>`
+    return html`<div class="flex justify-center" title=${label} role="img" aria-label=${label}>${dot}</div>`
   }
 
   return html`

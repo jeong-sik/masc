@@ -864,7 +864,6 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0)
     ?language_code () =
   let audio_file =
     Filename.temp_file
-      ~temp_dir:(Filename.get_temp_dir_name ())
       (Printf.sprintf "masc_stt_%s_" (safe_agent_id agent_id))
       ".wav"
   in

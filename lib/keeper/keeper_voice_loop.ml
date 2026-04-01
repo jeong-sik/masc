@@ -75,9 +75,11 @@ let run_one_voice_turn ~agent_id ~send_message ~speak
     @param send_message callback: text -> (success, result_json_string)
     @param speak callback: text -> (Ok json, Error msg)
     @param max_turns default 50 *)
+let max_consecutive_empty = 5
+
 let run ~agent_id ~send_message ~speak
     ?(max_turns = 50) ?language_code () : bool * string =
-  let rec loop turn_count =
+  let rec loop turn_count empty_count =
     if turn_count >= max_turns then
       (true, Printf.sprintf "voice loop ended after %d turns (max reached)"
          max_turns)
@@ -94,8 +96,13 @@ let run ~agent_id ~send_message ~speak
           (true, Printf.sprintf "voice loop ended after %d turns (user exit)"
              (turn_count + 1))
       | Ok `Empty ->
-          loop turn_count (* empty STT does not consume a turn *)
+          if empty_count + 1 >= max_consecutive_empty then
+            (true, Printf.sprintf
+               "voice loop ended: %d consecutive empty STT responses"
+               (empty_count + 1))
+          else
+            loop turn_count (empty_count + 1)
       | Ok `Continue ->
-          loop (turn_count + 1)
+          loop (turn_count + 1) 0
   in
-  loop 0
+  loop 0 0

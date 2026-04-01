@@ -40,10 +40,10 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
     match Agent_sdk.Execution_mode.of_yojson (json |> member "effective_mode") with
     | Error e -> Error (Printf.sprintf "effective_mode parse: %s" e)
     | Ok effective_mode ->
-    match violation_kind_of_string (json |> member "violation_kind" |> to_string) with
-    | Ok violation_kind ->
-        Ok { ts; tool_name; input_summary; effective_mode; violation_kind }
-    | Error e -> Error e
+        (match violation_kind_of_string (json |> member "violation_kind" |> to_string) with
+         | Ok violation_kind ->
+             Ok { ts; tool_name; input_summary; effective_mode; violation_kind }
+         | Error e -> Error e)
   with exn -> Error (Printexc.to_string exn)
 
 let of_json_list (json : Yojson.Safe.t) : (t list, string) result =

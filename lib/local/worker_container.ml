@@ -106,25 +106,38 @@ let execution_scope_or_default = function
 let infer_model_tier_from_model_name model_name =
   let model_name = String.trim model_name in
   let haystack = String.lowercase_ascii model_name in
-  let contains needle =
-    let needle = String.lowercase_ascii needle in
-    let needle_len = String.length needle in
-    let haystack_len = String.length haystack in
-    let rec loop idx =
-      if needle_len = 0 then true
-      else if idx + needle_len > haystack_len then false
-      else if String.sub haystack idx needle_len = needle then true
-      else loop (idx + 1)
+  let haystack_len = String.length haystack in
+  let is_digit = function '0' .. '9' -> true | _ -> false in
+  let is_alnum = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
+    | _ -> false
+  in
+  let matches_word suffix =
+    let suffix_len = String.length suffix in
+    let rec try_at idx =
+      if idx + suffix_len > haystack_len then false
+      else if String.sub haystack idx suffix_len <> suffix then
+        try_at (idx + 1)
+      else
+        let left_ok =
+          idx = 0 || not (is_digit haystack.[idx - 1])
+        in
+        let right_ok =
+          idx + suffix_len >= haystack_len
+          || not (is_alnum haystack.[idx + suffix_len])
+        in
+        if left_ok && right_ok then true
+        else try_at (idx + 1)
     in
-    loop 0
+    try_at 0
   in
   if model_name = "" then
     None
-  else if contains "35b" then
+  else if matches_word "35b" then
       Some Team_session_types.Tier_35b
-  else if contains "27b" then
+  else if matches_word "27b" then
       Some Team_session_types.Tier_27b
-  else if contains "9b" then
+  else if matches_word "9b" then
       Some Team_session_types.Tier_9b
   else
     None

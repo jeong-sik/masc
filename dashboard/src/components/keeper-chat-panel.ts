@@ -49,7 +49,11 @@ function toConversationEntry(
 }
 
 export function isKeeperTextContentEvent(event: KeeperChatStreamEvent): boolean {
-  return event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'TEXT_DELTA'
+  return (
+    (event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'TEXT_DELTA')
+    && typeof event.delta === 'string'
+    && event.delta.length > 0
+  )
 }
 
 export function normalizeKeeperChatErrorValue(value: unknown): string {

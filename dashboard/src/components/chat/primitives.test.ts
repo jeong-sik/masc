@@ -74,4 +74,30 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('[data-chat-delivery="saved"]')).toBeNull()
     expect(container.querySelector('[data-chat-delivery="live"]')).not.toBeNull()
   })
+
+  it('does not render an ellipsis for empty streaming text', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'u1', text: 'ping' }),
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            delivery: 'streaming',
+            streamState: 'streaming',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bodies = [...container.querySelectorAll('.whitespace-pre-wrap')]
+    const latestBody = (bodies[bodies.length - 1]?.textContent ?? '').trim()
+    expect(latestBody).toBe('')
+  })
 })

@@ -226,7 +226,7 @@ export function ChatMessageBubble({
         : null}
 
       <div class="whitespace-pre-wrap break-words text-[14px] leading-[1.7] text-[var(--text-body)]">
-        ${entry.text || (entry.delivery === 'streaming' ? '…' : '(empty reply)')}
+        ${entry.text || (entry.delivery === 'streaming' ? '' : '(empty reply)')}
       </div>
       ${entry.error
         ? html`

@@ -20,6 +20,11 @@ describe('isKeeperTextContentEvent', () => {
     const event: KeeperChatStreamEvent = { type: 'RUN_ERROR', value: { message: 'boom' } }
     expect(isKeeperTextContentEvent(event)).toBe(false)
   })
+
+  it('rejects text content events without delta', () => {
+    const event: KeeperChatStreamEvent = { type: 'TEXT_MESSAGE_CONTENT' }
+    expect(isKeeperTextContentEvent(event)).toBe(false)
+  })
 })
 
 describe('normalizeKeeperChatErrorValue', () => {

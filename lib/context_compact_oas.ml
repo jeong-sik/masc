@@ -58,8 +58,10 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
 (* ================================================================ *)
 
 let memory_summary_prefix = "[MEMORY_SUMMARY]"
+let _legacy_memory_summary_prefix = "[MASC_MEMORY_SUMMARY v1]"
 
 let goal_prefix = Keeper_working_context.goal_prefix
+let _legacy_goal_prefix = "[MASC_GOAL]"
 
 let starts_with ~prefix s =
   let lp = String.length prefix in
@@ -240,7 +242,9 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
     let score = 0.4 *. recency +. 0.25 *. role_w +. 0.2 *. content_w +. 0.15 *. tool_w in
     let score =
       if starts_with ~prefix:memory_summary_prefix msg_text
-         || starts_with ~prefix:goal_prefix msg_text then
+         || starts_with ~prefix:_legacy_memory_summary_prefix msg_text
+         || starts_with ~prefix:goal_prefix msg_text
+         || starts_with ~prefix:_legacy_goal_prefix msg_text then
         Float.max score 0.95
       else score
     in

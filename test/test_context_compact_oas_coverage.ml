@@ -195,6 +195,29 @@ let test_scoring_single () =
   check bool "score in range" true (score >= 0.0 && score <= 1.0)
 
 (* ================================================================ *)
+(* Backward Compatibility: Legacy Marker Tests                      *)
+(* ================================================================ *)
+
+let test_scoring_legacy_memory_summary () =
+  let msgs = [
+    msg Agent_sdk.Types.Assistant "[MASC_MEMORY_SUMMARY v1] old format summary";
+    msg Agent_sdk.Types.Assistant "normal message";
+  ] in
+  let scores = Scoring.score_messages msgs in
+  let legacy_score = List.assoc 0 scores in
+  let normal_score = List.assoc 1 scores in
+  check bool "legacy memory summary still sticky" true (legacy_score >= 0.95);
+  check bool "legacy > normal" true (legacy_score > normal_score)
+
+let test_scoring_legacy_goal () =
+  let msgs = [
+    msg Agent_sdk.Types.User "[MASC_GOAL] old format goal";
+  ] in
+  let scores = Scoring.score_messages msgs in
+  let score = List.assoc 0 scores in
+  check bool "legacy goal still sticky" true (score >= 0.95)
+
+(* ================================================================ *)
 (* Dynamic Strategy Resolution Tests (#3164)                        *)
 (* ================================================================ *)
 
@@ -276,6 +299,8 @@ let () =
       test_case "sticky goal" `Quick test_scoring_goal_sticky;
       test_case "empty input" `Quick test_scoring_empty;
       test_case "single message" `Quick test_scoring_single;
+      test_case "legacy memory summary compat" `Quick test_scoring_legacy_memory_summary;
+      test_case "legacy goal compat" `Quick test_scoring_legacy_goal;
     ];
     "dynamic_strategy", [
       test_case "high pressure multi-agent" `Quick test_dynamic_high_pressure_multi_agent;

@@ -2,6 +2,16 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const { bootKeeper, shutdownKeeper } = vi.hoisted(() => ({
+  bootKeeper: vi.fn(),
+  shutdownKeeper: vi.fn(),
+}))
+
+const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
+  invalidateDashboardCache: vi.fn(),
+  refreshDashboard: vi.fn(async () => undefined),
+}))
+
 vi.mock('../keeper-runtime', async () => {
   const { signal } = await import('@preact/signals')
   return {
@@ -22,13 +32,24 @@ vi.mock('../keeper-runtime', async () => {
   }
 })
 
+vi.mock('../api/keeper', () => ({
+  bootKeeper,
+  shutdownKeeper,
+}))
+
+vi.mock('../store', () => ({
+  invalidateDashboardCache,
+  refreshDashboard,
+}))
+
 vi.mock('./common/toast', () => ({
   showToast: vi.fn(),
 }))
 
 import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-runtime'
 import { hydrateKeeperStatus } from '../keeper-runtime'
-import { KeeperConversationPanel } from './keeper-shared'
+import { showToast } from './common/toast'
+import { KeeperConversationPanel, KeeperRuntimeActions } from './keeper-shared'
 
 describe('KeeperConversationPanel', () => {
   let container: HTMLDivElement
@@ -117,5 +138,37 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[data-chat-variant="messenger"]')).not.toBeNull()
     expect(container.querySelector('textarea')?.getAttribute('placeholder')).toBe('메시지 입력...')
     expect(hydrateKeeperStatus).not.toHaveBeenCalled()
+  })
+
+  it('keeps lifecycle success visible when dashboard refresh fails after boot', async () => {
+    const keeper = { name: 'sangsu', status: 'offline' } as any
+    bootKeeper.mockResolvedValue({ ok: true })
+    refreshDashboard.mockRejectedValue('refresh failed')
+
+    render(
+      html`<${KeeperRuntimeActions}
+        actor="dashboard"
+        keeper=${keeper}
+        onSocialSweep=${() => {}}
+      />`,
+      container,
+    )
+
+    const bootButton = Array.from(container.querySelectorAll('button')).find(
+      button => button.textContent?.trim() === '기동',
+    )
+    expect(bootButton).not.toBeUndefined()
+    bootButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(bootKeeper).toHaveBeenCalledWith('sangsu')
+    expect(invalidateDashboardCache).toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith('sangsu 기동됨', 'success')
+    expect(showToast).toHaveBeenCalledWith(
+      '대시보드 새로고침에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+      'error',
+    )
+    expect(showToast).not.toHaveBeenCalledWith('sangsu 기동 실패', 'error')
   })
 })

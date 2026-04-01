@@ -94,6 +94,7 @@ let worker_only_tools =
     "masc_voice_session_end";
     "masc_voice_conference_start";
     "masc_voice_conference_end";
+    "masc_voice_ping_pong";
     (* CanBroadcast — org units *)
     "masc_unit_define";
     "masc_unit_reparent";

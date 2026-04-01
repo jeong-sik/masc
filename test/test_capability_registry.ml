@@ -16,6 +16,19 @@ let test_public_visible_surface_hides_deprecated_aliases () =
   check bool "public contains masc_transition" true
     (List.mem "masc_transition" names)
 
+let test_public_visible_surface_includes_voice_tools () =
+  let names =
+    Lib.Capability_registry.visible_public_tool_schemas_from
+      Lib.Config.raw_all_tool_schemas
+    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  in
+  check bool "public contains masc_voice_agent" true
+    (List.mem "masc_voice_agent" names);
+  check bool "public contains masc_voice_speak" true
+    (List.mem "masc_voice_speak" names);
+  check bool "public contains masc_voice_ping_pong" true
+    (List.mem "masc_voice_ping_pong" names)
+
 let test_board_post_capability_merges_public_and_keeper_projections () =
   let capability =
     Lib.Capability_registry.all_capabilities_from Lib.Config.raw_all_tool_schemas
@@ -65,7 +78,13 @@ let test_spawned_agent_surface_stays_curated () =
   check bool "contains masc_status" true
     (List.mem "mcp__masc__masc_status" names);
   check bool "contains team_session_step" true
-    (List.mem "mcp__masc__masc_team_session_step" names)
+    (List.mem "mcp__masc__masc_team_session_step" names);
+  check bool "contains voice agent" true
+    (List.mem "mcp__masc__masc_voice_agent" names);
+  check bool "contains voice speak" true
+    (List.mem "mcp__masc__masc_voice_speak" names);
+  check bool "contains voice ping pong" true
+    (List.mem "mcp__masc__masc_voice_ping_pong" names)
 
 let test_privileged_keeper_surface_is_split () =
   check bool "keeper_bash privileged" true
@@ -86,6 +105,8 @@ let () =
         [
           test_case "public surface hides deprecated aliases" `Quick
             test_public_visible_surface_hides_deprecated_aliases;
+          test_case "public surface includes voice tools" `Quick
+            test_public_visible_surface_includes_voice_tools;
           test_case "board capability merges public and keeper projections"
             `Quick
             test_board_post_capability_merges_public_and_keeper_projections;

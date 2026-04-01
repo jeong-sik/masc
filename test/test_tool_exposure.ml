@@ -226,7 +226,7 @@ let () =
             (fun () ->
               let count = List.length Tool_catalog.public_mcp_tools in
               check bool "count in range"
-                true (count >= 30 && count <= 40));
+                true (count >= 30 && count <= 50));
           test_case "is_public_mcp returns true for listed tools" `Quick
             (fun () ->
               List.iter

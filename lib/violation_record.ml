@@ -37,11 +37,9 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
     let ts = json |> member "ts" |> to_float in
     let tool_name = json |> member "tool_name" |> to_string in
     let input_summary = json |> member "input_summary" |> to_string in
-    let effective_mode =
-      match Agent_sdk.Execution_mode.of_yojson (json |> member "effective_mode") with
-      | Ok m -> m
-      | Error _ -> Agent_sdk.Execution_mode.Diagnose
-    in
+    match Agent_sdk.Execution_mode.of_yojson (json |> member "effective_mode") with
+    | Error e -> Error (Printf.sprintf "effective_mode parse: %s" e)
+    | Ok effective_mode ->
     match violation_kind_of_string (json |> member "violation_kind" |> to_string) with
     | Ok violation_kind ->
         Ok { ts; tool_name; input_summary; effective_mode; violation_kind }

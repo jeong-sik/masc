@@ -134,27 +134,6 @@ let schemas : tool_schema list =
             ("required", `List [ `String "agent_ids" ]);
           ];
     };
-    {
-      name = "masc_voice_ping_pong";
-      description =
-        "Start a voice conversation loop with a keeper. Records speech, sends to keeper, speaks the response, repeats. Say 'stop' or '종료' to end.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              schema_properties
-                [
-                  ("name", `Assoc [ ("type", `String "string");
-                    ("description", `String "Keeper name to talk to") ]);
-                  ("max_turns", `Assoc [ ("type", `String "integer");
-                    ("description", `String "Max conversation turns (default 50)") ]);
-                  ("language_code", `Assoc [ ("type", `String "string");
-                    ("description", `String "ISO language hint for STT, e.g. ko, en") ]);
-                ] );
-            ("required", `List [ `String "name" ]);
-          ];
-    };
   ]
 
 let require_net_or_error (ctx : 'a context) =

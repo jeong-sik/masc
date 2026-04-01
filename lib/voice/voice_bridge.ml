@@ -130,7 +130,12 @@ let run_stt_multipart_request (req : Provider_adapter.voice_stt_request) =
   match status with
   | Unix.WEXITED 0 -> (
       match Yojson.Safe.from_string body with
-      | json -> Ok json
+      | json ->
+          (* Check for HTTP error responses — curl exit 0 does not imply 2xx *)
+          (match Yojson.Safe.Util.member "error" json with
+           | `Null -> Ok json
+           | err -> Error (Printf.sprintf "STT API error: %s"
+                     (Yojson.Safe.to_string err)))
       | exception Yojson.Json_error msg ->
           Error (Printf.sprintf "STT response parse error: %s" msg))
   | Unix.WEXITED 28 -> Error "STT request timed out"
@@ -852,15 +857,17 @@ let play_tone freq =
       ~timeout_sec:2.0 ~stdin_content:""
       [ "play"; "-qn"; "synth"; "0.15"; "sine";
         Printf.sprintf "%.0f" freq ])
-  with _ -> ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> ()
 
 let record_and_transcribe ~agent_id ?(timeout_sec = 15.0)
     ?language_code () =
   let audio_file =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc_stt_%d_%s.wav"
-         (int_of_float (Unix.gettimeofday ()))
-         (safe_agent_id agent_id))
+    Filename.temp_file
+      ~temp_dir:(Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_stt_%s_" (safe_agent_id agent_id))
+      ".wav"
   in
   let rec_argv =
     [ "rec"; "-q"; "-t"; "wav"; audio_file;

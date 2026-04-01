@@ -265,7 +265,7 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
 
 let handle_voice_ping_pong ctx args : tool_result =
   let keeper_name = get_string args "name" "" |> String.trim in
-  let max_turns = get_int args "max_turns" 50 in
+  let max_turns = max 1 (get_int args "max_turns" 50) in
   let language_code =
     get_string_opt args "language_code" |> Option.map String.trim
   in

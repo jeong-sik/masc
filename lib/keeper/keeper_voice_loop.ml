@@ -37,7 +37,7 @@ let is_stop_command (text : string) : bool =
 
 (** Single voice turn: listen → send_message → speak.
     @param send_message takes text, returns [(success, result_json_string)]
-    @param speak takes text, returns [Ok () | Error msg] *)
+    @param speak takes text, returns [(Yojson.Safe.t, string) result] *)
 let run_one_voice_turn ~agent_id ~send_message ~speak
     ?language_code () =
   match Voice_bridge.record_and_transcribe
@@ -49,7 +49,7 @@ let run_one_voice_turn ~agent_id ~send_message ~speak
       match extract_text_from_stt stt_json with
       | None ->
           Log.Keeper.info "voice_loop: no text from STT, skipping turn";
-          Ok `Continue
+          Ok `Empty
       | Some text ->
           if is_stop_command text then (
             Log.Keeper.info "voice_loop: stop command: %s" text;
@@ -93,6 +93,8 @@ let run ~agent_id ~send_message ~speak
       | Ok `Stop ->
           (true, Printf.sprintf "voice loop ended after %d turns (user exit)"
              (turn_count + 1))
+      | Ok `Empty ->
+          loop turn_count (* empty STT does not consume a turn *)
       | Ok `Continue ->
           loop (turn_count + 1)
   in

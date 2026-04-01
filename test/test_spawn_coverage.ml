@@ -384,9 +384,9 @@ let test_build_mcp_args_unknown () =
 
 let test_build_prompt_args_gemini () =
   (* "gemini" resolves to canonical "gemini-api" via Provider_adapter,
-     so the match arm "gemini" no longer triggers — returns [] *)
+     and the match arm now correctly matches "gemini-api" *)
   let flags = Spawn.build_prompt_args "gemini" "hello" in
-  check (list string) "gemini prompt args (canonical mismatch)" [] flags
+  check (list string) "gemini prompt args" ["-p"; "hello"] flags
 
 let test_build_prompt_args_other () =
   let flags = Spawn.build_prompt_args "claude" "hello" in

@@ -244,7 +244,7 @@ let build_mcp_args agent_name tools =
 
 let build_prompt_args agent_name prompt =
   match Provider_adapter.resolve_direct_canonical_name agent_name |> Option.value ~default:agent_name with
-  | "gemini" -> ["-p"; prompt]
+  | "gemini-api" -> ["-p"; prompt]
   | _ -> []
 
 (** Parse command string into executable and arguments *)

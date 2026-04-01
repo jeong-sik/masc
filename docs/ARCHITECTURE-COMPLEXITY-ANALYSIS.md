@@ -45,6 +45,7 @@ Modules that deliver real value in daily operation.
 | tool_operator | 856 | dispatch/assign/rebalance | High |
 | tool_command_plane* | ~960 | command-plane truth layer | High |
 | tool_keeper | 624 | persistent agent runtime | High |
+| tool_perpetual | 643 | autonomous agent loops | Medium |
 | tool_plan | 186 | planning context | High |
 | tool_worktree | 40 | git isolation | High |
 | tool_board/misc | ~770 | bulletin board | Medium |
@@ -100,14 +101,14 @@ Not related to core coordination. Candidates for separation or removal.
 Older cleanup, patrol, and ecosystem-control loops should not shape current architecture decisions.
 They have been retired from the active runtime surface, so the current complexity discussion should stay centered on room, keeper, command-plane, and operator layers.
 
-## Legacy Naming Cleanup
+## Perpetual Keepers Problem
 
 ### Before cleanup (Phase 1 complete)
 
 | Path | Size before | Size after | Action |
 |------|------------|------------|--------|
-| legacy keeper metrics path | 25MB | 0 (deleted) | Stale idle heartbeat logs |
-| legacy trace path | 1.2MB | 0 (deleted) | Ended experiment traces |
+| keepers/*.metrics.jsonl | 25MB | 0 (deleted) | Stale idle heartbeat logs |
+| perpetual/trace-17716*,17724* | 1.2MB | 0 (deleted) | Ended experiment traces |
 | **Total .masc/** | **63MB** | **36MB** | **27MB freed** |
 
 ### Root cause

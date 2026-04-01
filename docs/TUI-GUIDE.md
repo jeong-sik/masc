@@ -153,8 +153,8 @@ Dashboard <--Tab--> Keeper List
 | Feature | Source | Server Required |
 |---------|--------|-----------------|
 | Keeper list/detail | `.masc/keepers/*.json` | No |
-| Live context status | `.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl` (latest entry) | No |
-| Keeper logs | `.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl` (last 200 entries) | No |
+| Live context status | `<name>/metrics/YYYY-MM/DD.jsonl` (latest entry) | No |
+| Keeper logs | `<name>/metrics/YYYY-MM/DD.jsonl` (last 200 entries) | No |
 | Send messages | `POST /api/v1/keepers/chat/stream` | Yes |
 
 ## Requirements

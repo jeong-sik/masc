@@ -171,13 +171,10 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn -> Log.Misc.error "startup prune failed: %s" (Printexc.to_string exn))
 
-(** Migrate legacy directory aliases to traces/keepers.
+(** Migrate legacy directory names: perpetual->traces, resident-keepers->keepers.
     Moves contents via recursive merge. Conflicting files go to _quarantine/,
     except keeper meta files where a fresher valid legacy record may replace a
     stale or invalid current record. *)
-let legacy_trace_dir_alias = "perpetual"
-let legacy_keeper_meta_dir_alias = "perpetual-keepers"
-
 let keeper_meta_updated_ts (meta : Keeper_types.keeper_meta) =
   Resilience.Time.parse_iso8601_opt meta.updated_at
   |> Option.value ~default:0.0
@@ -241,8 +238,7 @@ let migrate_legacy_dirs (state : Mcp_server.server_state) =
     end
   in
   let renames = [
-    (legacy_trace_dir_alias, "traces");
-    (legacy_keeper_meta_dir_alias, "keepers");
+    ("perpetual", "traces");
     ("resident-keepers", "keepers");
   ] in
   (try

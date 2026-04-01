@@ -424,7 +424,7 @@
 - **Keeper social model** — remove unused params and mutable ref (#4075).
 
 ### Removed
-- **Mitosis/sentinel dead code** — final cleanup (#4067).
+- **Mitosis dead code cleanup** — final cleanup (#4067).
 
 ## [2.181.0] - 2026-03-31
 
@@ -842,7 +842,7 @@
 - **Prompt frontmatter auto-discovery** — prompts loaded from markdown frontmatter (#3336).
 - **OAS agent_sdk floor** — bumped to 0.92.0 (#3359).
 - **Centralized env config** — revived HTTP and assets config reads (#3374).
-- **Legacy agent cleanup** — purged guardian/sentinel/gardener references (#3378).
+- **Legacy agent cleanup** — removed deprecated references (#3378).
 - **Config dir resolution** — separated from base path (#3377).
 
 ### Fixed

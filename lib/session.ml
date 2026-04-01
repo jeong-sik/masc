@@ -127,7 +127,7 @@ let check_rate_limit_ex registry ~agent_name ~category ~role =
           t
     in
 
-    (* Reset burst if a minute has passed - atomic compare-and-set *)
+    (* Reset burst if a minute has passed - mutex-protected *)
     let last_reset = tracker.last_burst_reset in
     if now -. last_reset > 60.0 then begin
       tracker.burst_used <- 0;
@@ -150,7 +150,7 @@ let check_rate_limit_ex registry ~agent_name ~category ~role =
     let current = List.length recent in
 
     if current >= limit then begin
-      (* Check if burst is available - using atomic read/increment *)
+      (* Check if burst is available - mutex-protected read/increment *)
       let burst = tracker.burst_used in
       if burst < registry.config.burst_allowed then begin
         tracker.burst_used <- burst + 1;

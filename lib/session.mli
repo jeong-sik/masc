@@ -20,7 +20,8 @@ type session = {
 (** Rate-limit tracking per category.
 
     All fields are mutable and accessed exclusively under [registry.lock].
-    No lock-free access — the mutex is the single synchronization mechanism. *)
+    No lock-free access — the mutex is the single synchronization mechanism.
+    Callers must hold [registry.lock] before reading or writing any field. *)
 type rate_tracker = {
   mutable general_timestamps: float list;
   mutable broadcast_timestamps: float list;

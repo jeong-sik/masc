@@ -132,7 +132,7 @@ let test_set_get_roundtrip () =
   check (list (float 0.1)) "roundtrip" ts ts'
 
 (* ============================================================
-   Atomic Helpers Tests
+   Burst Counters Tests
    ============================================================ *)
 
 let test_burst_used_initial () =
@@ -425,7 +425,7 @@ let () =
       test_case "task_ops" `Quick test_set_timestamps_task_ops;
       test_case "roundtrip" `Quick test_set_get_roundtrip;
     ];
-    "atomic_helpers", [
+    "burst_counters", [
       test_case "burst_used initial" `Quick test_burst_used_initial;
       test_case "burst_used set" `Quick test_burst_used_set;
       test_case "burst_used incr" `Quick test_burst_used_incr;

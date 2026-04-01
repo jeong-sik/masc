@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [2.209.0] - 2026-04-01
+
+### Added
+- **Board TTL retention** — enforce TTL for automation posts + author cap (#4419, #3657).
+
+### Fixed
+- **Keeper checkpoint** — always generate checkpoint regardless of checkpoint_dir (#4418).
+
 ## [2.208.0] - 2026-04-01
 
 ### Added

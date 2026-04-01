@@ -72,8 +72,9 @@ let cleanup_session session_id =
     | None -> ()
     | Some session ->
       session.closed <- true;
-      (* cleanup: best-effort close, ignore any transport error *)
-      (try Httpun_ws.Wsd.close session.wsd with exn -> ignore exn);
+      (try Httpun_ws.Wsd.close session.wsd
+       with Eio.Cancel.Cancelled _ as e -> raise e
+          | exn -> Log.Server.warn "WS close failed for %s: %s" session_id (Printexc.to_string exn));
       Hashtbl.remove sessions session_id);
   Transport_metrics.set_ws_sessions
     (with_sessions_rw (fun () -> Hashtbl.length sessions));

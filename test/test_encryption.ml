@@ -169,19 +169,23 @@ let test_invalid_key_length () =
 let test_load_key_file_invalid_hex () =
   let path = Filename.temp_file "masc-key-invalid-" ".txt" in
   let oc = open_out path in
-  output_string oc (String.make 64 'g');
-  close_out oc;
-  let bad_config = {
-    Encryption.enabled = true;
-    key_source = `File path;
-    version = 1;
-  } in
-  (match Encryption.load_key bad_config with
-   | Error (Encryption.InvalidHexFormat _) -> ()
-   | Ok _ -> fail "should reject invalid file key"
-   | Error (Encryption.KeyNotFound _) -> fail "expected invalid hex format, not key not found"
-   | Error _ -> fail "expected invalid hex format");
-  (try Sys.remove path with _ -> ())
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr oc;
+      (try Sys.remove path with _ -> ()))
+    (fun () ->
+      output_string oc (String.make 64 'g');
+      close_out oc;
+      let bad_config = {
+        Encryption.enabled = true;
+        key_source = `File path;
+        version = 1;
+      } in
+      match Encryption.load_key bad_config with
+      | Error (Encryption.InvalidHexFormat _) -> ()
+      | Ok _ -> fail "should reject invalid file key"
+      | Error (Encryption.KeyNotFound _) -> fail "expected invalid hex format, not key not found"
+      | Error _ -> fail "expected invalid hex format")
 
 (* Test: generate_key_hex produces valid hex *)
 let test_generate_key_hex () =

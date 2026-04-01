@@ -256,20 +256,23 @@ let test_load_key_file_not_found () =
 let test_load_key_file_invalid_hex () =
   let path = Filename.temp_file "masc-key-invalid-" ".txt" in
   let oc = open_out path in
-  output_string oc (String.make 64 'g');
-  close_out oc;
-  let config : Encryption.config = {
-    enabled = true;
-    key_source = `File path;
-    version = 1;
-  } in
-  let result = Encryption.load_key config in
-  (match result with
-  | Error (Encryption.InvalidHexFormat _) -> ()
-  | Error (Encryption.KeyNotFound _) -> fail "expected invalid format, got missing key"
-  | Error _ -> fail "expected invalid hex format"
-  | Ok _ -> fail "should fail for malformed hex");
-  (try Sys.remove path with _ -> ())
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr oc;
+      (try Sys.remove path with _ -> ()))
+    (fun () ->
+      output_string oc (String.make 64 'g');
+      close_out oc;
+      let config : Encryption.config = {
+        enabled = true;
+        key_source = `File path;
+        version = 1;
+      } in
+      match Encryption.load_key config with
+      | Error (Encryption.InvalidHexFormat _) -> ()
+      | Error (Encryption.KeyNotFound _) -> fail "expected invalid format, got missing key"
+      | Error _ -> fail "expected invalid hex format"
+      | Ok _ -> fail "should fail for malformed hex")
 
 (* ============================================================
    envelope_to_json / envelope_of_json Tests

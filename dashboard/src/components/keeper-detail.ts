@@ -12,6 +12,7 @@ import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
 import { selectKeeper } from '../keeper-runtime'
+import { findKeeper } from '../lib/keeper-utils'
 import {
   KeeperConversationPanel,
   KeeperDiagnosticSummary,
@@ -298,8 +299,9 @@ function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
 // ── Main Detail Overlay ─────────────────────────────────
 
 export function KeeperDetailOverlay() {
-  const keeper = selectedKeeper.value
-  if (!keeper) return null
+  const selected = selectedKeeper.value
+  if (!selected) return null
+  const keeper = findKeeper(selected.name) ?? selected
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const titleId = `keeper-detail-title-${keeper.name}`
 

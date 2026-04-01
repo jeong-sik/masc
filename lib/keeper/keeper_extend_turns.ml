@@ -32,7 +32,8 @@ let make ~agent_ref ~max_turns ?ceiling () : Agent_sdk.Tool.t =
   Tool.create
     ~name:"extend_turns"
     ~descriptor:{ kind = None;
-                  shell = None; notes = []; examples = [] }
+                  shell = None; mutation_class = None;
+                  notes = []; examples = [] }
     ~description:"Request additional turns when you need more time. \
                    Guardrails check cost and idle before granting."
     ~parameters:[

@@ -160,9 +160,9 @@ module Local_runtime = struct
       Callers may request less, but never more than this cap.
       Falls back to MASC_LLAMA_MAX_TOKENS for backward compatibility. *)
   let max_tokens =
-    match Sys.getenv_opt "MASC_LOCAL_MAX_TOKENS" |> trim_opt with
-    | Some v -> (try int_of_string v with _ -> 32768)
-    | None -> get_int ~default:32768 "MASC_LLAMA_MAX_TOKENS"
+    let primary = get_int ~default:0 "MASC_LOCAL_MAX_TOKENS" in
+    if primary > 0 then primary
+    else get_int ~default:32768 "MASC_LLAMA_MAX_TOKENS"
 
   (** Llama swarm model override (formerly in Chain module). *)
   let llama_swarm_model_opt () =
@@ -404,9 +404,9 @@ module Worker = struct
   (** Enable local runtime debug logging. Default: false.
       Falls back to MASC_LLAMA_RUNTIME_DEBUG for backward compatibility. *)
   let local_runtime_debug =
-    match Sys.getenv_opt "MASC_LOCAL_RUNTIME_DEBUG" |> trim_opt with
-    | Some v -> (try bool_of_string v with _ -> false)
-    | None -> get_bool ~default:false "MASC_LLAMA_RUNTIME_DEBUG"
+    let primary = get_bool ~default:false "MASC_LOCAL_RUNTIME_DEBUG" in
+    if primary then true
+    else get_bool ~default:false "MASC_LLAMA_RUNTIME_DEBUG"
 
   (** @deprecated Use {!local_runtime_debug}. *)
   let llama_runtime_debug = local_runtime_debug

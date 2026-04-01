@@ -173,7 +173,12 @@ let all_flags : flag list = [
   { env_name = "MASC_LOCAL_RUNTIME_DEBUG";
     description = "Local LLM runtime debug output";
     default = false; category = "runtime";
-    lifecycle = Active; since = "2.100.0" };
+    lifecycle = Active; since = "2.200.0" };
+
+  { env_name = "MASC_LLAMA_RUNTIME_DEBUG";
+    description = "Deprecated: use MASC_LOCAL_RUNTIME_DEBUG";
+    default = false; category = "runtime";
+    lifecycle = Deprecated "use MASC_LOCAL_RUNTIME_DEBUG"; since = "2.100.0" };
 
   (* ── CDAL (Contract-Driven Agent Loop) ───────────────────── *)
   { env_name = "MASC_CDAL_ENABLED";

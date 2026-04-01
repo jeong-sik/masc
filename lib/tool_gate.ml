@@ -173,6 +173,6 @@ let rec equal a b =
   | Intersect_with a_names, Intersect_with b_names ->
       sort_dedup a_names = sort_dedup b_names
   | Seq a_ops, Seq b_ops ->
-      List.length a_ops = List.length b_ops
+      List.compare_lengths a_ops b_ops = 0
       && List.for_all2 equal a_ops b_ops
   | _ -> false

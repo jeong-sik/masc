@@ -158,6 +158,20 @@ let test_inverse_seq_irreversible () =
   | Irreversible -> ()
   | _ -> fail "expected Irreversible"
 
+(* Nested Seq: inverse reverses outer AND inner recursively.
+   Seq [Seq [Add ["a"]]; Remove ["b"]]
+   → inverse of inner Seq [Add ["a"]] = Seq [Remove ["a"]]
+   → inverse of Remove ["b"] = Add ["b"]
+   → fold_left + cons reversal: [Add ["b"]; Seq [Remove ["a"]]] *)
+let test_inverse_nested_seq () =
+  let op = Seq [Seq [Add ["a"]]; Remove ["b"]] in
+  match Tool_gate.inverse op with
+  | Reversible (Seq [Add ["b"]; Seq [Remove ["a"]]]) -> ()
+  | Reversible other ->
+      fail (Printf.sprintf "unexpected nested inverse: %s"
+        (Yojson.Safe.to_string (Tool_gate.to_yojson other)))
+  | Irreversible -> fail "expected Reversible"
+
 let test_inverse_seq_empty () =
   match Tool_gate.inverse (Seq []) with
   | Reversible Keep_all -> ()
@@ -380,6 +394,7 @@ let () =
           test_case "Seq reversible" `Quick test_inverse_seq_reversible;
           test_case "Seq irreversible" `Quick test_inverse_seq_irreversible;
           test_case "Seq empty" `Quick test_inverse_seq_empty;
+          test_case "nested Seq" `Quick test_inverse_nested_seq;
           test_case "roundtrip Add" `Quick test_roundtrip_add;
           test_case "roundtrip Remove" `Quick test_roundtrip_remove;
           test_case "roundtrip phantom" `Quick test_roundtrip_phantom;

@@ -576,8 +576,6 @@ let provider_model_label provider model =
   if model = "" then None
   else Some (Printf.sprintf "%s:%s" provider model)
 
-(** Centralized family → model label mapping.
-    Vendor-specific env var resolution happens here only. *)
 (** Family → model label. Uses "provider:auto" for cloud providers;
     OAS cascade resolves the concrete model at runtime. *)
 let default_model_label_for_family = function
@@ -591,41 +589,39 @@ let default_model_label_for_family = function
   | Custom_family _ ->
       Error "Custom provider requires explicit runtime_model"
 
+let cloud_provider_auto_labels_opt () =
+  [
+    (if env_present "ZAI_API_KEY" then Some "glm:auto" else None);
+    (if gemini_direct_available () then Some "gemini:auto" else None);
+    (if env_present "ANTHROPIC_API_KEY" then Some "claude:auto" else None);
+    (if env_present "OPENAI_API_KEY" then Some "openai:auto" else None);
+  ]
+
 let preferred_execution_model_labels () =
   Json_util.dedupe_keep_order
     (List.filter_map
        Fun.id
-       [
+       ([
          (match configured_default_model_label_result () with
          | Ok label -> Some label
          | Error _ -> None);
          (match explicit_llama_model_label_result () with
          | Ok label -> Some label
          | Error _ -> None);
-         (* Provider auto-detection: check API key presence, delegate
-            model selection to OAS cascade via "provider:auto". *)
-         (if env_present "ZAI_API_KEY" then Some "glm:auto" else None);
-         (if gemini_direct_available () then Some "gemini:auto" else None);
-         (if env_present "ANTHROPIC_API_KEY" then Some "claude:auto" else None);
-         (if env_present "OPENAI_API_KEY" then Some "openai:auto" else None);
-       ])
+       ] @ cloud_provider_auto_labels_opt ()))
 
 let preferred_verifier_model_labels () =
   Json_util.dedupe_keep_order
     (List.filter_map
        Fun.id
-       [
+       ([
          (match configured_verifier_model_label_result () with
          | Ok label -> Some label
          | Error _ -> None);
          (match explicit_llama_model_label_result () with
          | Ok label -> Some label
          | Error _ -> None);
-         (if env_present "ZAI_API_KEY" then Some "glm:auto" else None);
-         (if gemini_direct_available () then Some "gemini:auto" else None);
-         (if env_present "ANTHROPIC_API_KEY" then Some "claude:auto" else None);
-         (if env_present "OPENAI_API_KEY" then Some "openai:auto" else None);
-       ])
+       ] @ cloud_provider_auto_labels_opt ()))
 
 let default_model_labels_result () =
   let labels = preferred_execution_model_labels () in

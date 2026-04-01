@@ -55,11 +55,6 @@ module Inference = struct
     |> String.lowercase_ascii
 end
 
-(* Vendor-specific model modules removed (2026-04-01).
-   Model selection is delegated to OAS cascade via "provider:auto" labels.
-   OAS resolve_auto_model_id handles env-var fallbacks per provider.
-   See: oas/lib/llm_provider/cascade_model_resolve.ml *)
-
 (** {1 Rate Limit Cleanup Configuration} *)
 
 module RateLimit = struct

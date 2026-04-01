@@ -112,9 +112,6 @@ let transport_entries = [
 let inference_entries = [
   entry ~default:"30" "MASC_INFERENCE_TIMEOUT_SEC" "Inference call timeout (seconds)";
   entry ~default:"true" "MASC_INFERENCE_CACHE_ENABLED" "Enable inference result cache";
-  (* Vendor-specific model env vars removed. Model selection delegated to
-     OAS cascade via "provider:auto". Per-provider env vars (GEMINI_DEFAULT_MODEL,
-     ANTHROPIC_DEFAULT_MODEL, OPENAI_DEFAULT_MODEL) are read by OAS directly. *)
 ]
 
 let keeper_entries = [

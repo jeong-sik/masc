@@ -145,17 +145,15 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
     label = '정상'
   }
 
+  const dot = html`<span class="block size-2 shrink-0 rounded-full ${dotClass} shadow-[0_0_6px_rgba(0,0,0,0.4)]"></span>`
+
   if (collapsed) {
-    return html`
-      <div class="flex justify-center" title=${label}>
-        <span class="block size-2 rounded-full ${dotClass} shadow-[0_0_6px_rgba(0,0,0,0.4)]"></span>
-      </div>
-    `
+    return html`<div class="flex justify-center" title=${label}>${dot}</div>`
   }
 
   return html`
     <div class="flex items-center gap-2 px-1">
-      <span class="block size-2 shrink-0 rounded-full ${dotClass} shadow-[0_0_6px_rgba(0,0,0,0.4)]"></span>
+      ${dot}
       <span class="text-[11px] text-[var(--text-muted)] truncate">${label}</span>
     </div>
   `

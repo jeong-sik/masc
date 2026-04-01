@@ -1,6 +1,20 @@
 # Changelog
 
 
+## [2.204.0] - 2026-04-01
+
+### Changed
+- **Dashboard CSS split** — global.css → feature-based files (#4380, #3915).
+- **Tool_spec metadata** — preserve per-tool metadata in registration (#4375).
+
+### Fixed
+- **GC broken agent cleanup** — auto-remove corrupt agent files instead of skipping (#4368).
+- **Room delete_path** — local mirror removal for dual-write backends (#4378).
+- **Post-merge recovery** — 8 branch changes not in main (#4379).
+
+### Documentation
+- **Heartbeat Phase 2b** — feasibility analysis, No-Go until gRPC production active (#4377).
+
 ## [2.203.0] - 2026-04-01
 
 ### Added

@@ -83,8 +83,40 @@ let sweep store =
       Hashtbl.remove store.comments cid
     ) expired_comments;
 
+    (* Author cap enforcement: evict oldest posts from authors exceeding the cap *)
+    let cap_evicted = ref 0 in
+    if Limits.author_post_cap > 0 then begin
+      let author_posts = Hashtbl.create 64 in
+      Hashtbl.iter (fun _ (post : post) ->
+        let key = Agent_id.to_string post.author in
+        let existing = Hashtbl.find_opt author_posts key |> Option.value ~default:[] in
+        Hashtbl.replace author_posts key (post :: existing)
+      ) store.posts;
+      Hashtbl.iter (fun _author posts ->
+        if List.length posts > Limits.author_post_cap then begin
+          let sorted = List.sort (fun (a : post) (b : post) ->
+            compare a.created_at b.created_at
+          ) posts in
+          let excess = List.length sorted - Limits.author_post_cap in
+          let rec take_first n = function
+            | _ when n <= 0 -> []
+            | [] -> []
+            | x :: xs -> x :: take_first (n - 1) xs
+          in
+          let to_evict = take_first excess sorted in
+          List.iter (fun (post : post) ->
+            let id = Post_id.to_string post.id in
+            Hashtbl.remove store.posts id;
+            Hashtbl.remove store.comments_by_post id;
+            decr store.post_count;
+            incr cap_evicted
+          ) to_evict
+        end
+      ) author_posts
+    end;
+
     (* Invalidate caches if anything was swept *)
-    if !removed_posts > 0 then invalidate_post_caches store;
+    if !removed_posts > 0 || !cap_evicted > 0 then invalidate_post_caches store;
     if !removed_comments > 0 then invalidate_comment_caches store;
 
     store.last_sweep <- now;
@@ -443,7 +475,15 @@ let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
   | Error e -> Error e
   | Ok author_id ->
 
-  let ttl = if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours in
+  let ttl =
+    match post_kind with
+    | Automation_post | System_post ->
+        let forced = Limits.automation_ttl_hours in
+        if ttl_hours = 0 then forced
+        else min ttl_hours forced
+    | Human_post ->
+        if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours
+  in
 
   (* Normalize hearth: lowercase + trim *)
   let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
@@ -701,7 +741,15 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
           Error (Capacity_exceeded { current = post_comment_count; max = Limits.max_comments_per_post })
         else begin
           let now = Time_compat.now () in
-          let ttl = if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours in
+          let ttl =
+            match post.post_kind with
+            | Automation_post | System_post ->
+                let forced = Limits.automation_ttl_hours in
+                if ttl_hours = 0 then forced
+                else min ttl_hours forced
+            | Human_post ->
+                if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours
+          in
           let comment = {
             id = Comment_id.generate ();
             post_id = pid;

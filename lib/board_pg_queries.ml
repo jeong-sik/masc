@@ -327,6 +327,22 @@ let sweep_posts_q =
      ) RETURNING 1 \
    ) SELECT COUNT(*)::int FROM deleted"
 
+(** Author cap enforcement: delete oldest posts from authors exceeding the cap.
+    $1 = author_post_cap limit. *)
+let sweep_author_cap_q =
+  (Caqti_type.int ->! Caqti_type.int)
+  "WITH ranked AS ( \
+     SELECT id, author, \
+       ROW_NUMBER() OVER (PARTITION BY author ORDER BY created_at ASC) as rn, \
+       COUNT(*) OVER (PARTITION BY author) as total \
+     FROM masc_board_posts \
+   ), to_delete AS ( \
+     DELETE FROM masc_board_posts \
+     WHERE id IN ( \
+       SELECT id FROM ranked WHERE total > $1 AND rn <= total - $1 \
+     ) RETURNING 1 \
+   ) SELECT COUNT(*)::int FROM to_delete"
+
 let sweep_comments_q =
   (Caqti_type.int ->! Caqti_type.int)
   "WITH deleted AS ( \

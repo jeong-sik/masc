@@ -69,7 +69,7 @@ Current canonical CLI contracts:
 - default worker substrate: managed by cascade
 - `claude`, `codex`, `gemini` are explicit opt-in workers
 - direct API adapters are for:
-  - keeper/perpetual/MDAL/direct reasoning paths
+  - keeper/always-on/MDAL/direct reasoning paths
   - not the default swarm substrate
 
 ## Compatibility

@@ -162,9 +162,9 @@ export interface MdalLoop {
   history: MdalIterationRecord[]
 }
 
-// --- Perpetual Agent ---
+// --- Keeper Runtime ---
 
-export interface PerpetualStatus {
+export interface KeeperStatus {
   running: boolean
   goal?: string
   turn?: number
@@ -173,4 +173,3 @@ export interface PerpetualStatus {
   model?: string
   cost_usd?: number
 }
-

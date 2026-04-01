@@ -646,7 +646,7 @@
 
 ### Fixed
 - **Keeper supervisor** — hardened ownership, dead tombstone cleanup (#3678).
-- **Keeper metadata migration** — perpetual keeper meta with timestamp comparison (#3732).
+- **Keeper metadata migration** — legacy keeper meta with timestamp comparison (#3732).
 - **Keeper dir cache** — stale ensure_dir cache after base reset (#3714).
 - **Tool dispatch** — wired 3 missing modules (Cache, Goals, Compact) (#3716).
 - **Contract Harness** — mkdir_p keepers dir before writing meta (#3715).
@@ -682,7 +682,7 @@
 
 ### Changed
 - **Walph surface retired** — -1,172 lines removed (#3705).
-- **Perpetual dirs renamed** to `traces/keepers` with migration (#3702).
+- **Legacy runtime dirs renamed** to `traces/keepers` with migration (#3702).
 - **24 unused tools removed** from MCP surface (#3640), 7 more in follow-up (#3662).
 - **Dead scripts removed** — masc-watch, test_grpc (-696 lines) (#3647).
 - **3 sub-libraries extracted** from monolith — config, dashboard_utils, team_session_types (#3620).
@@ -1038,7 +1038,7 @@
 - **OAS-only MODEL path** — eliminate custom MODEL wrapper, all calls through `Model_orchestration` (#1531, #1575)
 - **Remove global MODEL semaphore** — per-provider concurrency instead (#1576)
 - **Remove OAS feature flags** — OAS is the only path (#1557)
-- **Remove perpetual_loop legacy** — `Perpetual_oas` is sole runtime (#1565)
+- **Remove legacy autonomy loop** — keeper runtime is sole runtime (#1565)
 - **Centralize vendor model labels** — single resolution point (#1579)
 - **Model_client to Agent_sdk.Types** — direct type usage (batches 1-2/4) (#1578, #1573)
 - **Schema decomposition** — monolithic tool schemas into owning modules (-4739 LOC) (#1546)
@@ -1800,7 +1800,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Keeper Proactive Tool-Loop** — Enable proactive tool-loop actions for keepers (#368)
 - **Keeper Tool Routing** — Add executable bash/github/fs tool routing (#370)
 - **Keeper Remove-Meta Default** — Change `remove_meta` default to false in `keeper_down` (#393)
-- **Perpetual CLI Eio Runtime** — Add Eio runtime to standalone perpetual CLI (#417)
+- **Standalone Keeper CLI Eio Runtime** — Add Eio runtime to standalone keeper CLI (#417)
 - **GLM Chdir Race** — Fix chdir race condition, add structured logging and pool tests (#404)
 - **MCP Status Path Timeout** — Harden status path for timeout-prone MCP calls (#379)
 - **Dashboard Asset Routes** — Ensure dashboard asset routes take priority over generic prefix (#345)
@@ -1899,7 +1899,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `pulse.ml`: Core engine using `Eio.Stream` for nudge signaling, `Eio.Promise` for graceful shutdown
   - `Pulse.Consumer` module type: First-class modules with `name`, `should_act`, `on_beat` callbacks
   - Rhythm types: Fixed interval, quiet hours support, interval clamping (min/max bounds)
-  - Lifecycle: `Perpetual` (auto-restart on error) or `Oneshot`
+  - Lifecycle: `Always_on` (auto-restart on error) or `Oneshot`
   - 20+ tests covering quiet hours, nudge coalescing, consumer error isolation
 
 ### Changed
@@ -1938,8 +1938,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Compaction prefers structured continuity snapshots (`[STATE] ... [/STATE]`) and emits summaries as assistant messages (prevents Claude system prompt pollution).
-- Succession hydration preserves the previous system prompt (keeper/perpetual constitution + custom instructions) across handoffs.
-- Keeper + Perpetual default system prompts include a continuity constitution and a stable `[STATE]` template for compaction/handoff.
+- Succession hydration preserves the previous system prompt (keeper continuity constitution + custom instructions) across handoffs.
+- Keeper default system prompts include a continuity constitution and a stable `[STATE]` template for compaction/handoff.
 
 ### Fixed
 - Keeper auto-handoff now stamps the successor DNA with the new `trace_id` and next `generation` before hydration/checkpointing.
@@ -1947,14 +1947,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.61.0] - 2026-02-06
 
 ### Added
-- **Perpetual Agent Runtime** — Infinite context system for 24h+ autonomous agent operation
+- **Always-on Keeper Runtime** — Infinite context system for 24h+ autonomous agent operation
   - `model_client.ml`: Vendor-agnostic MODEL caller (Ollama, Claude, Gemini, GLM Cloud, OpenRouter) with cascade fallback
   - `context_manager.ml`: 3-tier memory (working → session → semantic) with 4 compaction strategies
   - `verifier.ml`: Low-cost model action verification (PASS/WARN/FAIL)
   - `succession.ml`: Cross-model DNA extraction, hydration, and generation tracking
-  - `perpetual_loop.ml`: Autonomous loop (think → act → observe → verify → compact → heartbeat → loop/handoff)
-  - `tool_perpetual.ml`: 4 MCP tools (`masc_perpetual_start`, `masc_perpetual_status`, `masc_perpetual_stop`, `masc_perpetual_inject`)
-  - `bin/perpetual_cli.exe`: Standalone CLI for running agents outside MCP
+  - legacy autonomy loop: think → act → observe → verify → compact → heartbeat → loop/handoff
+  - legacy autonomy tool surface: start/status/stop/inject runtime controls
+  - standalone keeper CLI for running agents outside MCP
   - 3-threshold context management: compact (50%), prepare (70%), handoff (85%)
   - Idle detection with configurable max consecutive idle turns
   - 92 tests

@@ -10,12 +10,17 @@
 
     @since 2.201.0 *)
 
-(** Extract transcribed text from STT JSON response. *)
+(** Extract transcribed text from STT JSON response.
+    Returns None if no text or if status is "no_audio". *)
 let extract_text_from_stt (json : Yojson.Safe.t) : string option =
   try
-    match Yojson.Safe.Util.member "text" json with
-    | `String s when String.trim s <> "" -> Some (String.trim s)
-    | _ -> None
+    let open Yojson.Safe.Util in
+    match member "status" json with
+    | `String "no_audio" -> None
+    | _ ->
+        (match member "text" json with
+        | `String s when String.trim s <> "" -> Some (String.trim s)
+        | _ -> None)
   with _ -> None
 
 (** Extract reply text from keeper_msg tool_result.

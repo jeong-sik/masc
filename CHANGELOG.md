@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.208.0] - 2026-04-01
+
+### Added
+- **Tool_token smart constructor** — I/O boundary parse for dispatch tokens (#4414).
+- **OAS slot yield bridge** — turn-level slot yield for oas_worker (#4396).
+
+### Changed
+- **Vendor API key cleanup** — remove hardcoded vendor API key names from core (#4376).
+- **Model_family removal** — parameter-based decisions replace model_family/tier (#4413).
+- **Keeper dead code** — remove dead code from keeper_working_context (#4412).
+
 ## [2.207.0] - 2026-04-01
 
 ### Added

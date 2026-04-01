@@ -1,8 +1,18 @@
-(** Keeper_exec_tools — keeper tool execution and tool-loop helpers. *)
+(** Keeper_exec_tools — keeper tool execution and tool-loop helpers.
+
+    Split into three layers:
+    - [Keeper_tool_registry]: declarative tool name lists (data)
+    - [Keeper_tool_policy]: access control, presets, allowed-tool resolution (logic)
+    - This module: execution dispatch + shared helpers (side-effects) *)
 
 open Keeper_types
 open Keeper_memory
 open Keeper_alerting
+
+(* Re-export registry and policy so external callers keep using
+   [Keeper_exec_tools.foo] without changing import paths. *)
+include Keeper_tool_registry
+include Keeper_tool_policy
 
 (** Callback for recording keeper-internal tool calls.
     Set at server initialization to avoid Config dependency cycle.
@@ -41,363 +51,6 @@ let ensure_keeper_board_post_args ~author ~source = function
         @ fields)
   | other -> other
 
-let keeper_coordination_tool_names =
-  [ "keeper_tasks_list"; "keeper_task_claim"; "keeper_task_done"; "keeper_broadcast" ]
-
-let keeper_board_tool_names =
-  [
-    "keeper_board_get";
-    "keeper_board_post";
-    "keeper_board_comment";
-    "keeper_board_vote";
-    "keeper_board_list";
-    "keeper_board_stats";
-    "keeper_board_search";
-    (* keeper_board_delete removed from default shard in #4309 *)
-  ]
-
-let keeper_voice_tool_names =
-  [ "keeper_voice_speak"; "keeper_voice_listen"; "keeper_voice_agent";
-    "keeper_voice_sessions";
-    "keeper_voice_session_start"; "keeper_voice_session_end" ]
-
-let keeper_shell_readonly_tool_names = [ "keeper_shell_readonly" ]
-
-let keeper_governance_tool_names =
-  Tool_shard.governance_tools
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
-
-let keeper_coding_shard_tool_names =
-  Tool_shard.coding_tools
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
-
-let keeper_autoresearch_tool_names =
-  Tool_shard.autoresearch_keeper_tools
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
-
-let keeper_research_loop_tool_names =
-  Tool_research.schemas
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
-
-let keeper_coding_tool_names = Tool_code_write.tool_names
-
-let keeper_internal_candidate_tool_names =
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
-
-let keeper_voice_tool_schemas =
-  match Tool_shard.get_shard "voice" with
-  | Some shard -> shard.tools
-  | None -> []
-
-(** masc_* bridge for keepers.
-    All masc_* schemas are injected at server init and exposed to keepers
-    unconditionally. Execution dispatch (catch-all at bottom of
-    execute_keeper_tool_call) already handles any masc_* tool. *)
-
-let masc_schemas_ref : Types.tool_schema list ref = ref []
-
-(** Tool_catalog.Keeper_denied as a Hashtbl for O(1) lookup.
-    Tools in this set are denied at hook execution time (pre_tool_use Skip),
-    so they must also be excluded from the schema list sent to the LLM.
-    Otherwise the LLM sees tools it can never execute, wastes turns
-    selecting them, and appears to make poor tool choices. *)
-let keeper_denied_set : (string, unit) Hashtbl.t =
-  let tbl = Hashtbl.create 32 in
-  List.iter (fun name -> Hashtbl.replace tbl name ())
-    (Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied);
-  tbl
-
-let is_keeper_denied (name : string) : bool =
-  Hashtbl.mem keeper_denied_set name
-
-let inject_masc_schemas (schemas : Types.tool_schema list) =
-  masc_schemas_ref :=
-    List.filter (fun (s : Types.tool_schema) ->
-      String.starts_with ~prefix:"masc_" s.name
-      && not (is_keeper_denied s.name))
-      schemas
-
-let dedupe_tool_names names =
-  dedupe_keep_order
-    (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
-
-let keeper_base_tool_names =
-  [ "keeper_time_now"; "keeper_context_status"; "keeper_memory_search" ]
-
-let keeper_filesystem_tool_names = [ "keeper_fs_read" ]
-let keeper_library_tool_names = [ "keeper_library_search"; "keeper_library_read" ]
-
-let injected_masc_tool_names () =
-  !masc_schemas_ref
-  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
-
-let select_existing_masc_tool_names names =
-  let injected = injected_masc_tool_names () in
-  names
-  |> List.filter (fun name -> List.mem name injected)
-  |> dedupe_tool_names
-
-let keeper_core_masc_tool_names =
-  [
-    "masc_status";
-    "masc_messages";
-    "masc_broadcast";
-    "masc_join";
-    "masc_leave";
-    "masc_who";
-    "masc_heartbeat";
-    "masc_tasks";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_add_task";
-    "masc_batch_add_tasks";
-    "masc_agents";
-    "masc_dashboard";
-    "masc_agent_card";
-    "masc_tool_help";
-  ]
-
-(* ── Layer 0: Core tools (always executable, always visible) ───── *)
-
-(** Tools that bypass policy restrictions.  A keeper with Minimal
-    preset still needs masc_status/broadcast/heartbeat to function.
-    These are the survival-critical tools. *)
-let core_always_tools =
-  [ "keeper_time_now"; "keeper_context_status";
-    "masc_status"; "masc_broadcast"; "masc_heartbeat";
-    "masc_messages"; "masc_who"; "masc_tool_help";
-    "extend_turns" ]
-
-let core_always_set : (string, unit) Hashtbl.t =
-  let tbl = Hashtbl.create (List.length core_always_tools) in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) core_always_tools;
-  tbl
-
-let is_core_always_tool (name : string) : bool =
-  Hashtbl.mem core_always_set name
-
-let keeper_coding_masc_tool_names =
-  [
-    "masc_code_search";
-    "masc_code_symbols";
-    "masc_code_read";
-    "masc_worktree_create";
-    "masc_worktree_remove";
-    "masc_worktree_list";
-  ]
-
-let keeper_all_candidate_tool_names () =
-  dedupe_tool_names
-    ( keeper_internal_candidate_tool_names
-    @ keeper_voice_tool_names
-    @ keeper_governance_tool_names
-    @ keeper_coding_shard_tool_names
-    @ keeper_coding_tool_names
-    @ keeper_autoresearch_tool_names
-    @ keeper_research_loop_tool_names
-    @ keeper_voice_tool_names
-    @ injected_masc_tool_names () )
-
-let preset_allowlist = function
-  | Minimal ->
-      dedupe_tool_names
-        ( keeper_base_tool_names
-        @ select_existing_masc_tool_names [ "masc_status"; "masc_tool_help" ] )
-  | Messaging ->
-      dedupe_tool_names
-        ( keeper_base_tool_names
-        @ keeper_board_tool_names
-        @ keeper_coordination_tool_names
-        @ keeper_voice_tool_names
-        @ keeper_governance_tool_names
-        @ select_existing_masc_tool_names keeper_core_masc_tool_names )
-  | Coding ->
-      dedupe_tool_names
-        ( keeper_base_tool_names
-        @ keeper_filesystem_tool_names
-        @ keeper_library_tool_names
-        @ keeper_shell_readonly_tool_names
-        @ keeper_coordination_tool_names
-        @ keeper_coding_shard_tool_names
-        @ keeper_coding_tool_names
-        @ select_existing_masc_tool_names
-            (keeper_core_masc_tool_names @ keeper_coding_masc_tool_names) )
-  | Research ->
-      dedupe_tool_names
-        ( keeper_base_tool_names
-        @ keeper_filesystem_tool_names
-        @ keeper_library_tool_names
-        @ keeper_shell_readonly_tool_names
-        @ keeper_coordination_tool_names
-        @ keeper_board_tool_names
-        @ keeper_governance_tool_names
-        @ keeper_autoresearch_tool_names
-        @ keeper_research_loop_tool_names
-        @ select_existing_masc_tool_names keeper_core_masc_tool_names )
-  | Full -> keeper_all_candidate_tool_names ()
-
-let tool_policy_of_meta (meta : keeper_meta) =
-  let allow =
-    match meta.tool_access with
-    | Preset { preset; also_allow } ->
-        Tool_access_policy.Names (preset_allowlist preset @ also_allow)
-    | Custom allowlist ->
-        Tool_access_policy.Names allowlist
-  in
-  {
-    Tool_access_policy.allow;
-    deny = Tool_access_policy.Names meta.tool_denylist;
-  }
-
-type tool_access_lookup = {
-  candidate_names : string list;
-  candidate_set : (string, unit) Hashtbl.t;
-  allow_set : (string, unit) Hashtbl.t;
-  deny_set : (string, unit) Hashtbl.t;
-}
-
-let tool_name_set names =
-  let tbl = Hashtbl.create (max 16 (List.length names)) in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) names;
-  tbl
-
-let tool_access_lookup_of_meta (meta : keeper_meta) =
-  let candidate_names = keeper_all_candidate_tool_names () in
-  let candidate_set = tool_name_set candidate_names in
-  let allow_names =
-    Tool_access_policy.resolve
-      ~candidates:candidate_names
-      (tool_policy_of_meta meta)
-    |> List.filter (fun name -> Hashtbl.mem candidate_set name)
-    |> dedupe_tool_names
-  in
-  {
-    candidate_names;
-    candidate_set;
-    allow_set = tool_name_set allow_names;
-    deny_set = tool_name_set meta.tool_denylist;
-  }
-
-let filter_by_access ~(lookup : tool_access_lookup) (name : string) : bool =
-  (* keeper_denied tools are already excluded from candidate_set via
-     inject_masc_schemas, so the is_keeper_denied check was redundant. *)
-  Hashtbl.mem lookup.candidate_set name
-  && Hashtbl.mem lookup.allow_set name
-  && not (Hashtbl.mem lookup.deny_set name)
-
-(** Universe check: candidate minus denied, ignoring policy allowlist.
-    Core tools and BM25-discovered tools use this gate at execution time. *)
-let filter_by_universe ~(lookup : tool_access_lookup) (name : string) : bool =
-  Hashtbl.mem lookup.candidate_set name
-  && not (Hashtbl.mem lookup.deny_set name)
-
-(** Execution gate: core tools bypass policy, others require policy allowlist.
-    All tools must exist in candidate_set — rejects hallucinated tool names. *)
-let can_execute ~(lookup : tool_access_lookup) (name : string) : bool =
-  if not (Hashtbl.mem lookup.candidate_set name
-          || is_core_always_tool name) then
-    false
-  else if is_core_always_tool name then
-    filter_by_universe ~lookup name
-  else
-    filter_by_access ~lookup name
-
-let keeper_masc_tool_names (meta : keeper_meta) : string list =
-  let lookup = tool_access_lookup_of_meta meta in
-  !masc_schemas_ref
-  |> List.filter_map (fun (schema : Types.tool_schema) ->
-    if filter_by_access ~lookup schema.name
-    then Some schema.name
-    else None)
-
-let keeper_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
-  let lookup = tool_access_lookup_of_meta meta in
-  !masc_schemas_ref
-  |> List.filter (fun (schema : Types.tool_schema) -> filter_by_access ~lookup schema.name)
-
-(* ── Layer 2: Universe (all executable tools, policy-independent) ── *)
-
-(** Universe masc_* schemas: candidate minus denied, no policy filter.
-    Used by make_tools to build Tool.t for BM25 retrieval scope. *)
-let keeper_universe_masc_tool_schemas (meta : keeper_meta) : Types.tool_schema list =
-  let lookup = tool_access_lookup_of_meta meta in
-  !masc_schemas_ref
-  |> List.filter (fun (schema : Types.tool_schema) ->
-    filter_by_universe ~lookup schema.name)
-
-let keeper_default_model_tools (_meta : keeper_meta) : Types.tool_schema list =
-  keeper_model_tools @ keeper_voice_tool_schemas
-
-(** Return keeper tool names under the active preset/custom policy. *)
-let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
-    string list =
-  if write_done then
-    []
-  else
-    let lookup = tool_access_lookup_of_meta meta in
-    lookup.candidate_names
-    |> List.filter (fun name -> filter_by_access ~lookup name)
-    |> dedupe_tool_names
-
-(** Universe tool names: candidates minus denied, no policy filter.
-    Superset of keeper_allowed_tool_names.  BM25 indexes this set so
-    progressive disclosure can discover tools beyond the active preset.
-    Core tools are always included even if masc_schemas haven't been
-    injected yet (startup race) or the tool is not in any preset. *)
-let keeper_universe_tool_names (meta : keeper_meta) : string list =
-  let lookup = tool_access_lookup_of_meta meta in
-  let from_candidates =
-    lookup.candidate_names
-    |> List.filter (fun name -> filter_by_universe ~lookup name)
-  in
-  let from_core =
-    core_always_tools
-    |> List.filter (fun name -> not (Hashtbl.mem lookup.deny_set name))
-  in
-  dedupe_tool_names (from_candidates @ from_core)
-
-(** Universe model tool schemas for make_tools.
-    Returns schemas for all universe tools so Agent.run() can call them. *)
-let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
-  let universe = keeper_universe_tool_names meta in
-  let all_schemas =
-    (keeper_default_model_tools meta)
-    @ Tool_research.schemas
-    @ Tool_shard.autoresearch_keeper_tools
-    @ Tool_shard.coding_tools
-    @ Tool_code_write.schemas
-    @ (keeper_universe_masc_tool_schemas meta)
-  in
-  all_schemas
-  |> List.filter (fun tool -> List.mem tool.Types.name universe)
-
-(** Return keeper model tool schemas under the active preset/custom policy. *)
-let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
-    Types.tool_schema list =
-  let allowed = keeper_allowed_tool_names ~write_done meta in
-  if allowed = [] then
-    []
-  else
-    let all_schemas =
-      (keeper_default_model_tools meta)
-      @ Tool_research.schemas
-      @ Tool_shard.autoresearch_keeper_tools
-      @ Tool_shard.coding_tools
-      @ Tool_code_write.schemas
-      @ (keeper_masc_tool_schemas meta)
-    in
-    let result =
-      all_schemas
-      |> List.filter (fun tool -> List.mem tool.Types.name allowed)
-    in
-    let count = List.length result in
-    if count > 100 then
-      Log.Keeper.warn
-        "tool budget exceeded: %d schemas in LLM context (~%dKB estimated). \
-         Consider using a narrower preset or custom allowlist."
-        count (count * 470 / 1024);
-    result
-
 let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
   let voice = Voice_bridge.get_voice_for_agent agent_id in
   `Assoc
@@ -422,6 +75,8 @@ let lines_to_json ?(limit = max_int) (text : string) : Yojson.Safe.t =
   in
   `List (List.map (fun line -> `String line) lines)
 
+(* ── Tool execution dispatch ──────────────────────────────────── *)
+
 let execute_keeper_tool_call
     ~(config : Room.config)
     ~(meta : keeper_meta)
@@ -430,7 +85,7 @@ let execute_keeper_tool_call
   let args = input in
   let now_ts = Time_compat.now () in
   let lookup = tool_access_lookup_of_meta meta in
-  if not (can_execute ~lookup name) then
+  if not (filter_by_access ~lookup name) then
     Yojson.Safe.to_string
       (`Assoc [ ("error", `String "tool_not_allowed");
                 ("tool", `String name) ])
@@ -859,7 +514,6 @@ let execute_keeper_tool_call
                 ("error", `String err);
                 ("agent_id", `String meta.name) ]))
   | "keeper_voice_agent" ->
-      (* No net required — reads local voice config *)
       (match Voice_bridge.get_agent_voice ~agent_id:meta.name with
       | Ok json -> Yojson.Safe.to_string json
       | Error err ->
@@ -869,7 +523,6 @@ let execute_keeper_tool_call
                 ("agent_id", `String meta.name);
                 ("message", `String err) ]))
   | "keeper_voice_sessions" ->
-      (* Local session manager — no net/MCP dependency *)
       let mgr = Keeper_voice_local.get_session_manager () in
       let sessions = Voice_session_manager.list_sessions mgr in
       Yojson.Safe.to_string
@@ -878,7 +531,6 @@ let execute_keeper_tool_call
             ("sessions",
               `List (List.map Voice_session_manager.session_to_json sessions)) ])
   | "keeper_voice_session_start" ->
-      (* Local session manager — no net/MCP dependency *)
       let voice =
         Safe_ops.json_string_opt "session_name" args
         |> Option.map String.trim
@@ -891,7 +543,6 @@ let execute_keeper_tool_call
       Yojson.Safe.to_string
         (Voice_session_manager.session_to_json session)
   | "keeper_voice_session_end" ->
-      (* Local session manager — no net/MCP dependency *)
       let mgr = Keeper_voice_local.get_session_manager () in
       let ended = Voice_session_manager.end_session mgr ~agent_id:meta.name in
       Yojson.Safe.to_string
@@ -1023,8 +674,6 @@ let execute_keeper_tool_call
       let result = Room.claim_next config ~agent_name:meta.agent_name in
       Yojson.Safe.to_string (`Assoc [ ("result", `String result) ])
   | "keeper_task_done" ->
-      (* Uses force_done intentionally: keepers may close tasks from
-         agents who left the room. Regular agent completion uses masc_done. *)
       let task_id =
         Safe_ops.json_string ~default:"" "task_id" args |> String.trim
       in
@@ -1065,13 +714,10 @@ let execute_keeper_tool_call
             (`Assoc [ ("error", `String "unknown_autoresearch_tool");
                       ("tool", `String name) ]))
   | name when String.starts_with ~prefix:"masc_" name ->
-      (* Pre-dispatch path guard: if the tool args contain a path/file_path
-         key, validate it against effective_allowed_paths before dispatching. *)
       let effective_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
       let path_blocked =
         if effective_paths = [] && meta.execution_scope <> "observe_only" then None
         else if meta.execution_scope = "observe_only" && effective_paths = [] then
-          (* observe_only with no explicit paths: block write-capable tool args *)
           let has_path_arg =
             List.exists (fun key ->
               match Yojson.Safe.Util.member key args with

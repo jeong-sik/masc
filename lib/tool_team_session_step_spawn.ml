@@ -89,13 +89,13 @@ let execute_spawn_pipeline
                       deps.effective_execution_scope_of_spec prepared.spec
                     in
                     let local_worker_tool_names =
-                      let all_local_worker_tools =
-                        Team_session_oas_bridge.supported_local_worker_tool_names
-                      in
                       match execution_scope with
                       | Some Team_session_types.Observe_only ->
-                          let denied_observe_only_tools =
-                            [
+                          (* Includes masc_heartbeat in deny — spawned workers
+                             should not heartbeat on behalf of the session. *)
+                          Tool_access_policy.resolve {
+                            allow = Surface Tool_catalog.Local_worker;
+                            deny = Names [
                               "masc_claim_next";
                               "masc_transition";
                               "masc_add_task";
@@ -112,13 +112,10 @@ let execute_spawn_pipeline
                               "masc_repair_loop_start";
                               "masc_repair_loop_iterate";
                               "masc_repair_loop_stop";
-                            ]
-                          in
-                          List.filter
-                            (fun name ->
-                              not (List.mem name denied_observe_only_tools))
-                            all_local_worker_tools
-                      | _ -> all_local_worker_tools
+                            ];
+                          }
+                      | _ ->
+                          Team_session_oas_bridge.supported_local_worker_tool_names
                     in
                     let local_shell_tool_names =
                       match execution_scope with

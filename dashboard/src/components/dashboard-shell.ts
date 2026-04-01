@@ -4,7 +4,7 @@ import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
-import { missionSnapshot } from '../mission-store'
+import { missionSnapshot, missionLoading } from '../mission-store'
 import { roomTruthInitializing } from '../room-truth-store'
 import { Overview } from './overview/overview'
 import { ErrorBoundary } from './common/error-boundary'
@@ -15,7 +15,6 @@ import {
   currentSectionForRoute,
   visibleSectionItemsForTab,
 } from '../config/navigation'
-import { SnapshotCard } from './runtime-rail'
 import { RouteLink } from './common/route-link'
 
 const buildIdentityOpen = signal(false)
@@ -121,6 +120,47 @@ export function BuildIdentityBadge() {
 
 
 
+function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
+  const live = connected.value
+  const snap = missionSnapshot.value
+  const sessions = snap?.sessions ?? snap?.session_briefs ?? []
+  const blockers = sessions.filter(s => s.blocker_summary).length
+  const attentionCount = (snap?.attention_queue ?? []).length
+
+  let dotClass: string
+  let label: string
+
+  if (!live) {
+    dotClass = 'bg-[var(--bad)]'
+    label = '신호 없음'
+  } else if (!snap && missionLoading.value) {
+    dotClass = 'bg-[var(--text-muted)]'
+    label = '로딩 중'
+  } else if (blockers > 0 || attentionCount > 0) {
+    dotClass = 'bg-[var(--warn)]'
+    const total = blockers + attentionCount
+    label = `주의 ${total}건`
+  } else {
+    dotClass = 'bg-[var(--ok)]'
+    label = '정상'
+  }
+
+  if (collapsed) {
+    return html`
+      <div class="flex justify-center" title=${label}>
+        <span class="block size-2 rounded-full ${dotClass} shadow-[0_0_6px_rgba(0,0,0,0.4)]"></span>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="flex items-center gap-2 px-1">
+      <span class="block size-2 shrink-0 rounded-full ${dotClass} shadow-[0_0_6px_rgba(0,0,0,0.4)]"></span>
+      <span class="text-[11px] text-[var(--text-muted)] truncate">${label}</span>
+    </div>
+  `
+}
+
 export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggle?: () => void }) {
   const currentTab = route.value.tab
   const currentSection = currentSectionForRoute(route.value)
@@ -203,11 +243,9 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
         </div>
       </div>
 
-      ${!collapsed ? html`
-        <div class="shrink-0 border-t border-[rgba(255,255,255,0.08)] bg-[rgba(0,0,0,0.08)] p-3.5">
-          <${SnapshotCard} />
-        </div>
-      ` : null}
+      <div class="shrink-0 border-t border-[rgba(255,255,255,0.08)] ${collapsed ? 'px-1.5 py-2' : 'px-2.5 py-2'}">
+        <${HealthIndicator} collapsed=${collapsed} />
+      </div>
     </nav>
   `
 }

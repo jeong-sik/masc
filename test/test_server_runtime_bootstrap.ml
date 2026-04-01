@@ -341,6 +341,27 @@ let test_migrate_resident_keeper_dirs_keeps_fresher_current_meta () =
       Alcotest.(check bool) "older legacy keeper quarantined" true
         (Sys.file_exists quarantine_path))
 
+let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
+  with_temp_dir "startup-blocking-legacy-keepers" (fun dir ->
+      let state = Mcp_server.create_state ~base_path:dir in
+      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let legacy_dir = Filename.concat masc_root "perpetual-keepers" in
+      Fs_compat.mkdir_p legacy_dir;
+      write_file (Filename.concat legacy_dir "sangsu.json")
+        (make_keeper_meta_json ());
+      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+      Alcotest.(check bool) "legacy keeper meta promoted during blocking bootstrap"
+        true
+        (Sys.file_exists
+           (Filename.concat (Keeper_types.keeper_dir state.Mcp_server.room_config)
+              "sangsu.json"));
+      Alcotest.(check bool) "legacy dir removed before later startup readers" false
+        (Sys.file_exists legacy_dir);
+      Alcotest.(check (list string))
+        "autoboot sees promoted keepers on first scan"
+        [ "sangsu" ]
+        (Keeper_types.keepalive_keeper_names state.Mcp_server.room_config))
+
 let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();
   Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
@@ -503,6 +524,10 @@ let () =
           Alcotest.test_case
             "legacy keeper migration keeps fresher current meta"
             `Quick test_migrate_resident_keeper_dirs_keeps_fresher_current_meta;
+          Alcotest.test_case
+            "blocking bootstrap promotes legacy keeper meta"
+            `Quick
+            test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case "liveness probe is always true" `Quick

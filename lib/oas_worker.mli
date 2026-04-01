@@ -60,6 +60,8 @@ val run_named :
   ?memory:Oas.Memory.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?on_yield:(unit -> unit) ->
+  ?on_resume:(unit -> unit) ->
   ?agent_ref:Oas.Agent.t option ref ->
   ?proof_ref:Oas.Cdal_proof.t option ref ->
   ?contract:Oas.Risk_contract.t ->
@@ -67,6 +69,7 @@ val run_named :
   ?allowed_paths:string list ->
   ?working_context:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
+  ?yield_on_tool:bool ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
@@ -111,9 +114,12 @@ val run_named_with_masc_tools :
   ?memory:Oas.Memory.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?on_yield:(unit -> unit) ->
+  ?on_resume:(unit -> unit) ->
   ?proof_ref:Oas.Cdal_proof.t option ref ->
   ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
+  ?yield_on_tool:bool ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->

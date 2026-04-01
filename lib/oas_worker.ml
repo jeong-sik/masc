@@ -102,6 +102,7 @@ type config = {
   allowed_paths : string list;
   working_context : Yojson.Safe.t option;
   cache_system_prompt : bool;
+  yield_on_tool : bool;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -125,8 +126,8 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     transport = Masc_grpc_transport.from_env ();
     allowed_paths = [];
     working_context = None;
-    
     cache_system_prompt = false;
+    yield_on_tool = false;
   }
 
 (* ================================================================ *)
@@ -285,6 +286,11 @@ let build
       Oas.Builder.with_cache_system_prompt true builder
     else builder
   in
+  let builder =
+    if config.yield_on_tool then
+      Oas.Builder.with_yield_on_tool true builder
+    else builder
+  in
   Oas.Builder.build_safe builder
   |> Result.map_error Oas.Error.to_string
 
@@ -297,6 +303,8 @@ let run
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
     ?(on_event : (Oas.Types.sse_event -> unit) option)
+    ?(on_yield : (unit -> unit) option)
+    ?(on_resume : (unit -> unit) option)
     ?(agent_ref : Oas.Agent.t option ref option)
     ?(proof_ref : Oas.Cdal_proof.t option ref option)
     ?(contract : Oas.Risk_contract.t option)
@@ -337,8 +345,8 @@ let run
         (cr.response, Some cr.proof)
       | None ->
         let r = match on_event with
-          | Some cb -> Oas.Agent.run_stream ~sw ~on_event:cb agent goal
-          | None -> Oas.Agent.run ~sw agent goal
+          | Some cb -> Oas.Agent.run_stream ~sw ?on_yield ?on_resume ~on_event:cb agent goal
+          | None -> Oas.Agent.run ~sw ?on_yield ?on_resume agent goal
         in
         (r, None)
     in
@@ -413,6 +421,8 @@ let run_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?contract
     ?on_event
+    ?on_yield
+    ?on_resume
     (goal : string)
   : (run_result, string) result =
   let oas_tools = List.map (fun (td : Types.tool_schema) ->
@@ -423,7 +433,7 @@ let run_with_masc_tools
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   let config = { config with tools = oas_tools @ config.tools } in
-  run ~sw ~net ~config ?on_event ?contract goal
+  run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
 
 (* ================================================================ *)
 (* Cascade profile defaults (moved from Cascade module)              *)
@@ -548,6 +558,8 @@ let run_named
     ?memory
     ?raw_trace
     ?on_event
+    ?on_yield
+    ?on_resume
     ?agent_ref
     ?proof_ref
     ?contract
@@ -555,6 +567,7 @@ let run_named
     ?(allowed_paths = [])
     ?working_context
     ?(cache_system_prompt = false)
+    ?(yield_on_tool = false)
     ?sw
     ?net
     ()
@@ -601,8 +614,8 @@ let run_named
       cache_system_prompt;
     }
   in
-  let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in
-  match run ~sw ~net ~config ?on_event ?agent_ref ?proof_ref ?contract goal with
+  let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in
+  match run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?agent_ref ?proof_ref ?contract goal with
   | Ok result when accept result.response ->
     record_cascade ~cascade_name ~outcome:`Success;
     Ok result
@@ -678,9 +691,12 @@ let run_named_with_masc_tools
     ?memory
     ?raw_trace
     ?on_event
+    ?on_yield
+    ?on_resume
     ?proof_ref
     ?contract
     ?transport
+    ?(yield_on_tool = false)
     ?sw
     ?net
     ()
@@ -695,7 +711,8 @@ let run_named_with_masc_tools
   ) masc_tools in
   run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
-    ?raw_trace ?on_event ?proof_ref ?contract ?transport ?sw ?net ()
+    ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref ?contract
+    ?transport ~yield_on_tool ?sw ?net ()
 
 let run_model_with_masc_tools
     ~(model_label : string)

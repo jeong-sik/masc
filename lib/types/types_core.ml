@@ -222,7 +222,7 @@ type room_registry = {
   current_room: string option; [@default None] (* currently active room *)
 } [@@deriving yojson { strict = false }, show]
 
-(** Task status - state transitions enforced by types *)
+(** Task action — parsed at system boundary, matched exhaustively inside. *)
 type task_action =
   | Claim
   | Start
@@ -247,6 +247,11 @@ let task_action_to_string = function
   | Cancel -> "cancel"
   | Release -> "release"
 
+(** All task actions as strings — single source of truth for help/error text. *)
+let all_task_actions = [ Claim; Start; Done_action; Cancel; Release ]
+let valid_task_action_strings = List.map task_action_to_string all_task_actions
+
+(** Task status — state transitions enforced by types. *)
 type task_status =
   | Todo
   | Claimed of { assignee: string; claimed_at: string }

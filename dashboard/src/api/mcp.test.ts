@@ -36,9 +36,11 @@ function setupMcpSessionMocks(sessionId: string) {
 
 /** Find a fetchWithTimeout call by matching the JSON body's "method" field. */
 function findCallByMethod(method: string) {
-  const calls = fetchWithTimeout.mock.calls as Array<[string, { headers: Record<string, string>; body: string }]>
-  return calls.find(([, opts]) => {
-    try { return JSON.parse(opts.body).method === method }
+  const calls = fetchWithTimeout.mock.calls as Array<[string, RequestInit, number]>
+  return calls.find(([, init]) => {
+    const body = init.body
+    if (typeof body !== 'string') return false
+    try { return JSON.parse(body).method === method }
     catch { return false }
   })
 }
@@ -56,14 +58,15 @@ describe('mcpHeaders auth integration', () => {
 
     const initCall = findCallByMethod('initialize')
     expect(initCall).toBeDefined()
-    const initHeaders = initCall![1].headers
+    const initHeaders = initCall![1].headers as Record<string, string>
     expect(initHeaders['Authorization']).toBe('Bearer test-token-123')
     expect(initHeaders['X-MASC-Agent']).toBe('dashboard')
     expect(initHeaders['Content-Type']).toBe('application/json')
 
     const toolCall = findCallByMethod('tools/call')
     expect(toolCall).toBeDefined()
-    expect(toolCall![1].headers['Authorization']).toBe('Bearer test-token-123')
+    const toolHeaders = toolCall![1].headers as Record<string, string>
+    expect(toolHeaders['Authorization']).toBe('Bearer test-token-123')
   })
 
   it('works without token when authHeaders returns empty', async () => {
@@ -75,8 +78,9 @@ describe('mcpHeaders auth integration', () => {
 
     const initCall = findCallByMethod('initialize')
     expect(initCall).toBeDefined()
-    expect(initCall![1].headers['Authorization']).toBeUndefined()
-    expect(initCall![1].headers['Content-Type']).toBe('application/json')
+    const noAuthHeaders = initCall![1].headers as Record<string, string>
+    expect(noAuthHeaders['Authorization']).toBeUndefined()
+    expect(noAuthHeaders['Content-Type']).toBe('application/json')
   })
 })
 

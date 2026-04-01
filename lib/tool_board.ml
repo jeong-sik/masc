@@ -86,6 +86,7 @@ let visibility_of_string = function
 let agent_lookup_hook : (string -> bool) option ref = ref None
 
 let set_agent_lookup f = agent_lookup_hook := Some f
+let set_agent_lookup_none () = agent_lookup_hook := None
 
 (** Heuristic fallback: agent names have no spaces and are lowercase.
     "anonymous" is excluded — it is the default author for unauthenticated posts. *)
@@ -112,9 +113,13 @@ let resolve_board_post_kind ~author (raw_kind : string option) :
        | Some kind -> Ok kind
        | None -> Error (Printf.sprintf "unknown post_kind: %s" raw))
   | None ->
+      (* Auto-classify only when registry hook is available.
+         Without a registry, default to Human_post to avoid
+         false positives from the name-shape heuristic. *)
       let author_lc = String.lowercase_ascii (String.trim author) in
-      if is_agent author_lc then Ok Board.Automation_post
-      else Ok Board.Human_post
+      (match !agent_lookup_hook with
+       | Some _ when is_agent author_lc -> Ok Board.Automation_post
+       | _ -> Ok Board.Human_post)
 
 (** {1 Formatters} *)
 

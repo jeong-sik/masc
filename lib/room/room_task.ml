@@ -388,40 +388,46 @@ let transition_task_r config ~agent_name ~task_id ~action
                  | Some task ->
                      let now = now_iso () in
                      let now_ts = Time_compat.now () in
-                     let action = String.lowercase_ascii action in
+                     let action_str = String.lowercase_ascii action in
                      let transition =
-                       match action, task.task_status with
-                       | "claim", Types.Todo ->
+                       match Types_core.task_action_of_string action_str with
+                       | None ->
+                           Error (Types.TaskInvalidState
+                             (Printf.sprintf "Unknown action: %s (valid: %s)"
+                               action_str (String.concat ", " Types_core.valid_task_actions)))
+                       | Some act ->
+                       (match act, task.task_status with
+                       | Types_core.Claim, Types.Todo ->
                            Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
-                       | "start", Types.Claimed { assignee; _ } when assignee = agent_name ->
+                       | Types_core.Start, Types.Claimed { assignee; _ } when assignee = agent_name ->
                            Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
-                       | "done", Types.Claimed { assignee; _ }
-                       | "done", Types.InProgress { assignee; _ } when assignee = agent_name || force ->
+                       | Types_core.Done, Types.Claimed { assignee; _ }
+                       | Types_core.Done, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
                            Ok (Types.Done {
                              assignee = agent_name;
                              completed_at = now;
                              notes = if notes = "" then None else Some notes;
                            }, None)
-                       | "cancel", Types.Todo ->
+                       | Types_core.Cancel, Types.Todo ->
                            Ok (Types.Cancelled {
                              cancelled_by = agent_name;
                              cancelled_at = now;
                              reason = if reason = "" then None else Some reason;
                            }, None)
-                       | "cancel", Types.Claimed { assignee; _ }
-                       | "cancel", Types.InProgress { assignee; _ } when assignee = agent_name || force ->
+                       | Types_core.Cancel, Types.Claimed { assignee; _ }
+                       | Types_core.Cancel, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
                            Ok (Types.Cancelled {
                              cancelled_by = agent_name;
                              cancelled_at = now;
                              reason = if reason = "" then None else Some reason;
                            }, None)
-                       | "release", Types.Claimed { assignee; _ }
-                       | "release", Types.InProgress { assignee; _ } when assignee = agent_name || force ->
+                       | Types_core.Release, Types.Claimed { assignee; _ }
+                       | Types_core.Release, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
                            Ok (Types.Todo, None)
                        | _ ->
                            Error (Types.TaskInvalidState
                              (Printf.sprintf "Invalid transition: %s -> %s (%s)"
-                               (task_status_to_string task.task_status) action task_id))
+                               (task_status_to_string task.task_status) action_str task_id)))
                      in
                      (match transition with
                       | Error e -> Error e

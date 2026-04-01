@@ -376,7 +376,7 @@ let handle_transition ctx args =
   | Ok task_id ->
   let action = get_string args "action" "" in
   if action = "" then
-    (false, "action is required (claim, start, done, cancel, release, block, unblock)")
+    (false, Printf.sprintf "action is required (%s)" (String.concat ", " Types_core.valid_task_actions))
   else
   let notes = get_string args "notes" "" in
   let reason = get_string args "reason" "" in

@@ -241,6 +241,35 @@ let task_status_to_string = function
 
 let string_of_task_status = task_status_to_string
 
+(** Task action — algebraic type for task transitions.
+    Replaces string-based dispatch in room_task.ml and tool_task.ml.
+    @since 2.210.0 *)
+type task_action =
+  | Claim
+  | Start
+  | Done
+  | Cancel
+  | Release
+
+let task_action_to_string = function
+  | Claim -> "claim"
+  | Start -> "start"
+  | Done -> "done"
+  | Cancel -> "cancel"
+  | Release -> "release"
+
+let task_action_of_string s =
+  match String.lowercase_ascii s with
+  | "claim" -> Some Claim
+  | "start" -> Some Start
+  | "done" -> Some Done
+  | "cancel" -> Some Cancel
+  | "release" -> Some Release
+  | _ -> None
+
+(** Valid action strings for error messages *)
+let valid_task_actions = ["claim"; "start"; "done"; "cancel"; "release"]
+
 (* Manual yojson conversion for task_status (sum type with records) *)
 let task_status_to_yojson = function
   | Todo -> `Assoc [("status", `String "todo")]

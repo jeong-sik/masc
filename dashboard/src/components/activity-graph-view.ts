@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { Network } from 'vis-network'
+import 'vis-network/styles/vis-network.css'
 import { DataSet } from 'vis-data'
 import { statusLabel } from '../lib/status-label'
 import type { ActivityGraphResponse, ActivityGraphEdge } from '../types'
@@ -9,6 +10,19 @@ import type { ActivityGraphResponse, ActivityGraphEdge } from '../types'
 const hoveredNodeId = signal<string | null>(null)
 export const selectedNodeId = signal<string | null>(null)
 export const highlightedAgentId = signal<string | null>(null)
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function tooltipHtml(lines: string[]): string {
+  return lines.map(escapeHtml).join('<br/>')
+}
 
 function nodeColor(kind: string, status: string): string {
   if (status === 'offline' || status === 'retired') return '#64748b'
@@ -92,7 +106,7 @@ export function GraphView({ data }: GraphViewProps) {
       return {
         id: n.id,
         label: n.label,
-        title: `${n.label}\n${kindLabel(n.kind)}\nStatus: ${n.status}`, // tooltip
+        title: tooltipHtml([n.label, kindLabel(n.kind), `Status: ${n.status}`]),
         value: n.semantic_weight ?? n.weight,
         color: {
           background: color,
@@ -121,7 +135,7 @@ export function GraphView({ data }: GraphViewProps) {
         highlight: edgeColor(e.kind, e.active).replace(/[\d.]+\)$/, '0.7)'),
         hover: edgeColor(e.kind, e.active).replace(/[\d.]+\)$/, '0.6)')
       },
-      title: edgeKindLabel(e.kind),
+      title: tooltipHtml([edgeKindLabel(e.kind)]),
       arrows: {
         to: { enabled: true, scaleFactor: 0.5 }
       }
@@ -196,8 +210,29 @@ export function GraphView({ data }: GraphViewProps) {
 
     return () => {
       network.destroy()
+      networkRef.current = null
     }
   }, [data])
+
+  useEffect(() => {
+    const network = networkRef.current
+    const selected = selectedNodeId.value
+    if (!network) return
+
+    if (!selected) {
+      network.unselectAll()
+      return
+    }
+
+    network.selectNodes([selected])
+    network.focus(selected, {
+      animation: {
+        duration: 200,
+        easingFunction: 'easeInOutQuad',
+      },
+      scale: 1.05,
+    })
+  }, [data, selectedNodeId.value])
 
   const selectedNode = selectedNodeId.value
     ? data.nodes.find(n => n.id === selectedNodeId.value)

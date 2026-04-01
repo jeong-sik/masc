@@ -315,3 +315,68 @@
 /* slideInRight, markdown-content, think-block → ui.css (single definition) */
 
 /* ── SPA Refresh ─────────────────────────────────────────── */
+
+/* ── Activity Timeline / Graph ───────────────────────────── */
+.swimlane-vis-container .vis-timeline {
+  border: none;
+  font-family: system-ui, sans-serif;
+}
+
+.swimlane-vis-container .vis-item.activity-swimlane-item {
+  border-color: transparent;
+  color: #0f172a;
+}
+
+.swimlane-vis-container .vis-item.activity-swimlane-item--presence {
+  opacity: 0.4;
+}
+
+.swimlane-vis-container .vis-time-axis .vis-text {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.swimlane-vis-container .vis-labelset .vis-label {
+  color: #cbd5e1;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(100, 116, 139, 0.12);
+}
+
+.swimlane-vis-container .vis-labelset .vis-label.activity-swimlane-group-highlighted,
+.swimlane-vis-container .vis-center .vis-group.activity-swimlane-group-highlighted {
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.swimlane-vis-container .vis-labelset .vis-label.activity-swimlane-group-highlighted {
+  color: #fbbf24;
+}
+
+.swimlane-vis-container .vis-panel.vis-center,
+.swimlane-vis-container .vis-panel.vis-left,
+.swimlane-vis-container .vis-panel.vis-right,
+.swimlane-vis-container .vis-panel.vis-top,
+.swimlane-vis-container .vis-panel.vis-bottom {
+  border-color: rgba(100, 116, 139, 0.12);
+}
+
+.swimlane-vis-container .vis-current-time {
+  background-color: #f43f5e;
+}
+
+.swimlane-vis-container .vis-tooltip {
+  background-color: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 11px;
+  padding: 8px 10px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  white-space: pre-wrap;
+}
+
+.swimlane-vis-container .vis-item.vis-selected {
+  border-color: #fbbf24;
+  border-width: 2px;
+  box-shadow: 0 0 5px rgba(251, 191, 36, 0.5);
+  z-index: 10;
+}

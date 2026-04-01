@@ -16,6 +16,66 @@ import { createAsyncResource } from '../lib/async-state'
 import 'vis-timeline/styles/vis-timeline-graph2d.css'
 
 const swimlaneResource = createAsyncResource<SwimlaneResponse | null>()
+type TimelineItemId = number
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function truncateLabel(value: string, max = 20): string {
+  return value.length > max ? `${value.slice(0, max - 2)}..` : value
+}
+
+function tooltipHtml(lines: string[]): string {
+  return lines.map(escapeHtml).join('<br/>')
+}
+
+function syncHighlightedGroups(
+  container: HTMLDivElement,
+  agents: string[],
+  highlightedAgent: string | null,
+) {
+  const sync = (elements: HTMLElement[]) => {
+    elements.slice(0, agents.length).forEach((element, index) => {
+      const agent = agents[index]
+      element.dataset.agentId = agent
+      element.classList.toggle('activity-swimlane-group-highlighted', agent === highlightedAgent)
+    })
+  }
+
+  sync(Array.from(container.querySelectorAll<HTMLElement>('.vis-labelset .vis-label')))
+  sync(Array.from(container.querySelectorAll<HTMLElement>('.vis-center .vis-group')))
+}
+
+function syncTimelineSelection(
+  timeline: Timeline,
+  container: HTMLDivElement,
+  agents: string[],
+  itemIdsByAgent: Map<string, TimelineItemId[]>,
+  highlightedAgent: string | null,
+) {
+  const selectedItems = highlightedAgent ? itemIdsByAgent.get(highlightedAgent) ?? [] : []
+
+  timeline.setSelection(selectedItems)
+  const firstSelectedItem = selectedItems[0]
+  if (firstSelectedItem !== undefined) {
+    timeline.focus(firstSelectedItem, {
+      animation: {
+        duration: 200,
+        easingFunction: 'easeInOutQuad',
+      },
+    })
+  }
+
+  requestAnimationFrame(() => {
+    syncHighlightedGroups(container, agents, highlightedAgent)
+  })
+}
 
 function spanColor(kind: string): string {
   switch (kind) {
@@ -34,6 +94,7 @@ function loadSwimlane(since?: string) {
 export function ActivitySwimlane({ since }: { since?: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const timelineRef = useRef<Timeline | null>(null)
+  const itemIdsByAgentRef = useRef<Map<string, TimelineItemId[]>>(new Map())
 
   useEffect(() => {
     void loadSwimlane(since)
@@ -57,25 +118,30 @@ export function ActivitySwimlane({ since }: { since?: string }) {
       order: i
     })))
 
-    let idCounter = 1;
+    const itemIdsByAgent = new Map<string, TimelineItemId[]>()
+    let idCounter = 1
     const items = new DataSet(data.spans.map(span => {
       const color = spanColor(span.kind)
       const duration = formatDurationMs(span.end_ms - span.start_ms)
-      const title = `${span.label || span.kind}\n종류: ${span.kind}\n지속: ${duration}`
-      
-      const content = span.label && span.label.length > 20 
-        ? span.label.slice(0, 18) + '..' 
-        : (span.label || '')
+      const itemId = idCounter++
+      const title = tooltipHtml([span.label || span.kind, `종류: ${span.kind}`, `지속: ${duration}`])
+      const content = span.label ? escapeHtml(truncateLabel(span.label)) : ''
+
+      const agentItemIds = itemIdsByAgent.get(span.agent) ?? []
+      agentItemIds.push(itemId)
+      itemIdsByAgent.set(span.agent, agentItemIds)
 
       return {
-        id: idCounter++,
+        id: itemId,
         group: span.agent,
         start: new Date(span.start_ms),
         end: new Date(span.end_ms),
         content,
         title,
         type: 'range',
-        className: span.kind === 'presence' ? 'opacity-40' : '',
+        className: span.kind === 'presence'
+          ? 'activity-swimlane-item activity-swimlane-item--presence'
+          : 'activity-swimlane-item',
         style: `background-color: ${color}; border-color: ${color}; color: #0f172a; font-size: 10px; border-radius: 3px; font-family: system-ui, sans-serif; overflow: hidden;`
       }
     }))
@@ -100,6 +166,8 @@ export function ActivitySwimlane({ since }: { since?: string }) {
 
     const timeline = new Timeline(container, items, groups, options)
     timelineRef.current = timeline
+    itemIdsByAgentRef.current = itemIdsByAgent
+    syncTimelineSelection(timeline, container, data.agents, itemIdsByAgent, highlightedAgentId.value)
 
     timeline.on('select', (props) => {
       if (props.items.length > 0) {
@@ -116,24 +184,22 @@ export function ActivitySwimlane({ since }: { since?: string }) {
 
     return () => {
       timeline.destroy()
+      timelineRef.current = null
     }
   }, [data])
 
-  /* 
   useEffect(() => {
-    if (!timelineRef.current || !data) return
-    const _highlighted = highlightedAgentId.value
-    
-    // Custom styling injection for highlighting a group row
-    const elements = document.querySelectorAll('.vis-group')
-    elements.forEach(el => {
-      // const _groupId = el.getAttribute('data-group-id') // Or parsed from internal structure
-      // Wait, vis-timeline doesn't easily highlight groups natively via api.
-      // We can rely on CSS or just ignore row highlighting for now.
-    })
-
-  }, [highlightedAgentId.value, data]) 
-  */
+    const container = containerRef.current
+    const timeline = timelineRef.current
+    if (!container || !timeline || !data) return
+    syncTimelineSelection(
+      timeline,
+      container,
+      data.agents,
+      itemIdsByAgentRef.current,
+      highlightedAgentId.value,
+    )
+  }, [data, highlightedAgentId.value])
 
   if (s.status === 'loading' || s.status === 'idle') {
     return html`
@@ -173,51 +239,6 @@ export function ActivitySwimlane({ since }: { since?: string }) {
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[#22d3ee] inline-block"></span>자율</span>
         <span class="flex items-center gap-1.5"><span class="w-3 h-2 rounded-sm bg-[rgba(148,163,184,0.5)] inline-block"></span>접속</span>
       </div>
-      <style>
-        .swimlane-vis-container .vis-timeline {
-          border: none;
-          font-family: system-ui, sans-serif;
-        }
-        .swimlane-vis-container .vis-item {
-          border-color: transparent;
-          color: #0f172a;
-        }
-        .swimlane-vis-container .vis-time-axis .vis-text {
-          color: #94a3b8;
-          font-size: 10px;
-        }
-        .swimlane-vis-container .vis-labelset .vis-label {
-          color: #cbd5e1;
-          font-size: 11px;
-          border-bottom: 1px solid rgba(100, 116, 139, 0.12);
-        }
-        .swimlane-vis-container .vis-panel.vis-center,
-        .swimlane-vis-container .vis-panel.vis-left,
-        .swimlane-vis-container .vis-panel.vis-right,
-        .swimlane-vis-container .vis-panel.vis-top,
-        .swimlane-vis-container .vis-panel.vis-bottom {
-          border-color: rgba(100, 116, 139, 0.12);
-        }
-        .swimlane-vis-container .vis-current-time {
-          background-color: #f43f5e;
-        }
-        .swimlane-vis-container .vis-tooltip {
-          background-color: rgba(15, 23, 42, 0.95);
-          border: 1px solid rgba(100, 116, 139, 0.3);
-          border-radius: 6px;
-          color: #e2e8f0;
-          font-size: 11px;
-          padding: 8px 10px;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-          white-space: pre-wrap;
-        }
-        .swimlane-vis-container .vis-item.vis-selected {
-          border-color: #fbbf24;
-          border-width: 2px;
-          box-shadow: 0 0 5px rgba(251, 191, 36, 0.5);
-          z-index: 10;
-        }
-      </style>
     <//>
   `
 }

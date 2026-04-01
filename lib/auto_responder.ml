@@ -54,25 +54,27 @@ let activity_log ~mode ~from_agent ~mention ~status ~detail =
 
 (* --- Loop prevention / throttling --- *)
 
-let recent_responses : (string, float) Hashtbl.t = Hashtbl.create 16
+(** Per-agent-type timestamp list for rate limiting.
+    Key = agent_type, Value = recent response timestamps (newest first).
+    O(1) lookup per agent_type — no string prefix scanning. *)
+let response_times : (string, float list) Hashtbl.t = Hashtbl.create 8
 let chain_limit = 3
-let chain_window = 60.0
+let chain_window_sec = 60.0
 
 let should_throttle ~agent_type =
   let now = Time_compat.now () in
-  Hashtbl.filter_map_inplace (fun _ ts -> if now -. ts < chain_window then Some ts else None) recent_responses;
-  let count =
-    Hashtbl.fold (fun k _ acc ->
-      if String.length k >= String.length agent_type
-         && String.sub k 0 (String.length agent_type) = agent_type
-      then acc + 1 else acc
-    ) recent_responses 0
+  let recent =
+    (match Hashtbl.find_opt response_times agent_type with
+     | None -> []
+     | Some times -> List.filter (fun ts -> now -. ts < chain_window_sec) times)
   in
-  if count >= chain_limit then (
-    debug_log (Printf.sprintf "THROTTLE: %s has %d responses in last %.0fs" agent_type count chain_window);
+  if List.length recent >= chain_limit then (
+    debug_log (Printf.sprintf "THROTTLE: %s has %d responses in last %.0fs"
+      agent_type (List.length recent) chain_window_sec);
+    Hashtbl.replace response_times agent_type recent;
     true
   ) else (
-    Hashtbl.add recent_responses (Printf.sprintf "%s-%f" agent_type now) now;
+    Hashtbl.replace response_times agent_type (now :: recent);
     false
   )
 

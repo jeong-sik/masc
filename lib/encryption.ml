@@ -30,6 +30,7 @@ type envelope = {
 type encryption_error =
   | KeyNotFound of string
   | InvalidKeyLength of int
+  | InvalidHexFormat of string
   | DecryptionFailed
   | InvalidEnvelope of string
   | RngNotInitialized
@@ -37,6 +38,7 @@ type encryption_error =
 let show_encryption_error = function
   | KeyNotFound s -> Printf.sprintf "KeyNotFound: %s" s
   | InvalidKeyLength n -> Printf.sprintf "InvalidKeyLength: expected 32, got %d" n
+  | InvalidHexFormat s -> Printf.sprintf "InvalidHexFormat: %s" s
   | DecryptionFailed -> "DecryptionFailed: authentication tag mismatch"
   | InvalidEnvelope s -> Printf.sprintf "InvalidEnvelope: %s" s
   | RngNotInitialized -> "RngNotInitialized: call initialize() first"
@@ -60,37 +62,54 @@ let base64_decode s =
   | Ok decoded -> Some (Cstruct.of_string decoded)
   | Error _ -> None
 
+(** Decode hex string to raw bytes. Returns Error on invalid input.
+    Does not include input content in error messages to avoid leaking
+    key material through diagnostics/logs. *)
+let decode_hex_key content : (string, encryption_error) result =
+  let content = String.trim content in
+  let len = String.length content in
+  if len <> 64 then
+    Error (InvalidHexFormat
+      (Printf.sprintf "hex key must be exactly 64 characters, got %d" len))
+  else
+    let buf = Buffer.create 32 in
+    let err = ref None in
+    let i = ref 0 in
+    while !i < 32 && Option.is_none !err do
+      let hex = String.sub content (!i * 2) 2 in
+      (match int_of_string_opt ("0x" ^ hex) with
+       | Some v when v >= 0 && v <= 255 ->
+           Buffer.add_char buf (Char.chr v)
+       | _ ->
+           err := Some (InvalidHexFormat
+             (Printf.sprintf "invalid hex byte at position %d" (!i * 2))));
+      incr i
+    done;
+    match !err with
+    | Some e -> Error e
+    | None -> Ok (Buffer.contents buf)
+
 (** Load encryption key from configured source *)
 let load_key config : (GCM.key, encryption_error) result =
-  let key_string = match config.key_source with
+  let key_result = match config.key_source with
     | `Env var_name ->
-        Sys.getenv_opt var_name
+        (match Sys.getenv_opt var_name with
+         | Some v -> Ok (Some v)
+         | None -> Ok None)
     | `File path ->
         if Sys.file_exists path then
-          let content = Fs_compat.load_file path in
-          let content = String.trim content in
-          if String.length content <> 64 then
-            None  (* hex-encoded 32 bytes requires exactly 64 chars *)
-          else
-            let buf = Buffer.create 32 in
-            let valid = ref true in
-            for i = 0 to 31 do
-              if !valid then
-                let hex = String.sub content (i * 2) 2 in
-                match int_of_string_opt ("0x" ^ hex) with
-                | Some v when v >= 0 && v <= 255 ->
-                    Buffer.add_char buf (Char.chr v)
-                | _ -> valid := false
-            done;
-            if !valid then Some (Buffer.contents buf) else None
-        else None
-    | `Direct key -> Some key
+          (match decode_hex_key (Fs_compat.load_file path) with
+           | Ok bytes -> Ok (Some bytes)
+           | Error e -> Error e)
+        else Ok None
+    | `Direct key -> Ok (Some key)
   in
-  match key_string with
-  | None -> Error (KeyNotFound "encryption key not configured")
-  | Some key when String.length key <> 32 ->
+  match key_result with
+  | Error e -> Error e
+  | Ok None -> Error (KeyNotFound "encryption key not configured")
+  | Ok (Some key) when String.length key <> 32 ->
       Error (InvalidKeyLength (String.length key))
-  | Some key ->
+  | Ok (Some key) ->
       Ok (GCM.of_secret key)
 
 (** Generate a random 12-byte nonce (GCM recommended size) *)

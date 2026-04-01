@@ -76,10 +76,46 @@ let test_error_invalid_envelope () =
   let s = Encryption.show_encryption_error e in
   check bool "contains Invalid" true (String.sub s 0 15 = "InvalidEnvelope")
 
+let test_error_invalid_hex_format () =
+  let e = Encryption.InvalidHexFormat "bad hex" in
+  let s = Encryption.show_encryption_error e in
+  check bool "contains InvalidHexFormat" true (String.sub s 0 16 = "InvalidHexFormat")
+
 let test_error_rng_not_initialized () =
   let e = Encryption.RngNotInitialized in
   let s = Encryption.show_encryption_error e in
   check bool "contains RNG" true (String.sub s 0 17 = "RngNotInitialized")
+
+let test_decode_hex_key_valid () =
+  let hex = String.init 64 (fun i ->
+    let byte_val = i / 2 in
+    let nibble = if i mod 2 = 0 then byte_val / 16 else byte_val mod 16 in
+    "0123456789abcdef".[nibble]) in
+  match Encryption.decode_hex_key hex with
+  | Ok bytes -> check int "decoded length" 32 (String.length bytes)
+  | Error e -> fail (Encryption.show_encryption_error e)
+
+let test_decode_hex_key_too_short () =
+  match Encryption.decode_hex_key "aabb" with
+  | Error (Encryption.InvalidHexFormat msg) ->
+      check bool "mentions 64 chars" true (String.contains msg '6' && String.contains msg '4')
+  | _ -> fail "Expected InvalidHexFormat for short input"
+
+let test_decode_hex_key_too_long () =
+  let long_hex = String.make 66 '0' in
+  match Encryption.decode_hex_key long_hex with
+  | Error (Encryption.InvalidHexFormat msg) ->
+      check bool "mentions 64 chars" true (String.contains msg '6' && String.contains msg '4')
+  | _ -> fail "Expected InvalidHexFormat for long input"
+
+let test_decode_hex_key_invalid_chars () =
+  let hex = "GG" ^ String.make 62 '0' in
+  match Encryption.decode_hex_key hex with
+  | Error (Encryption.InvalidHexFormat msg) ->
+      check bool "mentions position index" true
+        (String.starts_with ~prefix:"invalid hex byte at position" msg);
+      check bool "does NOT leak invalid chars (security)" false (String.contains msg 'G')
+  | _ -> fail "Expected InvalidHexFormat for invalid hex chars"
 
 (* ============================================================
    envelope Tests
@@ -216,6 +252,24 @@ let test_load_key_file_not_found () =
   | Ok _ -> fail "should fail for missing file"
   | Error (Encryption.KeyNotFound _) -> ()
   | Error _ -> fail "unexpected error type"
+
+let test_load_key_file_invalid_hex () =
+  let path = Filename.temp_file "masc-key-invalid-" ".txt" in
+  let oc = open_out path in
+  output_string oc (String.make 64 'g');
+  close_out oc;
+  let config : Encryption.config = {
+    enabled = true;
+    key_source = `File path;
+    version = 1;
+  } in
+  let result = Encryption.load_key config in
+  (match result with
+  | Error (Encryption.InvalidHexFormat _) -> ()
+  | Error (Encryption.KeyNotFound _) -> fail "expected invalid format, got missing key"
+  | Error _ -> fail "expected invalid hex format"
+  | Ok _ -> fail "should fail for malformed hex");
+  (try Sys.remove path with _ -> ())
 
 (* ============================================================
    envelope_to_json / envelope_of_json Tests
@@ -503,9 +557,16 @@ let () =
     "encryption_error", [
       test_case "key not found" `Quick test_error_key_not_found;
       test_case "invalid key length" `Quick test_error_invalid_key_length;
+      test_case "invalid hex format" `Quick test_error_invalid_hex_format;
       test_case "decryption failed" `Quick test_error_decryption_failed;
       test_case "invalid envelope" `Quick test_error_invalid_envelope;
       test_case "rng not initialized" `Quick test_error_rng_not_initialized;
+    ];
+    "decode_hex_key", [
+      test_case "valid hex" `Quick test_decode_hex_key_valid;
+      test_case "too short" `Quick test_decode_hex_key_too_short;
+      test_case "too long" `Quick test_decode_hex_key_too_long;
+      test_case "invalid chars" `Quick test_decode_hex_key_invalid_chars;
     ];
     "envelope", [
       test_case "creation" `Quick test_envelope_creation;
@@ -533,6 +594,7 @@ let () =
       test_case "direct wrong length" `Quick test_load_key_direct_wrong_length;
       test_case "env not found" `Quick test_load_key_env_not_found;
       test_case "file not found" `Quick test_load_key_file_not_found;
+      test_case "file invalid hex" `Quick test_load_key_file_invalid_hex;
     ];
     "envelope_json", [
       test_case "to_json" `Quick test_envelope_to_json;

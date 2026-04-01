@@ -11,6 +11,8 @@ type selector =
   | Names of string list
   | Surface of Tool_catalog.surface
   | Union of selector list
+  | Inter of selector list
+  | Diff of { base : selector; exclude : selector }
 
 type t = {
   allow : selector;
@@ -23,6 +25,8 @@ val of_allowlist : ?deny:string list -> string list -> t
 val with_deny_names : t -> string list -> t
 val with_deny_selector : t -> selector -> t
 val union : selector list -> selector
+val inter : selector list -> selector
+val diff : base:selector -> exclude:selector -> selector
 
 val selector_matches_name : selector -> string -> bool
 val allows_name : t -> string -> bool

@@ -6,6 +6,8 @@ type selector =
   | Names of string list
   | Surface of Tool_catalog.surface
   | Union of selector list
+  | Inter of selector list
+  | Diff of { base : selector; exclude : selector }
 
 type t = {
   allow : selector;
@@ -41,6 +43,18 @@ let union selectors =
   | [ selector ] -> selector
   | many -> Union many
 
+let inter selectors =
+  match selectors with
+  | [] -> All
+  | [ selector ] -> selector
+  | many -> Inter many
+
+let diff ~base ~exclude =
+  match (base, exclude) with
+  | Empty, _ -> Empty
+  | _, Empty -> base
+  | _ -> Diff { base; exclude }
+
 let with_deny_selector policy selector =
   {
     policy with
@@ -64,6 +78,11 @@ let rec selector_matches_name selector name =
       Tool_catalog.is_on_surface surface name
   | Union selectors ->
       List.exists (fun item -> selector_matches_name item name) selectors
+  | Inter selectors ->
+      List.for_all (fun item -> selector_matches_name item name) selectors
+  | Diff { base; exclude } ->
+      selector_matches_name base name
+      && not (selector_matches_name exclude name)
 
 let allows_name policy name =
   selector_matches_name policy.allow name
@@ -87,6 +106,27 @@ let rec resolve_selector ?candidates selector =
   | Union selectors ->
       selectors
       |> List.concat_map (resolve_selector ?candidates)
+      |> normalize_names
+  | Inter selectors ->
+      (match selectors with
+      | [] ->
+          normalize_names
+            (match candidates with
+            | Some names -> names
+            | None -> default_candidates ())
+      | first :: rest ->
+          let first_set = resolve_selector ?candidates first in
+          List.fold_left
+            (fun acc sel ->
+              let resolved = resolve_selector ?candidates sel in
+              List.filter (fun name -> List.mem name resolved) acc)
+            first_set rest
+          |> normalize_names)
+  | Diff { base; exclude } ->
+      let base_resolved = resolve_selector ?candidates base in
+      let exclude_resolved = resolve_selector ?candidates exclude in
+      base_resolved
+      |> List.filter (fun name -> not (List.mem name exclude_resolved))
       |> normalize_names
 
 let resolve ?candidates policy =

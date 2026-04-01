@@ -49,6 +49,10 @@ type audit_entry = {
   trace_id: string option;
 }
 
+let preview ?(max_len = 200) (value : string) =
+  let len = String.length value in
+  if len <= max_len then value else String.sub value 0 max_len ^ "..."
+
 (** {1 Serialization} *)
 
 let action_to_string = function
@@ -150,8 +154,7 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
     let trace_id = Safe_ops.json_string_opt "trace_id" json in
     Ok { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count; trace_id }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    let snippet = String.sub (Yojson.Safe.to_string json) 0
-      (min 200 (String.length (Yojson.Safe.to_string json))) in
+    let snippet = preview (Yojson.Safe.to_string json) in
     Error (Printf.sprintf "%s | json: %s" (Printexc.to_string exn) snippet)
 
 (** Lenient wrapper: logs error and returns option for backward compat *)
@@ -220,7 +223,7 @@ let read_entries ?(n = 10_000) (config : config) : audit_entry list =
             | json -> Some json
             | exception Yojson.Json_error msg ->
                 Log.Misc.error "audit_log: invalid JSON line: %s | line: %s"
-                  msg (String.sub line 0 (min 100 (String.length line)));
+                  msg (preview ~max_len:100 line);
                 None) in
       partition_entries jsons
 
@@ -285,9 +288,7 @@ let log_cancel_task config ~agent_id ~room_id ~task_id ~reason ?cost_estimate ?t
 
 let log_broadcast config ~agent_id ~room_id ~message_preview ?cost_estimate ?token_count () =
   (* Truncate message for privacy/size *)
-  let preview = if String.length message_preview > 100
-    then String.sub message_preview 0 100 ^ "..."
-    else message_preview in
+  let preview = preview ~max_len:100 message_preview in
   log_action config ~agent_id ~action:Broadcast ~room_id
     ~details:(`Assoc [("preview", `String preview)])
     ?cost_estimate ?token_count ~outcome:Success ()

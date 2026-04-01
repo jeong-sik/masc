@@ -8,6 +8,7 @@ const { fetchWithTimeout, reportToolHostFailure } = vi.hoisted(() => ({
 vi.mock('./core', () => ({
   fetchWithTimeout,
   DEFAULT_MCP_TIMEOUT_MS: 30000,
+  getStoredToken: () => null,
 }))
 
 vi.mock('./dashboard', () => ({

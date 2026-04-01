@@ -1,4 +1,10 @@
-(** Tool permission filter *)
+(** Tool permission filter.
+
+    DEPRECATED: The pre-hook installed by [install] is no longer registered
+    in the authorization hot path. Admin tool checking is now handled by
+    [Tool_access_role.policy_for_role] via [Auth.authorize_tool_v2].
+    This module is retained only for backward compatibility with tests.
+    See #4381 Phase 0. *)
 
 (* Derived from Tool_catalog surface SSOT.
    team_session_stop intentionally stays outside this list:

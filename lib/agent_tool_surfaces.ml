@@ -534,8 +534,9 @@ let local_worker_tool_schemas ?names () :
   | Some values -> resolve_named_schemas all_schemas values
 
 (** Admin tool names that should be excluded from autonomous agents.
-    Delegates to Tool_permissions.admin_tools (SSOT). *)
-let admin_tool_names : string list = Tool_permissions.admin_tools
+    SSOT: Tool_catalog.Admin surface. *)
+let admin_tool_names : string list =
+  Tool_catalog.tools_for_surface Tool_catalog.Admin
 
 (** Coordination tool names for coordinators and fleet leaders. *)
 let coordination_tool_names : string list =

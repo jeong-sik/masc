@@ -20,5 +20,5 @@
 
 @utility keeper-chat__cursor {
   animation: keeper-blink 0.8s step-end infinite;
-  color: var(--ff-gold, var(--ff-gold));
+  color: var(--ff-gold);
 }

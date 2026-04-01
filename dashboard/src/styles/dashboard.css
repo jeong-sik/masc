@@ -67,7 +67,7 @@
 
 /* ── Mission Status Dot ── */
 @utility mission-status-dot {
-  &.mission-state-alive { background: var(--ok, var(--ok)); box-shadow: 0 0 4px rgba(74, 222, 128, 0.5); }
+  &.mission-state-alive { background: var(--ok); box-shadow: 0 0 4px rgba(74, 222, 128, 0.5); }
 }
 
 /* ── Card-level dimming: compound selectors, kept as raw CSS ── */
@@ -160,8 +160,6 @@
 }
 
 /* ── Responsive (layout) ── */
-@media (max-width: 960px) {
-}
 @media (max-width: 880px) {
   .control-row { grid-template-columns: 1fr; }
 }
@@ -317,26 +315,6 @@
 
 /* ═══ UI ═══ */
 
-/* ── Toast Notifications (styling moved to component Tailwind) ── */
-@keyframes slideInRight {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
-
-/* ── Markdown Rendered Content ─────────────────────────────── */
-@utility markdown-content {
-  & code { background: var(--white-8); padding: 1px 5px; font-size: var(--fs-sm); }
-  & pre { background: rgba(0,0,0,0.3); padding: 12px; overflow-x: auto; font-size: var(--fs-sm); }
-  & blockquote { border-left: 3px solid var(--cyan); padding-left: 12px; color: #aaa; }
-}
-
-/* ── Think Block (collapsible) ─────────────────────────────── */
-@utility think-block {
-  background: rgba(167,139,250,0.06);
-  border: 1px solid rgba(167,139,250,0.15);
-  padding: 10px 14px;
-  margin: 8px 0;
-  & summary { cursor: pointer; color: var(--purple); font-size: var(--fs-sm); }
-}
+/* slideInRight, markdown-content, think-block → ui.css (single definition) */
 
 /* ── SPA Refresh ─────────────────────────────────────────── */

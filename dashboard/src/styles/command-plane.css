@@ -231,18 +231,6 @@
   }
 }
 
-/* Word-break safety for guide/readiness/swarm text */
-.cmd-guide-card p,
-.cmd-readiness-row p,
-/* ── Command responsive breakpoints ───────────────────────── */
-
-@media (max-width: 1450px) {
-}
-
-@media (max-width: 1100px) {
-}
-
-
 /* State tone utilities */
 @utility tone-border-ok { border-color: var(--ok-24); }
 @utility tone-border-warn { border-color: rgba(251,191,36,0.22); }

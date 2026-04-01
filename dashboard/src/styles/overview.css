@@ -4,16 +4,16 @@
 
 @utility situation-banner--ok { border-left-color: var(--ok); }
 @utility situation-banner--warn { border-left-color: var(--gold, var(--ff-gold)); }
-@utility situation-banner--bad { border-left-color: var(--bad, var(--bad)); }
+@utility situation-banner--bad { border-left-color: var(--bad); }
 
 @utility attention-spotlight__card {
   animation: fadeSlide 0.3s ease both;
   &.ok { border-color: var(--ok-30); }
   &.warn { border-color: var(--warn-30); }
   &.bad { border-color: var(--bad-30); }
-  &.ok .attention-spotlight__bar { background: var(--agent-working, var(--agent-working)); }
-  &.warn .attention-spotlight__bar { background: var(--agent-busy, var(--agent-busy)); }
-  &.bad .attention-spotlight__bar { background: var(--bad, var(--bad)); }
+  &.ok .attention-spotlight__bar { background: var(--agent-working); }
+  &.warn .attention-spotlight__bar { background: var(--agent-busy); }
+  &.bad .attention-spotlight__bar { background: var(--bad); }
 }
 
 @utility narrative-timeline {

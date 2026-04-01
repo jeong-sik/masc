@@ -369,17 +369,10 @@ let execute_keeper_tool_call
             ("name", `String meta.name);
             ("trace_id", `String meta.runtime.trace_id);
             ("generation", `Int meta.runtime.generation);
-            ("context_ratio",
-              `Float (if ctx_work.max_tokens = 0 then 0.0
-                      else float_of_int
-                        (Agent_sdk.Context_reducer.estimate_char_tokens ctx_work.system_prompt
-                         + List.fold_left (fun acc m -> acc + Agent_sdk.Context_reducer.estimate_message_tokens m) 0 ctx_work.messages)
-                      /. float_of_int ctx_work.max_tokens));
-            ("context_tokens",
-              `Int (Agent_sdk.Context_reducer.estimate_char_tokens ctx_work.system_prompt
-                    + List.fold_left (fun acc m -> acc + Agent_sdk.Context_reducer.estimate_message_tokens m) 0 ctx_work.messages));
+            ("context_ratio", `Float (Keeper_exec_context.context_ratio ctx_work));
+            ("context_tokens", `Int (Keeper_exec_context.token_count ctx_work));
             ("context_max", `Int ctx_work.max_tokens);
-            ("message_count", `Int (List.length ctx_work.messages));
+            ("message_count", `Int (Keeper_exec_context.message_count ctx_work));
             ("last_model_used", `String meta.runtime.usage.last_model_used);
             ( "continuity_state",
               match continuity with

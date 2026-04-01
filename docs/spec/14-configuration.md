@@ -398,7 +398,7 @@ Keeper의 행동을 결정하는 설정은 3곳에서 공급된다.
 | TOML declaration | `<CONFIG_ROOT>/keepers/<name>.toml` | TOML | Persona 없이 선언적으로 keeper 정의 |
 | Persistent meta | `.masc/keepers/<name>.json` | JSON | 런타임 상태. turn 카운트, context ratio 등 포함 |
 
-별도 keepalive 설정 파일은 없다. keeper 선언과 런타임 상태는 `.masc/keepers/<name>.json`에 모이고, keeper는 always-on runtime으로 취급된다. legacy keeper-meta 경로는 부팅 시 `.masc/keepers/`로 마이그레이션된다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
+별도 keepalive 설정 파일은 없다. keeper 선언과 런타임 상태는 `.masc/keepers/<name>.json`에 모이고, keeper는 durable always-on으로 취급된다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
 
 ### 12.2 설정 적용 우선순위
 

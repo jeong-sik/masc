@@ -1,5 +1,5 @@
 (** Test suite for Keeper_alerting_path.effective_allowed_paths.
-    Verifies computed defaults, sentinel handling, and scope-based behavior. *)
+    Verifies computed defaults, wildcard handling, and scope-based behavior. *)
 
 open Alcotest
 module KAP = Masc_mcp.Keeper_alerting_path
@@ -49,7 +49,7 @@ let test_workspace_explicit_paths () =
   check (list string) "workspace + explicit = explicit"
     ["src/"; "docs/"] effective
 
-let test_workspace_star_sentinel () =
+let test_workspace_star_wildcard () =
   let meta = make_meta ~execution_scope:"workspace"
       ~allowed_paths:["*"] ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
@@ -62,9 +62,9 @@ let test_local_empty_paths () =
   let effective = KAP.effective_allowed_paths ~meta in
   check (list string) "local + [] = []" [] effective
 
-(* ── sentinel handling ── *)
+(* ── wildcard handling ── *)
 
-let test_star_sentinel_any_scope () =
+let test_star_wildcard_any_scope () =
   let scopes = ["observe_only"; "workspace"; "local"; "unknown"] in
   List.iter (fun scope ->
     let meta = make_meta ~execution_scope:scope ~allowed_paths:["*"] ~name:"t" () in
@@ -106,11 +106,11 @@ let () =
           test_case "workspace + explicit = explicit" `Quick
             test_workspace_explicit_paths;
           test_case "workspace + [*] = full access" `Quick
-            test_workspace_star_sentinel;
+            test_workspace_star_wildcard;
           test_case "local + [] = []" `Quick
             test_local_empty_paths;
-          test_case "[*] sentinel any scope" `Quick
-            test_star_sentinel_any_scope;
+          test_case "[*] wildcard any scope" `Quick
+            test_star_wildcard_any_scope;
           test_case "explicit paths any scope" `Quick
             test_explicit_paths_any_scope;
           test_case "keeper name in computed default" `Quick

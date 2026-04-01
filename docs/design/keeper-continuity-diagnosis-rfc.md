@@ -3,7 +3,7 @@
 **Status**: Draft v3 (post-review, 7 rounds)
 **Date**: 2026-03-29
 **Scope**: MASC Keeper Checkpoint Continuity / GC / Naming
-**Issues**: #3626 (zombie GC), #3627 (legacy naming cleanup), #3630 (memory dead code)
+**Issues**: #3626 (zombie GC), #3627 (perpetual naming), #3630 (memory dead code)
 **One sentence**: keeper가 이전 대화를 기억 못하는 원인을 OAS checkpoint 경로 진단으로 확정하고, 진단 중 발견된 filesystem 부채(dead code, naming, GC)를 정리한다.
 
 ## Related Documents
@@ -159,9 +159,9 @@ Documentation: 13 files, 26 occurrences.
 ### Directory Rename
 
 ```
-legacy trace dir         → .masc/traces/
-legacy keeper-meta dir   → .masc/keepers/
-.masc/resident-keepers/  → .masc/keepers/ (병합 후 삭제)
+.masc/perpetual/          → .masc/traces/
+.masc/keepers/  → .masc/keepers/
+.masc/resident-keepers/   → .masc/keepers/ (병합 후 삭제)
 ```
 
 ### Migration: 재귀 merge + file-level quarantine

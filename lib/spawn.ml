@@ -1,5 +1,15 @@
 (** MASC Spawn - Agent subprocess management *)
 
+(** Parsed output from a CLI tool's JSON response. *)
+type parsed_output = {
+  text : string;
+  input_tokens : int option;
+  output_tokens : int option;
+  cache_creation_tokens : int option;
+  cache_read_tokens : int option;
+  cost_usd : float option;
+}
+
 (** Spawn configuration for an agent *)
 type spawn_config = {
   agent_name: string;
@@ -7,6 +17,11 @@ type spawn_config = {
   timeout_seconds: int;
   working_dir: string option;
   mcp_tools: string list;  (* MCP tools to allow, e.g., ["mcp__masc__masc_status"] *)
+  parse_output: string -> parsed_output;
+    (** Parse CLI tool's raw output into structured result.
+        Each CLI tool has a different JSON schema. *)
+  stdin_prompt: bool;
+    (** Whether prompt is passed via stdin (true) or CLI flag (false). *)
 }
 
 (** Spawn result with token tracking *)
@@ -59,35 +74,32 @@ IMPORTANT: If relay pressure is high, checkpoint your state and hand off explici
 ---
 |}
 
-(** Parse Claude JSON output to extract token usage *)
-let parse_claude_json output =
+(** Default parser: no structured output, pass through raw text. *)
+let parse_raw_output raw =
+  { text = raw; input_tokens = None; output_tokens = None;
+    cache_creation_tokens = None; cache_read_tokens = None; cost_usd = None }
+
+(** Parse Claude CLI JSON output (--output-format json). *)
+let parse_claude_output raw =
   try
-    let json = Yojson.Safe.from_string output in
+    let json = Yojson.Safe.from_string raw in
     let usage = Safe_ops.json_member_opt "usage" json |> Option.value ~default:(`Assoc []) in
-    let input_tokens = Safe_ops.json_int_opt "input_tokens" usage in
-    let output_tokens = Safe_ops.json_int_opt "output_tokens" usage in
-    let cache_creation = Safe_ops.json_int_opt "cache_creation_input_tokens" usage in
-    let cache_read = Safe_ops.json_int_opt "cache_read_input_tokens" usage in
-    let cost_usd = Safe_ops.json_float_opt "total_cost_usd" json in
-    let result_text = Safe_ops.json_string_opt "result" json in
-    (result_text, input_tokens, output_tokens, cache_creation, cache_read, cost_usd)
+    { text = Option.value (Safe_ops.json_string_opt "result" json) ~default:raw;
+      input_tokens = Safe_ops.json_int_opt "input_tokens" usage;
+      output_tokens = Safe_ops.json_int_opt "output_tokens" usage;
+      cache_creation_tokens = Safe_ops.json_int_opt "cache_creation_input_tokens" usage;
+      cache_read_tokens = Safe_ops.json_int_opt "cache_read_input_tokens" usage;
+      cost_usd = Safe_ops.json_float_opt "total_cost_usd" json }
   with Yojson.Json_error _ ->
-    (* If JSON parsing fails, return raw output with no token info *)
-    (Some output, None, None, None, None, None)
+    parse_raw_output raw
 
-(** Extract Gemini CLI response text from JSON output. *)
-let extract_gemini_response_text output =
-  try
-    let json = Yojson.Safe.from_string output in
-    Safe_ops.json_string_opt "response" json
-  with Yojson.Json_error _ ->
-    None
-
-(** Parse Gemini output for token tracking.
+(** Parse Gemini CLI JSON output (--output-format json).
     Supports both Gemini API usageMetadata and Gemini CLI JSON stats. *)
-let parse_gemini_output output =
+let parse_gemini_output raw =
   try
-    let json = Yojson.Safe.from_string output in
+    let json = Yojson.Safe.from_string raw in
+    let response_text =
+      Option.value (Safe_ops.json_string_opt "response" json) ~default:raw in
     let usage_opt = Safe_ops.json_member_opt "usageMetadata" json in
     let stats_models_opt =
       match Safe_ops.json_member_opt "stats" json with
@@ -97,97 +109,81 @@ let parse_gemini_output output =
            | _ -> None)
       | _ -> None
     in
+    let sum_stat_field field entries =
+      entries
+      |> List.fold_left (fun acc (_name, item) ->
+             let tokens = Safe_ops.json_member_opt "tokens" item
+                          |> Option.value ~default:(`Assoc []) in
+             acc + (Safe_ops.json_int_opt field tokens |> Option.value ~default:0))
+           0
+    in
+    let from_usage key = Option.bind usage_opt (fun u -> Safe_ops.json_int_opt key u) in
+    let from_stats_first keys =
+      match stats_models_opt with
+      | None -> None
+      | Some entries ->
+          let rec try_keys = function
+            | [] -> None
+            | k :: rest ->
+                let total = sum_stat_field k entries in
+                if total > 0 then Some total else try_keys rest
+          in
+          try_keys keys
+    in
     let input_tokens =
-      match Option.bind usage_opt (fun usage -> Safe_ops.json_int_opt "promptTokenCount" usage) with
-      | Some _ as value -> value
-      | None ->
-          (match stats_models_opt with
-           | None -> None
-           | Some entries ->
-               let sum_field field =
-                 entries
-                 |> List.fold_left (fun acc (_name, item) ->
-                        let tokens = Safe_ops.json_member_opt "tokens" item |> Option.value ~default:(`Assoc []) in
-                        acc + (Safe_ops.json_int_opt field tokens |> Option.value ~default:0))
-                      0
-               in
-               let input = sum_field "input" in
-               let prompt = sum_field "prompt" in
-               let chosen = if input > 0 then input else prompt in
-               if chosen > 0 then Some chosen else None)
-    in
+      match from_usage "promptTokenCount" with
+      | Some _ as v -> v | None -> from_stats_first ["input"; "prompt"] in
     let output_tokens =
-      match Option.bind usage_opt (fun usage -> Safe_ops.json_int_opt "candidatesTokenCount" usage) with
-      | Some _ as value -> value
-      | None ->
-          (match stats_models_opt with
-           | None -> None
-           | Some entries ->
-               let total =
-                 entries
-                 |> List.fold_left (fun acc (_name, item) ->
-                        let tokens = Safe_ops.json_member_opt "tokens" item |> Option.value ~default:(`Assoc []) in
-                        acc + (Safe_ops.json_int_opt "candidates" tokens |> Option.value ~default:0))
-                      0
-               in
-               if total > 0 then Some total else None)
-    in
+      match from_usage "candidatesTokenCount" with
+      | Some _ as v -> v | None -> from_stats_first ["candidates"] in
     let cached_tokens =
-      match Option.bind usage_opt (fun usage -> Safe_ops.json_int_opt "cachedContentTokenCount" usage) with
-      | Some _ as value -> value
-      | None ->
-          (match stats_models_opt with
-           | None -> None
-           | Some entries ->
-               let total =
-                 entries
-                 |> List.fold_left (fun acc (_name, item) ->
-                        let tokens = Safe_ops.json_member_opt "tokens" item |> Option.value ~default:(`Assoc []) in
-                        acc + (Safe_ops.json_int_opt "cached" tokens |> Option.value ~default:0))
-                      0
-               in
-               if total > 0 then Some total else None)
-    in
-    let cost =
+      match from_usage "cachedContentTokenCount" with
+      | Some _ as v -> v | None -> from_stats_first ["cached"] in
+    let cost_usd =
       match input_tokens, output_tokens, cached_tokens with
       | Some inp, Some out, Some cached ->
           let uncached = inp - cached in
-          Some
-            (float_of_int uncached *. 0.00015 /. 1000.0
-           +. float_of_int cached *. 0.000015 /. 1000.0
-           +. float_of_int out *. 0.0006 /. 1000.0)
+          Some (float_of_int uncached *. 0.00015 /. 1000.0
+                +. float_of_int cached *. 0.000015 /. 1000.0
+                +. float_of_int out *. 0.0006 /. 1000.0)
       | Some inp, Some out, None ->
-          Some
-            (float_of_int inp *. 0.00015 /. 1000.0
-           +. float_of_int out *. 0.0006 /. 1000.0)
+          Some (float_of_int inp *. 0.00015 /. 1000.0
+                +. float_of_int out *. 0.0006 /. 1000.0)
       | _ -> None
     in
-    (input_tokens, output_tokens, cached_tokens, cost)
+    { text = response_text; input_tokens; output_tokens;
+      cache_creation_tokens = None; cache_read_tokens = cached_tokens; cost_usd }
   with Yojson.Json_error _ ->
-    (None, None, None, None)
+    parse_raw_output raw
 
 (** Default spawn configs for known agents *)
 let default_configs = [
   ("claude", {
     agent_name = "claude";
-    command = "claude --output-format json -p";  (* -p must be last before prompt *)
+    command = "claude --output-format json -p";
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
-    mcp_tools = masc_mcp_tools;  (* Claude: --allowedTools flag *)
+    mcp_tools = masc_mcp_tools;
+    parse_output = parse_claude_output;
+    stdin_prompt = true;
   });
   ("gemini", {
     agent_name = "gemini";
     command = "gemini --yolo --output-format json";
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
-    mcp_tools = masc_mcp_tools;  (* Gemini: --allowed-mcp-server-names flag *)
+    mcp_tools = masc_mcp_tools;
+    parse_output = parse_gemini_output;
+    stdin_prompt = false;  (* Gemini CLI uses -p flag, not stdin *)
   });
   ("codex", {
     agent_name = "codex";
-    command = "codex exec";  (* Non-interactive mode *)
+    command = "codex exec";
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
-    mcp_tools = masc_mcp_tools;  (* Codex: uses config.toml MCP servers *)
+    mcp_tools = masc_mcp_tools;
+    parse_output = parse_raw_output;
+    stdin_prompt = true;
   });
   ("llama", {
     agent_name = "llama";
@@ -195,6 +191,8 @@ let default_configs = [
     timeout_seconds = Env_config.Spawn.timeout_seconds;
     working_dir = None;
     mcp_tools = masc_mcp_tools;
+    parse_output = parse_raw_output;
+    stdin_prompt = true;
   });
 ]
 
@@ -322,10 +320,12 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
     | Some c -> c
     | None -> {
         agent_name;
-        command = agent_name;  (* fallback: use agent_name as command *)
+        command = agent_name;
         timeout_seconds = Option.value timeout_seconds ~default:Env_config.Spawn.timeout_seconds;
         working_dir;
         mcp_tools = [];
+        parse_output = parse_raw_output;
+        stdin_prompt = true;
       }
   in
 
@@ -356,8 +356,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
     in
     let cmd_array = Array.of_list cmd_args in
 
-    (* Gemini CLI expects prompt via -p; other CLIs still read stdin. *)
-    let stdin_content = if agent_name = "gemini" then "" else augmented_prompt in
+    let stdin_content = if config.stdin_prompt then augmented_prompt else "" in
 
     try
       (* Fork with chdir mutex to prevent CWD race between concurrent spawns *)
@@ -386,29 +385,13 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
         | Unix.WSTOPPED _ -> -2
       in
 
-      (* Extract token usage for Claude (JSON output) *)
-      let (output, input_tokens, output_tokens, cache_creation, cache_read, cost_usd)
-          =
-        if agent_name = "claude" then
-          let (result_opt, inp, out, cache_c, cache_r, cost) =
-            parse_claude_json raw_output
-          in
-          ( Option.value result_opt ~default:raw_output,
-            inp,
-            out,
-            cache_c,
-            cache_r,
-            cost )
-        else if agent_name = "gemini" then
-          let inp, out, cached, cost = parse_gemini_output raw_output in
-          let result_text =
-            Option.value (extract_gemini_response_text raw_output)
-              ~default:raw_output
-          in
-          (result_text, inp, out, None, cached, cost)
-        else
-          (raw_output, None, None, None, None, None)
-    in
+      let parsed = config.parse_output raw_output in
+      let output = parsed.text in
+      let input_tokens = parsed.input_tokens in
+      let output_tokens = parsed.output_tokens in
+      let cache_creation = parsed.cache_creation_tokens in
+      let cache_read = parsed.cache_read_tokens in
+      let cost_usd = parsed.cost_usd in
 
     {
       success = (exit_code = 0);

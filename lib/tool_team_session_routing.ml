@@ -142,6 +142,30 @@ let contains_ci haystack needle =
   in
   loop 0
 
+(** [contains_size_token_ci haystack token] checks that [token] appears in
+    [haystack] as a word-boundary-delimited token, preventing false positives
+    like "109b" matching "9b". Boundaries: start/end of string, or any
+    non-alphanumeric/non-underscore character. *)
+let contains_size_token_ci haystack token =
+  let h = String.lowercase_ascii haystack in
+  let t = String.lowercase_ascii token in
+  let h_len = String.length h in
+  let t_len = String.length t in
+  let is_alnum c =
+    (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '_'
+  in
+  let rec loop idx =
+    if idx + t_len > h_len then false
+    else if String.sub h idx t_len = t then
+      let before_ok = idx = 0 || not (is_alnum (String.get h (idx - 1))) in
+      let after_ok =
+        idx + t_len >= h_len || not (is_alnum (String.get h (idx + t_len)))
+      in
+      if before_ok && after_ok then true else loop (idx + 1)
+    else loop (idx + 1)
+  in
+  loop 0
+
 let contains_any_ci haystack needles =
   List.exists (fun needle -> contains_ci haystack needle) needles
 
@@ -192,9 +216,12 @@ let infer_model_tier_from_model_name model_name =
           Some Team_session_types.Tier_27b
       | _, _, Some lead_model when String.equal lead_model model_name ->
           Some Team_session_types.Tier_35b
-      | _ when contains_ci model_name "35b" -> Some Team_session_types.Tier_35b
-      | _ when contains_ci model_name "27b" -> Some Team_session_types.Tier_27b
-      | _ when contains_ci model_name "9b" -> Some Team_session_types.Tier_9b
+      | _ when contains_size_token_ci model_name "35b" ->
+          Some Team_session_types.Tier_35b
+      | _ when contains_size_token_ci model_name "27b" ->
+          Some Team_session_types.Tier_27b
+      | _ when contains_size_token_ci model_name "9b" ->
+          Some Team_session_types.Tier_9b
       | _ -> None)
 
 let default_risk_for_profile = function

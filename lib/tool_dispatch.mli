@@ -26,7 +26,7 @@ val dispatch : token:Tool_token.t -> args:Yojson.Safe.t -> (bool * string) optio
 
 val mint_token : name:string -> (Tool_token.t, string) result
 (** Mint a [Tool_token.t] validated against both tag and handler registries.
-    Returns [Error] when the tool name is unknown to the dispatch system. *)
+    Thread-safe (protected by dispatch_mu). *)
 
 (** {2 Dispatch Hooks}
 

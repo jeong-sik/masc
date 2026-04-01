@@ -355,37 +355,37 @@ let route
 module Stats = struct
   type routing_stats = {
     mutable total_queries : int;
-    mutable small_only : int;
-    mutable has_large : int;
+    mutable cheap_only : int;
+    mutable has_expensive : int;
   }
 
   let global_stats = {
     total_queries = 0;
-    small_only = 0;
-    has_large = 0;
+    cheap_only = 0;
+    has_expensive = 0;
   }
 
   let record (decision : route_decision) : unit =
     global_stats.total_queries <- global_stats.total_queries + 1;
-    let has_big = List.exists (fun a ->
+    let has_costly = List.exists (fun a ->
       a.cost_per_1k >= 0.005
     ) decision.agents in
-    if has_big
-    then global_stats.has_large <- global_stats.has_large + 1
-    else global_stats.small_only <- global_stats.small_only + 1
+    if has_costly
+    then global_stats.has_expensive <- global_stats.has_expensive + 1
+    else global_stats.cheap_only <- global_stats.cheap_only + 1
 
   let get_ratio () : float * float =
     let total = float_of_int global_stats.total_queries in
     if total = 0.0 then (0.0, 0.0)
     else (
-      float_of_int global_stats.small_only /. total,
-      float_of_int global_stats.has_large /. total
+      float_of_int global_stats.cheap_only /. total,
+      float_of_int global_stats.has_expensive /. total
     )
 
   let reset () : unit =
     global_stats.total_queries <- 0;
-    global_stats.small_only <- 0;
-    global_stats.has_large <- 0
+    global_stats.cheap_only <- 0;
+    global_stats.has_expensive <- 0
 end
 
 (** Route and record stats *)

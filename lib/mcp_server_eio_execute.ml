@@ -630,9 +630,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Error reason ->
       (false, Printf.sprintf "Unknown tool: %s (%s)" name reason)
   | Ok _token ->
-      (* Token proves the name is registered. lookup_tag None is defensive:
-         both mint_token and lookup_tag check tag_registry, so None here
-         would indicate a registration inconsistency, not a user error. *)
+      (* Token proves the name is registered in at least one registry.
+         lookup_tag None after mint is a registry inconsistency (tool in
+         handler registry but not tag registry), not a user error. *)
       let tag_result =
         match Tool_dispatch.lookup_tag name with
         | Some tag -> dispatch_by_tag tag
@@ -641,4 +641,5 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (match tag_result with
        | Some result -> result
        | None ->
-           (false, Printf.sprintf "Unknown tool: %s (no tag after mint)" name))
+           Log.Mcp.warn "registry inconsistency: %s minted but no tag" name;
+           (false, Printf.sprintf "Unknown tool: %s (registry inconsistency)" name))

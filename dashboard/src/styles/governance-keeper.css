@@ -1,5 +1,9 @@
 /* ── Keeper Rich Card (Overview) ──────────────────────────── */
-/* @keyframes keeperPulse → keyframes.css (canonical) */
+/* @keyframes keeperPulse → keyframes.css (canonical, general-purpose) */
+/* Keeper-specific animation values differ from general-purpose:
+   lower opacity (0.6), smaller glow radius (10px at peak).
+   Kept separate via the canonical keyframes.css definition which
+   already uses these keeper-appropriate values. */
 
 /* ── Metric explain tooltip ──────────────────────────────── */
 .metric-tip-pop {

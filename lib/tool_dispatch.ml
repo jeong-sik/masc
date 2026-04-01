@@ -198,10 +198,13 @@ let tag_registry_count () = with_dispatch_ro (fun () -> Hashtbl.length tag_regis
 let mark_tag_registry_initialized () = with_dispatch_rw (fun () -> tag_registry_initialized := true)
 let is_tag_registry_initialized () = with_dispatch_ro (fun () -> !tag_registry_initialized)
 
-(** Mint a [Tool_token.t] validated against both tag and handler registries.
-    Checks tag_registry first (primary), falls back to handler registry.
-    Convenience wrapper for callers without direct table access. *)
+(** Mint a [Tool_token.t] validated against both registries.
+    Protected by dispatch_mu for thread safety (Copilot review).
+    Checks tag_registry (primary) then handler registry (fallback).
+    In production both are populated at startup; in test binaries
+    only the handler registry may be populated. *)
 let mint_token ~name =
-  Tool_token.mint_with
-    ~validate:(fun n -> Hashtbl.mem tag_registry n || Hashtbl.mem registry n)
-    ~name
+  with_dispatch_ro (fun () ->
+    Tool_token.mint_with
+      ~validate:(fun n -> Hashtbl.mem tag_registry n || Hashtbl.mem registry n)
+      ~name)

@@ -22,7 +22,6 @@ import './styles/governance-agent.css'
 import './styles/governance-keeper.css'
 import './styles/mission.css'
 import './styles/ops.css'
-import './styles/roster.css'
 import './styles/tools.css'
 
 import { render } from 'preact'

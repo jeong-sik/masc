@@ -82,6 +82,7 @@ let test_mint_token_registered () =
   let tool = "__test_token_registered" in
   Tool_dispatch.register ~tool_name:tool
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "ok"));
+  Tool_dispatch.register_name_tag ~tool_name:tool ~tag:Mod_misc;
   match Tool_dispatch.mint_token ~name:tool with
   | Ok token -> check string "name" tool token.name
   | Error e -> fail (Printf.sprintf "mint_token failed for registered tool: %s" e)
@@ -95,6 +96,7 @@ let test_dispatch_with_token () =
   let tool = "__test_token_dispatch" in
   Tool_dispatch.register ~tool_name:tool
     ~handler:(fun ~name ~args:_ -> Some (true, "dispatched:" ^ name));
+  Tool_dispatch.register_name_tag ~tool_name:tool ~tag:Mod_misc;
   match Tool_dispatch.mint_token ~name:tool with
   | Error e -> fail e
   | Ok token ->

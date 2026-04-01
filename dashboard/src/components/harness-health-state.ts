@@ -231,9 +231,27 @@ export function handleHarnessSSE(): void {
   if (
     type === 'oas:masc:harness:handoff'
     || type === 'keeper_handoff'
+    || type === 'masc/keeper_handoff'
   ) {
+    const fallbackEvent = evt as unknown as Record<string, unknown>
     const handoffPayload: Record<string, unknown> =
-      payload ?? (evt as unknown as Record<string, unknown>)
+      payload ?? fallbackEvent ?? {}
+    const hasTimestamp =
+      handoffPayload.timestamp != null || handoffPayload.ts_unix != null
+    const hasKeeperIdentity =
+      handoffPayload.keeper_name != null || handoffPayload.name != null
+    const hasGeneration =
+      handoffPayload.generation != null
+      || handoffPayload.from_generation != null
+      || handoffPayload.next_generation != null
+      || handoffPayload.to_generation != null
+    if (!(hasTimestamp && hasKeeperIdentity && hasGeneration)) {
+      console.warn('[harness-health] ignoring malformed handoff event', {
+        type,
+        candidate: handoffPayload,
+      })
+      return
+    }
     const nextItem: HandoffEvent = {
       timestamp:
         typeof handoffPayload.timestamp === 'number'

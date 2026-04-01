@@ -12,6 +12,7 @@ export type SSEEventType =
   | 'heartbeat'
   | 'keeper_heartbeat'
   | 'keeper_handoff'
+  | 'masc/keeper_handoff'
   | 'keeper_compaction'
   | 'keeper_guardrail'
   | 'keeper_turn_complete'

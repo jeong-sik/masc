@@ -300,12 +300,23 @@ let persist_session (s : session) : (unit, error) result =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Error (Persistence_failed (Printexc.to_string e))
 
+(** Commit a session assuming no lock is held. Acquires write lock internally. *)
 let commit_session (s : session) : (session, error) result =
   match persist_session s with
   | Error _ as err -> err
   | Ok () ->
     with_sessions_lock (fun () ->
       Hashtbl.replace sessions s.id s);
+    Ok s
+
+(** Commit a session assuming the caller already holds [sessions_mutex].
+    Used by functions that wrap the entire read-validate-write cycle in
+    a single [with_sessions_lock] to prevent TOCTOU races. *)
+let commit_session_locked (s : session) : (session, error) result =
+  match persist_session s with
+  | Error _ as err -> err
+  | Ok () ->
+    Hashtbl.replace sessions s.id s;
     Ok s
 
 (** Load all sessions from disk into memory *)
@@ -384,28 +395,29 @@ let start_voting ~topic ~initiator ?(quorum = 2) ?(threshold = 0.5)
     } in
     commit_session session
 
-(** Cast a vote in a session *)
+(** Cast a vote in a session.
+    Entire read-validate-write runs under a single write lock to prevent
+    TOCTOU races (e.g. concurrent close + vote). *)
 let cast_vote ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.0) () : (session, error) Result.t =
-  let session_opt = with_sessions_ro (fun () ->
-    Hashtbl.find_opt sessions session_id) in
-  match session_opt with
-  | None -> Error (Session_not_found session_id)
-  | Some session ->
-    if session.state <> Open then
-      Error (Session_closed session_id)
-    else if List.exists (fun v -> v.agent = agent) session.votes then
-      Error (Already_voted agent)
-    else
-      let vote = {
-        agent;
-        decision;
-        reason;
-        timestamp = Time_compat.now ();
-        archetype;
-        weight;
-      } in
-      let updated = { session with votes = vote :: session.votes } in
-      commit_session updated
+  with_sessions_lock (fun () ->
+    match Hashtbl.find_opt sessions session_id with
+    | None -> Error (Session_not_found session_id)
+    | Some session ->
+      if session.state <> Open then
+        Error (Session_closed session_id)
+      else if List.exists (fun v -> v.agent = agent) session.votes then
+        Error (Already_voted agent)
+      else
+        let vote = {
+          agent;
+          decision;
+          reason;
+          timestamp = Time_compat.now ();
+          archetype;
+          weight;
+        } in
+        let updated = { session with votes = vote :: session.votes } in
+        commit_session_locked updated)
 
 (** Count votes by decision type *)
 let count_by_decision votes decision =
@@ -474,33 +486,33 @@ let get_result ~session_id : (voting_result, error) Result.t =
         else
           Ok Escalate
 
-(** Close a voting session *)
+(** Close a voting session.
+    Read-modify-write under single lock to prevent TOCTOU races. *)
 let close_session ~session_id : (session, error) Result.t =
-  let session_opt = with_sessions_ro (fun () ->
-    Hashtbl.find_opt sessions session_id) in
-  match session_opt with
-  | None -> Error (Session_not_found session_id)
-  | Some session ->
-    let updated = {
-      session with
-      state = Closed;
-      closed_at = Some (Time_compat.now ());
-    } in
-    commit_session updated
+  with_sessions_lock (fun () ->
+    match Hashtbl.find_opt sessions session_id with
+    | None -> Error (Session_not_found session_id)
+    | Some session ->
+      let updated = {
+        session with
+        state = Closed;
+        closed_at = Some (Time_compat.now ());
+      } in
+      commit_session_locked updated)
 
-(** Cancel a voting session *)
+(** Cancel a voting session.
+    Read-modify-write under single lock to prevent TOCTOU races. *)
 let cancel_session ~session_id : (session, error) Result.t =
-  let session_opt = with_sessions_ro (fun () ->
-    Hashtbl.find_opt sessions session_id) in
-  match session_opt with
-  | None -> Error (Session_not_found session_id)
-  | Some session ->
-    let updated = {
-      session with
-      state = Cancelled;
-      closed_at = Some (Time_compat.now ());
-    } in
-    commit_session updated
+  with_sessions_lock (fun () ->
+    match Hashtbl.find_opt sessions session_id with
+    | None -> Error (Session_not_found session_id)
+    | Some session ->
+      let updated = {
+        session with
+        state = Cancelled;
+        closed_at = Some (Time_compat.now ());
+      } in
+      commit_session_locked updated)
 
 (** Get session by ID *)
 let get_session ~session_id : session option =

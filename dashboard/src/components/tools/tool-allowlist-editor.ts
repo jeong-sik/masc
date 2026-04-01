@@ -403,12 +403,21 @@ export function ToolAllowlistEditor({
 
             ${isCustomEmpty
               ? html`
-                <div class="flex items-start gap-2 px-3 py-2 rounded-lg bg-[rgba(239,68,68,0.12)] border border-[rgba(239,68,68,0.3)]">
-                  <span class="text-red-400 text-[13px] shrink-0 font-bold">0</span>
-                  <span class="text-[11px] text-red-300 leading-snug">
-                    allowlist가 비어 있으면 이 키퍼는 <strong>도구를 하나도 사용할 수 없습니다</strong>.
-                    도구를 추가하거나 preset 모드로 전환하세요.
-                  </span>
+                <div class="flex flex-col gap-2 px-3 py-2 rounded-lg bg-[rgba(239,68,68,0.12)] border border-[rgba(239,68,68,0.3)]">
+                  <div class="flex items-start gap-2">
+                    <span class="text-red-400 text-[13px] shrink-0 font-bold">0</span>
+                    <span class="text-[11px] text-red-300 leading-snug">
+                      allowlist가 비어 있으면 이 키퍼는 <strong>도구를 하나도 사용할 수 없습니다</strong>.
+                    </span>
+                  </div>
+                  ${resolvedAllowlist.length > 0
+                    ? html`
+                      <button type="button"
+                        class="self-start py-1 px-3 rounded-lg text-[10px] font-medium border border-[rgba(71,184,255,0.35)] bg-[rgba(71,184,255,0.12)] text-[#9ad9ff] hover:bg-[rgba(71,184,255,0.22)] cursor-pointer transition-colors"
+                        onClick=${() => { customAllowItems.value = [...resolvedAllowlist] }}
+                      >현재 resolved list에서 복사 (${resolvedAllowlist.length}개)</button>
+                    `
+                    : null}
                 </div>`
               : null}
 

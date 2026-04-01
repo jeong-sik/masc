@@ -4,7 +4,7 @@ import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
-import { missionSnapshot } from '../mission-store'
+import { missionSnapshot, missionLoading } from '../mission-store'
 import { roomTruthInitializing } from '../room-truth-store'
 import { Overview } from './overview/overview'
 import { ErrorBoundary } from './common/error-boundary'
@@ -133,6 +133,9 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   if (!live) {
     dotClass = 'bg-[var(--bad)]'
     label = '신호 없음'
+  } else if (!snap && missionLoading.value) {
+    dotClass = 'bg-[var(--text-muted)]'
+    label = '로딩 중'
   } else if (blockers > 0 || attentionCount > 0) {
     dotClass = 'bg-[var(--warn)]'
     const total = blockers + attentionCount

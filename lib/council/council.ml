@@ -3,7 +3,6 @@
     통합 인터페이스:
     - Debate: 구조화된 토론 (파일 기반)
     - Consensus: 투표/합의 (파일 영속성 + 메모리 캐시)
-    (Router removed — was dead code with hardcoded vendor model names)
     - Balance: 공정성 정책
     - Conversation: 영속적 대화 (파일 + Neo4j)
 

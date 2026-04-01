@@ -151,6 +151,26 @@ let test_worker_allows_worker_only_tools () =
   ) Tool_access_role.worker_only_tools
 
 (* ================================================================ *)
+(* Unregistered tool behavior                                        *)
+(* ================================================================ *)
+
+let test_unregistered_tool_allowed_all_roles () =
+  let unknown = "masc_future_unknown_tool_xyz" in
+  List.iter (fun (role_name, role) ->
+    let policy = Tool_access_role.policy_for_role role in
+    check bool
+      (Printf.sprintf "%s: unregistered tool allowed (fail-open)" role_name)
+      true
+      (Tool_access_policy.allows_name policy unknown)
+  ) [("Admin", Admin); ("Worker", Worker); ("Reader", Reader)]
+
+let test_empty_string_tool_allowed () =
+  let policy = Tool_access_role.policy_for_role Worker in
+  check bool "empty string tool allowed by All"
+    true
+    (Tool_access_policy.allows_name policy "")
+
+(* ================================================================ *)
 (* Tool list integrity tests                                         *)
 (* ================================================================ *)
 
@@ -206,6 +226,13 @@ let () =
             test_reader_denies_worker_only_tools;
           test_case "Worker allows worker_only" `Quick
             test_worker_allows_worker_only_tools;
+        ] );
+      ( "unregistered",
+        [
+          test_case "unregistered allowed (fail-open)" `Quick
+            test_unregistered_tool_allowed_all_roles;
+          test_case "empty string tool" `Quick
+            test_empty_string_tool_allowed;
         ] );
       ( "integrity",
         [

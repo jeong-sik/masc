@@ -371,39 +371,35 @@ let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) res
 (* ============================================ *)
 
 (** Resolve the effective role for an agent from auth context.
-    Extracts the role resolution logic from check_permission. *)
-let resolve_role config ~agent_name ~token : agent_role =
+    Returns Error for invalid tokens (no silent downgrade). *)
+let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
   let auth_cfg = load_auth_config config in
   if not auth_cfg.enabled then
-    Admin  (* Auth disabled = full access *)
+    Ok Admin  (* Auth disabled = full access *)
   else if (match read_initial_admin config with
            | Some admin -> String.equal agent_name admin
            | None -> false) then
-    Admin  (* Bootstrap admin = full access *)
+    Ok Admin  (* Bootstrap admin = full access *)
   else if not auth_cfg.require_token then
-    auth_cfg.default_role
+    Ok auth_cfg.default_role
   else
     match token with
-    | None -> Reader  (* No token = minimum access *)
+    | None -> Error (Unauthorized "Token required")
     | Some t ->
         (match verify_token config ~agent_name ~token:t with
-        | Ok cred -> cred.role
-        | Error _ -> Reader)  (* Invalid/expired token = minimum access *)
+        | Ok cred -> Ok cred.role
+        | Error e -> Error e)
 
 (** Policy-based tool authorization.
     Replaces authorize_tool with a single Tool_access_policy check.
-    The role determines which tools are accessible. *)
+    Invalid/expired tokens are rejected (not silently downgraded). *)
 let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
-  let auth_cfg = load_auth_config config in
-  if not auth_cfg.enabled then
-    Ok ()
-  else
-    let role = resolve_role config ~agent_name ~token in
-    let policy = Tool_access_role.policy_for_role role in
-    if Tool_access_policy.allows_name policy tool_name then
-      Ok ()
-    else
-      Error (Forbidden { agent = agent_name; action = tool_name })
+  match resolve_role config ~agent_name ~token with
+  | Error e -> Error e
+  | Ok role ->
+      let policy = Tool_access_role.policy_for_role role in
+      if Tool_access_policy.allows_name policy tool_name then Ok ()
+      else Error (Forbidden { agent = agent_name; action = tool_name })
 
 (* ============================================ *)
 (* Room secret (for room-level auth)            *)

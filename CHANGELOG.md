@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.205.0] - 2026-04-01
+
+### Added
+- **Policy selectors** — Inter and Diff variants for tool_access policy (#4387).
+- **Test surface coverage** — rename misleading var + full coverage (#4399).
+
+### Fixed
+- **GC local mirror** — remove after backend-aware delete (#4389).
+- **Dashboard bearer token** — include in MCP requests (#4371).
+- **Post-merge recovery** — 3 conflict group changes (#4386).
+
 ## [2.204.0] - 2026-04-01
 
 ### Changed

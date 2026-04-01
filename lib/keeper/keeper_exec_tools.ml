@@ -167,6 +167,7 @@ let keeper_all_candidate_tool_names () =
     @ keeper_coding_tool_names
     @ keeper_autoresearch_tool_names
     @ keeper_research_loop_tool_names
+    @ keeper_voice_tool_names
     @ injected_masc_tool_names () )
 
 let preset_allowlist = function

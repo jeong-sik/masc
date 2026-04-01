@@ -276,8 +276,8 @@ let run_turn
            || name = "keeper_shell_readonly"
            || name = "keeper_bash"
            || name = "keeper_edit"
-           || name = "keeper_write"
-           || name = "keeper_github" then Some "filesystem"
+           || name = "keeper_write" then Some "filesystem"
+      else if name = "keeper_github" then Some "vcs"
       else None
     in
     let kr_kw = match List.assoc_opt name korean_keywords with

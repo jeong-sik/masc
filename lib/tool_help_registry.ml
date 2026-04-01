@@ -255,9 +255,9 @@ let manual_help_entry name =
         {
           name;
           short_description =
-            "Apply auth, unit-policy, or keeper-policy updates through a single admin entrypoint.";
+            "Apply auth or unit-policy updates through a single admin entrypoint.";
           when_to_use =
-            "Use when you need to change auth settings, update a unit policy envelope, or adjust keeper policy without bouncing between multiple tools.";
+            "Use when you need to change auth settings or update a unit policy envelope.";
           key_constraints =
             [
               "Section must be one of: auth | unit_policy.";

@@ -24,6 +24,7 @@ const chatMessages = signal<ChatMessage[]>([])
 const chatInput = signal('')
 const streaming = signal(false)
 const streamBuffer = signal('')
+const streamStartedAt = signal<number | null>(null)
 const chatError = signal('')
 
 let activeAbort: AbortController | null = null
@@ -86,6 +87,7 @@ async function sendChat(keeperName: string): Promise<void> {
   chatInput.value = ''
   chatError.value = ''
   streamBuffer.value = ''
+  streamStartedAt.value = Date.now()
 
   chatMessages.value = [
     ...chatMessages.value,
@@ -99,7 +101,7 @@ async function sendChat(keeperName: string): Promise<void> {
     await streamKeeperMessage(keeperName, text, {
       signal: activeAbort.signal,
       onEvent: (event: KeeperChatStreamEvent) => {
-        if (isKeeperTextContentEvent(event) && event.delta) {
+        if (isKeeperTextContentEvent(event)) {
           streamBuffer.value += event.delta
         } else if (event.type === 'RUN_FINISHED') {
           const finalText = streamBuffer.value.trim() || '(no response)'
@@ -121,6 +123,7 @@ async function sendChat(keeperName: string): Promise<void> {
   } finally {
     streaming.value = false
     activeAbort = null
+    streamStartedAt.value = null
   }
 }
 
@@ -129,6 +132,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
     cancelStream()
     chatInput.value = ''
     streamBuffer.value = ''
+    streamStartedAt.value = null
     chatError.value = ''
     chatMessages.value = []
     let stale = false
@@ -203,7 +207,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
           placeholder="메시지 입력..."
           disabled=${false}
           streaming=${isStreaming}
-          streamStartedAt=${null}
+          streamStartedAt=${streamStartedAt.value}
           onDraftChange=${(value: string) => { chatInput.value = value }}
           onSend=${() => { void sendChat(name) }}
           onAbort=${cancelStream}

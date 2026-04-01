@@ -1,19 +1,15 @@
-// Activity graph visualization — Canvas 2D force-directed graph
-// Fetches from /api/v1/activity/graph, renders nodes as circles and edges as lines
-// Supports hover (tooltip), click (detail panel), and semantic weight sizing.
-
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
-import { layoutGraph } from './activity-graph-layout'
+import { Network } from 'vis-network'
+import { DataSet } from 'vis-data'
 import { statusLabel } from '../lib/status-label'
-import type { ActivityGraphResponse, ActivityGraphNode, ActivityGraphEdge } from '../types'
+import type { ActivityGraphResponse, ActivityGraphEdge } from '../types'
 
 const hoveredNodeId = signal<string | null>(null)
 export const selectedNodeId = signal<string | null>(null)
 export const highlightedAgentId = signal<string | null>(null)
 
-// Node color by kind
 function nodeColor(kind: string, status: string): string {
   if (status === 'offline' || status === 'retired') return '#64748b'
   switch (kind) {
@@ -27,7 +23,6 @@ function nodeColor(kind: string, status: string): string {
   }
 }
 
-// Edge color by actual backend edge kind
 function edgeColor(kind: string, active: boolean): string {
   if (!active) return 'rgba(100, 116, 139, 0.15)'
   switch (kind) {
@@ -46,11 +41,6 @@ function edgeColor(kind: string, active: boolean): string {
     case 'belongs_to': return 'rgba(148, 163, 184, 0.12)'
     default: return 'rgba(148, 163, 184, 0.25)'
   }
-}
-
-function nodeRadius(node: ActivityGraphNode): number {
-  const w = node.semantic_weight ?? node.weight
-  return Math.max(6, Math.min(24, 6 + Math.log1p(w) * 3))
 }
 
 function kindLabel(kind: string): string {
@@ -89,166 +79,125 @@ interface GraphViewProps {
   data: ActivityGraphResponse
 }
 
-function hitTest(
-  nodes: ActivityGraphNode[],
-  positions: Map<string, { x: number; y: number }>,
-  mx: number,
-  my: number,
-): string | null {
-  for (const node of nodes) {
-    const pos = positions.get(node.id)
-    if (!pos) continue
-    const r = nodeRadius(node)
-    const dx = mx - pos.x
-    const dy = my - pos.y
-    if (dx * dx + dy * dy <= (r + 4) * (r + 4)) return node.id
-  }
-  return null
-}
-
 export function GraphView({ data }: GraphViewProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const networkRef = useRef<Network | null>(null)
 
   useEffect(() => {
-    const canvas = canvasRef.current
     const container = containerRef.current
-    if (!canvas || !container || !data.nodes.length) return
+    if (!container || !data.nodes.length) return
 
-    const rect = container.getBoundingClientRect()
-    const width = Math.max(rect.width, 400)
-    const height = 480
-    const dpr = window.devicePixelRatio || 1
-
-    canvas.width = width * dpr
-    canvas.height = height * dpr
-    canvas.style.width = `${width}px`
-    canvas.style.height = `${height}px`
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-
-    const layout = layoutGraph(
-      data.nodes.map(n => ({ id: n.id, weight: n.semantic_weight ?? n.weight })),
-      data.edges.map(e => ({ source: e.source, target: e.target, weight: e.weight })),
-      width,
-      height,
-      150,
-    )
-
-    const positions = layout.positions
-    const hovered = hoveredNodeId.value
-    const selected = selectedNodeId.value
-    const highlightedAgent = highlightedAgentId.value
-
-    // Background
-    ctx.fillStyle = '#0f1117'
-    ctx.fillRect(0, 0, width, height)
-
-    // Draw edges
-    for (const edge of data.edges ?? []) {
-      const sp = positions.get(edge.source)
-      const tp = positions.get(edge.target)
-      if (!sp || !tp) continue
-
-      const isConnected = selected === edge.source || selected === edge.target
-        || hovered === edge.source || hovered === edge.target
-      const lineWidth = isConnected
-        ? Math.max(1, Math.min(4, 1 + edge.weight * 0.5))
-        : Math.max(0.5, Math.min(2, 0.5 + edge.weight * 0.3))
-
-      ctx.beginPath()
-      ctx.moveTo(sp.x, sp.y)
-      ctx.lineTo(tp.x, tp.y)
-      ctx.strokeStyle = isConnected
-        ? edgeColor(edge.kind, edge.active).replace(/[\d.]+\)$/, '0.7)')
-        : edgeColor(edge.kind, edge.active)
-      ctx.lineWidth = lineWidth
-      ctx.stroke()
-    }
-
-    // Draw nodes
-    for (const node of data.nodes ?? []) {
-      const pos = positions.get(node.id)
-      if (!pos) continue
-
-      const r = nodeRadius(node)
-      const isHovered = hovered === node.id
-      const isSelected = selected === node.id
-      const isHighlightedAgent = highlightedAgent !== null && node.id === 'agent:' + highlightedAgent
-      const color = nodeColor(node.kind, node.status)
-
-      // Glow for selected or highlighted agent (distinct from hover)
-      if (isSelected || isHighlightedAgent) {
-        ctx.beginPath()
-        ctx.arc(pos.x, pos.y, r + 8, 0, Math.PI * 2)
-        ctx.fillStyle = 'rgba(251, 191, 36, 0.15)'
-        ctx.fill()
-      } else if (isHovered) {
-        ctx.beginPath()
-        ctx.arc(pos.x, pos.y, r + 6, 0, Math.PI * 2)
-        ctx.fillStyle = color.replace(')', ', 0.2)').replace('rgb', 'rgba')
-        ctx.fill()
+    const nodesData = new DataSet(data.nodes.map(n => {
+      const color = nodeColor(n.kind, n.status)
+      return {
+        id: n.id,
+        label: n.label,
+        title: `${n.label}\n${kindLabel(n.kind)}\nStatus: ${n.status}`, // tooltip
+        value: n.semantic_weight ?? n.weight,
+        color: {
+          background: color,
+          border: (n.status === 'offline' || n.status === 'retired') ? '#475569' : color,
+          highlight: {
+            background: color,
+            border: '#fbbf24'
+          },
+          hover: {
+            background: color,
+            border: '#ffffff'
+          }
+        },
+        font: { color: '#e2e8f0', size: 12 },
+        shape: 'dot'
       }
+    }))
 
-      ctx.beginPath()
-      ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2)
-      ctx.fillStyle = color
-      ctx.fill()
+    const edgesData = new DataSet(data.edges.map((e, i) => ({
+      id: e.id ?? `e-${i}-${e.source}-${e.target}`,
+      from: e.source,
+      to: e.target,
+      value: e.weight,
+      color: {
+        color: edgeColor(e.kind, e.active),
+        highlight: edgeColor(e.kind, e.active).replace(/[\d.]+\)$/, '0.7)'),
+        hover: edgeColor(e.kind, e.active).replace(/[\d.]+\)$/, '0.6)')
+      },
+      title: edgeKindLabel(e.kind),
+      arrows: {
+        to: { enabled: true, scaleFactor: 0.5 }
+      }
+    })))
 
-      // Border — selected/highlighted gets gold, hovered gets white
-      ctx.strokeStyle = (isSelected || isHighlightedAgent) ? '#fbbf24' : isHovered ? '#fff' : 'rgba(255,255,255,0.15)'
-      ctx.lineWidth = (isSelected || isHighlightedAgent) ? 2.5 : isHovered ? 2 : 1
-      ctx.stroke()
-
-      // Label for larger, hovered, selected, or highlighted nodes
-      if (r >= 10 || isHovered || isSelected || isHighlightedAgent) {
-        ctx.fillStyle = (isSelected || isHighlightedAgent) ? '#fbbf24' : '#e2e8f0'
-        ctx.font = `${isHovered || isSelected || isHighlightedAgent ? 11 : 9}px system-ui, sans-serif`
-        ctx.textAlign = 'center'
-        ctx.fillText(node.label, pos.x, pos.y + r + 12)
+    const networkData = { nodes: nodesData, edges: edgesData }
+    const options = {
+      nodes: {
+        scaling: {
+          min: 6,
+          max: 24,
+        },
+        borderWidth: 1,
+        borderWidthSelected: 2.5
+      },
+      edges: {
+        scaling: {
+          min: 0.5,
+          max: 2
+        },
+        smooth: {
+          enabled: true,
+          type: 'continuous',
+          roundness: 0.5
+        }
+      },
+      physics: {
+        forceAtlas2Based: {
+          gravitationalConstant: -50,
+          centralGravity: 0.01,
+          springLength: 100,
+          springConstant: 0.08
+        },
+        maxVelocity: 50,
+        solver: 'forceAtlas2Based',
+        timestep: 0.35,
+        stabilization: { iterations: 150 }
+      },
+      interaction: {
+        hover: true,
+        tooltipDelay: 200,
+        zoomView: true,
+        dragView: true
       }
     }
 
-    // Mouse interaction
-    function handleMouse(event: MouseEvent) {
-      const canvasEl = canvasRef.current
-      if (!canvasEl) return
-      const canvasRect = canvasEl.getBoundingClientRect()
-      const mx = event.clientX - canvasRect.left
-      const my = event.clientY - canvasRect.top
-      const found = hitTest(data.nodes, positions, mx, my)
-      if (hoveredNodeId.value !== found) hoveredNodeId.value = found
-      canvasEl.style.cursor = found ? 'pointer' : 'crosshair'
-    }
+    const network = new Network(container, networkData, options)
+    networkRef.current = network
 
-    function handleClick(event: MouseEvent) {
-      const canvasEl = canvasRef.current
-      if (!canvasEl) return
-      const canvasRect = canvasEl.getBoundingClientRect()
-      const mx = event.clientX - canvasRect.left
-      const my = event.clientY - canvasRect.top
-      const found = hitTest(data.nodes, positions, mx, my)
-      selectedNodeId.value = found
-      if (found && found.startsWith('agent:')) {
-        highlightedAgentId.value = found.slice(6)
+    network.on('click', (params) => {
+      if (params.nodes.length > 0) {
+        const found = params.nodes[0]
+        selectedNodeId.value = found
+        if (found && found.startsWith('agent:')) {
+          highlightedAgentId.value = found.slice(6)
+        } else {
+          highlightedAgentId.value = null
+        }
       } else {
+        selectedNodeId.value = null
         highlightedAgentId.value = null
       }
-    }
+    })
 
-    canvas.addEventListener('mousemove', handleMouse)
-    canvas.addEventListener('click', handleClick)
+    network.on('hoverNode', (params) => {
+      hoveredNodeId.value = params.node
+    })
+
+    network.on('blurNode', () => {
+      hoveredNodeId.value = null
+    })
+
     return () => {
-      canvas.removeEventListener('mousemove', handleMouse)
-      canvas.removeEventListener('click', handleClick)
+      network.destroy()
     }
-  }, [data, hoveredNodeId.value, selectedNodeId.value, highlightedAgentId.value])
-
-  const hoveredNode = hoveredNodeId.value
-    ? data.nodes.find(n => n.id === hoveredNodeId.value)
-    : null
+  }, [data])
 
   const selectedNode = selectedNodeId.value
     ? data.nodes.find(n => n.id === selectedNodeId.value)
@@ -269,16 +218,8 @@ export function GraphView({ data }: GraphViewProps) {
   }
 
   return html`
-    <div ref=${containerRef} class="relative w-full overflow-hidden bg-[#0f1117] my-3 rounded-xl">
-      <canvas ref=${canvasRef} class="block w-full cursor-crosshair" />
-      ${hoveredNode && !selectedNode ? html`
-        <div class="absolute bottom-3 left-3 flex items-center gap-3 py-2 px-3.5 rounded-[10px] bg-[rgba(15,23,42,0.92)] border border-[var(--slate-gray-20)] text-[13px] text-[var(--text-slate-light)] pointer-events-none">
-          <strong class="text-base text-[var(--text-near-white)]">${hoveredNode.label}</strong>
-          <span class="py-0.5 px-[7px] bg-[var(--slate-gray-15)] text-[11px] text-[var(--text-slate)] rounded-md">${kindLabel(hoveredNode.kind)}</span>
-          <span>중요도 ${(hoveredNode.semantic_weight ?? hoveredNode.weight).toFixed(1)}</span>
-          <span class="${hoveredNode.status === 'active' ? 'text-[var(--ok)]' : hoveredNode.status === 'offline' ? 'text-[var(--text-muted)]' : ''}">${statusLabel(hoveredNode.status)}</span>
-        </div>
-      ` : null}
+    <div class="relative w-full my-3 rounded-xl border border-[var(--card-border)] bg-[#0f1117]">
+      <div ref=${containerRef} class="w-full h-[480px]"></div>
     </div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1 px-1">
       ${[

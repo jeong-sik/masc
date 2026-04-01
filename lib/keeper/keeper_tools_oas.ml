@@ -148,7 +148,7 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
 let make_tools
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
-    ~(ctx_ref : Keeper_working_context.working_context ref)
+    ~(ctx_ref : Keeper_types.working_context ref)
     ?zone
     ()
   : Agent_sdk.Tool.t list =

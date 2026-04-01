@@ -2,16 +2,46 @@
     checkpoint management, compaction, room presence, system prompts,
     text processing, proactive prompt helpers, and proactive generation.
 
-    Pure types and context operations are provided by
-    [Keeper_working_context] (included below). This module adds
-    keeper-specific logic on top. *)
+    Working context types live in {!Keeper_types}.
+    Pure context operations (previously in Keeper_working_context)
+    are provided directly by this module. *)
 
 open Keeper_types
 open Keeper_memory
 
-(** {1 Re-exported from Keeper_working_context} *)
+(** {1 Working Context Types (re-exported from Keeper_types)} *)
 
-include module type of Keeper_working_context
+type working_context = Keeper_types.working_context
+
+type checkpoint = Keeper_types.checkpoint
+
+type session_context = Keeper_types.session_context
+
+(** {1 Working Context Operations} *)
+
+val text_of_message : Agent_sdk.Types.message -> string
+val msg_tokens : Agent_sdk.Types.message -> int
+val count_tokens : string -> Agent_sdk.Types.message list -> int
+val token_count : working_context -> int
+val message_count : working_context -> int
+val context_ratio : working_context -> float
+val exceeds_threshold : working_context -> float -> bool
+val create : system_prompt:string -> max_tokens:int -> working_context
+val set_system_prompt : working_context -> system_prompt:string -> working_context
+val append : working_context -> Agent_sdk.Types.message -> working_context
+val append_many : working_context -> Agent_sdk.Types.message list -> working_context
+val sync_oas_context : working_context -> working_context
+val role_to_string : Agent_sdk.Types.role -> string
+val role_of_string : string -> Agent_sdk.Types.role
+val message_to_json : Agent_sdk.Types.message -> Yojson.Safe.t
+val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
+val serialize_context : working_context -> string
+val deserialize_context : string -> max_tokens:int -> working_context
+val context_to_json : working_context -> Yojson.Safe.t
+val create_checkpoint : working_context -> generation:int -> checkpoint
+val restore_checkpoint : checkpoint -> max_tokens:int -> working_context
+val create_session : session_id:string -> base_dir:string -> session_context
+val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit
 
 (** {1 Inference Utilities} *)
 

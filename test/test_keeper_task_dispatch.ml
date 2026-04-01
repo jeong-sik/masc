@@ -11,7 +11,7 @@ let make_test_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 
 let make_ctx_work () =
-  Keeper_working_context.create ~system_prompt:"test" ~max_tokens:4000
+  Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
 
 (* Temp directory setup following test_keeper_tools_oas.ml pattern.
    Force filesystem backend by unsetting PG env vars. *)

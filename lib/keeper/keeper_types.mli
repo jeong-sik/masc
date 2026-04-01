@@ -213,3 +213,27 @@ type tool_call_entry = {
   mutable failures : int;
   mutable last_used_at : float;
 }
+
+(** {1 Working Context Types (moved from Keeper_working_context)} *)
+
+type working_context = {
+  system_prompt : string;
+  messages : Agent_sdk.Types.message list;
+  max_tokens : int;
+  context : Agent_sdk.Context.t;
+}
+
+type checkpoint = {
+  checkpoint_id : string;
+  timestamp : float;
+  generation : int;
+  message_count : int;
+  token_count : int;
+  serialized : string;
+}
+
+type session_context = {
+  session_id : string;
+  session_dir : string;
+  mutable checkpoints : checkpoint list;
+}

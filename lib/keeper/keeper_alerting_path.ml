@@ -95,7 +95,7 @@ let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
   | Unix.WSTOPPED sig_num ->
       `Assoc [("kind", `String "stopped"); ("signal", `Int sig_num)]
 
-let extract_user_messages (ctx_work : Keeper_working_context.working_context) : string list =
+let extract_user_messages (ctx_work : Keeper_types.working_context) : string list =
   ctx_work.messages
   |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
        if m.role = Agent_sdk.Types.User then

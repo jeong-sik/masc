@@ -17,6 +17,14 @@ let on_keeper_tool_call :
   (tool_name:string -> success:bool -> duration_ms:int -> unit) ref =
   ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
 
+(** Estimate total token count for a working context (system prompt + messages).
+    Mirrors [Keeper_exec_context.token_count] but avoids a dependency cycle. *)
+let count_context_tokens (ctx : working_context) =
+  Agent_sdk.Context_reducer.estimate_char_tokens ctx.system_prompt
+  + List.fold_left
+      (fun acc m -> acc + Agent_sdk.Context_reducer.estimate_message_tokens m)
+      0 ctx.messages
+
 let ensure_keeper_board_post_args ~author ~source = function
   | `Assoc fields ->
       let fields =
@@ -339,7 +347,7 @@ let lines_to_json ?(limit = max_int) (text : string) : Yojson.Safe.t =
 let execute_keeper_tool_call
     ~(config : Room.config)
     ~(meta : keeper_meta)
-    ~(ctx_work : Keeper_working_context.working_context)
+    ~(ctx_work : working_context)
     ~(name : string) ~(input : Yojson.Safe.t) : string =
   let args = input in
   let now_ts = Time_compat.now () in
@@ -363,16 +371,21 @@ let execute_keeper_tool_call
             if trimmed = "" then "No continuity snapshot available." else trimmed
         | Some snapshot -> keeper_state_snapshot_to_summary_text snapshot
       in
+      let ctx_tokens = count_context_tokens ctx_work in
+      let ctx_ratio =
+        if ctx_work.max_tokens = 0 then 0.0
+        else float_of_int ctx_tokens /. float_of_int ctx_work.max_tokens
+      in
       Yojson.Safe.to_string
         (`Assoc
           [
             ("name", `String meta.name);
             ("trace_id", `String meta.runtime.trace_id);
             ("generation", `Int meta.runtime.generation);
-            ("context_ratio", `Float (Keeper_working_context.context_ratio ctx_work));
-            ("context_tokens", `Int (Keeper_working_context.token_count ctx_work));
+            ("context_ratio", `Float ctx_ratio);
+            ("context_tokens", `Int ctx_tokens);
             ("context_max", `Int ctx_work.max_tokens);
-            ("message_count", `Int (Keeper_working_context.message_count ctx_work));
+            ("message_count", `Int ((List.length ctx_work.messages)));
             ("last_model_used", `String meta.runtime.usage.last_model_used);
             ( "continuity_state",
               match continuity with

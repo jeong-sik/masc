@@ -81,7 +81,7 @@ let compact_ctx (ctx : Keeper_exec_context.working_context) strategies =
     Context_compact_oas.compact
       ~system_prompt:ctx.system_prompt ~messages:ctx.messages ~strategies () in
   Keeper_exec_context.sync_oas_context
-    { ctx with Keeper_exec_context.messages }
+    { ctx with messages }
 (* ================================================================ *)
 
 let test_compact_prune_tool_outputs () =

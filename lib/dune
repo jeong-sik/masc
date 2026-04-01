@@ -440,7 +440,6 @@
    keeper_exec_persona
    keeper_fs
    keeper_identity
-   keeper_working_context
    keeper_checkpoint_store
    keeper_text_processing
    keeper_compaction
@@ -577,7 +576,6 @@
   keeper_exec_persona
   keeper_fs
   keeper_identity
-  keeper_working_context
   keeper_checkpoint_store
   keeper_text_processing
   keeper_compaction

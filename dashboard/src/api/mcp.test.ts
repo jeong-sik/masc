@@ -114,4 +114,61 @@ describe('callMcpTool', () => {
       }),
     )
   })
+
+  it('blocks subsequent calls after tools/call returns 403', async () => {
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-403' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('Forbidden', { status: 403, statusText: 'Forbidden' }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+
+    await expect(callMcpTool('masc_status', {})).rejects.toThrow(
+      'MCP 연결이 차단되었습니다',
+    )
+
+    fetchWithTimeout.mockClear()
+    await expect(callMcpTool('masc_status', {})).rejects.toThrow(
+      'MCP 연결이 차단되었습니다',
+    )
+    expect(fetchWithTimeout).not.toHaveBeenCalled()
+  })
+
+  it('throws on non-2xx initialize response without proceeding', async () => {
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response('Internal Server Error', { status: 500, statusText: 'Internal Server Error' }),
+    )
+
+    const { callMcpTool } = await import('./mcp')
+
+    await expect(callMcpTool('masc_status', {})).rejects.toThrow(
+      'POST /mcp initialize: 500',
+    )
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks subsequent calls after initialize returns 403', async () => {
+    fetchWithTimeout.mockResolvedValueOnce(
+      new Response('Forbidden', { status: 403, statusText: 'Forbidden' }),
+    )
+
+    const { callMcpTool } = await import('./mcp')
+
+    await expect(callMcpTool('masc_status', {})).rejects.toThrow(
+      'MCP 연결이 차단되었습니다',
+    )
+
+    fetchWithTimeout.mockClear()
+    await expect(callMcpTool('masc_status', {})).rejects.toThrow(
+      'MCP 연결이 차단되었습니다',
+    )
+    expect(fetchWithTimeout).not.toHaveBeenCalled()
+  })
 })

@@ -407,17 +407,17 @@ export function KeeperRuntimeActions({
           onClick=${() => {
             keeperBooting.value = { ...keeperBooting.value, [keeper.name]: true }
             void bootKeeper(keeper.name).then(res => {
-              if (res.ok) showToast(`${keeper.name} booted`, 'success')
-              else showToast(res.error ?? 'Boot failed', 'error')
+              if (res.ok) showToast(`${keeper.name} 기동됨`, 'success')
+              else showToast(res.error ?? '기동 실패', 'error')
             }).catch(err => {
-              showToast(err instanceof Error ? err.message : `Failed to boot ${keeper.name}`, 'error')
+              showToast(err instanceof Error ? err.message : `${keeper.name} 기동 실패`, 'error')
             }).finally(() => {
               keeperBooting.value = { ...keeperBooting.value, [keeper.name]: false }
             })
           }}
           disabled=${booting}
         >
-          ${booting ? 'Booting...' : 'Boot'}
+          ${booting ? '기동 중...' : '기동'}
         </button>
       ` : null}
       ${isRunning ? html`
@@ -431,7 +431,7 @@ export function KeeperRuntimeActions({
           }}
           disabled=${shuttingDown}
         >
-          ${shuttingDown ? 'Shutting down...' : 'Shutdown'}
+          ${shuttingDown ? '종료 중...' : '종료'}
         </button>
       ` : null}
       <button type="button"

@@ -146,9 +146,9 @@ export function SwarmLivePanels() {
                       </article>
                     `)}
                   </div>`
-                : html`<${EmptyState} message="slot telemetry가 아직 없습니다." compact />`}
+                : html`<${EmptyState} message="슬롯 데이터가 아직 없습니다" compact />`}
             `
-          : html`<${EmptyState} message="런타임 telemetry가 아직 없습니다." compact />`}
+          : html`<${EmptyState} message="런타임 데이터가 아직 없습니다" compact />`}
       </section>
 
       <section class="card rounded-xl min-h-[240px]">

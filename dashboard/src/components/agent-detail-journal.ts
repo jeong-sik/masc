@@ -14,7 +14,7 @@ export function AgentJournalStream({ agentName }: { agentName: string }) {
   return html`
     <${Card} title="실시간 활동 스트림">
       ${entries.length === 0
-        ? html`<${EmptyState} message="이 에이전트의 SSE 이벤트가 아직 없습니다. 대시보드 접속 후 발생한 이벤트만 표시됩니다." compact />`
+        ? html`<${EmptyState} message="아직 활동 기록이 없습니다" compact />`
         : html`
             <div class="flex flex-col gap-0.5 max-h-[280px] overflow-y-auto">
               ${entries.map((entry: JournalEntry, idx: number) => html`

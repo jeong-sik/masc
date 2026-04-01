@@ -88,7 +88,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
     return html`
       <div class="flex flex-col items-center gap-2 py-8 text-center">
         <div class="text-[var(--text-muted)] text-sm">이벤트 대기 중</div>
-        <div class="text-[var(--text-muted)] text-xs leading-relaxed max-w-[360px]">에이전트가 task claim, broadcast, board 게시 등 활동을 시작하면 시간순으로 여기에 표시됩니다. SSE 연결이 끊겨있으면 라이브 모니터 탭에서 연결 상태를 확인하세요.</div>
+        <div class="text-[var(--text-muted)] text-xs leading-relaxed max-w-[360px]">에이전트가 활동을 시작하면 시간순으로 여기에 표시됩니다. 연결이 끊겨있으면 라이브 모니터 탭에서 확인하세요.</div>
       </div>
     `
   }

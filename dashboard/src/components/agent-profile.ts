@@ -167,7 +167,7 @@ function timelineEventLabel(type: string): string {
     case 'task_started': return '시작'
     case 'task_completed': return '완료'
     case 'task_cancelled': return '취소'
-    case 'broadcast': return '방송'
+    case 'broadcast': return '공지'
     default: return type
   }
 }

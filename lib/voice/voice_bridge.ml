@@ -872,37 +872,33 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0)
       "rate"; "16k"; "channels"; "1";
       "silence"; "1"; "0.5"; "1%"; "1"; "2.0"; "1%" ]
   in
+  let cleanup () = try Sys.remove audio_file with Sys_error _ -> () in
   play_tone 880.0;
-  let record_result =
-    try
-      let status, _output =
-        Process_eio.run_argv_with_stdin_and_status
-          ~timeout_sec:(timeout_sec +. 5.0)
-          ~stdin_content:"" rec_argv
-      in
-      match status with
-      | Unix.WEXITED 0 -> Ok ()
-      | Unix.WEXITED code -> Error (Printf.sprintf "rec exit %d" code)
-      | _ -> Error "rec process failed"
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-      Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
-  in
-  play_tone 440.0;
-  match record_result with
-  | Error err ->
-      (try Sys.remove audio_file with Sys_error _ -> ());
-      Error err
-  | Ok () ->
-      let file_exists =
-        try (Unix.stat audio_file).st_size > 100
-        with Unix.Unix_error _ -> false
-      in
-      if not file_exists then (
-        (try Sys.remove audio_file with Sys_error _ -> ());
-        Error "no speech detected or recording too short")
-      else
-        let result = transcribe_audio ~audio_file ?language_code () in
-        (try Sys.remove audio_file with Sys_error _ -> ());
-        result
+  Fun.protect ~finally:cleanup (fun () ->
+    let record_result =
+      try
+        let status, _output =
+          Process_eio.run_argv_with_stdin_and_status
+            ~timeout_sec:(timeout_sec +. 5.0)
+            ~stdin_content:"" rec_argv
+        in
+        match status with
+        | Unix.WEXITED 0 -> Ok ()
+        | Unix.WEXITED code -> Error (Printf.sprintf "rec exit %d" code)
+        | _ -> Error "rec process failed"
+      with exn ->
+        Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
+    in
+    play_tone 440.0;
+    match record_result with
+    | Error err -> Error err
+    | Ok () ->
+        let file_exists =
+          try (Unix.stat audio_file).st_size > 100
+          with Unix.Unix_error _ -> false
+        in
+        if not file_exists then
+          Error "no speech detected or recording too short"
+        else
+          transcribe_audio ~audio_file ?language_code ()
+  )

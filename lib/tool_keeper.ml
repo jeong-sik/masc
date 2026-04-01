@@ -281,6 +281,9 @@ let handle_voice_ping_pong ctx args : tool_result =
             if k = "name" then (k, `String keeper_name) else (k, v)) fields)
       | other -> other
     in
+    if ctx.net = None then
+      (false, "Error: voice ping-pong requires network for TTS")
+    else
     match ensure_keeper_exists ctx trimmed_args with
     | Error err -> (false, err)
     | Ok _ ->

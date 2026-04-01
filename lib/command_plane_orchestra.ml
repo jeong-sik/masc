@@ -552,8 +552,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
     detachment_rows
     |> List.filter (fun det ->
            let status = string_opt det "status" |> Option.value ~default:"active" in
-           not (Dashboard_utils.is_session_terminal status
-                || status = "stopped"))
+           not (Dashboard_utils.is_session_terminal status))
   in
   let swarm_workers = list_member swarm_json "workers" in
   let actual_worker_names =

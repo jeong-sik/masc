@@ -125,7 +125,7 @@ let is_health_at_risk health =
   List.mem health [ "bad"; "risk"; "critical" ]
 
 let is_session_terminal status =
-  List.mem status [ "completed"; "cancelled"; "failed" ]
+  List.mem status [ "completed"; "cancelled"; "failed"; "stopped" ]
 
 let is_session_blocked status =
   List.mem status [ "failed"; "cancelled"; "interrupted" ]

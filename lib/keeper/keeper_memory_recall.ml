@@ -261,48 +261,24 @@ let keeper_reflection_payload_of_auto_rules (e : keeper_auto_rule_eval) : Yojson
 
     See: Anthropic "Harness Design" blog — Opus 4.6 removed context
     anxiety, but smaller models still exhibit it. *)
-type model_family =
-  | Small_local   (** Local LLMs via llama.cpp — limited context handling *)
-  | Medium_cloud  (** Mid-tier cloud models — moderate context handling *)
-  | Large_cloud   (** Top-tier models (Opus, Gemini Ultra) — strong context *)
-  | Unknown       (** Unrecognized model — use configured defaults *)
-
-let classify_model_family (model_id : string) : model_family =
-  let id = String.lowercase_ascii model_id in
-  let contains needle =
-    let nlen = String.length needle in
-    let hlen = String.length id in
-    if nlen > hlen then false
-    else
-      let rec scan i =
-        if i > hlen - nlen then false
-        else if String.sub id i nlen = needle then true
-        else scan (i + 1)
-      in scan 0
-  in
-  if contains "qwen" || contains "llama" || contains "mistral"
-     || contains "phi-" || contains "deepseek" then
-    Small_local
-  else if contains "opus" || contains "gemini-2" || contains "gpt-4o" then
-    Large_cloud
-  else if contains "sonnet" || contains "haiku" || contains "gemini"
-          || contains "glm" || contains "gpt-4" then
-    Medium_cloud
-  else
-    Unknown
-
-(** Adjust compaction/handoff thresholds based on model family.
+(** Adjust compaction/handoff thresholds based on model metadata from OAS.
     Returns [(ratio_gate_multiplier, handoff_threshold_multiplier)].
 
-    Small local models: lower thresholds (0.75x) → earlier handoff.
-    Large cloud models: higher thresholds (1.15x, clamped to 0.95) → prefer compaction.
-    Medium/Unknown: no adjustment (1.0x). *)
-let model_threshold_multipliers (family : model_family) : float * float =
-  match family with
-  | Small_local  -> (0.75, 0.75)   (* 0.70 * 0.75 = 0.525, 0.85 * 0.75 = 0.6375 *)
-  | Large_cloud  -> (1.15, 1.10)   (* 0.70 * 1.15 = 0.805, 0.85 * 1.10 = 0.935 *)
-  | Medium_cloud -> (1.0, 1.0)
-  | Unknown      -> (1.0, 1.0)
+    Uses concrete parameters (context_window, is_local) from
+    [Llm_provider.Model_meta] instead of tier classification.
+
+    - Local models with small context (< 32K): 0.75x — earlier handoff.
+    - Models with large context (>= 200K): 1.15x — prefer compaction.
+    - Everything else: 1.0x (no adjustment). *)
+let model_threshold_multipliers_of_model_id (model_id : string) : float * float =
+  let meta = Llm_provider.Model_meta.for_model_id model_id in
+  let ctx = meta.context_window in
+  if meta.is_local && ctx < 32_000 then
+    (0.75, 0.75)
+  else if ctx >= 200_000 then
+    (1.15, 1.10)
+  else
+    (1.0, 1.0)
 
 let evaluate_keeper_auto_rules
     ~(meta : keeper_meta)
@@ -316,7 +292,7 @@ let evaluate_keeper_auto_rules
   (* Apply model-aware threshold adjustment when model_id is provided *)
   let (ratio_mult, handoff_mult) =
     match model_id with
-    | Some id -> model_threshold_multipliers (classify_model_family id)
+    | Some id -> model_threshold_multipliers_of_model_id id
     | None -> (1.0, 1.0)
   in
   let ratio_gate = Float.min 0.95 (meta.compaction.ratio_gate *. ratio_mult) in
@@ -480,7 +456,7 @@ let learned_policy_auto_rules
     ?(model_id : string option) () : keeper_auto_rule_eval =
   let (ratio_mult, handoff_mult) =
     match model_id with
-    | Some id -> model_threshold_multipliers (classify_model_family id)
+    | Some id -> model_threshold_multipliers_of_model_id id
     | None -> (1.0, 1.0)
   in
   let ratio_gate = Float.min 0.95 (meta.compaction.ratio_gate *. ratio_mult) in

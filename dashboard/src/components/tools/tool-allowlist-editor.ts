@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useState, useMemo } from 'preact/hooks'
+import { useCombobox } from 'downshift'
 import { editKeeperTools, type ToolEditResponse } from '../../api/keeper'
 import { toolsData } from './tool-state'
 
@@ -14,11 +15,6 @@ const denyItems = signal<string[]>([])
 const saving = signal(false)
 const lastError = signal<string | null>(null)
 const lastSuccess = signal<string | null>(null)
-
-// Per-section search queries
-const alsoAllowQuery = signal('')
-const customAllowQuery = signal('')
-const denyQuery = signal('')
 
 // Bulk text input: which section is in text mode (null = none)
 const textInputSection = signal<'also_allow' | 'custom' | 'deny' | null>(null)
@@ -72,9 +68,6 @@ function resetEditorState(params: {
   saving.value = false
   lastError.value = null
   lastSuccess.value = null
-  alsoAllowQuery.value = ''
-  customAllowQuery.value = ''
-  denyQuery.value = ''
   textInputSection.value = null
   textInputBuffer.value = ''
 }
@@ -113,31 +106,61 @@ function ReadOnlyChip({ name }: { name: string }) {
   `
 }
 
-/** Search-based tool picker with autocomplete from tool inventory. */
+/** Search-based tool picker using downshift useCombobox for keyboard nav + ARIA. */
 function ToolSearchPicker({
   items,
-  querySig,
   onAdd,
   onRemove,
   placeholder,
   excludeItems,
 }: {
   items: string[]
-  querySig: typeof alsoAllowQuery
   onAdd: (name: string) => void
   onRemove: (name: string) => void
   placeholder: string
   excludeItems?: string[]
 }) {
-  const q = querySig.value.toLowerCase().trim()
-  const excluded = new Set([...items, ...(excludeItems ?? [])])
+  const [inputValue, setInputValue] = useState('')
+  const excluded = useMemo(() => new Set([...items, ...(excludeItems ?? [])]), [items, excludeItems])
   const descMap = inventoryDescMap.value
 
-  const suggestions = q.length > 0
-    ? inventoryNames.value
-        .filter(name => !excluded.has(name) && name.toLowerCase().includes(q))
-        .slice(0, 10)
-    : []
+  const filtered = useMemo(() => {
+    const q = inputValue.toLowerCase().trim()
+    if (q.length === 0) return []
+    return inventoryNames.value
+      .filter(name => !excluded.has(name) && name.toLowerCase().includes(q))
+      .slice(0, 15)
+  }, [inputValue, excluded])
+
+  const {
+    isOpen,
+    highlightedIndex,
+    getMenuProps,
+    getInputProps,
+    getItemProps,
+  } = useCombobox({
+    items: filtered,
+    inputValue,
+    itemToString: item => item ?? '',
+    onInputValueChange: ({ inputValue: v }) => setInputValue(v ?? ''),
+    onSelectedItemChange: ({ selectedItem }) => {
+      if (selectedItem) {
+        onAdd(selectedItem)
+        setInputValue('')
+      }
+    },
+    stateReducer: (_state, { type, changes }) => {
+      if (type === useCombobox.stateChangeTypes.InputKeyDownEnter) {
+        if (changes.selectedItem == null && inputValue.trim()) {
+          onAdd(inputValue.trim())
+          return { ...changes, inputValue: '', isOpen: false }
+        }
+      }
+      return changes
+    },
+  })
+
+  const showMenu = isOpen && (filtered.length > 0 || inputValue.trim().length > 1)
 
   return html`
     <div class="flex flex-col gap-1.5">
@@ -153,59 +176,42 @@ function ToolSearchPicker({
 
       <div class="relative">
         <input
-          type="text"
-          class="w-full px-3 py-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
-          placeholder=${placeholder}
-          value=${querySig.value}
-          onInput=${(e: Event) => { querySig.value = (e.target as HTMLInputElement).value }}
-          onKeyDown=${(e: KeyboardEvent) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              const val = querySig.value.trim()
-              const first = suggestions[0]
-              if (first) {
-                onAdd(first)
-              } else if (val) {
-                onAdd(val)
-              }
-              querySig.value = ''
-            } else if (e.key === 'Escape') {
-              querySig.value = ''
-              ;(e.target as HTMLInputElement).blur()
-            }
-          }}
+          ...${getInputProps({
+            placeholder,
+            class: 'w-full px-3 py-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]',
+          })}
         />
 
-        ${suggestions.length > 0
-          ? html`
-            <div class="absolute z-10 top-full left-0 right-0 mt-1 max-h-[180px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] shadow-lg backdrop-blur-sm">
-              ${suggestions.map((name, idx) => html`
-                <button type="button"
-                  class=${`w-full flex items-start gap-2 text-left px-3 py-1.5 cursor-pointer transition-colors ${
-                    idx === 0
-                      ? 'bg-[rgba(71,184,255,0.08)] hover:bg-[rgba(71,184,255,0.16)]'
-                      : 'hover:bg-[rgba(71,184,255,0.12)]'
-                  }`}
-                  onMouseDown=${(e: MouseEvent) => e.preventDefault()}
-                  onClick=${() => { onAdd(name); querySig.value = '' }}
-                >
-                  <span class="text-[11px] text-[var(--text-body)] font-medium shrink-0">${name}</span>
-                  ${descMap.has(name)
-                    ? html`<span class="text-[10px] text-[var(--text-muted)] truncate">${descMap.get(name)}</span>`
-                    : null}
-                </button>
-              `)}
-            </div>
-          `
-          : q.length > 1
-            ? html`
-              <div class="absolute z-10 top-full left-0 right-0 mt-1 px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] text-[11px] text-[var(--text-muted)]">
-                ${inventoryNames.value.length === 0
-                  ? '도구 목록 로딩 중... Enter로 직접 추가 가능'
-                  : '일치하는 도구 없음. Enter로 직접 추가 가능'}
-              </div>
-            `
-            : null}
+        <ul ...${getMenuProps({
+          class: showMenu
+            ? 'absolute z-10 top-full left-0 right-0 mt-1 max-h-[180px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] shadow-lg backdrop-blur-sm list-none m-0 p-0'
+            : 'hidden',
+        })}>
+          ${showMenu && filtered.length > 0
+            ? filtered.map((name, idx) => html`
+              <li
+                ...${getItemProps({ item: name, index: idx })}
+                class=${`w-full flex items-start gap-2 text-left px-3 py-1.5 cursor-pointer transition-colors ${
+                  highlightedIndex === idx
+                    ? 'bg-[rgba(71,184,255,0.16)] text-[#9ad9ff]'
+                    : 'hover:bg-[rgba(71,184,255,0.08)]'
+                }`}
+              >
+                <span class="text-[11px] text-[var(--text-body)] font-medium shrink-0">${name}</span>
+                ${descMap.has(name)
+                  ? html`<span class="text-[10px] text-[var(--text-muted)] truncate">${descMap.get(name)}</span>`
+                  : null}
+              </li>
+            `)
+            : showMenu && filtered.length === 0
+              ? html`
+                <li class="px-3 py-2 text-[11px] text-[var(--text-muted)]">
+                  ${inventoryNames.value.length === 0
+                    ? '도구 목록 로딩 중... Enter로 직접 추가 가능'
+                    : '일치하는 도구 없음. Enter로 직접 추가 가능'}
+                </li>`
+              : null}
+        </ul>
       </div>
     </div>
   `
@@ -396,7 +402,7 @@ export function ToolAllowlistEditor({
               : html`
                 <${ToolSearchPicker}
                   items=${alsoAllowItems.value}
-                  querySig=${alsoAllowQuery}
+
                   onAdd=${(name: string) => addToList(alsoAllowItems, name)}
                   onRemove=${(name: string) => removeFromList(alsoAllowItems, name)}
                   placeholder="추가 허용 도구 검색..."
@@ -439,7 +445,7 @@ export function ToolAllowlistEditor({
               : html`
                 <${ToolSearchPicker}
                   items=${customAllowItems.value}
-                  querySig=${customAllowQuery}
+
                   onAdd=${(name: string) => addToList(customAllowItems, name)}
                   onRemove=${(name: string) => removeFromList(customAllowItems, name)}
                   placeholder="허용 도구 검색..."
@@ -462,7 +468,6 @@ export function ToolAllowlistEditor({
           : html`
             <${ToolSearchPicker}
               items=${denyItems.value}
-              querySig=${denyQuery}
               onAdd=${(name: string) => addToList(denyItems, name)}
               onRemove=${(name: string) => removeFromList(denyItems, name)}
               placeholder="차단 도구 검색..."

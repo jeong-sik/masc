@@ -120,7 +120,8 @@ let run_stt_multipart_request (req : Provider_adapter.voice_stt_request) =
   let field_name, file_path = req.file_field in
   let file_arg = [ "-F"; Printf.sprintf "%s=@%s" field_name file_path ] in
   let argv =
-    [ "curl"; "-sS"; "--max-time"; "30"; "-X"; "POST"; req.url ]
+    [ "curl"; "-sS"; "--fail-with-body"; "--max-time"; "30";
+      "-X"; "POST"; req.url ]
     @ header_args @ form_args @ file_arg
   in
   let status, body =
@@ -130,14 +131,12 @@ let run_stt_multipart_request (req : Provider_adapter.voice_stt_request) =
   match status with
   | Unix.WEXITED 0 -> (
       match Yojson.Safe.from_string body with
-      | json ->
-          (* Check for HTTP error responses — curl exit 0 does not imply 2xx *)
-          (match Yojson.Safe.Util.member "error" json with
-           | `Null -> Ok json
-           | err -> Error (Printf.sprintf "STT API error: %s"
-                     (Yojson.Safe.to_string err)))
+      | json -> Ok json
       | exception Yojson.Json_error msg ->
           Error (Printf.sprintf "STT response parse error: %s" msg))
+  | Unix.WEXITED 22 ->
+      Error (Printf.sprintf "STT HTTP error: %s"
+        (if String.length body > 200 then String.sub body 0 200 else body))
   | Unix.WEXITED 28 -> Error "STT request timed out"
   | Unix.WEXITED code -> Error (Printf.sprintf "STT curl exit %d" code)
   | _ -> Error "STT curl process failed"

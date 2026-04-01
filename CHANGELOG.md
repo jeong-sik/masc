@@ -1,6 +1,22 @@
 # Changelog
 
 
+## [2.201.0] - 2026-04-01
+
+### Added
+- **Tool access policy SSOT** — centralize tool access policy (#4339).
+- **Keeper voice listen STT** — add STT + fix OAS SDK drift (#4332).
+- **Loopback dev shortcut** — add loopback local dev launcher (#4338).
+
+### Changed
+- **OAS SDK v0.99.7** — bump agent_sdk pin (#4345).
+- **Test env isolation** — scrub MASC_BASE_PATH from test env (#4337, #4347).
+
+### Fixed
+- **Dashboard board markdown** — render board markdown posts (#4334).
+- **CP snapshot stalls** — tail-bounded reads for event/operator logs (#4348).
+- **run-local.sh** — stale binary, empty env, personas coupling fixes (#4346).
+
 ## [2.200.0] - 2026-04-01
 
 ### Added

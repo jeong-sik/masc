@@ -139,9 +139,6 @@ let model_id_of_label label =
 
 let auth_kind_for_provider provider =
   match provider with
-  | "claude-api" -> "api_key:ANTHROPIC_API_KEY"
-  | "codex-api" -> "api_key:OPENAI_API_KEY"
-  | "glm" -> "api_key:ZAI_API_KEY"
   | "gemini-api" -> (
       match Provider_adapter.resolve_gemini_direct_auth () with
       | Provider_adapter.Gemini_api_key -> "api_key:GEMINI_API_KEY"
@@ -149,8 +146,7 @@ let auth_kind_for_provider provider =
           Printf.sprintf "vertex_adc:%s:%s" project location
       | Provider_adapter.Gemini_auth_missing _ ->
           "vertex_adc:GOOGLE_CLOUD_PROJECT:GOOGLE_CLOUD_LOCATION")
-  | "llama" -> "none"
-  | _ -> "unknown"
+  | _ -> Provider_adapter.auth_kind_for_canonical_name provider
 
 let endpoint_url_for_provider provider =
   match provider with
@@ -212,7 +208,7 @@ let llama_snapshot () =
 let direct_provider_snapshot provider =
   match provider with
   | "claude-api" ->
-      let available = Provider_adapter.env_present "ANTHROPIC_API_KEY" in
+      let available = Provider_adapter.provider_auth_available "claude-api" in
       let default_model = default_model_for_provider provider in
       {
         provider;
@@ -229,7 +225,7 @@ let direct_provider_snapshot provider =
         note = None;
       }
   | "codex-api" ->
-      let available = Provider_adapter.env_present "OPENAI_API_KEY" in
+      let available = Provider_adapter.provider_auth_available "codex-api" in
       let default_model = default_model_for_provider provider in
       {
         provider;
@@ -246,7 +242,7 @@ let direct_provider_snapshot provider =
         note = None;
       }
   | "glm" ->
-      let available = Provider_adapter.env_present "ZAI_API_KEY" in
+      let available = Provider_adapter.provider_auth_available "glm" in
       let default_model = default_model_for_provider provider in
       {
         provider;

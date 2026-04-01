@@ -226,6 +226,30 @@ let test_realtime_transports_fall_back_to_repo_config_when_home_missing () =
         (contains_substring captured
            ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config")))
 
+let test_inherited_base_path_with_dual_masc_roots_is_sanitized () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let script = Filename.concat dir "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe dir;
+      let stale_root = Filename.concat dir "stale-root" in
+      mkdir_p (Filename.concat stale_root ".masc");
+      let capture = Filename.concat dir "captured-sanitized.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("MASC_BASE_PATH", stale_root);
+            ]
+          (Printf.sprintf "%s --http --port 9960" (quote script))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "inherited base path corrected to script root" true
+        (contains_substring captured ("MASC_BASE_PATH=" ^ dir)))
+
 let test_worktree_prefers_local_build_over_workspace_build () =
   with_temp_dir "start-masc-script" (fun dir ->
       let repo_root = Filename.concat dir "repo-root" in
@@ -272,6 +296,8 @@ let () =
           test_case "realtime transports fall back to repo config when home missing"
             `Quick
             test_realtime_transports_fall_back_to_repo_config_when_home_missing;
+          test_case "inherited base path with dual .masc roots is sanitized" `Quick
+            test_inherited_base_path_with_dual_masc_roots_is_sanitized;
           test_case "worktree prefers local build over workspace build" `Quick
             test_worktree_prefers_local_build_over_workspace_build;
         ] );

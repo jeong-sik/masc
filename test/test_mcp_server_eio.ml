@@ -563,6 +563,18 @@ let test_handle_request_tools_list () =
     true
     (List.mem "masc_board_post" names);
   Alcotest.(check bool)
+    "contains masc_voice_agent (public surface)"
+    true
+    (List.mem "masc_voice_agent" names);
+  Alcotest.(check bool)
+    "contains masc_voice_speak (public surface)"
+    true
+    (List.mem "masc_voice_speak" names);
+  Alcotest.(check bool)
+    "contains masc_voice_ping_pong (public surface)"
+    true
+    (List.mem "masc_voice_ping_pong" names);
+  Alcotest.(check bool)
     "board_search hidden from public surface"
     false
     (List.mem "masc_board_search" names);
@@ -803,7 +815,13 @@ let test_handle_request_tools_list_managed_profile () =
                  Alcotest.(check bool) "omits raw masc_status" false
                    (List.mem "masc_status" names);
                  Alcotest.(check bool) "omits raw masc_transition" false
-                   (List.mem "masc_transition" names)
+                   (List.mem "masc_transition" names);
+                 Alcotest.(check bool) "includes managed voice agent" true
+                   (List.mem "masc_voice_agent" names);
+                 Alcotest.(check bool) "includes managed voice speak" true
+                   (List.mem "masc_voice_speak" names);
+                 Alcotest.(check bool) "includes managed voice ping pong" true
+                   (List.mem "masc_voice_ping_pong" names)
              | _ -> Alcotest.fail "tools not a list")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");

@@ -114,6 +114,11 @@ let public_mcp_surface_tools =
     (* Keeper interaction *)
     "masc_keeper_msg"; "masc_keeper_list"; "masc_keeper_status";
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
+    (* Voice *)
+    "masc_voice_agent"; "masc_voice_sessions"; "masc_voice_speak";
+    "masc_voice_session_start"; "masc_voice_session_end";
+    "masc_voice_conference_start"; "masc_voice_conference_end";
+    "masc_voice_ping_pong";
     (* Board *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote"; "masc_board_delete";
@@ -132,6 +137,10 @@ let spawned_agent_surface_tools =
     "masc_task_history"; "masc_broadcast"; "masc_join"; "masc_leave";
     "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
     "masc_messages";
+    "masc_voice_agent"; "masc_voice_sessions"; "masc_voice_speak";
+    "masc_voice_session_start"; "masc_voice_session_end";
+    "masc_voice_conference_start"; "masc_voice_conference_end";
+    "masc_voice_ping_pong";
     "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
     "masc_handover_create"; "masc_handover_list"; "masc_handover_claim";
     "masc_handover_get";

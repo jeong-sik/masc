@@ -498,6 +498,11 @@ let test_permission_for_tool_voice_speak () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
+let test_permission_for_tool_voice_ping_pong () =
+  match Auth.permission_for_tool "masc_voice_ping_pong" with
+  | Some Types.CanBroadcast -> ()
+  | _ -> fail "expected CanBroadcast"
+
 let test_permission_for_tool_autoresearch_status () =
   match Auth.permission_for_tool "masc_autoresearch_status" with
   | Some Types.CanReadState -> ()
@@ -692,6 +697,7 @@ let () =
       test_case "persona_list" `Quick test_permission_for_tool_persona_list;
       test_case "voice_sessions" `Quick test_permission_for_tool_voice_sessions;
       test_case "voice_speak" `Quick test_permission_for_tool_voice_speak;
+      test_case "voice_ping_pong" `Quick test_permission_for_tool_voice_ping_pong;
       test_case "autoresearch_status" `Quick
         test_permission_for_tool_autoresearch_status;
       test_case "autoresearch_start" `Quick

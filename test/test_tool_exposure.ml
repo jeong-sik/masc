@@ -222,11 +222,11 @@ let () =
                   Tool_catalog.public_mcp_tools
               in
               check (list string) "missing from registry" [] missing);
-          test_case "public surface count is between 30 and 40" `Quick
+          test_case "public surface count is between 30 and 50" `Quick
             (fun () ->
               let count = List.length Tool_catalog.public_mcp_tools in
-              check bool "count in range"
-                true (count >= 30 && count <= 40));
+              check bool "count is within expected range"
+                true (count >= 30 && count <= 50));
           test_case "is_public_mcp returns true for listed tools" `Quick
             (fun () ->
               List.iter

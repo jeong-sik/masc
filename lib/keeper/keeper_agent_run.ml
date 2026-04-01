@@ -82,18 +82,22 @@ let normalize_response_text
              (String.concat ", " tool_names))
 
 let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
-  let log =
-    match proof.result_status with
-    | Agent_sdk.Cdal_proof.Completed -> Log.Keeper.debug
-    | Agent_sdk.Cdal_proof.Errored
-    | Agent_sdk.Cdal_proof.Timed_out
-    | Agent_sdk.Cdal_proof.Cancelled -> Log.Keeper.warn
-  in
-  log "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
-    keeper_name proof.run_id
-    (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
-    (Agent_sdk.Cdal_proof.show_result_status proof.result_status)
-    (List.length proof.raw_evidence_refs)
+  match proof.result_status with
+  | Agent_sdk.Cdal_proof.Completed ->
+      if Keeper_types_profile.keeper_debug then
+        Log.Keeper.debug "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
+          keeper_name proof.run_id
+          (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
+          (Agent_sdk.Cdal_proof.show_result_status proof.result_status)
+          (List.length proof.raw_evidence_refs)
+  | Agent_sdk.Cdal_proof.Errored
+  | Agent_sdk.Cdal_proof.Timed_out
+  | Agent_sdk.Cdal_proof.Cancelled ->
+      Log.Keeper.warn "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
+        keeper_name proof.run_id
+        (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
+        (Agent_sdk.Cdal_proof.show_result_status proof.result_status)
+        (List.length proof.raw_evidence_refs)
 
 let log_keeper_contract_verdict
     ~(keeper_name : string)
@@ -127,11 +131,12 @@ let log_keeper_memory_write
     ~(keeper_name : string)
     ~(notes_written : int)
     ~(kinds_written : string list) =
-  let log =
-    if notes_written >= 10 then Log.Keeper.info else Log.Keeper.debug
-  in
-  log "keeper:%s memory_write: %d notes, kinds=[%s]"
-    keeper_name notes_written (String.concat "," kinds_written)
+  if notes_written >= 10 then
+    Log.Keeper.info "keeper:%s memory_write: %d notes, kinds=[%s]"
+      keeper_name notes_written (String.concat "," kinds_written)
+  else if Keeper_types_profile.keeper_debug then
+    Log.Keeper.debug "keeper:%s memory_write: %d notes, kinds=[%s]"
+      keeper_name notes_written (String.concat "," kinds_written)
 
 (** Run a single keeper turn via OAS Agent.run().
 

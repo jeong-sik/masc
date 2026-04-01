@@ -92,14 +92,9 @@ val keeper_reflection_payload_of_auto_rules :
 
 (** {1 Model-Aware Threshold Adjustment} *)
 
-type model_family =
-  | Small_local
-  | Medium_cloud
-  | Large_cloud
-  | Unknown
-
-val classify_model_family : string -> model_family
-val model_threshold_multipliers : model_family -> float * float
+(** Compute threshold multipliers from OAS [Llm_provider.Model_meta] parameters.
+    Uses [context_window] and [is_local] instead of model name matching. *)
+val model_threshold_multipliers_of_model_id : string -> float * float
 
 val evaluate_keeper_auto_rules :
   meta:keeper_meta ->

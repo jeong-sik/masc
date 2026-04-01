@@ -53,11 +53,11 @@ Defaults:
 - local-dev personas root: `<target>/.masc/config/personas`
 - local-dev transports: HTTP on, gRPC/WS/WebRTC off
 
-메모:
+Notes:
 
-- target 기준 기본 포트 확인: `scripts/run-local.sh --print-port --target-dir /path/to/project`
-- 고정 포트가 필요하면 `scripts/run-local.sh --target-dir /path/to/project --port 94xx`
-- shared repo/full-runtime 경로는 `./start-masc-mcp.sh --http`를 계속 사용한다.
+- Check the default port for a target: `scripts/run-local.sh --print-port --target-dir /path/to/project`
+- To use a fixed port: `scripts/run-local.sh --target-dir /path/to/project --port 94xx`
+- For shared repo/full-runtime paths, continue using `./start-masc-mcp.sh --http`.
 
 If you bind to a non-loopback address such as `0.0.0.0`, treat that as a remote exposure path and configure auth first. See [docs/REMOTE-MCP-OPERATOR.md](docs/REMOTE-MCP-OPERATOR.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 
@@ -115,9 +115,9 @@ Local full-surface MCP example:
 }
 ```
 
-dir-local local-dev에서는 `8935` 대신 `scripts/run-local.sh --print-port --target-dir ...` 출력값으로 바꾼다.
+For a dir-local `local-dev` environment, replace `8935` with the output of `scripts/run-local.sh --print-port --target-dir ...`.
 
-메모:
+Notes:
 
 - Normal local use starts with `/mcp`.
 - Remote supervision uses bearer-token `/mcp/operator` and the reduced operator profile.
@@ -161,11 +161,12 @@ Common entrypoints:
 
 The dashboard is a read / operate UI. Canonical write and control paths remain MCP tools.
 
-- 대시보드는 read/operate UI이고, canonical write/control path는 MCP입니다.
-- `scripts/run-local.sh`는 dashboard를 자동으로 빌드하지 않습니다. 필요할 때만 `--build-dashboard`를 붙이세요.
-- `start-masc-mcp.sh`는 `pnpm` 또는 `corepack pnpm`이 있을 때 dashboard SPA를 자동으로 빌드합니다.
-- dev server를 따로 띄울 때는 `PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"` 후 `cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" pnpm run dev`를 사용하세요.
-- 수동 재빌드가 필요하면 `cd dashboard && pnpm run build`를 실행하세요.
+- `scripts/run-local.sh` does not build the dashboard automatically. Append `--build-dashboard` only when needed.
+- `start-masc-mcp.sh` automatically builds the dashboard SPA if `pnpm` or `corepack pnpm` is available.
+- To run the dev server separately: 
+  `PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"`
+  `cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:${PORT}" pnpm run dev`
+- For manual rebuilds, run `cd dashboard && pnpm run build`.
 
 ## Verification
 

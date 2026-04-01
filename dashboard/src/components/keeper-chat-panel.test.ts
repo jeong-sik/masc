@@ -25,6 +25,16 @@ describe('isKeeperTextContentEvent', () => {
     const event: KeeperChatStreamEvent = { type: 'TEXT_MESSAGE_CONTENT' }
     expect(isKeeperTextContentEvent(event)).toBe(false)
   })
+
+  it('rejects text content events with empty string delta', () => {
+    const event: KeeperChatStreamEvent = { type: 'TEXT_MESSAGE_CONTENT', delta: '' }
+    expect(isKeeperTextContentEvent(event)).toBe(false)
+  })
+
+  it('rejects text content events with non-string delta', () => {
+    const event = { type: 'TEXT_MESSAGE_CONTENT', delta: 123 } as unknown as KeeperChatStreamEvent
+    expect(isKeeperTextContentEvent(event)).toBe(false)
+  })
 })
 
 describe('normalizeKeeperChatErrorValue', () => {

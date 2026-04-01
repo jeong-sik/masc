@@ -49,7 +49,9 @@ function toConversationEntry(
   }
 }
 
-export function isKeeperTextContentEvent(event: KeeperChatStreamEvent): boolean {
+export function isKeeperTextContentEvent(
+  event: KeeperChatStreamEvent,
+): event is KeeperChatStreamEvent & { type: 'TEXT_MESSAGE_CONTENT' | 'TEXT_DELTA'; delta: string } {
   return (
     (event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'TEXT_DELTA')
     && typeof event.delta === 'string'

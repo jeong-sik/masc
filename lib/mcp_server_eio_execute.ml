@@ -628,14 +628,17 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
      Validate). If mint fails, the tool is truly unknown. *)
   match Tool_dispatch.mint_token ~name with
   | Error reason ->
-    (false, Printf.sprintf "Unknown tool: %s (%s)" name reason)
+      (false, Printf.sprintf "Unknown tool: %s (%s)" name reason)
   | Ok _token ->
-  let tag_result =
-    match Tool_dispatch.lookup_tag name with
-    | Some tag -> dispatch_by_tag tag
-    | None -> None
-  in
-  match tag_result with
-  | Some result -> result
-  | None ->
-    (false, Printf.sprintf "Unknown tool: %s (no tag after mint)" name)
+      (* Token proves the name is registered. lookup_tag None is defensive:
+         both mint_token and lookup_tag check tag_registry, so None here
+         would indicate a registration inconsistency, not a user error. *)
+      let tag_result =
+        match Tool_dispatch.lookup_tag name with
+        | Some tag -> dispatch_by_tag tag
+        | None -> None
+      in
+      (match tag_result with
+       | Some result -> result
+       | None ->
+           (false, Printf.sprintf "Unknown tool: %s (no tag after mint)" name))

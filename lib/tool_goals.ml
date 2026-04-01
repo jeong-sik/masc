@@ -267,9 +267,9 @@ let handle_goal_list ctx args =
           ] )
 
 let handle_goal_snapshot ctx args =
-  let mode_raw = get_string args "mode" "daily" in
-  match Goal_store.parse_refresh_mode mode_raw with
-  | None -> (false, error_result_json "invalid mode (daily|weekly|monthly)")
+  let mode_raw = get_string args "mode" "manual" in
+  match Goal_store.parse_snapshot_mode mode_raw with
+  | None -> (false, error_result_json "invalid mode (daily|weekly|monthly|manual)")
   | Some mode ->
       let snap = Goal_store.snapshot ctx.config ~mode in
       ( true,

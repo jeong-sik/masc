@@ -42,6 +42,34 @@ let refresh_mode_of_yojson = function
   | `String "monthly" -> Ok Monthly
   | j -> Error ("refresh_mode_of_yojson: " ^ Yojson.Safe.to_string j)
 
+type snapshot_mode = SnapDaily | SnapWeekly | SnapMonthly | SnapManual
+
+let snapshot_mode_to_yojson = function
+  | SnapDaily -> `String "daily"
+  | SnapWeekly -> `String "weekly"
+  | SnapMonthly -> `String "monthly"
+  | SnapManual -> `String "manual"
+
+let snapshot_mode_of_yojson = function
+  | `String "daily" -> Ok SnapDaily
+  | `String "weekly" -> Ok SnapWeekly
+  | `String "monthly" -> Ok SnapMonthly
+  | `String "manual" -> Ok SnapManual
+  | j -> Error ("snapshot_mode_of_yojson: " ^ Yojson.Safe.to_string j)
+
+let snapshot_mode_of_refresh_mode = function
+  | Daily -> SnapDaily
+  | Weekly -> SnapWeekly
+  | Monthly -> SnapMonthly
+
+let parse_snapshot_mode s =
+  match String.trim s |> String.lowercase_ascii with
+  | "daily" -> Some SnapDaily
+  | "weekly" -> Some SnapWeekly
+  | "monthly" -> Some SnapMonthly
+  | "manual" -> Some SnapManual
+  | _ -> None
+
 type review_outcome = ReviewDone | ReviewProgress | ReviewBlocked | ReviewDropped
 
 let review_outcome_to_yojson = function
@@ -97,7 +125,7 @@ type rollup = {
 type snapshot = {
   snapshot_id : string;
   created_at : string;
-  mode : refresh_mode;
+  mode : snapshot_mode;
   goals : goal list;
   rollup : rollup;
 }
@@ -423,7 +451,7 @@ let refresh config ~mode =
              st.goals
          in
          { version = st.version + 1; updated_at = Types.now_iso (); goals }));
-  let snap = snapshot config ~mode in
+  let snap = snapshot config ~mode:(snapshot_mode_of_refresh_mode mode) in
   { mode; scanned = !scanned; updated = !updated; snapshot_id = snap.snapshot_id }
 
 let review_goal config ~goal_id ~(outcome : review_outcome) ?new_horizon ?note () =

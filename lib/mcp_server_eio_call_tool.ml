@@ -69,7 +69,7 @@ let quality_from_result ~success ~message ~attempts =
     ]
   else
     let issue =
-      if contains_casefold message "timeout" then
+      if contains_casefold message "timeout" || contains_casefold message "timed out" then
         quality_issue "error" "tool_timeout" message attempts
       else
         quality_issue "error" "tool_failure" message attempts

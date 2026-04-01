@@ -374,10 +374,14 @@ let handle_transition ctx args =
   match validate_task_id task_id with
   | Error e -> result_to_response (Error e)
   | Ok task_id ->
-  let action = get_string args "action" "" in
-  if action = "" then
-    (false, "action is required (claim, start, done, cancel, release, block, unblock)")
+  let action_raw = get_string args "action" "" in
+  if action_raw = "" then
+    (false, "action is required (claim, start, done, cancel, release)")
   else
+  match Types.task_action_of_string action_raw with
+  | Error msg -> (false, msg)
+  | Ok action ->
+  let action_s = Types.task_action_to_string action in
   let notes = get_string args "notes" "" in
   let reason = get_string args "reason" "" in
   let completion_contract =
@@ -387,7 +391,6 @@ let handle_transition ctx args =
   in
   let evaluator_cascade = get_string_opt args "evaluator_cascade" in
   let expected_version = get_int_opt args "expected_version" in
-  let action_lc = String.lowercase_ascii action in
   let force_raw = get_bool args "force" false in
   (* force=true requires admin privilege: initial_admin or Admin role *)
   let force =
@@ -404,7 +407,7 @@ let handle_transition ctx args =
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
   (* Anti-rationalization gate: verify completion notes before allowing "done" *)
   let gate_rejection =
-    if action_lc = "done" && not force && can_review_completion ~task_opt ~agent_name:ctx.agent_name then
+    if action = Types.Done_action && not force && can_review_completion ~task_opt ~agent_name:ctx.agent_name then
       review_completion_notes
         ~completion_contract
         ~evaluator_cascade
@@ -462,22 +465,22 @@ let handle_transition ctx args =
          ~agent:ctx.agent_name
          ~data:(`Assoc [
            ("task_id", `String task_id);
-           ("action", `String action);
+           ("action", `String action_s);
            ("notes", `String notes);
          ]);
        (* Notification harness: push task transition to all active sessions *)
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_transition");
          ("task_id", `String task_id);
-         ("action", `String action);
+         ("action", `String action_s);
          ("agent_name", `String ctx.agent_name);
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error err ->
        Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err));
   (* Record metrics *)
-  (match result, action_lc with
-   | Ok _, "done" ->
+  (match result, action with
+   | Ok _, Types.Done_action ->
        let metric : Metrics_store_eio.task_metric = {
          id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
@@ -494,7 +497,7 @@ let handle_transition ctx args =
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-done) failed: %s" (Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
        Prometheus.record_task_completed ()
-   | Ok _, "cancel" ->
+   | Ok _, Types.Cancel ->
        let metric : Metrics_store_eio.task_metric = {
          id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;

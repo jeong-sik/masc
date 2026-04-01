@@ -368,7 +368,7 @@ let test_cancel_done_task () =
 let test_transition_claim () =
   with_test_env (fun config ->
     let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let result = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:"claim" () in
+    let result = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Claim () in
     match result with
     | Ok msg -> Alcotest.(check bool) "claim via transition" true (str_contains msg "todo" && str_contains msg "claimed")
     | Error _ -> Alcotest.fail "Expected Ok"
@@ -379,7 +379,7 @@ let test_transition_start () =
     let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
     let _ = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
 
-    let result = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:"start" () in
+    let result = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Start () in
     match result with
     | Ok msg -> Alcotest.(check bool) "start via transition" true (str_contains msg "in_progress")
     | Error _ -> Alcotest.fail "Expected Ok"
@@ -400,7 +400,7 @@ let test_transition_invalid () =
   with_test_env (fun config ->
     let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
     (* Try to start without claiming first *)
-    let result = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:"start" () in
+    let result = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Start () in
     match result with
     | Error Types.TaskInvalidState _ -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState"
@@ -412,7 +412,7 @@ let test_transition_version_mismatch () =
 
     (* Pass wrong expected version *)
     let result = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001"
-                   ~action:"claim" ~expected_version:999 () in
+                   ~action:Types.Claim ~expected_version:999 () in
     match result with
     | Error Types.TaskInvalidState _ -> ()
     | _ -> Alcotest.fail "Expected TaskInvalidState for version mismatch"
@@ -508,7 +508,7 @@ let test_task_transitions_emit_observability () =
           (Types.show_masc_error err));
     (match
        Room.transition_task_r config ~agent_name:claude ~task_id:"task-001"
-         ~action:"start" ()
+         ~action:Types.Start ()
      with
     | Ok _ -> ()
     | Error err ->

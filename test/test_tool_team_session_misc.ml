@@ -200,9 +200,9 @@ let test_final_done_delta_snapshot_stable () =
   let session_id = start_session_exn ctx ~goal:"snapshot-stability" |> get_session_id in
 
   let task_before = add_task_id config ~title:"before-finalize" in
-  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:"claim";
-  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:"start";
-  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:"done";
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:Types.Claim;
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:Types.Start;
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_before ~action:Types.Done_action;
 
   let stop_ok, _ =
     dispatch_exn ctx ~name:"masc_team_session_stop"
@@ -226,9 +226,9 @@ let test_final_done_delta_snapshot_stable () =
   Alcotest.(check int) "done delta before finalize snapshot" 1 done_before;
 
   let task_after = add_task_id config ~title:"after-finalize" in
-  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:"claim";
-  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:"start";
-  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:"done";
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:Types.Claim;
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:Types.Start;
+  transition_task_ok config ~agent_name:"owner" ~task_id:task_after ~action:Types.Done_action;
 
   let status_ok_after, status_body_after =
     dispatch_exn ctx ~name:"masc_team_session_status"

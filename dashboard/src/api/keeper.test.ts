@@ -114,7 +114,7 @@ describe('keeper lifecycle', () => {
     const result = await bootKeeper('keeper-test')
 
     expect(result.ok).toBe(false)
-    expect(result.error).toBe('Failed to boot keeper-test (HTTP 502)')
+    expect(result.error).toBe('Failed to boot keeper-test (HTTP 502): auth gateway failed')
   })
 
   it('falls back to the HTTP status when boot failure payload is not JSON', async () => {

@@ -254,22 +254,15 @@ let keeper_reflection_payload_of_auto_rules (e : keeper_auto_rule_eval) : Yojson
 (* Model-aware threshold adjustment (#3069)                          *)
 (* ================================================================ *)
 
-(** Categorize model_id into a family for threshold selection.
-    Small local models (llama, qwen) are more susceptible to context
-    anxiety and benefit from earlier handoff. Large cloud models
-    (claude opus, gemini) handle long context well and prefer compaction.
-
-    See: Anthropic "Harness Design" blog — Opus 4.6 removed context
-    anxiety, but smaller models still exhibit it. *)
 (** Adjust compaction/handoff thresholds based on model metadata from OAS.
     Returns [(ratio_gate_multiplier, handoff_threshold_multiplier)].
 
     Uses concrete parameters (context_window, is_local) from
     [Llm_provider.Model_meta] instead of tier classification.
 
-    - Local models with small context (< 32K): 0.75x — earlier handoff.
-    - Models with large context (>= 200K): 1.15x — prefer compaction.
-    - Everything else: 1.0x (no adjustment). *)
+    - Local models with small context (< 32K): (0.75, 0.75) — earlier handoff.
+    - Models with large context (>= 200K): (1.15, 1.10) — prefer compaction.
+    - Everything else: (1.0, 1.0) (no adjustment). *)
 let model_threshold_multipliers_of_model_id (model_id : string) : float * float =
   let meta = Llm_provider.Model_meta.for_model_id model_id in
   let ctx = meta.context_window in

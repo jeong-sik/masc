@@ -25,7 +25,9 @@ let test_spawn_config_creation () =
   } in
   check string "agent_name" "test-agent" cfg.agent_name;
   check string "command" "claude -p" cfg.command;
-  check int "timeout" 60 cfg.timeout_seconds
+  check int "timeout" 60 cfg.timeout_seconds;
+  check bool "stdin_prompt" true cfg.stdin_prompt;
+  check string "parse_output" "hello" (cfg.parse_output "hello").text
 
 let test_spawn_config_no_working_dir () =
   let cfg : Spawn.spawn_config = {

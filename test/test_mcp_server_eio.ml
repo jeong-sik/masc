@@ -231,14 +231,6 @@ let find_tool_exn tools name =
   | Some tool -> tool
   | None -> Alcotest.failf "tool missing: %s" name
 
-let tool_description_exn tool =
-  match tool with
-  | `Assoc fields -> (
-      match List.assoc_opt "description" fields with
-      | Some (`String value) -> value
-      | _ -> Alcotest.fail "tool description missing")
-  | _ -> Alcotest.fail "tool is not an object"
-
 let tool_string_field tool field =
   match tool with
   | `Assoc fields -> (

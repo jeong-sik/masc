@@ -286,6 +286,7 @@
    tool_bridge
    tool_cache
    tool_access_policy
+   tool_gate
    tool_access_role
    tool_tempo
    tool_portal

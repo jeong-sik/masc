@@ -41,6 +41,11 @@ let test_agent_id_valid_mixed () =
   | Ok t -> check string "mixed" "Agent-X_42" (Validation.Agent_id.to_string t)
   | Error e -> fail e
 
+let test_agent_id_valid_colon_namespace () =
+  match Validation.Agent_id.validate "keeper:keeper-test-98295-0" with
+  | Ok t -> check string "colon namespace" "keeper:keeper-test-98295-0" (Validation.Agent_id.to_string t)
+  | Error e -> fail e
+
 let test_agent_id_reject_empty () =
   match Validation.Agent_id.validate "" with
   | Ok _ -> fail "should reject empty"
@@ -76,6 +81,26 @@ let test_agent_id_reject_space () =
   match Validation.Agent_id.validate "agent name" with
   | Ok _ -> fail "should reject space"
   | Error e -> check bool "error exists" true (String.length e > 0)
+
+let test_agent_id_reject_bare_colon () =
+  match Validation.Agent_id.validate ":" with
+  | Ok _ -> fail "should reject bare colon"
+  | Error _ -> ()
+
+let test_agent_id_reject_multi_colon () =
+  match Validation.Agent_id.validate "a:b:c" with
+  | Ok _ -> fail "should reject multiple colons"
+  | Error _ -> ()
+
+let test_agent_id_reject_leading_colon () =
+  match Validation.Agent_id.validate ":foo" with
+  | Ok _ -> fail "should reject leading colon"
+  | Error _ -> ()
+
+let test_agent_id_reject_trailing_colon () =
+  match Validation.Agent_id.validate "foo:" with
+  | Ok _ -> fail "should reject trailing colon"
+  | Error _ -> ()
 
 let test_agent_id_of_string_unsafe () =
   let t = Validation.Agent_id.of_string_unsafe "unsafe-input" in
@@ -201,6 +226,16 @@ let test_agent_id_dot_only () =
   | Ok _ -> fail "should reject dot"
   | Error _ -> ()
 
+let test_agent_id_single_dot () =
+  match Validation.Agent_id.validate "." with
+  | Ok _ -> fail "should reject single dot"
+  | Error _ -> ()
+
+let test_agent_id_double_dot () =
+  match Validation.Agent_id.validate ".." with
+  | Ok _ -> fail "should reject double dot"
+  | Error _ -> ()
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -213,6 +248,7 @@ let () =
       test_case "with underscore" `Quick test_agent_id_valid_with_underscore;
       test_case "numeric" `Quick test_agent_id_valid_numeric;
       test_case "mixed" `Quick test_agent_id_valid_mixed;
+      test_case "colon namespace" `Quick test_agent_id_valid_colon_namespace;
     ];
     "agent_id.reject", [
       test_case "empty" `Quick test_agent_id_reject_empty;
@@ -222,6 +258,10 @@ let () =
       test_case "path traversal" `Quick test_agent_id_reject_path_traversal;
       test_case "special chars" `Quick test_agent_id_reject_special_chars;
       test_case "space" `Quick test_agent_id_reject_space;
+      test_case "bare colon" `Quick test_agent_id_reject_bare_colon;
+      test_case "multi colon" `Quick test_agent_id_reject_multi_colon;
+      test_case "leading colon" `Quick test_agent_id_reject_leading_colon;
+      test_case "trailing colon" `Quick test_agent_id_reject_trailing_colon;
     ];
     "agent_id.unsafe", [
       test_case "of_string_unsafe" `Quick test_agent_id_of_string_unsafe;
@@ -255,5 +295,7 @@ let () =
       test_case "agent unicode rejected" `Quick test_agent_id_unicode_rejected;
       test_case "task unicode rejected" `Quick test_task_id_unicode_rejected;
       test_case "agent dot only" `Quick test_agent_id_dot_only;
+      test_case "agent single dot" `Quick test_agent_id_single_dot;
+      test_case "agent double dot" `Quick test_agent_id_double_dot;
     ];
   ]

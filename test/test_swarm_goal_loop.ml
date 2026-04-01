@@ -128,12 +128,12 @@ let test_aggregate_average () =
 
 let test_cancel_token_default () =
   let ct = Swarm_goal_loop.make_cancel_token () in
-  Alcotest.(check bool) "default not cancelled" false ct.cancelled
+  Alcotest.(check bool) "default not cancelled" false (Atomic.get ct.cancelled)
 
 let test_cancel_token_set () =
   let ct = Swarm_goal_loop.make_cancel_token () in
-  ct.cancelled <- true;
-  Alcotest.(check bool) "cancelled after set" true ct.cancelled
+  Atomic.set ct.cancelled true;
+  Alcotest.(check bool) "cancelled after set" true (Atomic.get ct.cancelled)
 
 (* ================================================================ *)
 (* Runner                                                           *)

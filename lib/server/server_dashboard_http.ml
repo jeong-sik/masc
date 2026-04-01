@@ -80,7 +80,7 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   Dashboard_governance.dashboard_json ~base_path ~limit ~offset
     ~status_filter
 
-let dashboard_planning_http_json request ~(config : Room.config) : Yojson.Safe.t =
+let dashboard_planning_http_json ~(config : Room.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
   let rollup = Goal_store.compute_rollup goals in
   let task_rollup =

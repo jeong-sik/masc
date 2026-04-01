@@ -527,7 +527,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `GET, "/api/v1/dashboard/planning" ->
           let state = get_server_state () in
           let json =
-            dashboard_planning_http_json httpun_request
+            dashboard_planning_http_json
               ~config:state.Mcp_server.room_config
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors

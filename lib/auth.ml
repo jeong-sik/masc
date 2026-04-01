@@ -367,6 +367,63 @@ let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) res
   | Some perm -> check_permission config ~agent_name ~token ~permission:perm
 
 (* ============================================ *)
+(* Unified policy-based authorization (v2)      *)
+(* ============================================ *)
+
+(** Resolve the effective role for an agent from auth context.
+    Returns Error for invalid tokens (no silent downgrade). *)
+let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
+  let auth_cfg = load_auth_config config in
+  if not auth_cfg.enabled then
+    Ok Admin  (* Auth disabled = full access *)
+  else if (match read_initial_admin config with
+           | Some admin -> String.equal agent_name admin
+           | None -> false) then
+    Ok Admin  (* Bootstrap admin = full access *)
+  else if not auth_cfg.require_token then
+    Ok auth_cfg.default_role
+  else
+    match token with
+    | None -> Error (Unauthorized "Token required")
+    | Some t ->
+        (match verify_token config ~agent_name ~token:t with
+        | Ok cred -> Ok cred.role
+        | Error e -> Error e)
+
+(** Policy-based tool authorization.
+    Replaces authorize_tool with a single Tool_access_policy check.
+    Invalid/expired tokens are rejected (not silently downgraded).
+
+    Strict mode (MASC_TOOL_AUTH_STRICT, default=true):
+    Tools not mapped by permission_for_tool are subject to additional
+    checks — unmapped masc_* tools require at least Worker, and
+    unmapped non-masc tools are forbidden. *)
+let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
+  match resolve_role config ~agent_name ~token with
+  | Error e -> Error e
+  | Ok role ->
+      let policy = Tool_access_role.policy_for_role role in
+      if not (Tool_access_policy.allows_name policy tool_name) then
+        Error (Forbidden { agent = agent_name; action = tool_name })
+      else if not (is_tool_auth_strict_enabled ()) then
+        Ok ()  (* Non-strict: policy check is sufficient *)
+      else
+        (* Strict mode: additional gate for unmapped tools *)
+        match permission_for_tool tool_name with
+        | Some _ -> Ok ()  (* Mapped tool — policy already checked *)
+        | None ->
+            if is_masc_tool_name tool_name
+               || is_protocol_canonical_tool_name tool_name then
+              (* Unmapped internal tool: require at least Worker *)
+              if has_permission role CanBroadcast then Ok ()
+              else Error (Forbidden { agent = agent_name; action = tool_name })
+            else
+              Error (Forbidden {
+                agent = agent_name;
+                action = "use unknown non-masc tool: " ^ tool_name
+              })
+
+(* ============================================ *)
 (* Room secret (for room-level auth)            *)
 (* ============================================ *)
 

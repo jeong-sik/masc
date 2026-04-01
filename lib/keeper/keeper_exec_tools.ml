@@ -252,8 +252,9 @@ let tool_access_lookup_of_meta (meta : keeper_meta) =
   }
 
 let filter_by_access ~(lookup : tool_access_lookup) (name : string) : bool =
-  not (is_keeper_denied name)
-  && Hashtbl.mem lookup.candidate_set name
+  (* keeper_denied tools are already excluded from candidate_set via
+     inject_masc_schemas, so the is_keeper_denied check was redundant. *)
+  Hashtbl.mem lookup.candidate_set name
   && Hashtbl.mem lookup.allow_set name
   && not (Hashtbl.mem lookup.deny_set name)
 

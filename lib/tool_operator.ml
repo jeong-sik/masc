@@ -380,6 +380,7 @@ let () =
     (fun (s : tool_schema) ->
       let is_destructive = List.mem s.name _tool_spec_hidden_destructive in
       let is_hidden = List.mem s.name _tool_spec_hidden || is_destructive in
+      let existing = Tool_catalog.metadata s.name in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -392,5 +393,6 @@ let () =
            ~visibility:(if is_hidden then Tool_catalog.Hidden else Tool_catalog.Default)
            ~is_destructive
            ~allow_direct_call_when_hidden:is_hidden
+           ?reason:existing.reason
            ()))
     schemas

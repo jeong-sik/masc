@@ -94,9 +94,10 @@ let cleanup_zombies
               Log.Gc.warn "removing broken agent file %s: %s" name err;
               (try
                  delete_path config path;
-                 (* delete_path only removes the backend entry for dual-write
-                    backends; the local mirror file must be removed separately
-                    to prevent repeated GC warnings on each scan cycle. *)
+                 (* delete_path removes the entry from the configured backend.
+                    For non-filesystem backends that dual-write a local mirror
+                    (should_dual_write_local), explicitly remove the local file
+                    as well to avoid repeated GC warnings on each scan cycle. *)
                  (try Sys.remove path with Sys_error _ -> ())
                with exn ->
                  Log.Gc.warn "failed to remove broken agent %s: %s"

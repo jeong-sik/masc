@@ -1,30 +1,57 @@
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
+import { signal, computed } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { editKeeperTools, type ToolEditResponse } from '../../api/keeper'
+import { toolsData } from './tool-state'
+
+// ── State signals ────────────────────────────
 
 const policyMode = signal<'preset' | 'custom'>('preset')
 const preset = signal<'minimal' | 'messaging' | 'coding' | 'research' | 'full'>('full')
-const alsoAllowRaw = signal('')
-const customAllowRaw = signal('')
-const denyRaw = signal('')
+const alsoAllowItems = signal<string[]>([])
+const customAllowItems = signal<string[]>([])
+const denyItems = signal<string[]>([])
 const saving = signal(false)
 const lastError = signal<string | null>(null)
 const lastSuccess = signal<string | null>(null)
 
-function parseToolList(raw: string): string[] {
-  return Array.from(
-    new Set(
-      raw
-        .split(/[\n,]/)
-        .map(item => item.trim())
-        .filter(Boolean),
-    ),
-  )
+// Per-section search queries
+const alsoAllowQuery = signal('')
+const customAllowQuery = signal('')
+const denyQuery = signal('')
+
+// Bulk text input: which section is in text mode (null = none)
+const textInputSection = signal<'also_allow' | 'custom' | 'deny' | null>(null)
+const textInputBuffer = signal('')
+
+// ── Preset metadata ──────────────────────────
+
+const PRESET_DESCRIPTIONS: Record<string, string> = {
+  minimal: 'base + status, tool_help',
+  messaging: 'base + board, coordination, voice, governance',
+  coding: 'base + filesystem, library, shell, coding shards',
+  research: 'base + filesystem, library, board, autoresearch',
+  full: '전체 후보 도구',
 }
 
-function formatToolList(values: string[] | undefined): string {
-  return (values ?? []).join(', ')
+// ── Tool inventory (from /api/v1/dashboard/tools) ──
+
+const inventoryNames = computed<string[]>(() => {
+  const inv = toolsData.value?.tool_inventory?.tools
+  return inv ? inv.map(t => t.name).sort() : []
+})
+
+const inventoryDescMap = computed<Map<string, string>>(() => {
+  const inv = toolsData.value?.tool_inventory?.tools
+  const m = new Map<string, string>()
+  if (inv) for (const t of inv) m.set(t.name, t.description)
+  return m
+})
+
+// ── Helpers ──────────────────────────────────
+
+function parseToolList(raw: string): string[] {
+  return [...new Set(raw.split(/[\n,]/).map(s => s.trim()).filter(Boolean))]
 }
 
 function resetEditorState(params: {
@@ -35,29 +62,216 @@ function resetEditorState(params: {
   denylist?: string[]
 }) {
   policyMode.value = params.mode === 'custom' ? 'custom' : 'preset'
+  const pv = params.preset
   preset.value =
-    params.preset === 'minimal'
-    || params.preset === 'messaging'
-    || params.preset === 'coding'
-    || params.preset === 'research'
-    || params.preset === 'full'
-      ? params.preset
-      : 'full'
-  alsoAllowRaw.value = formatToolList(params.alsoAllow)
-  customAllowRaw.value = formatToolList(params.customAllowlist)
-  denyRaw.value = formatToolList(params.denylist)
+    pv === 'minimal' || pv === 'messaging' || pv === 'coding' || pv === 'research' || pv === 'full'
+      ? pv : 'full'
+  alsoAllowItems.value = [...(params.alsoAllow ?? [])]
+  customAllowItems.value = [...(params.customAllowlist ?? [])]
+  denyItems.value = [...(params.denylist ?? [])]
   saving.value = false
   lastError.value = null
   lastSuccess.value = null
+  alsoAllowQuery.value = ''
+  customAllowQuery.value = ''
+  denyQuery.value = ''
+  textInputSection.value = null
+  textInputBuffer.value = ''
 }
 
-function ToolChip({ name }: { name: string }) {
+function addToList(listSig: typeof alsoAllowItems, name: string) {
+  const trimmed = name.trim()
+  if (trimmed && !listSig.value.includes(trimmed)) {
+    listSig.value = [...listSig.value, trimmed]
+  }
+}
+
+function removeFromList(listSig: typeof alsoAllowItems, name: string) {
+  listSig.value = listSig.value.filter(n => n !== name)
+}
+
+// ── Sub-components ───────────────────────────
+
+function RemovableChip({ name, onRemove }: { name: string; onRemove: () => void }) {
+  return html`
+    <span class="inline-flex items-center gap-0.5 py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">
+      ${name}
+      <button type="button"
+        class="text-[#9ad9ff]/50 hover:text-[#ff6b6b] cursor-pointer text-[11px] leading-none transition-colors"
+        onClick=${onRemove}
+        title="제거"
+      >\u00d7</button>
+    </span>
+  `
+}
+
+function ReadOnlyChip({ name }: { name: string }) {
   return html`
     <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">
       ${name}
     </span>
   `
 }
+
+/** Search-based tool picker with autocomplete from tool inventory. */
+function ToolSearchPicker({
+  items,
+  querySig,
+  onAdd,
+  onRemove,
+  placeholder,
+  excludeItems,
+}: {
+  items: string[]
+  querySig: typeof alsoAllowQuery
+  onAdd: (name: string) => void
+  onRemove: (name: string) => void
+  placeholder: string
+  excludeItems?: string[]
+}) {
+  const q = querySig.value.toLowerCase().trim()
+  const excluded = new Set([...items, ...(excludeItems ?? [])])
+  const descMap = inventoryDescMap.value
+
+  const suggestions = q.length > 0
+    ? inventoryNames.value
+        .filter(name => !excluded.has(name) && name.toLowerCase().includes(q))
+        .slice(0, 10)
+    : []
+
+  return html`
+    <div class="flex flex-col gap-1.5">
+      ${items.length > 0
+        ? html`
+          <div class="flex flex-wrap gap-1">
+            ${items.map(name => html`
+              <${RemovableChip} name=${name} onRemove=${() => onRemove(name)} />
+            `)}
+          </div>
+        `
+        : null}
+
+      <div class="relative">
+        <input
+          type="text"
+          class="w-full px-3 py-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
+          placeholder=${placeholder}
+          value=${querySig.value}
+          onInput=${(e: Event) => { querySig.value = (e.target as HTMLInputElement).value }}
+          onKeyDown=${(e: KeyboardEvent) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              const val = querySig.value.trim()
+              const first = suggestions[0]
+              if (first) {
+                onAdd(first)
+              } else if (val) {
+                onAdd(val)
+              }
+              querySig.value = ''
+            } else if (e.key === 'Escape') {
+              querySig.value = ''
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
+        />
+
+        ${suggestions.length > 0
+          ? html`
+            <div class="absolute z-10 top-full left-0 right-0 mt-1 max-h-[180px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] shadow-lg backdrop-blur-sm">
+              ${suggestions.map((name, idx) => html`
+                <button type="button"
+                  class=${`w-full flex items-start gap-2 text-left px-3 py-1.5 cursor-pointer transition-colors ${
+                    idx === 0
+                      ? 'bg-[rgba(71,184,255,0.08)] hover:bg-[rgba(71,184,255,0.16)]'
+                      : 'hover:bg-[rgba(71,184,255,0.12)]'
+                  }`}
+                  onMouseDown=${(e: MouseEvent) => e.preventDefault()}
+                  onClick=${() => { onAdd(name); querySig.value = '' }}
+                >
+                  <span class="text-[11px] text-[var(--text-body)] font-medium shrink-0">${name}</span>
+                  ${descMap.has(name)
+                    ? html`<span class="text-[10px] text-[var(--text-muted)] truncate">${descMap.get(name)}</span>`
+                    : null}
+                </button>
+              `)}
+            </div>
+          `
+          : q.length > 1
+            ? html`
+              <div class="absolute z-10 top-full left-0 right-0 mt-1 px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] text-[11px] text-[var(--text-muted)]">
+                ${inventoryNames.value.length === 0
+                  ? '도구 목록 로딩 중... Enter로 직접 추가 가능'
+                  : '일치하는 도구 없음. Enter로 직접 추가 가능'}
+              </div>
+            `
+            : null}
+      </div>
+    </div>
+  `
+}
+
+/** Toggle between search picker and raw textarea for a section. */
+function TextModeToggle({
+  section,
+  listSig,
+}: {
+  section: 'also_allow' | 'custom' | 'deny'
+  listSig: typeof alsoAllowItems
+}) {
+  const isText = textInputSection.value === section
+
+  if (!isText) {
+    return html`
+      <button type="button"
+        class="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+        onClick=${() => {
+          textInputBuffer.value = listSig.value.join(', ')
+          textInputSection.value = section
+        }}
+      >텍스트 입력</button>
+    `
+  }
+
+  return html`
+    <div class="flex gap-2">
+      <button type="button"
+        class="text-[10px] text-emerald-400 hover:text-emerald-300 cursor-pointer transition-colors"
+        onClick=${() => {
+          listSig.value = parseToolList(textInputBuffer.value)
+          textInputSection.value = null
+        }}
+      >적용</button>
+      <button type="button"
+        class="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+        onClick=${() => { textInputSection.value = null }}
+      >취소</button>
+    </div>
+  `
+}
+
+// ── Section header with label + text toggle ──
+
+function SectionHeader({
+  label,
+  section,
+  listSig,
+}: {
+  label: string
+  section: 'also_allow' | 'custom' | 'deny'
+  listSig: typeof alsoAllowItems
+}) {
+  return html`
+    <div class="flex items-center justify-between">
+      <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        ${label}${listSig.value.length > 0 ? html` <span class="text-[var(--text-body)]">(${listSig.value.length})</span>` : ''}
+      </span>
+      <${TextModeToggle} section=${section} listSig=${listSig} />
+    </div>
+  `
+}
+
+// ── Main export ──────────────────────────────
 
 export function ToolAllowlistEditor({
   keeperName,
@@ -95,6 +309,8 @@ export function ToolAllowlistEditor({
     JSON.stringify(currentDenylist ?? []),
   ])
 
+  const isCustomEmpty = policyMode.value === 'custom' && customAllowItems.value.length === 0
+
   async function applyChanges(): Promise<void> {
     saving.value = true
     lastError.value = null
@@ -104,9 +320,9 @@ export function ToolAllowlistEditor({
         action: 'set_policy',
         mode: policyMode.value,
         preset: policyMode.value === 'preset' ? preset.value : undefined,
-        allow: policyMode.value === 'custom' ? parseToolList(customAllowRaw.value) : undefined,
-        also_allow: policyMode.value === 'preset' ? parseToolList(alsoAllowRaw.value) : undefined,
-        deny: parseToolList(denyRaw.value),
+        allow: policyMode.value === 'custom' ? customAllowItems.value : undefined,
+        also_allow: policyMode.value === 'preset' ? alsoAllowItems.value : undefined,
+        deny: denyItems.value,
       })
       if (!response.ok) {
         lastError.value = response.error ?? '알 수 없는 오류'
@@ -125,109 +341,169 @@ export function ToolAllowlistEditor({
     <div class="flex flex-col gap-3 mt-2 p-3 rounded-xl border border-[var(--card-border)] bg-[rgba(11,18,32,0.6)]">
       <div class="flex items-center justify-between">
         <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">도구 정책 편집</span>
-        <button
-          type="button"
+        <button type="button"
           class="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer"
-          onClick=${() =>
-            resetEditorState({
-              mode: currentMode,
-              preset: currentPreset,
-              alsoAllow: currentAlsoAllow,
-              customAllowlist: currentCustomAllowlist,
-              denylist: currentDenylist,
-            })}
-        >
-          초기화
-        </button>
+          onClick=${() => resetEditorState({
+            mode: currentMode,
+            preset: currentPreset,
+            alsoAllow: currentAlsoAllow,
+            customAllowlist: currentCustomAllowlist,
+            denylist: currentDenylist,
+          })}
+        >초기화</button>
       </div>
 
+      <!-- Mode toggle -->
       <div class="flex gap-2">
-        <button
-          type="button"
-          class=${`py-1 px-3 rounded-lg text-[10px] font-medium border transition-colors cursor-pointer ${policyMode.value === 'preset'
-            ? 'border-[rgba(71,184,255,0.35)] bg-[rgba(71,184,255,0.16)] text-[#9ad9ff]'
-            : 'border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)]'}`}
-          onClick=${() => { policyMode.value = 'preset' }}
-        >
-          preset
-        </button>
-        <button
-          type="button"
-          class=${`py-1 px-3 rounded-lg text-[10px] font-medium border transition-colors cursor-pointer ${policyMode.value === 'custom'
-            ? 'border-[rgba(71,184,255,0.35)] bg-[rgba(71,184,255,0.16)] text-[#9ad9ff]'
-            : 'border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)]'}`}
-          onClick=${() => { policyMode.value = 'custom' }}
-        >
-          custom
-        </button>
+        ${(['preset', 'custom'] as const).map(mode => html`
+          <button type="button"
+            class=${`py-1 px-3 rounded-lg text-[10px] font-medium border transition-colors cursor-pointer ${
+              policyMode.value === mode
+                ? 'border-[rgba(71,184,255,0.35)] bg-[rgba(71,184,255,0.16)] text-[#9ad9ff]'
+                : 'border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)]'
+            }`}
+            onClick=${() => { policyMode.value = mode; textInputSection.value = null }}
+          >${mode}</button>
+        `)}
       </div>
 
+      <!-- Preset mode -->
       ${policyMode.value === 'preset'
         ? html`
-            <label class="flex flex-col gap-1">
-              <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">preset</span>
-              <select
-                class="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)]"
-                value=${preset.value}
-                onChange=${(e: Event) => { preset.value = (e.target as HTMLSelectElement).value as typeof preset.value }}
-              >
-                <option value="minimal">minimal</option>
-                <option value="messaging">messaging</option>
-                <option value="coding">coding</option>
-                <option value="research">research</option>
-                <option value="full">full</option>
-              </select>
-            </label>
-            <label class="flex flex-col gap-1">
-              <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">also allow</span>
-              <textarea
-                class="min-h-[72px] w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
-                placeholder="추가 허용 도구를 쉼표 또는 줄바꿈으로 입력"
-                value=${alsoAllowRaw.value}
-                onInput=${(e: Event) => { alsoAllowRaw.value = (e.target as HTMLTextAreaElement).value }}
-              />
-            </label>
-          `
+          <label class="flex flex-col gap-1">
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">preset</span>
+            <select
+              class="w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)]"
+              value=${preset.value}
+              onChange=${(e: Event) => { preset.value = (e.target as HTMLSelectElement).value as typeof preset.value }}
+            >
+              ${Object.entries(PRESET_DESCRIPTIONS).map(([key, desc]) => html`
+                <option value=${key}>${key} \u2014 ${desc}</option>
+              `)}
+            </select>
+          </label>
+
+          <div class="flex flex-col gap-1">
+            <${SectionHeader} label="also allow" section="also_allow" listSig=${alsoAllowItems} />
+            ${textInputSection.value === 'also_allow'
+              ? html`
+                <textarea
+                  class="min-h-[72px] w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
+                  placeholder="쉼표 또는 줄바꿈으로 구분"
+                  value=${textInputBuffer.value}
+                  onInput=${(e: Event) => { textInputBuffer.value = (e.target as HTMLTextAreaElement).value }}
+                />`
+              : html`
+                <${ToolSearchPicker}
+                  items=${alsoAllowItems.value}
+                  querySig=${alsoAllowQuery}
+                  onAdd=${(name: string) => addToList(alsoAllowItems, name)}
+                  onRemove=${(name: string) => removeFromList(alsoAllowItems, name)}
+                  placeholder="추가 허용 도구 검색..."
+                  excludeItems=${denyItems.value}
+                />`}
+          </div>
+        `
         : html`
-            <label class="flex flex-col gap-1">
-              <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">custom allowlist</span>
-              <textarea
-                class="min-h-[88px] w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
-                placeholder="허용 도구를 쉼표 또는 줄바꿈으로 입력"
-                value=${customAllowRaw.value}
-                onInput=${(e: Event) => { customAllowRaw.value = (e.target as HTMLTextAreaElement).value }}
-              />
-            </label>
-          `}
+          <div class="flex flex-col gap-1">
+            <${SectionHeader} label="custom allowlist" section="custom" listSig=${customAllowItems} />
 
-      <label class="flex flex-col gap-1">
-        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">denylist</span>
-        <textarea
-          class="min-h-[72px] w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
-          placeholder="차단 도구를 쉼표 또는 줄바꿈으로 입력"
-          value=${denyRaw.value}
-          onInput=${(e: Event) => { denyRaw.value = (e.target as HTMLTextAreaElement).value }}
-        />
-      </label>
+            ${isCustomEmpty
+              ? html`
+                <div class="flex flex-col gap-2 px-3 py-2 rounded-lg bg-[rgba(239,68,68,0.12)] border border-[rgba(239,68,68,0.3)]">
+                  <div class="flex items-start gap-2">
+                    <span class="text-red-400 text-[13px] shrink-0 font-bold">0</span>
+                    <span class="text-[11px] text-red-300 leading-snug">
+                      allowlist가 비어 있으면 이 키퍼는 <strong>도구를 하나도 사용할 수 없습니다</strong>.
+                    </span>
+                  </div>
+                  ${resolvedAllowlist.length > 0
+                    ? html`
+                      <button type="button"
+                        class="self-start py-1 px-3 rounded-lg text-[10px] font-medium border border-[rgba(71,184,255,0.35)] bg-[rgba(71,184,255,0.12)] text-[#9ad9ff] hover:bg-[rgba(71,184,255,0.22)] cursor-pointer transition-colors"
+                        onClick=${() => { customAllowItems.value = [...resolvedAllowlist] }}
+                      >현재 resolved list에서 복사 (${resolvedAllowlist.length}개)</button>
+                    `
+                    : null}
+                </div>`
+              : null}
 
+            ${textInputSection.value === 'custom'
+              ? html`
+                <textarea
+                  class="min-h-[88px] w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
+                  placeholder="쉼표 또는 줄바꿈으로 구분"
+                  value=${textInputBuffer.value}
+                  onInput=${(e: Event) => { textInputBuffer.value = (e.target as HTMLTextAreaElement).value }}
+                />`
+              : html`
+                <${ToolSearchPicker}
+                  items=${customAllowItems.value}
+                  querySig=${customAllowQuery}
+                  onAdd=${(name: string) => addToList(customAllowItems, name)}
+                  onRemove=${(name: string) => removeFromList(customAllowItems, name)}
+                  placeholder="허용 도구 검색..."
+                  excludeItems=${denyItems.value}
+                />`}
+          </div>
+        `}
+
+      <!-- Denylist -->
       <div class="flex flex-col gap-1">
-        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">resolved allowlist</span>
-        <div class="flex flex-wrap gap-1.5">
+        <${SectionHeader} label="denylist" section="deny" listSig=${denyItems} />
+        ${textInputSection.value === 'deny'
+          ? html`
+            <textarea
+              class="min-h-[72px] w-full px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)]"
+              placeholder="쉼표 또는 줄바꿈으로 구분"
+              value=${textInputBuffer.value}
+              onInput=${(e: Event) => { textInputBuffer.value = (e.target as HTMLTextAreaElement).value }}
+            />`
+          : html`
+            <${ToolSearchPicker}
+              items=${denyItems.value}
+              querySig=${denyQuery}
+              onAdd=${(name: string) => addToList(denyItems, name)}
+              onRemove=${(name: string) => removeFromList(denyItems, name)}
+              placeholder="차단 도구 검색..."
+              excludeItems=${policyMode.value === 'custom' ? customAllowItems.value : alsoAllowItems.value}
+            />`}
+      </div>
+
+      <!-- Resolved allowlist -->
+      <div class="flex flex-col gap-1">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+          현재 resolved allowlist (${resolvedAllowlist.length}개)
+        </span>
+        <div class="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto">
           ${resolvedAllowlist.length > 0
-            ? resolvedAllowlist.map(name => html`<${ToolChip} name=${name} />`)
+            ? resolvedAllowlist.map(name => html`<${ReadOnlyChip} name=${name} />`)
             : html`<span class="text-[11px] text-[var(--text-muted)] italic">resolved allowlist 없음</span>`}
         </div>
       </div>
 
-      <div class="flex gap-2">
-        <button
-          type="button"
-          class="py-1 px-3 rounded-lg text-[10px] font-medium bg-[#4ade80] text-[#000] hover:bg-[#22c55e] transition-colors cursor-pointer disabled:opacity-50"
+      <!-- Apply -->
+      <div class="flex items-center gap-3">
+        <button type="button"
+          class=${`py-1.5 px-4 rounded-lg text-[10px] font-medium transition-colors cursor-pointer disabled:opacity-50 ${
+            isCustomEmpty
+              ? 'bg-red-500/80 text-white hover:bg-red-500'
+              : 'bg-[#4ade80] text-[#000] hover:bg-[#22c55e]'
+          }`}
           onClick=${applyChanges}
           disabled=${saving.value}
         >
-          ${saving.value ? '저장 중...' : '정책 적용'}
+          ${saving.value
+            ? '저장 중...'
+            : isCustomEmpty
+              ? '도구 0개로 적용'
+              : '정책 적용'}
         </button>
+        <span class="text-[10px] text-[var(--text-muted)]">
+          ${policyMode.value === 'custom'
+            ? `${customAllowItems.value.length}개 허용${denyItems.value.length > 0 ? `, ${denyItems.value.length}개 차단` : ''}`
+            : `preset: ${preset.value}${alsoAllowItems.value.length > 0 ? ` + ${alsoAllowItems.value.length}개 추가` : ''}${denyItems.value.length > 0 ? `, ${denyItems.value.length}개 차단` : ''}`}
+        </span>
       </div>
 
       ${lastError.value

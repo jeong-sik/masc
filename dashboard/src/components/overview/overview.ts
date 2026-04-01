@@ -214,7 +214,7 @@ function HotSessions() {
       />
       ${userSessions.length > 0
         ? html`<div class="grid grid-cols-2 gap-3 max-[960px]:grid-cols-1">${userSessions.map(renderSessionCard)}</div>`
-        : html`<div class="text-xs text-[var(--text-muted)] py-6 text-center">활성 세션 없음. 세션은 SSE로 연결된 실시간 작업 단위입니다. 과거 에이전트는 에이전트 탭에서 확인하세요.</div>`}
+        : html`<div class="text-xs text-[var(--text-muted)] py-6 text-center">활성 세션 없음. 과거 에이전트는 에이전트 탭에서 확인하세요.</div>`}
     </div>
   `
 }

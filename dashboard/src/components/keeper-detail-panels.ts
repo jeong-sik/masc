@@ -46,14 +46,14 @@ const KPI_VALUE_TONE: Record<KpiTone, string> = {
 }
 
 const KPI_ICON: Record<string, string> = {
-  Generation: '🔄',
-  Turns: '↻',
-  Context: '📊',
-  Activity: '⚡',
-  Tokens: '🔤',
-  Handoffs: '🤝',
-  Compactions: '📦',
-  'Cost (USD)': '💰',
+  '세대': '🔄',
+  '턴': '↻',
+  '컨텍스트': '📊',
+  '활동': '⚡',
+  '토큰': '🔤',
+  '인계': '🤝',
+  '압축': '📦',
+  '비용 (USD)': '💰',
 }
 
 function KpiCard({ label, value, hint, tone = 'default', progress }: {
@@ -111,17 +111,17 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
       ${'' /* Primary KPIs — 3 cols (activityLevel removed) */}
       <div class="grid grid-cols-3 gap-3">
         <${KpiCard}
-          label="Generation"
+          label="세대"
           value=${keeper.generation ?? '-'}
           hint="승계 횟수"
         />
         <${KpiCard}
-          label="Turns"
+          label="턴"
           value=${keeper.turn_count ?? '-'}
           hint="총 루프 회차"
         />
         <${KpiCard}
-          label="Context"
+          label="컨텍스트"
           value=${ctxPct != null ? `${ctxPct}%` : '-'}
           hint=${ctxHint}
           tone=${ctxTone}
@@ -131,7 +131,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
       ${'' /* Model usage distribution */}
       ${totalCalls > 0 ? html`
         <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] p-3">
-          <div class="mb-2 text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">Provider-Model 호출 분포</div>
+          <div class="mb-2 text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--text-muted)]">모델 호출 분포</div>
           <div class="flex flex-col gap-1.5">
             ${modelEntries.slice(0, 4).map(([model, count]) => {
               const pct = Math.round((count / totalCalls) * 100)
@@ -154,49 +154,49 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
       ${'' /* Secondary KPIs — 3-4 cols, smaller feel */}
       <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
         <${KpiCard}
-          label="Tokens"
+          label="토큰"
           value=${formatTokens(keeper.context_tokens)}
           hint=${keeper.context_max ? `/ ${formatTokens(keeper.context_max)}` : undefined}
         />
         <${KpiCard}
-          label="Handoffs"
+          label="인계"
           value=${keeper.handoff_count_total ?? '-'}
         />
         <${KpiCard}
-          label="Compactions"
+          label="압축"
           value=${keeper.compaction_count ?? '-'}
         />
         ${latestCost
-          ? html`<${KpiCard} label="Cost (USD)" value=${latestCost} />`
+          ? html`<${KpiCard} label="비용 (USD)" value=${latestCost} />`
           : null}
       </div>
       ${'' /* Autonomy KPIs — always visible for keeper context */}
       <div class="grid grid-cols-4 gap-2">
         <${KpiCard}
-          label="Auto Actions"
+          label="자율 행동"
           value=${keeper.autonomous_action_count ?? 0}
-          hint=${autonomyHint(keeper.autonomous_action_count, keeper.proactive_enabled) ?? '자율 행동 횟수'}
+          hint=${autonomyHint(keeper.autonomous_action_count, keeper.proactive_enabled) ?? '행동 횟수'}
         />
         <${KpiCard}
-          label="Auto Turns"
+          label="자율 턴"
           value=${keeper.autonomous_turn_count ?? 0}
           hint=${keeper.autonomous_text_turn_count != null ? `텍스트 ${keeper.autonomous_text_turn_count} / 도구 ${keeper.autonomous_tool_turn_count ?? 0}` : autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) ?? '미발동'}
         />
         <${KpiCard}
-          label="Board React"
+          label="보드 반응"
           value=${keeper.board_reactive_turn_count ?? 0}
-          hint="게시판 반응"
+          hint="게시판 반응 턴"
         />
         <${KpiCard}
-          label="Noop"
+          label="비활동"
           value=${keeper.noop_turn_count ?? 0}
-          hint="비활동 턴"
+          hint="아무 작업 없는 턴"
         />
       </div>
       ${'' /* Proactive activity callout */}
       ${keeper.last_proactive_ago_s != null ? html`
         <div class="rounded-xl border border-purple-400/20 bg-purple-500/5 p-3 text-[11px]">
-          <span class="font-semibold text-purple-300">Proactive</span>
+          <span class="font-semibold text-purple-300">자율 활동</span>
           <span class="text-text-muted ml-2">${formatDuration(keeper.last_proactive_ago_s)} 전</span>
           ${keeper.last_proactive_reason ? html`
             <span class="text-text-dim ml-2">| ${keeper.last_proactive_reason}</span>
@@ -306,7 +306,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       ${'' /* Latency */}
       <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
         <div class="flex items-center justify-between mb-1.5">
-          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Latency</span>
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">지연 시간</span>
           <span class="text-xs font-mono tabular-nums text-[#9ad9ff]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
         </div>
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
@@ -317,7 +317,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       ${'' /* Cost */}
       <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
         <div class="flex items-center justify-between mb-1.5">
-          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Cost</span>
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">비용</span>
           <span class="text-xs font-mono tabular-nums text-[#a78bfa]">$${totalCost.toFixed(4)}</span>
         </div>
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
@@ -329,8 +329,8 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       ${modelSwitches.length > 0 ? html`
         <div class="md:col-span-2 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Model Switches</span>
-            <span class="text-[10px] text-[var(--text-dim)]">${modelSwitches.length} switch${modelSwitches.length > 1 ? 'es' : ''}</span>
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">모델 전환</span>
+            <span class="text-[10px] text-[var(--text-dim)]">${modelSwitches.length}회</span>
           </div>
           <div class="flex flex-wrap gap-1.5">
             ${modelSwitches.map(s => html`

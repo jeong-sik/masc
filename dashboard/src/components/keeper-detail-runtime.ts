@@ -329,13 +329,13 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
       <${ToolSection}
         title="관측된 도구"
-        description="하트비트 또는 런타임 텔레메트리의 최근 실행 근거."
+        description="최근 실행에서 감지된 도구"
         tools=${observedTools}
         fallback=${observedFallback}
       />
 
       <${SignalRow} label="도구 호출" value=${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback} />
-      <${SignalRow} label="근거 출처" value=${auditSource ?? metadataFallback} />
+      <${SignalRow} label="감사 출처" value=${auditSource ?? metadataFallback} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">관측 시점</span>
         <span class="text-xs font-medium text-[var(--text-strong)]">${auditAt ? html`<${TimeAgo} timestamp=${auditAt} />` : metadataFallback}</span>
@@ -360,7 +360,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <${ToolSection}
         title="사용 가능한 인근 액션"
         tools=${actions.map(action => actionDescriptorLabel(action.action_type))}
-        fallback="운영자 액션 광고 없음"
+        fallback="사용 가능한 액션 없음"
       />
     </div>
   `

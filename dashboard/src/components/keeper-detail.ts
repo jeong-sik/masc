@@ -117,7 +117,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 
       ${isOffline ? html`
         <div class="px-4 py-3 rounded-xl border border-[var(--card-border)] bg-[rgba(90,100,120,0.08)] text-[13px] text-[var(--text-muted)]">
-          이 키퍼는 현재 비활동 상태입니다. Boot 후 메시지를 보낼 수 있습니다.
+          이 키퍼는 현재 비활동 상태입니다. 기동 후 메시지를 보낼 수 있습니다.
         </div>
       ` : null}
 
@@ -125,7 +125,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
         <div class="w-full">
           <${KeeperConversationPanel}
             keeperName=${keeper.name}
-            placeholder=${isOffline ? '키퍼 오프라인 — Boot 필요' : '이 키퍼에게 직접 프롬프트 전송'}
+            placeholder=${isOffline ? '키퍼 오프라인 — 기동 필요' : '이 키퍼에게 직접 프롬프트 전송'}
           />
         </div>
 
@@ -193,7 +193,7 @@ function CrashCohortBar({ crash_log }: { crash_log: any[] }) {
   }
   return html`
     <div>
-      <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">Crash Cohort 분포</div>
+      <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">장애 유형 분포</div>
       <div class="flex w-full h-3 rounded-full overflow-hidden bg-[var(--white-5)]">
         ${Object.entries(cohorts).map(([key, count]) => html`
           <div style="width: ${(count / total * 100).toFixed(1)}%; background: ${colors[key] ?? '#6b7280'}"
@@ -217,12 +217,12 @@ function SpEventsPanel({ sp_events }: { sp_events: any[] }) {
   if (!sp_events || sp_events.length === 0) return null
   return html`
     <div>
-      <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">Self-Preservation 발동 이력</div>
+      <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">자기 보호 발동 이력</div>
       <div class="space-y-1 max-h-28 overflow-y-auto">
         ${sp_events.slice(0, 10).map((e: any) => html`
           <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[rgba(139,92,246,0.06)]">
             <span class="font-mono text-[var(--text-muted)]">${new Date((e.ts ?? 0) * 1000).toLocaleTimeString()}</span>
-            <span class="text-[#8b5cf6]">${e.suppressed_count}/${e.total} suppressed (${e.dominant_cohort})</span>
+            <span class="text-[#8b5cf6]">${e.suppressed_count}/${e.total} 억제 (${e.dominant_cohort})</span>
           </div>
         `)}
       </div>
@@ -239,14 +239,14 @@ function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
   const hs = typeof health_score === 'number' ? health_score : 100
   const hsColor = hs >= 80 ? '#4ade80' : hs >= 50 ? '#f59e0b' : '#ef4444'
   return html`
-    <${SectionCard} title="Supervisor 진단">
+    <${SectionCard} title="감독 진단">
       <div class="space-y-3">
         <div class="flex items-center justify-between">
-          <span class="text-xs text-[var(--text-muted)]">Health Score</span>
+          <span class="text-xs text-[var(--text-muted)]">건강도</span>
           <span class="text-sm font-bold font-mono" style="color: ${hsColor}">${hs}</span>
         </div>
         <div class="flex items-center justify-between">
-          <span class="text-xs text-[var(--text-muted)]">Fiber 상태</span>
+          <span class="text-xs text-[var(--text-muted)]">실행 상태</span>
           ${registryStateBadge((keeper as any).registry_state)}
         </div>
         <div>
@@ -260,7 +260,7 @@ function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         </div>
         ${typeof dead_eta_sec === 'number' && dead_eta_sec > 0 && dead_since == null ? html`
           <div class="flex items-center justify-between">
-            <span class="text-xs text-[var(--text-muted)]">Dead 예상</span>
+            <span class="text-xs text-[var(--text-muted)]">종료 예상</span>
             <span class="text-[11px] font-mono" style="color: ${budgetPct >= 50 ? '#f59e0b' : 'var(--text-body)'}">${dead_eta_sec >= 3600 ? (dead_eta_sec / 3600).toFixed(1) + 'h' : (dead_eta_sec / 60).toFixed(0) + 'm'} 후</span>
           </div>
         ` : null}
@@ -272,13 +272,13 @@ function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         ` : null}
         ${dead_since ? html`
           <div class="py-2 px-3 rounded-lg bg-[rgba(239,68,68,0.06)] border border-[rgba(239,68,68,0.15)] text-xs text-[#fb7185]">
-            Dead since ${new Date(dead_since * 1000).toLocaleString()}. Reboot 필요.
+            ${new Date(dead_since * 1000).toLocaleString()} 이후 중단됨. 재기동 필요.
           </div>
         ` : null}
         <${CrashCohortBar} crash_log=${crash_log} />
         ${crash_log && crash_log.length > 0 ? html`
           <div>
-            <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">Crash 이력</div>
+            <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">장애 이력</div>
             <div class="space-y-1 max-h-32 overflow-y-auto">
               ${crash_log.slice(0, 10).map((e: any) => html`
                 <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[var(--white-3)]">
@@ -344,12 +344,12 @@ export function KeeperDetailOverlay() {
                   onClick=${() => {
                     void bootKeeper(keeper.name).then(res => {
                       if (res.ok) {
-                        showToast(keeper.name + ' booted', 'success')
+                        showToast(keeper.name + ' 기동됨', 'success')
                         void refreshDashboard({ force: true })
                       } else showToast(res.error ?? 'Boot 실패', 'error')
                     }).catch(() => showToast('Boot 실패', 'error'))
                   }}
-                >Boot</button>`
+                >기동</button>`
               if (isRunning) return html`
                 <button type="button"
                   class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
@@ -361,7 +361,7 @@ export function KeeperDetailOverlay() {
                       }).catch(() => showToast('종료 실패', 'error'))
                     }
                   }}
-                >Shutdown</button>`
+                >종료</button>`
               return null
             })()}
             <button
@@ -459,7 +459,7 @@ export function KeeperDetailOverlay() {
           </div>
 
           <div class="md:col-span-2">
-            <${CollapsibleSection} title="통합 활동 추적" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">브로드캐스트 + 태스크 + 도구 호출</span>`}>
+            <${CollapsibleSection} title="통합 활동 추적" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">공지 + 태스크 + 도구 호출</span>`}>
               <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} />
             <//>
           </div>
@@ -481,7 +481,7 @@ export function KeeperDetailOverlay() {
         <details class="mt-4">
           <summary class="cursor-pointer py-3 px-4 text-[11px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[var(--text-dim)]"></span>
-            Raw Data (Debug)
+            원시 데이터 (디버그)
           </summary>
           <div class="mt-2 p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md">
             <${RawDataDebug} keeper=${keeper} />

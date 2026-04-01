@@ -131,7 +131,7 @@ export function AgentDetailOverlay() {
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${unified.canonical} />
                   ${unified.description !== unified.label ? html`<span class="text-[10px] font-medium py-1 px-2 border border-white/10 bg-white/5 text-text-muted whitespace-nowrap rounded-md" title=${unified.description}>${unified.description}</span>` : null}
-                  ${isArchivedParticipant ? html`<span class="text-[10px] font-medium py-1 px-2 border border-accent/20 bg-accent/10 text-accent whitespace-nowrap rounded-md shadow-sm">archived session participant</span>` : null}
+                  ${isArchivedParticipant ? html`<span class="text-[10px] font-medium py-1 px-2 border border-accent/20 bg-accent/10 text-accent whitespace-nowrap rounded-md shadow-sm">이전 세션 참여자</span>` : null}
                   ${agent?.model ? html`<span class="font-mono text-[10px] font-medium bg-white/10 border border-white/5 px-2 py-1 rounded-md text-text-muted shadow-sm">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-text-dim italic">${missionBrief.archived_reason}</span>`
@@ -182,7 +182,7 @@ export function AgentDetailOverlay() {
 
         <${AgentSessionReport} agentName=${agentName} />
 
-        <${CollapsibleSection} title="활동 추적" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">GitHub Agents 스타일</span>`}>
+        <${CollapsibleSection} title="활동 추적" badge=${html`<span class="text-[10px] text-[var(--text-dim)] font-normal ml-1">통합 타임라인</span>`}>
           <${SessionTraceView} agentName=${agentName} isKeeper=${!!keeper} />
         <//>
 
@@ -195,7 +195,7 @@ export function AgentDetailOverlay() {
 
           <${Card} title="최근 활동">
             ${lines.length === 0
-              ? html`<div class="h-full min-h-[120px]"><${EmptyState} message="최근 80개 room 메시지에서 이 에이전트 관련 항목 없음" compact /></div>`
+              ? html`<div class="h-full min-h-[120px]"><${EmptyState} message="최근 활동 메시지가 없습니다" compact /></div>`
               : html`<div class="max-h-[240px] overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-[12px] text-text-body leading-relaxed rounded-xl shadow-sm hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
           <//>
         </div>

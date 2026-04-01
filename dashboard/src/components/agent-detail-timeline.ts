@@ -22,7 +22,7 @@ function timelineEventLabel(type: string): string {
     case 'task_started': return '태스크 시작'
     case 'task_completed': return '태스크 완료'
     case 'task_cancelled': return '태스크 취소'
-    case 'broadcast': return '브로드캐스트'
+    case 'broadcast': return '공지'
     default: return type
   }
 }
@@ -35,7 +35,7 @@ export function AgentTimelineSection() {
   const summary = timeline.summary
 
   return html`
-    <${Card} title="활동 타임라인 (${summary?.total_events ?? 0} events)">
+    <${Card} title="활동 타임라인 (${summary?.total_events ?? 0}건)">
       ${summary ? html`
         <div class="flex gap-1.5 flex-wrap mb-2">
           ${summary.tasks_completed > 0 ? html`<span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">완료 ${summary.tasks_completed}</span>` : null}
@@ -45,7 +45,7 @@ export function AgentTimelineSection() {
         </div>
       ` : null}
       ${events.length === 0
-        ? html`<${EmptyState} message="이 에이전트의 작업 기록(태스크 수임/완료, 브로드캐스트 등)이 아직 없습니다." compact />`
+        ? html`<${EmptyState} message="작업 기록이 아직 없습니다" compact />`
         : html`
             <div class="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto">
               ${events.map((evt: AgentTimelineEvent, idx: number) => {

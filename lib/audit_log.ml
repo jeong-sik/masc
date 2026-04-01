@@ -154,10 +154,20 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
     let trace_id = Safe_ops.json_string_opt "trace_id" json in
     Ok { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count; trace_id }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    let snippet = preview (Yojson.Safe.to_string json) in
+    (* Redact details field to prevent sensitive content leaking into logs *)
+    let redacted = match json with
+      | `Assoc fields ->
+        let safe_fields = List.filter_map (fun (k, v) ->
+          if k = "details" then Some (k, `String "<redacted>")
+          else Some (k, v)
+        ) fields in
+        `Assoc safe_fields
+      | _ -> `String "<non-object>"
+    in
+    let snippet = preview (Yojson.Safe.to_string redacted) in
     Error (Printf.sprintf "%s | json: %s" (Printexc.to_string exn) snippet)
 
-(** Lenient wrapper: logs error and returns option for backward compat *)
+(** Lenient wrapper: logs warning and returns option for backward compat *)
 let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
   match entry_of_json_r json with
   | Ok entry -> Some entry

@@ -91,13 +91,14 @@ let of_keeper
   let exec_mode = infer_keeper_execution_mode ~scope_kind in
   let risk = infer_keeper_risk_class ~scope_kind in
   let mutations = infer_keeper_allowed_mutations ~execution_scope in
-  Log.Keeper.debug
-    "cdal contract for %s: mode=%s risk=%s mutations=[%s] scope_kind=%s exec_scope=%s"
-    keeper_name
-    (Oas.Execution_mode.to_string exec_mode)
-    (Oas.Risk_class.to_string risk)
-    (String.concat "," mutations)
-    scope_kind execution_scope;
+  if Keeper_types_profile.keeper_debug then
+    Log.Keeper.debug
+      "cdal contract for %s: mode=%s risk=%s mutations=[%s] scope_kind=%s exec_scope=%s"
+      keeper_name
+      (Oas.Execution_mode.to_string exec_mode)
+      (Oas.Risk_class.to_string risk)
+      (String.concat "," mutations)
+      scope_kind execution_scope;
   {
     Oas.Risk_contract.runtime_constraints =
       {

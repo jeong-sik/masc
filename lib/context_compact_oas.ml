@@ -382,6 +382,7 @@ let observation_summary = function
     - High context + multi-agent: aggressive compaction (preserve coordination)
     - High context + single task: summarize old + drop low importance
     - Small local model: prefer pruning (cheaper, faster)
+    - Large-context cloud (>= 500K): quality-preserving with summarization
     - Normal: standard DropLowImportance *)
 let default_dynamic_selector (obs : observation_context) : strategy list =
   if obs.context_ratio >= 0.80 && obs.active_agent_count > 1 then
@@ -393,6 +394,9 @@ let default_dynamic_selector (obs : observation_context) : strategy list =
   else if obs.is_local_model && obs.context_window < 32_000 then
     (* Small local models: lightweight compaction only *)
     [PruneToolOutputs; MergeContiguous]
+  else if obs.context_window >= 500_000 then
+    (* Large-context cloud: invest in quality-preserving strategies *)
+    [DropLowImportance; SummarizeOld]
   else
     (* Default: importance-based *)
     [DropLowImportance]

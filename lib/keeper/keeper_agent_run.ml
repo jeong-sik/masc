@@ -81,6 +81,69 @@ let normalize_response_text
           (Printf.sprintf "Completed without a textual reply. Tools used: %s."
              (String.concat ", " tool_names))
 
+let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
+  match proof.result_status with
+  | Agent_sdk.Cdal_proof.Completed ->
+      if Keeper_types_profile.keeper_debug then
+        Log.Keeper.debug "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
+          keeper_name proof.run_id
+          (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
+          (Agent_sdk.Cdal_proof.show_result_status proof.result_status)
+          (List.length proof.raw_evidence_refs)
+  | Agent_sdk.Cdal_proof.Errored
+  | Agent_sdk.Cdal_proof.Timed_out
+  | Agent_sdk.Cdal_proof.Cancelled ->
+      Log.Keeper.warn "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
+        keeper_name proof.run_id
+        (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
+        (Agent_sdk.Cdal_proof.show_result_status proof.result_status)
+        (List.length proof.raw_evidence_refs)
+
+let log_keeper_contract_verdict
+    ~(keeper_name : string)
+    (verdict : Cdal_types.contract_verdict) =
+  match verdict.status with
+  | Cdal_types.Satisfied ->
+      if Keeper_types_profile.keeper_debug then
+        Log.Keeper.debug "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
+          keeper_name
+          (Cdal_types.contract_status_to_string verdict.status)
+          verdict.claim_scope
+          verdict.judgment_hash
+  | Cdal_types.Violated | Cdal_types.Inconclusive ->
+      Log.Keeper.warn "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
+        keeper_name
+        (Cdal_types.contract_status_to_string verdict.status)
+        verdict.claim_scope
+        verdict.judgment_hash
+
+let log_keeper_friction
+    ~(keeper_name : string)
+    (fp : Cdal_friction_projection.friction_projection) =
+  let blocked = fp.blocked_attempt_count in
+  let groups = List.length fp.blocked_attempt_groups in
+  let tripwires = List.length fp.review_tripwires in
+  if tripwires > 0 then
+    Log.Keeper.warn "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
+      keeper_name blocked groups tripwires
+  else if blocked > 0 || groups > 0 then
+    Log.Keeper.info "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
+      keeper_name blocked groups tripwires
+  else if Keeper_types_profile.keeper_debug then
+    Log.Keeper.debug "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
+      keeper_name blocked groups tripwires
+
+let log_keeper_memory_write
+    ~(keeper_name : string)
+    ~(notes_written : int)
+    ~(kinds_written : string list) =
+  if notes_written >= 10 then
+    Log.Keeper.info "keeper:%s memory_write: %d notes, kinds=[%s]"
+      keeper_name notes_written (String.concat "," kinds_written)
+  else if Keeper_types_profile.keeper_debug then
+    Log.Keeper.debug "keeper:%s memory_write: %d notes, kinds=[%s]"
+      keeper_name notes_written (String.concat "," kinds_written)
+
 (** Run a single keeper turn via OAS Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
@@ -570,21 +633,12 @@ let run_turn
              ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
              (match result.proof with
              | Some p ->
-                Log.Keeper.info "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
-                  meta.name p.run_id
-                  (Agent_sdk.Execution_mode.to_string p.effective_execution_mode)
-                  (Agent_sdk.Cdal_proof.show_result_status p.result_status)
-                  (List.length p.raw_evidence_refs);
+                log_keeper_proof ~keeper_name:meta.name p;
                 let store = Agent_sdk.Proof_store.default_config in
                 let outcome = Cdal_eval_v1.evaluate ~store p in
                 let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
                 Cdal_eval_v1.persist verdict;
-                Log.Keeper.info
-                  "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
-                  meta.name
-                  (Cdal_types.contract_status_to_string verdict.status)
-                  verdict.claim_scope
-                  verdict.judgment_hash;
+                log_keeper_contract_verdict ~keeper_name:meta.name verdict;
                 (match outcome with
                  | Cdal_eval_v1.Load_failure (err, _) ->
                    Log.Keeper.warn "keeper:%s contract_verdict load failure: %s"
@@ -592,11 +646,7 @@ let run_turn
              | Cdal_eval_v1.Verdict (_, _) -> ());
             (match Cdal_eval_v1.friction_of_outcome outcome with
              | Some fp ->
-               Log.Keeper.info
-                 "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
-                 meta.name fp.blocked_attempt_count
-                 (List.length fp.blocked_attempt_groups)
-                 (List.length fp.review_tripwires)
+               log_keeper_friction ~keeper_name:meta.name fp
              | None -> ())
           | None -> ());
          (* Post-turn deterministic memory write.
@@ -608,8 +658,10 @@ let run_turn
                config meta ~turn:result.turns ~reply:response_text
            in
            if notes_written > 0 then
-             Log.Keeper.info "keeper:%s memory_write: %d notes, kinds=[%s]"
-               meta.name notes_written (String.concat "," kinds_written)
+             log_keeper_memory_write
+               ~keeper_name:meta.name
+               ~notes_written
+               ~kinds_written
          with
          | exn ->
            Log.Keeper.warn "keeper:%s memory_write failed: %s"

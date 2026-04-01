@@ -257,49 +257,15 @@ let register_metadata name (meta : metadata) =
   Hashtbl.replace metadata_table name meta
 
 (* ================================================================ *)
-(* Public MCP surface (legacy list, kept for backward compat)       *)
+(* Public MCP surface — delegates to Tool_catalog_surfaces (SSOT)   *)
 (* ================================================================ *)
-
-(** The subset of tools exposed via tools/list on the Full (external MCP client)
-    profile. Some hidden tools remain callable directly, but keeper-internal
-    adapters do not. This keeps the MCP surface focused on agent communication,
-    coordination, and stable public operations.
-
-    Override: set [MASC_FULL_SURFACE=1] to restore the full inventory,
-    excluding keeper-internal tools. *)
-
-let public_mcp_tools =
-  [
-    (* Room lifecycle *)
-    "masc_start"; "masc_join"; "masc_leave"; "masc_set_room"; "masc_status";
-    (* Messaging *)
-    "masc_broadcast"; "masc_messages"; "masc_who";
-    (* Task coordination *)
-    "masc_add_task"; "masc_batch_add_tasks"; "masc_tasks";
-    "masc_claim_next"; "masc_transition";
-    (* Planning *)
-    "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
-    (* Heartbeat *)
-    "masc_heartbeat";
-    (* Keeper interaction *)
-    "masc_keeper_msg"; "masc_keeper_list"; "masc_keeper_status";
-    "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
-    (* Board — async agent communication *)
-    "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote"; "masc_board_delete";
-    (* Agent discovery *)
-    "masc_agents"; "masc_dashboard"; "masc_agent_card";
-    (* Transport *)
-    "masc_transport_status"; "masc_websocket_discovery";
-    "masc_webrtc_offer"; "masc_webrtc_answer";
-    (* Utility *)
-    "masc_tool_help"; "masc_check";
-  ]
 
 (* Delegate to surfaces sub-module *)
 let keeper_internal_set = Tool_catalog_surfaces.keeper_internal_set
 
 let keeper_internal_replacement = Tool_catalog_surfaces.keeper_internal_replacement
+
+let public_mcp_tools = Tool_catalog_surfaces.public_mcp_surface_tools
 
 let keeper_internal_metadata name =
   let replacement = keeper_internal_replacement name in
@@ -317,7 +283,8 @@ let keeper_internal_metadata name =
 
 let public_mcp_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create 64 in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) public_mcp_tools;
+  List.iter (fun name -> Hashtbl.replace tbl name ())
+    Tool_catalog_surfaces.public_mcp_surface_tools;
   (* MASC_PUBLIC_TOOLS_EXTRA: comma-separated tool names to add at runtime.
      Example: MASC_PUBLIC_TOOLS_EXTRA=masc_board_search,masc_pause *)
   (match Env_config.Tools.public_tools_extra_opt () with

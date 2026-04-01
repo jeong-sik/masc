@@ -1,5 +1,7 @@
 open Alcotest
 
+module Keeper_voice_loop = Masc_mcp.Keeper_voice_loop
+
 (* ============================================================ *)
 (* Pure function tests                                           *)
 (* ============================================================ *)

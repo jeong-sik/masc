@@ -169,6 +169,9 @@ function ToolSearchPicker({
                 onAdd(val)
               }
               querySig.value = ''
+            } else if (e.key === 'Escape') {
+              querySig.value = ''
+              ;(e.target as HTMLInputElement).blur()
             }
           }}
         />
@@ -176,9 +179,13 @@ function ToolSearchPicker({
         ${suggestions.length > 0
           ? html`
             <div class="absolute z-10 top-full left-0 right-0 mt-1 max-h-[180px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] shadow-lg backdrop-blur-sm">
-              ${suggestions.map(name => html`
+              ${suggestions.map((name, idx) => html`
                 <button type="button"
-                  class="w-full flex items-start gap-2 text-left px-3 py-1.5 hover:bg-[rgba(71,184,255,0.12)] cursor-pointer transition-colors"
+                  class=${`w-full flex items-start gap-2 text-left px-3 py-1.5 cursor-pointer transition-colors ${
+                    idx === 0
+                      ? 'bg-[rgba(71,184,255,0.08)] hover:bg-[rgba(71,184,255,0.16)]'
+                      : 'hover:bg-[rgba(71,184,255,0.12)]'
+                  }`}
                   onMouseDown=${(e: MouseEvent) => e.preventDefault()}
                   onClick=${() => { onAdd(name); querySig.value = '' }}
                 >
@@ -355,7 +362,7 @@ export function ToolAllowlistEditor({
                 ? 'border-[rgba(71,184,255,0.35)] bg-[rgba(71,184,255,0.16)] text-[#9ad9ff]'
                 : 'border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)]'
             }`}
-            onClick=${() => { policyMode.value = mode }}
+            onClick=${() => { policyMode.value = mode; textInputSection.value = null }}
           >${mode}</button>
         `)}
       </div>

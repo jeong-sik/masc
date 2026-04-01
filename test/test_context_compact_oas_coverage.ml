@@ -268,6 +268,28 @@ let test_dynamic_small_local_model () =
   check (list string) "small local strategies"
     ["PruneToolOutputs"; "MergeContiguous"] names
 
+let test_dynamic_large_context_cloud () =
+  let obs : Compact.observation_context = {
+    context_ratio = 0.50; active_agent_count = 1;
+    unclaimed_task_count = 0; is_single_focused_task = false;
+    context_window = 1_000_000; is_local_model = false } in
+  let resolved = Compact.resolve_strategies ~obs:(Some obs)
+    [Compact.Dynamic Compact.default_dynamic_selector] in
+  let names = strategy_names resolved in
+  check (list string) "large context cloud strategies"
+    ["DropLowImportance"; "SummarizeOld"] names
+
+let test_dynamic_medium_cloud_default () =
+  let obs : Compact.observation_context = {
+    context_ratio = 0.50; active_agent_count = 1;
+    unclaimed_task_count = 0; is_single_focused_task = false;
+    context_window = 128_000; is_local_model = false } in
+  let resolved = Compact.resolve_strategies ~obs:(Some obs)
+    [Compact.Dynamic Compact.default_dynamic_selector] in
+  let names = strategy_names resolved in
+  check (list string) "medium cloud default strategies"
+    ["DropLowImportance"] names
+
 let test_dynamic_no_observation () =
   let resolved = Compact.resolve_strategies ~obs:None
     [Compact.Dynamic Compact.default_dynamic_selector] in
@@ -306,6 +328,8 @@ let () =
       test_case "high pressure multi-agent" `Quick test_dynamic_high_pressure_multi_agent;
       test_case "single focused task" `Quick test_dynamic_single_focused_task;
       test_case "small local model" `Quick test_dynamic_small_local_model;
+      test_case "large context cloud" `Quick test_dynamic_large_context_cloud;
+      test_case "medium cloud default" `Quick test_dynamic_medium_cloud_default;
       test_case "no observation fallback" `Quick test_dynamic_no_observation;
     ];
   ]

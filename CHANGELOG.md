@@ -1899,7 +1899,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `pulse.ml`: Core engine using `Eio.Stream` for nudge signaling, `Eio.Promise` for graceful shutdown
   - `Pulse.Consumer` module type: First-class modules with `name`, `should_act`, `on_beat` callbacks
   - Rhythm types: Fixed interval, quiet hours support, interval clamping (min/max bounds)
-  - Lifecycle: `Always_on` (auto-restart on error) or `Oneshot`
+  - Lifecycle: `Always_on` (auto-restart on error) or `Bounded`
   - 20+ tests covering quiet hours, nudge coalescing, consumer error isolation
 
 ### Changed

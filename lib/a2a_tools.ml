@@ -4,6 +4,8 @@
 open Types
 include A2a_types
 
+module SMap = Map.Make(String)
+
 (** Subscription *)
 type subscription = {
   id: string;
@@ -12,8 +14,8 @@ type subscription = {
   created_at: string;
 } [@@deriving show]
 
-(* Global subscription store *)
-let subscriptions : (string, subscription) Hashtbl.t = Hashtbl.create 16
+(* Global subscription store — immutable map + mutex for fiber safety *)
+let subscriptions : subscription SMap.t ref = ref SMap.empty
 let subscriptions_mutex = Eio.Mutex.create ()
 
 (* Persistence file path - set by init *)
@@ -60,7 +62,7 @@ let save_subscriptions () =
   if !subscriptions_file = "" then ()
   else
     let subs = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
-      Hashtbl.fold (fun _k v acc -> subscription_to_json v :: acc) subscriptions []) in
+      SMap.fold (fun _k v acc -> subscription_to_json v :: acc) !subscriptions []) in
     let json = `Assoc [("subscriptions", `List subs)] in
     let content = Yojson.Safe.pretty_to_string json in
     try
@@ -83,7 +85,7 @@ let load_subscriptions () =
       Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
         List.iter (fun j ->
           match subscription_of_json j with
-          | Some sub -> Hashtbl.replace subscriptions sub.id sub
+          | Some sub -> subscriptions := SMap.add sub.id sub !subscriptions
           | None -> ()
         ) subs)
 
@@ -100,8 +102,8 @@ type buffered_event = {
   timestamp: float;
 } [@@deriving show]
 
-(* Event buffer per subscription - key: subscription_id, value: event list *)
-let event_buffers : (string, buffered_event list) Hashtbl.t = Hashtbl.create 16
+(* Event buffer per subscription — immutable map + mutex *)
+let event_buffers : buffered_event list SMap.t ref = ref SMap.empty
 let event_buffers_mutex = Eio.Mutex.create ()
 
 (* Max events per subscription to prevent memory bloat *)
@@ -148,11 +150,9 @@ type heartbeat_result_snapshot = {
   updated_at: string;
 }
 
-let latest_heartbeat_tasks : (string, heartbeat_task_snapshot) Hashtbl.t =
-  Hashtbl.create 32
+let latest_heartbeat_tasks : heartbeat_task_snapshot SMap.t ref = ref SMap.empty
 
-let latest_heartbeat_results : (string, heartbeat_result_snapshot) Hashtbl.t =
-  Hashtbl.create 32
+let latest_heartbeat_results : heartbeat_result_snapshot SMap.t ref = ref SMap.empty
 
 let heartbeat_mutex = Eio.Mutex.create ()
 
@@ -164,11 +164,11 @@ let next_heartbeat_snapshot_seq () =
 
 let latest_heartbeat_task agent =
   Eio_guard.with_mutex heartbeat_mutex (fun () ->
-    Hashtbl.find_opt latest_heartbeat_tasks agent)
+    SMap.find_opt agent !latest_heartbeat_tasks)
 
 let latest_heartbeat_result agent =
   Eio_guard.with_mutex heartbeat_mutex (fun () ->
-    Hashtbl.find_opt latest_heartbeat_results agent)
+    SMap.find_opt agent !latest_heartbeat_results)
 
 let remote_agent_card_paths =
   [ "/.well-known/agent.json"; "/.well-known/agent-card.json" ]
@@ -429,7 +429,7 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
       created_at = now_iso8601 ();
     } in
     Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
-      Hashtbl.add subscriptions sub_id sub);
+      subscriptions := SMap.add sub_id sub !subscriptions);
     save_subscriptions ();
     Ok (`Assoc [
       ("subscription_id", `String sub_id);
@@ -447,13 +447,15 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
     @param subscription_id Subscription ID to remove
 *)
 let unsubscribe ~subscription_id : (Yojson.Safe.t, string) result =
-  let exists = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
-    Hashtbl.mem subscriptions subscription_id) in
-  if exists then begin
-    Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
-      Hashtbl.remove subscriptions subscription_id);
+  let removed = Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
+    let prev = !subscriptions in
+    if SMap.mem subscription_id prev then begin
+      subscriptions := SMap.remove subscription_id prev;
+      true
+    end else false) in
+  if removed then begin
     Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
-      Hashtbl.remove event_buffers subscription_id);
+      event_buffers := SMap.remove subscription_id !event_buffers);
     save_subscriptions ();
     Ok (`Assoc [
       ("unsubscribed", `Bool true);
@@ -464,8 +466,9 @@ let unsubscribe ~subscription_id : (Yojson.Safe.t, string) result =
 
 (** List active subscriptions *)
 let list_subscriptions () : Yojson.Safe.t =
+  let buf_snap = Eio.Mutex.use_ro event_buffers_mutex (fun () -> !event_buffers) in
   let subs = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
-    Hashtbl.fold (fun _k v acc ->
+    SMap.fold (fun _k v acc ->
       let sub_json = `Assoc [
         ("id", `String v.id);
         ("agent_filter", match v.agent_filter with
@@ -474,13 +477,13 @@ let list_subscriptions () : Yojson.Safe.t =
         ("events", `List (List.map (fun e -> `String (show_event_type e)) v.event_types));
         ("created_at", `String v.created_at);
         ("buffered_count", `Int (
-          match Hashtbl.find_opt event_buffers v.id with
+          match SMap.find_opt v.id buf_snap with
           | None -> 0
           | Some events -> List.length events
         ));
       ] in
       sub_json :: acc
-    ) subscriptions []) in
+    ) !subscriptions []) in
   `Assoc [
     ("count", `Int (List.length subs));
     ("subscriptions", `List subs);
@@ -501,17 +504,16 @@ let list_subscriptions () : Yojson.Safe.t =
 let poll_events ~subscription_id ?(clear = true) ()
     : (Yojson.Safe.t, string) result =
   let mem = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
-    Hashtbl.mem subscriptions subscription_id) in
+    SMap.mem subscription_id !subscriptions) in
   if not mem then
     Error (Printf.sprintf "Subscription '%s' not found" subscription_id)
   else
-    let events = Eio.Mutex.use_ro event_buffers_mutex (fun () ->
-      match Hashtbl.find_opt event_buffers subscription_id with
-      | None -> []
-      | Some events -> events) in
-    (* Optionally clear buffer *)
-    if clear then Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
-      Hashtbl.replace event_buffers subscription_id []);
+    let events = Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
+      let evts = match SMap.find_opt subscription_id !event_buffers with
+        | None -> []
+        | Some events -> events in
+      if clear then event_buffers := SMap.add subscription_id [] !event_buffers;
+      evts) in
     (* Convert to JSON *)
     let events_json = List.map (fun e ->
       `Assoc [
@@ -531,11 +533,10 @@ let poll_events ~subscription_id ?(clear = true) ()
 (** Buffer an event for a subscription (with max limit enforcement) *)
 let buffer_event sub_id event =
   Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
-    let current = match Hashtbl.find_opt event_buffers sub_id with
+    let current = match SMap.find_opt sub_id !event_buffers with
       | None -> []
       | Some events -> events
     in
-    (* Keep only last (max - 1) events + new one *)
     let trimmed =
       if List.length current >= max_buffered_events then
         match current with
@@ -543,45 +544,42 @@ let buffer_event sub_id event =
         | [] -> []
       else current
     in
-    Hashtbl.replace event_buffers sub_id (trimmed @ [event]))
+    event_buffers := SMap.add sub_id (trimmed @ [event]) !event_buffers)
 
 (** Notify subscribers of an event (internal use)
     Now also buffers events for polling in addition to SSE broadcast *)
 let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Safe.t) : unit =
   let timestamp = Time_compat.now () in
-  Eio.Mutex.use_ro subscriptions_mutex (fun () ->
-  Hashtbl.iter (fun _id sub ->
-    (* Check agent filter *)
-    let agent_match = match sub.agent_filter with
-      | None -> true
-      | Some filter -> filter = "*" || filter = agent
-          || event_type = HeartbeatTask (* System event: bypass agent filter *)
-    in
-    (* Check event type *)
-    let event_match = List.mem event_type sub.event_types in
-    if agent_match && event_match then begin
-      (* Buffer event for polling *)
-      let event = { event_type; agent; data; timestamp } in
-      buffer_event sub.id event;
-
-      (* Push event as MCP JSON-RPC Notification (no id = notification) *)
-      let event_params = `Assoc [
-        ("type", `String (show_event_type event_type));
-        ("agent", `String agent);
-        ("data", data);
-        ("timestamp", `Float timestamp);
-        ("subscription_id", `String sub.id);
-      ] in
-      let mcp_notification = `Assoc [
-        ("jsonrpc", `String "2.0");
-        ("method", `String "masc/event");
-        ("params", event_params);
-      ] in
-      Sse.broadcast mcp_notification;
-      Log.debug ~ctx:"a2a" "Event %s from %s buffered+SSE (sub: %s)"
-        (show_event_type event_type) agent sub.id
-    end
-  ) subscriptions)
+  (* Snapshot subscriptions to avoid nested locking (subscriptions → event_buffers) *)
+  let matching_subs = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
+    SMap.fold (fun _id sub acc ->
+      let agent_match = match sub.agent_filter with
+        | None -> true
+        | Some filter -> filter = "*" || filter = agent
+            || event_type = HeartbeatTask
+      in
+      let event_match = List.mem event_type sub.event_types in
+      if agent_match && event_match then sub :: acc else acc
+    ) !subscriptions []) in
+  List.iter (fun sub ->
+    let event = { event_type; agent; data; timestamp } in
+    buffer_event sub.id event;
+    let event_params = `Assoc [
+      ("type", `String (show_event_type event_type));
+      ("agent", `String agent);
+      ("data", data);
+      ("timestamp", `Float timestamp);
+      ("subscription_id", `String sub.id);
+    ] in
+    let mcp_notification = `Assoc [
+      ("jsonrpc", `String "2.0");
+      ("method", `String "masc/event");
+      ("params", event_params);
+    ] in
+    Sse.broadcast mcp_notification;
+    Log.debug ~ctx:"a2a" "Event %s from %s buffered+SSE (sub: %s)"
+      (show_event_type event_type) agent sub.id
+  ) matching_subs
 
 (** {1 Heartbeat Task Events — Soul + Tool Loop Pattern}
 
@@ -611,16 +609,16 @@ let emit_heartbeat_task
     ?(auth_token : string option)
     () : unit =
   Eio.Mutex.use_rw ~protect:true heartbeat_mutex (fun () ->
-    Hashtbl.replace latest_heartbeat_tasks agent
+    latest_heartbeat_tasks := SMap.add agent
       {
         seq = next_heartbeat_snapshot_seq ();
-      goal;
-      context;
-      worker_mode;
-      allowed_tools;
-      decision_reason;
+        goal;
+        context;
+        worker_mode;
+        allowed_tools;
+        decision_reason;
         created_at = now_iso8601 ();
-      });
+      } !latest_heartbeat_tasks);
   let data = `Assoc ([
     ("agent", `String agent);
     ("goal", `String goal);
@@ -706,19 +704,19 @@ let submit_heartbeat_result
   (match result with
    | Ok _ ->
        Eio.Mutex.use_rw ~protect:true heartbeat_mutex (fun () ->
-         Hashtbl.replace latest_heartbeat_results agent
+         latest_heartbeat_results := SMap.add agent
            {
              seq = next_heartbeat_snapshot_seq ();
-           status = normalized_status;
-           summary;
-           worker_name;
-           tool_call_count;
-           tool_names;
-           decision_reason;
-           decision_confidence;
-           failure_reason;
+             status = normalized_status;
+             summary;
+             worker_name;
+             tool_call_count;
+             tool_names;
+             decision_reason;
+             decision_confidence;
+             failure_reason;
              updated_at = now_iso8601 ();
-           });
+           } !latest_heartbeat_results);
        notify_event ~event_type:Completion ~agent
          ~data:(`Assoc [
            ("worker", `String worker_name);
@@ -745,23 +743,25 @@ let submit_heartbeat_result
     on next heartbeat emission. *)
 let cleanup_stale_heartbeats ~active_agents () =
   Eio_guard.with_mutex heartbeat_mutex (fun () ->
-    let stale = Hashtbl.fold (fun agent _ acc ->
+    let stale = SMap.fold (fun agent _ acc ->
       if not (List.mem agent active_agents) then agent :: acc else acc
-    ) latest_heartbeat_tasks [] in
+    ) !latest_heartbeat_tasks [] in
     List.iter (fun agent ->
-      Hashtbl.remove latest_heartbeat_tasks agent;
-      Hashtbl.remove latest_heartbeat_results agent
+      latest_heartbeat_tasks := SMap.remove agent !latest_heartbeat_tasks;
+      latest_heartbeat_results := SMap.remove agent !latest_heartbeat_results
     ) stale;
     List.length stale)
 
 (** Remove event buffer entries whose subscription no longer exists.
     Returns count of removed entries. *)
 let cleanup_orphan_buffers () =
+  (* Snapshot subscriptions first to avoid nested locking *)
+  let sub_snap = Eio.Mutex.use_ro subscriptions_mutex (fun () -> !subscriptions) in
   Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
-    let orphans = Hashtbl.fold (fun sub_id _ acc ->
-      let exists = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
-        Hashtbl.mem subscriptions sub_id) in
-      if not exists then sub_id :: acc else acc
-    ) event_buffers [] in
-    List.iter (Hashtbl.remove event_buffers) orphans;
+    let orphans = SMap.fold (fun sub_id _ acc ->
+      if not (SMap.mem sub_id sub_snap) then sub_id :: acc else acc
+    ) !event_buffers [] in
+    List.iter (fun sub_id ->
+      event_buffers := SMap.remove sub_id !event_buffers
+    ) orphans;
     List.length orphans)

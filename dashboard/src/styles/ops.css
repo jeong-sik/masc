@@ -22,9 +22,8 @@
 
 /* ops-stat tone variants: folded into @utility ops-stat above */
 
-.ops-control-summary::-webkit-details-marker,
-.ops-archive-panel[open] .ops-archive-summary::before {
-  transform: rotate(90deg);
+.ops-control-summary::-webkit-details-marker {
+  display: none;
 }
 
 @utility ops-guidance-card {

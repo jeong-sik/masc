@@ -9,7 +9,8 @@
  *   keyframes.css    — all @keyframes animations
  *
  * Feature styles are in separate files imported below.
- * This file contains only shared-base utilities used across features.
+ * Shared utilities (card, status-badge, control-input, ops-workbench,
+ * table, app shell, header) are defined after all imports.
  */
 
 /* ── Foundation imports ──────────────────────────────────────── */
@@ -19,7 +20,6 @@
 @import "./keyframes.css";
 
 /* ── Feature imports (alphabetical) ──────────────────────────── */
-@import "./a11y.css";
 @import "./agent-monitor.css";
 @import "./board.css";
 @import "./chat.css";
@@ -40,6 +40,7 @@
 @import "./roster-detail.css";
 @import "./tools.css";
 @import "./ui.css";
+@import "./a11y.css"; /* after feature styles so reduced-motion overrides win */
 
 /* ── Card / Section / Headline base styles ─────────────────────
    Shared across the dashboard. Every card, title, headline, and

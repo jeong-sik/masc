@@ -328,7 +328,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/prompts" (fun request reqd ->
-       with_tool_auth ~tool_name:"prompt_override"
+       with_tool_auth ~tool_name:"masc_prompt_override"
          (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try

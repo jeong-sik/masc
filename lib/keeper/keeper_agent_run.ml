@@ -102,16 +102,20 @@ let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
 let log_keeper_contract_verdict
     ~(keeper_name : string)
     (verdict : Cdal_types.contract_verdict) =
-  let log =
-    match verdict.status with
-    | Cdal_types.Satisfied -> Log.Keeper.debug
-    | Cdal_types.Violated | Cdal_types.Inconclusive -> Log.Keeper.warn
-  in
-  log "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
-    keeper_name
-    (Cdal_types.contract_status_to_string verdict.status)
-    verdict.claim_scope
-    verdict.judgment_hash
+  match verdict.status with
+  | Cdal_types.Satisfied ->
+      if Keeper_types_profile.keeper_debug then
+        Log.Keeper.debug "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
+          keeper_name
+          (Cdal_types.contract_status_to_string verdict.status)
+          verdict.claim_scope
+          verdict.judgment_hash
+  | Cdal_types.Violated | Cdal_types.Inconclusive ->
+      Log.Keeper.warn "keeper:%s contract_verdict: status=%s scope=%s hash=%s"
+        keeper_name
+        (Cdal_types.contract_status_to_string verdict.status)
+        verdict.claim_scope
+        verdict.judgment_hash
 
 let log_keeper_friction
     ~(keeper_name : string)
@@ -119,13 +123,15 @@ let log_keeper_friction
   let blocked = fp.blocked_attempt_count in
   let groups = List.length fp.blocked_attempt_groups in
   let tripwires = List.length fp.review_tripwires in
-  let log =
-    if tripwires > 0 then Log.Keeper.warn
-    else if blocked > 0 || groups > 0 then Log.Keeper.info
-    else Log.Keeper.debug
-  in
-  log "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
-    keeper_name blocked groups tripwires
+  if tripwires > 0 then
+    Log.Keeper.warn "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
+      keeper_name blocked groups tripwires
+  else if blocked > 0 || groups > 0 then
+    Log.Keeper.info "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
+      keeper_name blocked groups tripwires
+  else if Keeper_types_profile.keeper_debug then
+    Log.Keeper.debug "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
+      keeper_name blocked groups tripwires
 
 let log_keeper_memory_write
     ~(keeper_name : string)

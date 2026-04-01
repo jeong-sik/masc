@@ -122,6 +122,14 @@ let require_string_list json key =
   | `Null -> Error (Printf.sprintf "missing required field '%s'" key)
   | _ -> Error (Printf.sprintf "field '%s' must be an array" key)
 
+let string_of_intlike_float_field key f =
+  if not (Float.is_finite f) then
+    Error (Printf.sprintf "field '%s' must be a finite number" key)
+  else
+    try Ok (string_of_int (int_of_float f))
+    with Invalid_argument _ ->
+      Error (Printf.sprintf "field '%s' is out of range for int" key)
+
 let decode_status json =
   match member "status" json with
   | `String s -> Ok s
@@ -161,14 +169,8 @@ let decode_keeper ~filename json =
   let* k_models =
     match member "models" json with
     | `Null -> Ok []
-    | `List items ->
-        let rec collect acc = function
-          | [] -> Ok (List.rev acc)
-          | `String s :: rest -> collect (s :: acc) rest
-          | _ -> Error "field 'models' must be a list of strings"
-        in
-        collect [] items
-    | _ -> Error "field 'models' must be a list of strings or null"
+    | `List _ -> require_string_list json "models"
+    | _ -> Error "field 'models' must be a list of strings"
   in
   let* k_proactive_enabled = require_bool_field json "proactive_enabled" in
   let* k_initiative_enabled = optional_bool json "initiative_enabled" in
@@ -178,10 +180,10 @@ let decode_keeper ~filename json =
   let* k_last_turn_ts =
     match member "last_turn_ts" json with
     | `String s -> Ok s
-    | `Float f -> Ok (string_of_int (int_of_float f))
+    | `Float f -> string_of_intlike_float_field "last_turn_ts" f
     | `Int n -> Ok (string_of_int n)
     | `Null -> Ok ""
-    | _ -> Error "field 'last_turn_ts' must be a string or number"
+    | _ -> Error "field 'last_turn_ts' must be a string, number, or null"
   in
   let* k_compaction_count = require_int_field json "compaction_count" in
   let* k_compaction_ratio_gate = require_float_field json "compaction_ratio_gate" in

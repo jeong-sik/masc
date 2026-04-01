@@ -116,6 +116,12 @@ let test_decode_keeper_rejects_non_string_model_items () =
        (Tui_decode.decode_keeper ~filename:"keeper-main.json"
           (keeper_json ~models:(`List [ `String "glm-5.1"; `Int 7 ]) ())))
 
+let test_decode_keeper_rejects_non_finite_last_turn_ts () =
+  Alcotest.(check bool) "non-finite timestamp rejected" true
+    (Result.is_error
+       (Tui_decode.decode_keeper ~filename:"keeper-main.json"
+          (keeper_json ~last_turn_ts:(`Float Float.infinity) ())))
+
 let test_parse_log_entry_success () =
   let line =
     Yojson.Safe.to_string
@@ -260,6 +266,8 @@ let () =
           test_decode_keeper_rejects_invalid_models_type;
         Alcotest.test_case "rejects non-string model items" `Quick
           test_decode_keeper_rejects_non_string_model_items;
+        Alcotest.test_case "rejects non-finite last_turn_ts" `Quick
+          test_decode_keeper_rejects_non_finite_last_turn_ts;
       ] );
     ( "parse_log_entry",
       [

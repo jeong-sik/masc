@@ -215,7 +215,7 @@ let run_turn
   let agent_name = Printf.sprintf "keeper-%s" meta.name in
   let meta_ref = ref meta in
   let agent_ref : Agent_sdk.Agent.t option ref = ref None in
-    let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
+  let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =
@@ -427,9 +427,7 @@ let run_turn
           Log.Keeper.info
             "keeper:%s turn_budget turn=%d/%d last_turn=%b"
             meta.name turn max_turns is_last_turn;
-        let tool_filter =
-          Agent_sdk.Tool_op.to_tool_filter Agent_sdk.Tool_op.Keep_all all_allowed
-        in
+        let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
         Agent_sdk.Hooks.AdjustParams
           { current_params with
             extra_system_context = ctx;

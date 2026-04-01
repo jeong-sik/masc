@@ -158,9 +158,11 @@ module Limits = struct
   let max_comments_per_post = 1_000
   let max_content_length = 4_000
   let default_ttl_hours = 0    (* 0 = permanent (no expiry) *)
+  let automation_ttl_hours = 168 (* 7 days for Automation_post / System_post *)
   let max_ttl_hours = 720      (* 30 days max; ignored when ttl=0 *)
   let sweeper_interval_sec = 10  (* Much more aggressive than OpenClaw's 60s *)
   let sweeper_batch_size = 100   (* Backpressure: don't delete too many at once *)
+  let author_post_cap = 100     (* Max active posts per author; oldest auto-expired *)
 end
 
 (** {1 Vote Direction} *)

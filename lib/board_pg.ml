@@ -223,7 +223,15 @@ let create_post t ~author ~content ?title ?body ~post_kind ?meta_json
   match Agent_id.of_string author with
   | Error e -> Error e
   | Ok author_id ->
-  let ttl = if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours in
+  let ttl =
+    match post_kind with
+    | Automation_post | System_post ->
+        let forced = Limits.automation_ttl_hours in
+        if ttl_hours = 0 then forced
+        else min ttl_hours forced
+    | Human_post ->
+        if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours
+  in
   let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
   let now = Time_compat.now () in
   let expires_at = if ttl = 0 then 0.0 else now +. (float_of_int ttl *. 3600.0) in
@@ -354,9 +362,20 @@ let add_comment t ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.defaul
   ) t.pool with
   | Error err -> Error (caqti_err err)
   | Ok None -> Error (Post_not_found post_id)
-  | Ok (Some _) ->
+  | Ok (Some row) ->
+  (match post_of_row row with
+   | None -> Error (Validation_error "Corrupt parent post")
+   | Some parent_post ->
   let now = Time_compat.now () in
-  let ttl = if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours in
+  let ttl =
+    match parent_post.post_kind with
+    | Automation_post | System_post ->
+        let forced = Limits.automation_ttl_hours in
+        if ttl_hours = 0 then forced
+        else min ttl_hours forced
+    | Human_post ->
+        if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours
+  in
   let comment = {
     id = Comment_id.generate ();
     post_id = pid;
@@ -388,6 +407,7 @@ let add_comment t ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.defaul
         author = Agent_id.to_string author_id
       });
       Ok comment
+  )
 
 let get_comments t ~post_id =
   match Post_id.of_string post_id with
@@ -717,7 +737,13 @@ let sweep t =
     let module C = (val conn : Caqti_eio.CONNECTION) in
     let* posts_removed = C.find sweep_posts_q Limits.sweeper_batch_size in
     let* comments_removed = C.find sweep_comments_q Limits.sweeper_batch_size in
-    Ok (posts_removed, comments_removed)
+    let* cap_evicted =
+      if Limits.author_post_cap > 0 then
+        C.find sweep_author_cap_q Limits.author_post_cap
+      else Ok 0
+    in
+    let total_posts = posts_removed + cap_evicted in
+    Ok (total_posts, comments_removed)
   ) t.pool with
   | Ok (p, c) -> (p, c)
   | Error err ->

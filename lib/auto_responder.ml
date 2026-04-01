@@ -319,7 +319,7 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
       ) else if should_throttle ~agent_type:mention_base then (
         debug_log "EXIT: Throttled";
         activity_log ~mode ~from_agent ~mention:m ~status:"THROTTLE"
-          ~detail:(Printf.sprintf "Max %d responses per %.0fs" chain_limit chain_window);
+          ~detail:(Printf.sprintf "Max %d responses per %.0fs" chain_limit chain_window_sec);
         Log.AutoResponder.info "Throttled @%s (chain limit)" m;
         None
       ) else (

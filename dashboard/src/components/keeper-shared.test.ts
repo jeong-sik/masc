@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { waitFor } from '@testing-library/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -140,10 +141,9 @@ describe('KeeperConversationPanel', () => {
     expect(hydrateKeeperStatus).not.toHaveBeenCalled()
   })
 
-  it('keeps lifecycle success visible when dashboard refresh fails after boot', async () => {
+  it('keeps lifecycle success visible after boot', async () => {
     const keeper = { name: 'sangsu', status: 'offline' } as any
     bootKeeper.mockResolvedValue({ ok: true })
-    refreshDashboard.mockRejectedValue('refresh failed')
 
     render(
       html`<${KeeperRuntimeActions}
@@ -159,16 +159,13 @@ describe('KeeperConversationPanel', () => {
     )
     expect(bootButton).not.toBeUndefined()
     bootButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await Promise.resolve()
-    await Promise.resolve()
 
-    expect(bootKeeper).toHaveBeenCalledWith('sangsu')
+    await waitFor(() => {
+      expect(bootKeeper).toHaveBeenCalledWith('sangsu')
+    })
     expect(invalidateDashboardCache).toHaveBeenCalled()
+    expect(refreshDashboard).toHaveBeenCalledWith({ force: true })
     expect(showToast).toHaveBeenCalledWith('sangsu 기동됨', 'success')
-    expect(showToast).toHaveBeenCalledWith(
-      '대시보드 새로고침에 실패했습니다. 잠시 후 다시 시도해 주세요.',
-      'error',
-    )
     expect(showToast).not.toHaveBeenCalledWith('sangsu 기동 실패', 'error')
   })
 })

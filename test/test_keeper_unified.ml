@@ -242,6 +242,58 @@ let test_scheduled_turn_respects_cooldown () =
   check bool "cooldown blocks scheduled turn" false
     (WO.should_run_unified_turn ~meta base_observation)
 
+let test_effective_cooldown_no_decay_within_base () =
+  (* Within the base cooldown period, no decay should apply. *)
+  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:900 in
+  check int "no decay within base" 1800 result
+
+let test_effective_cooldown_at_boundary () =
+  (* Exactly at the base cooldown, no decay yet. *)
+  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:1800 in
+  check int "no decay at boundary" 1800 result
+
+let test_effective_cooldown_first_decay () =
+  (* One full extra period: cooldown halved. *)
+  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:3600 in
+  check int "first decay halves cooldown" 900 result
+
+let test_effective_cooldown_second_decay () =
+  (* Two extra periods: cooldown quartered. *)
+  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:5400 in
+  check int "second decay quarters cooldown" 450 result
+
+let test_effective_cooldown_floor () =
+  (* Four+ extra periods: cooldown at floor (300s default). *)
+  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:10800 in
+  check int "decay floors at min_cooldown" 300 result
+
+let test_effective_cooldown_max_int () =
+  (* max_int (first proactive ever): should hit floor immediately. *)
+  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:max_int in
+  check int "max_int hits floor" 300 result
+
+let test_idle_decay_triggers_turn () =
+  (* After extended idle, decay should make cooldown_elapsed true
+     even when since_last_proactive < base cooldown_sec. *)
+  let meta =
+    { minimal_meta with
+      proactive =
+        { minimal_meta.proactive with
+          enabled = true;
+          cooldown_sec = 1800;
+        };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 4000.0;
+            };
+        };
+    }
+  in
+  check bool "idle decay triggers turn before base cooldown" true
+    (WO.should_run_unified_turn ~meta base_observation)
+
 let test_prompt_contains_identity () =
   let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
   check bool "contains name" true (String.length sys > 0);
@@ -862,6 +914,20 @@ let () =
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn respects cooldown" `Quick
             test_scheduled_turn_respects_cooldown;
+          test_case "idle decay: no decay within base" `Quick
+            test_effective_cooldown_no_decay_within_base;
+          test_case "idle decay: at boundary" `Quick
+            test_effective_cooldown_at_boundary;
+          test_case "idle decay: first decay" `Quick
+            test_effective_cooldown_first_decay;
+          test_case "idle decay: second decay" `Quick
+            test_effective_cooldown_second_decay;
+          test_case "idle decay: floor" `Quick
+            test_effective_cooldown_floor;
+          test_case "idle decay: max_int" `Quick
+            test_effective_cooldown_max_int;
+          test_case "idle decay: triggers turn" `Quick
+            test_idle_decay_triggers_turn;
           test_case "with goals" `Quick test_observation_with_goals;
           test_case "economic modes" `Quick test_observation_economic_modes;
         ] );

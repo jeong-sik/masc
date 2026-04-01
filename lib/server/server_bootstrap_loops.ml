@@ -208,14 +208,18 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     Log.Keeper.info "autoboot: %d keeper(s) to boot: [%s]"
       (List.length names) (String.concat ", " names);
     let booted = ref 0 in
-    List.iter (fun name ->
+    let base_warmup = Keeper_config.keeper_bootstrap_proactive_warmup_sec () in
+    let stagger_step = Keeper_config.keeper_bootstrap_stagger_step_sec () in
+    List.iteri (fun idx name ->
         try
           Log.Keeper.info "autoboot: loading meta for %s" name;
           match Keeper_runtime.ensure_keeper_meta config name with
           | Error e ->
             Log.Keeper.error "autoboot: failed to load meta for %s: %s" name e
           | Ok m ->
-            Log.Keeper.info "autoboot: calling start_keepalive for %s" name;
+            let warmup = base_warmup + (idx * stagger_step) in
+            Log.Keeper.info "autoboot: calling start_keepalive for %s (warmup=%ds)"
+              name warmup;
             let ctx : _ Keeper_types.context = {
               config;
               agent_name = m.agent_name;
@@ -224,7 +228,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
               proc_mgr = Some proc_mgr;
               net = state.net;
             } in
-            Keeper_keepalive.start_keepalive ~proactive_warmup_sec:60 ctx m;
+            Keeper_keepalive.start_keepalive ~proactive_warmup_sec:warmup ctx m;
             incr booted;
             Log.Keeper.info "autoboot: started keepalive for %s" m.name
         with

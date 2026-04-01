@@ -1,6 +1,6 @@
 // MASC Dashboard — MCP-over-HTTP client with session lifecycle
 
-import { fetchWithTimeout, DEFAULT_MCP_TIMEOUT_MS } from './core'
+import { fetchWithTimeout, DEFAULT_MCP_TIMEOUT_MS, getStoredToken } from './core'
 import {
   MCP_INIT_COOLDOWN_MS,
   MCP_INITIALIZE_TIMEOUT_MS,
@@ -55,6 +55,10 @@ function mcpHeaders(extra?: Record<string, string>): Record<string, string> {
     Accept: 'application/json, text/event-stream',
     ...(extra ?? {}),
   }
+  const token = getStoredToken()
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
   if (mcpSessionId) {
     headers['Mcp-Session-Id'] = mcpSessionId
   }
@@ -89,10 +93,7 @@ async function ensureSession(): Promise<void> {
     try {
       const res = await fetchWithTimeout('/mcp', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json, text/event-stream',
-        },
+        headers: mcpHeaders(),
         body: JSON.stringify({
           jsonrpc: '2.0',
           method: 'initialize',

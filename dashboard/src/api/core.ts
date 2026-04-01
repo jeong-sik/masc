@@ -33,7 +33,7 @@ function initTokenFromUrl(): void {
 
 initTokenFromUrl()
 
-function getStoredToken(): string | null {
+export function getStoredToken(): string | null {
   return sessionStorage.getItem(TOKEN_STORAGE_KEY)
 }
 

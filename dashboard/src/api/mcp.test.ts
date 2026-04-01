@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+let storedToken: string | null = null
+
 const { fetchWithTimeout, reportToolHostFailure } = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
   reportToolHostFailure: vi.fn().mockResolvedValue({ ok: true }),
@@ -8,6 +10,7 @@ const { fetchWithTimeout, reportToolHostFailure } = vi.hoisted(() => ({
 vi.mock('./core', () => ({
   fetchWithTimeout,
   DEFAULT_MCP_TIMEOUT_MS: 30000,
+  getStoredToken: () => storedToken,
 }))
 
 vi.mock('./dashboard', () => ({
@@ -17,6 +20,7 @@ vi.mock('./dashboard', () => ({
 afterEach(async () => {
   const { resetMcpClientState } = await import('./mcp')
   resetMcpClientState()
+  storedToken = null
   vi.clearAllMocks()
   vi.resetModules()
 })
@@ -50,5 +54,58 @@ describe('callMcpTool', () => {
         timeout_ms: 30000,
       }),
     )
+  })
+
+  it('includes Authorization header when token is available', async () => {
+    storedToken = 'test-bearer-token'
+
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-auth' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('data: {"result":{"content":[{"type":"text","text":"ok"}]}}\n', {
+          status: 200,
+        }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    // initialize request (1st call) should include auth header
+    const initHeaders = fetchWithTimeout.mock.calls[0]?.[1]?.headers as Record<string, string>
+    expect(initHeaders['Authorization']).toBe('Bearer test-bearer-token')
+
+    // tools/call request (3rd call) should include auth header
+    const toolHeaders = fetchWithTimeout.mock.calls[2]?.[1]?.headers as Record<string, string>
+    expect(toolHeaders['Authorization']).toBe('Bearer test-bearer-token')
+  })
+
+  it('omits Authorization header when no token is stored', async () => {
+    storedToken = null
+
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-noauth' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('data: {"result":{"content":[{"type":"text","text":"ok"}]}}\n', {
+          status: 200,
+        }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    const initHeaders = fetchWithTimeout.mock.calls[0]?.[1]?.headers as Record<string, string>
+    expect(initHeaders['Authorization']).toBeUndefined()
   })
 })

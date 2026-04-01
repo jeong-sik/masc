@@ -13,32 +13,32 @@ module Oas = Agent_sdk
 let supported_local_worker_tool_names =
   Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 
-let observe_only_blocked_local_worker_tool_names =
-  [
-    "masc_add_task";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_board_post";
-    "masc_board_comment";
-    "masc_board_vote";
-    "masc_worktree_create";
-    "masc_worktree_remove";
-    "masc_run_init";
-    "masc_run_plan";
-    "masc_run_log";
-    "masc_run_deliverable";
-    "masc_repair_loop_start";
-    "masc_repair_loop_iterate";
-    "masc_repair_loop_stop";
-  ]
+let observe_only_policy : Tool_access_policy.t =
+  {
+    allow = Surface Tool_catalog.Local_worker;
+    deny = Names [
+      "masc_add_task";
+      "masc_claim_next";
+      "masc_transition";
+      "masc_board_post";
+      "masc_board_comment";
+      "masc_board_vote";
+      "masc_worktree_create";
+      "masc_worktree_remove";
+      "masc_run_init";
+      "masc_run_plan";
+      "masc_run_log";
+      "masc_run_deliverable";
+      "masc_repair_loop_start";
+      "masc_repair_loop_iterate";
+      "masc_repair_loop_stop";
+    ];
+  }
 
 let supported_local_worker_tool_names_for_scope execution_scope =
   match execution_scope with
   | Some Team_session_types.Observe_only ->
-      List.filter
-        (fun name ->
-          not (List.mem name observe_only_blocked_local_worker_tool_names))
-        supported_local_worker_tool_names
+      Tool_access_policy.resolve observe_only_policy
   | Some Team_session_types.Limited_code_change
   | Some Team_session_types.Autonomous
   | None ->

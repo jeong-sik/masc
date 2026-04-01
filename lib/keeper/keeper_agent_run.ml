@@ -452,6 +452,13 @@ let run_turn
     then Keeper_cdal_contract.of_keeper_meta meta
     else None
   in
+  let yield_on_tool = Env_config.slot_yield_enabled () in
+  let on_yield = if yield_on_tool then Some (fun () ->
+    Log.Misc.info "keeper %s: slot yielded (tool execution)" meta.name
+  ) else None in
+  let on_resume = if yield_on_tool then Some (fun () ->
+    Log.Misc.info "keeper %s: slot resumed (next LLM turn)" meta.name
+  ) else None in
   match
         Oas_worker.run_named
           ~cascade_name
@@ -469,10 +476,13 @@ let run_turn
           ~max_tokens
           ?guardrails
           ?on_event
+          ?on_yield
+          ?on_resume
           ~agent_ref
           ?contract
           ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
           ~cache_system_prompt:true
+          ~yield_on_tool
           ()
       with
       | Error e -> Error e

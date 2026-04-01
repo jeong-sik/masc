@@ -568,16 +568,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let json = dashboard_perf_http_json state.Mcp_server.room_config in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
-      | `GET, "/api/v1/mdal/loops" ->
-          let state = get_server_state () in
-          (match mdal_loops_json ~config:state.Mcp_server.room_config httpun_request with
-          | Ok json ->
-              h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-          | Error msg ->
-              h2_respond_json h2_reqd
-                (Yojson.Safe.to_string (mdal_loops_error_json msg))
-                ~status:`Bad_request ~extra_headers:cors)
-
       | `GET, "/api/v1/autoresearch/loops" ->
           let state = get_server_state () in
           let base_path = state.Mcp_server.room_config.base_path in

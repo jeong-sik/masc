@@ -17,7 +17,6 @@ type audience =
   | Spawned_managed_agent
   | Local_worker_agent
   | Keeper_agent
-  | Strict_mdal_worker
   | Privileged_executor
 
 type surface =
@@ -26,7 +25,6 @@ type surface =
   | Local_worker
   | Keeper_standard
   | Keeper_privileged
-  | Mdal_auditable
   | Privileged_executor_surface
 
 type projection = {
@@ -88,7 +86,6 @@ let dedupe_projections projections =
           | Local_worker -> "local_worker"
           | Keeper_standard -> "keeper_standard"
           | Keeper_privileged -> "keeper_privileged"
-          | Mdal_auditable -> "mdal_auditable"
           | Privileged_executor_surface -> "privileged_executor")
           projection.tool_name
       in
@@ -114,7 +111,6 @@ let surface_to_string = function
   | Local_worker -> "local_worker"
   | Keeper_standard -> "keeper_standard"
   | Keeper_privileged -> "keeper_privileged"
-  | Mdal_auditable -> "mdal_auditable"
   | Privileged_executor_surface -> "privileged_executor"
 
 let risk_class_to_string = function
@@ -127,7 +123,6 @@ let audience_to_string = function
   | Spawned_managed_agent -> "spawned_managed_agent"
   | Local_worker_agent -> "local_worker_agent"
   | Keeper_agent -> "keeper_agent"
-  | Strict_mdal_worker -> "strict_mdal_worker"
   | Privileged_executor -> "privileged_executor"
 
 let projection_to_schema (projection : projection) : Types.tool_schema =
@@ -166,9 +161,6 @@ let spawned_agent_public_tool_names : string list =
 let spawned_agent_prefixed_tools : string list =
   prefixed_tool_names (Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent)
 
-let mdal_auditable_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Mdal_auditable
-
 let local_worker_public_tool_names : string list =
   Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 
@@ -201,7 +193,6 @@ let public_projection_seeds_from (public_tool_source_schemas : Types.tool_schema
         Privileged
       else if
         List.mem name spawned_agent_public_tool_names
-        || List.mem name mdal_auditable_tool_names
       then
         Audited
       else
@@ -211,12 +202,10 @@ let public_projection_seeds_from (public_tool_source_schemas : Types.tool_schema
       unique_preserve_order
         (External_mcp_client
          :: (if List.mem name spawned_agent_public_tool_names then [ Spawned_managed_agent ] else [])
-         @ (if List.mem name local_worker_public_tool_names then [ Local_worker_agent ] else [])
-         @ (if List.mem name mdal_auditable_tool_names then [ Strict_mdal_worker ] else []))
+         @ (if List.mem name local_worker_public_tool_names then [ Local_worker_agent ] else []))
     in
     let supports_audit_evidence =
-      List.mem name mdal_auditable_tool_names
-      || List.mem name spawned_agent_public_tool_names
+      List.mem name spawned_agent_public_tool_names
     in
     let base =
       [
@@ -245,16 +234,7 @@ let public_projection_seeds_from (public_tool_source_schemas : Types.tool_schema
       else
         with_spawned
     in
-    if List.mem name mdal_auditable_tool_names then
-      with_local_worker
-      @ [
-          make_seed ~risk_class:Audited
-            ~audiences:[ Local_worker_agent; Strict_mdal_worker ]
-            ~supports_audit_evidence:true
-            ~supports_direct_user_discovery:false ~surface:Mdal_auditable schema;
-        ]
-    else
-      with_local_worker
+    with_local_worker
   in
   public_schemas |> List.concat_map make_public_seed
 
@@ -434,7 +414,6 @@ let surface_snapshot_json
       ("public_mcp", surface_json Public_mcp);
       ("spawned_agent_mcp", surface_json Spawned_agent_mcp);
       ("local_worker", surface_json Local_worker);
-      ("mdal_auditable", surface_json Mdal_auditable);
       ("keeper_standard", surface_json Keeper_standard);
       ("keeper_privileged", surface_json Keeper_privileged);
       ("privileged_executor", surface_json Privileged_executor_surface);

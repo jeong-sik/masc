@@ -124,7 +124,6 @@ type surface =
   | Admin
   | Keeper_internal
   | Keeper_denied
-  | Mdal_auditable
 
 val tools_for_surface : surface -> string list
 (** Canonical tool name list for [surface]. *)

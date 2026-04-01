@@ -38,7 +38,7 @@ end)
 include (Tool_catalog_surfaces : sig
   type surface = Tool_catalog_surfaces.surface =
     | Public_mcp | Spawned_agent | Local_worker | Session_min
-    | Admin | Keeper_internal | Keeper_denied | Mdal_auditable
+    | Admin | Keeper_internal | Keeper_denied
 end)
 
 type metadata = {

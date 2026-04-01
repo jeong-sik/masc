@@ -29,9 +29,6 @@ let spawned_agent_public_tool_names : string list =
 let spawned_agent_prefixed_tools : string list =
   prefixed_tool_names spawned_agent_public_tool_names
 
-let mdal_auditable_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Mdal_auditable
-
 let local_worker_public_tool_names : string list =
   unique_preserve_order
     ([
@@ -42,7 +39,7 @@ let local_worker_public_tool_names : string list =
        "masc_board_vote";
        "masc_board_post";
      ]
-    @ mdal_auditable_tool_names)
+    )
 
 let local_worker_contract_schemas : Types.tool_schema list =
   Sdk_tool_contract.sdk_tool_schemas

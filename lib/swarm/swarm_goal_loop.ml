@@ -78,10 +78,11 @@ type loop_state = {
 [@@deriving yojson]
 
 (** Shared cancellation flag for external loop cancellation.
-    Set [cancelled] to true from another fiber to request graceful stop. *)
-type cancel_token = { mutable cancelled : bool }
+    Set cancelled to true from another fiber to request graceful stop.
+    Uses [Atomic.t] for fiber-safe cross-fiber visibility in OCaml 5. *)
+type cancel_token = { cancelled : bool Atomic.t }
 
-let make_cancel_token () = { cancelled = false }
+let make_cancel_token () = { cancelled = Atomic.make false }
 
 (* ================================================================ *)
 (* Metric measurement                                               *)
@@ -307,10 +308,10 @@ let run_one_iteration state config ~agent_name ~goals =
 (** Run the swarm goal loop as a blocking Eio fiber.
     Returns the final loop_state when the goal is met, max iterations reached,
     or the loop is cancelled via [cancel_token]. *)
-let run ~clock ?(cancel_token = { cancelled = false }) config ~room_config ~agent_name ~goals =
+let run ~clock ?(cancel_token = { cancelled = Atomic.make false }) config ~room_config ~agent_name ~goals =
   let state = ref (make_initial_state config) in
   let keep_running () =
-    if cancel_token.cancelled then begin
+    if Atomic.get cancel_token.cancelled then begin
       state := { !state with status = Cancelled };
       false
     end else

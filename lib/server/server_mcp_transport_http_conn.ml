@@ -59,7 +59,7 @@ let close_sse_conn info =
          (Printexc.to_string exn));
     Sse.unregister_if_current info.session_id info.client_id)
 
-let with_conn_lock fn f =
+let with_conn_lock f =
   Eio.Mutex.use_rw ~protect:true conn_mutex f
 
 let stop_sse_session session_id =

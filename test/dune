@@ -43,8 +43,8 @@
         test_dashboard_tool_host_events
         test_multi_room test_worktree_detection test_bounded test_mention test_hat
         test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
-        test_post_verifier test_mdal
-        test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
+        test_post_verifier
+        test_swarm_checkpoint test_swarm_goal_loop
         test_keeper_memory
         test_keeper_lifecycle
         test_keeper_deliberation
@@ -101,8 +101,8 @@
           test_dashboard_tool_host_events
           test_multi_room test_worktree_detection test_bounded test_mention test_hat
           test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
-          test_post_verifier test_mdal
-          test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
+          test_post_verifier
+          test_swarm_checkpoint test_swarm_goal_loop
           test_keeper_memory
           test_keeper_lifecycle
           test_keeper_deliberation

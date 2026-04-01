@@ -175,17 +175,17 @@ let counts_to_json counts =
     |> List.sort (fun (a, _) (b, _) -> compare a b))
 
 (** Generic counting: given a key extractor, count occurrences in a list. *)
-let count_by (key_of : planned_worker -> string option) (workers : planned_worker list) : (string * int) list =
+let count_by (key_of : 'a -> string option) (items : 'a list) : (string * int) list =
   let tbl = Hashtbl.create 8 in
-  List.iter (fun (worker : planned_worker) ->
-    match key_of worker with
+  List.iter (fun item ->
+    match key_of item with
     | None -> ()
     | Some key ->
         let trimmed = String.trim key in
         if trimmed <> "" then
           let prev = Option.value ~default:0 (Hashtbl.find_opt tbl trimmed) in
           Hashtbl.replace tbl trimmed (prev + 1))
-    workers;
+    items;
   Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
 
 let worker_class_counts workers =

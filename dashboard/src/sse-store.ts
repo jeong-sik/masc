@@ -13,7 +13,6 @@ import {
   hydrateExecutionSnapshot,
   refreshExecution,
   refreshBoard,
-  refreshMdal,
   serverStatus,
 } from './store'
 import {
@@ -37,7 +36,6 @@ import {
   SSE_DEFAULT_DEBOUNCE_MS,
   SSE_KEEPER_OPERATOR_DEBOUNCE_MS,
   SSE_KEEPER_THREAD_DEBOUNCE_MS,
-  SSE_MDAL_DEBOUNCE_MS,
   SSE_OPERATOR_DEBOUNCE_MS,
   SSE_RECONNECT_RETRY_MS,
 } from './config/constants'
@@ -88,7 +86,7 @@ function scheduleRefresh(key: string, fn: () => void, delayMs = SSE_DEFAULT_DEBO
 // Simple events that map directly to a debounced refresh target.
 // Complex events (conditional logic, async imports) use named handlers below.
 
-type RefreshTarget = 'execution' | 'board' | 'mdal' | 'operator' | 'activity'
+type RefreshTarget = 'execution' | 'board' | 'operator' | 'activity'
 
 interface SimpleRoute {
   target: RefreshTarget
@@ -119,11 +117,6 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   'masc/board_comment': { target: 'board' },
   board_delete:         { target: 'board' },
   'masc/board_delete':  { target: 'board' },
-  // MDAL
-  mdal_started:    { target: 'mdal', debounceMs: SSE_MDAL_DEBOUNCE_MS },
-  mdal_iteration:  { target: 'mdal', debounceMs: SSE_MDAL_DEBOUNCE_MS },
-  mdal_completed:  { target: 'mdal', debounceMs: SSE_MDAL_DEBOUNCE_MS },
-  mdal_stopped:    { target: 'mdal', debounceMs: SSE_MDAL_DEBOUNCE_MS },
   // Activity graph
   'activity':                { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
   'masc/activity':           { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
@@ -139,7 +132,6 @@ const PREFIX_ROUTES: Array<{ prefix: string; target: RefreshTarget }> = [
 const REFRESH_FNS: Record<RefreshTarget, () => void> = {
   execution: () => { void refreshExecution({ force: true }) },
   board:     refreshBoard,
-  mdal:      refreshMdal,
   operator:  () => _refreshOperatorFn?.(),
   activity:  () => {
     for (const fn of _refreshActivityFns) fn()
@@ -363,7 +355,7 @@ export function setupSSEReaction(): () => void {
     if (AUTORESEARCH_EVENTS.has(event.type) && activeAutoresearchRoute()) {
       scheduleRefresh('autoresearch_route', () => {
         void refreshActiveRoute()
-      }, SSE_MDAL_DEBOUNCE_MS)
+      }, SSE_DEFAULT_DEBOUNCE_MS)
     }
 
     // 6. Governance events

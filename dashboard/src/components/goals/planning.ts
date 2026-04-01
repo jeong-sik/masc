@@ -1,4 +1,4 @@
-// Planning main component — orchestrates goals, MDAL, and kanban views
+// Planning main component — orchestrates goals and kanban views
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
@@ -8,26 +8,19 @@ import { ActionButton } from '../common/button'
 import {
   goals,
   goalsLoading,
-  mdalLoading,
-  mdalSnapshotState,
-  lastMdalError,
   refreshGoals,
-  refreshMdal,
   tasksByStatus,
 } from '../../store'
 import {
   filteredGoals,
   groupedByHorizon,
-  loopsList,
 } from './goal-helpers'
 import { GoalsSummary, FilterBar, HorizonGroup } from './goal-components'
-import { LoopRow, MdalStartFormButton, MdalStartFormDialog, showMdalStartForm } from './mdal-components'
 import { TaskBacklog } from './kanban-components'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 
 const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/QUICK-START.md'
 const COMMAND_PLANE_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/COMMAND-PLANE-RUNBOOK.md'
-const MDAL_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/MDAL-LONG-TERM-PLAN-STATUS.md'
 
 function PlanningStat({
   label,
@@ -117,25 +110,18 @@ export function Planning() {
   const highPriority = [...todo, ...inProgress].filter(t => (t.priority ?? 4) <= 2).length
 
   const grouped = groupedByHorizon.value
-  const loops = loopsList.value
   const hasGoals = goals.value.length > 0
-  const hasLoops = loops.length > 0
-  const mdalState = mdalSnapshotState.value
-  const onlyBacklogActive = totalTasks > 0 && !hasGoals && !hasLoops
+  const onlyBacklogActive = totalTasks > 0 && !hasGoals
   const planStatusHeadline = onlyBacklogActive
     ? '지금은 backlog만 채워져 있습니다'
-    : !hasGoals && hasLoops
-      ? 'MDAL은 돌고 있지만 장기 목표 파이프라인은 비어 있습니다'
-      : hasGoals && !hasLoops
-        ? '장기 목표는 등록되어 있고 MDAL은 아직 시작되지 않았습니다'
-        : '장기 목표와 MDAL 상태를 함께 추적합니다'
+    : hasGoals
+      ? '장기 목표와 backlog 상태를 함께 추적합니다'
+      : 'backlog와 장기 목표를 함께 보는 조감도입니다'
   const planStatusBody = onlyBacklogActive
-    ? '태스크는 execution projection에서 정상적으로 들어오고 있습니다. 반면 장기 목표와 MDAL은 자동 생성되지 않으므로, 별도로 등록하거나 시작해야 이 화면에 표시됩니다.'
-    : !hasGoals && hasLoops
-      ? '현재 루프는 수동으로 시작되었지만, 장기 목표 파이프라인은 아직 비어 있습니다. 중장기 구조화가 필요하면 goal을 먼저 등록하는 편이 낫습니다.'
-      : hasGoals && !hasLoops
-        ? '장기 목표는 등록되어 있지만 숫자 메트릭을 반복 추적하는 루프는 없습니다. MDAL은 opt-in 기능이므로 명시적으로 시작해야 합니다.'
-        : 'backlog, 장기 목표, MDAL이 각각 다른 데이터 소스에서 들어옵니다. 지금 화면은 세 흐름을 한 번에 보여 주는 조감도입니다.'
+    ? '태스크는 execution projection에서 정상적으로 들어오고 있습니다. 장기 목표는 자동 생성되지 않으므로, 별도로 등록해야 이 화면에 표시됩니다.'
+    : hasGoals
+      ? 'backlog와 장기 목표가 각각 다른 데이터 소스에서 들어옵니다. 지금 화면은 두 흐름을 한 번에 보여 주는 조감도입니다.'
+      : '현재 등록된 장기 목표가 없습니다. goal은 자동으로 생기지 않으므로 명시적으로 등록해야 합니다.'
 
   return html`
     <div class="flex flex-col gap-6">
@@ -149,13 +135,10 @@ export function Planning() {
           <${ActionButton}
             variant="ghost"
             size="md"
-            disabled=${goalsLoading.value || mdalLoading.value}
-            onClick=${() => {
-              refreshGoals()
-              refreshMdal()
-            }}
+            disabled=${goalsLoading.value}
+            onClick=${() => { refreshGoals() }}
           >
-            ${goalsLoading.value || mdalLoading.value ? '새로고침 중...' : '계획 데이터 새로고침'}
+            ${goalsLoading.value ? '새로고침 중...' : '계획 데이터 새로고침'}
           <//>
         </div>
 
@@ -167,7 +150,7 @@ export function Planning() {
           <${PlanningStat} label="높은 우선순위" value=${highPriority} tone=${highPriority > 0 ? 'bad' : 'default'} />
         </div>
 
-        <div class="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_repeat(2,minmax(0,1fr))]">
+        <div class="mt-5 grid gap-4 xl:grid-cols-2">
           <section class="rounded-xl border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
             <div class="mb-3">
               <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">Backlog Entry</div>
@@ -190,20 +173,6 @@ export function Planning() {
             docHref=${COMMAND_PLANE_DOC_URL}
             docLabel="Command Plane Runbook"
           />
-
-          <${GuideCard}
-            eyebrow="MDAL"
-            title="Metric-Driven Agent Loop"
-            count=${loops.length}
-            summary=${hasLoops
-              ? '실행 중인 루프가 있으면 여기서 기준값, 현재값, 반복 이력을 바로 확인할 수 있습니다.'
-              : 'MDAL은 기본 자동 시작이 아닙니다. 숫자 메트릭과 목표 조건을 정한 뒤 수동으로 시작해야 표시됩니다.'}
-            command="metric_fn + goal + target을 정한 뒤 새 루프 시작"
-            docHref=${MDAL_DOC_URL}
-            docLabel="MDAL 상태 문서"
-          >
-            ${!hasLoops ? html`<${MdalStartFormButton} />` : null}
-          <//>
         </div>
       </section>
 
@@ -251,53 +220,6 @@ export function Planning() {
               </div>
             </div>
           `}
-        </div>
-      </details>
-
-      <details class="overview-section-collapsible group overflow-hidden rounded-xl border border-card-border/60 bg-[rgba(9,14,24,0.82)]" open=${true}>
-        <summary class="flex items-center gap-3 border-b border-card-border/60 px-4 py-3.5 cursor-pointer text-[14px] font-bold text-text-strong transition-colors hover:bg-white/3">
-          <div class="min-w-0">
-            <div>MDAL 루프</div>
-            <div class="mt-1 text-[12px] font-normal text-text-muted">
-              opt-in 기능입니다. metric 없이 자동으로 생기지 않습니다.
-            </div>
-          </div>
-          <span class="ml-auto inline-flex items-center gap-2">
-            <button type="button"
-              class="rounded-lg border border-accent/35 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent transition-colors hover:bg-accent/16"
-              onClick=${(e: Event) => { e.preventDefault(); showMdalStartForm.value = true }}
-            >새 루프</button>
-            <span class="inline-flex items-center rounded-lg border border-card-border/70 bg-white/4 px-2.5 py-1 text-[10px] uppercase tracking-wider text-text-body font-semibold">${loops.length}</span>
-          </span>
-        </summary>
-        <div class="p-5">
-          <div class="mb-4 text-[12px] leading-relaxed text-text-muted">
-            숫자 메트릭(coverage, SSIM 등)을 반복 측정하는 루프입니다. <strong class="text-text-strong">자동 시작되지 않으며</strong>,
-            profile, metric, goal을 정한 뒤 명시적으로 시작해야 이 섹션에 나타납니다.
-          </div>
-          ${mdalLoading.value && loops.length === 0
-            ? html`<${LoadingState}>MDAL 루프 불러오는 중...<//>`
-            : loops.length === 0 && (mdalState === 'error' || lastMdalError.value)
-              ? html`<div class="rounded-xl border border-bad/30 bg-bad/10 p-4 text-[13px] font-medium text-bad">MDAL 스냅샷을 불러오지 못했습니다${lastMdalError.value ? `: ${lastMdalError.value}` : ''}. 백엔드 상태를 확인하세요.</div>`
-              : loops.length === 0
-                ? html`
-                    <div class="rounded-xl border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
-                      <div class="text-[14px] font-semibold text-text-strong">가동 중인 루프가 없습니다</div>
-                      <div class="mt-2 text-[13px] leading-relaxed text-text-muted">
-                        MDAL은 metric이 정해진 반복 작업에서만 쓰는 기능입니다. 메트릭과 목표 조건이 준비되지 않았다면 일반 backlog task가 더 적합합니다.
-                      </div>
-                      <div class="mt-3 flex flex-wrap gap-2">
-                        <${MdalStartFormButton} />
-                        <${ExternalDocLink} href=${MDAL_DOC_URL} label="MDAL 문서" />
-                      </div>
-                    </div>
-                  `
-                : html`
-                  <div class="grid gap-3">
-                    ${loops.map(loop => html`<${LoopRow} key=${loop.loop_id} loop=${loop} />`)}
-                  </div>
-                `}
-          <${MdalStartFormDialog} />
         </div>
       </details>
     </div>

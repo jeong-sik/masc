@@ -367,6 +367,45 @@ let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) res
   | Some perm -> check_permission config ~agent_name ~token ~permission:perm
 
 (* ============================================ *)
+(* Unified policy-based authorization (v2)      *)
+(* ============================================ *)
+
+(** Resolve the effective role for an agent from auth context.
+    Extracts the role resolution logic from check_permission. *)
+let resolve_role config ~agent_name ~token : agent_role =
+  let auth_cfg = load_auth_config config in
+  if not auth_cfg.enabled then
+    Admin  (* Auth disabled = full access *)
+  else if (match read_initial_admin config with
+           | Some admin -> String.equal agent_name admin
+           | None -> false) then
+    Admin  (* Bootstrap admin = full access *)
+  else if not auth_cfg.require_token then
+    auth_cfg.default_role
+  else
+    match token with
+    | None -> Reader  (* No token = minimum access *)
+    | Some t ->
+        (match verify_token config ~agent_name ~token:t with
+        | Ok cred -> cred.role
+        | Error _ -> Reader)  (* Invalid/expired token = minimum access *)
+
+(** Policy-based tool authorization.
+    Replaces authorize_tool with a single Tool_access_policy check.
+    The role determines which tools are accessible. *)
+let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
+  let auth_cfg = load_auth_config config in
+  if not auth_cfg.enabled then
+    Ok ()
+  else
+    let role = resolve_role config ~agent_name ~token in
+    let policy = Tool_access_role.policy_for_role role in
+    if Tool_access_policy.allows_name policy tool_name then
+      Ok ()
+    else
+      Error (Forbidden { agent = agent_name; action = tool_name })
+
+(* ============================================ *)
 (* Room secret (for room-level auth)            *)
 (* ============================================ *)
 

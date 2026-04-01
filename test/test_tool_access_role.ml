@@ -1,0 +1,217 @@
+(** Tests for Tool_access_role — role-based policy equivalence and properties.
+
+    The equivalence test is the critical gate: it verifies that the new
+    policy_for_role produces identical allow/deny decisions to the legacy
+    permission_for_tool + has_permission system for every registered tool
+    and every role. *)
+
+open Alcotest
+open Masc_mcp
+
+(* ================================================================ *)
+(* Old system simulation (from legacy_permission_for_tool)           *)
+(* ================================================================ *)
+
+(** Simulate the old authorization logic:
+    permission_for_tool(tool) → permission option
+    has_permission(role, permission) → bool
+
+    In non-strict mode, None → allowed (fail-open). *)
+let old_allows (role : Types.agent_role) (tool_name : string) : bool =
+  match Auth.permission_for_tool tool_name with
+  | None -> true  (* Legacy fail-open in non-strict mode *)
+  | Some perm -> Types.has_permission role perm
+
+(* ================================================================ *)
+(* Equivalence tests                                                 *)
+(* ================================================================ *)
+
+(** Collect all tool names from all surfaces. *)
+let all_surface_tools () =
+  Tool_catalog.all_surfaces
+  |> List.concat_map Tool_catalog.tools_for_surface
+  |> List.sort_uniq String.compare
+
+let test_equivalence_admin () =
+  let tools = all_surface_tools () in
+  List.iter (fun tool_name ->
+    let old_result = old_allows Admin tool_name in
+    let new_result =
+      Tool_access_policy.allows_name
+        (Tool_access_role.policy_for_role Admin) tool_name
+    in
+    check bool
+      (Printf.sprintf "Admin/%s" tool_name)
+      old_result new_result
+  ) tools
+
+let test_equivalence_worker () =
+  let tools = all_surface_tools () in
+  List.iter (fun tool_name ->
+    let old_result = old_allows Worker tool_name in
+    let new_result =
+      Tool_access_policy.allows_name
+        (Tool_access_role.policy_for_role Worker) tool_name
+    in
+    check bool
+      (Printf.sprintf "Worker/%s" tool_name)
+      old_result new_result
+  ) tools
+
+let test_equivalence_reader () =
+  let tools = all_surface_tools () in
+  List.iter (fun tool_name ->
+    let old_result = old_allows Reader tool_name in
+    let new_result =
+      Tool_access_policy.allows_name
+        (Tool_access_role.policy_for_role Reader) tool_name
+    in
+    check bool
+      (Printf.sprintf "Reader/%s" tool_name)
+      old_result new_result
+  ) tools
+
+(* ================================================================ *)
+(* Hierarchy tests                                                   *)
+(* ================================================================ *)
+
+let test_reader_subset_of_worker () =
+  let tools = all_surface_tools () in
+  let reader_policy = Tool_access_role.policy_for_role Reader in
+  let worker_policy = Tool_access_role.policy_for_role Worker in
+  List.iter (fun tool_name ->
+    let reader_allows = Tool_access_policy.allows_name reader_policy tool_name in
+    let worker_allows = Tool_access_policy.allows_name worker_policy tool_name in
+    if reader_allows then
+      check bool
+        (Printf.sprintf "Reader allows %s, Worker must too" tool_name)
+        true worker_allows
+  ) tools
+
+let test_worker_subset_of_admin () =
+  let tools = all_surface_tools () in
+  let worker_policy = Tool_access_role.policy_for_role Worker in
+  let admin_policy = Tool_access_role.policy_for_role Admin in
+  List.iter (fun tool_name ->
+    let worker_allows = Tool_access_policy.allows_name worker_policy tool_name in
+    let admin_allows = Tool_access_policy.allows_name admin_policy tool_name in
+    if worker_allows then
+      check bool
+        (Printf.sprintf "Worker allows %s, Admin must too" tool_name)
+        true admin_allows
+  ) tools
+
+(* ================================================================ *)
+(* Admin surface denial tests                                        *)
+(* ================================================================ *)
+
+let test_reader_denies_admin_only_tools () =
+  let reader_policy = Tool_access_role.policy_for_role Reader in
+  List.iter (fun tool_name ->
+    check bool
+      (Printf.sprintf "Reader denies %s" tool_name)
+      false
+      (Tool_access_policy.allows_name reader_policy tool_name)
+  ) Tool_access_role.admin_only_tools
+
+let test_worker_denies_admin_only_tools () =
+  let worker_policy = Tool_access_role.policy_for_role Worker in
+  List.iter (fun tool_name ->
+    check bool
+      (Printf.sprintf "Worker denies %s" tool_name)
+      false
+      (Tool_access_policy.allows_name worker_policy tool_name)
+  ) Tool_access_role.admin_only_tools
+
+let test_admin_allows_admin_only_tools () =
+  let admin_policy = Tool_access_role.policy_for_role Admin in
+  List.iter (fun tool_name ->
+    check bool
+      (Printf.sprintf "Admin allows %s" tool_name)
+      true
+      (Tool_access_policy.allows_name admin_policy tool_name)
+  ) Tool_access_role.admin_only_tools
+
+let test_reader_denies_worker_only_tools () =
+  let reader_policy = Tool_access_role.policy_for_role Reader in
+  List.iter (fun tool_name ->
+    check bool
+      (Printf.sprintf "Reader denies %s" tool_name)
+      false
+      (Tool_access_policy.allows_name reader_policy tool_name)
+  ) Tool_access_role.worker_only_tools
+
+let test_worker_allows_worker_only_tools () =
+  let worker_policy = Tool_access_role.policy_for_role Worker in
+  List.iter (fun tool_name ->
+    check bool
+      (Printf.sprintf "Worker allows %s" tool_name)
+      true
+      (Tool_access_policy.allows_name worker_policy tool_name)
+  ) Tool_access_role.worker_only_tools
+
+(* ================================================================ *)
+(* Tool list integrity tests                                         *)
+(* ================================================================ *)
+
+let test_admin_only_count () =
+  check bool "admin_only_tools is non-empty" true
+    (List.length Tool_access_role.admin_only_tools > 0);
+  check bool "admin_only_tools has expected size (23)"
+    true
+    (List.length Tool_access_role.admin_only_tools = 23)
+
+let test_worker_only_count () =
+  check bool "worker_only_tools is non-empty" true
+    (List.length Tool_access_role.worker_only_tools > 0);
+  check bool "worker_only_tools has expected size (54)"
+    true
+    (List.length Tool_access_role.worker_only_tools = 54)
+
+let test_no_overlap_admin_worker () =
+  List.iter (fun tool_name ->
+    check bool
+      (Printf.sprintf "%s not in both admin and worker lists" tool_name)
+      false
+      (List.mem tool_name Tool_access_role.worker_only_tools)
+  ) Tool_access_role.admin_only_tools
+
+(* ================================================================ *)
+(* Runner                                                            *)
+(* ================================================================ *)
+
+let () =
+  run "Tool_access_role"
+    [
+      ( "equivalence",
+        [
+          test_case "Admin: old == new" `Quick test_equivalence_admin;
+          test_case "Worker: old == new" `Quick test_equivalence_worker;
+          test_case "Reader: old == new" `Quick test_equivalence_reader;
+        ] );
+      ( "hierarchy",
+        [
+          test_case "Reader ⊂ Worker" `Quick test_reader_subset_of_worker;
+          test_case "Worker ⊂ Admin" `Quick test_worker_subset_of_admin;
+        ] );
+      ( "role_boundaries",
+        [
+          test_case "Reader denies admin_only" `Quick
+            test_reader_denies_admin_only_tools;
+          test_case "Worker denies admin_only" `Quick
+            test_worker_denies_admin_only_tools;
+          test_case "Admin allows admin_only" `Quick
+            test_admin_allows_admin_only_tools;
+          test_case "Reader denies worker_only" `Quick
+            test_reader_denies_worker_only_tools;
+          test_case "Worker allows worker_only" `Quick
+            test_worker_allows_worker_only_tools;
+        ] );
+      ( "integrity",
+        [
+          test_case "admin_only count" `Quick test_admin_only_count;
+          test_case "worker_only count" `Quick test_worker_only_count;
+          test_case "no overlap admin/worker" `Quick
+            test_no_overlap_admin_worker;
+        ] );
+    ]

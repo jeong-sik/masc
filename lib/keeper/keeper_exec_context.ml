@@ -732,7 +732,7 @@ let run_proactive_generation
       ~continuity_summary
   in
   let ctx_ref = ref ctx_work in
-  let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
+  let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
   let rec loop attempt usage_acc latency_acc cost_acc retry_hint =
     if attempt > max_attempts then
       Some {

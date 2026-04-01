@@ -149,9 +149,14 @@ let make_tools
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
     ~(ctx_ref : Keeper_working_context.working_context ref)
+    ?zone
+    ()
   : Agent_sdk.Tool.t list =
   let allowed_names =
-    Keeper_exec_tools.keeper_allowed_tool_names meta
+    let base = Keeper_exec_tools.keeper_allowed_tool_names meta in
+    match zone with
+    | None -> base
+    | Some zt -> List.filter (fun n -> Zone_tbl.is_tool_allowed zt n) base
   in
   let tool_defs =
     Keeper_exec_tools.keeper_allowed_model_tools meta

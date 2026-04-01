@@ -1204,7 +1204,7 @@ let test_force_release_bypasses_assignee () =
     let _ = Room.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* Different agent cannot release without force *)
     let normal = Room.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
-        ~action:"release" () in
+        ~action:Types.Release () in
     Alcotest.(check bool) "normal release blocked" true
       (match normal with Error _ -> true | Ok _ -> false);
     (* Force release succeeds *)
@@ -1223,7 +1223,7 @@ let test_force_done_bypasses_assignee () =
     let _ = Room.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* Normal done by different agent fails *)
     let normal = Room.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
-        ~action:"done" ~notes:"forced" () in
+        ~action:Types.Done_action ~notes:"forced" () in
     Alcotest.(check bool) "normal done blocked" true
       (match normal with Error _ -> true | Ok _ -> false);
     (* Force done succeeds *)

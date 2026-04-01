@@ -54,7 +54,7 @@ let run_background_agent config ~agent_cli ~agent_name ~task_id ~goal
   Log.Misc.info "[fire_task] claim %s by %s: %s" task_id agent_name claim_msg;
 
   (* Step 3: transition to in_progress *)
-  let _start = Room.transition_task_r config ~agent_name ~task_id ~action:"start" () in
+  let _start = Room.transition_task_r config ~agent_name ~task_id ~action:Types.Start () in
 
   (* Step 4: spawn the agent subprocess *)
   let prompt = build_agent_prompt ~goal ~task_id ~worktree_path in

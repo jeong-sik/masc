@@ -223,6 +223,30 @@ type room_registry = {
 } [@@deriving yojson { strict = false }, show]
 
 (** Task status - state transitions enforced by types *)
+type task_action =
+  | Claim
+  | Start
+  | Done_action
+  | Cancel
+  | Release
+[@@deriving show]
+
+let task_action_of_string s =
+  match String.lowercase_ascii s with
+  | "claim" -> Ok Claim
+  | "start" -> Ok Start
+  | "done" -> Ok Done_action
+  | "cancel" -> Ok Cancel
+  | "release" -> Ok Release
+  | other -> Error (Printf.sprintf "Unknown task action: %s" other)
+
+let task_action_to_string = function
+  | Claim -> "claim"
+  | Start -> "start"
+  | Done_action -> "done"
+  | Cancel -> "cancel"
+  | Release -> "release"
+
 type task_status =
   | Todo
   | Claimed of { assignee: string; claimed_at: string }

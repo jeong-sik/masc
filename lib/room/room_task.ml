@@ -388,40 +388,40 @@ let transition_task_r config ~agent_name ~task_id ~action
                  | Some task ->
                      let now = now_iso () in
                      let now_ts = Time_compat.now () in
-                     let action = String.lowercase_ascii action in
+                     let action_s = Types.task_action_to_string action in
                      let transition =
                        match action, task.task_status with
-                       | "claim", Types.Todo ->
+                       | Types.Claim, Types.Todo ->
                            Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
-                       | "start", Types.Claimed { assignee; _ } when assignee = agent_name ->
+                       | Types.Start, Types.Claimed { assignee; _ } when assignee = agent_name ->
                            Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
-                       | "done", Types.Claimed { assignee; _ }
-                       | "done", Types.InProgress { assignee; _ } when assignee = agent_name || force ->
+                       | Types.Done_action, Types.Claimed { assignee; _ }
+                       | Types.Done_action, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
                            Ok (Types.Done {
                              assignee = agent_name;
                              completed_at = now;
                              notes = if notes = "" then None else Some notes;
                            }, None)
-                       | "cancel", Types.Todo ->
+                       | Types.Cancel, Types.Todo ->
                            Ok (Types.Cancelled {
                              cancelled_by = agent_name;
                              cancelled_at = now;
                              reason = if reason = "" then None else Some reason;
                            }, None)
-                       | "cancel", Types.Claimed { assignee; _ }
-                       | "cancel", Types.InProgress { assignee; _ } when assignee = agent_name || force ->
+                       | Types.Cancel, Types.Claimed { assignee; _ }
+                       | Types.Cancel, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
                            Ok (Types.Cancelled {
                              cancelled_by = agent_name;
                              cancelled_at = now;
                              reason = if reason = "" then None else Some reason;
                            }, None)
-                       | "release", Types.Claimed { assignee; _ }
-                       | "release", Types.InProgress { assignee; _ } when assignee = agent_name || force ->
+                       | Types.Release, Types.Claimed { assignee; _ }
+                       | Types.Release, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
                            Ok (Types.Todo, None)
                        | _ ->
                            Error (Types.TaskInvalidState
                              (Printf.sprintf "Invalid transition: %s -> %s (%s)"
-                               (task_status_to_string task.task_status) action task_id))
+                               (task_status_to_string task.task_status) action_s task_id))
                      in
                      (match transition with
                       | Error e -> Error e
@@ -455,20 +455,20 @@ let transition_task_r config ~agent_name ~task_id ~action
                           end;
                           log_event config (Printf.sprintf
                             "{\"type\":\"task_transition\",\"agent\":\"%s\",\"task\":\"%s\",\"action\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"ts\":\"%s\"}"
-                            agent_name task_id action
+                            agent_name task_id action_s
                             (task_status_to_string task.task_status)
                             (task_status_to_string new_status)
                             now);
                           (match action with
-                           | "claim" ->
+                           | Types.Claim ->
                                emit_task_activity config ~agent_name ~task_id
                                  ~kind:"task.claimed"
                                  ~payload:(`Assoc [ ("task_id", `String task_id) ])
-                           | "start" ->
+                           | Types.Start ->
                                emit_task_activity config ~agent_name ~task_id
                                  ~kind:"task.started"
                                  ~payload:(`Assoc [ ("task_id", `String task_id) ])
-                           | "done" ->
+                           | Types.Done_action ->
                                emit_task_activity config ~agent_name ~task_id
                                  ~kind:"task.done"
                                  ~payload:
@@ -477,7 +477,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                                        ("task_id", `String task_id);
                                        ("notes", if notes = "" then `Null else `String notes);
                                      ])
-                           | "cancel" ->
+                           | Types.Cancel ->
                                emit_task_activity config ~agent_name ~task_id
                                  ~kind:"task.cancelled"
                                  ~payload:
@@ -486,24 +486,23 @@ let transition_task_r config ~agent_name ~task_id ~action
                                        ("task_id", `String task_id);
                                        ("reason", if reason = "" then `Null else `String reason);
                                      ])
-                           | "release" ->
+                           | Types.Release ->
                                emit_task_activity config ~agent_name ~task_id
                                  ~kind:"task.released"
-                                 ~payload:(`Assoc [ ("task_id", `String task_id) ])
-                           | _ -> ());
+                                 ~payload:(`Assoc [ ("task_id", `String task_id) ]));
                           let duration_ms =
                             match action with
-                            | "done" | "cancel" ->
+                            | Types.Done_action | Types.Cancel ->
                                 Some
                                   (max 0
                                      (int_of_float
                                         ((now_ts
                                          -. task_started_at_unix task.task_status)
                                         *. 1000.0)))
-                            | _ -> None
+                            | Types.Claim | Types.Start | Types.Release -> None
                           in
                           observe_task_transition config ~agent_name ~task_id
-                            ~transition:action
+                            ~transition:action_s
                             ~details:
                               (task_transition_details
                                  ~from_status:task.task_status ~to_status:new_status
@@ -521,15 +520,15 @@ let transition_task_r config ~agent_name ~task_id ~action
 
 (** Release task back to backlog - transition wrapper *)
 let release_task_r config ~agent_name ~task_id ?expected_version () : string Types.masc_result =
-  transition_task_r config ~agent_name ~task_id ~action:"release" ?expected_version ()
+  transition_task_r config ~agent_name ~task_id ~action:Types.Release ?expected_version ()
 
 (** Force-release a task regardless of assignee. Keeper privilege. *)
 let force_release_task_r config ~agent_name ~task_id () : string Types.masc_result =
-  transition_task_r config ~agent_name ~task_id ~action:"release" ~force:true ()
+  transition_task_r config ~agent_name ~task_id ~action:Types.Release ~force:true ()
 
 (** Force-done a task regardless of assignee. Keeper privilege. *)
 let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_result =
-  transition_task_r config ~agent_name ~task_id ~action:"done" ~notes ~force:true ()
+  transition_task_r config ~agent_name ~task_id ~action:Types.Done_action ~notes ~force:true ()
 
 (** Complete task with file locking *)
 let complete_task config ~agent_name ~task_id ~notes =

@@ -51,7 +51,7 @@ val claim_task_r :
 (** {1 Task transitions} *)
 
 val transition_task_r :
-  config -> agent_name:string -> task_id:string -> action:string ->
+  config -> agent_name:string -> task_id:string -> action:Types_core.task_action ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
   ?force:bool -> unit -> string Types.masc_result
 

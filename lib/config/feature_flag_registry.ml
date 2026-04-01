@@ -195,9 +195,14 @@ let all_flags : flag list = [
     description = "Aggregate proof bundles across multi-turn sessions";
     default = false; category = "runtime";
     lifecycle = Experimental; since = "2.162.0" };
+
+  { env_name = "MASC_SLOT_YIELD_ENABLED";
+    description = "Release LLM slot during tool execution so other agents can use it";
+    default = false; category = "runtime";
+    lifecycle = Experimental; since = "2.207.0" };
 ]
 
-(** Lookup a flag by env var name. O(n) — acceptable for 25 flags. *)
+(** Lookup a flag by env var name. O(n) — acceptable for ~30 flags. *)
 let find_opt env_name =
   List.find_opt (fun f -> f.env_name = env_name) all_flags
 

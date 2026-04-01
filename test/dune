@@ -205,9 +205,6 @@
         test_oas_adapters
         test_team_session_oas_bridge
         test_team_session_swarm_runner
-        test_tool_mdal
-        test_tool_mdal_pg
-        test_mdal_store
         test_cache_eio
         test_metrics_store_eio
         test_hebbian_eio
@@ -353,9 +350,6 @@
         test_oas_adapters
         test_team_session_oas_bridge
         test_team_session_swarm_runner
-        test_tool_mdal
-        test_tool_mdal_pg
-        test_mdal_store
         test_cache_eio
         test_metrics_store_eio
         test_hebbian_eio

@@ -247,14 +247,14 @@ let string_of_task_status = task_status_to_string
 type task_action =
   | Claim
   | Start
-  | Done
+  | Mark_done
   | Cancel
   | Release
 
 let task_action_to_string = function
   | Claim -> "claim"
   | Start -> "start"
-  | Done -> "done"
+  | Mark_done -> "done"
   | Cancel -> "cancel"
   | Release -> "release"
 
@@ -262,13 +262,14 @@ let task_action_of_string s =
   match String.lowercase_ascii s with
   | "claim" -> Some Claim
   | "start" -> Some Start
-  | "done" -> Some Done
+  | "done" -> Some Mark_done
   | "cancel" -> Some Cancel
   | "release" -> Some Release
   | _ -> None
 
-(** Valid action strings for error messages *)
-let valid_task_actions = ["claim"; "start"; "done"; "cancel"; "release"]
+(** Valid action strings for error messages (single source of truth). *)
+let valid_task_actions =
+  List.map task_action_to_string [ Claim; Start; Mark_done; Cancel; Release ]
 
 (* Manual yojson conversion for task_status (sum type with records) *)
 let task_status_to_yojson = function

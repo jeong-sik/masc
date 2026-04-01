@@ -388,50 +388,51 @@ let transition_task_r config ~agent_name ~task_id ~action
                  | Some task ->
                      let now = now_iso () in
                      let now_ts = Time_compat.now () in
-                     let action_str = String.lowercase_ascii action in
                      let transition =
-                       match Types_core.task_action_of_string action_str with
+                       match Types_core.task_action_of_string action with
                        | None ->
                            Error (Types.TaskInvalidState
                              (Printf.sprintf "Unknown action: %s (valid: %s)"
-                               action_str (String.concat ", " Types_core.valid_task_actions)))
+                               action (String.concat ", " Types_core.valid_task_actions)))
                        | Some act ->
                        (match act, task.task_status with
                        | Types_core.Claim, Types.Todo ->
-                           Ok (Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
+                           Ok (act, Types.Claimed { assignee = agent_name; claimed_at = now }, Some task_id)
                        | Types_core.Start, Types.Claimed { assignee; _ } when assignee = agent_name ->
-                           Ok (Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
-                       | Types_core.Done, Types.Claimed { assignee; _ }
-                       | Types_core.Done, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
-                           Ok (Types.Done {
+                           Ok (act, Types.InProgress { assignee = agent_name; started_at = now }, Some task_id)
+                       | Types_core.Mark_done, Types.Claimed { assignee; _ }
+                       | Types_core.Mark_done, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
+                           Ok (act, Types.Done {
                              assignee = agent_name;
                              completed_at = now;
                              notes = if notes = "" then None else Some notes;
                            }, None)
                        | Types_core.Cancel, Types.Todo ->
-                           Ok (Types.Cancelled {
+                           Ok (act, Types.Cancelled {
                              cancelled_by = agent_name;
                              cancelled_at = now;
                              reason = if reason = "" then None else Some reason;
                            }, None)
                        | Types_core.Cancel, Types.Claimed { assignee; _ }
                        | Types_core.Cancel, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
-                           Ok (Types.Cancelled {
+                           Ok (act, Types.Cancelled {
                              cancelled_by = agent_name;
                              cancelled_at = now;
                              reason = if reason = "" then None else Some reason;
                            }, None)
                        | Types_core.Release, Types.Claimed { assignee; _ }
                        | Types_core.Release, Types.InProgress { assignee; _ } when assignee = agent_name || force ->
-                           Ok (Types.Todo, None)
+                           Ok (act, Types.Todo, None)
                        | _ ->
-                           Error (Types.TaskInvalidState
-                             (Printf.sprintf "Invalid transition: %s -> %s (%s)"
-                               (task_status_to_string task.task_status) action_str task_id)))
+                         let action_str = Types_core.task_action_to_string act in
+                         Error (Types.TaskInvalidState
+                           (Printf.sprintf "Invalid transition: %s -> %s (%s)"
+                             (task_status_to_string task.task_status) action_str task_id)))
                      in
                      (match transition with
                       | Error e -> Error e
-                      | Ok (new_status, set_current) ->
+                      | Ok (act, new_status, set_current) ->
+                          let action_str = Types_core.task_action_to_string act in
                           let new_tasks = List.map (fun t ->
                             if t.id = task_id then { t with task_status = new_status } else t
                           ) backlog.tasks in
@@ -461,20 +462,20 @@ let transition_task_r config ~agent_name ~task_id ~action
                           end;
                           log_event config (Printf.sprintf
                             "{\"type\":\"task_transition\",\"agent\":\"%s\",\"task\":\"%s\",\"action\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"ts\":\"%s\"}"
-                            agent_name task_id action
+                            agent_name task_id action_str
                             (task_status_to_string task.task_status)
                             (task_status_to_string new_status)
                             now);
-                          (match action with
-                           | "claim" ->
+                          (match act with
+                           | Types_core.Claim ->
                                emit_task_activity config ~agent_name ~task_id
                                  ~kind:"task.claimed"
                                  ~payload:(`Assoc [ ("task_id", `String task_id) ])
-                           | "start" ->
+                           | Types_core.Start ->
                                emit_task_activity config ~agent_name ~task_id
                                  ~kind:"task.started"
                                  ~payload:(`Assoc [ ("task_id", `String task_id) ])
-                           | "done" ->
+                           | Types_core.Mark_done ->
                                emit_task_activity config ~agent_name ~task_id
                                  ~kind:"task.done"
                                  ~payload:
@@ -483,7 +484,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                                        ("task_id", `String task_id);
                                        ("notes", if notes = "" then `Null else `String notes);
                                      ])
-                           | "cancel" ->
+                           | Types_core.Cancel ->
                                emit_task_activity config ~agent_name ~task_id
                                  ~kind:"task.cancelled"
                                  ~payload:
@@ -492,14 +493,13 @@ let transition_task_r config ~agent_name ~task_id ~action
                                        ("task_id", `String task_id);
                                        ("reason", if reason = "" then `Null else `String reason);
                                      ])
-                           | "release" ->
+                           | Types_core.Release ->
                                emit_task_activity config ~agent_name ~task_id
                                  ~kind:"task.released"
-                                 ~payload:(`Assoc [ ("task_id", `String task_id) ])
-                           | _ -> ());
+                                 ~payload:(`Assoc [ ("task_id", `String task_id) ]));
                           let duration_ms =
-                            match action with
-                            | "done" | "cancel" ->
+                            match act with
+                            | Types_core.Mark_done | Types_core.Cancel ->
                                 Some
                                   (max 0
                                      (int_of_float
@@ -509,7 +509,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                             | _ -> None
                           in
                           observe_task_transition config ~agent_name ~task_id
-                            ~transition:action
+                            ~transition:action_str
                             ~details:
                               (task_transition_details
                                  ~from_status:task.task_status ~to_status:new_status

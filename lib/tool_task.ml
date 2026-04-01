@@ -387,7 +387,11 @@ let handle_transition ctx args =
   in
   let evaluator_cascade = get_string_opt args "evaluator_cascade" in
   let expected_version = get_int_opt args "expected_version" in
-  let action_lc = String.lowercase_ascii action in
+  let action_canonical =
+    match Types_core.task_action_of_string action with
+    | Some act -> Types_core.task_action_to_string act
+    | None -> String.lowercase_ascii action
+  in
   let force_raw = get_bool args "force" false in
   (* force=true requires admin privilege: initial_admin or Admin role *)
   let force =
@@ -404,7 +408,7 @@ let handle_transition ctx args =
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
   (* Anti-rationalization gate: verify completion notes before allowing "done" *)
   let gate_rejection =
-    if action_lc = "done" && not force && can_review_completion ~task_opt ~agent_name:ctx.agent_name then
+    if action_canonical = "done" && not force && can_review_completion ~task_opt ~agent_name:ctx.agent_name then
       review_completion_notes
         ~completion_contract
         ~evaluator_cascade
@@ -444,7 +448,7 @@ let handle_transition ctx args =
   let rec try_transition attempt =
     let ev = if attempt = 0 then expected_version else None in
     let r = Room.transition_task_r ctx.config ~agent_name:ctx.agent_name
-              ~task_id ~action ?expected_version:ev ~notes ~reason () in
+              ~task_id ~action:action_canonical ?expected_version:ev ~notes ~reason () in
     if is_version_mismatch r && attempt < max_cas_retries then begin
       Log.Task.info "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
         task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
@@ -462,21 +466,21 @@ let handle_transition ctx args =
          ~agent:ctx.agent_name
          ~data:(`Assoc [
            ("task_id", `String task_id);
-           ("action", `String action);
+           ("action", `String action_canonical);
            ("notes", `String notes);
          ]);
        (* Notification harness: push task transition to all active sessions *)
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_transition");
          ("task_id", `String task_id);
-         ("action", `String action);
+           ("action", `String action_canonical);
          ("agent_name", `String ctx.agent_name);
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error err ->
        Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err));
   (* Record metrics *)
-  (match result, action_lc with
+  (match result, action_canonical with
    | Ok _, "done" ->
        let metric : Metrics_store_eio.task_metric = {
          id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));

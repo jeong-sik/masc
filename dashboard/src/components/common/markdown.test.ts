@@ -128,6 +128,31 @@ describe('Markdown', () => {
     expect(href.toLowerCase()).not.toMatch(/^javascript:/)
   })
 
+  it('sanitizes javascript: URLs in images', () => {
+    const md = '![malicious](javascript:alert(1))'
+    render(html`<${Markdown} text=${md} />`, container)
+    const img = container.querySelector('img')
+    if (!img) return // DOMPurify removed entire tag — safe
+    const src = img.getAttribute('src') ?? ''
+    expect(src.toLowerCase()).not.toMatch(/^javascript:/)
+  })
+
+  it('preserves dangerous-looking strings inside code blocks without mangling', () => {
+    const md = [
+      '```html',
+      '<img src="x" onerror="alert(1)">',
+      '<a href="https://example.com/?onclick=alert(1)">click</a>',
+      '```',
+    ].join('\n')
+    render(html`<${Markdown} text=${md} />`, container)
+    const code = container.querySelector('code.language-html') ?? container.querySelector('code')
+    expect(code).not.toBeNull()
+    const text = code?.textContent ?? ''
+    // Literal strings inside code blocks must be preserved, not sanitized
+    expect(text).toContain('onerror=')
+    expect(text).toContain('?onclick=')
+  })
+
   it('handles think block with trailing whitespace in close tag', () => {
     const md = '<think>reasoning</think >'
     render(html`<${Markdown} text=${md} />`, container)

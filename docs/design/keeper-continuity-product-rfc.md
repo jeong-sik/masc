@@ -116,7 +116,7 @@ Out of scope for this RFC, but explicitly related:
 
 - history recall for current-trace user messages beyond the keep-last checkpoint window
 - recall observability (`evaluate_memory_recall`, `memory_eval_to_json`, `memory_check`)
-- naming cleanup for `perpetual` / `perpetual-keepers`
+- naming cleanup for legacy runtime paths
 - filesystem cleanup backlog discovered during diagnosis
 
 Any future expansion from bounded continuity to broader recall must ship in a separate RFC with an explicit contract for:

@@ -197,11 +197,6 @@ let all_known_tool_names =
     "masc_local_runtime_status";
     "masc_lock";
     "masc_mcp_session";
-    "masc_mdal_iterate";
-    "masc_mdal_start";
-    "masc_mdal_status";
-    "masc_mdal_stop";
-    "masc_mdal_swarm_start";
     "masc_messages";
     "masc_note_add";
     "masc_observe_alerts";
@@ -1078,7 +1073,6 @@ let guard_fragments_for_name name =
         "masc_handover_";
         "masc_keeper_";
         "masc_local_runtime_";
-        "masc_mdal_";
         "masc_relay_";
         "masc_repo_synthesis_";
         "masc_runtime_";

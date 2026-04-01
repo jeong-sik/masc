@@ -55,11 +55,6 @@ let test_keeper_denied_parity () =
   let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied) in
   check_set_equal "Keeper_denied" ~expected:legacy ~actual:ssot
 
-let test_mdal_auditable_parity () =
-  let legacy = set_of Agent_tool_surfaces.mdal_auditable_tool_names in
-  let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Mdal_auditable) in
-  check_set_equal "Mdal_auditable" ~expected:legacy ~actual:ssot
-
 (* {1 Structural Invariants — hold regardless of migration phase} *)
 
 let test_session_min_and_local_worker_share_core () =
@@ -193,7 +188,6 @@ let () =
           Alcotest.test_case "Session_min parity" `Quick test_session_min_parity;
           Alcotest.test_case "Admin parity" `Quick test_admin_parity;
           Alcotest.test_case "Keeper_denied parity" `Quick test_keeper_denied_parity;
-          Alcotest.test_case "Mdal_auditable parity" `Quick test_mdal_auditable_parity;
         ] );
       ( "invariants",
         [

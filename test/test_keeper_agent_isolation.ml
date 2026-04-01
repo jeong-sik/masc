@@ -118,11 +118,6 @@ let test_agent_surface_no_keeper_tools () =
   let leaked = List.filter has_keeper_prefix names in
   Alcotest.(check (list string)) "no keeper_* in agent surface" [] leaked
 
-let test_mdal_surface_no_keeper_tools () =
-  let names = Agent_tool_surfaces.mdal_auditable_tool_names in
-  let leaked = List.filter has_keeper_prefix names in
-  Alcotest.(check (list string)) "no keeper_* in mdal surface" [] leaked
-
 (* ============================================================
    Invariant 4: Keeper tools never overlap with agent coordination
    ============================================================ *)
@@ -239,7 +234,6 @@ let () =
     ]);
     ("agent_no_keeper_tools", [
       Alcotest.test_case "spawned agent surface" `Quick test_agent_surface_no_keeper_tools;
-      Alcotest.test_case "mdal surface" `Quick test_mdal_surface_no_keeper_tools;
     ]);
     ("disjoint_namespaces", [
       Alcotest.test_case "heuristic vs agent" `Quick test_no_overlap_heuristic_vs_agent;

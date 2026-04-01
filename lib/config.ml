@@ -18,7 +18,6 @@ let raw_all_tool_schemas : Types.tool_schema list =
     @ Tool_schemas_a2a.schemas
     @ Tool_schemas_misc.schemas
     @ Tool_board.tools
-    @ Tool_mdal.schemas
     @ Tool_keeper.schemas
     @ Tool_operator.schemas
     @ Tool_local_runtime.schemas

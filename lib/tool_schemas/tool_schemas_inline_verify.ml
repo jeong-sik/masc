@@ -21,7 +21,7 @@ let schemas : tool_schema list = [
     name = "masc_bounded_run";
     description = "Run a multi-agent round-robin loop with formal termination, token budget, cost, and time constraints. \
 Use when orchestrating autonomous agent collaboration that needs guaranteed termination and budget control. \
-Pair with masc_team_session_start for supervised sessions or masc_mdal_start for metric-driven loops.";
+Pair with masc_team_session_start for supervised sessions.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

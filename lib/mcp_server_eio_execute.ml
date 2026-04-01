@@ -544,11 +544,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_library.dispatch { Tool_library.agent_name } ~name ~args:arguments
     | Mod_keeper ->
         Tool_keeper.dispatch (make_keeper_ctx ()) ~name ~args:arguments
-    | Mod_mdal ->
-        let ctx : Tool_mdal.context = { agent_name; config = Some config;
-          sw = Some sw; proc_mgr = state.Mcp_server.proc_mgr;
-          worker_runner = None; clock = Some clock } in
-        Tool_mdal.dispatch ctx ~name ~args:arguments
     | Mod_repair_loop ->
         let ctx : _ Tool_repair_loop_types.context =
           {

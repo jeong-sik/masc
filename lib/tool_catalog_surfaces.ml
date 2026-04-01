@@ -97,7 +97,6 @@ type surface =
   | Admin
   | Keeper_internal
   | Keeper_denied
-  | Mdal_auditable
 
 let public_mcp_surface_tools =
   [
@@ -198,15 +197,6 @@ let keeper_denied_surface_tools =
     "masc_neo4j_query"; "masc_pg_query";
   ]
 
-let mdal_auditable_surface_tools =
-  [
-    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
-    "masc_worktree_create"; "masc_worktree_list"; "masc_worktree_remove";
-    "masc_run_init"; "masc_run_plan"; "masc_run_log";
-    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
-    "masc_spawn";
-  ]
-
 (* ================================================================ *)
 (* Surface query functions                                          *)
 (* ================================================================ *)
@@ -219,11 +209,10 @@ let tools_for_surface = function
   | Admin -> admin_surface_tools
   | Keeper_internal -> keeper_internal_surface_tools
   | Keeper_denied -> keeper_denied_surface_tools
-  | Mdal_auditable -> mdal_auditable_surface_tools
 
 let all_surfaces =
   [Public_mcp; Spawned_agent; Local_worker; Session_min;
-   Admin; Keeper_internal; Keeper_denied; Mdal_auditable]
+   Admin; Keeper_internal; Keeper_denied]
 
 let surface_sets : (surface * (string, unit) Hashtbl.t) list =
   List.map (fun surface ->
@@ -246,4 +235,3 @@ let surface_to_string = function
   | Admin -> "admin"
   | Keeper_internal -> "keeper_internal"
   | Keeper_denied -> "keeper_denied"
-  | Mdal_auditable -> "mdal_auditable"

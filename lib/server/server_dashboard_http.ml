@@ -80,14 +80,9 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   Dashboard_governance.dashboard_json ~base_path ~limit ~offset
     ~status_filter
 
-let dashboard_planning_http_json request ~(config : Room.config) : Yojson.Safe.t =
+let dashboard_planning_http_json ~(config : Room.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
   let rollup = Goal_store.compute_rollup goals in
-  let mdal_json =
-    match mdal_loops_json ~config request with
-    | Ok json -> json
-    | Error message -> `Assoc [ ("error", `String message); ("loops", `List []) ]
-  in
   let task_rollup =
     dashboard_tasks_safe config
     |> List.fold_left
@@ -106,7 +101,6 @@ let dashboard_planning_http_json request ~(config : Room.config) : Yojson.Safe.t
       ("generated_at", `String (Types.now_iso ()));
       ("goals", `List (List.map Goal_store.goal_to_yojson goals));
       ("rollup", Goal_store.rollup_to_yojson rollup);
-      ("mdal", mdal_json);
       ( "task_backlog",
         `Assoc
           [

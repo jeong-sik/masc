@@ -202,7 +202,7 @@ let all_flags : flag list = [
     lifecycle = Experimental; since = "2.207.0" };
 ]
 
-(** Lookup a flag by env var name. O(n) — acceptable for 25 flags. *)
+(** Lookup a flag by env var name. O(n) — acceptable for ~30 flags. *)
 let find_opt env_name =
   List.find_opt (fun f -> f.env_name = env_name) all_flags
 

@@ -67,9 +67,7 @@ let close_sse_conn info =
     Replaces direct [Hashtbl.replace sse_conn_by_session] at call sites. *)
 let register_sse_conn ~session_id ~info =
   Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      Hashtbl.replace sse_conn_by_session session_id info;
-      (* Reset guard on register — new connections reset it *)
-      Hashtbl.remove sse_connect_guard_by_session session_id)
+      Hashtbl.replace sse_conn_by_session session_id info)
 
 let stop_sse_session session_id =
   Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->

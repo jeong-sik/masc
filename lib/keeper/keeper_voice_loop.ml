@@ -33,6 +33,15 @@ let extract_reply_text (result_str : string) : string option =
     | _ -> None
   with _ -> None
 
+let parse_reply_text (result_str : string) : (string, string) result =
+  try
+    let json = Yojson.Safe.from_string result_str in
+    match Yojson.Safe.Util.member "reply" json with
+    | `String s when String.trim s <> "" -> Ok (String.trim s)
+    | _ -> Error "keeper reply missing or empty"
+  with Yojson.Json_error msg ->
+    Error (Printf.sprintf "invalid keeper reply JSON: %s" msg)
+
 (** Stop words that end the voice loop. *)
 let is_stop_command (text : string) : bool =
   let lower = String.lowercase_ascii (String.trim text) in
@@ -64,19 +73,19 @@ let run_one_voice_turn ~agent_id ~send_message ~speak
           else
             let (success, result_str) = send_message text in
             if not success then (
-              Log.Keeper.warn "voice_loop: turn failed: %s" result_str;
-              Ok `Continue)
+              Log.Keeper.error "voice_loop: turn failed: %s" result_str;
+              Error (Printf.sprintf "turn failed: %s" result_str))
             else
-              match extract_reply_text result_str with
-              | None ->
-                  Log.Keeper.info "voice_loop: no reply to speak";
-                  Ok `Continue
-              | Some reply ->
+              match parse_reply_text result_str with
+              | Error err ->
+                  Log.Keeper.error "voice_loop: %s" err;
+                  Error err
+              | Ok reply ->
                   (match speak reply with
-                   | Ok _ -> ()
+                   | Ok _ -> Ok `Continue
                    | Error err ->
-                       Log.Keeper.warn "voice_loop: speak failed: %s" err);
-                  Ok `Continue
+                       Log.Keeper.error "voice_loop: speak failed: %s" err;
+                       Error (Printf.sprintf "speak failed: %s" err))
 
 (** Run the voice ping-pong loop.
     @param send_message callback: text -> (success, result_json_string)
@@ -98,7 +107,7 @@ let run ~agent_id ~send_message ~speak
           if turn_count = 0 then
             (false, Printf.sprintf "voice loop failed on first turn: %s" err)
           else
-            (true, Printf.sprintf "voice loop ended after %d turns (error: %s)"
+            (false, Printf.sprintf "voice loop failed after %d turns: %s"
                turn_count err)
       | Ok `Stop ->
           (true, Printf.sprintf "voice loop ended after %d turns (user exit)"

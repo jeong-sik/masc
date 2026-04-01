@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { missionError, missionLoading } from '../../mission-store'
+import { roomTruthError } from '../../room-truth-store'
 import type {
   DashboardMissionResponse,
   DashboardMissionSessionBrief,
@@ -25,10 +26,24 @@ interface SituationResult {
 
 type SessionItem = DashboardMissionSessionBrief | DashboardMissionSessionCard
 
-function synthesizeSituation(snap: DashboardMissionResponse | null): SituationResult {
+export function synthesizeSituation(snap: DashboardMissionResponse | null): SituationResult {
+  const loadErrors = [
+    missionError.value?.trim(),
+    roomTruthError.value?.trim(),
+  ].filter((value): value is string => Boolean(value))
+
   if (!snap) {
-    const error = missionError.value
-    if (error) return { text: `데이터 로드 실패: ${error}`, tone: 'warn', reasons: [] }
+    if (loadErrors.length > 0) {
+      return {
+        text: `데이터 로드 실패: ${loadErrors[0]}`,
+        tone: 'bad',
+        reasons: loadErrors.map(text => ({
+          category: 'incident',
+          text,
+          severity: 'bad',
+        })),
+      }
+    }
     if (missionLoading.value) return { text: '데이터 로딩 중...', tone: 'ok', reasons: [] }
     return { text: '데이터 대기 중...', tone: 'ok', reasons: [] }
   }
@@ -47,6 +62,14 @@ function synthesizeSituation(snap: DashboardMissionResponse | null): SituationRe
   }
 
   const reasons: SituationReason[] = []
+
+  for (const error of loadErrors) {
+    reasons.push({
+      category: 'incident',
+      text: `최근 데이터 갱신 실패: ${error}`,
+      severity: 'bad',
+    })
+  }
 
   let blockerCount = 0
   for (const s of sessions) {
@@ -79,16 +102,41 @@ function synthesizeSituation(snap: DashboardMissionResponse | null): SituationRe
     })
   }
 
-  if (total === 0) return { text: '진행 중인 세션 없음.', tone: 'ok', reasons }
+  if (total === 0) {
+    if (loadErrors.length > 0) {
+      return {
+        text: '데이터 일부 갱신 실패. 진행 중인 세션 없음.',
+        tone: 'bad',
+        reasons,
+      }
+    }
+    return { text: '진행 중인 세션 없음.', tone: 'ok', reasons }
+  }
 
   if (blocked === 0 && attention === 0) {
+    if (loadErrors.length > 0) {
+      return {
+        text: `데이터 일부 갱신 실패. ${total}개 세션은 기존 스냅샷 기준으로 표시 중.`,
+        tone: 'bad',
+        reasons,
+      }
+    }
     return { text: `${total}개 세션 순조롭게 진행 중.`, tone: 'ok', reasons }
   }
 
   if (blocked > 0) {
     const suffix = attention > 0 ? ` ${attention}건 주의 필요.` : ''
-    const tone: SituationTone = blocked > total / 2 ? 'bad' : 'warn'
-    return { text: `${total}개 세션 중 ${blocked}개 막힘.${suffix}`, tone, reasons }
+    const tone: SituationTone = loadErrors.length > 0 || blocked > total / 2 ? 'bad' : 'warn'
+    const prefix = loadErrors.length > 0 ? '데이터 일부 갱신 실패. ' : ''
+    return { text: `${prefix}${total}개 세션 중 ${blocked}개 막힘.${suffix}`, tone, reasons }
+  }
+
+  if (loadErrors.length > 0) {
+    return {
+      text: `데이터 일부 갱신 실패. ${total}개 세션 진행 중. ${attention}건 주의 항목.`,
+      tone: 'bad',
+      reasons,
+    }
   }
 
   return { text: `${total}개 세션 진행 중. ${attention}건 주의 항목.`, tone: 'warn', reasons }

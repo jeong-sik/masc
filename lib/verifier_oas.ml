@@ -218,6 +218,7 @@ let verdict_to_hook_decision (v : verdict) : Agent_sdk.Hooks.hook_decision =
     @param goal The current agent goal (for verification prompt context).
     @param context_summary Brief summary of agent state. *)
 let make_pre_tool_hook
+    ?(verify_fn = verify)
     ~(goal : string)
     ~(context_summary : string)
   : Agent_sdk.Hooks.hook =
@@ -229,25 +230,37 @@ let make_pre_tool_hook
       if should_skip ~action_description then
         Agent_sdk.Hooks.Continue
       else
-        let input_str =
-          try Yojson.Safe.to_string input
-          with Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-                 Log.Verifier.warn "Failed to serialize input: %s" (Printexc.to_string exn);
-                 "{}" in
-        let req : verification_request = {
-          action_description;
-          action_result = input_str;
-          goal;
-          context_summary;
-        } in
-        begin match verify req with
-        | Ok verdict -> verdict_to_hook_decision verdict
-        | Error msg ->
-            Log.Verifier.warn "OAS run failed: %s (defaulting to Continue)" msg;
-            Agent_sdk.Hooks.Continue
-        end
-    | _ -> Agent_sdk.Hooks.Continue
+        (match
+           try Ok (Yojson.Safe.to_string input)
+           with Eio.Cancel.Cancelled _ as e -> raise e
+              | exn -> Error (Printexc.to_string exn)
+         with
+         | Error msg ->
+             Log.Verifier.error "Failed to serialize input for verifier: %s" msg;
+             Agent_sdk.Hooks.Skip
+         | Ok input_str ->
+             let req : verification_request = {
+               action_description;
+               action_result = input_str;
+               goal;
+               context_summary;
+             } in
+             begin match verify_fn req with
+             | Ok verdict -> verdict_to_hook_decision verdict
+             | Error msg ->
+                 Log.Verifier.error "OAS run failed; skipping tool: %s" msg;
+                 Agent_sdk.Hooks.Skip
+             end)
+    | Agent_sdk.Hooks.BeforeTurn _
+    | Agent_sdk.Hooks.BeforeTurnParams _
+    | Agent_sdk.Hooks.AfterTurn _
+    | Agent_sdk.Hooks.PostToolUse _
+    | Agent_sdk.Hooks.PostToolUseFailure _
+    | Agent_sdk.Hooks.OnStop _
+    | Agent_sdk.Hooks.OnIdle _
+    | Agent_sdk.Hooks.OnError _
+    | Agent_sdk.Hooks.OnToolError _
+    | Agent_sdk.Hooks.PreCompact _ -> Agent_sdk.Hooks.Continue
 
 (** Install the verifier hook into an existing OAS hooks record.
 

@@ -165,6 +165,57 @@ let test_run_no_audio_treated_as_empty () =
           let re = Re.compile (Re.str "empty STT") in
           Re.execp re msg)
 
+let test_run_mid_loop_send_message_failure_is_error () =
+  let send_calls = ref 0 in
+  let record = make_record [
+    Ok (`Assoc [("text", `String "hello")]);
+    Ok (`Assoc [("text", `String "again")]);
+  ] in
+  let send_message text =
+    incr send_calls;
+    if !send_calls = 1 then echo_send text
+    else (false, "keeper backend unavailable")
+  in
+  let (success, msg) =
+    Keeper_voice_loop.run ~agent_id:"test" ~send_message
+      ~speak:noop_speak ~record ~max_turns:10 ()
+  in
+  check bool "fails after mid-loop tool error" false success;
+  check bool "contains turn failure"
+    true (String.length msg > 0 &&
+          let re = Re.compile (Re.str "turn failed") in
+          Re.execp re msg)
+
+let test_run_malformed_reply_is_error () =
+  let record = make_record [
+    Ok (`Assoc [("text", `String "hello")]);
+  ] in
+  let send_message _text = (true, "{bad json") in
+  let (success, msg) =
+    Keeper_voice_loop.run ~agent_id:"test" ~send_message
+      ~speak:noop_speak ~record ~max_turns:10 ()
+  in
+  check bool "malformed reply fails" false success;
+  check bool "mentions invalid keeper reply JSON"
+    true (String.length msg > 0 &&
+          let re = Re.compile (Re.str "invalid keeper reply JSON") in
+          Re.execp re msg)
+
+let test_run_speak_failure_is_error () =
+  let record = make_record [
+    Ok (`Assoc [("text", `String "hello")]);
+  ] in
+  let speak _text = Error "tts offline" in
+  let (success, msg) =
+    Keeper_voice_loop.run ~agent_id:"test" ~send_message:echo_send
+      ~speak ~record ~max_turns:10 ()
+  in
+  check bool "tts failure is not silent" false success;
+  check bool "mentions speak failed"
+    true (String.length msg > 0 &&
+          let re = Re.compile (Re.str "speak failed") in
+          Re.execp re msg)
+
 let () =
   run "Keeper_voice_loop"
     [
@@ -194,5 +245,8 @@ let () =
           test_case "empty count resets on success" `Quick test_run_empty_resets_on_success;
           test_case "error on first turn" `Quick test_run_error_on_first_turn;
           test_case "no_audio treated as empty" `Quick test_run_no_audio_treated_as_empty;
+          test_case "mid-loop tool failure is error" `Quick test_run_mid_loop_send_message_failure_is_error;
+          test_case "malformed reply is error" `Quick test_run_malformed_reply_is_error;
+          test_case "speak failure is error" `Quick test_run_speak_failure_is_error;
         ] );
     ]

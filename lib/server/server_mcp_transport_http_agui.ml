@@ -77,7 +77,7 @@ let handle_ag_ui_events ~deps request reqd =
         }
       in
       info_ref := Some info;
-      Hashtbl.replace sse_conn_by_session session_id info;
+      register_sse_conn ~session_id ~info;
       let prime =
         Ag_ui.(
           make_event ~thread_id:room_id ~run_id:(Some session_id) Run_started

@@ -48,6 +48,12 @@ let sse_connect_window_s =
 let sse_connect_max_in_window =
   env_int_or ~name:"MASC_SSE_CONNECT_MAX_IN_WINDOW" ~default:0 |> max 0
 
+(** Register an SSE connection under [sse_registry_mutex].
+    All call sites must use this instead of direct [Hashtbl.replace]. *)
+let register_sse_conn ~session_id ~info =
+  Eio.Mutex.use_rw ~protect:true sse_registry_mutex (fun () ->
+    Hashtbl.replace sse_conn_by_session session_id info)
+
 let close_sse_conn info =
   if not info.closed then (
     info.closed <- true;

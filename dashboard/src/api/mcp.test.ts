@@ -34,6 +34,17 @@ function setupMcpSessionMocks(sessionId: string) {
     )
 }
 
+/** Find a fetchWithTimeout call by matching the JSON body's "method" field. */
+function findCallByMethod(method: string) {
+  const calls = fetchWithTimeout.mock.calls as Array<[string, RequestInit, number]>
+  return calls.find(([, init]) => {
+    const body = init.body
+    if (typeof body !== 'string') return false
+    try { return JSON.parse(body).method === method }
+    catch { return false }
+  })
+}
+
 describe('mcpHeaders auth integration', () => {
   it('includes Authorization header from authHeaders in MCP initialize request', async () => {
     authHeaders.mockReturnValue({
@@ -45,13 +56,16 @@ describe('mcpHeaders auth integration', () => {
     const { callMcpTool } = await import('./mcp')
     await callMcpTool('masc_status', {})
 
-    const initHeaders = fetchWithTimeout.mock.calls[0]![1]!.headers as Record<string, string>
+    const initCall = findCallByMethod('initialize')
+    expect(initCall).toBeDefined()
+    const initHeaders = initCall![1].headers as Record<string, string>
     expect(initHeaders['Authorization']).toBe('Bearer test-token-123')
     expect(initHeaders['X-MASC-Agent']).toBe('dashboard')
     expect(initHeaders['Content-Type']).toBe('application/json')
 
-    // tools/call request (3rd call) should also include auth headers
-    const toolHeaders = fetchWithTimeout.mock.calls[2]![1]!.headers as Record<string, string>
+    const toolCall = findCallByMethod('tools/call')
+    expect(toolCall).toBeDefined()
+    const toolHeaders = toolCall![1].headers as Record<string, string>
     expect(toolHeaders['Authorization']).toBe('Bearer test-token-123')
   })
 
@@ -62,9 +76,11 @@ describe('mcpHeaders auth integration', () => {
     const { callMcpTool } = await import('./mcp')
     await callMcpTool('masc_status', {})
 
-    const initHeaders = fetchWithTimeout.mock.calls[0]![1]!.headers as Record<string, string>
-    expect(initHeaders['Authorization']).toBeUndefined()
-    expect(initHeaders['Content-Type']).toBe('application/json')
+    const initCall = findCallByMethod('initialize')
+    expect(initCall).toBeDefined()
+    const noAuthHeaders = initCall![1].headers as Record<string, string>
+    expect(noAuthHeaders['Authorization']).toBeUndefined()
+    expect(noAuthHeaders['Content-Type']).toBe('application/json')
   })
 })
 

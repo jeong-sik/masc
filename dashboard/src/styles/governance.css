@@ -1,16 +1,34 @@
-/* MASC Dashboard -- Governance (retained: stateful variants, compound selectors, responsive) */
+/* Governance — council row/state, governance chips/badges, ff-plate signal variants,
+   responsive overrides. Extracted from global.css for #3915. */
 
-/* ── Governance Chips (multi-variant: ok, warn) ── */
-.governance-chip.ok {
-  border-color: var(--ok-40);
-  background: var(--ok-12);
-  color: #b4f5ca;
+/* ═══ Governance ═══ */
+
+/* ── Council Row (stateful: hover, selected, content-visibility) ── */
+@utility council-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
+}
+button.council-row.selected {
+  border-color: rgba(71, 184, 255, 0.5);
+  background: var(--accent-14);
 }
 
-.governance-chip.warn {
-  border-color: rgba(251, 191, 36, 0.4);
-  background: var(--warn-12);
-  color: #ffe09b;
+/* ── Council State badges (multi-variant) ── */
+@utility council-state {
+  &.open, &.positive { border-color: var(--ok-48); background: var(--ok-soft); color: #b4f5ca; }
+  &.closed, &.vote { border-color: rgba(251, 191, 36, 0.45); background: rgba(251, 191, 36, 0.14); color: #ffe09b; }
+  &.negative { border-color: rgba(239, 68, 68, 0.46); background: rgba(239, 68, 68, 0.14); color: #fecaca; }
+}
+
+/* ── Governance Chips (multi-variant: ok, warn) ── */
+@utility governance-chip {
+  &.ok { border-color: var(--ok-40); background: var(--ok-12); color: #b4f5ca; }
+  &.warn { border-color: rgba(251, 191, 36, 0.4); background: var(--warn-12); color: #ffe09b; }
+}
+
+@utility governance-badge {
+  &.positive { border-color: var(--ok-40); background: var(--ok-12); color: #b4f5ca; }
+  &.negative { border-color: rgba(239, 68, 68, 0.44); background: var(--bad-12); color: #fecaca; }
 }
 
 /* ── Responsive ── */
@@ -23,3 +41,49 @@
     max-height: none;
   }
 }
+
+/* ── FF Character Sheet — kept: gradient plate, signal variants, responsive ── */
+
+@utility ff-plate {
+  background:
+    linear-gradient(
+      135deg,
+      rgba(10, 22, 40, 0.95) 0%,
+      rgba(16, 28, 52, 0.88) 100%
+    );
+  box-shadow:
+    0 0 20px rgba(200, 168, 78, 0.04),
+    inset 0 1px 0 var(--ff-gold-8);
+}
+
+/* Signal badges — stateful variants */
+@utility ff-plate__signal--live {
+  color: var(--ok);
+  background: var(--ok-10);
+  border: 1px solid var(--ok-20);
+}
+
+@utility ff-plate__signal--stale {
+  color: var(--ff-gold);
+  background: var(--ff-gold-10);
+  border: 1px solid var(--ff-gold-20);
+}
+
+@utility ff-plate__signal--archived {
+  color: var(--text-dim);
+  background: rgba(128, 128, 128, 0.1);
+  border: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+/* Mention bar — nested .control-input override */
+.ff-profile__mention .control-input {
+  flex: 1;
+}
+
+@media (max-width: 768px) {
+  .ff-plate {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+}
+

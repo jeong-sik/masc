@@ -1,11 +1,8 @@
-/* mission.css — migrated to Tailwind utilities in components.
- * Remaining mission-* interactive/state rules live in dashboard.css:
- *   .mission-collapsible-*, .mission-status-dot,
- *   .mission-state-*, .is-selected modifiers.
- * Tone border utilities (.ok/.warn/.bad) live in global.css.
- */
+/* Mission — selected state, proof artifacts. Extracted for #3915. */
 
-/* Keep .is-selected for mission cards (used via dynamic class in components) */
+/* ── Mission ─────────────────────────────────── */
+
+/* mission .is-selected: compound selectors, kept as raw CSS */
 .mission-attention-card.is-selected,
 .mission-crew-card.is-selected {
   box-shadow: 0 0 0 1px rgba(71,184,255,0.45);
@@ -15,3 +12,4 @@
 .proof-artifact-row .command-meta-line span {
   overflow-wrap: anywhere;
 }
+

@@ -1,109 +1,102 @@
-/* ── Toast Notifications ───────────────────────────────────── */
-.toast {
-  animation: slideIn 0.3s ease;
+/* UI — toast animation, markdown content, think block, SPA refresh tabs, button.agent,
+   room-truth-card, monitor buttons, agent-event-badge variants. Extracted from global.css for #3915. */
+
+/* ═══ UI ═══ */
+
+/* ── Toast Notifications (styling moved to component Tailwind) ── */
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
-.toast.success { border-left: 4px solid var(--ok); }
-.toast.warning { border-left: 4px solid var(--warn); }
-.toast.error { border-left: 4px solid var(--bad); }
 
 /* ── Markdown Rendered Content ─────────────────────────────── */
-.markdown-content code {
-  background: var(--white-8);
-  padding: 1px 5px;
-  font-size: var(--fs-sm);
-}
-.markdown-content pre {
-  background: rgba(0,0,0,0.3);
-  padding: 12px;
-  overflow-x: auto;
-  font-size: var(--fs-sm);
-}
-.markdown-content blockquote {
-  border-left: 3px solid var(--cyan);
-  padding-left: 12px;
-  color: #aaa;
+@utility markdown-content {
+  & code { background: var(--white-8); padding: 1px 5px; font-size: var(--fs-sm); }
+  & pre { background: rgba(0,0,0,0.3); padding: 12px; overflow-x: auto; font-size: var(--fs-sm); }
+  & blockquote { border-left: 3px solid var(--cyan); padding-left: 12px; color: #aaa; }
 }
 
 /* ── Think Block (collapsible) ─────────────────────────────── */
-.think-block {
+@utility think-block {
   background: rgba(167,139,250,0.06);
   border: 1px solid rgba(167,139,250,0.15);
   padding: 10px 14px;
   margin: 8px 0;
-
-  & summary {
-    cursor: pointer;
-    color: var(--purple);
-    font-size: var(--fs-sm);
-  }
+  & summary { cursor: pointer; color: var(--purple); font-size: var(--fs-sm); }
 }
 
+/* ── SPA Refresh ─────────────────────────────────────────── */
+@utility main-tab-btn {
+  &:hover { color: #d6e5ff; border-color: var(--border-slate-35); }
+  &.active { color: #c9ebff; border-color: rgba(71, 184, 255, 0.5); background: var(--accent-soft); }
+}
+
+/* button.agent/agent-card: element+class selector, kept as raw CSS */
 button.agent,
 button.agent-card {
   cursor: pointer;
-
-  &:hover {
-    background: var(--white-8);
-  }
+  &:hover { background: var(--white-8); }
 }
 
 /* room-truth-strip: migrated to inline Tailwind */
 
-.room-truth-card {
+@utility room-truth-card {
   background:
     linear-gradient(180deg, rgba(40, 56, 92, 0.34), rgba(19, 29, 51, 0.9)),
     var(--card);
-
-  & strong {
-    color: #edf4ff;
-    font-size: var(--fs-lg);
-    line-height: 1.35;
-  }
-
-  & p {
-    margin: 0;
-    color: #96add7;
-    font-size: var(--fs-sm);
-    line-height: 1.5;
-  }
+  & strong { color: #edf4ff; font-size: var(--fs-lg); line-height: 1.35; }
+  & p { margin: 0; color: #96add7; font-size: var(--fs-sm); line-height: 1.5; }
 }
 
+/* button.monitor-alert/row: element+class selector, kept as raw CSS */
+button.monitor-alert,
 button.monitor-row {
   transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
-
-  &:hover {
-    transform: translateY(-1px);
-    border-color: var(--border-slate-35);
-    background: var(--white-6);
-  }
-
-  &.ok {
-    border-color: var(--ok-18);
-  }
-
-  &.warn {
-    border-color: var(--warn-28);
-  }
-
-  &.bad {
-    border-color: rgba(248, 113, 113, 0.34);
-  }
+  &:hover { transform: translateY(-1px); border-color: var(--border-slate-35); background: var(--white-6); }
+  &.ok { border-color: var(--ok-18); }
+  &.warn { border-color: var(--warn-28); }
+  &.bad { border-color: rgba(248, 113, 113, 0.34); }
 }
 
-/* ── Status Badge ──────────────────────────────────────────── */
-.status-badge.active { background: var(--ok-soft); color: var(--ok); }
-.status-badge.busy { background: var(--warn-15); color: var(--warn); }
-.status-badge.listening { background: rgba(56,189,248,0.15); color: #38bdf8; }
-.status-badge.idle { background: rgba(136,136,136,0.15); color: var(--text-dim); }
-.status-badge.offline { background: rgba(85,85,85,0.15); color: #555; }
-.status-badge.todo { background: rgba(136,136,136,0.15); color: var(--text-dim); }
-.status-badge.in_progress {
-  background: var(--warn-15); color: var(--warn);
+/* status-badge state variants: folded into @utility status-badge above */
+
+/* ── Agent List (Overview) ─────────────────────────────────── */
+/* agent-card:hover: uses compound selector, kept as raw CSS */
+.agent-card:hover { border-color: var(--white-20); }
+
+/* ── Agents Unified Tab (chip toggle) ────────── */
+@utility agents-chip {
+  transition-property: color, border-color;
+  transition-duration: 0.15s;
+  &:hover { border-color: var(--accent); color: var(--text-strong); }
 }
-.status-badge.done, .status-badge.completed {
-  background: var(--ok-soft); color: var(--ok);
+
+/* ── Agent Monitor — runtime strip + live timeline ──────────── */
+
+/* ── Runtime Strip ─────────────────────────────────────────── */
+@utility agent-runtime-strip {
+  background: linear-gradient(
+    90deg,
+    rgba(10, 22, 40, 0.85) 0%,
+    rgba(16, 28, 48, 0.7) 100%
+  );
 }
-.status-badge.running { background: var(--warn-15); color: var(--warn); }
-.status-badge.interrupted { background: rgba(56,189,248,0.15); color: #38bdf8; }
-.status-badge.stopped { background: var(--slate-gray-15); color: var(--text-slate); }
-.status-badge.error { background: rgba(251,113,133,0.15); color: #fb7185; }
+
+@utility agent-runtime-ctx-fill {
+  transition: width 0.3s ease;
+  &.warn { background: var(--warn); }
+  &.bad { background: var(--bad-light); }
+}
+
+/* ── Live Timeline — see agent-monitor.css ─────────────────── */
+
+/* Event kind badge variants */
+@utility agent-event-badge--heartbeat { background: var(--ok-12); color: var(--ok); }
+@utility agent-event-badge--lifecycle { background: var(--accent-12); color: var(--accent); }
+@utility agent-event-badge--keeper { background: var(--ff-gold-15); color: var(--ff-gold-bright); }
+@utility agent-event-badge--error { background: rgba(248, 113, 113, 0.14); color: var(--bad-light); }
+@utility agent-event-badge--broadcast { background: rgba(167, 139, 250, 0.12); color: var(--purple, var(--purple)); }
+@utility agent-event-badge--task { background: var(--warn-12); color: var(--warn, var(--warn)); }
+@utility agent-event-badge--board { background: var(--cyan-12); color: var(--cyan, var(--cyan)); }
+@utility agent-event-badge--default { background: var(--border-slate-12); color: var(--text-muted, var(--text-muted)); }
+

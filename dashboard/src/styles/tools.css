@@ -1,28 +1,31 @@
-/* ── Tools — kept: webkit-line-clamp, back-to-top,
-   bar-row grid, responsive ── */
+/* Tools — tool-detail, tool-param, tool-portal-card, etc. Extracted for #3915. */
 
-/* webkit-line-clamp — not expressible in Tailwind v4 */
-.tool-inventory-desc {
+/* ── Tools (merged from tools.css) ─────────────────────── */
+
+@utility tool-inventory-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+@utility tool-inventory-desc {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  &:hover { -webkit-line-clamp: unset; }
 }
 
-.tool-inventory-desc:hover,
-.tool-inventory-reason:hover {
-  -webkit-line-clamp: unset;
-}
-
-.tool-inventory-reason {
+@utility tool-inventory-reason {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  &:hover { -webkit-line-clamp: unset; }
 }
 
-/* Back to top — visibility/hover transitions */
-.tool-back-to-top {
+@utility tool-back-to-top {
   position: fixed;
   bottom: 24px;
   right: 24px;
@@ -31,27 +34,30 @@
   opacity: 0;
   transition: opacity 0.2s, background 0.15s;
   pointer-events: none;
+  &.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  &:hover {
+    background: rgba(30, 41, 59, 0.95);
+    color: var(--text-near-white);
+  }
 }
 
-.tool-back-to-top.visible {
-  opacity: 1;
-  pointer-events: auto;
+
+@utility tool-metrics-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.tool-back-to-top:hover {
-  background: rgba(30, 41, 59, 0.95);
-  color: var(--text-near-white);
-}
-
-/* ── Tool Metrics ── */
-.tool-metrics-sections {
+@utility tool-metrics-sections {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   gap: 16px;
 }
 
-/* Bar chart row — complex grid template */
-.tool-bar-row {
+@utility tool-bar-row {
   display: grid;
   grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;
   gap: 8px;
@@ -59,7 +65,6 @@
   font-size: var(--fs-sm);
 }
 
-/* ── Responsive ── */
 @media (max-width: 880px) {
   .tool-metrics-sections {
     grid-template-columns: 1fr;

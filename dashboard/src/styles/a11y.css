@@ -1,0 +1,16 @@
+/* Accessibility — prefers-reduced-motion overrides. Extracted from global.css for #3915. */
+
+@media (prefers-reduced-motion: reduce) {
+  .pixel-avatar[data-status] { animation: none; }
+  .pixel-avatar--has-blocker {
+    animation: none;
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.6);
+  }
+  .activity-dot--live-pulse { animation: none; }
+  .pulse-working { animation: none; }
+  .pipeline-stage-node.active.stage-thinking .pipeline-stage-dot { animation: none; }
+  .pipeline-stage-badge.stage-thinking { animation: none; }
+  [class*="avatar-pulse-glow"] { animation: none; }
+  [style*="workingPulse"] { animation: none; }
+  [style*="keeperPulse"] { animation: none; }
+}

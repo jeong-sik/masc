@@ -1,17 +1,64 @@
-/* ── Board ─────────────────────────────────────────── */
+/* Board — sort button, post card, vote button, comment expand, markdown preview. Extracted for #3915. */
+
+/* ── Board (Posts) ─────────────────────────────────────────── */
+
+@utility board-sort-btn {
+  &:hover { background: var(--white-8); color: #ccc; }
+  &.active { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-30); }
+}
+
+@utility board-post {
+  border-color: var(--card-border);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+  transition: border-color 0.2s, transform 0.2s, background 0.2s;
+  &:hover { border-color: rgba(71, 184, 255, 0.26); background: var(--white-6); transform: translateY(-1px); }
+}
 
 /* Vote column */
-.vote-btn {
+@utility vote-btn {
   transition: color 0.2s;
+  &:hover { color: #ccc; }
+  &.upvote:hover, &.upvote.active { color: #ff4500; }
+  &.downvote:hover, &.downvote.active { color: #7193ff; }
+  &.animate { animation: votePop 0.3s ease; }
 }
-.vote-btn:hover { color: #ccc; }
-.vote-btn.upvote:hover, .vote-btn.upvote.active { color: #ff4500; }
-.vote-btn.downvote:hover, .vote-btn.downvote.active { color: #7193ff; }
-.vote-btn.animate { animation: votePop 0.3s ease; }
 
-/* Board comments */
+/* Board comments: compound selector, kept as raw CSS */
 .board-comment .comment-text {
   transition: max-height 0.3s ease;
 }
 .board-comment .comment-text.expanded { max-height: none; }
 .board-comment .comment-expand-btn:hover { text-decoration: underline; }
+
+.board-post-preview .markdown-content {
+  overflow-wrap: anywhere;
+}
+
+.board-post-preview .markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.board-post-preview .markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.board-post-preview .markdown-content p,
+.board-post-preview .markdown-content ul,
+.board-post-preview .markdown-content ol,
+.board-post-preview .markdown-content blockquote,
+.board-post-preview .markdown-content pre {
+  margin: 0.35rem 0;
+}
+
+.board-post-preview .markdown-content h1,
+.board-post-preview .markdown-content h2,
+.board-post-preview .markdown-content h3 {
+  margin-top: 0;
+  margin-bottom: 0.35rem;
+}
+
+.board-post-preview .markdown-content pre {
+  max-height: 8rem;
+}
+

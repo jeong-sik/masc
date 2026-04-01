@@ -239,6 +239,7 @@ let transport_health_json ~config =
   let grpc_live = grpc_listening () in
   let ws_configured = ws_enabled () in
   let ws_live = ws_listening () in
+  let webrtc_configured = Server_webrtc_transport.is_enabled () in
   let webrtc_pending = Server_webrtc_transport.pending_offer_count () in
   let webrtc_peers = Server_webrtc_transport.active_peer_count () in
   let webrtc_live = Server_webrtc_transport.live_webrtc_count () in
@@ -302,7 +303,10 @@ let transport_health_json ~config =
       ("relay_source", `String "sse_external_subscriber");
     ]);
     ("webrtc", `Assoc [
-      ("enabled", `Bool (Server_webrtc_transport.is_enabled ()));
+      ("enabled", `Bool webrtc_configured);
+      ("configured", `Bool webrtc_configured);
+      ("signaling_available", `Bool webrtc_configured);
+      ("signaling_mode", `String "shared_http");
       ("pending_offers", `Int webrtc_pending);
       ("active_peers", `Int webrtc_peers);
       ("live_connections", `Int webrtc_live);

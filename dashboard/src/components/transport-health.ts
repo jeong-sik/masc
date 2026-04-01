@@ -57,6 +57,9 @@ interface TransportHealthData {
   }
   webrtc: {
     enabled: boolean
+    configured: boolean
+    signaling_available: boolean
+    signaling_mode: string
     pending_offers: number
     active_peers: number
     live_connections: number
@@ -110,6 +113,13 @@ type PracticalCase = {
 const transportHealth: Signal<TransportHealthData | null> = signal(null)
 const loading: Signal<boolean> = signal(false)
 const error: Signal<string | null> = signal(null)
+
+export function resetTransportHealthState(): void {
+  transportHealth.value = null
+  loading.value = false
+  error.value = null
+  inflightTransportHealthRefresh = null
+}
 
 /** Hydrate transport health from SSE payload — zero HTTP fetch. */
 export function hydrateTransportHealthFromSSE(data: unknown): void {
@@ -256,8 +266,18 @@ function websocketTone(data: TransportHealthData): StatusTone {
   )
 }
 
+function webrtcActive(data: TransportHealthData): boolean {
+  return data.webrtc.connected_channels > 0
+    || data.webrtc.live_connections > 0
+    || data.webrtc.active_peers > 0
+}
+
 function webrtcTone(data: TransportHealthData): StatusTone {
-  return transportTone(data.webrtc.enabled, true, data.webrtc.connected_channels > 0)
+  return transportTone(
+    data.webrtc.configured,
+    data.webrtc.signaling_available,
+    webrtcActive(data),
+  )
 }
 
 function http2Tone(data: TransportHealthData): StatusTone {
@@ -289,6 +309,13 @@ function MetricRow({ label, value, sub }: { label: string; value: string | numbe
 function transportEyebrow(configured: boolean, listening: boolean, port: number): string {
   if (!configured) return 'disabled'
   return listening ? `:${port} live` : `:${port} down`
+}
+
+function webrtcEyebrow(data: TransportHealthData): string {
+  if (!data.webrtc.configured) return 'disabled'
+  return data.webrtc.signaling_available
+    ? `${data.webrtc.ice_server_count} ICE · signaling ready`
+    : 'signaling down'
 }
 
 function SectionCard({
@@ -441,7 +468,8 @@ export function TransportHealthPanel() {
               <${MetricRow} label="릴레이 소스" value=${data.websocket.relay_source} />
             <//>
 
-            <${SectionCard} title="WebRTC" status=${webrtcStatus} eyebrow=${data.webrtc.enabled ? `${data.webrtc.ice_server_count} ICE` : 'disabled'}>
+            <${SectionCard} title="WebRTC" status=${webrtcStatus} eyebrow=${webrtcEyebrow(data)}>
+              <${MetricRow} label="시그널링" value=${data.webrtc.signaling_available ? 'ready' : 'down'} sub=${data.webrtc.signaling_mode} />
               <${MetricRow} label="연결된 채널" value=${data.webrtc.connected_channels} />
               <${MetricRow} label="활성 피어" value=${data.webrtc.active_peers} />
               <${MetricRow} label="대기 오퍼" value=${data.webrtc.pending_offers} />

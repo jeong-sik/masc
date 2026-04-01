@@ -247,6 +247,10 @@ let task_action_to_string = function
   | Cancel -> "cancel"
   | Release -> "release"
 
+(** All valid task actions, derived from the ADT (single source of truth). *)
+let all_task_actions = [Claim; Start; Done_action; Cancel; Release]
+let valid_task_action_strings = List.map task_action_to_string all_task_actions
+
 type task_status =
   | Todo
   | Claimed of { assignee: string; claimed_at: string }

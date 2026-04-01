@@ -12,6 +12,12 @@ let test_extract_text_from_stt_valid () =
     (Some "hello world")
     (Keeper_voice_loop.extract_text_from_stt json)
 
+let test_extract_text_from_stt_no_audio () =
+  let json = `Assoc [("status", `String "no_audio"); ("text", `String "")] in
+  check (option string) "no_audio status returns None"
+    None
+    (Keeper_voice_loop.extract_text_from_stt json)
+
 let test_extract_text_from_stt_empty () =
   let json = `Assoc [("text", `String "   ")] in
   check (option string) "empty text returns None"
@@ -145,12 +151,27 @@ let test_run_error_on_first_turn () =
   in
   check bool "fails on first turn" false success
 
+let test_run_no_audio_treated_as_empty () =
+  let record = make_record [
+    Ok (`Assoc [("status", `String "no_audio"); ("text", `String "")]);
+  ] in
+  let (success, msg) =
+    Keeper_voice_loop.run ~agent_id:"test" ~send_message:echo_send
+      ~speak:noop_speak ~record ~max_turns:100 ()
+  in
+  check bool "success" true success;
+  check bool "contains empty STT"
+    true (String.length msg > 0 &&
+          let re = Re.compile (Re.str "empty STT") in
+          Re.execp re msg)
+
 let () =
   run "Keeper_voice_loop"
     [
       ( "extract_text_from_stt",
         [
           test_case "valid text" `Quick test_extract_text_from_stt_valid;
+          test_case "no_audio status" `Quick test_extract_text_from_stt_no_audio;
           test_case "empty text" `Quick test_extract_text_from_stt_empty;
           test_case "missing field" `Quick test_extract_text_from_stt_missing;
         ] );
@@ -172,5 +193,6 @@ let () =
           test_case "consecutive empty STT stops loop" `Quick test_run_consecutive_empty_stops;
           test_case "empty count resets on success" `Quick test_run_empty_resets_on_success;
           test_case "error on first turn" `Quick test_run_error_on_first_turn;
+          test_case "no_audio treated as empty" `Quick test_run_no_audio_treated_as_empty;
         ] );
     ]

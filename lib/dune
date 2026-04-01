@@ -281,8 +281,6 @@
    tool_bridge
    tool_cache
    tool_access_policy
-   tool_gate
-   zone_tbl
    tool_access_role
    tool_tempo
    tool_portal
@@ -440,7 +438,6 @@
    keeper_exec_persona
    keeper_fs
    keeper_identity
-   keeper_working_context
    keeper_checkpoint_store
    keeper_text_processing
    keeper_compaction
@@ -577,7 +574,6 @@
   keeper_exec_persona
   keeper_fs
   keeper_identity
-  keeper_working_context
   keeper_checkpoint_store
   keeper_text_processing
   keeper_compaction

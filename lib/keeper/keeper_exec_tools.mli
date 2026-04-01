@@ -31,7 +31,7 @@ val keeper_masc_tool_schemas : keeper_meta -> Types.tool_schema list
 val execute_keeper_tool_call :
   config:Room.config ->
   meta:keeper_meta ->
-  ctx_work:Keeper_working_context.working_context ->
+  ctx_work:working_context ->
   name:string ->
   input:Yojson.Safe.t ->
   string

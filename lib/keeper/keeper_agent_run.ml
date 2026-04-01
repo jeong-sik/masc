@@ -128,6 +128,7 @@ let run_turn
     ?max_cost_usd
     ?on_event
     ?(trajectory_acc : Trajectory.accumulator option)
+    ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
     ?_priority
     ()
   : (run_result, string) result =
@@ -214,14 +215,7 @@ let run_turn
   let agent_name = Printf.sprintf "keeper-%s" meta.name in
   let meta_ref = ref meta in
   let agent_ref : Agent_sdk.Agent.t option ref = ref None in
-  (* Phase 2B: zone table for tool boundary management.
-     Created per-turn with the keeper's allowed tools as base.
-     No zones entered by default; zone_enter/exit triggers are Phase 2C. *)
-  let zone =
-    Zone_tbl.create
-      ~base_tools:(Keeper_exec_tools.keeper_allowed_tool_names meta)
-  in
-  let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref ~zone () in
+  let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =
@@ -298,13 +292,12 @@ let run_turn
       "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
       "keeper_tasks_list"; "keeper_fs_read"; "keeper_shell_readonly";
       "keeper_board_get"; "keeper_board_post";
-      "keeper_extend_turns" ]
+      "extend_turns" ]
   in
-  (* Fallback: all keeper tool names minus always_include.
-     Derived from keeper_tools (already per-keeper allow/deny filtered)
-     so no phantom tool names leak in. Used when BM25 confidence is low. *)
+  (* All tool names including extend_turns (added separately from keeper_tools). *)
   let all_tool_names =
-    List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
+    "extend_turns"
+    :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   let fallback_tools =
     List.filter (fun name ->
@@ -312,6 +305,13 @@ let run_turn
     ) all_tool_names
   in
   let confidence_threshold = 0.5 in
+  (* Runtime tool overlay: external callers (masc_tool_grant/revoke)
+     push Tool_op.t values here. The hook applies them each turn.
+     If caller provides one, use it; otherwise create a local one. *)
+  let tool_overlay_ref = match tool_overlay with
+    | Some r -> r
+    | None -> ref Agent_sdk.Tool_op.Keep_all
+  in
   let base_hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
     ?trajectory_acc
@@ -364,11 +364,15 @@ let run_turn
         let retrieved_names = List.map fst retrieved in
         let use_fallback = top_score < confidence_threshold in
         let all_allowed =
-          let base = always_include_tools @ retrieved_names in
-          if use_fallback then
-            List.sort_uniq String.compare (base @ fallback_tools)
-          else
-            List.sort_uniq String.compare base
+          Agent_sdk.Tool_op.apply
+            (Agent_sdk.Tool_op.compose [
+              Agent_sdk.Tool_op.Replace_with always_include_tools;
+              Agent_sdk.Tool_op.Add retrieved_names;
+              (if use_fallback then Agent_sdk.Tool_op.Add fallback_tools
+               else Agent_sdk.Tool_op.Keep_all);
+              !tool_overlay_ref;
+            ])
+            all_tool_names
         in
         if Keeper_types_profile.keeper_debug then
           Log.Keeper.info
@@ -407,25 +411,23 @@ let run_turn
              | Some existing -> Some (existing ^ "\n\n" ^ warning))
           else ctx
         in
+        let safe_last_turn_tools =
+          [ "keeper_board_post"; "keeper_board_comment";
+            "keeper_context_status"; "extend_turns";
+            "keeper_time_now"; "keeper_broadcast" ]
+        in
         let all_allowed =
           if is_last_turn then
-            (* On last turn, only allow state-preserving and communication tools.
-               Removes filesystem/bash/edit tools to prevent starting unfinishable work. *)
-            List.filter (fun name ->
-              List.mem name
-                [ "keeper_board_post"; "keeper_board_comment";
-                  "keeper_context_status"; "extend_turns";
-                  "keeper_time_now"; "keeper_broadcast" ]
-            ) all_allowed
+            Agent_sdk.Tool_op.apply
+              (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
+              all_allowed
           else all_allowed
         in
         if is_warning_zone then
           Log.Keeper.info
             "keeper:%s turn_budget turn=%d/%d last_turn=%b"
             meta.name turn max_turns is_last_turn;
-        let tool_filter =
-          Agent_sdk.Guardrails.AllowList all_allowed
-        in
+        let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
         Agent_sdk.Hooks.AdjustParams
           { current_params with
             extra_system_context = ctx;

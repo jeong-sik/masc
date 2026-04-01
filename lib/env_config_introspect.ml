@@ -112,11 +112,9 @@ let transport_entries = [
 let inference_entries = [
   entry ~default:"30" "MASC_INFERENCE_TIMEOUT_SEC" "Inference call timeout (seconds)";
   entry ~default:"true" "MASC_INFERENCE_CACHE_ENABLED" "Enable inference result cache";
-  entry ~default:"auto" "MASC_GLM_DEFAULT_MODEL" "Default GLM model";
-  entry ~default:"auto" "MASC_GLM_FLASH_MODEL" "GLM flash model";
-  entry ~default:"gemini-2.5-pro" "MASC_GEMINI_DEFAULT_MODEL" "Default Gemini model";
-  entry ~default:"claude-sonnet-4-6" "MASC_CLAUDE_DEFAULT_MODEL" "Default Claude model";
-  entry ~default:"gpt-4.1" "MASC_OPENAI_DEFAULT_MODEL" "Default OpenAI model";
+  (* Vendor-specific model env vars removed. Model selection delegated to
+     OAS cascade via "provider:auto". Per-provider env vars (GEMINI_DEFAULT_MODEL,
+     ANTHROPIC_DEFAULT_MODEL, OPENAI_DEFAULT_MODEL) are read by OAS directly. *)
 ]
 
 let keeper_entries = [

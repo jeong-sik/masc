@@ -578,23 +578,14 @@ let provider_model_label provider model =
 
 (** Centralized family → model label mapping.
     Vendor-specific env var resolution happens here only. *)
+(** Family → model label. Uses "provider:auto" for cloud providers;
+    OAS cascade resolves the concrete model at runtime. *)
 let default_model_label_for_family = function
-  | Claude_family ->
-      let m = Env_config.Claude.default_model in
-      if m = "" then Error "No Claude model configured (MASC_CLAUDE_DEFAULT_MODEL)"
-      else Ok ("claude:" ^ m)
-  | Gemini_family ->
-      let m = Env_config.Gemini.default_model in
-      if m = "" then Error "No Gemini model configured (MASC_GEMINI_DEFAULT_MODEL)"
-      else Ok ("gemini:" ^ m)
-  | OpenAI_family ->
-      let m = Env_config.OpenAI.default_model in
-      if m = "" then Error "No OpenAI model configured (MASC_OPENAI_DEFAULT_MODEL)"
-      else Ok ("openai:" ^ m)
-  | Glm_family ->
-      Ok "glm:auto"
-  | Llama_family ->
-      explicit_llama_model_label_result ()
+  | Claude_family -> Ok "claude:auto"
+  | Gemini_family -> Ok "gemini:auto"
+  | OpenAI_family -> Ok "openai:auto"
+  | Glm_family -> Ok "glm:auto"
+  | Llama_family -> explicit_llama_model_label_result ()
   | OpenRouter_family ->
       Error "OpenRouter requires explicit runtime_model"
   | Custom_family _ ->
@@ -611,22 +602,12 @@ let preferred_execution_model_labels () =
          (match explicit_llama_model_label_result () with
          | Ok label -> Some label
          | Error _ -> None);
-         (* GLM: even with empty model config, include as "glm:" —
-            the GLM provider selects the model at runtime. *)
-         (if env_present "ZAI_API_KEY" then
-           Some "glm:auto"
-         else None);
-         (* Non-GLM providers: only include when model is explicitly configured.
-            APIs require a model field, so empty model = skip. *)
-         (if gemini_direct_available () then
-           provider_model_label "gemini" Env_config.Gemini.default_model
-         else None);
-         (if env_present "ANTHROPIC_API_KEY" then
-           provider_model_label "claude" Env_config.Claude.default_model
-         else None);
-         (if env_present "OPENAI_API_KEY" then
-           provider_model_label "openai" Env_config.OpenAI.default_model
-         else None);
+         (* Provider auto-detection: check API key presence, delegate
+            model selection to OAS cascade via "provider:auto". *)
+         (if env_present "ZAI_API_KEY" then Some "glm:auto" else None);
+         (if gemini_direct_available () then Some "gemini:auto" else None);
+         (if env_present "ANTHROPIC_API_KEY" then Some "claude:auto" else None);
+         (if env_present "OPENAI_API_KEY" then Some "openai:auto" else None);
        ])
 
 let preferred_verifier_model_labels () =
@@ -640,18 +621,10 @@ let preferred_verifier_model_labels () =
          (match explicit_llama_model_label_result () with
          | Ok label -> Some label
          | Error _ -> None);
-         (if env_present "ZAI_API_KEY" then
-           Some "glm:auto"
-         else None);
-         (if gemini_direct_available () then
-           provider_model_label "gemini" Env_config.Gemini.flash_model
-         else None);
-         (if env_present "ANTHROPIC_API_KEY" then
-           provider_model_label "claude" Env_config.Claude.default_model
-         else None);
-         (if env_present "OPENAI_API_KEY" then
-           provider_model_label "openai" Env_config.OpenAI.default_model
-         else None);
+         (if env_present "ZAI_API_KEY" then Some "glm:auto" else None);
+         (if gemini_direct_available () then Some "gemini:auto" else None);
+         (if env_present "ANTHROPIC_API_KEY" then Some "claude:auto" else None);
+         (if env_present "OPENAI_API_KEY" then Some "openai:auto" else None);
        ])
 
 let default_model_labels_result () =

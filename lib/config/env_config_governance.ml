@@ -55,50 +55,10 @@ module Inference = struct
     |> String.lowercase_ascii
 end
 
-(** {1 GLM Configuration} *)
-
-module Glm = struct
-  (** GLM model label.  OAS cascade resolves "auto" to the concrete
-      model via ZAI_DEFAULT_MODEL env var.
-      MASC never hardcodes a model name — cascade is the SSOT. *)
-  let default_model =
-    get_string ~default:"auto" "MASC_GLM_DEFAULT_MODEL"
-
-  let flash_model =
-    get_string ~default:"auto" "MASC_GLM_FLASH_MODEL"
-end
-
-(** {1 Gemini Configuration} *)
-
-module Gemini = struct
-  (** Default Gemini model.
-      Empty = skip Gemini in cascades unless env-var overridden. *)
-  let default_model =
-    get_string ~default:"gemini-2.5-pro" "MASC_GEMINI_DEFAULT_MODEL"
-
-  (** Gemini flash model for lightweight tasks.
-      Empty = skip Gemini flash in cascades. *)
-  let flash_model =
-    get_string ~default:"gemini-2.5-flash" "MASC_GEMINI_FLASH_MODEL"
-end
-
-(** {1 Claude Configuration} *)
-
-module Claude = struct
-  (** Default Claude model.
-      Empty = skip Claude in cascades unless env-var overridden. *)
-  let default_model =
-    get_string ~default:"claude-sonnet-4-6" "MASC_CLAUDE_DEFAULT_MODEL"
-end
-
-(** {1 OpenAI Configuration} *)
-
-module OpenAI = struct
-  (** Default OpenAI model.
-      Empty = skip OpenAI in cascades unless env-var overridden. *)
-  let default_model =
-    get_string ~default:"gpt-4.1" "MASC_OPENAI_DEFAULT_MODEL"
-end
+(* Vendor-specific model modules removed (2026-04-01).
+   Model selection is delegated to OAS cascade via "provider:auto" labels.
+   OAS resolve_auto_model_id handles env-var fallbacks per provider.
+   See: oas/lib/llm_provider/cascade_model_resolve.ml *)
 
 (** {1 Rate Limit Cleanup Configuration} *)
 

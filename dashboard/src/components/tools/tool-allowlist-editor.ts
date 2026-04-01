@@ -80,8 +80,9 @@ function resetEditorState(params: {
 }
 
 function addToList(listSig: typeof alsoAllowItems, name: string) {
-  if (!listSig.value.includes(name)) {
-    listSig.value = [...listSig.value, name]
+  const trimmed = name.trim()
+  if (trimmed && !listSig.value.includes(trimmed)) {
+    listSig.value = [...listSig.value, trimmed]
   }
 }
 
@@ -392,6 +393,7 @@ export function ToolAllowlistEditor({
                   onAdd=${(name: string) => addToList(alsoAllowItems, name)}
                   onRemove=${(name: string) => removeFromList(alsoAllowItems, name)}
                   placeholder="추가 허용 도구 검색..."
+                  excludeItems=${denyItems.value}
                 />`}
           </div>
         `
@@ -425,6 +427,7 @@ export function ToolAllowlistEditor({
                   onAdd=${(name: string) => addToList(customAllowItems, name)}
                   onRemove=${(name: string) => removeFromList(customAllowItems, name)}
                   placeholder="허용 도구 검색..."
+                  excludeItems=${denyItems.value}
                 />`}
           </div>
         `}
@@ -447,6 +450,7 @@ export function ToolAllowlistEditor({
               onAdd=${(name: string) => addToList(denyItems, name)}
               onRemove=${(name: string) => removeFromList(denyItems, name)}
               placeholder="차단 도구 검색..."
+              excludeItems=${policyMode.value === 'custom' ? customAllowItems.value : alsoAllowItems.value}
             />`}
       </div>
 

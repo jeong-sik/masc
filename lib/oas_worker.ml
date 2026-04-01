@@ -351,19 +351,16 @@ let run
         (r, None)
     in
     (match proof_ref with Some ref_ -> ref_ := proof | None -> ());
-    let checkpoint = match config.checkpoint_dir with
-      | Some dir ->
-        let ckpt = build_checkpoint ~session_id ?working_context:config.working_context agent in
-        (try persist_checkpoint ~dir ~session_id ckpt
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Misc.error "oas_worker: Checkpoint save failed: %s"
-             (Printexc.to_string exn));
-        Some ckpt
-      | None ->
-        Option.map
-          (fun _ ->
-            build_checkpoint ~session_id ?working_context:config.working_context agent)
-          config.working_context
+    let checkpoint =
+      let ckpt = build_checkpoint ~session_id ?working_context:config.working_context agent in
+      (match config.checkpoint_dir with
+       | Some dir ->
+         (try persist_checkpoint ~dir ~session_id ckpt
+          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+            Log.Misc.error "oas_worker: Checkpoint save failed: %s"
+              (Printexc.to_string exn))
+       | None -> ());
+      Some ckpt
     in
     Option.iter (fun bus ->
       let status = match result with Ok _ -> "completed" | Error _ -> "failed" in

@@ -237,7 +237,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let auth_enabled = Auth.is_auth_enabled config.base_path in
   let auth_result =
     if auth_enabled then
-      match Auth.authorize_tool config.base_path ~agent_name ~token ~tool_name:name with
+      match Auth.authorize_tool_v2 config.base_path ~agent_name ~token ~tool_name:name with
       | Ok () -> Ok ()
       | Error err -> Error err
     else
@@ -324,7 +324,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       if auth_cfg.require_token && not (Nickname.is_generated_nickname agent_name) then
         false
       else
-        match Auth.authorize_tool config.base_path ~agent_name ~token ~tool_name:"masc_join" with
+        match Auth.authorize_tool_v2 config.base_path ~agent_name ~token ~tool_name:"masc_join" with
         | Ok () -> true
         | Error _ -> false
   in

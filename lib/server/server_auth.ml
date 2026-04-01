@@ -377,7 +377,7 @@ let authorize_tool_request ~base_path ~tool_name request :
               (Types.Unauthorized
                  "Agent name required (X-MASC-Agent or token-bound credential)")
           else
-            Auth.authorize_tool base_path ~agent_name ~token ~tool_name))
+            Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name))
 
 let authorize_token_bound_permission_request ~base_path ~permission request :
     (string, Types.masc_error) result =

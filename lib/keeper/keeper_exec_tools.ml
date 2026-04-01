@@ -291,9 +291,13 @@ let filter_by_universe ~(lookup : tool_access_lookup) (name : string) : bool =
   Hashtbl.mem lookup.candidate_set name
   && not (Hashtbl.mem lookup.deny_set name)
 
-(** Execution gate: core tools bypass policy, others require policy allowlist. *)
+(** Execution gate: core tools bypass policy, others require policy allowlist.
+    All tools must exist in candidate_set — rejects hallucinated tool names. *)
 let can_execute ~(lookup : tool_access_lookup) (name : string) : bool =
-  if is_core_always_tool name then
+  if not (Hashtbl.mem lookup.candidate_set name
+          || is_core_always_tool name) then
+    false
+  else if is_core_always_tool name then
     filter_by_universe ~lookup name
   else
     filter_by_access ~lookup name

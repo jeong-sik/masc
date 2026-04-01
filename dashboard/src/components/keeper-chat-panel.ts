@@ -51,7 +51,7 @@ function toConversationEntry(
 
 export function isKeeperTextContentEvent(
   event: KeeperChatStreamEvent,
-): event is KeeperChatStreamEvent & { type: 'TEXT_MESSAGE_CONTENT' | 'TEXT_DELTA'; delta: string } {
+): event is KeeperChatStreamEvent & { delta: string } {
   return (
     (event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'TEXT_DELTA')
     && typeof event.delta === 'string'
@@ -103,7 +103,7 @@ async function sendChat(keeperName: string): Promise<void> {
     await streamKeeperMessage(keeperName, text, {
       signal: activeAbort.signal,
       onEvent: (event: KeeperChatStreamEvent) => {
-        if (isKeeperTextContentEvent(event)) {
+        if (isKeeperTextContentEvent(event) && typeof event.delta === 'string') {
           streamBuffer.value += event.delta
         } else if (event.type === 'RUN_FINISHED') {
           const finalText = streamBuffer.value.trim() || '(no response)'

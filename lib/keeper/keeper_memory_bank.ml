@@ -25,20 +25,22 @@ let select_memory_candidates_by_profile
   in
   go [] rows
 
+(** Filter a list to unique items by a key function.
+    Empty keys are skipped (treated as duplicates). *)
+let dedup_by_key (key_of : 'a -> string) (items : 'a list) : 'a list =
+  let seen : (string, unit) Hashtbl.t = Hashtbl.create (List.length items) in
+  List.filter
+    (fun item ->
+      let key = key_of item in
+      if key = "" || Hashtbl.mem seen key then false
+      else (Hashtbl.add seen key (); true))
+    items
+
 let dedup_memory_candidates
     (items : (string * string * int) list) : (string * string * int) list =
-  let seen : (string, unit) Hashtbl.t = Hashtbl.create 32 in
-  List.filter
+  dedup_by_key
     (fun (kind, text, _) ->
-      let key =
-        String.lowercase_ascii
-          (String.trim kind ^ ":" ^ String.trim text)
-      in
-      if key = "" || Hashtbl.mem seen key then
-        false
-      else (
-        Hashtbl.add seen key ();
-        true))
+      String.lowercase_ascii (String.trim kind ^ ":" ^ String.trim text))
     items
 
 let normalize_memory_text_key (s : string) : string =
@@ -239,17 +241,17 @@ let compact_memory_bank_if_needed
             |> String.split_on_char '\n'
             |> List.filter (fun s -> String.trim s <> "")
           in
-          let parsed_rev = ref [] in
-          let invalid = ref 0 in
-          List.iter
-            (fun line ->
-              match parse_memory_bank_row line with
-              | Some row -> parsed_rev := row :: !parsed_rev
-              | None -> incr invalid)
-            lines;
-          let parsed = List.rev !parsed_rev in
+          let (parsed_rev, invalid) =
+            List.fold_left
+              (fun (acc, inv) line ->
+                match parse_memory_bank_row line with
+                | Some row -> (row :: acc, inv)
+                | None -> (acc, inv + 1))
+              ([], 0) lines
+          in
+          let parsed = List.rev parsed_rev in
           let before_notes = List.length parsed in
-          if before_notes <= target_notes && !invalid = 0 then
+          if before_notes <= target_notes && invalid = 0 then
             { no_memory_bank_compaction with
               target_notes;
               before_notes;
@@ -264,19 +266,9 @@ let compact_memory_bank_if_needed
                   if c <> 0 then c else compare b.priority a.priority)
                 parsed
             in
-            let dedup_keys : (string, unit) Hashtbl.t = Hashtbl.create 1024 in
-            let dedup_rev = ref [] in
-            List.iter
-              (fun (row : keeper_memory_row_raw) ->
-                let key = memory_row_key row in
-                if key <> "" && not (Hashtbl.mem dedup_keys key) then begin
-                  Hashtbl.add dedup_keys key ();
-                  dedup_rev := row :: !dedup_rev
-                end)
-              by_recency;
-            let deduped = List.rev !dedup_rev in
+            let deduped = dedup_by_key memory_row_key by_recency in
             let dedup_dropped = max 0 (before_notes - List.length deduped) in
-            if List.length deduped <= target_notes && dedup_dropped = 0 && !invalid = 0 then
+            if List.length deduped <= target_notes && dedup_dropped = 0 && invalid = 0 then
               { no_memory_bank_compaction with
                 target_notes;
                 before_notes;
@@ -338,7 +330,7 @@ let compact_memory_bank_if_needed
               in
               let after_notes = List.length selected in
               let dropped_notes = max 0 (before_notes - after_notes) in
-              if dropped_notes = 0 && !invalid = 0 then
+              if dropped_notes = 0 && invalid = 0 then
                 { no_memory_bank_compaction with
                   target_notes;
                   before_notes;
@@ -354,7 +346,7 @@ let compact_memory_bank_if_needed
                       before_notes;
                       after_notes = before_notes;
                       dedup_dropped;
-                      invalid_dropped = !invalid;
+                      invalid_dropped = invalid;
                       reason = Some "write_failed";
                     }
                 | Ok () ->
@@ -366,7 +358,7 @@ let compact_memory_bank_if_needed
                       after_notes;
                       dropped_notes;
                       dedup_dropped;
-                      invalid_dropped = !invalid;
+                      invalid_dropped = invalid;
                     }
 
 let append_memory_notes_from_reply

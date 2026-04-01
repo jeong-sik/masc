@@ -67,8 +67,9 @@ check "V8-agent-state-mutation" 2 \
   "lib/keeper/"
 
 # V9: MASC_LLAMA env var coupling (should migrate to MASC_LOCAL_*)
-# Remaining 6 are backward-compat fallbacks in env_config_runtime.ml.
-check "V9-masc-llama-envvar" 6 \
+# 7 remaining: 6 backward-compat fallbacks in env_config_runtime.ml
+# + 1 Deprecated registry entry in feature_flag_registry.ml.
+check "V9-masc-llama-envvar" 7 \
   'MASC_LLAMA' \
   "lib/"
 

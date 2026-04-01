@@ -70,7 +70,7 @@ let float_of_env_default name ~default =
       with Failure _ -> default)
 
 let cooldown_seconds () =
-  match Env_config.Worker.llama_runtime_cooldown_sec_opt () with
+  match Env_config.Worker.local_runtime_cooldown_sec_opt () with
   | Some raw -> (
       try
         let value = float_of_string (String.trim raw) in
@@ -84,7 +84,7 @@ let trim_opt = function
       let trimmed = String.trim raw in
       if trimmed = "" then None else Some trimmed
 
-let debug_enabled () = Env_config.Worker.llama_runtime_debug
+let debug_enabled () = Env_config.Worker.local_runtime_debug
 
 let debug_log fmt =
   if debug_enabled () then Printf.ksprintf (fun msg -> Log.LocalWorker.debug "%s" msg) fmt
@@ -302,7 +302,7 @@ let current_fingerprint () =
       Env_config.Llama.server_url;
       Option.value ~default:"" (Env_config.Local_runtime.llama_swarm_model_opt ());
       Option.value ~default:""
-        (Env_config.Worker.llama_runtime_cooldown_sec_opt ());
+        (Env_config.Worker.local_runtime_cooldown_sec_opt ());
       string_of_int
         (int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
            ~default:default_parallel_hint);
@@ -400,7 +400,7 @@ let model_name_for_runtime (runtime : runtime) requested_model =
       | None ->
           Error
             (sprintf
-               "no explicit llama model provided for runtime %s; set spawn_model or runtime.model"
+               "no explicit model provided for local runtime %s; set spawn_model or runtime.model"
                runtime.id))
 
 let preference_matches (runtime : runtime) preferred_pool =
@@ -435,7 +435,7 @@ let select_runtime_from (runtimes : runtime list) ?preferred_pool ?model_name ()
   in
   let matching = if matching = [] then runtimes else matching in
   match matching with
-  | [] -> Error "no local llama runtimes configured"
+  | [] -> Error "no local runtimes configured"
   | runtimes ->
       let requested_model = trim_opt model_name in
       let exact_model_matches =
@@ -471,7 +471,7 @@ let select_runtime_from (runtimes : runtime list) ?preferred_pool ?model_name ()
                     in
                     Error
                       (sprintf
-                         "no local llama runtime configured for model %s%s"
+                         "no local runtime configured for model %s%s"
                          requested scope)))
       in
       let* runtimes = candidate_runtimes_result in
@@ -495,8 +495,8 @@ let select_runtime_from (runtimes : runtime list) ?preferred_pool ?model_name ()
           match requested_model with
           | Some requested ->
               Error
-                (sprintf "no local llama runtime configured for model %s" requested)
-          | None -> Error "no local llama runtimes configured")
+                (sprintf "no local runtime configured for model %s" requested)
+          | None -> Error "no local runtimes configured")
 
 (* Backward-compatible wrapper that loads from env first. *)
 let select_runtime ?preferred_pool ?model_name () =

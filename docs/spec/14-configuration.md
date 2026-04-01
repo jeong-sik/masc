@@ -81,7 +81,7 @@ repo-managed config는 별도 규칙을 가진다: `MASC_CONFIG_DIR` -> `<MASC_B
 | `MASC_SPAWN_GRACE_PERIOD_SEC` | float | 60.0 | SIGTERM 유예 기간 |
 | `LLAMA_SERVER_URL` | string | `http://127.0.0.1:8085` | 로컬 LLM 서버 URL |
 | `LLAMA_DEFAULT_MODEL` | string | `explicit-model-required` | 로컬 기본 모델 |
-| `MASC_LLAMA_MAX_TOKENS` | int | 32768 | 로컬 LLM max_tokens 상한 |
+| `MASC_LOCAL_MAX_TOKENS` | int | 32768 | 로컬 LLM max_tokens 상한 (fallback: `MASC_LLAMA_MAX_TOKENS`) |
 | `MASC_CANCELLATION_TOKEN_MAX_AGE_SEC` | float | 3600.0 | 취소 토큰 최대 수명 |
 | `NEO4J_URI` | string | `bolt://turntable.proxy.rlwy.net:11490` | Neo4j 접속 URI |
 | `NEO4J_HTTP_URI` | string | `""` | Neo4j HTTP API URI |

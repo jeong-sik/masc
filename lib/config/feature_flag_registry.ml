@@ -170,8 +170,8 @@ let all_flags : flag list = [
     default = true; category = "runtime";
     lifecycle = Active; since = "2.140.0" };
 
-  { env_name = "MASC_LLAMA_RUNTIME_DEBUG";
-    description = "Llama.cpp runtime debug output";
+  { env_name = "MASC_LOCAL_RUNTIME_DEBUG";
+    description = "Local LLM runtime debug output";
     default = false; category = "runtime";
     lifecycle = Active; since = "2.100.0" };
 

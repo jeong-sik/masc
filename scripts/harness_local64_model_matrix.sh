@@ -107,7 +107,7 @@ while IFS= read -r item || [ -n "$item" ]; do
   mkdir -p "$run_dir"
 
   env_args=(
-    MASC_LLAMA_RUNTIME_POOL_STATE_DIR="$pool_state_dir"
+    MASC_LOCAL_RUNTIME_POOL_STATE_DIR="$pool_state_dir"
     MASC_LOCAL64_BASE_PATH="$base_path"
     MASC_LOCAL64_LOG_FILE="$server_log"
     MASC_LOCAL64_PORT="$mcp_port"

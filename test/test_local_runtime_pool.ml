@@ -54,6 +54,7 @@ let test_parse_runtime_env () =
 
 let test_parse_llm_endpoints_env () =
   Local_runtime_pool.reset ();
+  with_env "MASC_LOCAL_RUNTIMES_JSON" None @@ fun () ->
   with_env "MASC_LLAMA_RUNTIMES_JSON" None @@ fun () ->
   with_env "LLM_ENDPOINTS"
     (Some "http://127.0.0.1:8085, http://127.0.0.1:8086")
@@ -166,7 +167,7 @@ let test_record_measured_ceiling () =
 
 let test_failure_cooldown_from_env () =
   Local_runtime_pool.reset ();
-  with_env "MASC_LLAMA_RUNTIME_COOLDOWN_SEC" (Some "120") @@ fun () ->
+  with_env "MASC_LOCAL_RUNTIME_COOLDOWN_SEC" (Some "120") @@ fun () ->
   install_pool
     [ make_runtime "local-c" "http://127.0.0.1:9085" ~model:"qwen-c" ~max_concurrency:1 ];
   let fail_once () =

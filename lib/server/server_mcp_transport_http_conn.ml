@@ -20,6 +20,11 @@ let sse_connect_guard_by_session :
     (string, sse_connect_guard_state) Hashtbl.t =
   Hashtbl.create 256
 
+(** Module-level mutex protecting both Hashtbls.
+    All reads/writes to [sse_conn_by_session] and
+    [sse_connect_guard_by_session] must go through this lock. *)
+let conn_mutex : Eio.Mutex.t = Eio.Mutex.create ()
+
 let env_float_or ~name ~default =
   match Sys.getenv_opt name with
   | None -> default
@@ -54,30 +59,50 @@ let close_sse_conn info =
          (Printexc.to_string exn));
     Sse.unregister_if_current info.session_id info.client_id)
 
+let with_conn_lock fn f =
+  Eio.Mutex.use_rw ~protect:true conn_mutex f
+
 let stop_sse_session session_id =
-  match Hashtbl.find_opt sse_conn_by_session session_id with
+  let info_opt =
+    with_conn_lock (fun () ->
+      let info = Hashtbl.find_opt sse_conn_by_session session_id in
+      (match info with
+       | Some _ ->
+           Hashtbl.remove sse_conn_by_session session_id;
+           Hashtbl.remove sse_connect_guard_by_session session_id
+       | None -> ());
+      info)
+  in
+  match info_opt with
+  | Some info -> close_sse_conn info
   | None -> ()
-  | Some info ->
-      Hashtbl.remove sse_conn_by_session session_id;
-      Hashtbl.remove sse_connect_guard_by_session session_id;
-      close_sse_conn info
 
 let is_active_sse_session session_id =
-  Hashtbl.mem sse_conn_by_session session_id
+  Eio.Mutex.use_ro conn_mutex (fun () ->
+    Hashtbl.mem sse_conn_by_session session_id)
 
 let reap_stale_guards () =
-  let stale =
-    Hashtbl.fold (fun sid _ acc ->
-      if not (Hashtbl.mem sse_conn_by_session sid) then sid :: acc
-      else acc
-    ) sse_connect_guard_by_session []
-  in
-  List.iter (Hashtbl.remove sse_connect_guard_by_session) stale;
-  List.length stale
+  with_conn_lock (fun () ->
+    let stale =
+      Hashtbl.fold (fun sid _ acc ->
+        if not (Hashtbl.mem sse_conn_by_session sid) then sid :: acc
+        else acc
+      ) sse_connect_guard_by_session []
+    in
+    List.iter (Hashtbl.remove sse_connect_guard_by_session) stale;
+    List.length stale)
 
 let close_all_sse_connections () =
-  let sessions = Hashtbl.fold (fun k _ acc -> k :: acc) sse_conn_by_session [] in
-  List.iter stop_sse_session sessions;
+  let (sessions, infos) =
+    with_conn_lock (fun () ->
+      let pairs = Hashtbl.fold (fun k v acc -> (k, v) :: acc) sse_conn_by_session [] in
+      List.iter (fun (sid, _) ->
+        Hashtbl.remove sse_conn_by_session sid;
+        Hashtbl.remove sse_connect_guard_by_session sid
+      ) pairs;
+      (List.map fst pairs, List.map snd pairs))
+  in
+  List.iter close_sse_conn infos;
   Log.Server.info "MASC MCP: Closed %d SSE connections"
     (List.length sessions)
 
@@ -113,37 +138,38 @@ let prune_connect_times ~now times =
   else List.filter (fun ts -> now -. ts <= sse_connect_window_s) times
 
 let check_sse_connect_guard session_id =
-  let now = Time_compat.now () in
-  let state =
-    match Hashtbl.find_opt sse_connect_guard_by_session session_id with
-    | Some v -> v
-    | None -> { last_connect_at = -.1.0; connect_times = [] }
-  in
-  let recent = prune_connect_times ~now state.connect_times in
-  state.connect_times <- recent;
-  let session_wait_s =
-    if sse_reconnect_min_interval_s <= 0.0 then
-      0.0
-    else
-      sse_reconnect_min_interval_s -. (now -. state.last_connect_at)
-  in
-  if session_wait_s > 0.0 then
-    Error ("session_cooldown", session_wait_s)
-  else
-    let window_wait_s =
-      if sse_connect_window_s <= 0.0 || sse_connect_max_in_window <= 0 then
-        0.0
-      else if List.length recent >= sse_connect_max_in_window then
-        match List.rev recent with
-        | oldest :: _ -> sse_connect_window_s -. (now -. oldest)
-        | [] -> 0.0
-      else
-        0.0
+  with_conn_lock (fun () ->
+    let now = Time_compat.now () in
+    let state =
+      match Hashtbl.find_opt sse_connect_guard_by_session session_id with
+      | Some v -> v
+      | None -> { last_connect_at = -.1.0; connect_times = [] }
     in
-    if window_wait_s > 0.0 then
-      Error ("window_limit", window_wait_s)
-    else (
-      state.last_connect_at <- now;
-      state.connect_times <- now :: recent;
-      Hashtbl.replace sse_connect_guard_by_session session_id state;
-      Ok ())
+    let recent = prune_connect_times ~now state.connect_times in
+    state.connect_times <- recent;
+    let session_wait_s =
+      if sse_reconnect_min_interval_s <= 0.0 then
+        0.0
+      else
+        sse_reconnect_min_interval_s -. (now -. state.last_connect_at)
+    in
+    if session_wait_s > 0.0 then
+      Error ("session_cooldown", session_wait_s)
+    else
+      let window_wait_s =
+        if sse_connect_window_s <= 0.0 || sse_connect_max_in_window <= 0 then
+          0.0
+        else if List.length recent >= sse_connect_max_in_window then
+          match List.rev recent with
+          | oldest :: _ -> sse_connect_window_s -. (now -. oldest)
+          | [] -> 0.0
+        else
+          0.0
+      in
+      if window_wait_s > 0.0 then
+        Error ("window_limit", window_wait_s)
+      else (
+        state.last_connect_at <- now;
+        state.connect_times <- now :: recent;
+        Hashtbl.replace sse_connect_guard_by_session session_id state;
+        Ok ()))

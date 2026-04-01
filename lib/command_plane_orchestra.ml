@@ -538,7 +538,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
     operation_rows
     |> List.filter (fun op ->
            let status = string_opt op "status" |> Option.value ~default:"active" in
-           not (List.mem status [ "completed"; "cancelled"; "failed" ]))
+           not (Dashboard_utils.is_session_terminal status))
   in
   let detachments_json = Command_plane_v2.list_detachments_json config in
   let detachment_rows =
@@ -552,7 +552,8 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
     detachment_rows
     |> List.filter (fun det ->
            let status = string_opt det "status" |> Option.value ~default:"active" in
-           not (List.mem status [ "completed"; "cancelled"; "failed"; "stopped" ]))
+           not (Dashboard_utils.is_session_terminal status
+                || status = "stopped"))
   in
   let swarm_workers = list_member swarm_json "workers" in
   let actual_worker_names =

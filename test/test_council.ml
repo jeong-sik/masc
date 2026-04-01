@@ -449,10 +449,10 @@ let test_router_speed_priority () =
 let test_router_complex_selects_large_tier () =
   let decision = Router.route
     "prove that this distributed algorithm satisfies safety and liveness under partial synchrony" in
-  let has_large = List.exists (fun (a : Router.agent_spec) ->
-    match a.tier with Router.Large | Router.Giant -> true | _ -> false
+  let has_expensive = List.exists (fun (a : Router.agent_spec) ->
+    a.cost_per_1k >= 0.005
   ) decision.agents in
-  check bool "complex selects large tier" has_large true
+  check bool "complex selects expensive model" has_expensive true
 
 let test_router_simple_prefers_cheap () =
   let decision = Router.route "what is 2+2" in
@@ -466,9 +466,9 @@ let test_router_dot_product_correctness () =
                    creativity_score = 0.9; factual_score = 0.9; speed_score = 0.3 } in
   let tiny_cap = { Router.reasoning_score = 0.3; code_score = 0.4;
                    creativity_score = 0.3; factual_score = 0.5; speed_score = 1.0 } in
-  let opus_agent = { Router.name = "opus"; model = "opus"; tier = Router.Large;
+  let opus_agent = { Router.name = "opus"; model = "opus";
                      capabilities = opus_cap; cost_per_1k = 0.015 } in
-  let tiny_agent = { Router.name = "tiny"; model = "tiny"; tier = Router.Tiny;
+  let tiny_agent = { Router.name = "tiny"; model = "tiny";
                      capabilities = tiny_cap; cost_per_1k = 0.0 } in
   let opus_score = Router.score_agent ~requirements:r ~complexity opus_agent in
   let tiny_score = Router.score_agent ~requirements:r ~complexity tiny_agent in

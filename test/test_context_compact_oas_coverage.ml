@@ -233,7 +233,7 @@ let test_dynamic_high_pressure_multi_agent () =
   let obs : Compact.observation_context = {
     context_ratio = 0.85; active_agent_count = 3;
     unclaimed_task_count = 2; is_single_focused_task = false;
-    model_family = "medium_cloud" } in
+    context_window = 200_000; is_local_model = false } in
   let msgs = [msg Agent_sdk.Types.User "test"] in
   let _result, _tokens = Compact.compact
     ~system_prompt:"sys" ~messages:msgs
@@ -250,7 +250,7 @@ let test_dynamic_single_focused_task () =
   let obs : Compact.observation_context = {
     context_ratio = 0.75; active_agent_count = 1;
     unclaimed_task_count = 0; is_single_focused_task = true;
-    model_family = "large_cloud" } in
+    context_window = 1_000_000; is_local_model = false } in
   let resolved = Compact.resolve_strategies ~obs:(Some obs)
     [Compact.Dynamic Compact.default_dynamic_selector] in
   let names = strategy_names resolved in
@@ -261,7 +261,7 @@ let test_dynamic_small_local_model () =
   let obs : Compact.observation_context = {
     context_ratio = 0.50; active_agent_count = 1;
     unclaimed_task_count = 1; is_single_focused_task = true;
-    model_family = "small_local" } in
+    context_window = 8_192; is_local_model = true } in
   let resolved = Compact.resolve_strategies ~obs:(Some obs)
     [Compact.Dynamic Compact.default_dynamic_selector] in
   let names = strategy_names resolved in

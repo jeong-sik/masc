@@ -15,15 +15,6 @@ type query_class =
   | Complex      (** Multi-step, requires deep reasoning *)
 [@@deriving show, eq]
 
-(** Model tier for cost management *)
-type model_tier =
-  | Tiny   (** Lowest-cost tier *)
-  | Small  (** Low-cost tier *)
-  | Medium (** Mid-cost tier *)
-  | Large  (** High-cost tier *)
-  | Giant  (** Highest-cost tier *)
-[@@deriving show, eq]
-
 (** Multi-dimensional query requirements extracted from text.
     Each dimension is 0.0-1.0, computed from structural patterns. *)
 type query_requirements = {
@@ -49,7 +40,6 @@ type agent_capabilities = {
 type agent_spec = {
   name : string;
   model : string;
-  tier : model_tier;
   capabilities : agent_capabilities;
   cost_per_1k : float;  (** Cost per 1K tokens in USD *)
 }
@@ -103,7 +93,7 @@ let default_agents : agent_spec list =
   let tiny_agents =
     match default_tiny_model_opt () with
     | Some model ->
-        [ { name = "default-tiny"; model; tier = Tiny;
+        [ { name = "default-tiny"; model;
             capabilities = { reasoning_score = 0.3; code_score = 0.4;
                              creativity_score = 0.3; factual_score = 0.5;
                              speed_score = 1.0 };
@@ -111,27 +101,27 @@ let default_agents : agent_spec list =
     | None -> []
   in
   tiny_agents @ [
-    { name = "sonnet"; model = "claude-sonnet-4-6"; tier = Medium;
+    { name = "sonnet"; model = "claude-sonnet-4-6";
       capabilities = { reasoning_score = 0.7; code_score = 0.8;
                        creativity_score = 0.7; factual_score = 0.7;
                        speed_score = 0.6 };
       cost_per_1k = 0.003 };
-    { name = "gpt-4o-mini"; model = "gpt-4.1-mini"; tier = Medium;
+    { name = "gpt-4o-mini"; model = "gpt-4.1-mini";
       capabilities = { reasoning_score = 0.4; code_score = 0.5;
                        creativity_score = 0.4; factual_score = 0.6;
                        speed_score = 0.8 };
       cost_per_1k = 0.00015 };
-    { name = "opus"; model = "claude-opus-4-6"; tier = Large;
+    { name = "opus"; model = "claude-opus-4-6";
       capabilities = { reasoning_score = 0.95; code_score = 0.9;
                        creativity_score = 0.9; factual_score = 0.9;
                        speed_score = 0.3 };
       cost_per_1k = 0.015 };
-    { name = "gpt-4o"; model = "gpt-4.1"; tier = Large;
+    { name = "gpt-4o"; model = "gpt-4.1";
       capabilities = { reasoning_score = 0.7; code_score = 0.75;
                        creativity_score = 0.6; factual_score = 0.75;
                        speed_score = 0.5 };
       cost_per_1k = 0.005 };
-    { name = "o1"; model = "o1"; tier = Giant;
+    { name = "o1"; model = "o1";
       capabilities = { reasoning_score = 1.0; code_score = 0.8;
                        creativity_score = 0.5; factual_score = 0.8;
                        speed_score = 0.1 };
@@ -262,13 +252,18 @@ let calculate_complexity (query : string) : float =
    Capability-aware scoring
    ================================================================ *)
 
-(** Tier cost penalty -- higher tiers are penalized more *)
-let tier_cost_penalty = function
-  | Tiny -> 0.0
-  | Small -> 0.1
-  | Medium -> 0.3
-  | Large -> 0.6
-  | Giant -> 0.9
+(** Cost penalty derived from actual per-token cost.
+    Uses sqrt scaling to approximate the previous discrete tiers:
+    $0     -> 0.0   (was Tiny: 0.0)
+    $0.003 -> ~0.27 (was Medium: 0.3)
+    $0.005 -> ~0.35 (was Large: 0.6, but Large penalty was too aggressive)
+    $0.015 -> ~0.60 (was Giant: 0.9)
+    Capped at 0.9. *)
+let cost_penalty (agent : agent_spec) : float =
+  if agent.cost_per_1k <= 0.0 then 0.0
+  else
+    let max_expected_cost = 0.015 in
+    Float.min 0.9 (sqrt (agent.cost_per_1k /. max_expected_cost) *. 0.6)
 
 (** Score an agent against query requirements.
     Returns capability match (dot product) minus cost penalty.
@@ -284,9 +279,8 @@ let score_agent ~(requirements : query_requirements) ~(complexity : float)
     +. (r.factual_precision *. c.factual_score)
     +. (r.speed_priority *. c.speed_score)
   in
-  (* Cost penalty decreases with complexity -- same logic as before *)
   let cost_sensitivity = 1.0 -. (complexity *. 0.7) in
-  let penalty = tier_cost_penalty agent.tier *. cost_sensitivity in
+  let penalty = cost_penalty agent *. cost_sensitivity in
   match_score -. penalty
 
 (* ================================================================
@@ -331,14 +325,13 @@ let generate_reason (query : string) (agents : agent_spec list) : string =
     | [] -> "Unknown"
   in
   let agent_names = String.concat ", " (List.map (fun a -> a.name) agents) in
-  let tiers =
+  let costs =
     agents
-    |> List.map (fun a -> show_model_tier a.tier)
-    |> List.sort_uniq String.compare
-    |> String.concat "/"
+    |> List.map (fun a -> Printf.sprintf "$%.4f/1k" a.cost_per_1k)
+    |> String.concat ", "
   in
-  Printf.sprintf "Heuristic query class: %s | Agents: [%s] | Tiers: %s"
-    top_class agent_names tiers
+  Printf.sprintf "Heuristic query class: %s | Agents: [%s] | Costs: %s"
+    top_class agent_names costs
 
 (** Main routing function *)
 let route
@@ -375,7 +368,7 @@ module Stats = struct
   let record (decision : route_decision) : unit =
     global_stats.total_queries <- global_stats.total_queries + 1;
     let has_big = List.exists (fun a ->
-      match a.tier with Large | Giant -> true | _ -> false
+      a.cost_per_1k >= 0.005
     ) decision.agents in
     if has_big
     then global_stats.has_large <- global_stats.has_large + 1

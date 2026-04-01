@@ -27,7 +27,9 @@ type pre_compact_event = {
   message_count : int;
   token_count : int;
   strategies : string list;
-  model_family : string;
+  model_family : string;  (** Derived label for backward compat (SSE/dashboard) *)
+  context_window : int;
+  is_local_model : bool;
   trigger : string;
 }
 
@@ -193,6 +195,8 @@ let pre_compact_event_of_json json =
         token_count = Safe_ops.json_int ~default:0 "token_count" json;
         strategies = Safe_ops.json_string_list "strategies" json;
         model_family = string_field json "model_family";
+        context_window = Safe_ops.json_int ~default:100_000 "context_window" json;
+        is_local_model = Safe_ops.json_bool ~default:false "is_local_model" json;
         trigger = string_field json "trigger";
       }
 
@@ -380,7 +384,12 @@ let overview_json
     ]
 
 let record_pre_compact_at ~timestamp ~keeper_name ~context_ratio ~message_count
-    ~token_count ~strategies ~model_family ~trigger =
+    ~token_count ~strategies ~context_window ~is_local_model ~trigger =
+  let model_family =
+    if is_local_model && context_window < 32_000 then "small_local"
+    else if context_window >= 200_000 then "large_cloud"
+    else "medium_cloud"
+  in
   let event =
     {
       timestamp;
@@ -390,6 +399,8 @@ let record_pre_compact_at ~timestamp ~keeper_name ~context_ratio ~message_count
       token_count;
       strategies;
       model_family;
+      context_window;
+      is_local_model;
       trigger;
     }
   in
@@ -397,10 +408,10 @@ let record_pre_compact_at ~timestamp ~keeper_name ~context_ratio ~message_count
   event
 
 let record_pre_compact ~keeper_name ~context_ratio ~message_count ~token_count
-    ~strategies ~model_family ~trigger =
+    ~strategies ~context_window ~is_local_model ~trigger =
   record_pre_compact_at ~timestamp:(Time_compat.now ()) ~keeper_name
-    ~context_ratio ~message_count ~token_count ~strategies ~model_family
-    ~trigger
+    ~context_ratio ~message_count ~token_count ~strategies ~context_window
+    ~is_local_model ~trigger
 
 let recent_verdicts_json ?since ?until () =
   `List (List.map verdict_item_json (read_recent_verdicts ?since ?until ()))

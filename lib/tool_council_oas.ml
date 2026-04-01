@@ -273,7 +273,7 @@ let handle_route _ctx args =
       `Assoc [
         ("name", `String a.name);
         ("model", `String a.model);
-        ("tier", `String (Council.Router.show_model_tier a.tier));
+        ("cost_per_1k", `Float a.cost_per_1k);
       ]) decision.agents));
     ("requirements", `Assoc [
       ("reasoning_depth", `Float r.reasoning_depth);

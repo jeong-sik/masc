@@ -346,8 +346,8 @@ export function KeeperDetailOverlay() {
                       if (res.ok) {
                         showToast(keeper.name + ' 기동됨', 'success')
                         void refreshDashboard({ force: true })
-                      } else showToast(res.error ?? 'Boot 실패', 'error')
-                    }).catch(() => showToast('Boot 실패', 'error'))
+                      } else showToast(res.error ?? '기동 실패', 'error')
+                    }).catch(() => showToast('기동 실패', 'error'))
                   }}
                 >기동</button>`
               if (isRunning) return html`

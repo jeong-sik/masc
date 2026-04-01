@@ -5,10 +5,14 @@ const { runOperatorAction, currentDashboardActor } = vi.hoisted(() => ({
   currentDashboardActor: vi.fn(() => 'dashboard'),
 }))
 
-vi.mock('./core', () => ({
-  currentDashboardActor,
-  runOperatorAction,
-}))
+vi.mock('./core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./core')>()
+  return {
+    ...actual,
+    currentDashboardActor,
+    runOperatorAction,
+  }
+})
 
 import { sendKeeperMessageDetailed, streamKeeperMessage } from './keeper'
 

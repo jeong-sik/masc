@@ -45,7 +45,7 @@ type HeaderOptions = {
   includeActor?: boolean
 }
 
-function authHeaders(options: HeaderOptions = {}): Record<string, string> {
+export function authHeaders(options: HeaderOptions = {}): Record<string, string> {
   const headers: Record<string, string> = {}
   const token = getStoredToken()
   const agent = resolveDashboardActorName(window.location.search)
@@ -56,7 +56,7 @@ function authHeaders(options: HeaderOptions = {}): Record<string, string> {
   return headers
 }
 
-function jsonHeaders(): Record<string, string> {
+export function jsonHeaders(): Record<string, string> {
   return {
     ...authHeaders(),
     'Content-Type': 'application/json',

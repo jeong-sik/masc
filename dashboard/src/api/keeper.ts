@@ -6,8 +6,7 @@ import {
   normalizeKeeperConversationDetails,
 } from '../keeper-message'
 import type { KeeperConversationDetails } from '../types'
-import { currentDashboardActor, runOperatorAction } from './core'
-import { resolveDashboardActorName } from '../lib/dashboard-actor'
+import { currentDashboardActor, jsonHeaders, runOperatorAction } from './core'
 
 // --- Types ---
 
@@ -72,15 +71,6 @@ export async function sendKeeperMessageDetailed(
 }
 
 // --- SSE streaming ---
-
-function jsonHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = sessionStorage.getItem('masc_bearer_token')
-  const agent = resolveDashboardActorName(window.location.search)
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  if (agent) headers['X-MASC-Agent'] = agent
-  return headers
-}
 
 function parseSseFrames(chunk: string): { frames: string[]; rest: string } {
   const normalized = chunk.replace(/\r\n/g, '\n')

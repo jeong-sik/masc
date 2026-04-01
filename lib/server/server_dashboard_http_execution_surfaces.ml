@@ -87,8 +87,12 @@ let _execution_cache =
     Best-effort: never raises — cache staleness must not break
     the mutation path. *)
 let invalidate_execution_cache () =
-  (try invalidate_cached_surface _execution_cache with _ -> ());
-  (try Dashboard_cache.invalidate "execution:default:light" with _ -> ())
+  (try invalidate_cached_surface _execution_cache with exn ->
+     Log.Dashboard.error "Failed to invalidate execution surface cache: %s"
+       (Printexc.to_string exn));
+  (try Dashboard_cache.invalidate "execution:default:light" with exn ->
+     Log.Dashboard.error "Failed to invalidate dashboard execution cache: %s"
+       (Printexc.to_string exn))
 
 (** Bypass the proactive warm-up guard so tests that call
     [dashboard_room_truth_http_json] get the full response instead of

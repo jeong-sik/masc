@@ -244,6 +244,54 @@ let test_verify_skips_readonly () =
   Alcotest.(check bool) "read-only skips to Pass" true
     (Verifier_oas.verify req = Ok Pass)
 
+let test_hook_skips_on_verify_error () =
+  let verify_called = ref false in
+  let hook =
+    Verifier_oas.make_pre_tool_hook
+      ~verify_fn:(fun _req ->
+        verify_called := true;
+        Error "verifier backend unavailable")
+      ~goal:"test goal"
+      ~context_summary:"test context"
+  in
+  let decision =
+    hook
+      (Oas.Hooks.PreToolUse {
+         tool_name = "keeper_bash";
+         input = `Assoc [ ("cmd", `String "echo hi") ];
+         accumulated_cost_usd = 0.0;
+         turn = 1;
+       })
+  in
+  Alcotest.(check bool) "verify called" true !verify_called;
+  Alcotest.(check bool) "verifier errors fail closed"
+    true
+    (decision = Oas.Hooks.Skip)
+
+let test_hook_readonly_skips_verifier () =
+  let verify_called = ref false in
+  let hook =
+    Verifier_oas.make_pre_tool_hook
+      ~verify_fn:(fun _req ->
+        verify_called := true;
+        Ok (Fail "should not run"))
+      ~goal:"test goal"
+      ~context_summary:"test context"
+  in
+  let decision =
+    hook
+      (Oas.Hooks.PreToolUse {
+         tool_name = "read file";
+         input = `Assoc [ ("path", `String "README.md") ];
+         accumulated_cost_usd = 0.0;
+         turn = 1;
+       })
+  in
+  Alcotest.(check bool) "verify skipped" false !verify_called;
+  Alcotest.(check bool) "readonly still continues"
+    true
+    (decision = Oas.Hooks.Continue)
+
 (* ================================================================ *)
 (* Roundtrip: keeper_default_gate_config -> guardrails               *)
 (* ================================================================ *)
@@ -383,6 +431,10 @@ let () =
     ]);
     ("verify_skip", [
       Alcotest.test_case "read-only skips" `Quick test_verify_skips_readonly;
+      Alcotest.test_case "hook verifier errors fail closed" `Quick
+        test_hook_skips_on_verify_error;
+      Alcotest.test_case "hook skips verifier for readonly tools" `Quick
+        test_hook_readonly_skips_verifier;
     ]);
     ("autonomous_gate roundtrip", [
       Alcotest.test_case "default -> AllowList (strict)" `Quick test_default_gate_roundtrip;

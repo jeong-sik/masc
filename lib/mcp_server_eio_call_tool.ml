@@ -69,8 +69,8 @@ let quality_from_result ~success ~message ~attempts =
     ]
   else
     let issue =
-      if contains_casefold message "timeout" then
-        quality_issue "warning" "tool_timeout" message attempts
+      if contains_casefold message "timeout" || contains_casefold message "timed out" then
+        quality_issue "error" "tool_timeout" message attempts
       else
         quality_issue "error" "tool_failure" message attempts
     in
@@ -140,6 +140,12 @@ let tool_timeout_sec_opt ~(tool_name : string) ~(arguments : Yojson.Safe.t) : fl
       (* No fixed timeout for keeper_msg. Keeper has its own internal limits
          (max_turns, max_cost_usd, max_tokens) that control call duration.
          A fixed external timeout conflicts with multi-turn tool-use loops. *)
+      None
+  | "masc_transition" ->
+      (* Transition can trigger anti-rationalization review on completion
+         paths. A fixed timeout can report a false error while the state
+         mutation continues in the background, leaving caller-visible status
+         out of sync with persisted task state. *)
       None
   | _ ->
       let global_default_sec =

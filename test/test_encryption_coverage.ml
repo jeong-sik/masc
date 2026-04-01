@@ -97,14 +97,23 @@ let test_decode_hex_key_valid () =
 
 let test_decode_hex_key_too_short () =
   match Encryption.decode_hex_key "aabb" with
-  | Error (Encryption.InvalidHexFormat _) -> ()
+  | Error (Encryption.InvalidHexFormat msg) ->
+      check bool "mentions 64 chars" true (String.contains msg '6' && String.contains msg '4')
   | _ -> fail "Expected InvalidHexFormat for short input"
+
+let test_decode_hex_key_too_long () =
+  let long_hex = String.make 66 '0' in
+  match Encryption.decode_hex_key long_hex with
+  | Error (Encryption.InvalidHexFormat msg) ->
+      check bool "mentions 64 chars" true (String.contains msg '6' && String.contains msg '4')
+  | _ -> fail "Expected InvalidHexFormat for long input"
 
 let test_decode_hex_key_invalid_chars () =
   let hex = "GG" ^ String.make 62 '0' in
   match Encryption.decode_hex_key hex with
   | Error (Encryption.InvalidHexFormat msg) ->
-      check bool "mentions position" true (String.length msg > 0)
+      check bool "mentions position" true (String.length msg > 0);
+      check bool "does NOT mention invalid chars (security)" false (String.contains msg 'G')
   | _ -> fail "Expected InvalidHexFormat for invalid hex chars"
 
 (* ============================================================
@@ -242,6 +251,24 @@ let test_load_key_file_not_found () =
   | Ok _ -> fail "should fail for missing file"
   | Error (Encryption.KeyNotFound _) -> ()
   | Error _ -> fail "unexpected error type"
+
+let test_load_key_file_invalid_hex () =
+  let path = Filename.temp_file "masc-key-invalid-" ".txt" in
+  let oc = open_out path in
+  output_string oc (String.make 64 'g');
+  close_out oc;
+  let config : Encryption.config = {
+    enabled = true;
+    key_source = `File path;
+    version = 1;
+  } in
+  let result = Encryption.load_key config in
+  (match result with
+  | Error (Encryption.InvalidHexFormat _) -> ()
+  | Error (Encryption.KeyNotFound _) -> fail "expected invalid format, got missing key"
+  | Error _ -> fail "expected invalid hex format"
+  | Ok _ -> fail "should fail for malformed hex");
+  (try Sys.remove path with _ -> ())
 
 (* ============================================================
    envelope_to_json / envelope_of_json Tests
@@ -537,6 +564,7 @@ let () =
     "decode_hex_key", [
       test_case "valid hex" `Quick test_decode_hex_key_valid;
       test_case "too short" `Quick test_decode_hex_key_too_short;
+      test_case "too long" `Quick test_decode_hex_key_too_long;
       test_case "invalid chars" `Quick test_decode_hex_key_invalid_chars;
     ];
     "envelope", [
@@ -565,6 +593,7 @@ let () =
       test_case "direct wrong length" `Quick test_load_key_direct_wrong_length;
       test_case "env not found" `Quick test_load_key_env_not_found;
       test_case "file not found" `Quick test_load_key_file_not_found;
+      test_case "file invalid hex" `Quick test_load_key_file_invalid_hex;
     ];
     "envelope_json", [
       test_case "to_json" `Quick test_envelope_to_json;

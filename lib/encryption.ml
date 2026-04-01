@@ -64,10 +64,11 @@ let base64_decode s =
 
 (** Decode hex string to raw bytes. Returns Error on invalid input. *)
 let decode_hex_key content : (string, encryption_error) result =
+  let content = String.trim content in
   let len = String.length content in
-  if len < 64 then
+  if len <> 64 then
     Error (InvalidHexFormat
-      (Printf.sprintf "hex key too short: need 64 chars, got %d" len))
+      (Printf.sprintf "hex key must be exactly 64 characters, got %d" len))
   else
     let buf = Buffer.create 32 in
     let err = ref None in
@@ -79,7 +80,7 @@ let decode_hex_key content : (string, encryption_error) result =
            Buffer.add_char buf (Char.chr v)
        | _ ->
            err := Some (InvalidHexFormat
-             (Printf.sprintf "invalid hex byte at position %d: %S" (!i * 2) hex)));
+             (Printf.sprintf "invalid hex byte at position %d" (!i * 2))));
       incr i
     done;
     match !err with

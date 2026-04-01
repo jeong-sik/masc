@@ -70,6 +70,14 @@ let test_quality_normal_tokens () =
   let result = Pv.verify ~content:"The quick brown fox jumps over the lazy dog." in
   check bool "diverse tokens pass quality" true (is_pass result.quality)
 
+let test_quality_formatting_chars_pass () =
+  (* Markdown separators and code fences should NOT trigger repetition detection.
+     Agents using structured output should not be penalized. *)
+  let result = Pv.verify ~content:"Section header\n========\nContent below the line." in
+  check bool "markdown separator passes quality" true (is_pass result.quality);
+  let result2 = Pv.verify ~content:"```ocaml\nlet x = 42\n```\nAbove is a code block." in
+  check bool "code fence passes quality" true (is_pass result2.quality)
+
 (* ================================================================ *)
 (* Dimension 3: Safety                                              *)
 (* ================================================================ *)
@@ -164,6 +172,7 @@ let () =
       test_case "5+ char repetition warns" `Quick test_quality_char_repetition_warn;
       test_case "repetitive tokens fail" `Quick test_quality_token_repetition;
       test_case "diverse tokens pass" `Quick test_quality_normal_tokens;
+      test_case "formatting chars pass" `Quick test_quality_formatting_chars_pass;
     ];
     "safety", [
       test_case "normal content passes" `Quick test_safety_pass;

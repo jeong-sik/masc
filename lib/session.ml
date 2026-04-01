@@ -13,22 +13,19 @@ type session = {
 
 (** Rate limit tracking per category
 
-    OCaml 5.4 Atomic Fields: burst_used and last_burst_reset use [@atomic]
-    for lock-free concurrent access. This enables safe updates from multiple
-    domains without explicit locks, using compare-and-set semantics.
-
-    Access pattern:
-    - Read:  Atomic.Loc.get [%atomic.loc tracker.burst_used]
-    - Write: Atomic.Loc.set [%atomic.loc tracker.burst_used] value
-    - CAS:   Atomic.Loc.compare_and_set [%atomic.loc tracker.field] old new
-    - Incr:  Atomic.Loc.fetch_and_add [%atomic.loc tracker.burst_used] 1
-*)
+    All fields are plain mutable — access is serialized via registry.lock
+    (Eio.Mutex).  The previous [@atomic] annotation on burst_used and
+    last_burst_reset created a "mixed atomicity" antipattern: atomic and
+    non-atomic fields in the same record can lead to torn reads when one
+    fiber does a CAS while another reads a neighbouring non-atomic field.
+    Since every call-site already goes through with_lock, the atomic
+    overhead is unnecessary. *)
 type rate_tracker = {
   mutable general_timestamps: float list;
   mutable broadcast_timestamps: float list;
   mutable task_ops_timestamps: float list;
-  mutable burst_used: int [@atomic];  (* Atomic: concurrent burst tracking *)
-  mutable last_burst_reset: float [@atomic];  (* Atomic: timestamp for reset *)
+  mutable burst_used: int;
+  mutable last_burst_reset: float;
 }
 
 (** Session registry - manages all connected agents *)
@@ -78,12 +75,14 @@ let unregister registry ~agent_name =
       agent_name (Hashtbl.length registry.sessions)
   )
 
-(** Unregister agent synchronously — direct hashtable removal without
-    the extra mutex layer.  Safe in Eio single-fiber context. *)
+(** Unregister agent synchronously — uses registry mutex for safety.
+    Prefer [unregister] for standard usage; this variant for bootstrap/shutdown
+    paths where the caller may not be in an Eio fiber context. *)
 let unregister_sync (registry : registry) ~agent_name =
-  Hashtbl.remove registry.sessions agent_name;
-  Log.Session.info "Session unregistered (sync): %s (total: %d)"
-    agent_name (Hashtbl.length registry.sessions)
+  with_lock registry (fun () ->
+    Hashtbl.remove registry.sessions agent_name;
+    Log.Session.info "Session unregistered (sync): %s (total: %d)"
+      agent_name (Hashtbl.length registry.sessions))
 
 (** Update activity timestamp *)
 let update_activity registry ~agent_name ?(is_listening = None) () =
@@ -102,25 +101,24 @@ let create_tracker () = {
   general_timestamps = [];
   broadcast_timestamps = [];
   task_ops_timestamps = [];
-  burst_used = 0;  (* Initial value for atomic field *)
-  last_burst_reset = Time_compat.now ();  (* Initial value for atomic field *)
+  burst_used = 0;
+  last_burst_reset = Time_compat.now ();
 }
 
-(** Atomic helpers for rate tracker - OCaml 5.4+ *)
-let get_burst_used tracker =
-  Atomic.Loc.get [%atomic.loc tracker.burst_used]
+(** Direct mutable field accessors for rate tracker.
+    All access is serialized via registry.lock (Eio.Mutex),
+    so plain reads/writes are safe without atomic operations. *)
+let get_burst_used (tracker : rate_tracker) = tracker.burst_used
 
-let set_burst_used tracker v =
-  Atomic.Loc.set [%atomic.loc tracker.burst_used] v
+let set_burst_used (tracker : rate_tracker) v = tracker.burst_used <- v
 
-let incr_burst_used tracker =
-  ignore (Atomic.Loc.fetch_and_add [%atomic.loc tracker.burst_used] 1)
+let incr_burst_used (tracker : rate_tracker) =
+  tracker.burst_used <- tracker.burst_used + 1
 
-let get_last_burst_reset tracker =
-  Atomic.Loc.get [%atomic.loc tracker.last_burst_reset]
+let get_last_burst_reset (tracker : rate_tracker) = tracker.last_burst_reset
 
-let set_last_burst_reset tracker v =
-  Atomic.Loc.set [%atomic.loc tracker.last_burst_reset] v
+let set_last_burst_reset (tracker : rate_tracker) v =
+  tracker.last_burst_reset <- v
 
 (** Get timestamps for category *)
 let get_timestamps tracker = function
@@ -344,32 +342,36 @@ let wait_for_message registry ~agent_name ~timeout =
 
 (** Get inactive agents (idle > threshold seconds) *)
 let get_inactive_agents registry ~threshold =
-  let now = Time_compat.now () in
-  Hashtbl.fold (fun name session acc ->
-    if now -. session.last_activity > threshold then
-      name :: acc
-    else
-      acc
-  ) registry.sessions []
+  with_lock registry (fun () ->
+    let now = Time_compat.now () in
+    Hashtbl.fold (fun name session acc ->
+      if now -. session.last_activity > threshold then
+        name :: acc
+      else
+        acc
+    ) registry.sessions []
+  )
 
 (** Get all agent statuses *)
 let get_agent_statuses registry =
-  let now = Time_compat.now () in
-  Hashtbl.fold (fun name session acc ->
-    let idle_secs = int_of_float (now -. session.last_activity) in
-    let status_icon =
-      if session.is_listening then "🎧"
-      else if idle_secs > 60 then "💤"
-      else "🔨"
-    in
-    let status = `Assoc [
-      ("name", `String name);
-      ("listening", `Bool session.is_listening);
-      ("idle_seconds", `Int idle_secs);
-      ("status", `String status_icon);
-    ] in
-    status :: acc
-  ) registry.sessions []
+  with_lock registry (fun () ->
+    let now = Time_compat.now () in
+    Hashtbl.fold (fun name session acc ->
+      let idle_secs = int_of_float (now -. session.last_activity) in
+      let status_icon =
+        if session.is_listening then "🎧"
+        else if idle_secs > 60 then "💤"
+        else "🔨"
+      in
+      let status = `Assoc [
+        ("name", `String name);
+        ("listening", `Bool session.is_listening);
+        ("idle_seconds", `Int idle_secs);
+        ("status", `String status_icon);
+      ] in
+      status :: acc
+    ) registry.sessions []
+  )
 
 (** Format status for display *)
 let status_string registry =
@@ -408,7 +410,9 @@ let status_string registry =
 
 (** Connected agent names *)
 let connected_agents registry =
-  Hashtbl.fold (fun name _ acc -> name :: acc) registry.sessions []
+  with_lock registry (fun () ->
+    Hashtbl.fold (fun name _ acc -> name :: acc) registry.sessions []
+  )
 
 (** Restore sessions from disk (call on server startup) *)
 let restore_from_disk registry ~agents_path =
@@ -438,7 +442,9 @@ let restore_from_disk registry ~agents_path =
 (* Legacy compatibility: X-MCP-Session-ID       *)
 (* ============================================ *)
 
-(** MCP Session ID store - separate from agent sessions *)
+(** MCP Session ID store - separate from agent sessions.
+    All access is serialized via [store_mutex] (Eio.Mutex)
+    for fiber-safe concurrent access. *)
 module McpSessionStore = struct
   type mcp_session = {
     id: string;
@@ -450,6 +456,7 @@ module McpSessionStore = struct
   }
 
   let sessions : (string, mcp_session) Hashtbl.t = Hashtbl.create 64
+  let store_mutex = Eio.Mutex.create ()
   let max_age = ref Env_config.Session.max_age_seconds
 
   (** Generate MCP session ID *)
@@ -461,37 +468,40 @@ module McpSessionStore = struct
     done;
     Printf.sprintf "mcp_%s" (Buffer.contents buf)
 
-  (** Create new MCP session *)
+  (** Create new MCP session — mutex-protected *)
   let create ?agent_name () : mcp_session =
-    let now = Time_compat.now () in
-    let session = {
-      id = generate_id ();
-      created_at = now;
-      last_activity = now;
-      agent_name;
-      metadata = [];
-      request_count = 0;
-    } in
-    Hashtbl.add sessions session.id session;
-    session
+    Eio.Mutex.use_rw ~protect:true store_mutex (fun () ->
+      let now = Time_compat.now () in
+      let session = {
+        id = generate_id ();
+        created_at = now;
+        last_activity = now;
+        agent_name;
+        metadata = [];
+        request_count = 0;
+      } in
+      Hashtbl.add sessions session.id session;
+      session)
 
-  (** Get MCP session by ID *)
+  (** Get MCP session by ID — mutex-protected *)
   let get (session_id : string) : mcp_session option =
-    match Hashtbl.find_opt sessions session_id with
-    | None -> None
-    | Some session ->
-      session.last_activity <- Time_compat.now ();
-      session.request_count <- session.request_count + 1;
-      Some session
+    Eio.Mutex.use_rw ~protect:true store_mutex (fun () ->
+      match Hashtbl.find_opt sessions session_id with
+      | None -> None
+      | Some session ->
+        session.last_activity <- Time_compat.now ();
+        session.request_count <- session.request_count + 1;
+        Some session)
 
-  (** Cleanup stale MCP sessions *)
+  (** Cleanup stale MCP sessions — mutex-protected *)
   let cleanup_stale () : int =
-    let now = Time_compat.now () in
-    let stale = Hashtbl.fold (fun id session acc ->
-      if now -. session.last_activity > !max_age then id :: acc else acc
-    ) sessions [] in
-    List.iter (Hashtbl.remove sessions) stale;
-    List.length stale
+    Eio.Mutex.use_rw ~protect:true store_mutex (fun () ->
+      let now = Time_compat.now () in
+      let stale = Hashtbl.fold (fun id session acc ->
+        if now -. session.last_activity > !max_age then id :: acc else acc
+      ) sessions [] in
+      List.iter (Hashtbl.remove sessions) stale;
+      List.length stale)
 
   (** Convert MCP session to JSON *)
   let to_json (s : mcp_session) : Yojson.Safe.t =
@@ -504,16 +514,18 @@ module McpSessionStore = struct
       ("metadata", `Assoc (List.map (fun (k, v) -> (k, `String v)) s.metadata));
     ]
 
-  (** List all MCP sessions *)
+  (** List all MCP sessions — mutex-protected *)
   let list_all () : mcp_session list =
-    Hashtbl.fold (fun _ s acc -> s :: acc) sessions []
+    Eio.Mutex.use_ro store_mutex (fun () ->
+      Hashtbl.fold (fun _ s acc -> s :: acc) sessions [])
 
-  (** Remove session *)
+  (** Remove session — mutex-protected *)
   let remove (id : string) : bool =
-    if Hashtbl.mem sessions id then begin
-      Hashtbl.remove sessions id;
-      true
-    end else false
+    Eio.Mutex.use_rw ~protect:true store_mutex (fun () ->
+      if Hashtbl.mem sessions id then begin
+        Hashtbl.remove sessions id;
+        true
+      end else false)
 end
 
 (** Start a background fiber that periodically cleans up stale MCP sessions.

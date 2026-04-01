@@ -24,7 +24,8 @@ type observation_context = {
   active_agent_count : int;       (** Agents currently active in the room *)
   unclaimed_task_count : int;     (** Pending tasks in the backlog *)
   is_single_focused_task : bool;  (** Keeper working on exactly one task *)
-  model_family : string;          (** "small_local", "medium_cloud", "large_cloud", "unknown" *)
+  context_window : int;           (** Model context window in tokens *)
+  is_local_model : bool;          (** Whether model runs locally *)
 }
 
 type strategy =
@@ -353,7 +354,7 @@ let resolve_strategies
           (* Fallback: minimal observation when none provided *)
           { context_ratio = 0.5; active_agent_count = 1;
             unclaimed_task_count = 0; is_single_focused_task = true;
-            model_family = "unknown" }
+            context_window = 100_000; is_local_model = false }
       in
       (* Resolve once — no recursive Dynamic *)
       selector obs_val
@@ -372,9 +373,9 @@ let observation_summary = function
   | None -> "obs=none"
   | Some obs ->
       Printf.sprintf
-        "obs=ratio=%.2f agents=%d unclaimed=%d single_task=%b model=%s"
+        "obs=ratio=%.2f agents=%d unclaimed=%d single_task=%b ctx=%dk local=%b"
         obs.context_ratio obs.active_agent_count obs.unclaimed_task_count
-        obs.is_single_focused_task obs.model_family
+        obs.is_single_focused_task (obs.context_window / 1000) obs.is_local_model
 
 (** Default dynamic strategy selector.
     Chooses strategies based on observation context:
@@ -389,8 +390,8 @@ let default_dynamic_selector (obs : observation_context) : strategy list =
   else if obs.context_ratio >= 0.70 && obs.is_single_focused_task then
     (* Focused work near budget: summarize old context *)
     [PruneToolOutputs; SummarizeOld]
-  else if obs.model_family = "small_local" then
-    (* Small models: lightweight compaction only *)
+  else if obs.is_local_model && obs.context_window < 32_000 then
+    (* Small local models: lightweight compaction only *)
     [PruneToolOutputs; MergeContiguous]
   else
     (* Default: importance-based *)

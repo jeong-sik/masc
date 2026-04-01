@@ -180,13 +180,21 @@ let publish_verdict_recorded (bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
 (** Publish a pre-compaction observation event.
     Emitted before [Context_compact_oas.compact] runs in keeper. *)
 let publish_pre_compact (bus : Agent_sdk.Event_bus.t) ~keeper_name
-    ~context_ratio ~strategy_names ~active_agent_count ~model_family =
+    ~context_ratio ~strategy_names ~active_agent_count ~context_window
+    ~is_local_model =
+  let model_family =
+    if is_local_model && context_window < 32_000 then "small_local"
+    else if context_window >= 200_000 then "large_cloud"
+    else "medium_cloud"
+  in
   let payload = `Assoc [
     ("keeper_name", `String keeper_name);
     ("context_ratio", `Float context_ratio);
     ("strategies", `List (List.map (fun s -> `String s) strategy_names));
     ("active_agent_count", `Int active_agent_count);
     ("model_family", `String model_family);
+    ("context_window", `Int context_window);
+    ("is_local_model", `Bool is_local_model);
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   Agent_sdk.Event_bus.publish bus

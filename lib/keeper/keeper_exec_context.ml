@@ -368,11 +368,18 @@ let compact_if_needed
       Log.Harness.info
         "[pre_compact] keeper=%s ratio=%.4f messages=%d tokens=%d trigger=%s"
         meta.name ratio message_count token_count reason;
+      let model_meta =
+        let model_labels = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
+        let primary_id = match Llm_provider.Cascade_config.parse_model_strings model_labels with
+          | c :: _ -> c.Llm_provider.Provider_config.model_id | [] -> "auto" in
+        Llm_provider.Model_meta.for_model_id primary_id
+      in
       let pre_compact_event =
         Dashboard_harness_health.record_pre_compact
           ~keeper_name:meta.name ~context_ratio:ratio ~message_count
           ~token_count ~strategies:strategy_names
-          ~model_family:meta.cascade_name ~trigger:reason
+          ~context_window:model_meta.context_window
+          ~is_local_model:model_meta.is_local ~trigger:reason
       in
       (try
          Sse.broadcast
@@ -393,6 +400,8 @@ let compact_if_needed
                             (fun value -> `String value)
                             pre_compact_event.strategies) );
                      ("model_family", `String pre_compact_event.model_family);
+                     ("context_window", `Int pre_compact_event.context_window);
+                     ("is_local_model", `Bool pre_compact_event.is_local_model);
                      ("trigger", `String pre_compact_event.trigger);
                    ] );
              ])

@@ -77,8 +77,8 @@ type error =
 (** In-memory session store — protected by [sessions_mutex]. *)
 let sessions : (string, session) Hashtbl.t = Hashtbl.create 16
 let sessions_mutex = Eio.Mutex.create ()
-let with_sessions f = Eio.Mutex.use_rw ~protect:true sessions_mutex f
-let with_sessions_ro f = Eio.Mutex.use_ro sessions_mutex f
+let with_sessions f = Eio_guard.with_mutex sessions_mutex (fun () -> f ())
+let with_sessions_ro f = Eio_guard.with_mutex_ro sessions_mutex (fun () -> f ())
 
 (** {1 File-based Persistence} *)
 
@@ -293,11 +293,13 @@ let persist_session (s : session) : (unit, error) result =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Error (Persistence_failed (Printexc.to_string e))
 
+(** Persist + replace. Caller must hold sessions_mutex when atomicity
+    with a preceding find is required. *)
 let commit_session (s : session) : (session, error) result =
   match persist_session s with
   | Error _ as err -> err
   | Ok () ->
-    with_sessions (fun () -> Hashtbl.replace sessions s.id s);
+    Hashtbl.replace sessions s.id s;
     Ok s
 
 (** Load all sessions from disk into memory *)
@@ -357,40 +359,44 @@ let start_voting ~topic ~initiator ?(quorum = 2) ?(threshold = 0.5)
   if threshold < 0.0 || threshold > 1.0 then
     Error (Invalid_threshold threshold)
   else
-    let session = {
-      id = generate_id ();
-      topic;
-      initiator;
-      votes = [];
-      quorum;
-      threshold;
-      state = Open;
-      created_at = Time_compat.now ();
-      closed_at = None;
-      context;
-    } in
-    commit_session session
-
-(** Cast a vote in a session *)
-let cast_vote ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.0) () : (session, error) Result.t =
-  match with_sessions_ro (fun () -> Hashtbl.find_opt sessions session_id) with
-  | None -> Error (Session_not_found session_id)
-  | Some session ->
-    if session.state <> Open then
-      Error (Session_closed session_id)
-    else if List.exists (fun v -> v.agent = agent) session.votes then
-      Error (Already_voted agent)
-    else
-      let vote = {
-        agent;
-        decision;
-        reason;
-        timestamp = Time_compat.now ();
-        archetype;
-        weight;
+    with_sessions (fun () ->
+      let session = {
+        id = generate_id ();
+        topic;
+        initiator;
+        votes = [];
+        quorum;
+        threshold;
+        state = Open;
+        created_at = Time_compat.now ();
+        closed_at = None;
+        context;
       } in
-      let updated = { session with votes = vote :: session.votes } in
-      commit_session updated
+      commit_session session)
+
+(** Cast a vote in a session.
+    The entire lookup + validate + update is performed under a single
+    write lock to prevent concurrent cast_vote calls from losing votes. *)
+let cast_vote ~session_id ~agent ~decision ~reason ?(archetype=None) ?(weight=1.0) () : (session, error) Result.t =
+  with_sessions (fun () ->
+    match Hashtbl.find_opt sessions session_id with
+    | None -> Error (Session_not_found session_id)
+    | Some session ->
+      if session.state <> Open then
+        Error (Session_closed session_id)
+      else if List.exists (fun v -> v.agent = agent) session.votes then
+        Error (Already_voted agent)
+      else
+        let vote = {
+          agent;
+          decision;
+          reason;
+          timestamp = Time_compat.now ();
+          archetype;
+          weight;
+        } in
+        let updated = { session with votes = vote :: session.votes } in
+        commit_session updated)
 
 (** Count votes by decision type *)
 let count_by_decision votes decision =
@@ -457,29 +463,34 @@ let get_result ~session_id : (voting_result, error) Result.t =
         else
           Ok Escalate
 
-(** Close a voting session *)
+(** Close a voting session.
+    Write lock spans lookup + state transition + commit to prevent
+    concurrent close/vote from overwriting each other. *)
 let close_session ~session_id : (session, error) Result.t =
-  match with_sessions_ro (fun () -> Hashtbl.find_opt sessions session_id) with
-  | None -> Error (Session_not_found session_id)
-  | Some session ->
-    let updated = {
-      session with
-      state = Closed;
-      closed_at = Some (Time_compat.now ());
-    } in
-    commit_session updated
+  with_sessions (fun () ->
+    match Hashtbl.find_opt sessions session_id with
+    | None -> Error (Session_not_found session_id)
+    | Some session ->
+      let updated = {
+        session with
+        state = Closed;
+        closed_at = Some (Time_compat.now ());
+      } in
+      commit_session updated)
 
-(** Cancel a voting session *)
+(** Cancel a voting session.
+    Write lock spans lookup + state transition + commit. *)
 let cancel_session ~session_id : (session, error) Result.t =
-  match with_sessions_ro (fun () -> Hashtbl.find_opt sessions session_id) with
-  | None -> Error (Session_not_found session_id)
-  | Some session ->
-    let updated = {
-      session with
-      state = Cancelled;
-      closed_at = Some (Time_compat.now ());
-    } in
-    commit_session updated
+  with_sessions (fun () ->
+    match Hashtbl.find_opt sessions session_id with
+    | None -> Error (Session_not_found session_id)
+    | Some session ->
+      let updated = {
+        session with
+        state = Cancelled;
+        closed_at = Some (Time_compat.now ());
+      } in
+      commit_session updated)
 
 (** Get session by ID *)
 let get_session ~session_id : session option =

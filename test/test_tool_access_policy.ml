@@ -210,20 +210,20 @@ let test_surface_resolution_respects_candidates () =
   check bool "drops candidate outside surface" false
     (List.mem "totally_unknown" resolved)
 
-let test_keeper_denied_surface_blocks_admin_tools () =
-  let admin_tools = Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied in
+let test_keeper_denied_surface_blocks_tools () =
+  let denied_tools = Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied in
   let policy = {
     Tool_access_policy.allow = All;
     deny = Surface Tool_catalog.Keeper_denied;
   } in
   check bool "keeper_denied surface has tools" true
-    (List.length admin_tools > 0);
+    (List.length denied_tools > 0);
   List.iter (fun tool_name ->
     check bool
       (Printf.sprintf "%s denied by Keeper_denied surface" tool_name)
       false
       (Tool_access_policy.allows_name policy tool_name)
-  ) (List.filteri (fun i _ -> i < 5) admin_tools)
+  ) denied_tools
 
 (* ================================================================ *)
 (* of_allowlist convenience constructor                              *)
@@ -314,7 +314,7 @@ let () =
           test_case "surface respects candidates" `Quick
             test_surface_resolution_respects_candidates;
           test_case "Keeper_denied surface blocks" `Quick
-            test_keeper_denied_surface_blocks_admin_tools;
+            test_keeper_denied_surface_blocks_tools;
         ] );
       ( "of_allowlist",
         [

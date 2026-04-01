@@ -4,7 +4,7 @@ import type {
   DashboardExecutionSummary, DashboardExecutionHandoff,
   DashboardExecutionQueueItem, DashboardExecutionSessionBrief,
   DashboardExecutionOperationBrief, DashboardExecutionWorkerSupportBrief,
-  DashboardExecutionContinuityBrief, MdalLoop, MdalIterationRecord,
+  DashboardExecutionContinuityBrief,
   OperatorAttentionItem, OperatorRecommendedAction,
 } from './types'
 
@@ -396,102 +396,3 @@ export function mergeServerStatus(previous: ServerStatus | null, next: ServerSta
   }
 }
 
-export function normalizeMdalStatus(value: unknown): MdalLoop['status'] {
-  const raw = typeof value === 'string' ? value.toLowerCase() : ''
-  if (raw === 'running' || raw === 'interrupted' || raw === 'completed' || raw === 'stopped' || raw === 'error') return raw
-  if (raw.startsWith('error')) return 'error'
-  return 'running'
-}
-
-export function normalizeMdalIteration(raw: unknown): MdalIterationRecord | null {
-  if (!isRecord(raw)) return null
-  const iteration = asNumber(raw.iteration)
-  if (iteration == null) return null
-  const metricBefore = asNumber(raw.metric_before) ?? 0
-  const metricAfter = asNumber(raw.metric_after) ?? metricBefore
-  const evidenceRaw = isRecord(raw.evidence) ? raw.evidence : null
-  return {
-    iteration,
-    metric_before: metricBefore,
-    metric_after: metricAfter,
-    delta: asNumber(raw.delta) ?? (metricAfter - metricBefore),
-    changes: asString(raw.changes) ?? '',
-    failed_attempts: asString(raw.failed_attempts) ?? '',
-    next_suggestion: asString(raw.next_suggestion) ?? '',
-    elapsed_ms: asNumber(raw.elapsed_ms) ?? 0,
-    cost_usd: asNumber(raw.cost_usd) ?? null,
-    evidence: evidenceRaw
-      ? {
-          worker_engine: evidenceRaw.worker_engine === 'api_tool_loop' ? 'api_tool_loop' : 'api_tool_loop',
-          worker_model: asString(evidenceRaw.worker_model) ?? '',
-          tool_call_count: asNumber(evidenceRaw.tool_call_count) ?? 0,
-          tool_names: asStringArray(evidenceRaw.tool_names) ?? [],
-          session_id: asString(evidenceRaw.session_id) ?? '',
-          evidence_status:
-            evidenceRaw.evidence_status === 'legacy_unverified'
-              ? 'legacy_unverified'
-              : 'verified',
-        }
-      : null,
-  }
-}
-
-export function normalizeMdalLoop(raw: unknown): MdalLoop | null {
-  if (!isRecord(raw)) return null
-  const loopId = asString(raw.loop_id)
-  if (!loopId) return null
-  const baseline = asNumber(raw.baseline_metric) ?? 0
-  const history = Array.isArray(raw.history)
-    ? raw.history.map(normalizeMdalIteration).filter((row): row is MdalIterationRecord => row !== null)
-    : []
-  const currentMetric =
-    asNumber(raw.current_metric)
-    ?? history[0]?.metric_after
-    ?? baseline
-  return {
-    loop_id: loopId,
-    profile: asString(raw.profile) ?? 'unknown',
-    status: normalizeMdalStatus(raw.status),
-    strict_mode: typeof raw.strict_mode === 'boolean' ? raw.strict_mode : undefined,
-    error_message: asString(raw.error_message) ?? asString(raw.error_reason) ?? null,
-    stop_reason: asString(raw.stop_reason) ?? asString(raw.reason) ?? null,
-    current_iteration: asNumber(raw.current_iteration) ?? history[0]?.iteration ?? 0,
-    max_iterations: asNumber(raw.max_iterations) ?? 0,
-    baseline_metric: baseline,
-    current_metric: currentMetric,
-    target: asString(raw.target) ?? '',
-    stagnation_streak: asNumber(raw.stagnation_streak) ?? 0,
-    stagnation_limit: asNumber(raw.stagnation_limit) ?? 0,
-    elapsed_seconds: asNumber(raw.elapsed_seconds) ?? 0,
-    updated_at: toIsoTimestamp(raw.updated_at) ?? null,
-    stopped_at: toIsoTimestamp(raw.stopped_at) ?? null,
-    execution_mode: raw.execution_mode === 'worker_spawn' ? 'worker_spawn' : undefined,
-    worker_engine: raw.worker_engine === 'api_tool_loop' ? 'api_tool_loop' : null,
-    worker_model: asString(raw.worker_model) ?? null,
-    evidence_policy:
-      raw.evidence_policy === 'hard' || raw.evidence_policy === 'legacy'
-        ? raw.evidence_policy
-        : undefined,
-    latest_tool_call_count: asNumber(raw.latest_tool_call_count) ?? 0,
-    latest_tool_names: asStringArray(raw.latest_tool_names) ?? [],
-    session_id: asString(raw.session_id) ?? null,
-    evidence_status:
-      raw.evidence_status === 'legacy_unverified'
-        ? 'legacy_unverified'
-        : raw.evidence_status === 'verified'
-          ? 'verified'
-          : null,
-    durability:
-      raw.durability === 'persistent_backend' || raw.durability === 'memory_only'
-        ? raw.durability
-        : undefined,
-    persistence_backend:
-      raw.persistence_backend === 'filesystem'
-      || raw.persistence_backend === 'postgres'
-      || raw.persistence_backend === 'memory'
-        ? raw.persistence_backend
-        : undefined,
-    recoverable: typeof raw.recoverable === 'boolean' ? raw.recoverable : undefined,
-    history,
-  }
-}

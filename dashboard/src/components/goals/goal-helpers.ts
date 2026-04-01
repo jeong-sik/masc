@@ -3,9 +3,8 @@
 import { signal, computed } from '@preact/signals'
 import {
   goals,
-  mdalLoops,
 } from '../../store'
-import type { Goal, MdalLoop, Task } from '../../types'
+import type { Goal, Task } from '../../types'
 
 // -- Filter state ------------------------------------------------
 
@@ -48,18 +47,6 @@ export const groupedByHorizon = computed(() => {
   return groups
 })
 
-export const loopsList = computed(() => {
-  const loops = Array.from(mdalLoops.value.values())
-  loops.sort((a, b) => {
-    if (a.status === 'running' && b.status !== 'running') return -1
-    if (b.status === 'running' && a.status !== 'running') return 1
-    if (a.status === 'interrupted' && b.status !== 'interrupted') return -1
-    if (b.status === 'interrupted' && a.status !== 'interrupted') return 1
-    return b.elapsed_seconds - a.elapsed_seconds
-  })
-  return loops
-})
-
 // -- Helpers -----------------------------------------------------
 
 export function priorityStars(n: number): string {
@@ -86,12 +73,6 @@ export function horizonColor(h: string): string {
 
 export function formatMetric(value: number): string {
   return value.toFixed(4)
-}
-
-export function formatMetricDelta(loop: MdalLoop): string {
-  const delta = loop.current_metric - loop.baseline_metric
-  const sign = delta >= 0 ? '+' : ''
-  return `${sign}${delta.toFixed(4)}`
 }
 
 export function priorityLabel(p: number): string {

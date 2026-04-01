@@ -66,7 +66,6 @@
 | `docs/archive/` | Archive | closed roadmaps and archived planning docs |
 | `docs/archive/keeper-autonomy-identity-v2/` | Archive | archived design package |
 | `docs/design/` | Archive | active design memos, not front-door docs |
-| `docs/release-feedback/` | Archive | release-specific feedback snapshots |
 | `docs/research/` | Archive | research reference material |
 | `docs/qa/` | Archive | reverse-engineered and QA-oriented notes |
 

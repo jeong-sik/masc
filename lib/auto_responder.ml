@@ -140,14 +140,19 @@ let run_cli_agent ~agent_type ~prompt =
 let cascade_name_for_agent_type agent_type =
   Printf.sprintf "auto_responder_%s" agent_type
 
+(** Validate model response using structural fields, not text heuristics.
+    Guardrail principle: accept unless there is a clear structural reason to reject.
+    - stop_reason=EndTurn with non-empty content → valid
+    - stop_reason=MaxTokens with non-empty content → valid (truncated but usable)
+    - Unknown stop reason with content → valid (permissive: give autonomy)
+    - Empty content → reject *)
 let model_response_is_valid (resp : Oas_response.api_response) =
-  let s = String.trim (Oas_response.text_of_response resp) in
-  let s_lower = String.lowercase_ascii s in
-  let len = String.length s in
-  len > 0
-  && not (len >= 5 && String.sub s_lower 0 5 = "error")
-  && not (len >= 14 && String.sub s 0 14 = "Empty response")
-  && not (len >= 9 && String.sub s 0 9 = "{\"error\":")
+  let text = String.trim (Oas_response.text_of_response resp) in
+  String.length text > 0
+  && (match resp.stop_reason with
+      | Agent_sdk.Types.EndTurn | Agent_sdk.Types.MaxTokens
+      | Agent_sdk.Types.StopSequence | Agent_sdk.Types.StopToolUse -> true
+      | Agent_sdk.Types.Unknown _ -> String.length text > 5)
 
 let call_model_direct_sync ~agent_type ~prompt =
   let cascade_name = cascade_name_for_agent_type agent_type in

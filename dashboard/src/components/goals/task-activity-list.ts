@@ -2,16 +2,11 @@
 // Independent from global traceSlots (avoids keeper-detail overlay collision).
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 import { EmptyState } from '../common/empty-state'
 import { LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
 import type { UnifiedTraceEvent, TraceEventKind } from '../session-trace/session-trace-state'
-
-export type ActivityFilter = 'all' | 'tool_call' | 'broadcast' | 'task'
-
-/** Exported so task-detail-state.ts resetState() can clear it. */
-export const activeFilter = signal<ActivityFilter>('all')
+import { activeFilter, type ActivityFilter } from './task-detail-state'
 
 function kindIcon(kind: TraceEventKind): string {
   switch (kind) {
@@ -43,7 +38,7 @@ function durationColor(ms: number | undefined): string {
 }
 
 function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
-  const hasDetail = event.toolArgs || event.toolResult || (event.detail && Object.keys(event.detail).length > 0)
+  const hasDetail = event.toolArgs != null || event.toolResult != null || (event.detail && Object.keys(event.detail).length > 0)
 
   if (!hasDetail) {
     return html`
@@ -66,20 +61,20 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
         <span class="text-[10px] text-text-dim">\u25B8</span>
       </summary>
       <div class="px-3 pb-2 pt-1 ml-7">
-        ${event.toolArgs ? html`
+        ${event.toolArgs != null ? html`
           <div class="mb-1">
             <div class="text-[10px] text-text-dim mb-0.5">args</div>
             <pre class="text-[11px] text-text-body whitespace-pre-wrap break-all bg-[var(--white-3)] rounded p-2 max-h-[200px] overflow-y-auto">${typeof event.toolArgs === 'string' ? event.toolArgs : JSON.stringify(event.toolArgs, null, 2)}</pre>
           </div>
         ` : null}
-        ${event.toolResult ? html`
+        ${event.toolResult != null ? html`
           <div>
             <div class="text-[10px] text-text-dim mb-0.5">result</div>
             <pre class="text-[11px] text-text-body whitespace-pre-wrap break-all bg-[var(--white-3)] rounded p-2 max-h-[200px] overflow-y-auto">${typeof event.toolResult === 'string' ? event.toolResult : JSON.stringify(event.toolResult, null, 2)}</pre>
           </div>
         ` : null}
         ${event.error ? html`<div class="text-[11px] text-bad mt-1">${event.error}</div>` : null}
-        ${event.cost_usd ? html`<div class="text-[10px] text-text-dim mt-1">cost: $${event.cost_usd.toFixed(4)}</div>` : null}
+        ${event.cost_usd != null ? html`<div class="text-[10px] text-text-dim mt-1">cost: $${event.cost_usd.toFixed(4)}</div>` : null}
       </div>
     </details>
   `

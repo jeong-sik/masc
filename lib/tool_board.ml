@@ -209,6 +209,7 @@ let handle_post_create args =
   let body = get_string_opt args "body" |> Option.map strip_state_blocks_text in
   let raw_content = match body with Some value -> value | None -> get_string args "content" "" in
   let content = strip_state_blocks_text raw_content in
+  let author = get_string_opt args "author" |> Option.map String.trim in
   let title_is_empty =
     match title with
     | Some value -> String.trim value = ""
@@ -216,11 +217,13 @@ let handle_post_create args =
   in
   if title_is_empty then
     (false, "❌ title is required")
+  else if author = None || author = Some "" || author = Some "anonymous" then
+    (false, "❌ author is required")
   else if String.length content > Board.Limits.max_content_length then
     (false, Printf.sprintf "Content exceeds max length (%d > %d chars)"
        (String.length content) Board.Limits.max_content_length)
   else
-  let author = get_string args "author" "anonymous" in
+  let author = Option.value author ~default:"" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
   let visibility_str = get_string args "visibility" "internal" in
   let hearth = get_string_opt args "hearth" in
@@ -380,18 +383,21 @@ let handle_post_get args =
 let handle_comment_add args =
   let post_id = get_string args "post_id" "" in
   let content = get_string args "content" "" in
-  let author = get_string args "author" "anonymous" in
+  let author = get_string_opt args "author" |> Option.map String.trim in
   let parent_id = get_string_opt args "parent_id" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
   if String.trim post_id = "" then
     (false, "post_id is required")
   else if String.trim content = "" then
     (false, "Content must not be empty")
+  else if author = None || author = Some "" || author = Some "anonymous" then
+    (false, "author is required")
   else if String.length content > Board.Limits.max_content_length then
     (false, Printf.sprintf "Content exceeds max length (%d > %d chars)"
        (String.length content) Board.Limits.max_content_length)
   else
-  match Board_dispatch.add_comment ~post_id ~author ~content ?parent_id ~ttl_hours () with
+  match Board_dispatch.add_comment ~post_id ~author:(Option.value author ~default:"")
+          ~content ?parent_id ~ttl_hours () with
   | Ok comment ->
       let json = Board.comment_to_yojson comment in
       (true, Printf.sprintf "✅ Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
@@ -519,7 +525,7 @@ let tool_post_create : Types.tool_schema = {
       ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic hearth name (e.g. webrtc, code-review)")]);
       ("thread_id", `Assoc [("type", `String "string"); ("description", `String "Linked conversation thread ID")]);
     ]);
-    ("required", `List [`String "content"]);
+    ("required", `List [`String "content"; `String "author"]);
   ];
 }
 
@@ -567,7 +573,7 @@ let tool_comment_add : Types.tool_schema = {
       ("parent_id", `Assoc [("type", `String "string"); ("description", `String "Parent comment ID for replies (optional)")]);
       ("ttl_hours", `Assoc [("type", `String "integer"); ("description", `String "Time-to-live in hours")]);
     ]);
-    ("required", `List [`String "post_id"; `String "content"]);
+    ("required", `List [`String "post_id"; `String "content"; `String "author"]);
   ];
 }
 

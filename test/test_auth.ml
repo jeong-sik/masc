@@ -249,6 +249,49 @@ let test_permission_denied_for_reader () =
   | Error (Types.Forbidden _) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Types.masc_error_to_string e))
 
+let test_optional_token_overrides_reader_default_role () =
+  let dir = setup_test_room () in
+  let _ = Auth.enable_auth dir ~require_token:false ~agent_name:"test-admin" in
+  let cfg = Auth.load_auth_config dir in
+  Auth.save_auth_config dir { cfg with default_role = Types.Reader };
+  let result =
+    match Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker with
+    | Ok (raw_token, _) ->
+        Auth.check_permission dir ~agent_name:"worker_agent"
+          ~token:(Some raw_token) ~permission:Types.CanClaimTask
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match result with
+  | Ok () -> ()
+  | Error e ->
+      fail
+        (Printf.sprintf
+           "optional worker token should override reader default_role: %s"
+           (Types.masc_error_to_string e))
+
+let test_optional_token_authorizes_keeper_tool_when_default_role_reader () =
+  let dir = setup_test_room () in
+  let _ = Auth.enable_auth dir ~require_token:false ~agent_name:"test-admin" in
+  let cfg = Auth.load_auth_config dir in
+  Auth.save_auth_config dir { cfg with default_role = Types.Reader };
+  let result =
+    match Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker with
+    | Ok (raw_token, _) ->
+        Auth.authorize_tool_v2 dir ~agent_name:"worker_agent"
+          ~token:(Some raw_token)
+          ~tool_name:"masc_keeper_create_from_persona"
+    | Error e -> Error e
+  in
+  cleanup_test_room dir;
+  match result with
+  | Ok () -> ()
+  | Error e ->
+      fail
+        (Printf.sprintf
+           "optional worker token should authorize keeper spawn tool: %s"
+           (Types.masc_error_to_string e))
+
 let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   let dir = setup_test_room () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
@@ -383,6 +426,10 @@ let () =
       test_case "auth enabled requires token" `Quick test_auth_enabled_requires_token;
       test_case "auth enabled with valid token" `Quick test_auth_enabled_with_valid_token;
       test_case "permission denied for reader" `Quick test_permission_denied_for_reader;
+      test_case "optional token overrides reader default role"
+        `Quick test_optional_token_overrides_reader_default_role;
+      test_case "optional token authorizes keeper tool"
+        `Quick test_optional_token_authorizes_keeper_tool_when_default_role_reader;
       test_case "strict unknown masc tool allows worker"
         `Quick test_authorize_unknown_masc_tool_strict_worker_allowed;
       test_case "strict unknown masc tool denies reader"

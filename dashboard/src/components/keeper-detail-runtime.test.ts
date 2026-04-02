@@ -57,6 +57,18 @@ describe('resolveKeeperToolPolicy', () => {
       resolvedAllowlist: [],
     })
   })
+
+  it('preserves an explicit config error state', () => {
+    expect(resolveKeeperToolPolicy(null, 'error')).toEqual({
+      source: 'error',
+      mode: 'preset',
+      preset: null,
+      alsoAllow: [],
+      customAllowlist: [],
+      denylist: [],
+      resolvedAllowlist: [],
+    })
+  })
 })
 
 describe('resolveKeeperObservedToolAudit', () => {

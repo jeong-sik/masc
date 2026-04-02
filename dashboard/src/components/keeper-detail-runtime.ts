@@ -22,6 +22,7 @@ import {
 import { ToolAllowlistEditor } from './tools/tool-allowlist-editor'
 import { loadTools } from './tools/tool-state'
 import {
+  loadKeeperConfig,
   peekKeeperConfigLoadStatus,
   peekLoadedKeeperConfig,
 } from './keeper-config-panel'
@@ -78,7 +79,7 @@ function missionKeeperBrief(keeper: Keeper): DashboardMissionKeeperBrief | null 
 type KeeperConfigLoadStatus = 'idle' | 'loading' | 'loaded' | 'error' | 'other'
 
 export interface KeeperToolPolicySnapshot {
-  source: 'keeper_config' | 'loading' | 'none'
+  source: 'keeper_config' | 'loading' | 'error' | 'none'
   mode: 'preset' | 'custom' | string
   preset: Keeper['tool_preset']
   alsoAllow: string[]
@@ -107,6 +108,18 @@ export function resolveKeeperToolPolicy(
   if (loadStatus === 'idle' || loadStatus === 'loading') {
     return {
       source: 'loading',
+      mode: 'preset',
+      preset: null,
+      alsoAllow: [],
+      customAllowlist: [],
+      denylist: [],
+      resolvedAllowlist: [],
+    }
+  }
+
+  if (loadStatus === 'error') {
+    return {
+      source: 'error',
       mode: 'preset',
       preset: null,
       alsoAllow: [],
@@ -383,19 +396,25 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
     keeper.skill_primary
     ?? (runtimeState === 'offline' ? 'offline' : 'not_collected')
   const policyLoading = toolPolicy.source === 'loading'
+  const policyError = toolPolicy.source === 'error'
   const policyEditable = toolPolicy.source === 'keeper_config'
   const toolPolicyLabel =
     policyLoading
       ? 'loading'
+      : policyError
+        ? 'error'
       : toolPolicy.mode === 'custom'
         ? 'custom'
         : toolPolicy.preset ?? 'unset'
+  const unavailablePolicyLabel = policyError ? 'config_error' : 'config_unavailable'
   const allowedToolCountLabel =
     allowedTools.length > 0
       ? String(allowedTools.length)
       : policyLoading
         ? 'loading'
-        : allowlistFallback
+        : policyEditable
+          ? allowlistFallback
+          : unavailablePolicyLabel
   const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? recentTools[0] ?? null
 
   return html`
@@ -429,7 +448,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
             showAllowlistEditor.value = !showAllowlistEditor.value
             if (showAllowlistEditor.value) loadTools()
           }}
-        >${policyLoading ? '로딩 중' : policyEditable ? (showAllowlistEditor.value ? '닫기' : '편집') : '설정 필요'}</button>
+        >${policyLoading ? '로딩 중' : policyEditable ? (showAllowlistEditor.value ? '닫기' : '편집') : policyError ? '설정 오류' : '설정 필요'}</button>
       </div>
 
       ${showAllowlistEditor.value && policyEditable
@@ -441,7 +460,11 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
             currentCustomAllowlist=${toolPolicy.customAllowlist}
             currentDenylist=${toolPolicy.denylist}
             resolvedAllowlist=${allowedTools}
-            onUpdated=${() => { showAllowlistEditor.value = false; loadTools() }}
+            onUpdated=${() => {
+              showAllowlistEditor.value = false
+              void loadKeeperConfig(keeper.name, { force: true })
+              loadTools()
+            }}
           />`
         : html`
           <span class="text-[11px] text-[var(--text-muted)] leading-snug">
@@ -449,12 +472,14 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
               ? '정적 도구 정책을 불러오는 중입니다.'
               : policyEditable
                 ? '이 키퍼 정책에서 해석된 allowlist입니다.'
-                : '정적 도구 정책을 아직 확인할 수 없습니다.'}
+                : policyError
+                  ? '정적 도구 정책 로드에 실패했습니다.'
+                  : '정적 도구 정책을 아직 확인할 수 없습니다.'}
           </span>
           <div class="flex flex-wrap gap-1.5">
             ${allowedTools.length > 0
               ? allowedTools.map((tool: string) => html`<${ToolChip} name=${tool} />`)
-              : html`<span class="text-[11px] text-[var(--text-muted)] italic">${policyLoading ? 'loading' : policyEditable ? allowlistFallback : 'config_unavailable'}</span>`}
+              : html`<span class="text-[11px] text-[var(--text-muted)] italic">${policyLoading ? 'loading' : policyEditable ? allowlistFallback : unavailablePolicyLabel}</span>`}
           </div>
         `}
 

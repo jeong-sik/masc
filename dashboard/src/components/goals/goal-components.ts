@@ -18,6 +18,7 @@ import {
   horizonColor,
   priorityStars,
   statusFilterLabel,
+  goalById,
 } from './goal-helpers'
 
 const deletingGoalId = signal<string | null>(null)
@@ -47,7 +48,7 @@ export function GoalRow({ goal }: { goal: Goal }) {
           <span class="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest" style="color:${horizonColor(goal.horizon)}">
             ${horizonLabel(goal.horizon)}
           </span>
-          <span class="truncate text-[15px] font-semibold tracking-[-0.01em] text-text-strong">${goal.title}</span>
+          <span class="break-words line-clamp-2 text-[15px] font-semibold tracking-[-0.01em] text-text-strong">${goal.title}</span>
         </div>
         <div class="mt-2.5 flex flex-wrap items-center gap-2 text-[11px] font-medium text-text-muted">
           <span class="rounded-md border border-card-border/60 bg-white/4 px-2 py-1 text-[12px] text-amber-300" title="우선순위 ${goal.priority}">
@@ -65,14 +66,15 @@ export function GoalRow({ goal }: { goal: Goal }) {
           ` : null}
         </div>
         ${goal.last_review_note ? html`
-          <div class="mt-3 rounded-lg border border-card-border/50 bg-white/4 p-3 text-[12px] italic leading-relaxed text-text-body/85">${goal.last_review_note}</div>
+          <div class="mt-3 rounded-lg border border-card-border/50 bg-white/4 p-3 text-[12px] italic leading-relaxed text-text-body/85 whitespace-pre-wrap">${goal.last_review_note}</div>
         ` : null}
       </div>
       <div class="flex flex-col items-end gap-1.5 shrink-0 pt-0.5">
         <${StatusBadge} status=${goal.status} />
-        <div class="text-[11px] font-mono text-text-dim">
-          <${TimeAgo} timestamp=${goal.updated_at} />
-        </div>
+        ${goal.parent_goal_id ? (() => {
+          const parent = goalById(goal.parent_goal_id)
+          return html`<div class="text-[10px] text-text-dim">\u2190 ${parent?.title ?? goal.parent_goal_id}</div>`
+        })() : null}
         <button type="button"
           class="mt-1 rounded-lg border border-bad/25 bg-bad/10 px-2.5 py-1 text-[10px] font-semibold text-bad transition-colors hover:bg-bad/20 disabled:opacity-50 disabled:cursor-not-allowed"
           onClick=${handleDelete}

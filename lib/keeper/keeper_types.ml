@@ -214,6 +214,11 @@ let json_member_present key (json : Yojson.Safe.t) =
   | `Assoc fields -> List.mem_assoc key fields
   | _ -> false
 
+let json_object_member_present key (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member key json with
+  | `Assoc _ -> true
+  | _ -> false
+
 let string_list_field_result ?label ~field_name (json : Yojson.Safe.t) =
   let label = Option.value ~default:field_name label in
   match Yojson.Safe.Util.member field_name json with
@@ -443,7 +448,7 @@ let warn_tool_access_compat_keys ~path (json : Yojson.Safe.t) =
   match compat_present with
   | [] -> ()
   | fields ->
-      if json_member_present "tool_access" json then
+      if json_object_member_present "tool_access" json then
         Log.Keeper.warn
           "keeper meta %s has tool_access plus compatibility tool keys; ignoring %s"
           path (String.concat ", " fields)

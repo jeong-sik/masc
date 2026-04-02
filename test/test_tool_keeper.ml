@@ -2267,6 +2267,76 @@ let test_read_meta_warns_on_compat_tool_keys () =
            (fun message -> contains_substring message "uses compatibility tool keys")
            messages))
 
+let test_read_meta_treats_null_tool_access_as_compat_warning () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "null-tool-access-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "null-tool-access-demo");
+              ("goal", `String "Warn on null canonical tool_access");
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      if not ok then fail ("keeper up failed: " ^ body);
+      let meta_path =
+        Masc_mcp.Keeper_types.keeper_meta_path config "null-tool-access-demo"
+      in
+      let original_json = Yojson.Safe.from_file meta_path in
+      let compat_json =
+        match original_json with
+        | `Assoc fields ->
+            `Assoc
+              ( ("tool_access", `Null)
+              :: ("tool_preset", `String "coding")
+              :: ("tool_also_allow", `List [ `String "masc_status" ])
+              :: List.remove_assoc "tool_access" fields )
+        | _ -> fail "expected keeper meta object"
+      in
+      let oc = open_out meta_path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc (Yojson.Safe.pretty_to_string compat_json));
+      let baseline = latest_log_seq () in
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "null-tool-access-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after null tool_access warning read"
+        | Error e -> fail e
+      in
+      let messages = recent_keeper_log_messages ~since_seq:baseline in
+      check bool "compat warning emitted for null tool_access" true
+        (List.exists
+           (fun message -> contains_substring message "uses compatibility tool keys")
+           messages);
+      check bool "ignore warning not emitted for null tool_access" false
+        (List.exists
+           (fun message -> contains_substring message "has tool_access plus compatibility tool keys")
+           messages);
+      check bool "tool access projected from compat fields" true
+        (match meta.tool_access with
+         | Masc_mcp.Keeper_types.Preset
+             { preset = Masc_mcp.Keeper_types.Coding; also_allow } ->
+             List.mem "masc_status" also_allow
+         | _ -> false))
+
 let test_keeper_up_recreates_cached_keeper_dir_after_base_reset () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2466,6 +2536,8 @@ let () =
            test_read_meta_warns_on_unknown_keys;
          test_case "read_meta warns on compat tool keys" `Quick
            test_read_meta_warns_on_compat_tool_keys;
+         test_case "read_meta treats null tool_access as compat warning" `Quick
+           test_read_meta_treats_null_tool_access_as_compat_warning;
          test_case "keeper repair passes with provided source_text" `Quick
            test_keeper_repair_passes_with_provided_source_text;
          test_case "keeper up recreates cached keeper dir after base reset (issue #3710)" `Quick

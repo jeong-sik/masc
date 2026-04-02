@@ -26,6 +26,8 @@ let make_meta () =
     Uses the same Korean keywords, groups, and config. *)
 let build_keeper_index () =
   let meta = make_meta () in
+  (* Inject masc_* schemas so the universe includes governance, agent, etc. *)
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
   let tool_schemas = Keeper_exec_tools.keeper_universe_model_tools meta in
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with top_k = 20 } in
@@ -121,6 +123,10 @@ let build_keeper_index () =
       else if String.starts_with ~prefix:"masc_team_session_" name then Some "masc_session"
       else if String.starts_with ~prefix:"masc_worktree_" name then Some "masc_worktree"
       else if String.starts_with ~prefix:"masc_code_" name then Some "masc_code"
+      else if String.starts_with ~prefix:"masc_governance_" name then Some "masc_governance"
+      else if String.starts_with ~prefix:"masc_autoresearch_" name then Some "masc_autoresearch"
+      else if String.starts_with ~prefix:"masc_agent_" name
+           || name = "masc_agents" then Some "masc_agent"
       else if String.starts_with ~prefix:"masc_" name then Some "masc_core"
       else None
     in

@@ -28,6 +28,17 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
     ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
+(** Detect transient TCP/TLS errors that warrant a single immediate retry.
+    These patterns match OAS cascade error messages for connection-level failures. *)
+let transient_error_patterns =
+  [ "Connection_reset"; "Broken pipe"; "End_of_file";
+    "connection closed"; "Connection refused" ]
+
+let is_transient_network_error (msg : string) : bool =
+  List.exists
+    (fun needle -> string_contains_substring ~needle msg)
+    transient_error_patterns
+
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
   if observation.pending_mentions <> [] || observation.pending_board_events <> [] then
@@ -556,9 +567,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
            No dynamic_context needed here. *)
         { system_prompt; dynamic_context = "" }
       in
-      (* 5. Run via OAS Agent.run() *)
+      (* 5. Run via OAS Agent.run() with transient-error retry *)
       let run_result, latency_ms =
         Keeper_exec_context.timed (fun () ->
+          let do_run () =
             Keeper_agent_run.run_turn ~config ~meta ~base_dir
               ~max_context:primary_max_context ~build_turn_prompt
               ~user_message ~cascade_name:"keeper_unified"
@@ -567,7 +579,16 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
               ~max_cost_usd
-              ())
+              ()
+          in
+          match do_run () with
+          | Ok _ as ok -> ok
+          | Error e when is_transient_network_error e ->
+              Log.Keeper.warn "%s: transient network error, retrying once: %s"
+                meta.name (short_preview e);
+              Eio.Fiber.yield ();
+              do_run ()
+          | Error _ as err -> err)
       in
       match run_result with
       | Error e ->

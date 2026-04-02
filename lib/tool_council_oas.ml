@@ -254,6 +254,21 @@ let handle_set_param ctx args =
     ])
   end
 
+let feed_ctx_of (ctx : context) : Tool_council_feed.context =
+  { base_path = ctx.base_path;
+    agent_name = ctx.agent_name;
+    room_config = ctx.room_config; }
+
+let handle_clear_param ctx args =
+  let fctx = feed_ctx_of ctx in
+  let submit_petition _ctx petition_args =
+    handle_petition_submit ctx petition_args
+  in
+  Tool_council_feed.handle_clear_param ~submit_petition fctx args
+
+let handle_prompt_override ctx args =
+  Tool_council_feed.handle_prompt_override (feed_ctx_of ctx) args
+
 (* ================================================================ *)
 (* Execute/voting — delegate to Council.Executor                     *)
 (* ================================================================ *)
@@ -405,6 +420,8 @@ let dispatch (ctx : context) ~name ~args : result option =
     | "masc_execution_orders" -> Some handle_execution_orders
     | "masc_runtime_params" -> Some handle_runtime_params
     | "masc_set_param" -> Some handle_set_param
+    | "masc_clear_param" -> Some handle_clear_param
+    | "masc_prompt_override" -> Some handle_prompt_override
     | _ -> None
   in
   match handler with

@@ -219,6 +219,17 @@ let test_list_posts_matches_comment_author () =
   Alcotest.(check bool) "non matching comment author excluded" false
     (List.mem other_post_id ids)
 
+let test_author_filter_treats_wildcards_literally () =
+  ignore
+    (Board_dispatch.create_post ~author:"wildcard-alpha"
+       ~content:"literal wildcard filter" ~post_kind:Board.Human_post ());
+  let filtered =
+    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent
+      ~author_filter:"%" ~limit:20 ()
+  in
+  Alcotest.(check int) "percent does not match all authors" 0
+    (List.length filtered)
+
 let test_reclassify_posts_dry_run_and_apply () =
   let post_id = seed_legacy_keeper_post () in
   let dry_run = Board_dispatch.reclassify_posts ~dry_run:true () in
@@ -401,6 +412,8 @@ let () =
       Alcotest.test_case "filters" `Quick (with_eio test_list_posts_with_filters);
       Alcotest.test_case "comment author filter" `Quick
         (with_eio test_list_posts_matches_comment_author);
+      Alcotest.test_case "literal wildcard filter" `Quick
+        (with_eio test_author_filter_treats_wildcards_literally);
       Alcotest.test_case "reclassify dry-run and apply" `Quick
         (with_eio test_reclassify_posts_dry_run_and_apply);
     ];

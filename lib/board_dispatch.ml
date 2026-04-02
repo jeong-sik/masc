@@ -145,7 +145,13 @@ let get_pg_pool () =
 
 let sort_posts_in_memory ~sort_by (posts : Board.post list) =
   match sort_by with
-  | Hot -> posts  (* Board.list_posts already sorts by score *)
+  | Hot ->
+      List.sort (fun (a : Board.post) (b : Board.post) ->
+        let score_a = a.votes_up - a.votes_down in
+        let score_b = b.votes_up - b.votes_down in
+        let cmp = compare score_b score_a in
+        if cmp <> 0 then cmp
+        else compare b.created_at a.created_at) posts
   | Recent ->
       List.sort (fun (a : Board.post) (b : Board.post) ->
         compare b.created_at a.created_at) posts

@@ -138,12 +138,12 @@ let mk_list_q order_clause =
        AND ($1::TEXT IS NULL OR visibility = $1) \
        AND ($2::TEXT IS NULL OR hearth = $2) \
        AND ($3::TEXT IS NULL \
-         OR author ILIKE '%%' || $3 || '%%' \
+         OR position(lower($3) in lower(author)) > 0 \
          OR EXISTS ( \
            SELECT 1 FROM masc_board_comments c \
            WHERE c.post_id = masc_board_posts.id \
              AND %s \
-             AND c.author ILIKE '%%' || $3 || '%%')) \
+             AND position(lower($3) in lower(c.author)) > 0)) \
      ORDER BY %s LIMIT $4"
     post_columns ttl_where comment_ttl_where order_clause)
 

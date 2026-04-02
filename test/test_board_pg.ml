@@ -197,6 +197,18 @@ let test_list_posts_matches_comment_author = with_pg_backend (fun t ->
     (List.mem other_post_id ids)
 )
 
+let test_author_filter_treats_wildcards_literally = with_pg_backend (fun t ->
+  ignore
+    (Board_pg.create_post t ~author:"pg-test-wildcard-alpha"
+       ~content:"pg literal wildcard filter" ~post_kind:Board.Human_post ());
+  let filtered =
+    Board_pg.list_posts t ~sort_by:Board_pg.Recent
+      ~author_filter:"%" ~limit:10 ()
+  in
+  Alcotest.(check int) "percent does not match all authors" 0
+    (List.length filtered)
+)
+
 (** {1 Vote Operations} *)
 
 let test_vote_post = with_pg_backend (fun t ->
@@ -386,6 +398,8 @@ let () =
       Alcotest.test_case "add and get" `Quick test_add_and_get_comments;
       Alcotest.test_case "comment author filter" `Quick
         test_list_posts_matches_comment_author;
+      Alcotest.test_case "literal wildcard filter" `Quick
+        test_author_filter_treats_wildcards_literally;
     ];
     "votes", [
       Alcotest.test_case "upvote" `Quick test_vote_post;

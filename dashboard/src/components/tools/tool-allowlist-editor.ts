@@ -44,6 +44,20 @@ const inventoryDescMap = computed<Map<string, string>>(() => {
   return m
 })
 
+const inventoryCategoryMap = computed<Map<string, string>>(() => {
+  const inv = toolsData.value?.tool_inventory?.tools
+  const m = new Map<string, string>()
+  if (inv) for (const t of inv) m.set(t.name, t.category)
+  return m
+})
+
+const usageCountMap = computed<Map<string, number>>(() => {
+  const top = toolsData.value?.tool_usage?.top_20
+  const m = new Map<string, number>()
+  if (top) for (const t of top) m.set(t.name, t.call_count)
+  return m
+})
+
 // ── Helpers ──────────────────────────────────
 
 function parseToolList(raw: string): string[] {
@@ -106,6 +120,44 @@ function ReadOnlyChip({ name }: { name: string }) {
   `
 }
 
+/** Resolved allowlist grouped by category. */
+function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Map<string, string> }) {
+  if (tools.length === 0) {
+    return html`
+      <div class="flex flex-col gap-1">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">resolved allowlist (0)</span>
+        <span class="text-[11px] text-[var(--text-muted)] italic">resolved allowlist 없음</span>
+      </div>
+    `
+  }
+
+  const groups = new Map<string, string[]>()
+  for (const name of tools) {
+    const cat = catMap.get(name) ?? 'other'
+    const list = groups.get(cat)
+    if (list) list.push(name)
+    else groups.set(cat, [name])
+  }
+
+  return html`
+    <div class="flex flex-col gap-1">
+      <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        resolved allowlist (${tools.length}개, ${groups.size} 카테고리)
+      </span>
+      <div class="flex flex-col gap-2 max-h-[160px] overflow-y-auto">
+        ${Array.from(groups.entries()).map(([cat, names]) => html`
+          <div class="flex flex-col gap-1">
+            <span class="text-[9px] font-bold uppercase tracking-widest text-[var(--text-muted)]">${cat} (${names.length})</span>
+            <div class="flex flex-wrap gap-1">
+              ${names.map(name => html`<${ReadOnlyChip} name=${name} />`)}
+            </div>
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
 /** Search-based tool picker using downshift useCombobox for keyboard nav + ARIA. */
 function ToolSearchPicker({
   items,
@@ -123,14 +175,29 @@ function ToolSearchPicker({
   const [inputValue, setInputValue] = useState('')
   const excluded = useMemo(() => new Set([...items, ...(excludeItems ?? [])]), [items, excludeItems])
   const descMap = inventoryDescMap.value
+  const catMap = inventoryCategoryMap.value
+  const usageMap = usageCountMap.value
+  const allNames = inventoryNames.value
 
   const filtered = useMemo(() => {
     const q = inputValue.toLowerCase().trim()
     if (q.length === 0) return []
-    return inventoryNames.value
-      .filter(name => !excluded.has(name) && name.toLowerCase().includes(q))
-      .slice(0, 15)
-  }, [inputValue, excluded])
+    const matched = allNames.filter(name => !excluded.has(name) && name.toLowerCase().includes(q))
+    matched.sort((a, b) => (usageMap.get(b) ?? 0) - (usageMap.get(a) ?? 0))
+    return matched.slice(0, 15)
+  }, [inputValue, excluded, allNames, usageMap])
+
+  // Group filtered items by category for rendering (flat array for downshift, visual grouping for UI)
+  const groupedFiltered = useMemo(() => {
+    const groups = new Map<string, string[]>()
+    for (const name of filtered) {
+      const cat = catMap.get(name) ?? 'other'
+      const list = groups.get(cat)
+      if (list) list.push(name)
+      else groups.set(cat, [name])
+    }
+    return groups
+  }, [filtered, catMap])
 
   const {
     isOpen,
@@ -183,35 +250,46 @@ function ToolSearchPicker({
         />
 
         <ul ...${getMenuProps({
-          class: showMenu
-            ? 'absolute z-10 top-full left-0 right-0 mt-1 max-h-[180px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] shadow-lg backdrop-blur-sm list-none m-0 p-0'
+          class: showMenu && filtered.length > 0
+            ? 'absolute z-10 top-full left-0 right-0 mt-1 max-h-[220px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] shadow-lg backdrop-blur-sm list-none m-0 p-0'
             : 'hidden',
         })}>
           ${showMenu && filtered.length > 0
-            ? filtered.map((name, idx) => html`
-              <li
-                ...${getItemProps({ item: name, index: idx })}
-                class=${`w-full flex items-start gap-2 text-left px-3 py-1.5 cursor-pointer transition-colors ${
-                  highlightedIndex === idx
-                    ? 'bg-[rgba(71,184,255,0.16)] text-[#9ad9ff]'
-                    : 'hover:bg-[rgba(71,184,255,0.08)]'
-                }`}
-              >
-                <span class="text-[11px] text-[var(--text-body)] font-medium shrink-0">${name}</span>
-                ${descMap.has(name)
-                  ? html`<span class="text-[10px] text-[var(--text-muted)] truncate">${descMap.get(name)}</span>`
-                  : null}
-              </li>
+            ? Array.from(groupedFiltered.entries()).map(([cat, names]) => html`
+              ${groupedFiltered.size > 1
+                ? html`<li class="px-3 pt-2 pb-0.5 text-[9px] font-bold uppercase tracking-widest text-[var(--text-muted)] select-none" aria-hidden="true">${cat}</li>`
+                : null}
+              ${names.map(name => {
+                const idx = filtered.indexOf(name)
+                const usage = usageMap.get(name)
+                return html`
+                  <li
+                    ...${getItemProps({ item: name, index: idx })}
+                    class=${`w-full flex items-start gap-2 text-left px-3 py-1.5 cursor-pointer transition-colors ${
+                      highlightedIndex === idx
+                        ? 'bg-[rgba(71,184,255,0.16)] text-[#9ad9ff]'
+                        : 'hover:bg-[rgba(71,184,255,0.08)]'
+                    }`}
+                  >
+                    <span class="text-[11px] text-[var(--text-body)] font-medium shrink-0">${name}</span>
+                    ${usage ? html`<span class="text-[9px] text-[var(--text-muted)] shrink-0 tabular-nums">${usage}x</span>` : null}
+                    ${descMap.has(name)
+                      ? html`<span class="text-[10px] text-[var(--text-muted)] truncate">${descMap.get(name)}</span>`
+                      : null}
+                  </li>
+                `
+              })}
             `)
-            : showMenu && filtered.length === 0
-              ? html`
-                <li class="px-3 py-2 text-[11px] text-[var(--text-muted)]">
-                  ${inventoryNames.value.length === 0
-                    ? '도구 목록 로딩 중... Enter로 직접 추가 가능'
-                    : '일치하는 도구 없음. Enter로 직접 추가 가능'}
-                </li>`
-              : null}
+            : null}
         </ul>
+        ${showMenu && filtered.length === 0
+          ? html`
+            <div class="absolute z-10 top-full left-0 right-0 mt-1 px-3 py-2 rounded-lg border border-[var(--card-border)] bg-[rgba(11,18,32,0.97)] text-[11px] text-[var(--text-muted)]">
+              ${allNames.length === 0
+                ? '도구 목록 로딩 중... Enter로 직접 추가 가능'
+                : '일치하는 도구 없음. Enter로 직접 추가 가능'}
+            </div>`
+          : null}
       </div>
     </div>
   `
@@ -475,17 +553,8 @@ export function ToolAllowlistEditor({
             />`}
       </div>
 
-      <!-- Resolved allowlist -->
-      <div class="flex flex-col gap-1">
-        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-          현재 resolved allowlist (${resolvedAllowlist.length}개)
-        </span>
-        <div class="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto">
-          ${resolvedAllowlist.length > 0
-            ? resolvedAllowlist.map(name => html`<${ReadOnlyChip} name=${name} />`)
-            : html`<span class="text-[11px] text-[var(--text-muted)] italic">resolved allowlist 없음</span>`}
-        </div>
-      </div>
+      <!-- Resolved allowlist grouped by category -->
+      <${ResolvedPreview} tools=${resolvedAllowlist} catMap=${inventoryCategoryMap.value} />
 
       <!-- Apply -->
       <div class="flex items-center gap-3">

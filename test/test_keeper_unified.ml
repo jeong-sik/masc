@@ -176,7 +176,7 @@ let test_observe_uses_precollected_board_events () =
       check bool "board event schedules turn" true
         (WO.should_run_unified_turn ~meta:minimal_meta obs))
 
-let test_collect_board_events_keeps_non_mentions () =
+let test_collect_board_events_skips_non_mentions_without_followup () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -201,14 +201,62 @@ let test_collect_board_events_keeps_non_mentions () =
           ~continuity_summary:"goal test-keeper"
           ~meta:minimal_meta
       in
-      check int "collects non-mention events" 1 (List.length events);
+      check int "skips non-mention events" 0 (List.length events);
       check int "new count includes non-mention" 1 new_count;
+      check int "mention count stays zero" 0 mention_count)
+
+let test_collect_board_events_keeps_external_replies_after_self_comment () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let post_id =
+        match
+          Masc_mcp.Board_dispatch.create_post ~author:"alice"
+            ~title:"General update" ~content:"No direct mention here"
+            ~post_kind:Masc_mcp.Board.Human_post ()
+        with
+        | Ok post -> Masc_mcp.Board.Post_id.to_string post.id
+        | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e)
+      in
+      (match
+         Masc_mcp.Board_dispatch.add_comment ~post_id ~author:"test-keeper"
+           ~content:"I am following this thread."
+           ()
+       with
+      | Ok _ -> ()
+      | Error e -> fail ("add_comment failed: " ^ Masc_mcp.Board.show_board_error e));
+      Unix.sleepf 0.02;
+      (match
+         Masc_mcp.Board_dispatch.add_comment ~post_id ~author:"bob"
+           ~content:"Thanks, there is a new question for you."
+           ()
+       with
+      | Ok _ -> ()
+      | Error e -> fail ("add_comment failed: " ^ Masc_mcp.Board.show_board_error e));
+      let events, new_count, mention_count =
+        WO.collect_board_events ~base_path:base_dir
+          ~continuity_summary:"goal test-keeper"
+          ~meta:minimal_meta
+      in
+      check int "new count still tracks recent post" 1 new_count;
       check int "mention count stays zero" 0 mention_count;
       match events with
       | [ event ] ->
-          check bool "explicit mention false" false event.explicit_mention;
-          check (list string) "matched targets empty" [] event.matched_targets
-      | _ -> fail "expected exactly one board event")
+          check bool "follow-up marks self commented" true event.self_commented;
+          check int "external reply count" 1 event.new_external_since;
+          check bool "no explicit mention required" false event.explicit_mention;
+          check string "latest external author" "bob"
+            (Option.value ~default:"" event.latest_external_author)
+      | _ -> fail "expected one follow-up board event")
 
 let test_observe_collects_room_signal_when_enabled () =
   let base_dir = temp_dir () in
@@ -1155,8 +1203,10 @@ let () =
           test_case "with mentions" `Quick test_observation_with_mentions;
           test_case "uses precollected board events" `Quick
             test_observe_uses_precollected_board_events;
-          test_case "collects non-mention board events" `Quick
-            test_collect_board_events_keeps_non_mentions;
+          test_case "skips non-mention board events without follow-up" `Quick
+            test_collect_board_events_skips_non_mentions_without_followup;
+          test_case "keeps external replies after self comment" `Quick
+            test_collect_board_events_keeps_external_replies_after_self_comment;
           test_case "collects room signal when enabled" `Quick
             test_observe_collects_room_signal_when_enabled;
           test_case "scheduled turn uses cooldown only" `Quick

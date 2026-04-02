@@ -353,22 +353,28 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
                 }
               in
               let matched = board_signal_match ~continuity_summary ~meta ~signal in
-              Some
-                {
+              if matched.explicit_mention then
+                Some
+                  {
+                    post_id;
+                    author = Board.Agent_id.to_string p.author;
+                    title = p.title;
+                    preview = short_preview ~max_len:80 p.content;
+                    hearth = p.hearth;
+                    post_kind = p.post_kind;
+                    updated_at = p.updated_at;
+                    explicit_mention = matched.explicit_mention;
+                    matched_targets = matched.matched_targets;
+                    self_commented = false;
+                    new_external_since = 0;
+                    latest_external_author = None;
+                    latest_external_preview = None;
+                  }
+              else (
+                Log.Keeper.debug
+                  "board dedup: skipping post_id=%s (no mention and no prior keeper participation)"
                   post_id;
-                  author = Board.Agent_id.to_string p.author;
-                  title = p.title;
-                  preview = short_preview ~max_len:80 p.content;
-                  hearth = p.hearth;
-                  post_kind = p.post_kind;
-                  updated_at = p.updated_at;
-                  explicit_mention = matched.explicit_mention;
-                  matched_targets = matched.matched_targets;
-                  self_commented = false;
-                  new_external_since = 0;
-                  latest_external_author = None;
-                  latest_external_preview = None;
-                }
+                None)
           | `New_external (count, ext_author, ext_preview) ->
               let signal : Board_dispatch.keeper_board_signal =
                 {

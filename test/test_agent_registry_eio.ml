@@ -90,9 +90,9 @@ let test_cleanup_stale () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Agent_registry_eio.reset_for_testing ();
-  (* This should not fail even with nothing to clean *)
+  (* After reset, no sessions exist so cleanup should return 0 *)
   let cleaned = Agent_registry_eio.cleanup_stale_sessions () in
-  check int "cleanup empty registry returns 0" 0 cleaned
+  check int "cleanup after reset returns 0" 0 cleaned
 
 let test_reset_clears_cached_session_mappings () =
   Eio_main.run @@ fun env ->

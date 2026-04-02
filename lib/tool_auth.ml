@@ -114,8 +114,12 @@ Expires: %s
 
 let handle_auth_revoke ctx args =
   let target_agent = target_agent_name ctx args in
-  Auth.delete_credential ctx.config.base_path target_agent;
-  (true, Printf.sprintf "🗑️ Token revoked for %s" target_agent)
+  match Auth.load_credential ctx.config.base_path target_agent with
+  | None ->
+      (false, Printf.sprintf "No credential found for %s" target_agent)
+  | Some _ ->
+      Auth.delete_credential ctx.config.base_path target_agent;
+      (true, Printf.sprintf "🗑️ Token revoked for %s" target_agent)
 
 let handle_auth_list ctx _args =
   let creds = Auth.list_credentials ctx.config.base_path in

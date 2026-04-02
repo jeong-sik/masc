@@ -196,6 +196,15 @@ let () = test "handle_auth_revoke_respects_agent_name" (fun () ->
   assert (remaining = [])
 )
 
+let () = test "handle_auth_revoke_missing_agent_fails" (fun () ->
+  let ctx = make_test_ctx () in
+  let target = "missing-agent" in
+  let args = `Assoc [("agent_name", `String target)] in
+  let (success, result) = Tool_auth.handle_auth_revoke ctx args in
+  assert (not success);
+  assert (contains_substring result target)
+)
+
 (* Test get_string helper *)
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in

@@ -25,6 +25,7 @@ let keeper_internal_tools =
     "keeper_library_search";
     "keeper_library_read";
     "keeper_time_now";
+    "keeper_tools_list";
     "keeper_context_status";
     "keeper_tasks_list";
     "keeper_tasks_audit";

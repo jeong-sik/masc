@@ -603,7 +603,7 @@ let test_delegate_rejects_unplanned_worker_container () =
   in
   Alcotest.(check bool) "delegate denied for unplanned worker" false delegate_ok;
   let delegate_json = parse_json_exn delegate_body in
-  let message = Yojson.Safe.Util.(delegate_json |> member "message" |> to_string) in
+  let message = Yojson.Safe.Util.(delegate_json |> member "error" |> to_string) in
   Alcotest.(check bool) "mentions unplanned worker reason" true
     (try
        let _ =

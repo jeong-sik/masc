@@ -4,13 +4,17 @@
 ## [2.214.0] - 2026-04-02
 
 ### Added
-- **Dashboard auth status** — add auth status indicator and token management UI (#4549).
-
-### Fixed
-- **Failure envelope ids** — normalize `entity_id` by using the first non-empty trimmed request/session/trace id and preserve critical severity ordering in operator digest attention ranking (#4553).
+- **Tool editor category grouping** -- search suggestions grouped by category header when spanning multiple categories (#4560).
+- **Tool editor usage sorting** -- suggestions sorted by call_count from tool metrics, frequently-used tools first (#4560).
+- **Resolved allowlist preview** -- resolved tools displayed grouped by category with counts (#4560).
+- **Auth status indicator** -- dashboard auth status badge and token management UI (#4549).
 
 ### Changed
-- **Dashboard severity tone ADT** — replace string severity handling with a tone ADT for dashboard classification (#4552).
+- **downshift combobox** -- replaced custom autocomplete with downshift useCombobox for keyboard nav and WAI-ARIA (#4540).
+- **Tone ADT** -- introduce typed severity ADT for dashboard failure envelopes (#4552).
+
+### Fixed
+- **Failure envelope IDs** -- normalize failure envelope IDs for consistent matching (#4553).
 
 ## [2.213.0] - 2026-04-02
 

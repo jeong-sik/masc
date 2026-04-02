@@ -40,22 +40,11 @@ vi.mock('../api/actions', () => ({
 // memory-state re-exports from store; Vitest needs this mock so the
 // component's transitive import resolves to the mocked signals above.
 vi.mock('./memory-state', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('./memory-state')
   const store = await vi.importMock<typeof import('../store')>('../store')
   return {
+    ...actual,
     ...store,
-    SORT_MODES: [
-      { id: 'recent', label: '최신순' },
-      { id: 'hot', label: '인기순' },
-      { id: 'trending', label: '급상승' },
-      { id: 'updated', label: '최근 갱신' },
-      { id: 'discussed', label: '토론 많은 순' },
-    ],
-    detailPost: { value: null },
-    detailComments: { value: [] },
-    detailLoading: { value: false },
-    detailPostId: { value: null },
-    commentText: { value: '' },
-    commentSubmitting: { value: false },
     votePost: vi.fn(),
     deleteBoardPost: vi.fn(),
     fetchBoardPost: vi.fn(),

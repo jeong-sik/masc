@@ -83,11 +83,19 @@ let dispatch
   | Mod_tempo ->
       Tool_tempo.dispatch { Tool_tempo.config; agent_name } ~name ~args
   | Mod_agent ->
+      (* Review #4579: Mod_agent includes masc_agent_update, masc_register_capabilities etc.
+         Tool_agent.dispatch already validates per-tool; keeper agent_name is passed so
+         self-mutation is gated by the module's own checks. Observation-only tools
+         (masc_get_metrics, masc_collaboration_graph) are safe. *)
       Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
   | Mod_room ->
       Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args
   | Mod_control ->
-      Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args
+      (* Review #4579: Mod_control exposes room lifecycle tools.
+         Too risky for autonomous keeper dispatch. *)
+      Some (false,
+        Printf.sprintf
+          "tool '%s' is a control tool (requires MCP operator context)" name)
   | Mod_agent_timeline ->
       Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name }
         ~name ~args
@@ -207,8 +215,9 @@ let dispatch
              { Tool_research.base_path = config.base_path;
                agent_name = Some agent_name; sw; net; clock }
              ~name ~args
-       | _, _, _ ->
-           Some (false, "research tools require Eio sw/clock/net"))
+       | Error e, _, _ | _, Error e, _ -> Some (false, e)
+       | _, _, None ->
+           Some (false, "research tools require Eio net"))
 
   | Mod_autoresearch ->
       (* Keeper already handles masc_autoresearch_* before reaching this path.
@@ -269,3 +278,11 @@ let dispatch
           mcp_state = None; mcp_session_id = None; auth_token = None }
       in
       Tool_command_plane.dispatch ctx ~name ~args
+
+  (* ── Fallback: future module_tag variants ──────────────────── *)
+  (* Safety net for new Mod_* variants added after this code.
+     Without this, a missing arm causes Match_failure at runtime. *)
+  | _ ->
+      Some (false,
+        Printf.sprintf
+          "tool '%s' has no keeper dispatch handler (unhandled module tag)" name)

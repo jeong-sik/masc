@@ -341,11 +341,11 @@ let detachment_index command_plane_json =
 
 let operation_severity ~status ~blocker_summary =
   if List.mem status [ "failed"; "cancelled" ] then
-    "bad"
-  else if List.mem status [ "paused" ] || Option.is_some blocker_summary then
-    "warn"
+    Tone_bad
+  else if status = "paused" || Option.is_some blocker_summary then
+    Tone_warn
   else
-    "ok"
+    Tone_ok
 
 let build_operation_contexts command_plane_json =
   let operations =
@@ -429,8 +429,8 @@ let build_operation_contexts command_plane_json =
   |> List.sort (fun left right ->
          let by_severity =
            Int.compare
-             (severity_rank right.severity)
-             (severity_rank left.severity)
+             (tone_rank right.severity)
+             (tone_rank left.severity)
          in
          if by_severity <> 0 then by_severity
          else Float.compare right.last_seen_ts left.last_seen_ts)

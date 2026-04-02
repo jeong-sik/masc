@@ -369,24 +369,28 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Guard against env inheritance: when the process inherits MASC_BASE_PATH
-# pointing to a different directory (same repo worktree OR a parent project),
-# both paths may have .masc/ and using the inherited path would silently
-# operate on the wrong room state.
+# Guard against worktree env inheritance: when a worktree child inherits
+# MASC_BASE_PATH pointing to its own repo root, both paths have .masc/
+# and using the parent path would silently operate on the wrong room state.
 #
-# When --base-path was not explicitly provided and the script's own directory
-# has .masc/, prefer SCRIPT_DIR over the inherited env value.  This covers:
-#   - Worktree inheritance (MASC_BASE_PATH = repo root, script runs in worktree)
-#   - Cross-project inheritance (MASC_BASE_PATH = ~/me, script runs in ~/me/.../masc-mcp)
-#   - MCP auto-restart (client re-launches binary with stale env)
+# Exception: if BASE_PATH is a genuinely different project (not this repo's
+# root), the user intentionally configured a parent project as MASC root
+# (e.g. MASC_BASE_PATH=~/me in .zshenv while running from ~/me/workspace/*/masc-mcp).
+# REPO_ENV_ROOT (git common dir) identifies the repo boundary.
 if [ "$BASE_PATH_EXPLICIT" != "1" ] && \
    [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && \
    [ -n "$BASE_PATH" ] && \
    [ "$BASE_PATH" != "$SCRIPT_DIR" ]; then
-    if [ -d "$SCRIPT_DIR/.masc" ] && [ -d "$BASE_PATH/.masc" ]; then
-        echo "WARN: Ignoring inherited MASC_BASE_PATH=$BASE_PATH (script dir has its own .masc/). Using $SCRIPT_DIR for server state." >&2
-        BASE_PATH="$SCRIPT_DIR"
+    RESOLVED_ENV_ROOT="$(cd "$REPO_ENV_ROOT" && pwd)"
+    RESOLVED_BASE="$(cd "$BASE_PATH" 2>/dev/null && pwd || echo "$BASE_PATH")"
+    if [ "$RESOLVED_BASE" = "$RESOLVED_ENV_ROOT" ]; then
+        # BASE_PATH is this repo's own root — worktree inheritance. Guard applies.
+        if [ -d "$SCRIPT_DIR/.masc" ] && [ -d "$BASE_PATH/.masc" ]; then
+            echo "WARN: Ignoring inherited MASC_BASE_PATH=$BASE_PATH (same repo root). Using $SCRIPT_DIR for server state." >&2
+            BASE_PATH="$SCRIPT_DIR"
+        fi
     fi
+    # If BASE_PATH is a different project, honor the env var unconditionally.
 fi
 
 if [ "$PORT_EXPLICIT" != "1" ]; then

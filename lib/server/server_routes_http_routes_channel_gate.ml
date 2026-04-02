@@ -71,7 +71,8 @@ let handle_gate_message ~sw ~clock state request reqd =
             | Error gate_err ->
                 Error (gate_err, Channel_gate.gate_error_to_string gate_err))
       with
-      | Yojson.Json_error e -> Error (Channel_gate.Internal e, "invalid json")
+      | Yojson.Json_error _e ->
+          Error (Channel_gate.Validation Channel_gate.Empty_content, "invalid json")
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           (* Log details server-side, return generic message to client *)

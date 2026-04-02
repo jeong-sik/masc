@@ -4,6 +4,10 @@ open Test_tool_team_session_support
 
 module U = Yojson.Safe.Util
 
+let has_key key = function
+  | `Assoc fields -> List.exists (fun (field, _) -> String.equal field key) fields
+  | _ -> false
+
 let sample_trace_ref ~session_id ~worker_run_id ~agent_name =
   `Assoc
     [
@@ -143,7 +147,11 @@ let test_summary_distinguishes_missing_vs_unavailable_evidence () =
          ~checkpoint_ref:`Null ~evidence_refs:(`List []) ())
   in
   check string "proof absent without refs is unavailable" "unavailable"
-    U.(unavailable_proof |> member "proof_evidence_status" |> to_string)
+    U.(unavailable_proof |> member "proof_evidence_status" |> to_string);
+  check bool "proof fields stay absent when no proof_run_id" false
+    (has_key "proof_run_id" unavailable_proof);
+  check bool "proof status stays absent when no proof_run_id" false
+    (has_key "proof_status" unavailable_proof)
 
 let test_verify_trace_returns_canonical_worker_run_summary () =
   with_eio @@ fun env ->

@@ -420,6 +420,12 @@ let persist_worker_run_proof_if_present ~(config : Room.config)
             (proof.capability_snapshot.tools @ tool_surface_masc_names)
           |> List.sort String.compare
         in
+        let tool_surface_status =
+          if tool_surface_names <> [] then `String "available" else `String "missing"
+        in
+        let tool_surface_source =
+          if tool_surface_names <> [] then `String "swarm_masc_tools" else `Null
+        in
         let worker_run_id = proof.run_id in
         let worker_name =
           worker_name_of_planned_worker ~fallback:fallback_name planned_worker
@@ -449,8 +455,8 @@ let persist_worker_run_proof_if_present ~(config : Room.config)
                     `String
                       (Team_session_types.execution_scope_to_string scope))
                   planned_worker.execution_scope );
-              ("tool_surface_status", `String "available");
-              ("tool_surface_source", `String "swarm_masc_tools");
+              ("tool_surface_status", tool_surface_status);
+              ("tool_surface_source", tool_surface_source);
               ( "tool_surface_names",
                 `List
                   (List.map (fun value -> `String value) tool_surface_names)

@@ -62,6 +62,12 @@ let tool_surface_status json =
       Some
         (if tool_surface_names json <> [] then "available" else "missing")
 
+let tool_surface_status_with_names ~names json =
+  match string_member_opt "tool_surface_status" json with
+  | Some _ as value -> value
+  | None ->
+      Some (if names <> [] then "available" else "missing")
+
 let trace_validated json =
   match bool_member_opt "validated" json with
   | Some _ as value -> value
@@ -135,6 +141,10 @@ let proof_evidence_state json =
 
 let summary_json json =
   let summary = U.member "trace_summary" json in
+  let normalized_tool_surface_names = tool_surface_names json in
+  let normalized_tool_surface_status =
+    tool_surface_status_with_names ~names:normalized_tool_surface_names json
+  in
   let summary_member key =
     match summary with
     | `Assoc _ -> U.member key summary
@@ -161,16 +171,16 @@ let summary_json json =
       ("routing_reason", U.member "routing_reason" json);
       ( "tool_surface_status",
         Option.fold ~none:`Null ~some:(fun value -> `String value)
-          (tool_surface_status json) );
+          normalized_tool_surface_status );
       ("tool_surface_source", U.member "tool_surface_source" json);
-      ("tool_surface_names", string_list_to_json (tool_surface_names json));
+      ("tool_surface_names", string_list_to_json normalized_tool_surface_names);
       ( "tool_surface_masc_names",
         string_list_to_json (string_list_member "tool_surface_masc_names" json)
       );
       ( "tool_surface_shell_names",
         string_list_to_json
           (string_list_member "tool_surface_shell_names" json) );
-      ("tool_surface_count", `Int (List.length (tool_surface_names json)));
+      ("tool_surface_count", `Int (List.length normalized_tool_surface_names));
       ("tool_names", U.member "tool_names" json);
       ("tool_call_count", U.member "tool_call_count" json);
       ("output_preview", U.member "output_preview" json);

@@ -43,34 +43,8 @@ let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
 let local_worker_tool_names_of_scope scope =
-  match scope with
-  | Team_session_types.Observe_only ->
-      Tool_access_policy.resolve
-        {
-          allow = Surface Tool_catalog.Local_worker;
-          deny =
-            Names
-              [
-                "masc_claim_next";
-                "masc_transition";
-                "masc_add_task";
-                "masc_heartbeat";
-                "masc_board_post";
-                "masc_board_comment";
-                "masc_board_vote";
-                "masc_worktree_create";
-                "masc_worktree_remove";
-                "masc_run_init";
-                "masc_run_plan";
-                "masc_run_log";
-                "masc_run_deliverable";
-                "masc_repair_loop_start";
-                "masc_repair_loop_iterate";
-                "masc_repair_loop_stop";
-              ];
-        }
-  | _ ->
-      Team_session_oas_bridge.supported_local_worker_tool_names
+  Team_session_oas_bridge.supported_local_worker_tool_names_for_scope
+    (Some scope)
 
 let local_shell_tool_names_of_scope = function
   | Team_session_types.Observe_only ->

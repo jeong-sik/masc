@@ -20,10 +20,19 @@ let is_keeper_denied (name : string) : bool =
 
 (* ── Schema injection filter ──────────────────────────────────── *)
 
+let keeper_mcp_context_required_tools =
+  Tool_schemas_inline.schemas
+  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+
+let is_keeper_mcp_context_required name =
+  List.mem name keeper_mcp_context_required_tools
+  || Tool_dispatch.is_mcp_context_required name
+
 let inject_masc_schemas (schemas : Types.tool_schema list) =
   masc_schemas_ref :=
     List.filter (fun (s : Types.tool_schema) ->
       String.starts_with ~prefix:"masc_" s.name
+      && not (is_keeper_mcp_context_required s.name)
       && not (is_keeper_denied s.name))
       schemas
 

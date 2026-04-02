@@ -25,7 +25,7 @@ val keeper_preset_universe_tool_names : keeper_meta -> string list
 val keeper_preset_universe_model_tools : keeper_meta -> Types.tool_schema list
 
 (** Core tools that are always executable and visible regardless of preset.
-    E.g. masc_status, masc_broadcast, masc_heartbeat, extend_turns. *)
+    E.g. masc_status, masc_heartbeat, masc_tool_help, extend_turns. *)
 val core_always_tools : string list
 
 (** [is_core_always_tool name] — true if [name] bypasses policy restrictions. *)

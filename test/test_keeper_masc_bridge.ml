@@ -2,6 +2,10 @@
 
 module KET = Masc_mcp.Keeper_exec_tools
 
+let prime_keeper_bridge () =
+  ignore (Masc_mcp.Mcp_server_eio.get_clock_opt ());
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas
+
 let make_meta ?tool_access ?(tool_denylist = []) () =
   let tool_access =
     match tool_access with
@@ -24,7 +28,7 @@ let make_meta ?tool_access ?(tool_denylist = []) () =
   | Error e -> failwith e
 
 let allowed_names_of_json json =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  prime_keeper_bridge ();
   match Masc_mcp.Keeper_types.meta_of_json json with
   | Ok meta -> KET.keeper_allowed_tool_names meta
   | Error e -> failwith e
@@ -38,6 +42,7 @@ let test_inject_stores_filtered_masc () =
       { name = "keeper_time_now"; description = ""; input_schema = `Assoc [] };
     ]
   in
+  ignore (Masc_mcp.Mcp_server_eio.get_clock_opt ());
   KET.inject_masc_schemas schemas;
   let meta =
     make_meta
@@ -47,12 +52,19 @@ let test_inject_stores_filtered_masc () =
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "3 masc tools" 3 (List.length names);
+  Alcotest.(check int) "only keeper-compatible masc tools remain" 1
+    (List.length names);
+  Alcotest.(check bool) "keeps masc_status" true
+    (List.mem "masc_status" names);
+  Alcotest.(check bool) "filters masc_broadcast" false
+    (List.mem "masc_broadcast" names);
+  Alcotest.(check bool) "filters masc_messages" false
+    (List.mem "masc_messages" names);
   Alcotest.(check bool) "no keeper_time_now" false
     (List.mem "keeper_time_now" names)
 
 let test_full_preset_exposes_masc () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  prime_keeper_bridge ();
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
@@ -63,7 +75,7 @@ let test_full_preset_exposes_masc () =
     (List.mem "masc_autoresearch_cycle" names)
 
 let test_messaging_preset_exposes_board () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  prime_keeper_bridge ();
   let meta =
     make_meta
       ~tool_access:
@@ -81,40 +93,42 @@ let test_messaging_preset_exposes_board () =
     (List.mem "keeper_shell_readonly" names)
 
 let test_custom_opens_specific_tools_only () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  prime_keeper_bridge ();
   let meta =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_types.Custom
-           [ "masc_status"; "masc_broadcast"; "masc_join" ])
+           [ "masc_status"; "masc_tasks"; "masc_join" ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "3 allowed" 3 (List.length names);
+  Alcotest.(check int) "only keeper-compatible tools allowed" 2
+    (List.length names);
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "has masc_broadcast" true
-    (List.mem "masc_broadcast" names);
-  Alcotest.(check bool) "has masc_join" true (List.mem "masc_join" names);
+  Alcotest.(check bool) "has masc_tasks" true
+    (List.mem "masc_tasks" names);
+  Alcotest.(check bool) "filters masc_join" false
+    (List.mem "masc_join" names);
   Alcotest.(check bool) "no masc_board_post" false
     (List.mem "masc_board_post" names)
 
 let test_deny_overrides_allow () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  prime_keeper_bridge ();
   let meta =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_types.Custom
-           [ "masc_status"; "masc_broadcast"; "masc_join" ])
-      ~tool_denylist:[ "masc_broadcast" ] ()
+           [ "masc_status"; "masc_tasks"; "masc_join" ])
+      ~tool_denylist:[ "masc_tasks" ] ()
   in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "2 after deny" 2 (List.length names);
+  Alcotest.(check int) "1 after deny" 1 (List.length names);
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "no masc_broadcast (denied)" false
-    (List.mem "masc_broadcast" names)
+  Alcotest.(check bool) "no masc_tasks (denied)" false
+    (List.mem "masc_tasks" names)
 
 let test_custom_empty_blocks_all () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  prime_keeper_bridge ();
   let meta =
     make_meta ~tool_access:(Masc_mcp.Keeper_types.Custom []) ()
   in
@@ -122,22 +136,22 @@ let test_custom_empty_blocks_all () =
   Alcotest.(check int) "no tools" 0 (List.length names)
 
 let test_preset_with_also_allow_opens_extra_tool () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  prime_keeper_bridge ();
   let meta =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_types.Preset
            {
              preset = Masc_mcp.Keeper_types.Minimal;
-             also_allow = [ "masc_broadcast" ];
+             also_allow = [ "masc_tasks" ];
            })
       ()
   in
   let names = KET.keeper_allowed_tool_names meta in
   Alcotest.(check bool) "minimal keeps base tool" true
     (List.mem "keeper_time_now" names);
-  Alcotest.(check bool) "also_allow adds broadcast" true
-    (List.mem "masc_broadcast" names);
+  Alcotest.(check bool) "also_allow adds tasks" true
+    (List.mem "masc_tasks" names);
   Alcotest.(check bool) "minimal omits board post" false
     (List.mem "keeper_board_post" names)
 
@@ -421,18 +435,18 @@ let test_tool_access_invalid_tool_member_rejected () =
         e
 
 let test_allowlist_gates_shard_tools () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  prime_keeper_bridge ();
   let meta =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_types.Custom
-           [ "masc_status"; "masc_broadcast" ])
+           [ "masc_status"; "masc_tasks" ])
       ()
   in
   let names = KET.keeper_allowed_tool_names meta in
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "has masc_broadcast" true
-    (List.mem "masc_broadcast" names);
+  Alcotest.(check bool) "has masc_tasks" true
+    (List.mem "masc_tasks" names);
   Alcotest.(check bool) "masc_autoresearch_cycle blocked by custom policy" false
     (List.mem "masc_autoresearch_cycle" names)
 
@@ -443,12 +457,12 @@ let test_dispatch_unregistered () =
   Alcotest.(check bool) "unregistered mint_token returns Error" true (Result.is_error result)
 
 let test_schemas_match_names () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  prime_keeper_bridge ();
   let meta =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_types.Custom
-           [ "masc_status"; "masc_join"; "masc_broadcast" ])
+           [ "masc_status"; "masc_join"; "masc_tasks" ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
@@ -462,7 +476,7 @@ let test_schemas_match_names () =
     schemas
 
 let test_denied_tools_excluded_from_injection () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  prime_keeper_bridge ();
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
   let denied =
@@ -486,7 +500,7 @@ let test_is_keeper_denied () =
     (KET.is_keeper_denied "keeper_time_now")
 
 let test_denied_excluded_from_allowed_names () =
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  prime_keeper_bridge ();
   let meta = make_meta () in
   let names = KET.keeper_allowed_tool_names meta in
   let denied =

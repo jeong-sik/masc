@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.214.0] - 2026-04-02
+
+### Added
+- **Dashboard auth status** — add auth status indicator and token management UI (#4549).
+
+### Fixed
+- **Failure envelope ids** — normalize `entity_id` by using the first non-empty trimmed request/session/trace id and preserve critical severity ordering in operator digest attention ranking (#4553).
+
+### Changed
+- **Dashboard severity tone ADT** — replace string severity handling with a tone ADT for dashboard classification (#4552).
+
 ## [2.213.0] - 2026-04-02
 
 ### Added

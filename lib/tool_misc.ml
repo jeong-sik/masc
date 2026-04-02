@@ -22,6 +22,30 @@ type web_search_hit = string * string * string
 
 let max_web_search_query_length = 500
 
+let whitespace_re = Re.Pcre.re "[ \t\r\n]+" |> Re.compile
+let html_tag_re = Re.Pcre.re "<[^>]+>" |> Re.compile
+let cdata_start_re = Re.str "<![CDATA[" |> Re.compile
+let cdata_end_re = Re.str "]]>" |> Re.compile
+let rss_re = Re.Pcre.re "<rss\\b" |> Re.compile
+let channel_re = Re.Pcre.re "<channel\\b" |> Re.compile
+let item_re = Re.Pcre.re "<item\\b[^>]*>([\\s\\S]*?)</item>" |> Re.compile
+let title_re = Re.Pcre.re "<title>([\\s\\S]*?)</title>" |> Re.compile
+let link_re = Re.Pcre.re "<link>([\\s\\S]*?)</link>" |> Re.compile
+let description_re = Re.Pcre.re "<description>([\\s\\S]*?)</description>" |> Re.compile
+
+let html_entity_replacements =
+  [
+    ("&amp;", "&");
+    ("&lt;", "<");
+    ("&gt;", ">");
+    ("&quot;", "\"");
+    ("&#39;", "'");
+    ("&#039;", "'");
+    ("&nbsp;", " ");
+  ]
+  |> List.map (fun (entity, replacement) ->
+         (Re.str entity |> Re.compile, replacement))
+
 let json_error message =
   Yojson.Safe.to_string
     (`Assoc [ ("status", `String "error"); ("message", `String message) ])
@@ -30,32 +54,22 @@ let json_ok fields =
   Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
 
 let normalize_spaces text =
-  text
-  |> Re.replace_string (Re.Pcre.re "[ \t\r\n]+" |> Re.compile) ~by:" "
-  |> String.trim
+  text |> Re.replace_string whitespace_re ~by:" " |> String.trim
 
 let strip_html_tags text =
-  Re.replace_string (Re.Pcre.re "<[^>]+>" |> Re.compile) ~by:"" text
+  Re.replace_string html_tag_re ~by:"" text
 
 let strip_cdata text =
   text
-  |> Re.replace_string (Re.str "<![CDATA[" |> Re.compile) ~by:""
-  |> Re.replace_string (Re.str "]]>" |> Re.compile) ~by:""
+  |> Re.replace_string cdata_start_re ~by:""
+  |> Re.replace_string cdata_end_re ~by:""
 
 let decode_html_entities text =
   let basic =
-    [
-      ("&amp;", "&");
-      ("&lt;", "<");
-      ("&gt;", ">");
-      ("&quot;", "\"");
-      ("&#39;", "'");
-      ("&#039;", "'");
-      ("&nbsp;", " ");
-    ]
+    html_entity_replacements
     |> List.fold_left
-         (fun acc (entity, replacement) ->
-           Re.replace_string (Re.str entity |> Re.compile) ~by:replacement acc)
+         (fun acc (entity_re, replacement) ->
+           Re.replace_string entity_re ~by:replacement acc)
          text
   in
   let len = String.length basic in
@@ -112,8 +126,7 @@ let clean_search_text text =
 let looks_like_rss_payload payload =
   let normalized = String.lowercase_ascii payload in
   String.contains normalized '<'
-  && (Re.execp (Re.Pcre.re "<rss\\b" |> Re.compile) normalized
-      || Re.execp (Re.Pcre.re "<channel\\b" |> Re.compile) normalized)
+  && (Re.execp rss_re normalized || Re.execp channel_re normalized)
 
 let valid_search_result_url url =
   let trimmed = String.trim url in
@@ -125,20 +138,19 @@ let valid_search_result_url url =
     | Some "http" | Some "https" -> true
     | _ -> false
 
-let search_field pattern block =
-  match Re.exec_opt (Re.Pcre.re pattern |> Re.compile) block with
+let search_field field_re block =
+  match Re.exec_opt field_re block with
   | None -> None
   | Some groups -> Some (Re.Group.get groups 1 |> clean_search_text)
 
 let parse_bing_rss_items (payload : string) : web_search_hit list =
-  let item_re = Re.Pcre.re "<item\\b[^>]*>([\\s\\S]*?)</item>" |> Re.compile in
   Re.all item_re payload
   |> List.filter_map (fun groups ->
          let block = Re.Group.get groups 1 in
          match
-           search_field "<title>([\\s\\S]*?)</title>" block,
-           search_field "<link>([\\s\\S]*?)</link>" block,
-           search_field "<description>([\\s\\S]*?)</description>" block
+           search_field title_re block,
+           search_field link_re block,
+           search_field description_re block
          with
          | Some title, Some url, Some snippet
            when title <> "" && valid_search_result_url url ->

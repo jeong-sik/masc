@@ -271,6 +271,7 @@ let all_known_tool_names =
     "masc_tool_admin_snapshot";
     "masc_tool_admin_update";
     "masc_tool_help";
+    "masc_web_search";
     "masc_tool_stats";
     "masc_transition";
     "masc_transport_status";
@@ -1046,8 +1047,20 @@ let git_guard_fragments =
     "path traversal";
   ]
 
+let web_search_guard_fragments =
+  [
+    "curl exit code";
+    "curl signal";
+    "curl stopped";
+    "search endpoint returned no http status";
+    "search endpoint returned http";
+    "search endpoint returned a non-rss payload";
+  ]
+
 let guard_fragments_for_name name =
-  if
+  if String.equal name "masc_web_search" then
+    web_search_guard_fragments
+  else if
     List.exists
       (fun prefix -> string_starts_with ~prefix name)
       [

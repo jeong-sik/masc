@@ -410,8 +410,8 @@ let merge_selection_note selection_note routing_note =
   | Some note, Some routing when String.equal note routing -> Some note
   | Some note, Some routing -> Some (note ^ " | " ^ routing)
 
-(* Model selection delegated to cascade. Explicit spawn_model takes precedence,
-   otherwise use the lead model from environment/runtime. *)
+(* Explicit spawn_model takes precedence; otherwise default to the
+   inferred lead model from environment/runtime configuration. *)
 let finalize_routing_decision ~spawn_model ~(decision : routing_decision) =
   let resolved_model =
     match trim_opt spawn_model with

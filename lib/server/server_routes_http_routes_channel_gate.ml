@@ -109,6 +109,15 @@ let handle_gate_health _state request reqd =
   respond_json_with_cors ~status:`OK request reqd
     {|{"ok":true,"service":"channel_gate"}|}
 
+(** GET /api/v1/gate/status
+
+    Per-channel connector metrics: message counts, last activity,
+    average latency, error counts.  Public read. *)
+let handle_gate_status _state request reqd =
+  let json = Channel_gate_metrics.snapshot_json () in
+  respond_json_with_cors ~status:`OK request reqd
+    (Yojson.Safe.to_string json)
+
 (** Register all gate routes on the router. *)
 let add_routes ~sw ~clock router =
   router
@@ -120,4 +129,9 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/gate/health" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          handle_gate_health state request reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/gate/status" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_gate_status state request reqd
        ) request reqd)

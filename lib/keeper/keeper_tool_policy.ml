@@ -29,10 +29,29 @@ let is_keeper_mcp_context_required name =
   || Tool_dispatch.is_mcp_context_required name
 
 let inject_masc_schemas (schemas : Types.tool_schema list) =
+  let supported_in_keeper name =
+    if Tool_dispatch.is_registered name then
+      true
+    else if not (Tool_dispatch.is_tag_registry_initialized ()) then
+      true
+    else
+      match Tool_dispatch.lookup_tag name with
+      | Some Tool_dispatch.Mod_inline
+      | Some Tool_dispatch.Mod_encryption
+      | Some Tool_dispatch.Mod_rate_limit
+      | Some Tool_dispatch.Mod_compact
+      | Some Tool_dispatch.Mod_keeper
+      | Some Tool_dispatch.Mod_operator
+      | Some Tool_dispatch.Mod_control ->
+          false
+      | Some _ -> true
+      | None -> false
+  in
   masc_schemas_ref :=
     List.filter (fun (s : Types.tool_schema) ->
       String.starts_with ~prefix:"masc_" s.name
       && not (is_keeper_mcp_context_required s.name)
+      && supported_in_keeper s.name
       && not (is_keeper_denied s.name))
       schemas
 

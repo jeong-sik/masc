@@ -250,7 +250,7 @@ let resolved_keeper_args_from_persona args :
                  let tool_preset =
                    match Option.bind defaults.tool_preset tool_preset_of_string with
                    | Some preset -> preset
-                   | None -> Full
+                   | None -> Research
                  in
                  let tool_also_allow =
                    match get_string_list args "tool_also_allow" with

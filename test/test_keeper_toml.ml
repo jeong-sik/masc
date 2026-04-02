@@ -454,6 +454,30 @@ let test_persona_profile_ignores_invalid_soul_profile () =
   let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
   check (option string) "invalid soul_profile dropped" None defaults.soul_profile
 
+let test_persona_resolver_defaults_to_research_tool_preset () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test persona keeper"
+  }
+}
+|};
+  match
+    Masc_mcp.Keeper_exec_persona.resolved_keeper_args_from_persona
+      (`Assoc [ ("persona_name", `String "probe") ])
+  with
+  | Error e -> fail ("resolver failed: " ^ e)
+  | Ok (_, resolved) ->
+      let tool_preset = Yojson.Safe.Util.member "tool_preset" resolved in
+      check string "persona default tool_preset" "research"
+        (Yojson.Safe.Util.to_string tool_preset)
+
 (* ================================================================ *)
 (* Test suite                                                        *)
 (* ================================================================ *)
@@ -504,5 +528,7 @@ let () =
             test_persona_profile_canonicalizes_soul_profile;
           test_case "persona profile ignores invalid soul_profile" `Quick
             test_persona_profile_ignores_invalid_soul_profile;
+          test_case "persona resolver defaults to research tool_preset" `Quick
+            test_persona_resolver_defaults_to_research_tool_preset;
         ] );
     ]

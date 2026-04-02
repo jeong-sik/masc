@@ -531,12 +531,12 @@ let test_runtime_inventory_uses_token_boundaries_for_model_tiers () =
       Alcotest.(check (option string)) "worker runtime inferred from 9b token"
         (Some "qwen2.5-9b-instruct")
         (Tool_team_session_routing.inferred_worker_model ());
-      Alcotest.(check (option string)) "109b does not infer as 9b tier" None
+      (* #4505: tier inference removed — always returns None *)
+      Alcotest.(check (option string)) "tier inference disabled (109b)" None
         (Tool_team_session_routing.infer_model_tier_from_model_name
            (Some "llama-109b-instruct")
         |> Option.map Team_session_types.model_tier_to_string);
-      Alcotest.(check (option string)) "35b token still infers exact tier"
-        (Some "35b")
+      Alcotest.(check (option string)) "tier inference disabled (35b)" None
         (Tool_team_session_routing.infer_model_tier_from_model_name
            (Some "qwen3.5-35b-a3b-ud-q8-xl")
         |> Option.map Team_session_types.model_tier_to_string))

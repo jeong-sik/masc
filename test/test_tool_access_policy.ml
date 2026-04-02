@@ -519,6 +519,74 @@ let test_minimal_preset_includes_core_masc () =
     (List.mem "masc_heartbeat" universe)
 
 (* ================================================================ *)
+(* Preset-scoped universe (#4637)                                    *)
+(* ================================================================ *)
+
+let test_preset_universe_subset_of_global () =
+  let base = make_gate_test_meta () in
+  let meta = { base with
+    tool_access = Preset { preset = Coding; also_allow = [] };
+    tool_denylist = [];
+  } in
+  let scoped = Keeper_exec_tools.keeper_preset_universe_tool_names meta in
+  let global = Keeper_exec_tools.keeper_universe_tool_names meta in
+  let outside =
+    List.filter (fun name -> not (List.mem name global)) scoped
+  in
+  check (list string) "scoped is subset of global" [] outside;
+  check bool "scoped < global for non-Full preset" true
+    (List.length scoped < List.length global)
+
+let test_preset_universe_includes_core () =
+  let base = make_gate_test_meta ~name:"test-scoped" () in
+  let meta = { base with
+    tool_access = Preset { preset = Minimal; also_allow = [] };
+    tool_denylist = [];
+  } in
+  let scoped = Keeper_exec_tools.keeper_preset_universe_tool_names meta in
+  check bool "masc_status in scoped" true
+    (List.mem "masc_status" scoped);
+  check bool "masc_broadcast in scoped" true
+    (List.mem "masc_broadcast" scoped);
+  check bool "masc_heartbeat in scoped" true
+    (List.mem "masc_heartbeat" scoped)
+
+let test_preset_universe_sizes () =
+  let make preset =
+    let base = make_gate_test_meta () in
+    { base with
+      tool_access = Preset { preset; also_allow = [] };
+      tool_denylist = [];
+    }
+  in
+  let minimal_size = List.length (Keeper_exec_tools.keeper_preset_universe_tool_names (make Minimal)) in
+  let messaging_size = List.length (Keeper_exec_tools.keeper_preset_universe_tool_names (make Messaging)) in
+  let coding_size = List.length (Keeper_exec_tools.keeper_preset_universe_tool_names (make Coding)) in
+  let full_size = List.length (Keeper_exec_tools.keeper_preset_universe_tool_names (make Full)) in
+  check bool
+    (Printf.sprintf "Minimal(%d) < Messaging(%d)" minimal_size messaging_size)
+    true (minimal_size < messaging_size);
+  check bool
+    (Printf.sprintf "Messaging(%d) < Coding(%d)" messaging_size coding_size)
+    true (messaging_size < coding_size);
+  check bool
+    (Printf.sprintf "Coding(%d) <= Full(%d)" coding_size full_size)
+    true (coding_size <= full_size)
+
+let test_preset_universe_superset_of_policy () =
+  let base = make_gate_test_meta () in
+  let meta = { base with
+    tool_access = Preset { preset = Coding; also_allow = [] };
+    tool_denylist = [];
+  } in
+  let policy = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let scoped = Keeper_exec_tools.keeper_preset_universe_tool_names meta in
+  let missing =
+    List.filter (fun name -> not (List.mem name scoped)) policy
+  in
+  check (list string) "all policy tools in preset universe" [] missing
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -657,5 +725,19 @@ let () =
             test_universe_superset_of_policy;
           test_case "minimal preset includes core masc" `Quick
             test_minimal_preset_includes_core_masc;
+        ] );
+      (* ======================================================== *)
+      (* Preset-scoped universe (#4637)                            *)
+      (* ======================================================== *)
+      ( "preset_scoped_universe",
+        [
+          test_case "scoped subset of global" `Quick
+            test_preset_universe_subset_of_global;
+          test_case "scoped includes core" `Quick
+            test_preset_universe_includes_core;
+          test_case "preset size ordering" `Quick
+            test_preset_universe_sizes;
+          test_case "scoped superset of policy" `Quick
+            test_preset_universe_superset_of_policy;
         ] );
     ]

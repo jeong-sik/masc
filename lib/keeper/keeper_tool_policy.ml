@@ -207,6 +207,47 @@ let keeper_universe_tool_names (meta : keeper_meta) : string list =
   in
   dedupe_tool_names (from_candidates @ from_core)
 
+(** Preset-scoped universe: preset allowlist + core_always - denied.
+    Strict subset of [keeper_universe_tool_names].  Used for BM25 indexing
+    to improve signal-to-noise ratio: a Minimal keeper indexes ~30 tools
+    instead of 244+.  Execution gate still uses the full universe so
+    externally-granted tools (tool_overlay) remain callable.
+    See #4637 (Samchon harness: absence > prohibition). *)
+let keeper_preset_universe_tool_names (meta : keeper_meta) : string list =
+  let lookup = tool_access_lookup_of_meta meta in
+  let preset_tools =
+    match meta.tool_access with
+    | Preset { preset; also_allow } ->
+        preset_allowlist preset @ also_allow
+    | Custom allowlist -> allowlist
+  in
+  let from_preset =
+    preset_tools
+    |> List.filter (fun name ->
+         Hashtbl.mem lookup.candidate_set name
+         && not (Hashtbl.mem lookup.deny_set name))
+  in
+  let from_core =
+    Keeper_tool_registry.core_always_tools
+    |> List.filter (fun name -> not (Hashtbl.mem lookup.deny_set name))
+  in
+  dedupe_tool_names (from_preset @ from_core)
+
+(** Preset-scoped model tool schemas for BM25 indexing.
+    Returns schemas only for the preset-scoped universe. *)
+let keeper_preset_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
+  let scoped = keeper_preset_universe_tool_names meta in
+  let all_schemas =
+    (keeper_default_model_tools meta)
+    @ Tool_research.schemas
+    @ Tool_shard.autoresearch_keeper_tools
+    @ Tool_shard.coding_tools
+    @ Tool_code_write.schemas
+    @ (keeper_universe_masc_tool_schemas meta)
+  in
+  all_schemas
+  |> List.filter (fun tool -> List.mem tool.Types.name scoped)
+
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     Types.tool_schema list =
   let allowed = keeper_allowed_tool_names ~write_done meta in

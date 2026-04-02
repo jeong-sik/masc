@@ -285,11 +285,15 @@ let run_turn
     keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
   in
   (* Build BM25 tool index for progressive disclosure.
-     The active keeper tool policy defines the candidate surface, and the
-     index retrieves the most relevant tools per-turn based on goal/context.
-     This prevents the LLM from being overwhelmed by 50+ tools and improves selection.
+     Index uses **preset-scoped** universe (not the full 244+ universe)
+     so BM25 searches a smaller, relevant candidate pool per preset.
+     A Minimal keeper indexes ~30 tools instead of 244+, giving 66.7%
+     visibility at top_k=20 instead of 8.2%.  See #4637.
 
-     top_k=20 (up from default 10) for better coverage across 60-80 tools.
+     The dispatch-time tool set (keeper_tools / all_tool_names) still
+     covers the full universe so externally-granted tools remain callable.
+
+     top_k=20 (up from default 10) for better coverage.
      Group by prefix so co-retrieval pulls related tools together
      (e.g. matching keeper_board_post also retrieves keeper_board_comment).
      OAS Tool_index.build already supports group co-retrieval. *)
@@ -404,24 +408,25 @@ let run_turn
     in
     Agent_sdk.Tool_index.{ name; description = t.schema.description ^ kr_kw; group }
   ) keeper_tools in
-  let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
+  (* Preset-scoped BM25 index: only index tools within the keeper's preset
+     universe, not the full 244+ universe.  This reduces noise and improves
+     BM25 ranking quality.  See #4637. *)
+  let preset_scoped_names =
+    Keeper_exec_tools.keeper_preset_universe_tool_names meta
+  in
+  let scoped_tool_entries =
+    List.filter (fun (e : Agent_sdk.Tool_index.entry) ->
+      List.mem e.name preset_scoped_names
+    ) tool_entries
+  in
+  let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config scoped_tool_entries in
   (* Layer 0: Core tools — always visible to the LLM regardless of preset.
-     Includes survival-critical masc_* tools so even Minimal keepers
-     can report status, broadcast, and extend turns. *)
+     With preset-scoped BM25 (#4637), category anchors are no longer needed
+     because the smaller pool surfaces relevant tools directly. *)
   let always_include_tools =
     Keeper_exec_tools.core_always_tools
     @ [ "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
-        "keeper_tasks_list"; "keeper_fs_read"; "keeper_shell_readonly";
-        "keeper_board_get"; "keeper_board_post";
-        (* Category anchors: one representative per major tool category
-           so the LLM knows these capabilities exist even when BM25
-           retrieval favours keeper_* internal tools.  See #4520. *)
-        "masc_governance_status";    (* governance *)
-        "masc_code_search";          (* coding shard *)
-        "masc_plan_get";             (* planning *)
-        "masc_tasks";                (* task management *)
-        "masc_agent_card";           (* agent introspection *)
-      ]
+        "keeper_tasks_list" ]
     |> Keeper_exec_tools.dedupe_tool_names
   in
   (* Layer 2: Universe — all tool names that the dispatch can handle.

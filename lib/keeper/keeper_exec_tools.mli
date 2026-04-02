@@ -16,6 +16,14 @@ val keeper_universe_tool_names : keeper_meta -> string list
     so [make_tools] can build Agent_sdk.Tool.t for the full search scope. *)
 val keeper_universe_model_tools : keeper_meta -> Types.tool_schema list
 
+(** Preset-scoped universe: preset allowlist + core_always - denied.
+    Strict subset of [keeper_universe_tool_names].  Used for BM25 indexing
+    to reduce candidate pool size per keeper preset.  See #4637. *)
+val keeper_preset_universe_tool_names : keeper_meta -> string list
+
+(** Preset-scoped model tool schemas for BM25 indexing. *)
+val keeper_preset_universe_model_tools : keeper_meta -> Types.tool_schema list
+
 (** Core tools that are always executable and visible regardless of preset.
     E.g. masc_status, masc_broadcast, masc_heartbeat, extend_turns. *)
 val core_always_tools : string list

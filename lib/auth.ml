@@ -283,7 +283,20 @@ let legacy_permission_for_tool = function
   | "masc_observe_swarm" | "masc_observe_capacity" | "masc_observe_alerts"
   | "masc_observe_traces"
   | "masc_voice_sessions" | "masc_voice_agent"
-  | "masc_agent_card" | "masc_agent_fitness" ->
+  | "masc_agent_card" | "masc_agent_fitness"
+  | "masc_agent_relations" | "masc_a2a_discover" | "masc_a2a_query_skill"
+  | "masc_dashboard" | "masc_check" | "masc_config_snapshot"
+  | "masc_collaboration_graph" | "masc_episode_list"
+  | "masc_feature_flags" | "masc_get_metrics"
+  | "masc_meta_cognition_snapshot" | "masc_poll_events"
+  | "masc_recall_search" | "masc_room_strategy_get"
+  | "masc_select_agent" | "masc_auth_list"
+  | "masc_verify_auto" | "masc_verify_handoff"
+  | "masc_verify_pending" | "masc_verify_request"
+  | "masc_verify_status" | "masc_verify_submit"
+  | "masc_heartbeat_list" | "masc_heartbeat_result"
+  | "masc_plan_get_task" | "masc_plan_get"
+  | "masc_pause_status" | "masc_workflow_guide" ->
       Some CanReadState
   | "masc_autoresearch_status" | "masc_config" -> Some CanReadState
   | "masc_add_task" -> Some CanAddTask

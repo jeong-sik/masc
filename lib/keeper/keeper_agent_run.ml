@@ -386,10 +386,9 @@ let run_turn
     "masc_tasks", "태스크 목록 할일 작업";
     "masc_add_task", "태스크 추가 등록 생성";
     "masc_status", "상태 현황 방 룸 요약";
-    "masc_broadcast", "브로드캐스트 방송 알림 공지";
     "masc_heartbeat", "하트비트 살아있음 생존";
-    "masc_who", "누구 참여자 에이전트 목록";
-    "masc_messages", "메시지 대화 채팅 로그";
+    (* masc_broadcast, masc_who, masc_messages require MCP session context
+       and fail in keeper. Use keeper_broadcast instead. (#4694) *)
   ] in
   let tool_entries = List.map (fun (t : Agent_sdk.Tool.t) ->
     let name = t.schema.name in

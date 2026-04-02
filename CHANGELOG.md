@@ -1,15 +1,50 @@
 # Changelog
 
 
-## [2.213.0] - 2026-04-01
+## [2.213.0] - 2026-04-02
+
+### Added
+- **Voice tools on public surfaces** — expose voice tools on public MCP and managed-agent surfaces (#4503).
+- **Activity Graph** — vis.js-based activity graph visualization in dashboard (#4493).
+- **Keeper tool editor UX** — search-based picker + chip UI, empty allowlist warning, preset descriptions (#4509).
+- **3-layer tool gate** — core/policy/universe separation for keeper tool access (#4541).
+- **Unified failure envelope** — shared `failure_envelope` contract for runtime failures across logs, digest, and dashboard (#4526).
+- **MCP session recovery** — reconnect toast and recovery path for lost MCP sessions (#4538).
 
 ### Fixed
+- **Cancel token fiber safety** — `mutable bool` to `Atomic.t` with `compare_and_set` for proper memory ordering (#4492).
+- **MASC_BASE_PATH sanitize** — ignore inherited `MASC_BASE_PATH` when both repo and inherited root have `.masc` (#4494).
+- **Keeper shutdown** — fix response handling and close-flow cleanup (#4487).
+- **Auth route naming** — rename `prompt_override` to `masc_prompt_override` in HTTP route (#4534).
+- **Transport health** — fix shared webrtc signaling health truth (#4536).
+- **Hard failure surface** — surface failures in verifier and voice flows (#4535).
+- **Burst-then-dormancy** — stagger keeper warmup per-keeper, defer board cursor to prevent synchronized burst (#4542).
 - **Council mutex** — `Eio.Mutex` for consensus sessions Hashtbl and router Stats (#4472, #4433).
+- **Council TOCTOU** — single-lock read-validate-write in cast_vote/close/cancel_session (#4486).
 - **Encryption tests** — `decode_hex_key` extracted, `InvalidHexFormat` error type, 7 tests (#4465).
 - **Voice review** — `no_audio` status handling, `Eio.Cancel.Cancelled` re-raise, keeper name validation (#4456).
+- **Dashboard keeper lifecycle** — fix auth failures in keeper lifecycle operations (#4499).
+- **Keeper detail metrics** — rehydrate from execution store (#4491).
+- **Tool inventory field** — `enabled` to `enabled_in_current_mode` (#4488).
+- **Transport atomicity** — atomic `jsonrpc_id`, log WS close failures (#4476).
+- **CI contracts** — update stale source_guard router assertions (#4497), OAS pin for Tool_op (#4485).
 
 ### Changed
+- **Perpetual to keeper naming** — rename perpetual surfaces to keeper runtime across CHANGELOG, types, docs (#4502, #4495).
+- **Legacy keeper meta migration** — move dir promotion into blocking bootstrap for autoboot race fix (#4512).
+- **Structural guardrails** — replace text heuristics with `stop_reason` ADT-based validation, extract magic numbers (#4508).
+- **Keeper dedup** — extract `dedup_by_key`, replace mutable refs with fold (#4484).
+- **Keeper refresh** — simplify dashboard refresh, remove dead error handling (#4506).
+- **Downshift combobox** — replace custom tool editor combobox with downshift (#4540).
 - **Tool gate OAS migration** — `tool_gate.ml`/`zone_tbl.ml` deleted, migrated to OAS `Tool_op` (-1,327 lines) (#4471).
+- **Router dead code removal** — remove dead code, inject spawn parsers (#4475).
+- **Type strictness** — god file decomposition and type tightening (#4545, #4544).
+- **Model tier refactor** — extract `count_by` helper (#4481).
+- **Keeper audit noise** — reduce keeper audit log verbosity (#4500).
+
+### Removed
+- **Stale docs and lab code** — remove archived lab experiments and outdated docs (#4531).
+- **MDAL dead code** — remove from dashboard frontend (#4478).
 
 ## [2.212.0] - 2026-04-01
 

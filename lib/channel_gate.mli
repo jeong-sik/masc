@@ -62,6 +62,9 @@ val dedup_check : string -> bool
 val dedup_cleanup : now:float -> unit
 (** Evict expired entries.  Called periodically. *)
 
+val dedup_table_size : unit -> int
+(** Current number of entries in the dedup table.  For metrics. *)
+
 (** {1 Dispatch} *)
 
 (** {1 Dispatch errors (typed, not string)} *)

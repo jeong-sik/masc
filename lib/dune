@@ -29,6 +29,7 @@
    cascade_inference
    cancellation
    channel_gate
+   channel_gate_metrics
    command_plane_v2
    command_plane_orchestra
    cp_types

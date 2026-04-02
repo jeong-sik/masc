@@ -185,7 +185,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
         </button>
       </div>
 
-      <div class="flex-1 overflow-y-auto ${collapsed ? 'px-1' : 'px-2'} py-1.5">
+      <div class="flex-1 overflow-y-auto px-2 py-1.5">
         <div class="flex flex-col gap-2">
           ${DASHBOARD_SURFACES.map(surface => {
             const isSurfaceActive = surface.id === currentTab
@@ -227,6 +227,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id
                       return html`
                         <${RouteLink}
+                          role="listitem"
                           tab=${surface.id}
                           params=${item.params}
                           class="w-full rounded-lg border px-2 py-1 text-left cursor-pointer text-[13px] transition-[background-color,border-color,color,box-shadow] duration-200 ${isSectionActive ? 'bg-[rgba(71,184,255,0.14)] text-[#cfeaff] font-medium shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)] border-[rgba(71,184,255,0.14)]' : 'border-transparent text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--text-body)]'}"
@@ -244,7 +245,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
         </div>
       </div>
 
-      <div class="shrink-0 border-t border-[rgba(255,255,255,0.08)] ${collapsed ? 'px-1 py-2' : 'px-2 py-2'}">
+      <div class="shrink-0 border-t border-[rgba(255,255,255,0.08)] px-2 py-2">
         <${HealthIndicator} collapsed=${collapsed} />
       </div>
     </nav>
@@ -303,7 +304,7 @@ function SurfaceLead() {
     <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
       <h2 class="flex items-center gap-2 text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
         ${currentSection?.label ?? currentView?.label ?? '홈'}
-        ${description ? html`<span class="text-[13px] font-normal text-[rgba(255,255,255,0.44)]">${description}</span>` : null}
+        ${description ? html`<span class="text-[13px] font-normal text-[rgba(255,255,255,0.44)] truncate min-w-0">${description}</span>` : null}
       </h2>
     </div>
   `
@@ -325,7 +326,7 @@ export function DashboardMain() {
 
   return html`
     ${roomTruthInitializing.value ? html`
-      <div class="mb-3 shrink-0 rounded-xl border border-solid border-[rgba(230,167,0,0.22)] bg-[rgba(230,167,0,0.1)] px-3 py-1.5 text-center text-[0.78rem] text-[#e6a700]">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
+      <div class="mb-3 shrink-0 rounded-xl border border-solid border-[rgba(230,167,0,0.22)] bg-[rgba(230,167,0,0.1)] px-4 py-1.5 text-center text-[0.78rem] text-[#e6a700]">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
     ` : null}
     <${SurfaceLead} />
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>

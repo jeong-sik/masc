@@ -384,9 +384,39 @@ let test_status_reports_worker_run_progress_summary () =
   Alcotest.(check (list string)) "ready worker names" [ "worker-a" ]
     Yojson.Safe.Util.(
       worker_runs |> member "ready_worker_names" |> to_list |> List.map to_string);
+  Alcotest.(check (list string)) "delegate ready worker names" []
+    Yojson.Safe.Util.(
+      worker_runs |> member "delegate_ready_worker_names" |> to_list
+      |> List.map to_string);
+  Alcotest.(check (list string)) "blocked worker names"
+    [ "worker-a"; "worker-b" ]
+    Yojson.Safe.Util.(
+      worker_runs |> member "blocked_worker_names" |> to_list
+      |> List.map to_string);
   Alcotest.(check (list string)) "pending worker names" [ "worker-b" ]
     Yojson.Safe.Util.(
       worker_runs |> member "pending_worker_names" |> to_list |> List.map to_string);
+  let readiness_entries =
+    Yojson.Safe.Util.(worker_runs |> member "worker_readiness" |> to_list)
+  in
+  let readiness_for worker_name =
+    List.find
+      (fun json ->
+        Yojson.Safe.Util.(json |> member "worker_name" |> to_string = worker_name))
+      readiness_entries
+  in
+  let worker_a_readiness = readiness_for "worker-a" in
+  Alcotest.(check string) "worker-a blocked reason" "broken_container"
+    Yojson.Safe.Util.(
+      worker_a_readiness |> member "blocked_reason" |> to_string);
+  Alcotest.(check bool) "worker-a has checkpoint" true
+    Yojson.Safe.Util.(worker_a_readiness |> member "has_checkpoint" |> to_bool);
+  let worker_b_readiness = readiness_for "worker-b" in
+  Alcotest.(check string) "worker-b blocked reason" "in_flight"
+    Yojson.Safe.Util.(
+      worker_b_readiness |> member "blocked_reason" |> to_string);
+  Alcotest.(check bool) "worker-b marked in flight" true
+    Yojson.Safe.Util.(worker_b_readiness |> member "in_flight" |> to_bool);
   cleanup_dir base_dir
 
 let test_step_spawn_batch_infers_exact_env_model_tiers () =

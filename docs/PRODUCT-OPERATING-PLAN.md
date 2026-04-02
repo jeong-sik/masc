@@ -4,6 +4,9 @@
 > Latest release: v2.215.0 (2026-04-02)
 > Updated: 2026-04-02
 
+Execution companion for capsule-only coordination hardening:
+[design/masc-capsule-execution-plan.md](design/masc-capsule-execution-plan.md)
+
 ## Product Promise
 
 `masc-mcp` is a repo-local MCP server for coordinating multiple coding agents inside one repository.

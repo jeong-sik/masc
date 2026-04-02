@@ -341,6 +341,10 @@ let emit_activity_event config ~session_id ~(event_type : string)
         Some
           ( "team.delegate_requested",
             [ "team_session"; "team.delegate_requested" ] )
+    | "team_step_delegate_denied" ->
+        Some
+          ( "team.delegate_denied",
+            [ "team_session"; "team.delegate_denied" ] )
     | "team_run_deliverable" ->
         Some ("team.deliverable", [ "team_session"; "team.deliverable" ])
     | "swarm_iteration_start" ->

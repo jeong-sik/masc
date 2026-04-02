@@ -24,6 +24,9 @@ let execute_delegate_pipeline
   let append_delegate_requested_event =
     Tool_team_session_step_exec.append_delegate_requested_event env
   in
+  let append_delegate_denied_event =
+    Tool_team_session_step_exec.append_delegate_denied_event env
+  in
   let persist_worker_run_snapshot =
     Tool_team_session_step_exec.persist_worker_run_snapshot env
   in
@@ -80,8 +83,12 @@ let execute_delegate_pipeline
                           when String.equal actor
                                  worker_name ->
                             w.execution_scope
-                        | _ -> None)
+                                | _ -> None)
                       session.planned_workers)
+              in
+              let delegate_readiness =
+                Team_session_engine_status.worker_delegate_readiness
+                  ctx.config session worker_name
               in
               let contract =
                 let delivery_contract =
@@ -245,42 +252,68 @@ let execute_delegate_pipeline
                       ~success:false ~error:err ();
                     `Assoc [ ("error", `String err) ]
               in
-              (match wait_mode with
-              | Team_session_types.Wait_blocking ->
-                  Some (run_delegate ())
-              | Team_session_types.Wait_background ->
-                  let sw_bg =
-                    Option.value ~default:ctx.sw
-                      (Eio_context.get_switch_opt ())
+              match delegate_readiness with
+              | Some readiness when not readiness.delegate_ready ->
+                  let readiness_json =
+                    Team_session_engine_status.worker_delegate_readiness_to_json
+                      readiness
                   in
-                  append_delegate_requested_event
-                    ~worker_run_id ~worker_name
-                    ~delegate_prompt;
-                  Eio.Fiber.fork ~sw:sw_bg (fun () ->
-                      try ignore (run_delegate ())
-                      with
-                      | Eio.Cancel.Cancelled _ as exn -> raise exn
-                      | exn ->
-                        let err = Printexc.to_string exn in
-                        Log.Spawn.error
-                          "background delegate failed (worker_run_id=%s, agent=%s): %s"
-                          worker_run_id worker_name err;
-                        append_delegate_event ~worker_run_id
-                          ~worker_name ~delegate_prompt
-                          ?execution_scope
-                          ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
-                          ~trace_capability:"summary_only"
-                          ~resolved_runtime:"local"
-                          ~success:false ~error:err ());
+                  let blocked_reason =
+                    Option.value ~default:"not_ready" readiness.blocked_reason
+                  in
+                  let err =
+                    Printf.sprintf
+                      "target worker '%s' is not ready for delegation (%s). %s \
+                       See status.worker_runs.delegate_ready_worker_names and \
+                       status.worker_runs.worker_readiness."
+                      worker_name blocked_reason readiness.guidance
+                  in
+                  append_delegate_denied_event ~worker_name ~delegate_prompt
+                    ~blocked_reason ~guidance:readiness.guidance
+                    ~readiness:readiness_json;
                   Some
                     (`Assoc
                       [
-                        ("worker_run_id", `String worker_run_id);
-                        ("worker_name", `String worker_name);
-                        ("worker_backend", `String "local");
-                        ("status", `String "accepted");
-                        ("wait_mode", `String "background");
-                      ])))))
+                        ("error", `String err);
+                        ("readiness", readiness_json);
+                      ])
+              | _ -> (
+                  match wait_mode with
+                  | Team_session_types.Wait_blocking ->
+                      Some (run_delegate ())
+                  | Team_session_types.Wait_background ->
+                      let sw_bg =
+                        Option.value ~default:ctx.sw
+                          (Eio_context.get_switch_opt ())
+                      in
+                      append_delegate_requested_event
+                        ~worker_run_id ~worker_name
+                        ~delegate_prompt;
+                      Eio.Fiber.fork ~sw:sw_bg (fun () ->
+                          try ignore (run_delegate ())
+                          with
+                          | Eio.Cancel.Cancelled _ as exn -> raise exn
+                          | exn ->
+                            let err = Printexc.to_string exn in
+                            Log.Spawn.error
+                              "background delegate failed (worker_run_id=%s, agent=%s): %s"
+                              worker_run_id worker_name err;
+                            append_delegate_event ~worker_run_id
+                              ~worker_name ~delegate_prompt
+                              ?execution_scope
+                              ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
+                              ~trace_capability:"summary_only"
+                              ~resolved_runtime:"local"
+                              ~success:false ~error:err ());
+                      Some
+                        (`Assoc
+                          [
+                            ("worker_run_id", `String worker_run_id);
+                            ("worker_name", `String worker_name);
+                            ("worker_backend", `String "local");
+                            ("status", `String "accepted");
+                            ("wait_mode", `String "background");
+                          ])))))
 
 let non_empty_string_list_of_json = function
   | `List xs ->

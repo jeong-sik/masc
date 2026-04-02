@@ -113,6 +113,43 @@ let should_stream_post_tools_call request body_str accept_mode =
   | Some ("tools/call", true) -> true
   | _ -> false
 
+(** Inject _agent_name into MCP tools/call arguments if not already present.
+    This propagates the HTTP-resolved actor identity into the MCP protocol
+    so that tool execution uses the correct agent name instead of an
+    ephemeral session-derived identity. *)
+let inject_agent_name_into_body ~agent_name body_str =
+  try
+    let json = Yojson.Safe.from_string body_str in
+    let open Yojson.Safe.Util in
+    let method_name = member "method" json |> to_string_option in
+    match method_name with
+    | Some "tools/call" ->
+        let params = member "params" json in
+        let args = member "arguments" params in
+        let existing = member "_agent_name" args |> to_string_option in
+        if Option.is_some existing then body_str
+        else
+          let new_args = match args with
+            | `Assoc fields ->
+                `Assoc (("_agent_name", `String agent_name) :: fields)
+            | _ -> args
+          in
+          let new_params = match params with
+            | `Assoc fields ->
+                `Assoc (List.map (fun (k, v) ->
+                  if k = "arguments" then (k, new_args) else (k, v)) fields)
+            | _ -> params
+          in
+          let new_json = match json with
+            | `Assoc fields ->
+                `Assoc (List.map (fun (k, v) ->
+                  if k = "params" then (k, new_params) else (k, v)) fields)
+            | _ -> json
+          in
+          Yojson.Safe.to_string new_json
+    | _ -> body_str
+  with _ -> body_str
+
 let handle_post_mcp ~deps ?(profile = Full) request reqd =
   (* Readiness gate: reject before session/auth if server state is not ready *)
   if not (deps.is_ready ()) then
@@ -126,6 +163,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
     | None -> Mcp_session.generate ()
   in
   let auth_token = deps.auth_token_from_request request in
+  let http_agent_name = Server_auth.agent_from_request request in
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let origin = deps.get_origin request in
   let base_path = deps.get_base_path () in
@@ -255,9 +293,15 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 in
                                 inline_sse := Some info;
                                 spawn_post_sse_keepalive ~sw ~clock info);
+                              let body_with_agent =
+                                match http_agent_name with
+                                | None -> body_str
+                                | Some agent ->
+                                    inject_agent_name_into_body ~agent_name:agent body_str
+                              in
                               let response_json =
                                 runtime.handle_request ?auth_token ~profile
-                                  ~mcp_session_id:session_id body_str
+                                  ~mcp_session_id:session_id body_with_agent
                               in
                               let protocol_version =
                                 get_protocol_version_for_session ~session_id request

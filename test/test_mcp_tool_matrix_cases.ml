@@ -287,6 +287,11 @@ let all_known_tool_names =
     "masc_team_session_step";
     "masc_team_session_stop";
     "masc_team_session_verify_trace";
+    "masc_tempo";
+    "masc_tempo_adjust";
+    "masc_tempo_get";
+    "masc_tempo_reset";
+    "masc_tempo_set";
     "masc_tool_admin_snapshot";
     "masc_tool_admin_update";
     "masc_tool_help";

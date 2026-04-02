@@ -170,11 +170,13 @@ let test_custom_keeps_registered_inline_board_tool () =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_types.Custom
-           [ "masc_board_post"; "masc_who" ])
+           [ "keeper_board_post"; "masc_who" ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check bool) "keeps board handler tool" true
+  (* keeper_board_post is a keeper-internal tool, not a masc_ schema;
+     it won't appear in masc tool names but will be in the full allowed set *)
+  Alcotest.(check bool) "raw masc_board_post filtered out" false
     (List.mem "masc_board_post" names);
   Alcotest.(check bool) "drops unsupported inline tool" false
     (List.mem "masc_who" names)
@@ -557,7 +559,7 @@ let () =
             test_messaging_preset_exposes_board;
           Alcotest.test_case "preset also_allow opens extra tool" `Quick
             test_preset_with_also_allow_opens_extra_tool;
-          Alcotest.test_case "custom keeps registered inline board tool" `Quick
+          Alcotest.test_case "custom filters board tools with keeper wrappers" `Quick
             test_custom_keeps_registered_inline_board_tool;
         ] );
       ( "custom_policy",

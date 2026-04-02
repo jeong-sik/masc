@@ -19,6 +19,10 @@ type pending_board_event = {
   updated_at : float;
   explicit_mention : bool;
   matched_targets : string list;
+  self_commented : bool;
+  new_external_since : int;
+  latest_external_author : string option;
+  latest_external_preview : string option;
 }
 
 type world_observation = {
@@ -202,9 +206,62 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
 (** Board event cursor bootstrap window (seconds). *)
 let bootstrap_window_sec = 300.0
 
+let is_self_author ~self_tokens (author : string) : bool =
+  List.mem (String.lowercase_ascii (String.trim author)) self_tokens
+
+(** Check whether this keeper has commented on a post, and whether new
+    external comments arrived after the keeper's latest comment.
+    Uses actual comment stream as ground truth (no proxy like reply_count
+    or updated_at). Based on BDI commitment reconsideration: a committed
+    response is only re-evaluated when new external beliefs arrive. *)
+let check_self_comment_status ~self_tokens ~(post_id : string)
+    : [ `Never | `No_new_external | `New_external of int * string * string ] =
+  match Board_dispatch.get_comments ~post_id with
+  | Error _ -> `Never
+  | Ok comments ->
+      let my_comments =
+        List.filter
+          (fun (c : Board.comment) ->
+            is_self_author ~self_tokens (Board.Agent_id.to_string c.author))
+          comments
+      in
+      if my_comments = [] then `Never
+      else
+        let my_latest_ts =
+          List.fold_left
+            (fun acc (c : Board.comment) -> max acc c.created_at)
+            0.0 my_comments
+        in
+        let external_after =
+          List.filter
+            (fun (c : Board.comment) ->
+              not (is_self_author ~self_tokens (Board.Agent_id.to_string c.author))
+              && c.created_at > my_latest_ts)
+            comments
+        in
+        match external_after with
+        | [] -> `No_new_external
+        | hd :: tl ->
+          let latest =
+            List.fold_left
+              (fun (acc : Board.comment) (c : Board.comment) ->
+                if c.created_at > acc.created_at then c else acc)
+              hd tl
+          in
+          `New_external
+            ( List.length external_after,
+              Board.Agent_id.to_string latest.author,
+              short_preview ~max_len:60 latest.content )
+
 (** Collect recent board activity using cursor-based tracking.
     Cursor state lives in Keeper_registry (board_cursor_ts field).
-    Returns (structured events, new post count, mention count). *)
+    Returns (structured events, new post count, mention count).
+
+    Comment-stream dedup: after the initial cursor + author filter,
+    each candidate post is scanned for self-authored comments.
+    Posts where the keeper has already commented and no new external
+    replies have arrived are excluded. This prevents duplicate reactive
+    comments while allowing legitimate follow-ups. *)
 let collect_board_events ~(base_path : string) ~(continuity_summary : string)
     ~(meta : keeper_meta) : pending_board_event list * int * int =
   try
@@ -215,7 +272,7 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
     in
     let cursor_watermark = Time_compat.now () in
     let posts =
-      Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:20 ()
+      Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:50 ()
     in
     Keeper_registry.set_board_cursor_ts ~base_path meta.name cursor_watermark;
     let self_tokens =
@@ -226,11 +283,8 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
       List.filter
         (fun (p : Board.post) ->
           p.updated_at >= since_ts
-          && not
-               (List.mem
-                  (String.lowercase_ascii
-                     (String.trim (Board.Agent_id.to_string p.author)))
-                  self_tokens))
+          && not (is_self_author ~self_tokens
+                    (Board.Agent_id.to_string p.author)))
         posts
     in
     let new_count = List.length recent in
@@ -254,39 +308,86 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
                targets)
            recent)
     in
+    let capped =
+      if List.length recent > 10 then
+        List.filteri (fun i _ -> i < 10) recent
+      else recent
+    in
     let events =
-      let capped =
-        if List.length recent > 5 then
-          List.filteri (fun i _ -> i < 5) recent
-        else recent
-      in
-      List.map
+      List.filter_map
         (fun (p : Board.post) ->
-          let signal : Board_dispatch.keeper_board_signal =
-            {
-              kind = Board_dispatch.Board_post_created;
-              post_id = Board.Post_id.to_string p.id;
-              author = Board.Agent_id.to_string p.author;
-              title = p.title;
-              content = p.content;
-              hearth = p.hearth;
-            }
-          in
-          let matched = board_signal_match ~continuity_summary ~meta ~signal in
-          {
-            post_id = Board.Post_id.to_string p.id;
-            author = Board.Agent_id.to_string p.author;
-            title = p.title;
-            preview = short_preview ~max_len:80 p.content;
-            hearth = p.hearth;
-            post_kind = p.post_kind;
-            updated_at = p.updated_at;
-            explicit_mention = matched.explicit_mention;
-            matched_targets = matched.matched_targets;
-          })
+          let post_id = Board.Post_id.to_string p.id in
+          let comment_status = check_self_comment_status ~self_tokens ~post_id in
+          match comment_status with
+          | `No_new_external ->
+              Log.Keeper.debug
+                "board dedup: skipping post_id=%s (no new external since my comment)"
+                post_id;
+              None
+          | `Never ->
+              let signal : Board_dispatch.keeper_board_signal =
+                {
+                  kind = Board_dispatch.Board_post_created;
+                  post_id;
+                  author = Board.Agent_id.to_string p.author;
+                  title = p.title;
+                  content = p.content;
+                  hearth = p.hearth;
+                }
+              in
+              let matched = board_signal_match ~continuity_summary ~meta ~signal in
+              Some
+                {
+                  post_id;
+                  author = Board.Agent_id.to_string p.author;
+                  title = p.title;
+                  preview = short_preview ~max_len:80 p.content;
+                  hearth = p.hearth;
+                  post_kind = p.post_kind;
+                  updated_at = p.updated_at;
+                  explicit_mention = matched.explicit_mention;
+                  matched_targets = matched.matched_targets;
+                  self_commented = false;
+                  new_external_since = 0;
+                  latest_external_author = None;
+                  latest_external_preview = None;
+                }
+          | `New_external (count, ext_author, ext_preview) ->
+              let signal : Board_dispatch.keeper_board_signal =
+                {
+                  kind = Board_dispatch.Board_post_created;
+                  post_id;
+                  author = Board.Agent_id.to_string p.author;
+                  title = p.title;
+                  content = p.content;
+                  hearth = p.hearth;
+                }
+              in
+              let matched = board_signal_match ~continuity_summary ~meta ~signal in
+              Some
+                {
+                  post_id;
+                  author = Board.Agent_id.to_string p.author;
+                  title = p.title;
+                  preview = short_preview ~max_len:80 p.content;
+                  hearth = p.hearth;
+                  post_kind = p.post_kind;
+                  updated_at = p.updated_at;
+                  explicit_mention = matched.explicit_mention;
+                  matched_targets = matched.matched_targets;
+                  self_commented = true;
+                  new_external_since = count;
+                  latest_external_author = Some ext_author;
+                  latest_external_preview = Some ext_preview;
+                })
         capped
     in
-    (events, new_count, mention_count)
+    let final_events =
+      if List.length events > 5 then
+        List.filteri (fun i _ -> i < 5) events
+      else events
+    in
+    (final_events, new_count, mention_count)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

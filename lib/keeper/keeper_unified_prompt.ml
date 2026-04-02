@@ -43,8 +43,17 @@ let format_board_events
            | Some hearth when String.trim hearth <> "" -> " {" ^ hearth ^ "}"
            | _ -> ""
          in
-         Printf.sprintf "- [%s] %s%s%s: %s"
-           kind event.author hearth_note mention_note event.preview)
+         let self_note =
+           if event.self_commented && event.new_external_since > 0 then
+             Printf.sprintf " [%d new reply since yours%s]"
+               event.new_external_since
+               (match event.latest_external_author, event.latest_external_preview with
+                | Some a, Some p -> Printf.sprintf ", latest by %s: %s" a p
+                | _ -> "")
+           else ""
+         in
+         Printf.sprintf "- [%s] %s%s%s%s: %s"
+           kind event.author hearth_note mention_note self_note event.preview)
        events)
 
 let line_block label value =

@@ -101,7 +101,6 @@ let proof_refs_present json =
   || has_non_null "checkpoint_ref" json
   || list_member "tool_trace_refs" json <> []
   || list_member "raw_evidence_refs" json <> []
-  || list_member "evidence_refs" json <> []
 
 let proof_evidence_state json =
   match bool_member_opt "proof_present" json with

@@ -201,10 +201,16 @@ let read_latest_decision_json config keeper_name =
     in
     loop None
 
-let string_list_member key json =
+let string_list_member_opt key json =
   let open Yojson.Safe.Util in
-  json |> member key |> to_list
-  |> List.filter_map (function `String value -> Some value | _ -> None)
+  let rec collect acc = function
+    | [] -> Some (List.rev acc)
+    | `String value :: rest -> collect (value :: acc) rest
+    | _ -> None
+  in
+  match json |> member key with
+  | `List items -> collect [] items
+  | _ -> None
 
 let string_member_opt key json =
   match Yojson.Safe.Util.member key json with
@@ -332,21 +338,27 @@ let evaluate_run env fixture run_index =
                         failure_report ~fixture ~run_index ~base_dir
                           ?model_used:(Some updated_meta.runtime.usage.last_model_used)
                           ?primary_salience err
-                    | Ok decision_json ->
-                        let tools_used = string_list_member "tools_used" decision_json in
-                        let pass, failure_reason = evaluate_tools tools_used in
-                        {
-                          fixture = fixture_name fixture;
-                          run_index;
-                          temp_dir = base_dir;
-                          model_used = Some updated_meta.runtime.usage.last_model_used;
-                          primary_salience;
-                          tools_used;
-                          response_preview =
-                            string_member_opt "response_preview" decision_json;
-                          pass;
-                          failure_reason;
-                        }))
+                    | Ok decision_json -> (
+                        match string_list_member_opt "tools_used" decision_json with
+                        | None ->
+                            failure_report ~fixture ~run_index ~base_dir
+                              ?model_used:(Some updated_meta.runtime.usage.last_model_used)
+                              ?primary_salience
+                              "decision log missing valid tools_used list"
+                        | Some tools_used ->
+                            let pass, failure_reason = evaluate_tools tools_used in
+                            {
+                              fixture = fixture_name fixture;
+                              run_index;
+                              temp_dir = base_dir;
+                              model_used = Some updated_meta.runtime.usage.last_model_used;
+                              primary_salience;
+                              tools_used;
+                              response_preview =
+                                string_member_opt "response_preview" decision_json;
+                              pass;
+                              failure_reason;
+                            })))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

@@ -266,7 +266,7 @@ let legacy_permission_for_tool = function
   | "masc_status" | "masc_who" | "masc_tasks" | "masc_messages"
   | "masc_transport_status" | "masc_websocket_discovery"
   | "masc_agents" | "masc_portal_status" | "masc_pending_interrupts"
-  | "masc_votes" | "masc_vote_status" | "masc_worktree_list"
+  | "masc_worktree_list"
   | "masc_task_history" | "masc_operator_snapshot"
   | "masc_operator_digest" | "masc_surface_audit"
   | "masc_collaboration_evidence"
@@ -322,7 +322,6 @@ let legacy_permission_for_tool = function
   | "masc_portal_send" -> Some CanSendPortal
   | "masc_worktree_create" -> Some CanCreateWorktree
   | "masc_worktree_remove" -> Some CanRemoveWorktree
-  | "masc_vote_create" | "masc_vote_cast" -> Some CanVote
   | "masc_interrupt" | "masc_branch" -> Some CanInterrupt
   | "masc_approve" | "masc_reject" -> Some CanApprove
   | "masc_cleanup_zombies" -> Some CanBroadcast (* Worker level *)

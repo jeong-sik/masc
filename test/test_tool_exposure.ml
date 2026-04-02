@@ -158,11 +158,8 @@ let () =
             (fun () ->
               let hidden_names =
                 [
-                  "masc_vote_create";
-                  "masc_vote_cast";
-                  "masc_vote_status";
-                  "masc_post_create";
-                  "masc_post_list";
+                  "masc_operator_judgment_write";
+                  "masc_operator_judgment_latest";
                 ]
               in
               List.iter
@@ -174,9 +171,8 @@ let () =
             (fun () ->
               let hidden_names =
                 [
-                  "masc_vote_create";
-                  "masc_vote_cast";
-                  "masc_vote_status";
+                  "masc_operator_judgment_write";
+                  "masc_operator_judgment_latest";
                 ]
               in
               List.iter

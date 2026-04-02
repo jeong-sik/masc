@@ -5,7 +5,7 @@
     - Reader tier: CanReadState, CanJoin, CanLeave
     - Worker tier: CanAddTask, CanClaimTask, CanCompleteTask, CanBroadcast,
                    CanOpenPortal, CanSendPortal, CanCreateWorktree,
-                   CanRemoveWorktree, CanVote
+                   CanRemoveWorktree
     - Admin tier:  CanInit, CanReset, CanInterrupt, CanApprove, CanAdmin
 
     @since 2.204.0 *)
@@ -131,9 +131,6 @@ let worker_only_tools =
     "masc_worktree_create";
     (* CanRemoveWorktree *)
     "masc_worktree_remove";
-    (* CanVote *)
-    "masc_vote_create";
-    "masc_vote_cast";
   ]
 
 (* ================================================================ *)

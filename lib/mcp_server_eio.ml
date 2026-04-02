@@ -76,11 +76,11 @@ let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
 
 let read_only_tools_inline =
   ["masc_status"; "masc_who"; "masc_messages";
-   "masc_votes"; "masc_vote_status"; "masc_pending_interrupts"]
+   "masc_pending_interrupts"]
 
 let requires_join_tools_inline =
   ["masc_broadcast"; "masc_listen"; "masc_leave";
-   "masc_vote_cast"; "masc_vote_revoke"]
+   "masc_vote_revoke"]
 
 let mcp_context_required_tools_inline =
   Tool_schemas_inline.schemas

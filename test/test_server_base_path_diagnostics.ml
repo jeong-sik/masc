@@ -88,6 +88,51 @@ let test_to_yojson_exposes_effective_paths () =
   Alcotest.(check bool) "roots diverge field" true
     (json |> member "roots_diverge" |> to_bool)
 
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let realpath p = try Unix.realpath p with Unix.Unix_error _ -> p
+
+let test_infer_repo_root_finds_build_ancestor () =
+  with_temp_dir "infer-repo" @@ fun root ->
+  let repo = Filename.concat root "my-repo" in
+  let exe = Filename.concat repo "_build/default/bin/main_eio.exe" in
+  mkdir_p (Filename.concat repo ".masc");
+  mkdir_p (Filename.dirname exe);
+  (* Create a dummy executable so realpath works *)
+  let oc = open_out exe in
+  close_out oc;
+  let result =
+    Server_mcp_transport_http_session.infer_repo_root_from_exe ~exe_path:exe ()
+  in
+  (* Normalize both sides: macOS /var -> /private/var symlink *)
+  Alcotest.(check (option string)) "finds repo root"
+    (Some (realpath repo)) result
+
+let test_infer_repo_root_returns_none_without_masc () =
+  with_temp_dir "infer-repo-no-masc" @@ fun root ->
+  let repo = Filename.concat root "bare-repo" in
+  let exe = Filename.concat repo "_build/default/bin/main_eio.exe" in
+  mkdir_p (Filename.dirname exe);
+  let oc = open_out exe in
+  close_out oc;
+  let result =
+    Server_mcp_transport_http_session.infer_repo_root_from_exe ~exe_path:exe ()
+  in
+  Alcotest.(check (option string)) "returns None without .masc" None result
+
+let test_infer_repo_root_returns_none_for_installed_binary () =
+  let result =
+    Server_mcp_transport_http_session.infer_repo_root_from_exe
+      ~exe_path:"/usr/local/bin/masc-mcp" ()
+  in
+  Alcotest.(check (option string)) "returns None for installed binary" None result
+
 let () =
   Alcotest.run "Server_base_path_diagnostics"
     [
@@ -99,5 +144,14 @@ let () =
             test_strict_violation_respects_env;
           Alcotest.test_case "json exposes effective paths" `Quick
             test_to_yojson_exposes_effective_paths;
+        ] );
+      ( "infer_repo_root",
+        [
+          Alcotest.test_case "finds repo root from _build path" `Quick
+            test_infer_repo_root_finds_build_ancestor;
+          Alcotest.test_case "returns None without .masc dir" `Quick
+            test_infer_repo_root_returns_none_without_masc;
+          Alcotest.test_case "returns None for installed binary" `Quick
+            test_infer_repo_root_returns_none_for_installed_binary;
         ] );
     ]

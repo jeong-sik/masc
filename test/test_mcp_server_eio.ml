@@ -595,13 +595,9 @@ let test_handle_request_tools_list () =
     false
     (List.mem "masc_room_enter" names);
   Alcotest.(check bool)
-    "low-usage social tool hidden from list"
+    "removed ghost tool absent from list"
     false
     (List.mem "masc_post_create" names);
-  Alcotest.(check bool)
-    "low-usage vote utility hidden from list"
-    false
-    (List.mem "masc_vote_create" names);
   Alcotest.(check bool) "first page non-empty" true (names <> []);
   let meta = tools_list_meta_exn first_page in
   let total_count = int_field_exn "tools/list _meta" meta "totalCount" in
@@ -1143,7 +1139,7 @@ let test_handle_request_tools_list_include_hidden_metadata () =
     (Yojson.Safe.Util.member "visibility" status_tool <> `Null);
   Alcotest.(check bool) "implementation status exposed" true
     (Yojson.Safe.Util.member "implementationStatus" status_tool <> `Null);
-  Alcotest.(check bool) "hidden utility omitted" false
+  Alcotest.(check bool) "removed ghost tool absent" false
     (List.exists
        (function
          | `Assoc fields -> List.assoc_opt "name" fields = Some (`String "masc_post_create")

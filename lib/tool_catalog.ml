@@ -154,36 +154,6 @@ let destructive_tool =
 
 let explicit_metadata : (string * metadata) list =
   [
-    ( "masc_post_create",
-      hidden_active
-        "Low-usage social feed utility hidden from the default tool list; board tools are the primary collaborative surface." );
-    ( "masc_post_list",
-      hidden_active
-        "Low-usage social feed utility hidden from the default tool list; board tools are the primary collaborative surface." );
-    ( "masc_post_get",
-      hidden_active
-        "Low-usage social feed utility hidden from the default tool list; board tools are the primary collaborative surface." );
-    ( "masc_comment_add",
-      hidden_active
-        "Low-usage social feed utility hidden from the default tool list; board tools are the primary collaborative surface." );
-    ( "masc_comment_list",
-      hidden_active
-        "Low-usage social feed utility hidden from the default tool list; board tools are the primary collaborative surface." );
-    ( "masc_vote",
-      hidden_active
-        "Low-usage social feed utility hidden from the default tool list; board tools are the primary collaborative surface." );
-    ( "masc_vote_create",
-      hidden_active
-        "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
-    ( "masc_vote_cast",
-      hidden_active
-        "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
-    ( "masc_vote_status",
-      hidden_active
-        "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
-    ( "masc_votes",
-      hidden_active
-        "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
     ( "masc_operator_judgment_write",
       hidden_active
         "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );

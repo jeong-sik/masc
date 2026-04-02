@@ -261,6 +261,26 @@ let test_post_create_empty_title_rejected () =
   Alcotest.(check bool) "error mentions title" true
     (contains_substring body "title" || contains_substring body "Title")
 
+let test_post_create_missing_author_rejected () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body = dispatch "masc_board_post"
+    (make_args [("content", `String "Hello board")]) in
+  Alcotest.(check bool) "missing author rejected" false ok;
+  Alcotest.(check bool) "error mentions author" true
+    (contains_substring body "author")
+
+let test_post_create_anonymous_author_rejected () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body = dispatch "masc_board_post"
+    (make_args [("content", `String "Hello board"); ("author", `String "anonymous")]) in
+  Alcotest.(check bool) "anonymous author rejected" false ok;
+  Alcotest.(check bool) "error mentions author" true
+    (contains_substring body "author")
+
 let test_post_list_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -495,6 +515,27 @@ let test_comment_add_missing_post () =
   Alcotest.(check bool) "comment on missing post fails" false ok;
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
+let test_comment_add_missing_author_rejected () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body = dispatch "masc_board_comment"
+    (make_args [("post_id", `String "missing"); ("content", `String "hi")]) in
+  Alcotest.(check bool) "missing author rejected" false ok;
+  Alcotest.(check bool) "error mentions author" true
+    (contains_substring body "author")
+
+let test_comment_add_anonymous_author_rejected () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body = dispatch "masc_board_comment"
+    (make_args
+       [("post_id", `String "missing"); ("content", `String "hi"); ("author", `String "anonymous")]) in
+  Alcotest.(check bool) "anonymous author rejected" false ok;
+  Alcotest.(check bool) "error mentions author" true
+    (contains_substring body "author")
+
 let test_comment_vote_missing () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -640,6 +681,10 @@ let () =
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;
           Alcotest.test_case "create empty title rejected" `Quick
             test_post_create_empty_title_rejected;
+          Alcotest.test_case "create missing author rejected" `Quick
+            test_post_create_missing_author_rejected;
+          Alcotest.test_case "create anonymous author rejected" `Quick
+            test_post_create_anonymous_author_rejected;
           Alcotest.test_case "list empty" `Quick test_post_list_empty;
           Alcotest.test_case "cleanup clears persisted jsonl" `Quick
             test_cleanup_clears_persisted_jsonl;
@@ -660,6 +705,10 @@ let () =
       ( "comments",
         [
           Alcotest.test_case "comment missing post" `Quick test_comment_add_missing_post;
+          Alcotest.test_case "comment missing author rejected" `Quick
+            test_comment_add_missing_author_rejected;
+          Alcotest.test_case "comment anonymous author rejected" `Quick
+            test_comment_add_anonymous_author_rejected;
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
         ] );
       ( "search_stats",

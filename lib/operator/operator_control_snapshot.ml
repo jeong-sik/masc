@@ -190,7 +190,7 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
         fallback_snapshot.tool_audit_source,
         fallback_snapshot.tool_audit_at )
 
-let keepers_json ?keeper_names ?(include_recent_activity = true)
+let keepers_json ?keeper_names ?(include_recent_activity = false)
     ?(lightweight = false) config =
   let names = match keeper_names with
     | Some n -> n
@@ -242,7 +242,8 @@ let keepers_json ?keeper_names ?(include_recent_activity = true)
             in
             let allowed_tool_names, latest_tool_names, latest_tool_call_count,
                 tool_audit_source, tool_audit_at =
-              keeper_tool_audit_fields config meta
+              if lightweight then ([], [], None, None, None)
+              else keeper_tool_audit_fields config meta
             in
             let agent_status =
               if not agent_exists then "offline"

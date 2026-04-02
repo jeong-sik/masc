@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [2.215.0] - 2026-04-02
+
+### Added
+- **Board author filter** -- add author filtering to `masc_board_list` queries (#4551).
+- **Prompt state tools** -- register `masc_clear_param` and `masc_prompt_override` on MCP surfaces (#4570).
+
+### Changed
+- **Config introspection snapshot** -- centralize config introspection snapshot generation for shared consumers (#4557).
+
+### Fixed
+- **Runtime transport follow-up** -- patch runtime transport review follow-up issues on the post-release path (#4562).
+- **Board author filter accessibility** -- add `aria-label` to the board author filter input (#4571).
+
 ## [2.214.0] - 2026-04-02
 
 ### Added

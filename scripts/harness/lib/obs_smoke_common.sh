@@ -5,10 +5,20 @@
 PASS_COUNT=0
 FAIL_COUNT=0
 
+# Exit code 2 = skipped (distinct from 0=pass, 1=fail).
+# Set OBS_PERMISSIVE=1 to treat skips as exit 0 for local dev convenience.
+OBS_SKIP_EXIT=${OBS_PERMISSIVE:+0}
+OBS_SKIP_EXIT=${OBS_SKIP_EXIT:-2}
+
+obs_skip() {
+  echo "SKIP: $1"
+  exit "$OBS_SKIP_EXIT"
+}
+
 obs_require_commands() {
   for cmd in jq curl python3; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
-      echo "SKIP: $cmd not found" && exit 0
+      obs_skip "$cmd not found"
     fi
   done
 }
@@ -17,8 +27,7 @@ obs_require_server_exe() {
   local root_dir="$1"
   local exe
   exe="$(harness_find_server_exe "$root_dir" "${SERVER_EXE:-}")" || {
-    echo "SKIP: server executable not found (run: dune build)"
-    exit 0
+    obs_skip "server executable not found (run: dune build)"
   }
   printf '%s\n' "$exe"
 }

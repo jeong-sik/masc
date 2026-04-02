@@ -102,8 +102,7 @@ else
 fi
 
 if ! obs_wait_for_ready "$PORT" "$HEALTH_TIMEOUT_SEC"; then
-  echo "SKIP: server did not become healthy (not running or build missing)"
-  exit 0
+  obs_skip "server did not become healthy (not running or build missing)"
 fi
 
 # ── step 2: bootstrap room ──

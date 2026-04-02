@@ -274,7 +274,7 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
 let classify_post_kind (p : post) = p.post_kind
 
 let post_classification_reason (p : post) =
-  let author = Agent_id.to_string p.author in
+  let author = String.lowercase_ascii (Agent_id.to_string p.author) in
   match p.post_kind, meta_source p.meta_json with
   | Human_post, Some "dashboard_board_post" ->
       "Direct board post created from the dashboard without automation override."

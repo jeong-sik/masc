@@ -45,10 +45,10 @@ let json_ensure_meta_source source = function
         | Some (`Assoc meta_fields as existing_meta) -> (
             match List.assoc_opt "source" meta_fields with
             | Some (`String current) when String.trim current <> "" -> existing_meta
-            | _ -> `Assoc (("source", `String source) :: List.remove_assoc "source" meta_fields))
+            | _ -> `Assoc (("source", `String source) :: List.filter (fun (k, _) -> k <> "source") meta_fields))
         | _ -> `Assoc [ ("source", `String source) ]
       in
-      let fields = ("meta", meta_json) :: List.remove_assoc "meta" fields in
+      let fields = ("meta", meta_json) :: List.filter (fun (k, _) -> k <> "meta") fields in
       `Assoc fields
   | _non_object ->
       failwith "json_ensure_meta_source: expected JSON object"

@@ -100,7 +100,7 @@ let test_route_auth_contracts () =
   check bool "channel gate health route stays public read" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
-       {|with_public_read (fun state _req reqd ->|})
+       "with_public_read")
 
 let test_http_write_auth_contracts () =
   check bool "server auth no longer accepts query token fallback" true

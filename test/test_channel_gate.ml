@@ -18,6 +18,16 @@ let reset_dedup () =
   Channel_gate.dedup_cleanup
     ~now:(Unix.gettimeofday () +. Channel_gate.dedup_ttl_sec () +. 1.0)
 
+let unique_key prefix =
+  Printf.sprintf "%s-%d-%.0f" prefix (Unix.getpid ())
+    (Unix.gettimeofday () *. 1_000_000.)
+
+let test_validate_accepts_valid_message () =
+  reset_dedup ();
+  match Channel_gate.validate (make_message ~idempotency_key:(unique_key "ok") ()) with
+  | Ok () -> ()
+  | Error _ -> fail "expected valid message to pass validation"
+
 let test_validate_rejects_empty_keeper_name () =
   reset_dedup ();
   match Channel_gate.validate (make_message ~keeper_name:"   " ~idempotency_key:"empty-keeper" ()) with
@@ -34,7 +44,7 @@ let test_validate_rejects_empty_content () =
 
 let test_validate_rejects_duplicate_message () =
   reset_dedup ();
-  let key = Printf.sprintf "dup-%d" (Unix.getpid ()) in
+  let key = unique_key "dup" in
   let message = make_message ~idempotency_key:key () in
   (match Channel_gate.validate message with
   | Ok () -> ()
@@ -47,7 +57,7 @@ let test_validate_rejects_duplicate_message () =
 
 let test_validate_allows_key_after_cleanup () =
   reset_dedup ();
-  let key = Printf.sprintf "cleanup-%d" (Unix.getpid ()) in
+  let key = unique_key "cleanup" in
   let message = make_message ~idempotency_key:key () in
   (match Channel_gate.validate message with
   | Ok () -> ()
@@ -57,9 +67,25 @@ let test_validate_allows_key_after_cleanup () =
   | Ok () -> ()
   | Error _ -> fail "cleanup should evict expired idempotency key"
 
+let test_failed_validation_does_not_consume_idempotency_key () =
+  reset_dedup ();
+  let key = unique_key "retryable" in
+  (match
+     Channel_gate.validate
+       (make_message ~content:"   " ~idempotency_key:key ())
+   with
+  | Error Channel_gate.Empty_content -> ()
+  | Ok () -> fail "expected invalid message to fail"
+  | Error _ -> fail "expected Empty_content");
+  match Channel_gate.validate (make_message ~idempotency_key:key ()) with
+  | Ok () -> ()
+  | Error _ -> fail "failed validation should not consume idempotency key"
+
 let test_validation_error_to_string () =
   check string "empty content" "content is required"
     (Channel_gate.validation_error_to_string Channel_gate.Empty_content);
+  check string "empty keeper name" "keeper_name is required"
+    (Channel_gate.validation_error_to_string Channel_gate.Empty_keeper_name);
   check string "duplicate message"
     "duplicate message (idempotency_key=dup)"
     (Channel_gate.validation_error_to_string
@@ -70,6 +96,8 @@ let () =
     [
       ( "validate",
         [
+          test_case "accepts valid message" `Quick
+            test_validate_accepts_valid_message;
           test_case "rejects empty content" `Quick
             test_validate_rejects_empty_content;
           test_case "rejects empty keeper name" `Quick
@@ -78,6 +106,8 @@ let () =
             test_validate_rejects_duplicate_message;
           test_case "allows key after cleanup" `Quick
             test_validate_allows_key_after_cleanup;
+          test_case "failed validation does not consume key" `Quick
+            test_failed_validation_does_not_consume_idempotency_key;
           test_case "stringifies validation errors" `Quick
             test_validation_error_to_string;
         ] );

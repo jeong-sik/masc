@@ -102,7 +102,7 @@ vi.mock('../api/dashboard', () => ({
   patchKeeperConfig: mocks.patchKeeperConfig,
 }))
 
-import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
+import { KeeperConfigPanel, loadKeeperConfig, resetKeeperConfig } from './keeper-config-panel'
 
 async function flush() {
   await new Promise(resolve => setTimeout(resolve, 0))
@@ -145,5 +145,13 @@ describe('KeeperConfigPanel', () => {
     const textareas = Array.from(container.querySelectorAll('textarea'))
     expect(textareas.length).toBeGreaterThan(0)
     expect(textareas[0]?.value).toContain('Ship stable keeper ops')
+  })
+
+  it('supports forced config refresh for already-loaded keepers', async () => {
+    await loadKeeperConfig('keeper-sangsu')
+    await loadKeeperConfig('keeper-sangsu')
+    await loadKeeperConfig('keeper-sangsu', { force: true })
+
+    expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
   })
 })

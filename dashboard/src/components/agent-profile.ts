@@ -323,7 +323,9 @@ export function AgentProfile({ name }: { name: string }) {
         <//>
       </div>
 
-      ${ps.status === 'error' ? html`<div class="council-error rounded-lg">${ps.message}</div>` : null}
+      ${ps.status === 'error'
+        ? html`<div class="rounded-lg border border-[rgba(239,68,68,0.35)] bg-[rgba(239,68,68,0.08)] px-3 py-2">${ps.message}</div>`
+        : null}
 
       <${CharacterPlate} name=${name} />
 

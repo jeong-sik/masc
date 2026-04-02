@@ -210,52 +210,30 @@ Decision: SSE with fallback to WebSocket
 ### 구현
 
 ```bash
-# 1. Debate 시작
-masc_debate_start --topic "WebSocket vs SSE for real-time updates"
+# 1. 제안 게시
+masc_board_post --title "Realtime transport choice" --content "Proposal: use SSE unless true bidirectional control is required"
 
-# 2. 관점별 주장 기록
-masc_debate_argue --debate_id debate-123 --position support --content "Use SSE for server-to-client"
-masc_debate_argue --debate_id debate-123 --position oppose --content "Use WebSocket for bidirectional"
+# 2. 관점별 의견 추가
+masc_board_comment --post_id post-123 --content "Operational view: SSE is enough for server-push"
+masc_board_comment --post_id post-123 --content "Strategic view: keep WebSocket only as a fallback"
 
-# 3. 합의 세션 시작
-masc_consensus_start --topic "Choose realtime transport"
+# 3. 요약 확인
+masc_board_get --post_id post-123
 
-# 4. 투표 진행
-masc_consensus_vote --session_id consensus-456 --decision reject --reason "WebSocket is heavier than needed"
-masc_consensus_vote --session_id consensus-456 --decision approve --reason "SSE is simpler and HTTP-native"
-masc_consensus_vote --session_id consensus-456 --decision approve --reason "Industry trend favors SSE for server-push"
-
-# 5. 결과 확인
-masc_consensus_result --session_id consensus-456
-# Result: SSE wins 2-1
-
-# 6. 학습 기록
+# 4. 학습 기록
 masc_consolidate_learning --topic "realtime-protocol" --outcome "sse-chosen"
 ```
 
 ### MCP 호출 예시
 
 ```json
-// Start structured debate
 {
   "method": "tools/call",
   "params": {
-    "name": "masc_debate_start",
+    "name": "masc_board_post",
     "arguments": {
-      "topic": "WebSocket vs SSE for real-time updates?"
-    }
-  }
-}
-
-// Cast consensus vote with reasoning
-{
-  "method": "tools/call",
-  "params": {
-    "name": "masc_consensus_vote",
-    "arguments": {
-      "session_id": "consensus-456",
-      "decision": "approve",
-      "reason": "SSE is simpler, HTTP-native, and sufficient for server-push scenarios. WebSocket adds complexity without clear benefit for our use case."
+      "title": "Realtime transport choice",
+      "content": "Proposal: use SSE unless true bidirectional control is required"
     }
   }
 }

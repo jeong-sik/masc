@@ -1311,7 +1311,7 @@ let _test_execute_tool_trpg_flow () =
 
   cleanup_dir base_path
 
-(* Council module removed — governance_status tool no longer dispatched *)
+(* Governance status tool is no longer dispatched *)
 
 let test_execute_tool_team_session_step_direct_call () =
   Eio_main.run @@ fun env ->
@@ -1618,7 +1618,7 @@ let test_execute_tool_mcp_session_ignores_term_persistence () =
 
   cleanup_dir base_path
 
-(* Council module removed — convo tools are stubs, room-scoped test removed *)
+(* Legacy governance convo tools are stubs; room-scoped test removed *)
 
 let _test_handle_request_tools_call_trpg () =
   Eio_main.run @@ fun env ->
@@ -2597,7 +2597,7 @@ let eio_tests = [
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)
-  (* Council module removed — governance_status tool test removed *)
+  (* Governance status tool test removed *)
   "canonical team_session_step direct call", `Quick,
     test_execute_tool_team_session_step_direct_call;
   "legacy persisted agent read only for ephemeral names", `Quick,
@@ -2607,7 +2607,7 @@ let eio_tests = [
   "generated agent_name uses token identity", `Quick,
     test_execute_tool_generated_agent_name_uses_token_identity;
   "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;
-  (* Council module removed — convo room test removed *)
+  (* Legacy governance convo room test removed *)
 ]
 
 let () =

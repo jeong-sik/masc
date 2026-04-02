@@ -106,10 +106,10 @@ dune build
 Use conventional commits:
 
 ```
-feat(council): add conversation loop guard
+feat(governance): add review queue guard
 fix(heartbeat): reduce GraphQL query cost under limit
 refactor(keeper): rename persona to agent terminology
-test(council): add conversation file persistence tests
+test(governance): add review queue persistence tests
 docs: update CONTRIBUTING for current architecture
 chore: bump version to 0.9.0
 ```

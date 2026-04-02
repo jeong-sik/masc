@@ -5,7 +5,7 @@
 | Status | Draft |
 | Team | Dashboard |
 | Maps to | `lib/dashboard/dashboard_*.ml`, `lib/server/server_dashboard_http*.ml`, `lib/web_dashboard.ml`, `lib/credits_dashboard.ml`, `dashboard/` |
-| Dependencies | 09-server-transport, 05-keeper-agent, Room, Operator_control, Team_session_store, Council.Governance_v2 |
+| Dependencies | 09-server-transport, 05-keeper-agent, Room, Operator_control, Team_session_store, Governance Pipeline |
 | Modules (OCaml) | 39 (.ml + .mli) |
 | LOC (OCaml) | ~13K |
 | Modules (Frontend) | ~210 TypeScript + ~15 CSS |
@@ -188,22 +188,13 @@ type attention_item = {
 
 ### 3.5. Governance Surface (`dashboard_governance.ml`)
 
-**552 LOC.** `Council.Governance_v2` (GV2) case bundle을 대시보드 JSON으로 변환한다.
+현재 `dashboard_governance.ml`은 빈 호환성 payload를 반환하는 compatibility stub이다. Governance case tracking은 retire되었고, 대시보드 endpoint는 0 요약치와 empty list를 반환한다.
 
 주요 함수:
-- `dashboard_json`: 전체 governance 대시보드 (summary + items + activity + judge + pending_actions)
-- `cases_json`: case 목록 (pagination: limit/offset)
-- `case_detail_json`: 단일 case bundle 상세 (case + petitions + briefs + ruling + execution_order)
-- `factual_snapshot_json`: 전체 case bundle의 팩트 기반 스냅샷 (judge prompt 입력용)
-
-각 case bundle은 다음 필드를 포함하는 JSON으로 변환된다:
-- `truth_summary`: petition/brief/ref 카운트 요약
-- `judgment_summary`: ruling 요약
-- `recommended_action`: 권장 액션 (action_kind, resolved_tool, target)
-- `executed_route`: 실행 명령 상태
-- `guardrail_state`: human gate 필요 여부, 실행 준비 상태
-- `auto_execution_state`: 자동 실행 상태
-- `activity`: petition/brief/ruling/order 이벤트 타임라인
+- `dashboard_json`: governance summary + judge 상태의 빈 호환 응답
+- `cases_json`: 빈 case 목록 (pagination 유지)
+- `case_detail_json`: 단일 case 조회 시 not-found 응답
+- `factual_snapshot_json`: judge 입력용 빈 팩트 스냅샷
 
 ### 3.6. Governance Judge (`dashboard_governance_judge.ml`)
 

@@ -25,7 +25,7 @@
 | Keeper Agent | 05 | 24 | 1 | 0 | 0 | 96% | tech debt(meta 100필드) 외 완전 |
 | Command Plane | 06 | 38 | 2 | 0 | 0 | 95% | Intent 도구 사용 빈도 낮음 |
 | Team Session | 07 | 30 | 3 | 0 | 0 | 90% | Auto 모드는 OAS 위임, lossy projection |
-| Council/Governance | 08 | 28 | 0 | 0 | 0 | 100% | 거버넌스 24+ 호출 |
+| Governance | 08 | 28 | 0 | 0 | 0 | 100% | 거버넌스 pipeline + dashboard surface 유지 |
 | Server/Transport | 09 | 18 | 5 | 0 | 0 | 78% | HTTP/1.1 canonical + gRPC/WS/WebRTC local harness verified |
 | Dashboard | 10 | 15 | 1 | 0 | 0 | 94% | MDAL surface만 미약 |
 | Board | 11 | 16 | 1 | 0 | 0 | 94% | Board Listener polling만 CODE |
@@ -121,17 +121,15 @@
 | Tool Surface | 9 handler modules, 4.5K LOC | IMPL | God file 분할 완료 |
 | Lossy Projection | 47→12 fields to OAS Collaboration.t | CODE | 의도적 gap |
 
-### 08-Council/Governance (100% IMPL)
+### 08-Governance (100% IMPL)
 
 | Section | Feature | Status | Evidence |
 |---------|---------|--------|----------|
-| Debate Module | Structured debates, SSJ turn-taking | IMPL | council/debate.ml |
-| Consensus | In-memory + file write-through | IMPL | council/consensus.ml |
-| Router (MoE) | Agent selection, 90/10 cost target | IMPL | council/router.ml |
-| Governance V2 | Petition→Case→Ruling legal metaphor | IMPL | governance_v2.ml, 24+ calls |
+| Governance Surface | Empty compatibility payloads, no case tracking | IMPL | dashboard/dashboard_governance.ml |
 | Governance Pipeline | 4 risk levels, pre-hook | IMPL | governance_pipeline.ml |
+| Governance Registry | Runtime level resolution and policy mapping | IMPL | governance_registry.ml |
 | Operator Control | Snapshot, digest, action, judgment | IMPL | operator_control.ml 26K |
-| Loop Guard | 3-layer defense | IMPL | loop_guard.ml |
+| Governance Judge | Dashboard judgment loop | IMPL | dashboard/dashboard_governance_judge.ml |
 
 ### 09-Server/Transport (65% IMPL)
 
@@ -183,7 +181,7 @@ env-gated 6종(PG/network/viewer)만 CODE.
 ## 4. Key Findings
 
 ### 건강한 서브시스템 (100% IMPL)
-- Room, Memory, OAS, Config, Council — 코드+테스트+실사용 모두 확인
+- Room, Memory, OAS, Config, Governance — 코드+테스트+실사용 모두 확인
 
 ### CODE 집중 영역 (빌드됨, 미사용)
 1. **Chain Engine** (17K LOC) → **Frozen** 판정, OAS superseded

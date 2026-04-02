@@ -4190,7 +4190,7 @@ body.wasm-dom-fallback #bevy-canvas {
 }
 
 /* ═══════════════════════════════════════════
-   MODE PANELS (Monitor, Council, Social, Experiment)
+   MODE PANELS (Monitor, Social, Experiment)
    ═══════════════════════════════════════════ */
 
 /* Mode Panels (shared) */
@@ -4278,12 +4278,6 @@ body.wasm-dom-fallback #bevy-canvas {
     margin-bottom: 12px;
 }
 
-/* Council Mode */
-.council-deliberation {
-    max-width: 800px;
-    margin: 0 auto;
-}
-
 /* Social Mode */
 .social-feed {
     max-width: 600px;
@@ -4320,7 +4314,6 @@ body.wasm-dom-fallback #bevy-canvas {
 /* ─── Status Badges ──────────────────────── */
 
 .mode-status,
-.council-status,
 .experiment-status {
     font-family: var(--font-ui);
     font-size: 11px;
@@ -4349,7 +4342,6 @@ body.wasm-dom-fallback #bevy-canvas {
 
 /* ─── Feed Containers (scrollable) ───────── */
 
-.council-feed,
 .social-feed,
 .experiment-feed {
     max-height: 80vh;
@@ -4363,26 +4355,22 @@ body.wasm-dom-fallback #bevy-canvas {
     word-break: break-word;
 }
 
-.council-feed::-webkit-scrollbar,
 .social-feed::-webkit-scrollbar,
 .experiment-feed::-webkit-scrollbar {
     width: 4px;
 }
 
-.council-feed::-webkit-scrollbar-track,
 .social-feed::-webkit-scrollbar-track,
 .experiment-feed::-webkit-scrollbar-track {
     background: var(--bg-deep);
 }
 
-.council-feed::-webkit-scrollbar-thumb,
 .social-feed::-webkit-scrollbar-thumb,
 .experiment-feed::-webkit-scrollbar-thumb {
     background: var(--scrollbar-thumb);
     border-radius: 2px;
 }
 
-.council-feed::-webkit-scrollbar-thumb:hover,
 .social-feed::-webkit-scrollbar-thumb:hover,
 .experiment-feed::-webkit-scrollbar-thumb:hover {
     background: var(--scrollbar-thumb-hover);
@@ -4390,7 +4378,6 @@ body.wasm-dom-fallback #bevy-canvas {
 
 /* ─── Empty State Placeholders ───────────── */
 
-.council-empty,
 .social-empty,
 .experiment-empty {
     color: var(--text-dim);

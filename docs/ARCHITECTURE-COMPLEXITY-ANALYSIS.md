@@ -82,7 +82,6 @@ Not related to core coordination. Candidates for separation or removal.
 | tool_protocol_game_view | **1674** | Protocol game view | Separate package |
 | tool_risc | **1070** | Role sampling campaigns | Experimental residue |
 | tool_autoresearch | **889** | Auto research loop | Experimental residue |
-| tool_council | **950** | Consensus protocol | Usage unclear |
 | tool_experiment | **898** | Sandbox | Experimental residue |
 | tool_code | ~200 | Code read/search | Utility |
 | tool_tempo | ~200 | Tempo/rhythm | Experimental |
@@ -159,7 +158,7 @@ types (leaf) <- parse <- spawn <- handlers <- tool_team_session (entry)
 ### Phase 2: Separation (separate PRs)
 
 - [ ] TRPG + protocol_game_view -> `masc-games` library (3600+ lines)
-- [ ] risc + autoresearch + council + experiment -> `masc-experiments` (3800+ lines)
+- [ ] risc + autoresearch + experiment -> `masc-experiments` (2700+ lines)
 - [ ] dune optional library separation
 
 ### Phase 3: Structural improvements (separate PRs)

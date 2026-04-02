@@ -204,82 +204,6 @@ pub fn poll_masc_events(
                 log::info!("MASC endpoint info received");
             }
 
-            // ─── Council (MAGI Deliberation) ─────────────
-            "decision_issue" => {
-                let title = extract_field(&data, "title").unwrap_or("untitled");
-                let urgency = extract_field(&data, "urgency").unwrap_or("normal");
-                let summary = format!("[ISSUE] {} (urgency: {})", title, urgency);
-                event_log.entries.push(MascLogEntry {
-                    timestamp: now,
-                    event_type: "decision_issue".to_string(),
-                    summary: summary.clone(),
-                });
-                update_council_deliberation(&summary);
-                log::info!("MASC council: {}", summary);
-            }
-            "decision_option" => {
-                let label = extract_field(&data, "label").unwrap_or("?");
-                let proposed_by = extract_field(&data, "proposed_by").unwrap_or("unknown");
-                let summary = format!("[OPTION] {} by {}", label, proposed_by);
-                event_log.entries.push(MascLogEntry {
-                    timestamp: now,
-                    event_type: "decision_option".to_string(),
-                    summary: summary.clone(),
-                });
-                update_council_deliberation(&summary);
-                log::info!("MASC council: {}", summary);
-            }
-            "decision_argument" => {
-                let agent = extract_field(&data, "agent").unwrap_or("unknown");
-                let position = extract_field(&data, "position").unwrap_or("neutral");
-                let reasoning = extract_field(&data, "reasoning").unwrap_or("...");
-                let summary = format!("[{}] {}: {}", position.to_uppercase(), agent, reasoning);
-                event_log.entries.push(MascLogEntry {
-                    timestamp: now,
-                    event_type: "decision_argument".to_string(),
-                    summary: summary.clone(),
-                });
-                update_council_deliberation(&summary);
-                log::info!("MASC council: {}", summary);
-            }
-            "decision_vote" => {
-                let agent = extract_field(&data, "agent").unwrap_or("unknown");
-                let option_id = extract_field(&data, "option_id").unwrap_or("?");
-                let weight = extract_field(&data, "weight").unwrap_or("1");
-                let summary = format!("[VOTE] {} -> {} (weight: {})", agent, option_id, weight);
-                event_log.entries.push(MascLogEntry {
-                    timestamp: now,
-                    event_type: "decision_vote".to_string(),
-                    summary: summary.clone(),
-                });
-                update_council_deliberation(&summary);
-                log::info!("MASC council: {}", summary);
-            }
-            "decision_consensus" => {
-                let chosen = extract_field(&data, "chosen_option_id").unwrap_or("?");
-                let method = extract_field(&data, "method").unwrap_or("unknown");
-                let margin = extract_field(&data, "margin").unwrap_or("?");
-                let summary = format!("[CONSENSUS] {} via {} (margin: {})", chosen, method, margin);
-                event_log.entries.push(MascLogEntry {
-                    timestamp: now,
-                    event_type: "decision_consensus".to_string(),
-                    summary: summary.clone(),
-                });
-                update_council_deliberation(&summary);
-                log::info!("MASC council: {}", summary);
-            }
-            "decision_phase" => {
-                let phase = extract_field(&data, "phase").unwrap_or("unknown");
-                let summary = format!("[PHASE] {}", phase);
-                event_log.entries.push(MascLogEntry {
-                    timestamp: now,
-                    event_type: "decision_phase".to_string(),
-                    summary: summary.clone(),
-                });
-                update_council_deliberation(&summary);
-                log::info!("MASC council: {}", summary);
-            }
-
             // ─── Experiment (A/B Testing) ────────────────
             "experiment_created" => {
                 let hypothesis = extract_field(&data, "hypothesis").unwrap_or("(no hypothesis)");
@@ -460,22 +384,6 @@ fn update_social_feed(_summary: &str) {
                     }
                 }
             }
-        }
-    }
-}
-
-/// Update the Council panel deliberation feed.
-fn update_council_deliberation(_summary: &str) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-            return;
-        };
-        if let Ok(Some(el)) = doc.query_selector("#council-deliberation") {
-            let current = el.text_content().unwrap_or_default();
-            let updated = format!("{}\n{}", _summary, current);
-            let lines: Vec<&str> = updated.lines().take(50).collect();
-            el.set_text_content(Some(&lines.join("\n")));
         }
     }
 }

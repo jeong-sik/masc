@@ -186,14 +186,13 @@
 
 | ID | 기능 | 판정 | 비고 |
 |----|------|------|------|
-| 6.1 | Mode Selector (5개) | NOT_IMPL | Rust/WASM 빌드. API 레벨 검증 불가 |
+| 6.1 | Mode Selector (4개) | NOT_IMPL | Rust/WASM 빌드. API 레벨 검증 불가 |
 | 6.2 | TRPG Mode | NOT_IMPL | |
 | 6.3 | System Monitor | NOT_IMPL | |
-| 6.4 | MAGI Council | NOT_IMPL | |
-| 6.5 | Keeper Autonomy | NOT_IMPL | |
-| 6.6 | Experiment Lab | NOT_IMPL | |
+| 6.4 | Social Board | NOT_IMPL | |
+| 6.5 | Experiment Lab | NOT_IMPL | |
 
-**5 모드**: trpg, experiment, monitor, council, social
+**4 모드**: trpg, experiment, monitor, social
 
 ---
 

@@ -68,7 +68,7 @@ let test_full_preset_exposes_masc () =
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  (* Council removed: governance tools no longer in raw_all_tool_schemas *)
+  (* Governance tools are no longer in raw_all_tool_schemas *)
   Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
   Alcotest.(check bool) "has masc_autoresearch_cycle" true
@@ -86,7 +86,7 @@ let test_messaging_preset_exposes_board () =
   let names = KET.keeper_allowed_tool_names meta in
   Alcotest.(check bool) "has keeper_board_post" true
     (List.mem "keeper_board_post" names);
-  (* Council removed: governance tools no longer available *)
+  (* Governance tools are no longer available *)
   Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
   Alcotest.(check bool) "omits keeper_shell_readonly" false

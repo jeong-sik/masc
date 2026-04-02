@@ -125,7 +125,7 @@ let cleanup_board_artifacts_fn
   : (unit -> int) ref
   = ref (fun () -> 0)
 
-(** Governance stale case purge (council removed, no-op stub).
+(** Governance stale case purge (retired, no-op stub).
     Returns (test_cases_purged, artifact_cases_purged). *)
 let governance_purge_fn
   : (string -> int * int) ref

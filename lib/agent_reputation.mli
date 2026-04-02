@@ -1,7 +1,7 @@
 (** Agent_reputation — Reputation scoring from existing JSONL data
 
     Computes agent reputation from task transitions, mention inbox,
-    board posts/comments, and debate participation.
+    and board posts/comments.
     No new storage — reads from existing `.masc/` JSONL files.
 
     @since Phase 3B — Keeper Deliberation Engine
@@ -18,7 +18,6 @@ type agent_reputation = {
   response_rate: float;       (** responded / received, 0.0 if no mentions *)
   board_posts: int;
   board_comments: int;
-  debates_participated: int;
   overall_score: float;       (** Weighted composite 0.0-1.0 *)
 }
 
@@ -33,7 +32,7 @@ val default_reputation : agent_name:string -> agent_reputation
 (** A zero-valued reputation for a given agent. *)
 
 val compute_reputation : Room.config -> agent_name:string -> agent_reputation
-(** Compute reputation by reading tasks, mentions, board, and debate data. *)
+(** Compute reputation by reading tasks, mentions, and board data. *)
 
 val reputation_to_json : agent_reputation -> Yojson.Safe.t
 (** Alias for {!agent_reputation_to_yojson}. *)
@@ -47,7 +46,6 @@ val compute_overall_score :
   response_rate:float ->
   board_posts:int ->
   board_comments:int ->
-  debates_participated:int ->
   float
 (** Compute the weighted overall score from individual metrics.
     Exposed for testing. *)

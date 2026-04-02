@@ -1,4 +1,4 @@
-(** Dashboard Governance — council module removed, stubs only. *)
+(** Dashboard Governance — compatibility stubs only. *)
 
 type detail_status = [ `OK | `Not_found ]
 
@@ -11,7 +11,7 @@ let factual_snapshot_json ~base_path:_ =
       ("generated_at", `String (Types.now_iso ()));
       ("items", `List []);
       ("activity", `List []);
-      ("note", `String "Council module removed. Governance cases are no longer tracked.");
+      ("note", `String "Governance case tracking is no longer available.");
     ]
 
 let dashboard_json ~base_path:_ ~limit:_ ~offset:_ ~status_filter:_ =
@@ -61,4 +61,4 @@ let cases_json ~base_path:_ ~limit ~offset ~status_filter:_ ~include_test:_ =
 
 let case_detail_json ~base_path:_ ~case_id =
   ignore case_id;
-  (`Not_found, `Assoc [ ("error", `String "Council module removed") ])
+  (`Not_found, `Assoc [ ("error", `String "Governance case tracking unavailable") ])

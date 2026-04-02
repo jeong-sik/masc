@@ -20,7 +20,6 @@
 **원래 발견된 위치 (중복이었던 곳):**
 - `lib/process/file_lock_eio.ml` — `acquire_flock_fd` (원본, 이제 `acquire_flock_retry` 호출)
 - `lib/backend/backend.ml` — `with_locked_rw_fd` (중복 제거됨)
-- `lib/council/governance_v2.ml` — `submit_petition` (중복 제거됨)
 - `lib/hebbian_eio.ml` — `with_graph_lock` (중복 제거됨)
 
 ---

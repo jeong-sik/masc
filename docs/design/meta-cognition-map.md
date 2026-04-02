@@ -76,27 +76,21 @@ Board는 이미 집단 신호의 핵심 surface다.
 - 여론, 반복 서사, 정정, 반론, 릴레이 코멘트는 이미 board에 쌓인다.
 - 다만 현재는 원시 이벤트 저장에 가깝고, "consensus", "dissent", "complaint", "room desire" 같은 파생 객체가 없다.
 
-### 4. Structured stance / consensus primitives already exist
+### 4. Structured stance primitives are still partial
 
-Board 외에도 집단 의견을 구조화할 수 있는 primitive가 있다.
+Board 외에도 의견 차이를 구조화할 수 있는 흔적은 남아 있다.
 
 - Governance brief stance: `support | oppose | neutral`
-- Debate: `Support | Oppose | Neutral`
-- Consensus session: `Approve | Reject | Abstain`
-- Balance: dominance / mandatory participation
 
 관련 코드:
 
-- `docs/spec/08-council-governance.md`
-- `lib/council/governance_v2_types.ml`
-- `lib/council/consensus.ml`
-- `lib/council/debate.ml`
-- `lib/council/balance.ml`
+- `lib/dashboard/dashboard_governance.ml`
+- `lib/governance_pipeline.ml`
 
 의미:
 
-- MASC에는 이미 "의견 차이"와 "합의"를 표현하는 제도적 surface가 있다.
-- 하지만 board discourse와 governance/consensus surface가 자동으로 연결되지 않는다.
+- MASC에는 여전히 "의견 차이"를 표현하는 일부 surface가 있다.
+- 하지만 board discourse가 구조화된 stance object로 자동 승격되지는 않는다.
 
 ### 5. Relationship primitives already exist
 

@@ -12,8 +12,8 @@ use crate::mode::ViewerMode;
 /// Plugin that establishes the SSE connection to the TRPG Engine
 /// and bridges SSE events into the Bevy event system.
 ///
-/// Also manages MASC MCP SSE connections for Monitor, Council,
-/// Social, and Experiment modes — rendering events as text in DOM panels.
+/// Also manages MASC MCP SSE connections for Monitor, Social,
+/// and Experiment modes — rendering events as text in DOM panels.
 ///
 /// Social mode additionally runs a Board HTTP poller (no board SSE events
 /// exist on the server, so it uses 30s polling via social_board module).
@@ -43,13 +43,8 @@ impl Plugin for SsePlugin {
         // ── MASC SSE (shared event log resource) ──
         app.init_resource::<masc_bridge::MascEventLog>();
 
-        // ── MASC modes: Monitor, Council, Social, Experiment ──
-        let masc_modes = [
-            ViewerMode::Monitor,
-            ViewerMode::Council,
-            ViewerMode::Social,
-            ViewerMode::Experiment,
-        ];
+        // ── MASC modes: Monitor, Social, Experiment ──
+        let masc_modes = [ViewerMode::Monitor, ViewerMode::Social, ViewerMode::Experiment];
         for mode in masc_modes {
             app.add_systems(OnEnter(mode), masc_client::setup_masc_sse)
                 .add_systems(Update, masc_bridge::poll_masc_events.run_if(in_state(mode)))

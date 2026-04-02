@@ -113,9 +113,9 @@ This wraps `Agent_sdk.Context.t` with additional MASC-specific fields (`importan
 
 **Impact**: MASC-specific markers (`[MASC_GOAL]`, `[STATE]...[/STATE]`) embedded in messages that OAS Context_reducer must handle. Domain concepts leak into message content format.
 
-### V4: `Collaboration.t` decoration issue resolved in `tool_council_oas.ml`
+### V4: Decorative petition bridge issue resolved
 
-The current `tool_council_oas.ml` no longer creates decorative `Collaboration.t` instances for petitions. Governance petitions persist directly via `Governance_v2`, and the module comment states that explicitly.
+The retired petition bridge no longer creates decorative `Collaboration.t` instances for petitions. Governance petitions persist directly via the current governance surface.
 
 **Impact**: Resolved. The current code path no longer instantiates `Collaboration.t` as one-shot decoration for petitions.
 
@@ -238,7 +238,7 @@ Replace `[MASC_GOAL]`, `[STATE]...[/STATE]`, `[MASC_MEMORY_SUMMARY v1]` prefixes
 
 ### Phase 4: Mark decorative `Collaboration.t` violation as resolved
 
-`tool_council_oas.ml` no longer creates decorative `Collaboration.t` records for petitions.
+The retired petition bridge no longer creates decorative `Collaboration.t` records for petitions.
 
 남은 작업은 코드 수정이 아니라 boundary 문서와 invariants를 현재 상태에 맞게 유지하는 것이다.
 

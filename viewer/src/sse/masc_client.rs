@@ -57,13 +57,6 @@ const MASC_SSE_EVENT_TYPES: &[&str] = &[
     "agent_left",
     "task_update",
     "endpoint",
-    // Council (MAGI deliberation)
-    "decision_issue",
-    "decision_option",
-    "decision_argument",
-    "decision_vote",
-    "decision_consensus",
-    "decision_phase",
     // Experiment (A/B testing)
     "experiment_created",
     "experiment_assignment",
@@ -269,7 +262,7 @@ fn attempt_reconnect(
     );
 }
 
-/// OnEnter system for MASC modes (Monitor, Council, Social, Experiment).
+/// OnEnter system for MASC modes (Monitor, Social, Experiment).
 /// Creates an EventSource connection to the MASC MCP SSE endpoint.
 #[cfg(target_arch = "wasm32")]
 pub fn setup_masc_sse(

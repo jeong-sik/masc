@@ -345,7 +345,7 @@ masc_set_param(key, value)
 
 ### 8.3 거버넌스 연동
 
-`masc_runtime_params`로 현재 값 조회, `masc_set_param`으로 변경. Council/Governance 결정(`case_id`)과 연결하여 감사 추적이 가능하다.
+`masc_runtime_params`로 현재 값 조회, `masc_set_param`으로 변경. Governance 결정(`case_id`)과 연결하여 감사 추적이 가능하다.
 
 ---
 

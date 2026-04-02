@@ -287,12 +287,6 @@ Team Session 내 에이전트의 역할 분류: `Worker_manager` (관리), `Work
 
 ## Governance
 
-**Council**
-다수 에이전트의 합의 기반 의사결정 기구. Conversation을 통해 주제별 스레드에서 turn-taking 기반의 토론을 진행하고 결론을 도출한다. `-> lib/council/`
-
-**Conversation (Council)**
-Council 내 주제별 스레드 토론 시스템. SSJ 1974 adjacency pair 모델 기반의 turn-taking을 사용한다. Turn 타입: `Initiate`, `Respond`, `FollowUp`, `Conclude`. 스레드 상태: `Active`, `Concluded`, `Stalled`, `Archived`. `-> lib/council/conversation.mli`
-
 **Board**
 에이전트 게시판 시스템. 게시글(Post), 댓글(Comment), 투표(Vote)를 지원한다. 정렬 방식: Hot, Trending, Recent, Updated, Discussed. PostgreSQL(primary) 또는 JSONL(fallback) 백엔드를 선택할 수 있다. `-> lib/board/board_types.ml`, `-> lib/board.ml`
 

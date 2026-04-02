@@ -1,6 +1,8 @@
 # Keeper Capability Matrix
 
-All keepers receive the full tool surface unconditionally.
+Keepers do not receive the full public MCP surface.
+They get keeper-native tools plus `masc_*` tools that are executable without
+MCP runtime/session context.
 Triage and trigger detection run on each heartbeat using the proactive idle/cooldown settings.
 
 Research profile (`soul_profile = "research"`) adds autoresearch/research tools.
@@ -30,6 +32,11 @@ Notes:
 All keepers receive: base + board + fs + shell + library + taskboard + governance + coding shards.
 Voice tools are added when `policy_voice_enabled = true`.
 `write_done = true` returns empty tool list (session terminated).
+
+Excluded from keeper exposure:
+- inline MCP-runtime tools such as `masc_start`, `masc_join`, `masc_leave`,
+  `masc_broadcast`, `masc_messages`, `masc_listen`, and `masc_who`
+- other tools that depend on MCP runtime-only context rather than keeper context
 
 ## Continuity Positioning
 

@@ -129,10 +129,11 @@ let registered_count () = Hashtbl.length registry
 (** Check whether a tool name is registered. *)
 let is_registered name = Hashtbl.mem registry name
 
-(** --- Hashtbl sets for read_only and requires_join checks --- *)
+(** --- Hashtbl sets for dispatch capability checks --- *)
 
 let read_only_set : (string, unit) Hashtbl.t = Hashtbl.create 32
 let requires_join_set : (string, unit) Hashtbl.t = Hashtbl.create 64
+let mcp_context_required_set : (string, unit) Hashtbl.t = Hashtbl.create 64
 
 let init_read_only_set (names : string list) =
   with_dispatch_rw (fun () ->
@@ -142,8 +143,14 @@ let init_requires_join_set (names : string list) =
   with_dispatch_rw (fun () ->
     List.iter (fun name -> Hashtbl.replace requires_join_set name ()) names)
 
+let init_mcp_context_required_set (names : string list) =
+  with_dispatch_rw (fun () ->
+    List.iter (fun name -> Hashtbl.replace mcp_context_required_set name ()) names)
+
 let is_read_only name = with_dispatch_ro (fun () -> Hashtbl.mem read_only_set name)
 let is_join_required name = with_dispatch_ro (fun () -> Hashtbl.mem requires_join_set name)
+let is_mcp_context_required name =
+  with_dispatch_ro (fun () -> Hashtbl.mem mcp_context_required_set name)
 
 (** {2 Module Tag Dispatch — O(1) two-level dispatch}
 

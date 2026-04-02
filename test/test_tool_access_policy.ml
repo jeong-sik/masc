@@ -478,10 +478,10 @@ let test_core_tools_are_core () =
   let core = Keeper_exec_tools.core_always_tools in
   check bool "masc_status is core" true
     (List.mem "masc_status" core);
-  check bool "masc_broadcast is core" true
-    (List.mem "masc_broadcast" core);
   check bool "masc_heartbeat is core" true
     (List.mem "masc_heartbeat" core);
+  check bool "masc_tool_help is core" true
+    (List.mem "masc_tool_help" core);
   check bool "extend_turns is core" true
     (List.mem "extend_turns" core);
   check bool "is_core_always_tool masc_status" true
@@ -513,10 +513,12 @@ let test_minimal_preset_includes_core_masc () =
   let universe = Keeper_exec_tools.keeper_universe_tool_names meta in
   check bool "masc_status in universe" true
     (List.mem "masc_status" universe);
-  check bool "masc_broadcast in universe" true
-    (List.mem "masc_broadcast" universe);
   check bool "masc_heartbeat in universe" true
-    (List.mem "masc_heartbeat" universe)
+    (List.mem "masc_heartbeat" universe);
+  check bool "masc_tool_help in universe" true
+    (List.mem "masc_tool_help" universe);
+  check bool "masc_broadcast excluded from universe" false
+    (List.mem "masc_broadcast" universe)
 
 (* ================================================================ *)
 (* Preset-scoped universe (#4637)                                    *)
@@ -546,10 +548,12 @@ let test_preset_universe_includes_core () =
   let scoped = Keeper_exec_tools.keeper_preset_universe_tool_names meta in
   check bool "masc_status in scoped" true
     (List.mem "masc_status" scoped);
-  check bool "masc_broadcast in scoped" true
-    (List.mem "masc_broadcast" scoped);
   check bool "masc_heartbeat in scoped" true
-    (List.mem "masc_heartbeat" scoped)
+    (List.mem "masc_heartbeat" scoped);
+  check bool "masc_tool_help in scoped" true
+    (List.mem "masc_tool_help" scoped);
+  check bool "masc_broadcast excluded from scoped" false
+    (List.mem "masc_broadcast" scoped)
 
 let test_preset_universe_sizes () =
   let make preset =

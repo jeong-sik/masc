@@ -68,11 +68,6 @@ let keeper_library_tool_names = [ "keeper_library_search"; "keeper_library_read"
 let keeper_core_masc_tool_names =
   [
     "masc_status";
-    "masc_messages";
-    "masc_broadcast";
-    "masc_join";
-    "masc_leave";
-    "masc_who";
     "masc_heartbeat";
     "masc_tasks";
     "masc_claim_next";
@@ -102,8 +97,7 @@ let keeper_coding_masc_tool_names =
     These are the survival-critical tools. *)
 let core_always_tools =
   [ "keeper_time_now"; "keeper_context_status";
-    "masc_status"; "masc_broadcast"; "masc_heartbeat";
-    "masc_messages"; "masc_who"; "masc_tool_help";
+    "masc_status"; "masc_heartbeat"; "masc_tool_help";
     "extend_turns" ]
 
 let core_always_set : (string, unit) Hashtbl.t =

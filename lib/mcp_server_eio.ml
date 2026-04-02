@@ -82,8 +82,13 @@ let requires_join_tools_inline =
   ["masc_broadcast"; "masc_listen"; "masc_leave";
    "masc_vote_cast"; "masc_vote_revoke"]
 
+let mcp_context_required_tools_inline =
+  Tool_schemas_inline.schemas
+  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+
 let () = Tool_dispatch.init_read_only_set read_only_tools_inline
 let () = Tool_dispatch.init_requires_join_set requires_join_tools_inline
+let () = Tool_dispatch.init_mcp_context_required_set mcp_context_required_tools_inline
 
 (* Tag registry initialization.
    Most modules register via Tool_spec.register at module load time.

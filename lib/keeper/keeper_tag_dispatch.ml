@@ -27,6 +27,12 @@ let get_proc_mgr_opt () =
   | Ok pm -> Some pm
   | Error _ -> None
 
+(** Helper: require Eio net, return error if unavailable. *)
+let require_net () =
+  match Eio_context.get_net_opt () with
+  | Some net -> Ok net
+  | None -> Error "requires Eio net (not available in keeper context)"
+
 (** Helper: get optional net. *)
 let get_net_opt () = Eio_context.get_net_opt ()
 
@@ -50,7 +56,11 @@ let dispatch
     ~(name : string)
     ~(args : Yojson.Safe.t)
   : (bool * string) option =
-  match tag with
+  (* Wrap dispatch in try-catch to normalize exceptions into error tuples.
+     Tool_*.dispatch functions may raise on unexpected JSON shapes or
+     backend failures. Without this, exceptions escape to the keeper loop
+     and may crash the agent turn. *)
+  try match tag with
 
   (* ── Tier A: config + agent_name only ──────────────────────── *)
 
@@ -92,10 +102,10 @@ let dispatch
       Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args
   | Mod_control ->
       (* Review #4579: Mod_control exposes room lifecycle tools.
-         Too risky for autonomous keeper dispatch. *)
-      Some (false,
-        Printf.sprintf
-          "tool '%s' is a control tool (requires MCP operator context)" name)
+         Too risky for autonomous keeper dispatch. Return None so the
+         caller treats it as unsupported rather than advertising a tool
+         that always fails. *)
+      None
   | Mod_agent_timeline ->
       Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name }
         ~name ~args
@@ -209,15 +219,14 @@ let dispatch
        | Error e, _ | _, Error e -> Some (false, e))
 
   | Mod_research ->
-      (match require_sw (), require_clock (), get_net_opt () with
-       | Ok sw, Ok clock, Some net ->
+      (match require_sw (), require_clock (), require_net () with
+       | Ok sw, Ok clock, Ok net ->
            Tool_research.dispatch
              { Tool_research.base_path = config.base_path;
                agent_name = Some agent_name; sw; net; clock }
              ~name ~args
-       | Error e, _, _ | _, Error e, _ -> Some (false, e)
-       | _, _, None ->
-           Some (false, "research tools require Eio net"))
+       | Error e, _, _ | _, Error e, _ | _, _, Error e ->
+           Some (false, e))
 
   | Mod_autoresearch ->
       (* Keeper already handles masc_autoresearch_* before reaching this path.
@@ -278,3 +287,9 @@ let dispatch
           mcp_state = None; mcp_session_id = None; auth_token = None }
       in
       Tool_command_plane.dispatch ctx ~name ~args
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Some (false,
+        Printf.sprintf "keeper tag dispatch error for %s: %s"
+          name (Printexc.to_string exn))

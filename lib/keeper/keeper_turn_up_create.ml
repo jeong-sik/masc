@@ -104,7 +104,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     let handoff_threshold = Option.value ~default:0.85 p.handoff_threshold_opt in
     let handoff_cooldown_sec = Option.value ~default:300 p.handoff_cooldown_sec_opt in
     let tool_preset =
-      Option.value ~default:Full
+      Option.value ~default:Research
         (first_some p.tool_preset_opt (preset_of_defaults p.profile_defaults))
     in
     let tool_also_allow =

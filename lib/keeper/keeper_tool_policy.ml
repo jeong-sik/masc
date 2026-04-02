@@ -228,8 +228,9 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     let count = List.length result in
     if count > 100 then
       Log.Keeper.warn
-        "tool budget exceeded: %d schemas in LLM context (~%dKB estimated). \
-         Consider using a narrower preset or custom allowlist."
+        "tool policy allows %d schemas (~%dKB). Progressive disclosure \
+         limits actual LLM context to ~20-40, but universe build cost scales \
+         with policy size. Consider a narrower preset or custom allowlist."
         count (count * 470 / 1024);
     result
 

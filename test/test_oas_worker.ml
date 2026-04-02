@@ -34,11 +34,11 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let parse_json s =
+let _parse_json s =
   try Yojson.Safe.from_string s
   with Yojson.Json_error e -> failwith ("invalid json: " ^ e)
 
-let field key json = Yojson.Safe.Util.member key json
+let _field key json = Yojson.Safe.Util.member key json
 
 (* ================================================================ *)
 (* SSE Event Bridge Tests (OAS #215 streaming verification)         *)

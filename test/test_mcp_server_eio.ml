@@ -1311,27 +1311,7 @@ let _test_execute_tool_trpg_flow () =
 
   cleanup_dir base_path
 
-let test_execute_tool_coding_mode_allows_governance_status () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let (ok, msg) =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_governance_status"
-      ~arguments:(`Assoc [])
-  in
-  Alcotest.(check bool) "governance status tool allowed in coding mode" true ok;
-  let json = Yojson.Safe.from_string msg in
-  Alcotest.(check bool) "has open_cases field" true
-    Yojson.Safe.Util.(member "open_cases" json <> `Null);
-
-  cleanup_dir base_path
+(* Council module removed — governance_status tool no longer dispatched *)
 
 let test_execute_tool_team_session_step_direct_call () =
   Eio_main.run @@ fun env ->
@@ -1610,53 +1590,7 @@ let test_execute_tool_mcp_session_ignores_term_persistence () =
 
   cleanup_dir base_path
 
-let test_convo_start_uses_current_room () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let sid = "mcp-convo-room-regression" in
-  let room_id = "convo-proof-room" in
-
-  let (ok_init, _init_msg) =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_init"
-      ~arguments:(`Assoc [])
-  in
-  Alcotest.(check bool) "init success" true ok_init;
-  Masc_mcp.Room.write_current_room state.room_config room_id;
-  Masc_mcp.Room.ensure_room_bootstrap state.room_config room_id;
-
-  (* After entering a new room, convo tools are immediately available. *)
-
-  let (ok_start, start_msg) =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_convo_start"
-      ~arguments:(`Assoc [
-        ("topic", `String "room-scoped convo");
-        ("initiator", `String "proof-a");
-      ])
-  in
-  Alcotest.(check bool) "convo start success" true ok_start;
-  let start_json = extract_json_from_text start_msg in
-  let thread_id = Yojson.Safe.Util.(start_json |> member "id" |> to_string) in
-
-  let (ok_get, get_msg) =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_convo_get"
-      ~arguments:(`Assoc [("thread_id", `String thread_id)])
-  in
-  Alcotest.(check bool) "convo get success" true ok_get;
-  let get_json = Yojson.Safe.from_string get_msg in
-  let convo_room = Yojson.Safe.Util.(get_json |> member "room" |> to_string) in
-  Alcotest.(check string) "conversation stored in current room" room_id convo_room;
-
-  cleanup_dir base_path
+(* Council module removed — convo tools are stubs, room-scoped test removed *)
 
 let _test_handle_request_tools_call_trpg () =
   Eio_main.run @@ fun env ->
@@ -2635,7 +2569,7 @@ let eio_tests = [
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)
-  "coding mode allows governance status", `Quick, test_execute_tool_coding_mode_allows_governance_status;
+  (* Council module removed — governance_status tool test removed *)
   "canonical team_session_step direct call", `Quick,
     test_execute_tool_team_session_step_direct_call;
   "legacy persisted agent read only for ephemeral names", `Quick,
@@ -2643,7 +2577,7 @@ let eio_tests = [
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
   "explicit alias reuses joined nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
   "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;
-  "convo start uses current room", `Quick, test_convo_start_uses_current_room;
+  (* Council module removed — convo room test removed *)
 ]
 
 let () =

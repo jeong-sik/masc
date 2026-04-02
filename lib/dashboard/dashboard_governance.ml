@@ -41,7 +41,7 @@ let dashboard_json ~base_path:_ ~limit:_ ~offset:_ ~status_filter:_ =
         ("generated_at", `Null);
         ("expires_at", `Null);
         ("model_used", `Null);
-        ("keeper_name", `String "");
+        ("keeper_name", `String Dashboard_governance_judge.keeper_name);
         ("last_error", `Null);
       ]);
       ("judgments", `List []);

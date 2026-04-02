@@ -91,14 +91,10 @@ let all_known_tool_names =
     "masc_cache_set";
     "masc_cache_stats";
     "masc_cancellation";
-    "masc_case_brief_submit";
-    "masc_case_status";
-    "masc_cases";
     "masc_check";
     "masc_circuit_status";
     "masc_claim_next";
     "masc_cleanup_zombies";
-    "masc_clear_param";
     "masc_code_delete";
     "masc_code_edit";
     "masc_code_git";
@@ -131,9 +127,6 @@ let all_known_tool_names =
     "masc_episode_list";
     "masc_error_add";
     "masc_error_resolve";
-    "masc_execute";
-    "masc_execute_dry_run";
-    "masc_execution_orders";
     "masc_feature_flags";
     "masc_find_by_capability";
     "masc_gc";
@@ -144,9 +137,7 @@ let all_known_tool_names =
     "masc_goal_review";
     "masc_goal_snapshot";
     "masc_goal_upsert";
-    "masc_governance_feed";
     "masc_governance_set";
-    "masc_governance_status";
     "masc_handover_claim";
     "masc_handover_create";
     "masc_handover_get";
@@ -223,7 +214,6 @@ let all_known_tool_names =
     "masc_pause_status";
     "masc_pending_interrupts";
     "masc_persona_list";
-    "masc_petition_submit";
     "masc_plan_clear_task";
     "masc_plan_get";
     "masc_plan_get_task";
@@ -242,7 +232,6 @@ let all_known_tool_names =
     "masc_portal_send";
     "masc_portal_status";
     "masc_progress";
-    "masc_prompt_override";
     "masc_recall_search";
     "masc_register_capabilities";
     "masc_reject";
@@ -255,17 +244,14 @@ let all_known_tool_names =
     "masc_resume";
     "masc_room_strategy_get";
     "masc_room_strategy_set";
-    "masc_ruling_status";
     "masc_run_deliverable";
     "masc_run_get";
     "masc_run_init";
     "masc_run_list";
     "masc_run_log";
     "masc_run_plan";
-    "masc_runtime_params";
     "masc_runtime_verify";
     "masc_select_agent";
-    "masc_set_param";
     "masc_set_room";
     "masc_spawn";
     "masc_start";

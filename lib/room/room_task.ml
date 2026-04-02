@@ -585,11 +585,13 @@ let complete_task config ~agent_name ~task_id ~notes =
                     ("task_id", `String task_id);
                     ("notes", if notes = "" then `Null else `String notes);
                   ]);
-            log_event config (Printf.sprintf
-              "{\"type\":\"task_done\",\"agent\":\"%s\",\"task\":\"%s\",\"notes\":%s,\"ts\":\"%s\"}"
-              agent_name task_id
-              (if notes = "" then "null" else Printf.sprintf "\"%s\"" notes)
-              (now_iso ()));
+            log_event config (Yojson.Safe.to_string (`Assoc [
+              ("type", `String "task_done");
+              ("agent", `String agent_name);
+              ("task", `String task_id);
+              ("notes", if notes = "" then `Null else `String notes);
+              ("ts", `String (now_iso ()));
+            ]));
             observe_task_transition config ~agent_name ~task_id
               ~transition:"done"
               ~details:

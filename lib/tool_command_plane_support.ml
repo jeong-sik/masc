@@ -160,10 +160,16 @@ let wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid =
   in
   loop ()
 
-let run_process_with_timeout ~clock_opt ~timeout_sec ~prog ~argv ~env =
+let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv ~env () =
   let stdout_path = Filename.temp_file "masc_cp_stdout_" ".log" in
   let stderr_path = Filename.temp_file "masc_cp_stderr_" ".log" in
-  let stdin_fd = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
+  let stdin_fd, stdin_writer =
+    match stdin_content with
+    | None -> (Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0, None)
+    | Some _ ->
+        let read_fd, write_fd = Unix.pipe ~cloexec:true () in
+        (read_fd, Some write_fd)
+  in
   let stdout_fd =
     Unix.openfile stdout_path
       [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
@@ -177,6 +183,20 @@ let run_process_with_timeout ~clock_opt ~timeout_sec ~prog ~argv ~env =
       stderr_fd
   in
   Unix.close stdin_fd;
+  (match stdin_content, stdin_writer with
+  | Some content, Some write_fd ->
+      let rec write_all offset =
+        if offset < String.length content then
+          let written =
+            Unix.write_substring write_fd content offset
+              (String.length content - offset)
+          in
+          write_all (offset + written)
+      in
+      (try write_all 0 with
+      | Unix.Unix_error _ -> ());
+      Unix.close write_fd
+  | _ -> ());
   Unix.close stdout_fd;
   Unix.close stderr_fd;
   let finalize exit_code =

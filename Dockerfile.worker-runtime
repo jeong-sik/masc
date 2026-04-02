@@ -1,0 +1,22 @@
+FROM ocaml/opam:debian-12-ocaml-5.4 AS build
+
+WORKDIR /src
+
+COPY . .
+
+RUN sudo apt-get update \
+ && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev libsqlite3-dev zlib1g-dev curl git \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN opam exec -- bash -lc "scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test -y && dune build @install"
+
+FROM debian:12-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl git \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/_build/install/default/bin/masc-worker-run /usr/local/bin/masc-worker-run
+COPY --from=build /src/_build/install/default/bin/masc-mcp /usr/local/bin/masc-mcp
+
+ENTRYPOINT ["/usr/local/bin/masc-worker-run"]

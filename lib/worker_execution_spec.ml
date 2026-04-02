@@ -1,0 +1,153 @@
+module Oas = Agent_sdk
+
+type t = {
+  base_path : string;
+  worker_name : string;
+  model_label : string;
+  team_session_id : string option;
+  working_dir : string option;
+  worker_class : Team_session_types.worker_class option;
+  worker_size : Team_session_types.worker_size option;
+  execution_scope : Team_session_types.execution_scope option;
+  thinking_enabled : bool option;
+  max_turns : int;
+  worker_run_id : string option;
+  role : string option;
+  selection_note : string option;
+  prompt : string;
+  allowed_tools : string list;
+  allowed_shell_tools : string list;
+  timeout_sec : int;
+  delivery_contract : Team_session_types.delivery_contract option;
+}
+
+let option_to_yojson to_json = function
+  | Some value -> to_json value
+  | None -> `Null
+
+let option_string json =
+  match json with
+  | `String value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | `Null -> None
+  | _ -> None
+
+let string_list_of_yojson = function
+  | `List values ->
+      values
+      |> List.filter_map (function
+           | `String value ->
+               let trimmed = String.trim value in
+               if trimmed = "" then None else Some trimmed
+           | _ -> None)
+  | _ -> []
+
+let execution_scope_to_yojson = function
+  | Some scope ->
+      `String (Team_session_types.execution_scope_to_string scope)
+  | None -> `Null
+
+let execution_scope_of_yojson = function
+  | `String value ->
+      Some
+        (Team_session_types.execution_scope_of_string
+           (String.lowercase_ascii (String.trim value)))
+  | `Null -> None
+  | _ -> None
+
+let worker_class_to_yojson = function
+  | Some worker_class ->
+      `String (Team_session_types.worker_class_to_string worker_class)
+  | None -> `Null
+
+let worker_class_of_yojson = function
+  | `String value ->
+      Team_session_types.worker_class_of_string
+        (String.lowercase_ascii (String.trim value))
+  | `Null -> None
+  | _ -> None
+
+let worker_size_to_yojson = function
+  | Some worker_size ->
+      `String (Team_session_types.worker_size_to_string worker_size)
+  | None -> `Null
+
+let worker_size_of_yojson = function
+  | `String value ->
+      Team_session_types.worker_size_of_string
+        (String.lowercase_ascii (String.trim value))
+  | `Null -> None
+  | _ -> None
+
+let to_yojson (spec : t) =
+  `Assoc
+    [
+      ("base_path", `String spec.base_path);
+      ("worker_name", `String spec.worker_name);
+      ("model_label", `String spec.model_label);
+      ("team_session_id", option_to_yojson (fun s -> `String s) spec.team_session_id);
+      ("working_dir", option_to_yojson (fun s -> `String s) spec.working_dir);
+      ("worker_class", worker_class_to_yojson spec.worker_class);
+      ("worker_size", worker_size_to_yojson spec.worker_size);
+      ("execution_scope", execution_scope_to_yojson spec.execution_scope);
+      ("thinking_enabled", option_to_yojson (fun v -> `Bool v) spec.thinking_enabled);
+      ("max_turns", `Int spec.max_turns);
+      ("worker_run_id", option_to_yojson (fun s -> `String s) spec.worker_run_id);
+      ("role", option_to_yojson (fun s -> `String s) spec.role);
+      ("selection_note", option_to_yojson (fun s -> `String s) spec.selection_note);
+      ("prompt", `String spec.prompt);
+      ("allowed_tools", `List (List.map (fun value -> `String value) spec.allowed_tools));
+      ( "allowed_shell_tools",
+        `List
+          (List.map (fun value -> `String value) spec.allowed_shell_tools) );
+      ("timeout_sec", `Int spec.timeout_sec);
+      ( "delivery_contract",
+        option_to_yojson Team_session_types.delivery_contract_to_yojson
+          spec.delivery_contract );
+    ]
+
+let of_yojson (json : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  match json with
+  | `Assoc _ ->
+      let base_path = json |> member "base_path" |> to_string in
+      let worker_name = json |> member "worker_name" |> to_string in
+      let model_label = json |> member "model_label" |> to_string in
+      let prompt = json |> member "prompt" |> to_string in
+      let max_turns = json |> member "max_turns" |> to_int in
+      let timeout_sec = json |> member "timeout_sec" |> to_int in
+      let delivery_contract =
+        match json |> member "delivery_contract" with
+        | `Null -> None
+        | contract_json ->
+            Team_session_types.delivery_contract_of_yojson contract_json
+      in
+      Ok
+        {
+          base_path;
+          worker_name;
+          model_label;
+          team_session_id = option_string (json |> member "team_session_id");
+          working_dir = option_string (json |> member "working_dir");
+          worker_class = worker_class_of_yojson (json |> member "worker_class");
+          worker_size = worker_size_of_yojson (json |> member "worker_size");
+          execution_scope =
+            execution_scope_of_yojson (json |> member "execution_scope");
+          thinking_enabled =
+            (match json |> member "thinking_enabled" with
+            | `Bool value -> Some value
+            | `Null -> None
+            | _ -> None);
+          max_turns;
+          worker_run_id = option_string (json |> member "worker_run_id");
+          role = option_string (json |> member "role");
+          selection_note = option_string (json |> member "selection_note");
+          prompt;
+          allowed_tools = string_list_of_yojson (json |> member "allowed_tools");
+          allowed_shell_tools =
+            string_list_of_yojson (json |> member "allowed_shell_tools");
+          timeout_sec;
+          delivery_contract;
+        }
+  | _ -> Error "worker execution spec must be a JSON object"

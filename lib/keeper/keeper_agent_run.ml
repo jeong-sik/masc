@@ -399,6 +399,10 @@ let run_turn
       else if String.starts_with ~prefix:"masc_team_session_" name then Some "masc_session"
       else if String.starts_with ~prefix:"masc_worktree_" name then Some "masc_worktree"
       else if String.starts_with ~prefix:"masc_code_" name then Some "masc_code"
+      else if String.starts_with ~prefix:"masc_governance_" name then Some "masc_governance"
+      else if String.starts_with ~prefix:"masc_autoresearch_" name then Some "masc_autoresearch"
+      else if String.starts_with ~prefix:"masc_agent_" name
+           || name = "masc_agents" then Some "masc_agent"
       else if String.starts_with ~prefix:"masc_" name then Some "masc_core"
       else None
     in

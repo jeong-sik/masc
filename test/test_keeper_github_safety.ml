@@ -96,6 +96,8 @@ let test_blocked_destructive_operations () =
     [
       "repo delete owner/repo --yes";
       "gist delete abc123";
+      "Repo Delete owner/repo";
+      "GIST DELETE abc123";
     ]
   in
   List.iter
@@ -142,6 +144,9 @@ let test_destructive_ops_detected () =
       "label delete bug";
       "api -X DELETE repos/owner/repo/issues/1";
       "api --method DELETE repos/owner/repo/pulls/1";
+      "PR Merge 123";
+      "Issue CLOSE 456";
+      "api -X DeLeTe repos/owner/repo";
     ]
   in
   List.iter

@@ -199,13 +199,16 @@ let validate_gh_command cmd =
     match extract_gh_command_pair trimmed with
     | (None, _) -> Error "gh command must not be empty"
     | (Some command, subcmd) ->
+      let command = String.lowercase_ascii command in
       if not (List.mem command gh_allowed_commands) then
         Error
           (Printf.sprintf
              "gh command blocked: '%s' is not in the approved command list"
              command)
       else
-        let sub = Option.value ~default:"" subcmd in
+        let sub =
+          Option.value ~default:"" subcmd |> String.lowercase_ascii
+        in
         if List.exists (fun (c, s) -> c = command && s = sub)
              gh_blocked_operations
         then
@@ -220,6 +223,7 @@ let is_gh_destructive_operation cmd =
   let parts =
     String.split_on_char ' ' (String.trim cmd)
     |> List.filter (fun s -> s <> "")
+    |> List.map String.lowercase_ascii
   in
   match parts with
   | "pr" :: sub :: _ -> List.mem sub [ "merge"; "close" ]
@@ -227,9 +231,7 @@ let is_gh_destructive_operation cmd =
   | "release" :: sub :: _ -> List.mem sub [ "delete" ]
   | "repo" :: sub :: _ -> List.mem sub [ "archive"; "rename" ]
   | "label" :: sub :: _ -> List.mem sub [ "delete" ]
-  | "api" :: _ ->
-    let upper_parts = List.map String.uppercase_ascii parts in
-    List.mem "DELETE" upper_parts
+  | "api" :: _ -> List.mem "delete" parts
   | _ -> false
 
 (* --- Recursive mkdir --- *)

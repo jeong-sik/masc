@@ -1,0 +1,11 @@
+.git
+_build
+_opam
+.worktrees
+node_modules
+dashboard/node_modules
+logs
+.masc
+.env
+.env.*
+*.exe

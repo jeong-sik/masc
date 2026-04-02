@@ -18,7 +18,7 @@ RUN sudo apk add --no-cache \
 
 # Copy opam files for dependency caching
 COPY --chown=opam:opam masc_mcp.opam dune-project ./
-RUN opam install . --deps-only --yes 2>&1 | tail -5
+RUN opam install . --deps-only --yes
 
 # Copy full source
 COPY --chown=opam:opam . .

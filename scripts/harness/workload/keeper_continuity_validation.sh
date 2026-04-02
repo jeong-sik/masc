@@ -387,6 +387,8 @@ phase_report_string() {
   local value="$2"
   if ! phase_enabled "$phase"; then
     printf 'skipped'
+  elif [[ "$value" == "2" ]]; then
+    printf 'simulated'
   elif [[ "$value" == "1" ]]; then
     printf 'pass'
   else
@@ -405,12 +407,12 @@ run_dry_run() {
     write_text "$heartbeat_file" "[simulated] Active heartbeats:\n  • dry-run: agent=keeper-dry-run-agent interval=5s message=\"dry-run\" uptime=1s"
     append_phase "$phase" "simulated" "dry-run synthetic (not runtime proof)" "$snapshot_file" "$heartbeat_file"
   done
-  BOOTSTRAP_PASS=1
-  LIVENESS_PASS=1
-  CONTINUITY_PASS=1
-  COMPACTION_PASS=1
-  HANDOFF_PASS=1
-  RECOVERY_PASS=1
+  BOOTSTRAP_PASS=2
+  LIVENESS_PASS=2
+  CONTINUITY_PASS=2
+  COMPACTION_PASS=2
+  HANDOFF_PASS=2
+  RECOVERY_PASS=2
   LATEST_INPUT_PREVIEW="[simulated] dry-run validation input"
   LATEST_OUTPUT_PREVIEW="[simulated] dry-run validation output"
   LATEST_TRACE_ID="trace-dry-run-simulated"

@@ -56,7 +56,7 @@ mcp_call() {
         local n
         n="$(echo "$args_json" | jq -r '.name // "unknown"')"
         jq -cn --arg n "$n" \
-          '{jsonrpc:"2.0",id:1,result:{content:[{type:"text",text:("{\"simulated\":true,\"name\":\""+$n+"\",\"ok\":true}")}]}}'
+          '{jsonrpc:"2.0",id:1,result:{content:[{type:"text",text:({simulated:true,name:$n,ok:true}|tojson)}]}}'
         ;;
       masc_keeper_msg)
         DRY_TICK=$((DRY_TICK + 1))

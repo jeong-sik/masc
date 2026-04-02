@@ -486,20 +486,6 @@
       "coupling_ratio": 0.231
     },
     {
-      "prefix": "tool_council",
-      "module_count": 5,
-      "members": [
-        "Tool_council_feed",
-        "Tool_council_helpers",
-        "Tool_council_internal_schemas",
-        "Tool_council_json",
-        "Tool_council_oas"
-      ],
-      "internal_edges": 3,
-      "external_dep_count": 10,
-      "coupling_ratio": 0.231
-    },
-    {
       "prefix": "tool_inline",
       "module_count": 6,
       "members": [

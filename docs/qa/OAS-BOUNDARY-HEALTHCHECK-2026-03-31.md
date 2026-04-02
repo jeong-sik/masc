@@ -78,7 +78,6 @@ Checked modules:
 - `lib/worker_oas.ml`
 - `lib/memory_oas_bridge.ml`
 - `lib/context_compact_oas.ml`
-- `lib/tool_council_oas.ml`
 - `lib/verifier_oas.ml`
 - `lib/keeper/keeper_hooks_oas.ml`
 - `lib/keeper/keeper_tools_oas.ml`

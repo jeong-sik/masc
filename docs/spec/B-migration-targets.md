@@ -17,7 +17,7 @@
 | MCP tool schemas | ~371 | 일반적 MCP 서버: 5-15개 |
 | .mli files | 144 | 761개 중 19% |
 | Test files | 319 | test/ 하위 |
-| Sub-libraries | 12 | backend, bridge, core, council, dated_jsonl, eio_context, fs_compat, masc_log, process, room, time_compat, types |
+| Sub-libraries | 11 | backend, bridge, core, dated_jsonl, eio_context, fs_compat, masc_log, process, room, time_compat, types |
 | Flat lib/ .ml files | 294 | Sub-library에 속하지 않은 파일 |
 | Environment variables | 50+ | 설정 파일 없이 env var만으로 운영 |
 | Dashboard | Preact + HTM SPA | Vite 빌드, assets/dashboard/ |
@@ -84,7 +84,7 @@ Source: `ROADMAP.md` Short-term + `ARCHITECTURE-COMPLEXITY-ANALYSIS.md` Phase 2-
 | Item | Module | Est. lines | Status | Priority |
 |------|--------|-----------|--------|----------|
 | TRPG + protocol_game_view -> `masc-games` | tool_trpg, tool_protocol_game_view | 3,600+ | Not started | High |
-| risc + autoresearch + council + experiment -> `masc-experiments` | 4 tool modules | 3,800+ | Not started | High |
+| risc + autoresearch + experiment -> `masc-experiments` | 3 tool modules | 2,700+ | Not started | High |
 | dune optional library separation | dune, lib/ | -- | Not started | Medium |
 | tool_team_session split (5 modules) | tool_team_session | 4,412 | Design done | High |
 | TRPG dm-keeper -> on-demand | keeper_autonomy | -- | Not started | Medium |
@@ -179,12 +179,12 @@ Source: memory/masc-org-design-7teams.md (2026-03-21)
 
 ## 7. Module Extraction Plan
 
-### 현재 Sub-library (12개)
+### 현재 Sub-library (11개)
 
 ```
-lib/backend/     lib/bridge/      lib/core/       lib/council/
-lib/dated_jsonl/ lib/eio_context/ lib/fs_compat/  lib/masc_log/
-lib/process/     lib/room/        lib/time_compat/ lib/types/
+lib/backend/     lib/bridge/      lib/core/       lib/dated_jsonl/
+lib/eio_context/ lib/fs_compat/   lib/masc_log/   lib/process/
+lib/room/        lib/time_compat/ lib/types/
 ```
 
 ### 즉시 추출 대상 (Phase 2 from ARCHITECTURE-COMPLEXITY)
@@ -192,7 +192,7 @@ lib/process/     lib/room/        lib/time_compat/ lib/types/
 | 새 패키지 | 포함 모듈 | Lines | 근거 |
 |-----------|----------|-------|------|
 | `masc-games` | tool_trpg, tool_protocol_game_view, trpg_*.ml | 3,600+ | Coordination과 완전 무관 |
-| `masc-experiments` | tool_risc, tool_autoresearch, tool_council, tool_experiment | 3,800+ | 실험 잔재, optional로 전환 |
+| `masc-experiments` | tool_risc, tool_autoresearch, tool_experiment | 2,700+ | 실험 잔재, optional로 전환 |
 
 ### 구조 분할 대상
 
@@ -280,7 +280,6 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 05-keeper-agent.md          -- Keeper 에이전트
 06-command-plane.md         -- Command Plane
 07-team-session.md          -- Team Session
-08-council-governance.md    -- Council 거버넌스
 09-server-transport.md      -- 서버/전송
 10-dashboard.md             -- Dashboard
 11-board.md                 -- Board 시스템

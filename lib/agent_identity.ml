@@ -337,16 +337,6 @@ let set_archetype identity archetype =
   let filtered = List.filter (fun (k, _) -> k <> "archetype") identity.metadata in
   { identity with metadata = ("archetype", archetype_to_string archetype) :: filtered }
 
-(** Suggest position for debate based on archetype *)
-let suggest_debate_position archetype topic =
-  let _ = topic in (* Could use topic keywords for smarter suggestions *)
-  match archetype with
-  | Melchior -> `Support     (* Scientists tend to support technical solutions *)
-  | Balthasar -> `Neutral    (* Ethics reviewers stay neutral initially *)
-  | Casper -> `Oppose        (* Strategists challenge to find weaknesses *)
-  | Athena -> `Neutral       (* Reasoners analyze before committing *)
-  | Generalist -> `Neutral
-
 (** Voting weight modifier based on archetype and topic *)
 let archetype_weight archetype topic_category =
   match archetype, topic_category with

@@ -290,10 +290,10 @@ let audit_decision (config : Room.config) (decision : governance_decision) =
 (* ── Auto-Petition for High/Critical Risk ──────────────────── *)
 
 let maybe_create_petition ~config:_ ~(decision : governance_decision) =
-  (* Council module removed — auto-petition is a no-op.
+  (* Governance petitions are retired — auto-petition is a no-op.
      High-risk decisions are still logged via audit_decision. *)
   if risk_level_to_int decision.risk >= risk_level_to_int High then
-    Log.Governance.info "high-risk tool=%s (petition skipped, council removed)"
+    Log.Governance.info "high-risk tool=%s (petition skipped; governance petitions retired)"
       decision.tool_name
 
 (* ── Pre-Hook Construction ──────────────────────────────────── *)

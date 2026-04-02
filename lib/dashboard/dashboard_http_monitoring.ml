@@ -136,7 +136,7 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
 let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
   : Yojson.Safe.t * bool =
   ignore (now_ts, base_path);
-  (* Council module removed — return empty governance status *)
+  (* Governance case tracking is retired — return empty governance status *)
   (`Assoc [
     ("alert_level", `String "ok");
     ("cases_open", `Int 0);

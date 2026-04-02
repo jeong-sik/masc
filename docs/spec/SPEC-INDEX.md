@@ -31,7 +31,7 @@ graph TB
     L5["Layer 5: Surface<br/>dashboard, operator, TUI, web"]
     L4["Layer 4: Protocol<br/>MCP server, HTTP transport, gRPC, SSE"]
     L3["Layer 3: Engine<br/>chain, keeper, swarm, team_session, command_plane"]
-    L2["Layer 2: Domain<br/>room, council, board"]
+    L2["Layer 2: Domain<br/>room, board"]
     L1["Layer 1: Storage<br/>backend, dated_jsonl, memory"]
     L0["Layer 0: Primitives<br/>types, core, log, time_compat, fs_compat"]
 
@@ -55,7 +55,6 @@ graph TB
 | `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
 | `06-command-plane.md` | Command Plane v2 | Units, operations, search fabric, detachments, policy, orchestra | Draft |
 | `07-team-session.md` | Team Session | Supervised collaboration, OAS swarm bridge, worker dispatch, proof | Draft |
-| `08-council-governance.md` | Council and Governance | 의사결정, 합의, governance surface | Draft |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
 | `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
 | `11-board.md` | Board System | Posts, comments, votes, PG/JSONL backend | Draft |

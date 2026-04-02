@@ -56,7 +56,7 @@ let respond_high_risk_param_blocked request reqd ~param_key ~risk =
             ( "error",
               `String
                 (Printf.sprintf
-                   "runtime param %s is %s risk and no longer supports direct dashboard mutation after council removal"
+                   "runtime param %s is %s risk and no longer supports direct dashboard mutation"
                    param_key risk) );
           ]))
 

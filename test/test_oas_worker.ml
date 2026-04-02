@@ -1,5 +1,5 @@
 (** Test_oas_worker — Unit tests for OAS worker streaming bridge,
-    cascade config, and council.
+    cascade config, and governance integration.
 
     LLM 0 — no real MODEL calls. Tests use mock net / temp directories.
 

@@ -574,7 +574,7 @@ let test_http_client_fd_safety_contracts () =
   ()
 
 let test_router_contract_alignment () =
-  (* Council module removed — petition schema/handler contract checks removed *)
+  (* Petition schema/handler contract checks removed with governance tool retirement *)
   ()
 
 let test_runtime_precondition_contracts () =
@@ -590,7 +590,7 @@ let test_runtime_precondition_contracts () =
   check bool "h2 governance routes use server state guard helper" true
     (file_contains_pattern "lib/server/server_h2_gateway_routes_extra.ml"
        "let with_server_state f =");
-  (* Council module removed — executor contract check removed *)
+  (* Executor contract check removed with governance tool retirement *)
   ()
 
 let () =

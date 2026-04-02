@@ -88,7 +88,7 @@ MASC가 명시적으로 **하지 않는 것**:
 
 ## 5. Sub-library Dependency Graph
 
-MASC는 1개 main library(`masc_mcp`)와 12개 sub-library로 구성된다. main library가 sub-library를 참조하며, sub-library 간 의존은 단방향이다.
+MASC는 1개 main library(`masc_mcp`)와 11개 sub-library로 구성된다. main library가 sub-library를 참조하며, sub-library 간 의존은 단방향이다.
 
 ```mermaid
 graph TD
@@ -100,7 +100,6 @@ graph TD
     TYPES["masc_types<br/>(4 .ml, 1.3K LOC)"]
     LOG["masc_log<br/>(1 .ml, 0.3K LOC)"]
     PROCESS["masc_process<br/>(2 .ml, 0.4K LOC)"]
-    COUNCIL["council<br/>(13 .ml, 4.7K LOC)<br/>separate opam pkg"]
     EIO_CTX["masc_eio_context<br/>(1 .ml, 0.1K LOC)"]
     DATED["dated_jsonl<br/>(1 .ml, 0.3K LOC)"]
     TIME["time_compat<br/>(1 .ml)"]
@@ -111,7 +110,6 @@ graph TD
     MAIN --> BACKEND
     MAIN --> CORE
     MAIN --> TYPES
-    MAIN --> COUNCIL
     MAIN --> LOG
     MAIN --> PROCESS
     MAIN --> EIO_CTX

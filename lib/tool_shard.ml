@@ -511,7 +511,7 @@ let governance_keeper_tool_names : string list =
   ]
 
 let governance_tools : Types.tool_schema list =
-  (* Council module removed — governance tool schemas no longer available *)
+  (* Governance compatibility surface retained, but no governance tool schemas are exposed. *)
   ignore governance_keeper_tool_names;
   []
 
@@ -526,8 +526,7 @@ let shard_governance : shard = {
   name = "governance";
   tools = governance_tools;
   removable = true;
-  description =
-    "Governance compatibility stub: council removed, no governance tools exposed";
+  description = "Governance compatibility stub: no governance tools exposed";
 }
 
 (** Autoresearch tools: filtered subset for keeper use (excludes swarm_start). *)

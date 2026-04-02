@@ -181,64 +181,6 @@ let mention_activities (config : Room.config) : activity_item list =
         created_at;
       })
 
-(** Read debate activity from `.masc/debates/` directory. *)
-let debate_activities (config : Room.config) : activity_item list =
-  let debates_dir = Filename.concat (Room.masc_dir config) "debates" in
-  if not (Sys.file_exists debates_dir) || not (Sys.is_directory debates_dir) then []
-  else
-    let files =
-      try Sys.readdir debates_dir |> Array.to_list
-      with Sys_error _ -> []
-    in
-    files
-    |> List.filter (fun fname -> Filename.check_suffix fname ".json")
-    |> List.filter_map (fun fname ->
-        let path = Filename.concat debates_dir fname in
-        match Safe_ops.read_json_file_safe path with
-        | Error _ -> None
-        | Ok json ->
-          let id = Safe_ops.json_string ~default:"" "id" json in
-          let topic = Safe_ops.json_string ~default:"" "topic" json in
-          let status = Safe_ops.json_string ~default:"" "status" json in
-          let created_at = Safe_ops.json_float ~default:0.0 "created_at" json in
-          (* Extract participating agents from arguments *)
-          let agents =
-            try
-              Yojson.Safe.Util.member "arguments" json
-              |> Yojson.Safe.Util.to_list
-              |> List.filter_map (fun arg ->
-                  let a = Safe_ops.json_string ~default:"" "agent" arg in
-                  if a <> "" then Some a else None)
-            with
-            | Yojson.Safe.Util.Type_error _ -> []
-            | exn ->
-                Log.Feed.warn "debate agents extract: %s" (Printexc.to_string exn);
-                []
-          in
-          if id = "" then None
-          else
-            (* Create one activity per participating agent *)
-            match agents with
-            | [] ->
-              Some [{
-                id = "act-debate-" ^ id;
-                kind = "debate";
-                agent_name = "system";
-                summary = Printf.sprintf "Debate: %s (%s)" topic status;
-                detail_json = json;
-                created_at;
-              }]
-            | agents ->
-              Some (List.map (fun agent ->
-                  { id = Printf.sprintf "act-debate-%s-%s" id agent;
-                    kind = "debate";
-                    agent_name = agent;
-                    summary = Printf.sprintf "Debated: %s (%s)" topic status;
-                    detail_json = json;
-                    created_at;
-                  }) agents))
-    |> List.flatten
-
 (** {1 Unified Timeline} *)
 
 let recent_activity (config : Room.config) ?agent_name ~(limit : int) ()
@@ -249,7 +191,6 @@ let recent_activity (config : Room.config) ?agent_name ~(limit : int) ()
       board_post_activities config;
       board_comment_activities config;
       mention_activities config;
-      debate_activities config;
     ]
   in
   let filtered = match agent_name with

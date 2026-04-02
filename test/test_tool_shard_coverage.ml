@@ -51,11 +51,11 @@ let test_shard_governance_exists () =
   match Tool_shard.get_shard "governance" with
   | Some s ->
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
-    (* Council removed: governance shard exists but has 0 tools *)
-    Alcotest.(check int) "no tools after council removal" 0
+    (* Governance shard exists for compatibility but has 0 tools. *)
+    Alcotest.(check int) "no tools after governance tool retirement" 0
       (List.length s.Tool_shard.tools);
     Alcotest.(check string) "stub description"
-      "Governance compatibility stub: council removed, no governance tools exposed"
+      "Governance compatibility stub: no governance tools exposed"
       s.Tool_shard.description
   | None -> Alcotest.fail "governance shard not found"
 
@@ -101,7 +101,7 @@ let test_default_shard_names () =
   (* All shards are now in defaults (mode removal: every keeper gets all tools) *)
   Alcotest.(check bool) "at least 8 defaults" true (List.length defaults >= 8);
   Alcotest.(check bool) "base in defaults" true (List.mem "base" defaults);
-  (* governance shard still in defaults but has 0 tools after council removal *)
+  (* governance shard still in defaults but has 0 tools after tool retirement *)
   Alcotest.(check bool) "governance in defaults" true
     (List.mem "governance" defaults);
   Alcotest.(check bool) "coding in defaults" true
@@ -329,8 +329,8 @@ let test_board_tools_names () =
   Alcotest.(check bool) "has board_vote" true (List.mem "keeper_board_vote" names)
 
 let test_governance_tools_empty () =
-  (* Council removed: governance_tools is now empty *)
-  Alcotest.(check int) "governance tools empty after council removal" 0
+  (* Governance tools are retired, so governance_tools is empty. *)
+  Alcotest.(check int) "governance tools empty after retirement" 0
     (List.length Tool_shard.governance_tools)
 
 (* ============================================================
@@ -354,7 +354,7 @@ let test_keeper_model_excludes_voice_tools () =
     Tool_shard.keeper_model_tools in
   Alcotest.(check bool) "keeper_model no voice_speak" false
     (List.mem "keeper_voice_speak" names);
-  (* Council removed: governance tools no longer in keeper_model_tools *)
+  (* Governance tools are no longer in keeper_model_tools *)
   Alcotest.(check bool) "keeper_model no governance_status" false
     (List.mem "masc_governance_status" names)
 

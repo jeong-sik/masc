@@ -362,7 +362,7 @@ let () =
      with Sys_error _ -> ())
   in
 
-  (* Council module removed — handle_set_param/clear_param/prompt_override
+  (* Governance tool retirement — handle_set_param/clear_param/prompt_override
      tests are no longer applicable *)
 
   (* ── crash persistence ───────────────────────────────────── *)

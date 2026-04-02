@@ -1,20 +1,20 @@
-/* Governance — council row/state, governance chips/badges, ff-plate signal variants,
+/* Governance — row/state, governance chips/badges, ff-plate signal variants,
    responsive overrides. Extracted from global.css for #3915. */
 
 /* ═══ Governance ═══ */
 
-/* ── Council Row (stateful: hover, selected, content-visibility) ── */
-@utility council-row {
+/* ── Governance Row (stateful: hover, selected, content-visibility) ── */
+@utility governance-row {
   content-visibility: auto;
   contain-intrinsic-size: auto 48px;
 }
-button.council-row.selected {
+button.governance-row.selected {
   border-color: rgba(71, 184, 255, 0.5);
   background: var(--accent-14);
 }
 
-/* ── Council State badges (multi-variant) ── */
-@utility council-state {
+/* ── Governance State badges (multi-variant) ── */
+@utility governance-state {
   &.open, &.positive { border-color: var(--ok-48); background: var(--ok-soft); color: #b4f5ca; }
   &.closed, &.vote { border-color: rgba(251, 191, 36, 0.45); background: rgba(251, 191, 36, 0.14); color: #ffe09b; }
   &.negative { border-color: rgba(239, 68, 68, 0.46); background: rgba(239, 68, 68, 0.14); color: #fecaca; }
@@ -86,4 +86,3 @@ button.council-row.selected {
     text-align: center;
   }
 }
-

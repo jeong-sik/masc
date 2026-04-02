@@ -12,10 +12,6 @@ Legend:
 CATEGORY 1: Timeouts (seconds, milliseconds)
 ========================================================================
 
-[CANDIDATE] lib/council/thread_persist.ml:
-  let timeout_sec = 10.0
-  -- HTTP timeout for thread persistence. Not in Env_config.
-
 [CANDIDATE] lib/federation.ml:
   let timeout = 3600.0   (* 1 hour timeout *)
   -- Challenge timeout. Hardcoded 1 hour.
@@ -145,11 +141,6 @@ CATEGORY 3: Thresholds (ratios, percentages)
   let apoptosis_delay_seconds = 5.0
   -- Mitosis defaults. Well-organized in dedicated module.
 
-[CANDIDATE] lib/council/balance.ml:
-  let max_consecutive_wins = 3
-  let min_participation = 0.2
-  -- Council balance thresholds.
-
 [LOCAL] lib/autonomy_adjuster.ml:
   let default_level = 0.5
   let high_quality_threshold = 0.7
@@ -198,10 +189,6 @@ CATEGORY 4: Intervals (polling, refresh)
 ========================================================================
 CATEGORY 5: Other notable constants
 ========================================================================
-
-[CANDIDATE] lib/council/archive.ml:
-  let http_port = 7474   (* Neo4j HTTP default *)
-  -- Hardcoded Neo4j port. Should use Env_config or connection URL.
 
 [CANDIDATE] lib/backend.ml:
   let pg_notify_max_payload = 7900

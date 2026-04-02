@@ -101,8 +101,6 @@
 - **Transport health** — fix shared webrtc signaling health truth (#4536).
 - **Hard failure surface** — surface failures in verifier and voice flows (#4535).
 - **Burst-then-dormancy** — stagger keeper warmup per-keeper, defer board cursor to prevent synchronized burst (#4542).
-- **Council mutex** — `Eio.Mutex` for consensus sessions Hashtbl and router Stats (#4472, #4433).
-- **Council TOCTOU** — single-lock read-validate-write in cast_vote/close/cancel_session (#4486).
 - **Encryption tests** — `decode_hex_key` extracted, `InvalidHexFormat` error type, 7 tests (#4465).
 - **Voice review** — `no_audio` status handling, `Eio.Cancel.Cancelled` re-raise, keeper name validation (#4456).
 - **Dashboard keeper lifecycle** — fix auth failures in keeper lifecycle operations (#4499).
@@ -562,7 +560,6 @@
 - **Board nested replies** — dashboard reply UI (#4014).
 - **Board cleaner persona** — sonsukku keeper persona (#4012, #4016).
 - **Keeper social model** — typed social state routing (#4036).
-- **Council capability routing** — replace keyword heuristics with capability-aware routing (#4039).
 
 ### Fixed
 - **Research tool exposure** — restore keeper autoresearch/research test parity after SSOT refactor (#4032).
@@ -633,7 +630,6 @@
 ### Added
 - **Keeper lifecycle tests** — bootstrap restore, lifecycle params, crash persistence coverage (#3911).
 - **Cache system prompt plumbing** — P1-1b surface and provider prefix cache metrics (#3895).
-- **Council explicit errors** — silent placeholder stubs replaced with typed errors (#3914).
 
 ### Changed
 - **Dashboard UX overhaul** — CSS dedup, progressive disclosure, terminology alignment (-347 lines) (#3912).
@@ -1287,7 +1283,7 @@
 
 ### Fixed
 - **Zero blocking I/O** — migrate all 70+ modules from `Stdlib` to `Fs_compat` (Phases 1-3) (#1421, #1437, #1438)
-- **Replace Stdlib.Mutex with Eio.Mutex** — guard HTTP session Hashtbl, split tool_council JSON (#1449)
+- **Replace Stdlib.Mutex with Eio.Mutex** — guard HTTP session Hashtbl and split legacy governance JSON helpers (#1449)
 - **17 remaining Stdlib.Mutex** migrated to Eio.Mutex (#1364)
 - **MCP transport hang** — global timeout, relax Accept, fix pagination (#1434)
 - **Background loop duplicate tasks** — prevent accumulation (#1450)
@@ -1547,7 +1543,7 @@
 
 ### Changed
 - **Managed-Agent Surface Cleanup** — split managed-agent/public MCP boundaries and pruned dead hidden tool surfaces from the mainline surface set (#960, #976)
-- **Governance HTTP Read-only** — governance and council HTTP compatibility surfaces were narrowed to the current read-only model (#965)
+- **Governance HTTP Read-only** — governance HTTP compatibility surfaces were narrowed to the current read-only model (#965)
 - **Upgrade Note Required** — integrations relying on hidden/deprecated tool surfaces or legacy governance HTTP semantics should read the `v2.87.0` release note before upgrading
 
 ### Fixed
@@ -1826,7 +1822,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TRPG Actor Streamlining** — simplified actor creation with profile fields (#478)
 - **Transport Error Classification** — pre-JSON-RPC error detection for proxy/CDN HTML pages (#473)
 - **Preflight Accessibility** — ARIA attributes and keyboard navigation for new-game wizard (#473)
-- **Board/Council Contracts** — repaired execution IA and dashboard typing (#475)
+- **Board Contracts** — repaired execution IA and dashboard typing (#475)
 
 ### Changed
 - Dashboard context ratio and input event typing tightened (#471)
@@ -1883,7 +1879,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Viewer Party-Card Quick Pick** — One-click actor join from party cards (#358)
 - **Dashboard Enriched Keeper and Agent Detail Pages** — Expanded keeper overview cards and agent detail (#394, #378)
 - **Dashboard SPA Routes and Sticky Shell** — Restore SPA navigation with redesigned persistent shell (#340)
-- **Dashboard Control Dock and Council** — Restore council functionality in dashboard (#343)
 - **Viewer Bevy Improvements P3-P7** — Bevy viewer rendering improvements (#399)
 - **Quick-Win Tests for Heartbeat and SSE** — Unit test coverage for heartbeat and SSE modules (#407)
 
@@ -1977,7 +1972,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Viewer manual and auto round execution serialized to prevent race conditions (#279)
 - Viewer round gate and keeper selection UX (#277)
 - MCP RPC response parsing hardened against malformed envelopes (#274)
-- Council decision SSE events emitted from game-view decisions (#272)
 - SSE storm E2E test skipped when bind is not permitted (#270)
 - MCP message envelopes unwrapped for MASC viewer panels (#269)
 - Emoji replaced with ASCII in Bevy UI text rendering (#268)
@@ -2492,18 +2486,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.7.0] - 2026-02-01
 
 ### Added
-- **Council Module**: Multi-agent governance system (MAGI-style)
-  - `lib/council/debate.ml`: Structured debate with positions (Support/Oppose/Neutral)
-  - `lib/council/consensus.ml`: Voting system (Unanimous/Majority/Deadlock/Escalate)
-  - `lib/council/router.ml`: MoE-style agent routing (90% small / 10% large models)
-  - `lib/council/archive.ml`: 실록 (Record system) with Neo4j + PostgreSQL
-  - `lib/council/balance.ml`: Agent fairness policy
-  - `lib/council/council.ml`: Unified API facade
-- **12 New MCP Tools**:
-  - `masc_debate_start`, `masc_debate_argue`, `masc_debate_close`, `masc_debate_status`, `masc_debates`
-  - `masc_consensus_start`, `masc_consensus_vote`, `masc_consensus_close`, `masc_consensus_result`, `masc_sessions`
-  - `masc_route` (MoE query routing)
-  - `masc_council_status`
 
 ## [2.6.0] - 2026-01-30
 
@@ -2555,7 +2537,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Complete Time_compat Migration**: All 56 main library modules now use Eio-native timestamps
   - Prevents domain blocking in async context
-  - council/ and jiphyeon/ sublibraries unchanged (separate dependency graph)
+  - legacy sublibraries unchanged (separate dependency graph)
 
 ## [2.31.0] - 2026-02-02
 

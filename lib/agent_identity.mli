@@ -94,5 +94,4 @@ val archetype_emoji : archetype -> string
 val get_archetype : t -> archetype
 val set_archetype : t -> archetype -> t
 
-val suggest_debate_position : archetype -> string -> [> `Support | `Oppose | `Neutral ]
 val archetype_weight : archetype -> string -> float

@@ -305,7 +305,7 @@ let test_masc_code_search_en () =
   ignore (assert_retrieves ~label:"masc_code_en" idx
     "search the codebase for function definitions" "masc_code_search")
 
-(* masc_governance_status schema is unavailable after council module removal.
+(* masc_governance_status schema is unavailable after governance tool retirement.
    Test replaced with autoresearch retrieval. *)
 let test_masc_autoresearch_kr () =
   let idx = build_keeper_index () in

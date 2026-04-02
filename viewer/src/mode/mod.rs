@@ -78,10 +78,6 @@ pub enum ViewerMode {
     /// SSE: MASC `/sse?room=monitor`
     Monitor,
 
-    /// MAGI council deliberation viewer — consensus voting, debate flow.
-    /// SSE: MASC `/sse?room=council`
-    Council,
-
     /// Social board feed — agent posts, comments, reactions.
     /// SSE: MASC `/sse?room=social`
     Social,
@@ -97,7 +93,6 @@ impl ViewerMode {
             Self::Trpg => "그림란드 연대기",
             Self::Experiment => "Experiment Lab",
             Self::Monitor => "System Monitor",
-            Self::Council => "MAGI Council",
             Self::Social => "Social Board",
         }
     }
@@ -107,7 +102,6 @@ impl ViewerMode {
     pub fn panel_id(&self) -> Option<&'static str> {
         match self {
             Self::Monitor => Some("monitor-panel"),
-            Self::Council => Some("council-panel"),
             Self::Social => Some("social-panel"),
             Self::Experiment => Some("experiment-panel"),
             _ => None,
@@ -118,7 +112,6 @@ impl ViewerMode {
     pub fn status_badge_id(&self) -> Option<&'static str> {
         match self {
             Self::Monitor => Some("monitor-status"),
-            Self::Council => Some("council-status"),
             Self::Social => Some("social-status"),
             Self::Experiment => Some("experiment-status"),
             _ => None,
@@ -133,7 +126,6 @@ impl ViewerMode {
             Self::Trpg => "mode-trpg",
             Self::Experiment => "mode-experiment",
             Self::Monitor => "mode-monitor",
-            Self::Council => "mode-council",
             Self::Social => "mode-social",
         }
     }
@@ -145,7 +137,6 @@ impl ViewerMode {
             "trpg" => Some(Self::Trpg),
             "experiment" => Some(Self::Experiment),
             "monitor" => Some(Self::Monitor),
-            "council" => Some(Self::Council),
             "social" => Some(Self::Social),
             _ => None,
         }
@@ -159,7 +150,6 @@ fn mode_storage_value(mode: ViewerMode) -> &'static str {
         ViewerMode::Trpg => "trpg",
         ViewerMode::Experiment => "experiment",
         ViewerMode::Monitor => "monitor",
-        ViewerMode::Council => "council",
         ViewerMode::Social => "social",
     }
 }
@@ -171,7 +161,6 @@ fn parse_mode_storage_value(raw: &str) -> Option<ViewerMode> {
         "trpg" => Some(ViewerMode::Trpg),
         "experiment" => Some(ViewerMode::Experiment),
         "monitor" => Some(ViewerMode::Monitor),
-        "council" => Some(ViewerMode::Council),
         "social" => Some(ViewerMode::Social),
         _ => None,
     }
@@ -310,8 +299,6 @@ impl Plugin for ModePlugin {
             .add_systems(OnExit(ViewerMode::Trpg), exit_trpg)
             .add_systems(OnEnter(ViewerMode::Monitor), enter_masc_panel)
             .add_systems(OnExit(ViewerMode::Monitor), exit_masc_panel)
-            .add_systems(OnEnter(ViewerMode::Council), enter_masc_panel)
-            .add_systems(OnExit(ViewerMode::Council), exit_masc_panel)
             .add_systems(OnEnter(ViewerMode::Social), enter_masc_panel)
             .add_systems(OnExit(ViewerMode::Social), exit_masc_panel)
             .add_systems(OnEnter(ViewerMode::Experiment), enter_masc_panel)
@@ -1896,35 +1883,6 @@ async fn seed_monitor_snapshot(doc: web_sys::Document) -> Result<(), String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn seed_council_snapshot(doc: web_sys::Document) -> Result<(), String> {
-    let payload = mcp_tool_call("masc_governance_status", json!({})).await?;
-    let debates = payload
-        .get("open_cases")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let votes = payload
-        .get("execution_orders")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let threads = payload
-        .get("total_cases")
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let line = format!(
-        "[snapshot] 열린 거버넌스 {} · 실행 대기 {} · 전체 케이스 {}",
-        debates, votes, threads
-    );
-    set_or_prepend_line(
-        &doc,
-        "council-deliberation",
-        &line,
-        &["No deliberations in progress."],
-        80,
-    );
-    Ok(())
-}
-
-#[cfg(target_arch = "wasm32")]
 async fn seed_experiment_snapshot(doc: web_sys::Document) -> Result<(), String> {
     let payload = match mcp_tool_call("experiment_list", json!({ "limit": 20 })).await {
         Ok(payload) => payload,
@@ -1977,7 +1935,6 @@ fn seed_masc_panel_snapshot(mode: ViewerMode, doc: web_sys::Document) {
     wasm_bindgen_futures::spawn_local(async move {
         let result = match mode {
             ViewerMode::Monitor => seed_monitor_snapshot(doc.clone()).await,
-            ViewerMode::Council => seed_council_snapshot(doc.clone()).await,
             ViewerMode::Experiment => seed_experiment_snapshot(doc.clone()).await,
             _ => Ok(()),
         };
@@ -1991,11 +1948,6 @@ fn seed_masc_panel_snapshot(mode: ViewerMode, doc: web_sys::Document) {
 fn count_mode_events(mode: ViewerMode, event_log: &crate::sse::masc_bridge::MascEventLog) -> usize {
     match mode {
         ViewerMode::Monitor => event_log.entries.len(),
-        ViewerMode::Council => event_log
-            .entries
-            .iter()
-            .filter(|entry| entry.event_type.starts_with("decision_"))
-            .count(),
         ViewerMode::Experiment => event_log
             .entries
             .iter()
@@ -2068,7 +2020,7 @@ fn sync_masc_panel_connection_status(
 
 // ─── Generic MASC Panel Enter/Exit ───────────
 
-/// Generic enter handler for MASC mode panels (Monitor, Council, Social, Experiment).
+/// Generic enter handler for MASC mode panels (Monitor, Social, Experiment).
 /// Shows the mode's panel, hides lobby and dashboard, binds back navigation.
 fn enter_masc_panel(mode: Res<State<ViewerMode>>, buffer: Res<ModeTransitionBuffer>) {
     #[cfg(target_arch = "wasm32")]
@@ -2100,12 +2052,7 @@ fn exit_masc_panel() {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
-        for panel_id in &[
-            "monitor-panel",
-            "council-panel",
-            "social-panel",
-            "experiment-panel",
-        ] {
+        for panel_id in &["monitor-panel", "social-panel", "experiment-panel"] {
             set_panel_active(&doc, panel_id, false);
         }
     }
@@ -2185,7 +2132,6 @@ mod tests {
     #[test]
     fn panel_id_returns_correct_ids_for_masc_modes() {
         assert_eq!(ViewerMode::Monitor.panel_id(), Some("monitor-panel"));
-        assert_eq!(ViewerMode::Council.panel_id(), Some("council-panel"));
         assert_eq!(ViewerMode::Social.panel_id(), Some("social-panel"));
         assert_eq!(ViewerMode::Experiment.panel_id(), Some("experiment-panel"));
     }

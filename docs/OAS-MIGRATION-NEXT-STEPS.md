@@ -9,7 +9,7 @@ The migration is no longer blocked on “move major subsystems to OAS”.
 The important migrations are already in place:
 
 - keeper turn execution uses OAS runtime paths
-- verifier/council/dashboard provider runs use OAS execution helpers
+- verifier/governance/dashboard provider runs use OAS execution helpers
 - team-session execution goes through OAS Swarm
 - OAS Event_bus custom events already flow into dashboard SSE
 - context compaction already delegates to OAS `Context_reducer`

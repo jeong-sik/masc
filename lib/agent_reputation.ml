@@ -1,7 +1,7 @@
 (** Agent_reputation — Reputation scoring from existing JSONL data
 
     Computes agent reputation from task transitions, mention inbox,
-    board posts/comments, and debate participation.
+    and board posts/comments.
     No new storage — reads from existing `.masc/` JSONL files.
 
     @since Phase 3B — Keeper Deliberation Engine
@@ -17,7 +17,6 @@ type agent_reputation = {
   response_rate: float; [@default 0.0]
   board_posts: int; [@default 0]
   board_comments: int; [@default 0]
-  debates_participated: int; [@default 0]
   overall_score: float; [@default 0.0]
 } [@@deriving yojson { strict = false }]
 
@@ -33,7 +32,6 @@ let default_reputation ~(agent_name : string) : agent_reputation =
     response_rate = 0.0;
     board_posts = 0;
     board_comments = 0;
-    debates_participated = 0;
     overall_score = 0.0;
   }
 
@@ -132,40 +130,6 @@ let count_board_activity (config : Room.config) ~(agent_name : string)
   in
   (post_count, comment_count)
 
-(** {1 Debate Counting} *)
-
-(** Count debates an agent participated in.
-    Debates are stored under `.masc/debates/` as individual JSON files. *)
-let count_debate_participation (config : Room.config) ~(agent_name : string) : int =
-  let debates_dir = Filename.concat (Room.masc_dir config) "debates" in
-  if not (Sys.file_exists debates_dir) || not (Sys.is_directory debates_dir) then 0
-  else
-    let files =
-      try Sys.readdir debates_dir |> Array.to_list
-      with Sys_error _ -> []
-    in
-    files
-    |> List.filter (fun fname -> Filename.check_suffix fname ".json")
-    |> List.filter (fun fname ->
-        let path = Filename.concat debates_dir fname in
-        match Safe_ops.read_json_file_safe path with
-        | Error _ -> false
-        | Ok json ->
-          (* Check arguments array for agent participation *)
-          (try
-             let args_list = Yojson.Safe.Util.member "arguments" json
-                             |> Yojson.Safe.Util.to_list in
-             List.exists (fun arg_json ->
-                 let agent = Safe_ops.json_string ~default:"" "agent" arg_json in
-                 agent = agent_name)
-               args_list
-           with
-           | Yojson.Safe.Util.Type_error _ -> false
-           | exn ->
-               Log.Reputation.warn "dispatch count parse: %s" (Printexc.to_string exn);
-               false))
-    |> List.length
-
 (** {1 Mention Counting} *)
 
 let count_mention_activity (config : Room.config) ~(agent_name : string)
@@ -180,17 +144,14 @@ let count_mention_activity (config : Room.config) ~(agent_name : string)
 (** Compute weighted overall score.
     - 0.4 * completion_rate
     - 0.3 * response_rate
-    - 0.2 * board_activity_normalized (capped at 20 actions)
-    - 0.1 * debate_normalized (capped at 10 debates) *)
+    - 0.3 * board_activity_normalized (capped at 20 actions) *)
 let compute_overall_score ~completion_rate ~response_rate
-    ~board_posts ~board_comments ~debates_participated : float =
+    ~board_posts ~board_comments : float =
   let board_total = float_of_int (board_posts + board_comments) in
   let board_norm = Float.min 1.0 (board_total /. 20.0) in
-  let debate_norm = Float.min 1.0 (float_of_int debates_participated /. 10.0) in
   (0.4 *. completion_rate)
   +. (0.3 *. response_rate)
-  +. (0.2 *. board_norm)
-  +. (0.1 *. debate_norm)
+  +. (0.3 *. board_norm)
 
 (** {1 Main Computation} *)
 
@@ -212,20 +173,13 @@ let compute_reputation (config : Room.config) ~(agent_name : string)
       float_of_int mentions_responded /. float_of_int mentions_received
     else 0.0
   in
-  let (board_posts, board_comments) =
-    count_board_activity config ~agent_name
-  in
-  let debates_participated =
-    count_debate_participation config ~agent_name
-  in
+  let (board_posts, board_comments) = count_board_activity config ~agent_name in
   let overall_score =
-    compute_overall_score ~completion_rate ~response_rate
-      ~board_posts ~board_comments ~debates_participated
+    compute_overall_score ~completion_rate ~response_rate ~board_posts ~board_comments
   in
   { agent_name;
     tasks_completed; tasks_claimed; completion_rate;
     mentions_received; mentions_responded; response_rate;
     board_posts; board_comments;
-    debates_participated;
     overall_score;
   }

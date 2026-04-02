@@ -565,7 +565,7 @@ type archetype =
   | Generalist  (* No specialization *)
 ```
 
-MAGI 3인 체제(Melchior/Balthasar/Casper)에 Athena와 Generalist를 추가한 확장. 각 archetype은 토론 포지션 제안(`suggest_debate_position`)과 가중치 계산(`archetype_weight`)을 지원한다.
+MAGI 3인 체제(Melchior/Balthasar/Casper)에 Athena와 Generalist를 추가한 확장. 각 archetype은 가중치 계산(`archetype_weight`)을 지원한다.
 
 ---
 

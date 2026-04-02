@@ -508,7 +508,6 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
         ))),
         ViewerMode::Monitor => Some(build_masc_url("sse?room=monitor")),
         ViewerMode::Experiment => Some(build_masc_url("sse?room=experiment")),
-        ViewerMode::Council => Some(build_masc_url("sse?room=council")),
         ViewerMode::Social => Some(build_masc_url("sse?room=social")),
         ViewerMode::Lobby => None,
     }
@@ -524,7 +523,6 @@ pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
         ))),
         "Monitor" => Some(build_masc_url("sse?room=monitor")),
         "Experiment" => Some(build_masc_url("sse?room=experiment")),
-        "Council" => Some(build_masc_url("sse?room=council")),
         "Social" => Some(build_masc_url("sse?room=social")),
         _ => None,
     }
@@ -575,10 +573,6 @@ mod tests {
             Some("/sse?room=experiment")
         );
         assert_eq!(
-            sse_endpoint(&ViewerMode::Council).as_deref(),
-            Some("/sse?room=council")
-        );
-        assert_eq!(
             sse_endpoint(&ViewerMode::Social).as_deref(),
             Some("/sse?room=social")
         );
@@ -593,10 +587,6 @@ mod tests {
         assert_eq!(
             sse_endpoint_by_name("Experiment").as_deref(),
             Some("/sse?room=experiment")
-        );
-        assert_eq!(
-            sse_endpoint_by_name("Council").as_deref(),
-            Some("/sse?room=council")
         );
         assert_eq!(
             sse_endpoint_by_name("Social").as_deref(),

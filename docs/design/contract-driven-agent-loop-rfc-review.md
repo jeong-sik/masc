@@ -21,7 +21,7 @@
 
 - `keeper_meta`는 `106 fields`가 아니라 `54 direct fields`, nested까지 flat하게 보면 대략 `~83` 수준으로 정정
 - `keeper_working_context.ml` / `keeper_exec_context.ml` 라인 수를 각각 `317 / 694`로 정정
-- `tool_council_oas.ml`의 decorative `Collaboration.t` 사용은 이미 resolved 상태로 변경
+- retired petition bridge의 decorative `Collaboration.t` 사용은 이미 resolved 상태로 변경
 - labeling / judging protocol은 별도 문서로 분리
 - rollout plan은 `OAS -> MASC -> MCP SDK` 순차 경로가 보이도록 조정
 

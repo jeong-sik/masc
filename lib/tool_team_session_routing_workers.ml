@@ -338,6 +338,19 @@ let planned_worker_of_spec ?runtime_actor (spec : spawn_spec) :
 let resolve_target_worker_name config (session : Team_session_types.session)
     target_agent =
   let trimmed = String.trim target_agent in
+  let fallback_worker_container_exists () =
+    let worker_dir =
+      Team_session_store.worker_container_dir config session.session_id
+        trimmed
+    in
+    Room_utils.path_exists config
+      (Team_session_store.worker_container_meta_path config session.session_id
+         trimmed)
+    || Room_utils.path_exists config
+         (Team_session_store.worker_container_checkpoint_path config
+            session.session_id trimmed)
+    || Team_session_store.immediate_dir_entries config worker_dir <> []
+  in
   let matches_runtime_actor worker =
     match worker.Team_session_types.runtime_actor with
     | Some actor -> String.equal (String.trim actor) trimmed
@@ -355,12 +368,7 @@ let resolve_target_worker_name config (session : Team_session_types.session)
         session.planned_workers |> List.filter matches_role
       with
       | [ worker ] -> worker.Team_session_types.runtime_actor
-      | _ ->
-          let worker_dir =
-            Team_session_store.worker_container_dir config session.session_id
-              trimmed
-          in
-          if Room_utils.path_exists config worker_dir then Some trimmed else None)
+      | _ -> if fallback_worker_container_exists () then Some trimmed else None)
 
 let register_planned_workers config session_id workers =
   match Team_session_store.update_session config session_id (fun session ->

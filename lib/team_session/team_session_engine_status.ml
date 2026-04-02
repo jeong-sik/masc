@@ -194,23 +194,24 @@ let planned_worker_for_actor (session : Team_session_types.session) worker_name 
       | None -> false)
     session.planned_workers
 
+let worker_container_has_artifacts config session_id worker_name =
+  let worker_dir =
+    Team_session_store.worker_container_dir config session_id worker_name
+  in
+  Room_utils.path_exists config
+    (Team_session_store.worker_container_meta_path config session_id worker_name)
+  || Room_utils.path_exists config
+       (Team_session_store.worker_container_checkpoint_path config session_id
+          worker_name)
+  || Team_session_store.immediate_dir_entries config worker_dir <> []
+
 let worker_container_actor_names config session_id =
-  Team_session_store.workers_dir config session_id
-  |> Room_utils.list_dir config
-  |> List.filter (fun name ->
-         let trimmed = String.trim name in
-         trimmed <> "" && not (String.contains trimmed '/'))
-  |> Team_session_types.dedup_strings
-  |> List.sort String.compare
+  Team_session_store.immediate_dir_entries config
+    (Team_session_store.workers_dir config session_id)
 
 let build_worker_delegate_readiness_entry config ~snapshot
     (session : Team_session_types.session) worker_name
     (planned_worker : Team_session_types.planned_worker option) =
-  let has_container_dir =
-    Room_utils.path_exists config
-      (Team_session_store.worker_container_dir config session.session_id
-         worker_name)
-  in
   let has_meta =
     Room_utils.path_exists config
       (Team_session_store.worker_container_meta_path config
@@ -221,12 +222,19 @@ let build_worker_delegate_readiness_entry config ~snapshot
       (Team_session_store.worker_container_checkpoint_path config
          session.session_id worker_name)
   in
+  let has_container_artifacts =
+    has_meta || has_checkpoint
+    || Team_session_store.immediate_dir_entries config
+         (Team_session_store.worker_container_dir config session.session_id
+            worker_name)
+       <> []
+  in
   let in_flight = List.mem worker_name snapshot.in_flight_actors in
   let blocked_reason =
     if in_flight then Some "in_flight"
     else
       match planned_worker with
-      | None when has_container_dir -> Some "unplanned_worker"
+      | None when has_container_artifacts -> Some "unplanned_worker"
       | None -> Some "missing_container"
       | Some _ -> (
           match (has_meta, has_checkpoint) with
@@ -273,12 +281,9 @@ let worker_delegate_readiness config (session : Team_session_types.session)
     worker_name =
   let snapshot = worker_run_event_snapshot config session in
   let planned_worker = planned_worker_for_actor session worker_name in
-  let has_container_dir =
-    Room_utils.path_exists config
-      (Team_session_store.worker_container_dir config session.session_id
-         worker_name)
-  in
-  if Option.is_some planned_worker || has_container_dir then
+  if Option.is_some planned_worker
+     || worker_container_has_artifacts config session.session_id worker_name
+  then
     Some
       (build_worker_delegate_readiness_entry config ~snapshot session
          worker_name planned_worker)

@@ -1,4 +1,4 @@
-import { missionKeeperBriefs } from '../mission-store'
+import { missionKeeperBriefs } from '../mission-signals'
 import type {
   DashboardMissionKeeperBrief,
   Keeper,

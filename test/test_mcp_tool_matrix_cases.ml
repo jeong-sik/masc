@@ -199,6 +199,7 @@ let all_known_tool_names =
     "masc_lock";
     "masc_mcp_session";
     "masc_messages";
+    "masc_meta_cognition_snapshot";
     "masc_note_add";
     "masc_observe_alerts";
     "masc_observe_capacity";

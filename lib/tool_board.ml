@@ -114,9 +114,18 @@ let resolve_board_post_kind ~author (raw_kind : string option) :
        | None -> Error (Printf.sprintf "unknown post_kind: %s" raw))
   | None ->
       let author_lc = String.lowercase_ascii (String.trim author) in
-      if author_lc = "" || author_lc = "anonymous" then
+      if author_lc = "" then
+        Error "missing author"
+      else if author_lc = "anonymous" then
+        (* "anonymous" is the MCP/internal path default when the caller
+           omits _agent_name.  These are programmatic calls, not human
+           posts, so classify as automation to prevent misleading
+           attribution on people-facing board surfaces. *)
         Ok Board.Automation_post
       else
+        (* Auto-classify only when registry hook is available.
+           Without a registry, default to Human_post to avoid
+           false positives from the name-shape heuristic. *)
         (match !agent_lookup_hook with
          | Some _ when is_agent author_lc -> Ok Board.Automation_post
          | _ -> Ok Board.Human_post)

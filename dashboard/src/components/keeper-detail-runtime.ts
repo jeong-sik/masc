@@ -6,8 +6,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { TimeAgo } from './common/time-ago'
-import { missionSnapshot } from '../mission-store'
-import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
+import type { Keeper } from '../types'
 import { serverStatus } from '../store'
 import { operatorSnapshot } from '../operator-store'
 import {
@@ -21,6 +20,11 @@ import {
 } from './common/tool-audit'
 import { ToolAllowlistEditor } from './tools/tool-allowlist-editor'
 import { loadTools } from './tools/tool-state'
+import {
+  resolveKeeperMissionBrief,
+  resolveKeeperObservedToolAudit,
+  resolveKeeperToolPolicy,
+} from './keeper-detail-source'
 import {
   loadKeeperConfig,
   peekKeeperConfigLoadStatus,
@@ -65,134 +69,6 @@ function keeperTopTools(keeper: Keeper): string[] {
   return topTools
     .map(item => (typeof item === 'object' && item !== null && 'tool' in item && typeof item.tool === 'string' ? item.tool : null))
     .filter((item): item is string => item !== null)
-}
-
-function missionKeeperBrief(keeper: Keeper): DashboardMissionKeeperBrief | null {
-  const mission = missionSnapshot.value
-  if (!mission) return null
-  return mission.keeper_briefs.find(brief =>
-    brief.name === keeper.name
-      || (brief.agent_name && keeper.agent_name && brief.agent_name === keeper.agent_name))
-    ?? null
-}
-
-type KeeperConfigLoadStatus = 'idle' | 'loading' | 'loaded' | 'error' | 'other'
-
-export interface KeeperToolPolicySnapshot {
-  source: 'keeper_config' | 'loading' | 'error' | 'none'
-  mode: 'preset' | 'custom' | string
-  preset: Keeper['tool_preset']
-  alsoAllow: string[]
-  customAllowlist: string[]
-  denylist: string[]
-  resolvedAllowlist: string[]
-}
-
-export function resolveKeeperToolPolicy(
-  keeperConfig: Pick<KeeperConfig, 'tools'> | null,
-  loadStatus: KeeperConfigLoadStatus,
-): KeeperToolPolicySnapshot {
-  const tools = keeperConfig?.tools
-  if (tools) {
-    return {
-      source: 'keeper_config',
-      mode: tools.tool_policy_mode,
-      preset: tools.tool_preset ?? null,
-      alsoAllow: tools.tool_also_allow ?? [],
-      customAllowlist: tools.tool_custom_allowlist ?? [],
-      denylist: tools.tool_denylist ?? [],
-      resolvedAllowlist: tools.resolved_allowlist ?? [],
-    }
-  }
-
-  if (loadStatus === 'idle' || loadStatus === 'loading') {
-    return {
-      source: 'loading',
-      mode: 'preset',
-      preset: null,
-      alsoAllow: [],
-      customAllowlist: [],
-      denylist: [],
-      resolvedAllowlist: [],
-    }
-  }
-
-  if (loadStatus === 'error') {
-    return {
-      source: 'error',
-      mode: 'preset',
-      preset: null,
-      alsoAllow: [],
-      customAllowlist: [],
-      denylist: [],
-      resolvedAllowlist: [],
-    }
-  }
-
-  return {
-    source: 'none',
-    mode: 'preset',
-    preset: null,
-    alsoAllow: [],
-    customAllowlist: [],
-    denylist: [],
-    resolvedAllowlist: [],
-  }
-}
-
-export interface KeeperObservedToolAuditSnapshot {
-  source: 'mission_brief' | 'dashboard_summary' | 'none'
-  latestToolNames: string[]
-  latestToolCallCount: number | null
-  toolAuditSource: string | null
-  toolAuditAt: string | null
-}
-
-export function resolveKeeperObservedToolAudit(
-  keeper: Keeper,
-  missionBrief: DashboardMissionKeeperBrief | null,
-): KeeperObservedToolAuditSnapshot {
-  const hasMissionAudit =
-    missionBrief != null && (
-      (missionBrief.latest_tool_names?.length ?? 0) > 0
-      || missionBrief.latest_tool_call_count != null
-      || !!missionBrief.tool_audit_source?.trim()
-      || !!missionBrief.tool_audit_at?.trim()
-    )
-
-  if (hasMissionAudit && missionBrief) {
-    return {
-      source: 'mission_brief',
-      latestToolNames: missionBrief.latest_tool_names ?? [],
-      latestToolCallCount: missionBrief.latest_tool_call_count ?? null,
-      toolAuditSource: missionBrief.tool_audit_source ?? null,
-      toolAuditAt: missionBrief.tool_audit_at ?? null,
-    }
-  }
-
-  const hasDashboardAudit =
-    (keeper.latest_tool_names?.length ?? 0) > 0
-    || keeper.latest_tool_call_count != null
-    || !!keeper.tool_audit_source?.trim()
-    || !!keeper.tool_audit_at?.trim()
-
-  if (hasDashboardAudit) {
-    return {
-      source: 'dashboard_summary',
-      latestToolNames: keeper.latest_tool_names ?? [],
-      latestToolCallCount: keeper.latest_tool_call_count ?? null,
-      toolAuditSource: keeper.tool_audit_source ?? null,
-      toolAuditAt: keeper.tool_audit_at ?? null,
-    }
-  }
-
-  return {
-    source: 'none',
-    latestToolNames: [],
-    latestToolCallCount: null,
-    toolAuditSource: null,
-    toolAuditAt: null,
-  }
 }
 
 // ── Shared row component ─────────────────────────────────
@@ -371,7 +247,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
     .slice(0, 8)
   const recentTools = keeperRecentTools(keeper)
   const topTools = keeperTopTools(keeper)
-  const missionBrief = missionKeeperBrief(keeper)
+  const missionBrief = resolveKeeperMissionBrief(keeper)
   const toolPolicy = resolveKeeperToolPolicy(keeperConfig, configLoadStatus)
   const observedAudit = resolveKeeperObservedToolAudit(keeper, missionBrief)
   const allowedTools = toolPolicy.resolvedAllowlist

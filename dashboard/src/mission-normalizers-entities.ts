@@ -196,9 +196,6 @@ export function normalizeKeeperBrief(raw: unknown): DashboardMissionKeeperBrief 
     last_turn_ago_s: asNumber(raw.last_turn_ago_s) ?? null,
     current_work: asString(raw.current_work) ?? null,
     last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
-    allowed_tool_names: extractArray(raw.allowed_tool_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
     latest_tool_names: extractArray(raw.latest_tool_names)
       .map(item => (typeof item === 'string' ? item.trim() : ''))
       .filter(Boolean),

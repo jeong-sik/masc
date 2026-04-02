@@ -109,4 +109,42 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
     expect(deriveLifecycleState(keeper!)).toBe('compacting')
   })
+
+  it('drops authored tool policy duplicates from shell rows while keeping runtime audit fields', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'delta',
+        status: 'active',
+        tool_policy_mode: 'custom',
+        tool_preset: 'full',
+        tool_also_allow: ['mcp__masc__masc_join'],
+        tool_custom_allowlist: ['mcp__masc__masc_board_post'],
+        tool_denylist: ['mcp__masc__masc_board_delete'],
+        allowed_tool_names: ['compat_only_allowlist'],
+        latest_tool_names: ['observed_tool'],
+        latest_tool_call_count: 2,
+        tool_audit_source: 'heartbeat_result',
+        tool_audit_at: '2026-04-02T08:30:00Z',
+        context_source: 'metrics_log',
+        recent_input_preview: 'operator asked for a refresh',
+        recent_output_preview: 'keeper acknowledged the request',
+      },
+    ])
+
+    expect(keeper).toMatchObject({
+      latest_tool_names: ['observed_tool'],
+      latest_tool_call_count: 2,
+      tool_audit_source: 'heartbeat_result',
+      tool_audit_at: '2026-04-02T08:30:00Z',
+      context_source: 'metrics_log',
+      recent_input_preview: 'operator asked for a refresh',
+      recent_output_preview: 'keeper acknowledged the request',
+    })
+    expect(keeper as unknown as Record<string, unknown>).not.toHaveProperty('tool_policy_mode')
+    expect(keeper as unknown as Record<string, unknown>).not.toHaveProperty('tool_preset')
+    expect(keeper as unknown as Record<string, unknown>).not.toHaveProperty('tool_also_allow')
+    expect(keeper as unknown as Record<string, unknown>).not.toHaveProperty('tool_custom_allowlist')
+    expect(keeper as unknown as Record<string, unknown>).not.toHaveProperty('tool_denylist')
+    expect(keeper as unknown as Record<string, unknown>).not.toHaveProperty('allowed_tool_names')
+  })
 })

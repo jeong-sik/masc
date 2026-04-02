@@ -495,12 +495,7 @@ export interface Keeper {
   recent_input_preview?: string | null
   recent_output_preview?: string | null
   recent_tool_names?: string[]
-  tool_policy_mode?: 'preset' | 'custom' | string
-  tool_preset?: 'minimal' | 'messaging' | 'coding' | 'research' | 'full' | null
-  tool_also_allow?: string[]
-  tool_custom_allowlist?: string[]
-  tool_denylist?: string[]
-  allowed_tool_names?: string[]
+  // Observed audit fallback from the shell summary; not authored tool policy.
   latest_tool_names?: string[]
   latest_tool_call_count?: number | null
   tool_audit_source?: string | null

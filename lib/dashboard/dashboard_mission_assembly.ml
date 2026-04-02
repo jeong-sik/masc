@@ -6,6 +6,8 @@
 include Dashboard_mission_agents
 
 let keeper_tool_audit_json_fields config keeper agent_name =
+  (* Compatibility-only derived allowlist. Keeper detail SSOT must source
+     authored/effective policy from /api/v1/keepers/:name/config instead. *)
   let fallback_allowed =
     string_list_of_json (member_assoc "allowed_tool_names" keeper)
   in

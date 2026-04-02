@@ -197,17 +197,14 @@ let masc_call ~sw:_ ~tool_name ~(args : Yojson.Safe.t) : (string, string) result
   match Eio_context.get_net_opt () with
   | None -> Error "Eio net not initialized"
   | Some net ->
-      try
-        let headers = [
-          ("Content-Type", "application/json");
-          ("Accept", "application/json, text/event-stream");
-        ] in
-        let code, body_str =
-          match Masc_http_client.post_sync ~net ~url:(Uri.to_string uri)
-            ~headers ~body () with
-          | Ok v -> v
-          | Error e -> raise (Failure e)
-        in
+      let headers = [
+        ("Content-Type", "application/json");
+        ("Accept", "application/json, text/event-stream");
+      ] in
+      (match Masc_http_client.post_sync ~net ~url:(Uri.to_string uri)
+          ~headers ~body () with
+      | Error e -> Error e
+      | Ok (code, body_str) ->
         if not (Cohttp.Code.is_success code) then
           Error (Printf.sprintf "MASC HTTP %d" code)
         else
@@ -224,11 +221,7 @@ let masc_call ~sw:_ ~tool_name ~(args : Yojson.Safe.t) : (string, string) result
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
             Log.Misc.warn "auto_responder: MCP response parse failed: %s" (Printexc.to_string exn);
-            Ok body_str
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Error (Printexc.to_string exn)
+            Ok body_str)
 
 let extract_nickname (response_text : string) : string option =
   let prefix = "Nickname:" in

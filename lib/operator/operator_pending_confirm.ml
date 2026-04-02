@@ -34,7 +34,7 @@ let normalized_actor ~context_actor = function
   | Some raw when String.trim raw <> "" -> String.trim raw
   | _ ->
       let trimmed = String.trim context_actor in
-      if trimmed = "" then "unknown" else trimmed
+      if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
 
 let operator_surface_contract_json =
   `Assoc

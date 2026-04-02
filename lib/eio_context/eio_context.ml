@@ -151,7 +151,5 @@ let get_https_connector_result () =
           Ok c
       | Error _ as error -> error)
 
-let get_https_connector () =
-  match get_https_connector_result () with
-  | Ok connector -> connector
-  | Error message -> failwith message
+(* get_https_connector (failwith variant) removed — all callers use
+   get_https_connector_result which returns (connector, string) result. *)

@@ -330,133 +330,6 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
       | None -> Error "keeper tool_access.kind required")
   | _ -> Error "keeper tool_access must be an object"
 
-let canonical_keeper_meta_key_names =
-  [
-    "name";
-    "agent_name";
-    "trace_id";
-    "trace_history";
-    "goal";
-    "short_goal";
-    "mid_goal";
-    "long_goal";
-    "soul_profile";
-    "social_model";
-    "cascade_name";
-    "will";
-    "needs";
-    "desires";
-    "instructions";
-    "policy_voice_enabled";
-    "execution_scope";
-    "allowed_paths";
-    "scope_kind";
-    "tool_access";
-    "tool_denylist";
-    "room_scope";
-    "mention_targets";
-    "room_signal_prompt_enabled";
-    "joined_room_ids";
-    "last_seen_seq_by_room";
-    "generation";
-    "proactive_enabled";
-    "proactive_idle_sec";
-    "proactive_cooldown_sec";
-    "compaction_profile";
-    "compaction_ratio_gate";
-    "compaction_message_gate";
-    "compaction_token_gate";
-    "continuity_compaction_cooldown_sec";
-    "auto_handoff";
-    "handoff_threshold";
-    "handoff_cooldown_sec";
-    "voice_enabled";
-    "voice_channel";
-    "voice_agent_id";
-    "last_handoff_ts";
-    "created_at";
-    "updated_at";
-    "total_turns";
-    "total_input_tokens";
-    "total_output_tokens";
-    "total_tokens";
-    "total_cost_usd";
-    "last_turn_ts";
-    "last_model_used";
-    "last_input_tokens";
-    "last_output_tokens";
-    "last_total_tokens";
-    "last_latency_ms";
-    "compaction_count";
-    "last_compaction_ts";
-    "last_compaction_before_tokens";
-    "last_compaction_after_tokens";
-    "proactive_count_total";
-    "last_proactive_ts";
-    "last_proactive_reason";
-    "last_proactive_preview";
-    "last_compaction_check_ts";
-    "last_compaction_decision";
-    "last_continuity_update_ts";
-    "continuity_summary";
-    "active_goal_ids";
-    "active_team_session_id";
-    "last_team_session_started_at";
-    "team_session_start_count_total";
-    "last_autonomous_action_at";
-    "autonomous_action_count";
-    "autonomous_turn_count";
-    "autonomous_text_turn_count";
-    "autonomous_tool_turn_count";
-    "board_reactive_turn_count";
-    "mention_reactive_turn_count";
-    "noop_turn_count";
-    "last_speech_act";
-    "last_blocker";
-    "last_need";
-    "paused";
-    "current_task_id";
-  ]
-
-let compatibility_keeper_meta_key_names =
-  [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist"; "tool_allowlist" ]
-
-let known_keeper_meta_key_names =
-  canonical_keeper_meta_key_names
-  @ compatibility_keeper_meta_key_names
-
-let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields ->
-      let unknown =
-        fields
-        |> List.filter_map (fun (key, _) ->
-               if List.mem key known_keeper_meta_key_names then None else Some key)
-        |> dedupe_keep_order
-      in
-      if unknown <> [] then
-        Log.Keeper.warn
-          "keeper meta %s has unknown keys: %s"
-          path (String.concat ", " unknown)
-  | _ -> ()
-
-let warn_tool_access_compat_keys ~path (json : Yojson.Safe.t) =
-  let compat_present =
-    compatibility_keeper_meta_key_names
-    |> List.filter (fun key -> json_member_present key json)
-  in
-  match compat_present with
-  | [] -> ()
-  | fields ->
-      if json_object_member_present "tool_access" json then
-        Log.Keeper.warn
-          "keeper meta %s has tool_access plus compatibility tool keys; ignoring %s"
-          path (String.concat ", " fields)
-      else
-        Log.Keeper.warn
-          "keeper meta %s uses compatibility tool keys (%s); prefer canonical tool_access"
-          path (String.concat ", " fields)
-
 (* -- Updater helpers for nested record updates -- *)
 
 let map_runtime (f : agent_runtime_state -> agent_runtime_state) (m : keeper_meta) : keeper_meta =
@@ -983,6 +856,67 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
+
+let canonical_keeper_meta_key_names =
+  let seed_json =
+    `Assoc
+      [
+        ("name", `String "__keeper-meta-key-seed__");
+        ("agent_name", `String "__keeper-meta-key-seed__");
+        ("trace_id", `String "__keeper-meta-key-seed__");
+      ]
+  in
+  let seed_meta =
+    match meta_of_json seed_json with
+    | Ok meta -> meta
+    | Error msg ->
+        failwith
+          (Printf.sprintf
+             "canonical_keeper_meta_key_names seed failed: %s"
+             msg)
+  in
+  match meta_to_json seed_meta with
+  | `Assoc fields -> fields |> List.map fst |> dedupe_keep_order
+  | _ -> []
+
+let compatibility_keeper_meta_key_names =
+  [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist"; "tool_allowlist" ]
+
+let known_keeper_meta_key_names =
+  canonical_keeper_meta_key_names
+  @ compatibility_keeper_meta_key_names
+
+let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+      let unknown =
+        fields
+        |> List.filter_map (fun (key, _) ->
+               if List.mem key known_keeper_meta_key_names then None else Some key)
+        |> dedupe_keep_order
+      in
+      if unknown <> [] then
+        Log.Keeper.warn
+          "keeper meta %s has unknown keys: %s"
+          path (String.concat ", " unknown)
+  | _ -> ()
+
+let warn_tool_access_compat_keys ~path (json : Yojson.Safe.t) =
+  let compat_present =
+    compatibility_keeper_meta_key_names
+    |> List.filter (fun key -> json_member_present key json)
+  in
+  match compat_present with
+  | [] -> ()
+  | fields ->
+      if json_object_member_present "tool_access" json then
+        Log.Keeper.warn
+          "keeper meta %s has tool_access plus compatibility tool keys; ignoring %s"
+          path (String.concat ", " fields)
+      else
+        Log.Keeper.warn
+          "keeper meta %s uses compatibility tool keys (%s); prefer canonical tool_access"
+          path (String.concat ", " fields)
 
 let read_meta_file_path path : (keeper_meta option, string) result =
   if not (Sys.file_exists path) then Ok None

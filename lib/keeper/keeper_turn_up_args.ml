@@ -84,6 +84,13 @@ let resolve_tool_name_list ~preferred ~fallback =
   |> Option.value ~default:[]
   |> normalize_tool_name_list
 
+let reject_legacy_tool_access_kind access_json =
+  match json_assoc_member_opt "kind" access_json with
+  | Some (`String ("restricted" | "unrestricted")) ->
+      Error
+        "tool_access.kind must be \"preset\" or \"custom\"; legacy kinds \"restricted\" and \"unrestricted\" are not supported for this endpoint"
+  | _ -> Ok ()
+
 let parse_tool_access_input (args : Yojson.Safe.t) :
     (tool_access option * tool_preset option * string list option, string) result =
   let tool_access_present = json_non_null_member_present "tool_access" args in
@@ -103,9 +110,12 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
       if tool_access_present then
         match json_assoc_member_opt "tool_access" args with
         | Some ((`Assoc _) as access_json) -> (
-            match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
-            | Ok access -> Ok (Some access)
-            | Error msg -> Error msg)
+            match reject_legacy_tool_access_kind access_json with
+            | Error msg -> Error msg
+            | Ok () -> (
+                match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
+                | Ok access -> Ok (Some access)
+                | Error msg -> Error msg))
         | Some `Null -> Error "tool_access must not be null"
         | Some _ -> Error "tool_access must be an object"
         | None -> Ok None

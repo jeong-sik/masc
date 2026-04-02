@@ -9,8 +9,12 @@ let starts_with ~(prefix : string) (s : string) : bool =
   String.length s >= lp && String.sub s 0 lp = prefix
 
 let strip_trailing_slash s =
+  let rec find_end i =
+    if i > 0 && s.[i - 1] = '/' then find_end (i - 1) else i
+  in
   let len = String.length s in
-  if len > 0 && s.[len - 1] = '/' then String.sub s 0 (len - 1) else s
+  let end_pos = find_end len in
+  if end_pos = len then s else String.sub s 0 end_pos
 
 let normalize_path_for_check (path : string) : string =
   try Unix.realpath path

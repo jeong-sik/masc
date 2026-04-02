@@ -335,6 +335,17 @@ let test_path_allowed_paths_filter () =
         (Str.regexp_string "path_not_in_allowed_paths") err 0 in true
        with Not_found -> false))
 
+let test_path_allowed_paths_filter_strips_all_trailing_slashes () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    let ok_result = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:["lib//"] ~raw_path:"lib/foo.ml" in
+    check bool "lib path allowed with repeated trailing slash" true
+      (Result.is_ok ok_result))
+
 let test_path_empty_rejected () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
@@ -427,6 +438,8 @@ let () =
       test_case "absolute outside root" `Quick test_path_absolute_outside_root;
       test_case "traversal attack" `Quick test_path_traversal_attack;
       test_case "allowed_paths filter" `Quick test_path_allowed_paths_filter;
+      test_case "allowed_paths strip all trailing slashes" `Quick
+        test_path_allowed_paths_filter_strips_all_trailing_slashes;
       test_case "empty path rejected" `Quick test_path_empty_rejected;
       test_case "whitespace only rejected" `Quick test_path_whitespace_only_rejected;
       test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;

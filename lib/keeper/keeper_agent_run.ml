@@ -169,7 +169,10 @@ let log_keeper_memory_write
     @param temperature MODEL temperature override; when omitted, resolved
            from [Cascade_inference] with a 0.3 fallback
     @param max_tokens Maximum output tokens override; when omitted, resolved
-           from [Cascade_inference] with a 4096 fallback *)
+           from [Cascade_inference] with a 4096 fallback
+    @param is_retry When [true], replays the current user message into the
+           working context without persisting it again, so transient retry
+           attempts do not duplicate the user entry in session history *)
 let run_turn
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)

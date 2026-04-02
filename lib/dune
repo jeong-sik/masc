@@ -367,10 +367,6 @@
    tool_unified
    tool_help_registry
    tool_registry
-   tool_council_feed
-   tool_council_helpers
-   tool_council_internal_schemas
-   tool_council_json
    tool_code
    tool_code_write
    code_swarm_plan
@@ -494,7 +490,6 @@
    procedural_memory
    oas_events
    oas_worker
-   tool_council_oas
    oas_sse_bridge
    env_config_introspect
    runtime_params
@@ -617,10 +612,6 @@
   team_session_report_proof
   ;; godsplit-phase1: file split sub-modules
   tool_team_session_step_exec
-  tool_council_feed
-  tool_council_helpers
-  tool_council_internal_schemas
-  tool_council_json
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules
   autoresearch_codegen
@@ -738,8 +729,6 @@
    dated_jsonl
    ;; HTTP client with fd-leak prevention (extracted sub-library)
    masc_http_client
-   ;; Council - multi-agent governance
-   council
    ;; Neo4j Bolt native driver (OCaml 5.x Eio)
    ;; Structured logging (extracted sub-library)
    masc_log

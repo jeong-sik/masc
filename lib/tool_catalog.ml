@@ -233,6 +233,14 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
         (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );
+    ( "masc_set_param",
+      {
+        (with_semantic_flags ~destructive:true
+           (hidden_active
+              "Internal HTTP runtime-parameter mutation route; hidden from the public tool surface."))
+        with
+        required_permission = Some Types.CanAdmin;
+      } );
     ( "masc_execute",
       with_semantic_flags ~destructive:true
         (hidden_active "Direct execution can apply privileged side effects and should be treated as destructive.") );

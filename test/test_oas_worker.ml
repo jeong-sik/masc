@@ -34,11 +34,11 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let parse_json s =
+let _parse_json s =
   try Yojson.Safe.from_string s
   with Yojson.Json_error e -> failwith ("invalid json: " ^ e)
 
-let field key json = Yojson.Safe.Util.member key json
+let _field key json = Yojson.Safe.Util.member key json
 
 (* ================================================================ *)
 (* SSE Event Bridge Tests (OAS #215 streaming verification)         *)
@@ -248,185 +248,6 @@ let test_resume_model_id_falls_back_to_meta_model () =
   let checkpoint = make_checkpoint () in
   Alcotest.(check string) "meta model fallback" "meta-model"
     (Worker_oas.resume_model_id_of_checkpoint meta checkpoint)
-
-(* ================================================================ *)
-(* Module 2: Tool_council_oas tests                                 *)
-(* ================================================================ *)
-
-let make_council_ctx ~base_path : Tool_council_oas.context =
-  { base_path; agent_name = "test-agent"; room_config = None;
-    policy = None; audit = None }
-
-let with_council_base f =
-  let base_path = temp_dir "test_council_oas" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-      Council.Governance_v2.reset_legacy_storage base_path;
-      f base_path)
-
-let test_petition_submit_creates_case () =
-  with_council_base @@ fun base_path ->
-  let ctx = make_council_ctx ~base_path in
-  let args = `Assoc [
-    ("title", `String "Test petition via OAS");
-    ("subject", `String "task");
-    ("risk_class", `String "low");
-  ] in
-  match Tool_council_oas.dispatch ctx ~name:"masc_petition_submit" ~args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "petition ok" true ok;
-    let json = parse_json body in
-    let case_id = json |> field "case_id" |> Yojson.Safe.Util.to_string in
-    Alcotest.(check bool) "case_id non-empty" true (String.length case_id > 0);
-    Alcotest.(check string) "collaboration_id compatibility alias" case_id
-      (json |> field "collaboration_id" |> Yojson.Safe.Util.to_string);
-    Alcotest.(check string) "phase compatibility alias" "active"
-      (json |> field "phase" |> Yojson.Safe.Util.to_string);
-    (match Council.Governance_v2.get_case_bundle base_path case_id with
-     | Ok bundle ->
-         let source_refs =
-           bundle.Council.Governance_v2.case_
-             .Council.Governance_v2.source_refs
-         in
-         Alcotest.(check (list string)) "source_refs empty" []
-           source_refs
-     | Error err -> Alcotest.fail ("get_case_bundle failed: " ^ err));
-    Alcotest.(check bool) "merged field present" true
-      (Yojson.Safe.Util.member "merged" json <> `Null)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_petition_submit_accepts_subject_type () =
-  with_council_base @@ fun base_path ->
-  let ctx = make_council_ctx ~base_path in
-  let args = `Assoc [
-    ("title", `String "Schema-aligned petition");
-    ("subject_type", `String "policy");
-    ("risk_class", `String "low");
-  ] in
-  match Tool_council_oas.dispatch ctx ~name:"masc_petition_submit" ~args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "petition ok" true ok;
-    let json = parse_json body in
-    let case_id = json |> field "case_id" |> Yojson.Safe.Util.to_string in
-    Alcotest.(check bool) "case_id non-empty" true (String.length case_id > 0)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_petition_submit_empty_title_err () =
-  with_council_base @@ fun base_path ->
-  let ctx = make_council_ctx ~base_path in
-  let args = `Assoc [("title", `String "")] in
-  match Tool_council_oas.dispatch ctx ~name:"masc_petition_submit" ~args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "empty title rejected" false ok;
-    let json = parse_json body in
-    let err = json |> field "error" |> Yojson.Safe.Util.to_string in
-    Alcotest.(check bool) "error mentions title" true
-      (String.length err > 0)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_cases_list_empty () =
-  with_council_base @@ fun base_path ->
-  let ctx = make_council_ctx ~base_path in
-  match Tool_council_oas.dispatch ctx ~name:"masc_cases" ~args:(`Assoc []) with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "cases ok" true ok;
-    let json = parse_json body in
-    (match json with
-     | `List cases -> Alcotest.(check int) "empty case list" 0 (List.length cases)
-     | _ -> Alcotest.fail "expected JSON list")
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_governance_status_overview () =
-  with_council_base @@ fun base_path ->
-  let ctx = make_council_ctx ~base_path in
-  match Tool_council_oas.dispatch ctx ~name:"masc_governance_status" ~args:(`Assoc []) with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "governance status ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check int) "total_cases 0" 0
-      (json |> field "total_cases" |> Yojson.Safe.Util.to_int);
-    Alcotest.(check int) "open_cases 0" 0
-      (json |> field "open_cases" |> Yojson.Safe.Util.to_int);
-    Alcotest.(check string) "runtime oas" "oas"
-      (json |> field "runtime" |> Yojson.Safe.Util.to_string)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_runtime_params_config () =
-  with_council_base @@ fun base_path ->
-  let ctx = make_council_ctx ~base_path in
-  match Tool_council_oas.dispatch ctx ~name:"masc_runtime_params" ~args:(`Assoc []) with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "runtime params ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check string) "governance_version" "v2"
-      (json |> field "governance_version" |> Yojson.Safe.Util.to_string);
-    Alcotest.(check string) "runtime" "oas"
-      (json |> field "runtime" |> Yojson.Safe.Util.to_string);
-    Alcotest.(check bool) "collaboration_enabled" true
-      (json |> field "collaboration_enabled" |> Yojson.Safe.Util.to_bool)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_council_dispatch_unknown () =
-  with_council_base @@ fun base_path ->
-  let ctx = make_council_ctx ~base_path in
-  let result = Tool_council_oas.dispatch ctx ~name:"nonexistent_tool" ~args:(`Assoc []) in
-  Alcotest.(check bool) "unknown tool returns None" true (Option.is_none result)
-
-let test_governance_status_after_petition () =
-  with_council_base @@ fun base_path ->
-  let ctx = make_council_ctx ~base_path in
-  let args = `Assoc [
-    ("title", `String "Test for status count");
-    ("subject", `String "task");
-    ("risk_class", `String "low");
-  ] in
-  (match Tool_council_oas.dispatch ctx ~name:"masc_petition_submit" ~args with
-   | Some (ok, _) -> Alcotest.(check bool) "petition ok" true ok
-   | None -> Alcotest.fail "petition dispatch returned None");
-  match Tool_council_oas.dispatch ctx ~name:"masc_governance_status" ~args:(`Assoc []) with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "status ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check int) "total_cases 1" 1
-      (json |> field "total_cases" |> Yojson.Safe.Util.to_int);
-    Alcotest.(check bool) "open_cases >= 1" true
-      (json |> field "open_cases" |> Yojson.Safe.Util.to_int >= 1)
-  | None -> Alcotest.fail "dispatch returned None"
-
-let test_case_brief_submit_accepts_evidence_refs_array () =
-  with_council_base @@ fun base_path ->
-  let ctx = make_council_ctx ~base_path in
-  let petition_args = `Assoc [
-    ("title", `String "Brief evidence case");
-    ("subject_type", `String "task");
-    ("risk_class", `String "low");
-  ] in
-  let case_id =
-    match Tool_council_oas.dispatch ctx ~name:"masc_petition_submit"
-            ~args:petition_args with
-    | Some (true, body) ->
-      parse_json body |> field "case_id" |> Yojson.Safe.Util.to_string
-    | Some (false, body) ->
-      Alcotest.failf "petition failed: %s" body
-    | None -> Alcotest.fail "petition dispatch returned None"
-  in
-  let brief_args = `Assoc [
-    ("case_id", `String case_id);
-    ("stance", `String "support");
-    ("summary", `String "Ship it");
-    ("evidence_refs", `List [ `String "trace:abc"; `String "doc:123" ]);
-  ] in
-  match Tool_council_oas.dispatch ctx ~name:"masc_case_brief_submit"
-          ~args:brief_args with
-  | Some (ok, body) ->
-    Alcotest.(check bool) "brief ok" true ok;
-    let json = parse_json body in
-    Alcotest.(check string) "case_id preserved" case_id
-      (json |> field "case_id" |> Yojson.Safe.Util.to_string);
-    Alcotest.(check string) "stance preserved" "support"
-      (json |> field "stance" |> Yojson.Safe.Util.to_string)
-  | None -> Alcotest.fail "dispatch returned None"
 
 (* ================================================================ *)
 (* Keeper checkpoint boundary tests                                  *)
@@ -913,26 +734,6 @@ let () =
         test_resume_model_id_prefers_checkpoint_model;
       Alcotest.test_case "meta model fallback" `Quick
         test_resume_model_id_falls_back_to_meta_model;
-    ];
-    "tool_council_oas", [
-      Alcotest.test_case "petition creates case without decorative collaboration" `Quick
-        test_petition_submit_creates_case;
-      Alcotest.test_case "petition accepts subject_type" `Quick
-        test_petition_submit_accepts_subject_type;
-      Alcotest.test_case "petition empty title error" `Quick
-        test_petition_submit_empty_title_err;
-      Alcotest.test_case "cases list empty" `Quick
-        test_cases_list_empty;
-      Alcotest.test_case "governance status overview" `Quick
-        test_governance_status_overview;
-      Alcotest.test_case "runtime params config" `Quick
-        test_runtime_params_config;
-      Alcotest.test_case "dispatch unknown" `Quick
-        test_council_dispatch_unknown;
-      Alcotest.test_case "governance status after petition" `Quick
-        test_governance_status_after_petition;
-      Alcotest.test_case "case brief accepts evidence_refs array" `Quick
-        test_case_brief_submit_accepts_evidence_refs_array;
     ];
     "keeper_checkpoint_boundary", [
       Alcotest.test_case "prefers OAS checkpoint over legacy" `Quick

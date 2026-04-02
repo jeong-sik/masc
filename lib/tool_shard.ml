@@ -499,8 +499,9 @@ let governance_keeper_tool_names : string list =
   ]
 
 let governance_tools : Types.tool_schema list =
-  select_named_schemas governance_keeper_tool_names
-    Tool_council_internal_schemas.schemas
+  (* Council module removed — governance tool schemas no longer available *)
+  ignore governance_keeper_tool_names;
+  []
 
 let shard_taskboard : shard = {
   name = "taskboard";
@@ -514,7 +515,7 @@ let shard_governance : shard = {
   tools = governance_tools;
   removable = true;
   description =
-    "Governance workflow: cases, briefs, petitions, rulings, feed, status";
+    "Governance compatibility stub: council removed, no governance tools exposed";
 }
 
 (** Autoresearch tools: filtered subset for keeper use (excludes swarm_start). *)

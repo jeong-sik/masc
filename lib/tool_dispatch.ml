@@ -157,7 +157,7 @@ type module_tag =
   | Mod_local_runtime | Mod_team_session | Mod_voice
   | Mod_portal | Mod_worktree
   | Mod_code | Mod_code_write
-  | Mod_council | Mod_a2a | Mod_handover
+  | Mod_a2a | Mod_handover
   | Mod_relay | Mod_heartbeat
   | Mod_auth | Mod_audit | Mod_cost | Mod_encryption | Mod_fire_task
   | Mod_hat | Mod_cache | Mod_model_catalog | Mod_rate_limit | Mod_run

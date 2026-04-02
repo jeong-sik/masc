@@ -51,12 +51,12 @@ let test_shard_governance_exists () =
   match Tool_shard.get_shard "governance" with
   | Some s ->
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
-    Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1);
-    let names = List.map (fun (t : Types.tool_schema) -> t.name) s.tools in
-    Alcotest.(check bool) "contains petition_submit" true
-      (List.mem "masc_petition_submit" names);
-    Alcotest.(check bool) "contains case_brief_submit" true
-      (List.mem "masc_case_brief_submit" names)
+    (* Council removed: governance shard exists but has 0 tools *)
+    Alcotest.(check int) "no tools after council removal" 0
+      (List.length s.Tool_shard.tools);
+    Alcotest.(check string) "stub description"
+      "Governance compatibility stub: council removed, no governance tools exposed"
+      s.Tool_shard.description
   | None -> Alcotest.fail "governance shard not found"
 
 let test_shard_coding_exists () =
@@ -101,6 +101,7 @@ let test_default_shard_names () =
   (* All shards are now in defaults (mode removal: every keeper gets all tools) *)
   Alcotest.(check bool) "at least 8 defaults" true (List.length defaults >= 8);
   Alcotest.(check bool) "base in defaults" true (List.mem "base" defaults);
+  (* governance shard still in defaults but has 0 tools after council removal *)
   Alcotest.(check bool) "governance in defaults" true
     (List.mem "governance" defaults);
   Alcotest.(check bool) "coding in defaults" true
@@ -327,14 +328,10 @@ let test_board_tools_names () =
   Alcotest.(check bool) "has board_comment" true (List.mem "keeper_board_comment" names);
   Alcotest.(check bool) "has board_vote" true (List.mem "keeper_board_vote" names)
 
-let test_governance_tools_names () =
-  let names = List.map (fun (t : Types.tool_schema) -> t.name)
-    Tool_shard.governance_tools in
-  Alcotest.(check bool) "has cases" true (List.mem "masc_cases" names);
-  Alcotest.(check bool) "has governance_status" true
-    (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "has brief submit" true
-    (List.mem "masc_case_brief_submit" names)
+let test_governance_tools_empty () =
+  (* Council removed: governance_tools is now empty *)
+  Alcotest.(check int) "governance tools empty after council removal" 0
+    (List.length Tool_shard.governance_tools)
 
 (* ============================================================
    Voice tools content tests (#3: all 5 voice tools present)
@@ -357,7 +354,8 @@ let test_keeper_model_excludes_voice_tools () =
     Tool_shard.keeper_model_tools in
   Alcotest.(check bool) "keeper_model no voice_speak" false
     (List.mem "keeper_voice_speak" names);
-  Alcotest.(check bool) "keeper_model has governance_status" true
+  (* Council removed: governance tools no longer in keeper_model_tools *)
+  Alcotest.(check bool) "keeper_model no governance_status" false
     (List.mem "masc_governance_status" names)
 
 (* ============================================================
@@ -571,7 +569,7 @@ let () =
     ("tool_content", [
       Alcotest.test_case "base tools" `Quick test_base_tools_names;
       Alcotest.test_case "board tools" `Quick test_board_tools_names;
-      Alcotest.test_case "governance tools" `Quick test_governance_tools_names;
+      Alcotest.test_case "governance tools empty" `Quick test_governance_tools_empty;
       Alcotest.test_case "voice tools" `Quick test_voice_tools_names;
       Alcotest.test_case "keeper_model excludes voice" `Quick
         test_keeper_model_excludes_voice_tools;

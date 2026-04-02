@@ -38,6 +38,28 @@ let json_upsert_string_field name value = function
   | _non_object ->
       failwith (Printf.sprintf "json_upsert_string_field: expected JSON object, got non-object for field %S" name)
 
+let governance_surface_for_param_key param_key =
+  Governance_registry.surfaces
+  |> List.find_opt (fun (surface : Governance_registry.surface) ->
+       List.mem param_key surface.param_keys)
+
+let governance_param_risk param_key =
+  governance_surface_for_param_key param_key
+  |> Option.map (fun (surface : Governance_registry.surface) -> surface.risk)
+
+let respond_high_risk_param_blocked request reqd ~param_key ~risk =
+  respond_json_with_cors ~status:`Forbidden request reqd
+    (Yojson.Safe.to_string
+       (`Assoc
+          [
+            ("ok", `Bool false);
+            ( "error",
+              `String
+                (Printf.sprintf
+                   "runtime param %s is %s risk and no longer supports direct dashboard mutation after council removal"
+                   param_key risk) );
+          ]))
+
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
@@ -79,12 +101,39 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/governance/params" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let args = `Assoc [] in
-         let ctx : Tool_council_feed.context =
-           { base_path = ""; agent_name = "http-api"; room_config = None }
+         let params = Runtime_params.registry () in
+         let meta_to_json = function
+           | None -> `Null
+           | Some (m : Runtime_params.param_meta) ->
+               `Assoc ([
+                 ("description", `String m.description);
+                 ("value_type", `String m.value_type);
+               ]
+               @ (match m.min_value with Some v -> [("min_value", v)] | None -> [])
+               @ (match m.max_value with Some v -> [("max_value", v)] | None -> []))
          in
-         let (_ok, body) = Tool_council_feed.handle_runtime_params ctx args in
-         Http.Response.json body reqd
+         let items =
+           List.map
+             (fun (key, current, default, has_override, meta) ->
+               `Assoc
+                 [
+                   ("key", `String key);
+                   ("current", current);
+                   ("default", default);
+                   ("has_override", `Bool has_override);
+                   ("meta", meta_to_json meta);
+                 ])
+             params
+         in
+         let surfaces = Governance_registry.surfaces_json () in
+         let json =
+           `Assoc
+             [
+               ("parameters", `List items);
+               ("surfaces", surfaces);
+             ]
+         in
+         Http.Response.json (Yojson.Safe.pretty_to_string json) reqd
        ) request reqd)
 
   |> Http.Router.get "/api/v1/governance/params/audit" (fun request reqd ->
@@ -403,44 +452,65 @@ let add_routes ~sw ~clock router =
              let base_path = state.Mcp_server.room_config.base_path in
              let actor = agent_from_request request
                |> Option.value ~default:"dashboard" in
-             let module GV2 = Council.Governance_v2 in
-             let submit_petition ctx petition_args =
-               let open Yojson.Safe.Util in
-               let title = member "title" petition_args |> to_string_option
-                 |> Option.value ~default:"Dashboard param change" in
-               let subject_type = member "subject_type" petition_args |> to_string_option
-                 |> Option.value ~default:"param_change" in
-               let ra_json = member "requested_action" petition_args in
-               let requested_action = match ra_json with
-                 | `Null -> None
-                 | ra ->
-                   let at = member "action_type" ra |> to_string_option
-                     |> Option.value ~default:"set_param" in
-                   let payload = match member "payload" ra with
-                     | `Null -> None | p -> Some p in
-                   Some ({ action_type = at; target_type = Some "param";
-                           target_id = None; payload } : GV2.action_request)
-               in
-               let source_refs = match member "source_refs" petition_args with
-                 | `List items -> List.filter_map to_string_option items
-                 | _ -> [] in
-               match GV2.submit_petition ctx.Tool_council_feed.base_path
-                 ~title ~origin:"dashboard" ~subject_type
-                 ~risk_class:GV2.High
-                 ~requested_action ~source_refs ~created_by:actor with
-               | Ok result ->
-                 (true, Printf.sprintf "Petition created: case %s" result.case_.id)
-               | Error msg -> (false, msg)
-             in
-             let ctx = Tool_council_feed.{ base_path; agent_name = actor;
-               room_config = Some state.Mcp_server.room_config } in
-             let (ok, msg) = Tool_council_feed.handle_set_param
-               ~submit_petition ctx args in
-             let status = if ok then `OK else `Bad_request in
-             respond_json_with_cors ~status request reqd
-               (Yojson.Safe.to_string (`Assoc [
-                 ("ok", `Bool ok); ("message", `String msg)
-               ]))
+             let param_key = Yojson.Safe.Util.(member "param_key" args
+               |> to_string_option) |> Option.value ~default:"" |> String.trim in
+             let value_json = match Yojson.Safe.Util.member "value" args with
+               | `Null -> None | v -> Some v in
+             if param_key = "" then
+               respond_json_with_cors ~status:`Bad_request request reqd
+                 (Yojson.Safe.to_string (`Assoc [
+                   ("ok", `Bool false); ("error", `String "param_key is required")
+                 ]))
+             else match value_json with
+             | None ->
+               respond_json_with_cors ~status:`Bad_request request reqd
+                 (Yojson.Safe.to_string (`Assoc [
+                   ("ok", `Bool false); ("error", `String "value is required")
+                 ]))
+             | Some value ->
+               (match governance_param_risk param_key with
+                | Some "high" ->
+                    respond_high_risk_param_blocked request reqd
+                      ~param_key ~risk:"high"
+                | _ ->
+                    let old_value =
+                      match Runtime_params.registry ()
+                        |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+                      | Some (_, current, _, _, _) -> current
+                      | None -> `Null
+                    in
+                    (match Runtime_params.set_by_key param_key value with
+                     | Error msg ->
+                         respond_json_with_cors ~status:`Bad_request request reqd
+                           (Yojson.Safe.to_string
+                              (`Assoc
+                                 [
+                                   ("ok", `Bool false);
+                                   ("error", `String msg);
+                                 ]))
+                     | Ok () ->
+                         Runtime_params.persist ~base_path;
+                         Runtime_params.record_audit ~base_path
+                           ~key:param_key ~old_value ~new_value:value ~actor ();
+                         Sse.broadcast
+                           (`Assoc
+                              [
+                                ("type", `String "governance_param_changed");
+                                ("param_key", `String param_key);
+                                ("old_value", old_value);
+                                ("new_value", value);
+                                ("actor", `String actor);
+                              ]);
+                         respond_json_with_cors request reqd
+                           (Yojson.Safe.to_string
+                              (`Assoc
+                                 [
+                                   ("ok", `Bool true);
+                                   ( "message",
+                                     `String
+                                       (Printf.sprintf "Set %s = %s" param_key
+                                          (Yojson.Safe.to_string value)) );
+                                 ]))))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd
                (Yojson.Safe.to_string (`Assoc [
@@ -467,73 +537,54 @@ let add_routes ~sw ~clock router =
                    ("ok", `Bool false); ("error", `String "param_key is required")
                  ]))
              else begin
-               let risk = Governance_registry.surfaces
-                 |> List.find_opt (fun (s : Governance_registry.surface) ->
-                      List.mem param_key s.param_keys)
-                 |> Option.map (fun (s : Governance_registry.surface) -> s.risk)
-                 |> Option.value ~default:"low" in
-               if risk = "high" then begin
-                 let module GV2 = Council.Governance_v2 in
-                 let title = Printf.sprintf "Clear %s to default" param_key in
-                 let requested_action = Some ({
-                   action_type = "clear_param";
-                   target_type = Some "param";
-                   target_id = None;
-                   payload = Some (`Assoc [("param_key", `String param_key)]);
-                 } : GV2.action_request) in
-                 let source_refs = [param_key] in
-                 match GV2.submit_petition base_path
-                   ~title ~origin:"dashboard" ~subject_type:"param_change"
-                   ~risk_class:GV2.High ~requested_action ~source_refs
-                   ~created_by:actor with
-                 | Ok result ->
-                   respond_json_with_cors request reqd
-                     (Yojson.Safe.to_string (`Assoc [
-                       ("ok", `Bool true);
-                       ("message", `String (Printf.sprintf
-                         "High-risk param. Governance petition created: case %s"
-                         result.case_.id));
-                     ]))
-                 | Error msg ->
-                   respond_json_with_cors ~status:`Bad_request request reqd
-                     (Yojson.Safe.to_string (`Assoc [
-                       ("ok", `Bool false);
-                       ("error", `String (Printf.sprintf
-                         "Failed to create governance petition: %s" msg));
-                     ]))
-               end
-               else begin
-                 let old_value =
-                   match Runtime_params.registry ()
-                     |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                   | Some (_, current, _, _, _) -> current
-                   | None -> `Null in
-                 match Runtime_params.clear_by_key param_key with
-                 | Error msg ->
-                   respond_json_with_cors ~status:`Bad_request request reqd
-                     (Yojson.Safe.to_string (`Assoc [
-                       ("ok", `Bool false); ("error", `String msg)
-                     ]))
-                 | Ok () ->
-                   let new_value =
+               match governance_param_risk param_key with
+               | Some "high" ->
+                   respond_high_risk_param_blocked request reqd
+                     ~param_key ~risk:"high"
+               | _ ->
+                   let old_value =
                      match Runtime_params.registry ()
                        |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                     | Some (_, _, default, _, _) -> default
-                     | None -> `Null in
-                   Runtime_params.persist ~base_path;
-                   Runtime_params.record_audit ~base_path
-                     ~key:param_key ~old_value ~new_value ~actor ();
-                   Sse.broadcast
-                     (`Assoc [
-                       ("type", `String "governance_param_changed");
-                       ("param_key", `String param_key);
-                     ]);
-                   respond_json_with_cors request reqd
-                     (Yojson.Safe.to_string (`Assoc [
-                       ("ok", `Bool true);
-                       ("message", `String (Printf.sprintf "Cleared %s to default" param_key));
-                     ]))
-               end
+                     | Some (_, current, _, _, _) -> current
+                     | None -> `Null
+                   in
+                   match Runtime_params.clear_by_key param_key with
+                   | Error msg ->
+                       respond_json_with_cors ~status:`Bad_request request reqd
+                         (Yojson.Safe.to_string
+                            (`Assoc
+                               [
+                                 ("ok", `Bool false);
+                                 ("error", `String msg);
+                               ]))
+                   | Ok () ->
+                       let new_value =
+                         match Runtime_params.registry ()
+                           |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+                         | Some (_, _, default, _, _) -> default
+                         | None -> `Null
+                       in
+                       Runtime_params.persist ~base_path;
+                       Runtime_params.record_audit ~base_path
+                         ~key:param_key ~old_value ~new_value ~actor ();
+                       Sse.broadcast
+                         (`Assoc
+                            [
+                              ("type", `String "governance_param_changed");
+                              ("param_key", `String param_key);
+                              ("old_value", old_value);
+                              ("new_value", new_value);
+                              ("actor", `String actor);
+                            ]);
+                       respond_json_with_cors request reqd
+                         (Yojson.Safe.to_string
+                            (`Assoc
+                               [
+                                 ("ok", `Bool true);
+                                 ( "message",
+                                   `String
+                                     (Printf.sprintf "Cleared %s to default" param_key) );
+                               ]))
              end
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd

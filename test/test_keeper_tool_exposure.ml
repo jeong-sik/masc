@@ -71,12 +71,13 @@ let test_default_has_voice () =
   check bool "voice tools available by default" true
     (has_tool "keeper_voice_speak" tools)
 
-let test_default_has_governance_tools () =
+(* Council module removed — governance tool schemas no longer registered *)
+let test_default_has_no_council_governance_tools () =
   let meta = make_meta () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has governance status" true
+  check bool "governance status removed" false
     (has_tool "masc_governance_status" tools);
-  check bool "has case brief submit" true
+  check bool "case brief submit removed" false
     (has_tool "masc_case_brief_submit" tools)
 
 let test_default_has_research_tools () =
@@ -198,12 +199,13 @@ let test_coding_preset_has_coordination_tools () =
   check bool "has keeper_broadcast" true
     (has_tool "keeper_broadcast" tools)
 
-let test_messaging_preset_has_governance_tools () =
+(* Council module removed — governance tool schemas no longer registered *)
+let test_messaging_preset_has_no_council_governance_tools () =
   let meta = make_meta ~preset:Keeper_types.Messaging () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has governance status" true
+  check bool "governance status removed" false
     (has_tool "masc_governance_status" tools);
-  check bool "has petition submit" true
+  check bool "petition submit removed" false
     (has_tool "masc_petition_submit" tools)
 
 let test_sufficient_tool_count () =
@@ -384,7 +386,7 @@ let () =
     ("default_profile", [
       test_case "has base tools" `Quick test_default_has_base_tools;
       test_case "has voice tools" `Quick test_default_has_voice;
-      test_case "has governance tools" `Quick test_default_has_governance_tools;
+      test_case "council governance tools removed" `Quick test_default_has_no_council_governance_tools;
       test_case "has research tools" `Quick test_default_has_research_tools;
       test_case "custom empty blocks all tools" `Quick
         test_custom_empty_blocks_all_tools;
@@ -411,7 +413,7 @@ let () =
       test_case "messaging has board tools" `Quick test_messaging_preset_has_board_tools;
       test_case "research has read tools" `Quick test_research_preset_has_read_tools;
       test_case "coding has coordination tools" `Quick test_coding_preset_has_coordination_tools;
-      test_case "messaging has governance tools" `Quick test_messaging_preset_has_governance_tools;
+      test_case "messaging council governance tools removed" `Quick test_messaging_preset_has_no_council_governance_tools;
       test_case "sufficient tool count" `Quick test_sufficient_tool_count;
     ]);
     ("combined_profiles", [

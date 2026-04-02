@@ -56,12 +56,13 @@ let test_full_preset_exposes_masc () =
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "has masc_governance_status" true
+  (* Council removed: governance tools no longer in raw_all_tool_schemas *)
+  Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
   Alcotest.(check bool) "has masc_autoresearch_cycle" true
     (List.mem "masc_autoresearch_cycle" names)
 
-let test_messaging_preset_exposes_board_and_governance () =
+let test_messaging_preset_exposes_board () =
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let meta =
     make_meta
@@ -73,7 +74,8 @@ let test_messaging_preset_exposes_board_and_governance () =
   let names = KET.keeper_allowed_tool_names meta in
   Alcotest.(check bool) "has keeper_board_post" true
     (List.mem "keeper_board_post" names);
-  Alcotest.(check bool) "has masc_governance_status" true
+  (* Council removed: governance tools no longer available *)
+  Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
   Alcotest.(check bool) "omits keeper_shell_readonly" false
     (List.mem "keeper_shell_readonly" names)
@@ -127,15 +129,15 @@ let test_preset_with_also_allow_opens_extra_tool () =
         (Masc_mcp.Keeper_types.Preset
            {
              preset = Masc_mcp.Keeper_types.Minimal;
-             also_allow = [ "masc_governance_status" ];
+             also_allow = [ "masc_broadcast" ];
            })
       ()
   in
   let names = KET.keeper_allowed_tool_names meta in
   Alcotest.(check bool) "minimal keeps base tool" true
     (List.mem "keeper_time_now" names);
-  Alcotest.(check bool) "also_allow adds governance" true
-    (List.mem "masc_governance_status" names);
+  Alcotest.(check bool) "also_allow adds broadcast" true
+    (List.mem "masc_broadcast" names);
   Alcotest.(check bool) "minimal omits board post" false
     (List.mem "keeper_board_post" names)
 
@@ -363,13 +365,13 @@ let test_allowlist_gates_shard_tools () =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_types.Custom
-           [ "masc_status"; "masc_governance_status" ])
+           [ "masc_status"; "masc_broadcast" ])
       ()
   in
   let names = KET.keeper_allowed_tool_names meta in
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  Alcotest.(check bool) "has masc_governance_status" true
-    (List.mem "masc_governance_status" names);
+  Alcotest.(check bool) "has masc_broadcast" true
+    (List.mem "masc_broadcast" names);
   Alcotest.(check bool) "masc_autoresearch_cycle blocked by custom policy" false
     (List.mem "masc_autoresearch_cycle" names)
 
@@ -452,8 +454,8 @@ let () =
         [
           Alcotest.test_case "full preset exposes masc tools" `Quick
             test_full_preset_exposes_masc;
-          Alcotest.test_case "messaging preset exposes board and governance" `Quick
-            test_messaging_preset_exposes_board_and_governance;
+          Alcotest.test_case "messaging preset exposes board" `Quick
+            test_messaging_preset_exposes_board;
           Alcotest.test_case "preset also_allow opens extra tool" `Quick
             test_preset_with_also_allow_opens_extra_tool;
         ] );

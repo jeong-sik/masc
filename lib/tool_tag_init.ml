@@ -32,9 +32,6 @@ let register_all () =
     "masc_board_profile"; "masc_board_hearths"; "masc_board_migrate";
     "masc_board_delete";
     "masc_board_reclassify";
-    (* conversations *)
-    "masc_convo_start"; "masc_convo_reply"; "masc_convo_conclude";
-    "masc_convo_get"; "masc_convo_list";
   ];
 
   (* ── Mod_task: non-schema tools ─────────────────────────────── *)
@@ -51,11 +48,6 @@ let register_all () =
   reg Mod_code_write [
     "masc_code_write"; "masc_code_edit"; "masc_code_delete";
     "masc_code_shell"; "masc_code_git";
-  ];
-
-  (* ── Mod_council: non-schema tools ──────────────────────────── *)
-  reg Mod_council [
-    "masc_execute"; "masc_execute_dry_run";
   ];
 
   (* ── Mod_a2a: Tool_a2a ───────────────────────────────────────── *)

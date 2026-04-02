@@ -213,34 +213,6 @@ let test_parse_keeper_chat_response_json_error () =
   | Ok _ -> Alcotest.fail "expected parse failure"
   | Error err -> Alcotest.(check string) "error message" "boom" err
 
-let test_parse_requested_action_uses_typed_decoder () =
-  let args =
-    `Assoc [
-      ( "requested_action",
-        `Assoc [
-          ("action_type", `String "restart_keeper");
-          ("target_id", `String "keeper-main");
-          ("payload", `Assoc [("reason", `String "refresh")]);
-        ] );
-    ]
-  in
-  match Tool_council_helpers.parse_requested_action args with
-  | Ok (Some request) ->
-      Alcotest.(check string) "action type" "restart_keeper" request.action_type;
-      Alcotest.(check (option string)) "target" (Some "keeper-main")
-        request.target_id
-  | Ok None -> Alcotest.fail "expected requested_action"
-  | Error err -> Alcotest.fail err
-
-let test_parse_requested_action_rejects_unknown_type () =
-  let args =
-    `Assoc [
-      ("requested_action", `Assoc [("action_type", `String "drop_database")]);
-    ]
-  in
-  Alcotest.(check bool) "unknown action rejected" true
-    (Result.is_error (Tool_council_helpers.parse_requested_action args))
-
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_agent",
@@ -285,12 +257,5 @@ let () =
           test_parse_keeper_chat_response_sse_delta;
         Alcotest.test_case "json error" `Quick
           test_parse_keeper_chat_response_json_error;
-      ] );
-    ( "parse_requested_action",
-      [
-        Alcotest.test_case "success" `Quick
-          test_parse_requested_action_uses_typed_decoder;
-        Alcotest.test_case "rejects unknown type" `Quick
-          test_parse_requested_action_rejects_unknown_type;
       ] );
   ]

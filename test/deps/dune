@@ -14,7 +14,6 @@
    (re_export caqti-eio)
    (re_export cohttp)
    (re_export cohttp-eio)
-   (re_export council)
    (re_export cstruct)
    (re_export dated_jsonl)
    (re_export digestif)

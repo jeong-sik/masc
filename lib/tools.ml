@@ -22,7 +22,6 @@ let raw_schemas : tool_schema list =
   @ Tool_run.schemas
   @ Tool_task.schemas
   @ Tool_suspend.schemas
-  @ Tool_council_oas.schemas
   @ Tool_relay.schemas
   @ Tool_handover.schemas
   @ Tool_improve_loop.schemas

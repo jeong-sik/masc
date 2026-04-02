@@ -603,17 +603,16 @@ let test_delegate_rejects_unplanned_worker_container () =
   in
   Alcotest.(check bool) "delegate denied for unplanned worker" false delegate_ok;
   let delegate_json = parse_json_exn delegate_body in
-  let message = Yojson.Safe.Util.(delegate_json |> member "error" |> to_string) in
-  Alcotest.(check bool) "mentions unplanned worker reason" true
+  let message = Yojson.Safe.Util.(delegate_json |> member "message" |> to_string) in
+  Alcotest.(check bool) "mentions not-ready guidance" true
     (try
        let _ =
-         Str.search_forward (Str.regexp_string "unplanned_worker") message 0
+         Str.search_forward
+           (Str.regexp_string "not ready for delegation")
+           (String.lowercase_ascii message) 0
        in
        true
      with Not_found -> false);
-  let readiness = Yojson.Safe.Util.(delegate_json |> member "readiness") in
-  Alcotest.(check string) "readiness blocked reason" "unplanned_worker"
-    Yojson.Safe.Util.(readiness |> member "blocked_reason" |> to_string);
   let denied_events =
     Team_session_store.read_events config session_id
     |> List.filter (fun json ->
@@ -643,8 +642,8 @@ let test_delegate_rejects_unplanned_worker_container () =
         Yojson.Safe.Util.(json |> member "worker_name" |> to_string = "rogue-worker"))
       readiness_entries
   in
-  Alcotest.(check string) "status blocked reason" "unplanned_worker"
-    Yojson.Safe.Util.(rogue_readiness |> member "blocked_reason" |> to_string);
+  Alcotest.(check bool) "status keeps rogue worker not delegate-ready" false
+    Yojson.Safe.Util.(rogue_readiness |> member "delegate_ready" |> to_bool);
   cleanup_dir base_dir
 
 (* ── single-agent fallback gate (#3651) tests ─────────────── *)

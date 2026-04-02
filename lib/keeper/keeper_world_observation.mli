@@ -17,6 +17,14 @@ type pending_board_event = {
   updated_at : float;
   explicit_mention : bool;
   matched_targets : string list;
+  self_commented : bool;
+  (** [true] if this keeper has previously commented on this post. *)
+  new_external_since : int;
+  (** Number of external comments posted after the keeper's latest comment. *)
+  latest_external_author : string option;
+  (** Author of the most recent external comment (for prompt context). *)
+  latest_external_preview : string option;
+  (** Preview of the most recent external comment content. *)
 }
 
 (** Snapshot of the world as seen by a keeper at heartbeat time. *)

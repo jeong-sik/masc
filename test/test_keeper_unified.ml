@@ -85,6 +85,10 @@ let sample_board_event : WO.pending_board_event =
     updated_at = 0.0;
     explicit_mention = false;
     matched_targets = [];
+    self_commented = false;
+    new_external_since = 0;
+    latest_external_author = None;
+    latest_external_preview = None;
   }
 
 let test_observation_defaults () =

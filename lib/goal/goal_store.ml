@@ -1,12 +1,101 @@
+(* Variant types for domain values — Parse, Don't Validate.
+   Custom yojson serializers maintain backward-compatible JSON ("active", "short", etc.). *)
+
+type goal_status = Active | Paused | Done | Dropped
+
+let goal_status_to_yojson = function
+  | Active -> `String "active"
+  | Paused -> `String "paused"
+  | Done -> `String "done"
+  | Dropped -> `String "dropped"
+
+let goal_status_of_yojson = function
+  | `String "active" -> Ok Active
+  | `String "paused" -> Ok Paused
+  | `String "done" -> Ok Done
+  | `String "dropped" -> Ok Dropped
+  | j -> Error ("goal_status_of_yojson: " ^ Yojson.Safe.to_string j)
+
+type horizon = Short | Mid | Long
+
+let horizon_to_yojson = function
+  | Short -> `String "short"
+  | Mid -> `String "mid"
+  | Long -> `String "long"
+
+let horizon_of_yojson = function
+  | `String "short" -> Ok Short
+  | `String "mid" -> Ok Mid
+  | `String "long" -> Ok Long
+  | j -> Error ("horizon_of_yojson: " ^ Yojson.Safe.to_string j)
+
+type refresh_mode = Daily | Weekly | Monthly
+
+let refresh_mode_to_yojson = function
+  | Daily -> `String "daily"
+  | Weekly -> `String "weekly"
+  | Monthly -> `String "monthly"
+
+let refresh_mode_of_yojson = function
+  | `String "daily" -> Ok Daily
+  | `String "weekly" -> Ok Weekly
+  | `String "monthly" -> Ok Monthly
+  | j -> Error ("refresh_mode_of_yojson: " ^ Yojson.Safe.to_string j)
+
+type snapshot_mode = SnapDaily | SnapWeekly | SnapMonthly | SnapManual
+
+let snapshot_mode_to_yojson = function
+  | SnapDaily -> `String "daily"
+  | SnapWeekly -> `String "weekly"
+  | SnapMonthly -> `String "monthly"
+  | SnapManual -> `String "manual"
+
+let snapshot_mode_of_yojson = function
+  | `String "daily" -> Ok SnapDaily
+  | `String "weekly" -> Ok SnapWeekly
+  | `String "monthly" -> Ok SnapMonthly
+  | `String "manual" -> Ok SnapManual
+  | j -> Error ("snapshot_mode_of_yojson: " ^ Yojson.Safe.to_string j)
+
+let snapshot_mode_of_refresh_mode = function
+  | Daily -> SnapDaily
+  | Weekly -> SnapWeekly
+  | Monthly -> SnapMonthly
+
+let parse_snapshot_mode s =
+  match String.trim s |> String.lowercase_ascii with
+  | "daily" -> Some SnapDaily
+  | "weekly" -> Some SnapWeekly
+  | "monthly" -> Some SnapMonthly
+  | "manual" -> Some SnapManual
+  | _ -> None
+
+type review_outcome = ReviewDone | ReviewProgress | ReviewBlocked | ReviewDropped
+
+let review_outcome_to_yojson = function
+  | ReviewDone -> `String "done"
+  | ReviewProgress -> `String "progress"
+  | ReviewBlocked -> `String "blocked"
+  | ReviewDropped -> `String "dropped"
+
+let review_outcome_of_yojson = function
+  | `String "done" -> Ok ReviewDone
+  | `String "progress" -> Ok ReviewProgress
+  | `String "blocked" -> Ok ReviewBlocked
+  | `String "dropped" -> Ok ReviewDropped
+  | j -> Error ("review_outcome_of_yojson: " ^ Yojson.Safe.to_string j)
+
+(* Record types *)
+
 type goal = {
   id : string;
-  horizon : string;
+  horizon : horizon;
   title : string;
   metric : string option;
   target_value : string option;
   due_date : string option;
   priority : int;
-  status : string;
+  status : goal_status;
   parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
@@ -36,7 +125,7 @@ type rollup = {
 type snapshot = {
   snapshot_id : string;
   created_at : string;
-  mode : string;
+  mode : snapshot_mode;
   goals : goal list;
   rollup : rollup;
 }
@@ -45,30 +134,51 @@ type snapshot = {
 type upsert_kind = [ `created | `updated ]
 
 type refresh_result = {
-  mode : string;
+  mode : refresh_mode;
   scanned : int;
   updated : int;
   snapshot_id : string;
 }
 [@@deriving yojson]
 
-let horizons = [ "short"; "mid"; "long" ]
-let statuses = [ "active"; "paused"; "done"; "dropped" ]
+(* Parsing: string -> variant at the boundary *)
 
 let normalize_lower s =
   String.trim s |> String.lowercase_ascii
 
-let normalize_horizon = function
-  | Some s ->
-      let v = normalize_lower s in
-      if List.mem v horizons then Some v else None
+let parse_horizon = function
+  | Some s -> (
+      match normalize_lower s with
+      | "short" -> Some Short
+      | "mid" -> Some Mid
+      | "long" -> Some Long
+      | _ -> None)
   | None -> None
 
-let normalize_status = function
-  | Some s ->
-      let v = normalize_lower s in
-      if List.mem v statuses then Some v else None
+let parse_goal_status = function
+  | Some s -> (
+      match normalize_lower s with
+      | "active" -> Some Active
+      | "paused" -> Some Paused
+      | "done" -> Some Done
+      | "dropped" -> Some Dropped
+      | _ -> None)
   | None -> None
+
+let parse_refresh_mode s =
+  match normalize_lower s with
+  | "daily" -> Some Daily
+  | "weekly" -> Some Weekly
+  | "monthly" -> Some Monthly
+  | _ -> None
+
+let parse_review_outcome s =
+  match normalize_lower s with
+  | "done" -> Some ReviewDone
+  | "progress" -> Some ReviewProgress
+  | "blocked" -> Some ReviewBlocked
+  | "dropped" -> Some ReviewDropped
+  | _ -> None
 
 let clamp_priority p = max 1 (min 5 p)
 
@@ -138,10 +248,9 @@ let delete_goal config ~goal_id =
 
 let sort_goals goals =
   let horizon_rank = function
-    | "short" -> 0
-    | "mid" -> 1
-    | "long" -> 2
-    | _ -> 3
+    | Short -> 0
+    | Mid -> 1
+    | Long -> 2
   in
   List.sort
     (fun a b ->
@@ -168,100 +277,88 @@ let list_goals config ?horizon ?status () =
 
 let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
     ?priority ?status ?parent_goal_id () =
-  let normalized_horizon = normalize_horizon horizon in
-  let normalized_status = normalize_status status in
   let is_new_goal = id = None in
-  match horizon with
-  | Some _ when normalized_horizon = None -> Error "invalid horizon (short|mid|long)"
-  | _ -> (
-      match status with
-      | Some _ when normalized_status = None ->
-          Error "invalid status (active|paused|done|dropped)"
-      | _ when is_new_goal && (title = None || title = Some "") ->
-          Error "title required for new goal"
-      | _ ->
-          let now = Types.now_iso () in
-          let resolved_id = Option.value id ~default:(gen_goal_id ()) in
-          let was_created = ref false in
-          let updated_goal =
-            update_state config (fun st ->
-                match find_goal st.goals resolved_id with
-                | Some existing ->
-                    let next_goal =
-                      {
-                        existing with
-                        horizon =
-                          Option.value normalized_horizon ~default:existing.horizon;
-                        title = Option.value title ~default:existing.title;
-                        metric = (match metric with Some _ -> metric | None -> existing.metric);
-                        target_value =
-                          (match target_value with
-                          | Some _ -> target_value
-                          | None -> existing.target_value);
-                        due_date =
-                          (match due_date with Some _ -> due_date | None -> existing.due_date);
-                        priority =
-                          clamp_priority
-                            (Option.value priority ~default:existing.priority);
-                        status = Option.value normalized_status ~default:existing.status;
-                        parent_goal_id =
-                          (match parent_goal_id with
-                          | Some _ -> parent_goal_id
-                          | None -> existing.parent_goal_id);
-                        updated_at = now;
-                      }
-                    in
-                    {
-                      version = st.version + 1;
-                      updated_at = now;
-                      goals = replace_goal st.goals next_goal;
-                    }
-                | None ->
-                    let horizon_value =
-                      Option.value normalized_horizon ~default:"short"
-                    in
-                    let title_value = Option.value title ~default:"Untitled goal" in
-                    let new_goal =
-                      {
-                        id = resolved_id;
-                        horizon = horizon_value;
-                        title = title_value;
-                        metric;
-                        target_value;
-                        due_date;
-                        priority =
-                          clamp_priority (Option.value priority ~default:3);
-                        status = Option.value normalized_status ~default:"active";
-                        parent_goal_id;
-                        last_review_note = None;
-                        last_review_at = None;
-                        created_at = now;
-                        updated_at = now;
-                      }
-                    in
-                    was_created := true;
-                    {
-                      version = st.version + 1;
-                      updated_at = now;
-                      goals = st.goals @ [ new_goal ];
-                    })
-          in
-          let saved = find_goal updated_goal.goals resolved_id in
-          match saved with
-          | Some g ->
-              Ok (g, if !was_created then `created else `updated)
-          | None -> Error "failed to save goal")
+  if is_new_goal && (title = None || title = Some "") then
+    Error "title required for new goal"
+  else
+    let now = Types.now_iso () in
+    let resolved_id = Option.value id ~default:(gen_goal_id ()) in
+    let was_created = ref false in
+    let updated_goal =
+      update_state config (fun st ->
+          match find_goal st.goals resolved_id with
+          | Some existing ->
+              let next_goal =
+                {
+                  existing with
+                  horizon =
+                    Option.value horizon ~default:existing.horizon;
+                  title = Option.value title ~default:existing.title;
+                  metric = (match metric with Some _ -> metric | None -> existing.metric);
+                  target_value =
+                    (match target_value with
+                    | Some _ -> target_value
+                    | None -> existing.target_value);
+                  due_date =
+                    (match due_date with Some _ -> due_date | None -> existing.due_date);
+                  priority =
+                    clamp_priority
+                      (Option.value priority ~default:existing.priority);
+                  status = Option.value status ~default:existing.status;
+                  parent_goal_id =
+                    (match parent_goal_id with
+                    | Some _ -> parent_goal_id
+                    | None -> existing.parent_goal_id);
+                  updated_at = now;
+                }
+              in
+              {
+                version = st.version + 1;
+                updated_at = now;
+                goals = replace_goal st.goals next_goal;
+              }
+          | None ->
+              let new_goal =
+                {
+                  id = resolved_id;
+                  horizon = Option.value horizon ~default:Short;
+                  title = Option.value title ~default:"Untitled goal";
+                  metric;
+                  target_value;
+                  due_date;
+                  priority =
+                    clamp_priority (Option.value priority ~default:3);
+                  status = Option.value status ~default:Active;
+                  parent_goal_id;
+                  last_review_note = None;
+                  last_review_at = None;
+                  created_at = now;
+                  updated_at = now;
+                }
+              in
+              was_created := true;
+              {
+                version = st.version + 1;
+                updated_at = now;
+                goals = st.goals @ [ new_goal ];
+              })
+    in
+    let saved = find_goal updated_goal.goals resolved_id in
+    match saved with
+    | Some g ->
+        Ok (g, if !was_created then `created else `updated)
+    | None -> Error "failed to save goal"
 
 let compute_rollup goals =
   let count p = List.length (List.filter p goals) in
   {
-    short_count = count (fun g -> g.horizon = "short");
-    mid_count = count (fun g -> g.horizon = "mid");
-    long_count = count (fun g -> g.horizon = "long");
-    active_count = count (fun g -> g.status = "active");
-    paused_count = count (fun g -> g.status = "paused");
-    done_count = count (fun g -> g.status = "done");
-    dropped_count = count (fun g -> g.status = "dropped");
+    short_count = count (fun g -> g.horizon = Short);
+    mid_count = count (fun g -> g.horizon = Mid);
+    long_count = count (fun g -> g.horizon = Long);
+    active_count = count (fun g -> g.status = Active);
+    paused_count = count (fun g -> g.status = Paused);
+    done_count = count (fun g -> g.status = Done);
+    dropped_count = count (fun g -> g.status = Dropped);
   }
 
 let snapshot config ~mode =
@@ -319,18 +416,17 @@ let days_until due_date =
 
 let should_refresh_goal mode goal =
   match mode with
-  | "daily" -> goal.horizon = "short" && goal.status = "active"
-  | "weekly" -> goal.horizon = "mid" && goal.status = "active"
-  | "monthly" -> goal.horizon = "long" && goal.status = "active"
-  | _ -> false
+  | Daily -> goal.horizon = Short && goal.status = Active
+  | Weekly -> goal.horizon = Mid && goal.status = Active
+  | Monthly -> goal.horizon = Long && goal.status = Active
 
 let reprioritize mode goal =
   let next_priority =
     match days_until goal.due_date with
     | Some d when d < 0 -> 1
-    | Some d when mode = "daily" && d <= 3 -> max 1 (goal.priority - 1)
-    | Some d when mode = "weekly" && d <= 14 -> max 1 (goal.priority - 1)
-    | Some d when mode = "monthly" && d <= 45 -> max 1 (goal.priority - 1)
+    | Some d when mode = Daily && d <= 3 -> max 1 (goal.priority - 1)
+    | Some d when mode = Weekly && d <= 14 -> max 1 (goal.priority - 1)
+    | Some d when mode = Monthly && d <= 45 -> max 1 (goal.priority - 1)
     | _ -> goal.priority
   in
   if next_priority = goal.priority then
@@ -339,75 +435,64 @@ let reprioritize mode goal =
     ({ goal with priority = next_priority; updated_at = Types.now_iso () }, true)
 
 let refresh config ~mode =
-  let mode = normalize_lower mode in
-  if not (List.mem mode [ "daily"; "weekly"; "monthly" ]) then
-    Error "mode must be daily|weekly|monthly"
-  else
-    let scanned = ref 0 in
-    let updated = ref 0 in
-    ignore
-      (update_state config (fun st ->
-           let goals =
-             List.map
-               (fun g ->
-                 if should_refresh_goal mode g then (
-                   incr scanned;
-                   let g', changed = reprioritize mode g in
-                   if changed then incr updated;
-                   g')
-                 else g)
-               st.goals
-           in
-           { version = st.version + 1; updated_at = Types.now_iso (); goals }));
-    let snap = snapshot config ~mode in
-    Ok { mode; scanned = !scanned; updated = !updated; snapshot_id = snap.snapshot_id }
+  let scanned = ref 0 in
+  let updated = ref 0 in
+  ignore
+    (update_state config (fun st ->
+         let goals =
+           List.map
+             (fun g ->
+               if should_refresh_goal mode g then (
+                 incr scanned;
+                 let g', changed = reprioritize mode g in
+                 if changed then incr updated;
+                 g')
+               else g)
+             st.goals
+         in
+         { version = st.version + 1; updated_at = Types.now_iso (); goals }));
+  let snap = snapshot config ~mode:(snapshot_mode_of_refresh_mode mode) in
+  { mode; scanned = !scanned; updated = !updated; snapshot_id = snap.snapshot_id }
 
-let review_goal config ~goal_id ~outcome ?new_horizon ?note () =
-  let outcome = normalize_lower outcome in
-  let normalized_horizon = normalize_horizon new_horizon in
-  match new_horizon with
-  | Some _ when normalized_horizon = None ->
-      Error "invalid new_horizon (short|mid|long)"
-  | _ ->
-      let now = Types.now_iso () in
-      let found = ref false in
-      let st =
-        update_state config (fun state ->
-            let goals =
-              List.map
-                (fun g ->
-                  if g.id <> goal_id then g
-                  else (
-                    found := true;
-                    let status, priority =
-                      match outcome with
-                      | "done" -> ("done", g.priority)
-                      | "progress" -> ("active", max 1 (g.priority - 1))
-                      | "blocked" -> ("paused", min 5 (g.priority + 1))
-                      | "dropped" -> ("dropped", g.priority)
-                      | _ -> (g.status, g.priority)
-                    in
-                    {
-                      g with
-                      status;
-                      priority;
-                      horizon = Option.value normalized_horizon ~default:g.horizon;
-                      last_review_note = note;
-                      last_review_at = Some now;
-                      updated_at = now;
-                    }))
-                state.goals
-            in
-            { version = state.version + 1; updated_at = now; goals })
-      in
-      if not !found then Error "goal not found"
-      else
-        match find_goal st.goals goal_id with
-        | Some g -> Ok g
-        | None -> Error "goal not found after review"
+let review_goal config ~goal_id ~(outcome : review_outcome) ?new_horizon ?note () =
+  let now = Types.now_iso () in
+  let found = ref false in
+  let st =
+    update_state config (fun state ->
+        let goals =
+          List.map
+            (fun g ->
+              if g.id <> goal_id then g
+              else (
+                found := true;
+                let status, priority =
+                  match outcome with
+                  | ReviewDone -> (Done, g.priority)
+                  | ReviewProgress -> (Active, max 1 (g.priority - 1))
+                  | ReviewBlocked -> (Paused, min 5 (g.priority + 1))
+                  | ReviewDropped -> (Dropped, g.priority)
+                in
+                {
+                  g with
+                  status;
+                  priority;
+                  horizon = Option.value new_horizon ~default:g.horizon;
+                  last_review_note = note;
+                  last_review_at = Some now;
+                  updated_at = now;
+                }))
+            state.goals
+        in
+        { version = state.version + 1; updated_at = now; goals })
+  in
+  if not !found then Error "goal not found"
+  else
+    match find_goal st.goals goal_id with
+    | Some g -> Ok g
+    | None -> Error "goal not found after review"
 
 let active_goals config =
-  list_goals config ~status:"active" ()
+  list_goals config ~status:Active ()
 
 let has_scheduler_state config =
   Room.path_exists config (scheduler_state_path config)

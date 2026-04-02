@@ -48,9 +48,9 @@ let filter_horizon horizon goals =
   List.filter (fun g -> g.Goal_store.horizon = horizon) goals
 
 let selected_children goals opts =
-  let short = filter_horizon "short" goals |> take opts.fanout_short in
-  let mid = filter_horizon "mid" goals |> take opts.fanout_mid in
-  let long = filter_horizon "long" goals |> take opts.fanout_long in
+  let short = filter_horizon Goal_store.Short goals |> take opts.fanout_short in
+  let mid = filter_horizon Goal_store.Mid goals |> take opts.fanout_mid in
+  let long = filter_horizon Goal_store.Long goals |> take opts.fanout_long in
   (short @ mid @ long) |> take opts.child_limit
 
 let build_plan ~goals opts =

@@ -202,34 +202,44 @@ let schemas : tool_schema list =
 
 let handle_goal_upsert ctx args =
   let id = get_string_opt args "id" in
-  let horizon = get_string_opt args "horizon" in
+  let horizon_raw = get_string_opt args "horizon" in
   let title = get_string_opt args "title" in
   let metric = get_string_opt args "metric" in
   let target_value = get_string_opt args "target_value" in
   let due_date = get_string_opt args "due_date" in
   let priority = get_int_opt args "priority" in
-  let status = get_string_opt args "status" in
+  let status_raw = get_string_opt args "status" in
   let parent_goal_id = get_string_opt args "parent_goal_id" in
-  match
-    Goal_store.upsert_goal ctx.config ?id ?horizon ?title ?metric ?target_value
-      ?due_date ?priority ?status ?parent_goal_id ()
-  with
-  | Ok (goal, kind) ->
-      let kind_str = match kind with `created -> "created" | `updated -> "updated" in
-      ( true,
-        tool_result_json
-          [
-            ("result", `String kind_str);
-            ("goal", Goal_store.goal_to_yojson goal);
-          ] )
-  | Error msg -> (false, error_result_json msg)
+  let horizon = Goal_store.parse_horizon horizon_raw in
+  let status = Goal_store.parse_goal_status status_raw in
+  match horizon_raw with
+  | Some _ when horizon = None ->
+      (false, error_result_json "invalid horizon (short|mid|long)")
+  | _ -> (
+      match status_raw with
+      | Some _ when status = None ->
+          (false, error_result_json "invalid status (active|paused|done|dropped)")
+      | _ -> (
+          match
+            Goal_store.upsert_goal ctx.config ?id ?horizon ?title ?metric ?target_value
+              ?due_date ?priority ?status ?parent_goal_id ()
+          with
+          | Ok (goal, kind) ->
+              let kind_str = match kind with `created -> "created" | `updated -> "updated" in
+              ( true,
+                tool_result_json
+                  [
+                    ("result", `String kind_str);
+                    ("goal", Goal_store.goal_to_yojson goal);
+                  ] )
+          | Error msg -> (false, error_result_json msg)))
 
 let validate_horizon_filter args =
   let raw = get_string_opt args "horizon" in
   match raw with
   | None -> Ok None
   | Some _ -> (
-      match Goal_store.normalize_horizon raw with
+      match Goal_store.parse_horizon raw with
       | Some v -> Ok (Some v)
       | None -> Error "invalid horizon filter")
 
@@ -238,7 +248,7 @@ let validate_status_filter args =
   match raw with
   | None -> Ok None
   | Some _ -> (
-      match Goal_store.normalize_status raw with
+      match Goal_store.parse_goal_status raw with
       | Some v -> Ok (Some v)
       | None -> Error "invalid status filter")
 
@@ -257,67 +267,65 @@ let handle_goal_list ctx args =
           ] )
 
 let handle_goal_snapshot ctx args =
-  let mode = get_string args "mode" "manual" in
-  let snap = Goal_store.snapshot ctx.config ~mode in
-  ( true,
-    tool_result_json
-      [
-        ("snapshot", Goal_store.snapshot_to_yojson snap);
-      ] )
+  let mode_raw = get_string args "mode" "manual" in
+  match Goal_store.parse_snapshot_mode mode_raw with
+  | None -> (false, error_result_json "invalid mode (daily|weekly|monthly|manual)")
+  | Some mode ->
+      let snap = Goal_store.snapshot ctx.config ~mode in
+      ( true,
+        tool_result_json
+          [
+            ("snapshot", Goal_store.snapshot_to_yojson snap);
+          ] )
 
 let refresh_one_mode ctx ~mode ~now =
-  match Goal_store.refresh ctx.config ~mode with
-  | Error e -> Error e
-  | Ok result ->
-      Goal_scheduler.commit_run ctx.config ~mode ~now;
-      Ok result
+  let result = Goal_store.refresh ctx.config ~mode in
+  Goal_scheduler.commit_run ctx.config ~mode ~now;
+  result
 
 let handle_goal_refresh ctx args =
-  let mode = get_string args "mode" "daily" |> String.lowercase_ascii in
+  let mode_raw = get_string args "mode" "daily" |> String.lowercase_ascii in
   let force = get_bool args "force" false in
   let now = Time_compat.now () in
-  let valid_mode = mode = "auto" || List.mem mode [ "daily"; "weekly"; "monthly" ] in
-  if not valid_mode then
+  let is_auto = mode_raw = "auto" in
+  let parsed_mode = Goal_store.parse_refresh_mode mode_raw in
+  if not is_auto && parsed_mode = None then
     (false, error_result_json "mode must be daily|weekly|monthly|auto")
   else
   let selected_modes =
-    if mode = "auto" then
-      if force then [ "daily"; "weekly"; "monthly" ]
+    if is_auto then
+      if force then Goal_scheduler.all_modes
       else Goal_scheduler.due_modes ctx.config ~now
     else
-      if force then [ mode ]
-      else
-        let due = Goal_scheduler.due_modes ctx.config ~now in
-        if List.mem mode due then [ mode ] else []
+      match parsed_mode with
+      | None -> []
+      | Some m ->
+          if force then [ m ]
+          else
+            let due = Goal_scheduler.due_modes ctx.config ~now in
+            if List.mem m due then [ m ] else []
   in
   if selected_modes = [] then
     ( true,
       tool_result_json
         [
-          ("mode", `String mode);
+          ("mode", `String mode_raw);
           ("skipped", `Bool true);
           ("message", `String "no cadence window due");
         ] )
   else
-    let rec collect acc = function
-      | [] -> Ok (List.rev acc)
-      | m :: rest -> (
-          match refresh_one_mode ctx ~mode:m ~now with
-          | Ok r -> collect (r :: acc) rest
-          | Error e -> Error (Printf.sprintf "[%s] %s" m e))
+    let results =
+      List.map (fun m -> refresh_one_mode ctx ~mode:m ~now) selected_modes
     in
-    match collect [] selected_modes with
-    | Error e -> (false, error_result_json e)
-    | Ok results ->
-        ( true,
-          tool_result_json
-            [
-              ("mode", `String mode);
-              ("skipped", `Bool false);
-              ( "results",
-                `List
-                  (List.map Goal_store.refresh_result_to_yojson results) );
-            ] )
+    ( true,
+      tool_result_json
+        [
+          ("mode", `String mode_raw);
+          ("skipped", `Bool false);
+          ( "results",
+            `List
+              (List.map Goal_store.refresh_result_to_yojson results) );
+        ] )
 
 let filter_goal_ids goals ids =
   if ids = [] then goals
@@ -616,20 +624,29 @@ let handle_goal_dispatch ctx args =
 
 let handle_goal_review ctx args =
   let goal_id = get_string args "goal_id" "" in
-  let outcome = get_string args "outcome" "" in
-  let new_horizon = get_string_opt args "new_horizon" in
+  let outcome_raw = get_string args "outcome" "" in
+  let new_horizon_raw = get_string_opt args "new_horizon" in
   let note = get_string_opt args "note" in
-  if goal_id = "" || outcome = "" then
+  if goal_id = "" || outcome_raw = "" then
     (false, error_result_json "goal_id and outcome are required")
   else
-    match Goal_store.review_goal ctx.config ~goal_id ~outcome ?new_horizon ?note () with
-    | Ok goal ->
-        ( true,
-          tool_result_json
-            [
-              ("goal", Goal_store.goal_to_yojson goal);
-            ] )
-    | Error msg -> (false, error_result_json msg)
+    match Goal_store.parse_review_outcome outcome_raw with
+    | None ->
+        (false, error_result_json "invalid outcome (done|progress|blocked|dropped)")
+    | Some outcome ->
+        let new_horizon = Goal_store.parse_horizon new_horizon_raw in
+        (match new_horizon_raw with
+         | Some _ when new_horizon = None ->
+             (false, error_result_json "invalid new_horizon (short|mid|long)")
+         | _ ->
+             match Goal_store.review_goal ctx.config ~goal_id ~outcome ?new_horizon ?note () with
+             | Ok goal ->
+                 ( true,
+                   tool_result_json
+                     [
+                       ("goal", Goal_store.goal_to_yojson goal);
+                     ] )
+             | Error msg -> (false, error_result_json msg))
 
 let dispatch ctx ~name ~args =
   match name with

@@ -432,6 +432,8 @@
    keeper_skill_routing
    keeper_alerting
    keeper_alerting_path
+   keeper_tool_registry
+   keeper_tool_policy
    keeper_exec_tools
    keeper_voice_local
    keeper_voice_loop
@@ -569,6 +571,8 @@
  tool_command_plane_dispatch
  tool_command_plane_schemas_01
  tool_command_plane_schemas_02
+  keeper_tool_registry
+  keeper_tool_policy
   keeper_exec_tools
   keeper_exec_status_metrics
   keeper_exec_status

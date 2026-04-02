@@ -632,8 +632,8 @@ let action_json ?actor_hint (ctx : _ context) args :
         target_type = request.target_type;
         target_id = request.target_id;
         delegated_tool;
-        confirmation_state = "preview";
-        result_status = "ok";
+        confirmation_state = Preview;
+        result_status = ActionOk;
         latency_ms = 0;
         created_at = Types.now_iso ();
       };
@@ -660,8 +660,8 @@ let action_json ?actor_hint (ctx : _ context) args :
         target_type = request.target_type;
         target_id = request.target_id;
         delegated_tool;
-        confirmation_state = "immediate";
-        result_status = "ok";
+        confirmation_state = Immediate;
+        result_status = ActionOk;
         latency_ms;
         created_at = Types.now_iso ();
       };
@@ -704,15 +704,15 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               target_type = entry.target_type;
               target_id = entry.target_id;
               delegated_tool = entry.delegated_tool;
-              confirmation_state = "expired";
-              result_status = "error";
+              confirmation_state = Expired;
+              result_status = ActionError;
               latency_ms = 0;
               created_at = Types.now_iso ();
             };
           Audit_log.log_governance_decision ctx.config
             ~agent_id:actor ~trace_id:entry.trace_id
             ~decision:"expired" ~action_type:entry.action_type
-            ~confirmation_state:"expired" ();
+            ~confirmation_state:(confirmation_state_to_string Expired) ();
           Error "pending confirmation expired"
       | Some entry when not (String.equal actor entry.actor) ->
           append_action_log ctx.config
@@ -725,15 +725,15 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               target_type = entry.target_type;
               target_id = entry.target_id;
               delegated_tool = entry.delegated_tool;
-              confirmation_state = "denied";
-              result_status = "error";
+              confirmation_state = Denied;
+              result_status = ActionError;
               latency_ms = 0;
               created_at = Types.now_iso ();
             };
           Audit_log.log_governance_decision ctx.config
             ~agent_id:actor ~trace_id:entry.trace_id
             ~decision:"unauthorized" ~action_type:entry.action_type
-            ~confirmation_state:"denied" ();
+            ~confirmation_state:(confirmation_state_to_string Denied) ();
           Error "actor is not allowed to confirm this action"
       | Some entry ->
           if String.equal decision "deny" then (
@@ -748,15 +748,15 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                 target_type = entry.target_type;
                 target_id = entry.target_id;
                 delegated_tool = entry.delegated_tool;
-                confirmation_state = "denied";
-                result_status = "ok";
+                confirmation_state = Denied;
+                result_status = ActionOk;
                 latency_ms = 0;
                 created_at = Types.now_iso ();
               };
             Audit_log.log_governance_decision ctx.config
               ~agent_id:actor ~trace_id:entry.trace_id
               ~decision:"deny" ~action_type:entry.action_type
-              ~confirmation_state:"denied" ();
+              ~confirmation_state:(confirmation_state_to_string Denied) ();
             Ok
               (json_ok
                  [
@@ -788,15 +788,15 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                 target_type = entry.target_type;
                 target_id = entry.target_id;
                 delegated_tool = entry.delegated_tool;
-                confirmation_state = "confirmed";
-                result_status = "ok";
+                confirmation_state = Confirmed;
+                result_status = ActionOk;
                 latency_ms;
                 created_at = Types.now_iso ();
               };
             Audit_log.log_governance_decision ctx.config
               ~agent_id:entry.actor ~trace_id:entry.trace_id
               ~decision:"confirm" ~action_type:entry.action_type
-              ~confirmation_state:"confirmed" ();
+              ~confirmation_state:(confirmation_state_to_string Confirmed) ();
             Ok
               (json_ok
                  [

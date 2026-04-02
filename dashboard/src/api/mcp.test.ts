@@ -1,15 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const { fetchWithTimeout, reportToolHostFailure, authHeaders } = vi.hoisted(() => ({
+const { fetchWithTimeout, reportToolHostFailure, authHeaders, currentDashboardActor } = vi.hoisted(() => ({
   fetchWithTimeout: vi.fn(),
   reportToolHostFailure: vi.fn().mockResolvedValue({ ok: true }),
   authHeaders: vi.fn().mockReturnValue({}),
+  currentDashboardActor: vi.fn().mockReturnValue('dashboard'),
 }))
 
 vi.mock('./core', () => ({
   fetchWithTimeout,
   DEFAULT_MCP_TIMEOUT_MS: 30000,
   authHeaders,
+  currentDashboardActor,
 }))
 
 vi.mock('./dashboard', () => ({
@@ -85,6 +87,35 @@ describe('mcpHeaders auth integration', () => {
 })
 
 describe('callMcpTool', () => {
+  it('injects the dashboard actor into MCP tool arguments', async () => {
+    setupMcpSessionMocks('sess-actor')
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_keeper_create_from_persona', { persona_name: 'sonsukku' })
+
+    const toolCall = findCallByMethod('tools/call')
+    expect(toolCall).toBeDefined()
+    const body = JSON.parse(toolCall![1].body as string)
+    expect(body.params.arguments).toEqual({
+      persona_name: 'sonsukku',
+      _agent_name: 'dashboard',
+    })
+  })
+
+  it('preserves an explicit agent_name field when the caller already set one', async () => {
+    setupMcpSessionMocks('sess-explicit')
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_join', { agent_name: 'codex-tool-matrix' })
+
+    const toolCall = findCallByMethod('tools/call')
+    expect(toolCall).toBeDefined()
+    const body = JSON.parse(toolCall![1].body as string)
+    expect(body.params.arguments).toEqual({
+      agent_name: 'codex-tool-matrix',
+    })
+  })
+
   it('reports tool-host failures after the MCP session is established', async () => {
     fetchWithTimeout
       .mockResolvedValueOnce(

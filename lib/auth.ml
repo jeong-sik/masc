@@ -215,6 +215,15 @@ let refresh_token config ~agent_name ~old_token : (string * agent_credential, ma
 (* ============================================ *)
 
 (** Check if agent has permission for an action *)
+let verify_optional_token config ~agent_name ~token :
+    (agent_credential option, masc_error) result =
+  match token with
+  | None -> Ok None
+  | Some raw ->
+      match verify_token config ~agent_name ~token:raw with
+      | Ok cred -> Ok (Some cred)
+      | Error e -> Error e
+
 let check_permission config ~agent_name ~token ~permission : (unit, masc_error) result =
   let auth_cfg = load_auth_config config in
   if not auth_cfg.enabled then
@@ -225,24 +234,24 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
            | None -> false) then
     (* Bootstrap grace: the agent who enabled auth always has full access *)
     (ignore permission; Ok ())
-  else if not auth_cfg.require_token then
-    (* Token not required - use default role *)
-    if has_permission auth_cfg.default_role permission then
-      Ok ()
-    else
-      Error (Forbidden { agent = agent_name; action = show_permission permission })
   else
-    (* Token required - verify and check role *)
-    match token with
-    | None -> Error (Unauthorized "Token required")
-    | Some t ->
-        match verify_token config ~agent_name ~token:t with
-        | Error e -> Error e
-        | Ok cred ->
-            if has_permission cred.role permission then
-              Ok ()
-            else
-              Error (Forbidden { agent = agent_name; action = show_permission permission })
+    match verify_optional_token config ~agent_name ~token with
+    | Error e -> Error e
+    | Ok (Some cred) ->
+        if has_permission cred.role permission then
+          Ok ()
+        else
+          Error (Forbidden { agent = agent_name; action = show_permission permission })
+    | Ok None ->
+        if not auth_cfg.require_token then
+          (* Optional-token mode: fall back to the room's default role only
+             when no token was presented. *)
+          if has_permission auth_cfg.default_role permission then
+            Ok ()
+          else
+            Error (Forbidden { agent = agent_name; action = show_permission permission })
+        else
+          Error (Unauthorized "Token required")
 
 (** Tool_spec / Tool_catalog-declared permission, when present. *)
 let declared_permission_for_tool tool_name =
@@ -380,15 +389,15 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
            | Some admin -> String.equal agent_name admin
            | None -> false) then
     Ok Admin  (* Bootstrap admin = full access *)
-  else if not auth_cfg.require_token then
-    Ok auth_cfg.default_role
   else
-    match token with
-    | None -> Error (Unauthorized "Token required")
-    | Some t ->
-        (match verify_token config ~agent_name ~token:t with
-        | Ok cred -> Ok cred.role
-        | Error e -> Error e)
+    match verify_optional_token config ~agent_name ~token with
+    | Error e -> Error e
+    | Ok (Some cred) -> Ok cred.role
+    | Ok None ->
+        if auth_cfg.require_token then
+          Error (Unauthorized "Token required")
+        else
+          Ok auth_cfg.default_role
 
 (** Policy-based tool authorization.
     Replaces authorize_tool with a single Tool_access_policy check.

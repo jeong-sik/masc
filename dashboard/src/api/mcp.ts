@@ -1,6 +1,6 @@
 // MASC Dashboard — MCP-over-HTTP client with session lifecycle
 
-import { fetchWithTimeout, DEFAULT_MCP_TIMEOUT_MS, authHeaders } from './core'
+import { fetchWithTimeout, DEFAULT_MCP_TIMEOUT_MS, authHeaders, currentDashboardActor } from './core'
 import {
   MCP_INIT_COOLDOWN_MS,
   MCP_INITIALIZE_TIMEOUT_MS,
@@ -194,12 +194,17 @@ export async function callMcpTool(toolName: string, args: Record<string, unknown
   try {
     await ensureSession()
     phase = 'tools/call'
+    const actor = currentDashboardActor()
+    const toolArgs =
+      args._agent_name == null && args.agent_name == null && actor
+        ? { ...args, _agent_name: actor }
+        : args
     const text = await mcpPost({
       jsonrpc: '2.0',
       method: 'tools/call',
       params: {
         name: toolName,
-        arguments: args,
+        arguments: toolArgs,
       },
       id: Number.parseInt(requestId, 10),
     })

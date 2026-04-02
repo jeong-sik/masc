@@ -199,9 +199,14 @@ let make_tools
                 Hashtbl.replace failure_counts key count;
                 Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:td.name ~success:false;
                 !Keeper_exec_tools.on_keeper_tool_call ~tool_name:td.name ~success:false ~duration_ms;
+                let preview =
+                  let s = String.trim result in
+                  if String.length s <= 120 then s
+                  else String.sub s 0 120 ^ "..."
+                in
                 Log.Keeper.warn
-                  "tool %s returned error result (%d/%d) for same args"
-                  td.name count max_consecutive_failures;
+                  "tool %s returned error result (%d/%d) for same args: %s"
+                  td.name count max_consecutive_failures preview;
                 (false, normalize_tool_result ~success:false result)
               end else begin
                 Hashtbl.remove failure_counts key;

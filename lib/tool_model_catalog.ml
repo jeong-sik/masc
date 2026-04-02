@@ -41,6 +41,7 @@ let handle_status _ctx _args : result =
     ("result", `Assoc [
       ("endpoints", `List (List.map D.endpoint_to_json endpoints));
       ("summary", summary);
+      ("cascade_metrics", Oas_worker.cascade_metrics_json ());
       ("masc_permits", `Assoc [
         ("available", `Int permits_available);
         ("in_use", `Int permits_in_use);
@@ -127,7 +128,7 @@ let schemas : tool_schema list = [
     description =
       "Query MODEL provider infrastructure status and get endpoint recommendations. \
        Actions: 'list' (enumerate endpoints), 'status' (slot utilization + \
-       MASC permit state), 'recommend' (pick best endpoint for task_type: \
+       MASC permit state + cascade runtime metrics), 'recommend' (pick best endpoint for task_type: \
        reasoning|analysis|planning|generation|general). Uses OAS Discovery \
        to probe OpenAI-compatible endpoints.";
     input_schema = `Assoc [

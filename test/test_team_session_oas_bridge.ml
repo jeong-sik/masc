@@ -296,6 +296,7 @@ let test_telemetry_of_run_result_carries_trace_ref () =
       turns = 3;
       trace_ref = Some trace_ref;
       proof = None;
+      cascade_observation = None;
       stop_reason = Oas_worker.Completed;
     }
   in

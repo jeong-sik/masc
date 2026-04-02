@@ -363,6 +363,27 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     else "noop"
   in
   let metrics_store = keeper_metrics_store config meta.name in
+  let cascade_json =
+    match result.cascade_observation with
+    | Some obs -> Oas_worker.cascade_observation_to_json obs
+    | None ->
+        `Assoc
+          [
+            ("cascade_name", `String meta.cascade_name);
+            ("configured_labels", `List []);
+            ("candidate_models", `List []);
+            ("primary_model", `Null);
+            ("selected_model", `String result.model_used);
+            ("selected_model_raw", `String result.model_used);
+            ("selected_index", `Null);
+            ("fallback_hops", `Null);
+            ("fallback_applied", `Bool false);
+            ("attempts", `List []);
+            ("fallback_events", `List []);
+            ("attempt_details_available", `Bool false);
+            ("attempt_details_source", `String "no_oas_observation");
+          ]
+  in
   let snapshot =
     `Assoc
       [
@@ -374,6 +395,7 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("trace_id", `String meta.runtime.trace_id);
         ("generation", `Int turn_generation);
         ("model_used", `String result.model_used);
+        ("cascade", cascade_json);
         ( "usage",
           `Assoc
             [

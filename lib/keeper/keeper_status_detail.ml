@@ -86,6 +86,18 @@ let handle_keeper_status ctx args : tool_result =
          let trace_history_count = List.length m.runtime.trace_history in
          let active_model = active_model_of_meta m in
          let next_model_hint = next_model_hint_of_meta m in
+         let runtime_cascade_metrics =
+           match Oas_worker.cascade_metrics_json () with
+           | `List entries ->
+               entries
+               |> List.find_opt (function
+                    | `Assoc fields ->
+                        List.assoc_opt "cascade_name" fields
+                        = Some (`String m.cascade_name)
+                    | _ -> false)
+               |> Option.value ~default:`Null
+           | _ -> `Null
+         in
          let last_compaction_saved_tokens =
            max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
          in
@@ -442,6 +454,7 @@ let handle_keeper_status ctx args : tool_result =
            ("last_proactive_ago_s", `Float last_proactive_ago_s);
            ("active_model", `String active_model);
            ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
+           ("runtime_cascade_metrics", runtime_cascade_metrics);
            ("trace_history_count", `Int trace_history_count);
            ("handoff_count_total", `Int trace_history_count);
            ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);

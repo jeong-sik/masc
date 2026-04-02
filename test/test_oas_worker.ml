@@ -182,6 +182,84 @@ let test_cascade_names_produce_models () =
     Alcotest.(check bool) (name ^ " has models") true (models <> [])
   ) cascades
 
+let test_cascade_observation_json_includes_fallback_fields () =
+  let observation : Oas_worker.cascade_observation =
+    {
+      cascade_name = "keeper_unified";
+      configured_labels = [ "glm:auto"; "llama:auto" ];
+      candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
+      primary_model = Some "glm:glm-5.1";
+      selected_model = Some "openai:qwen3.5-35b";
+      selected_model_raw = Some "qwen3.5-35b";
+      selected_index = Some 1;
+      fallback_hops = Some 1;
+      fallback_applied = true;
+      attempts =
+        [
+          {
+            attempt_index = 0;
+            model_id = "glm-5.1";
+            model_label = Some "glm:glm-5.1";
+            latency_ms = None;
+            error = Some "HTTP 503";
+          };
+          {
+            attempt_index = 1;
+            model_id = "qwen3.5-35b";
+            model_label = Some "openai:qwen3.5-35b";
+            latency_ms = Some 212;
+            error = None;
+          };
+        ];
+      fallback_events =
+        [
+          {
+            from_model_id = "glm-5.1";
+            from_model_label = Some "glm:glm-5.1";
+            to_model_id = "qwen3.5-35b";
+            to_model_label = Some "openai:qwen3.5-35b";
+            reason = "HTTP 503";
+          };
+        ];
+      attempt_details_available = true;
+      attempt_details_source = "oas_metrics_callbacks";
+    }
+  in
+  let json = Oas_worker.cascade_observation_to_json observation in
+  Alcotest.(check string) "cascade name preserved" "keeper_unified"
+    Yojson.Safe.Util.(json |> member "cascade_name" |> to_string);
+  Alcotest.(check bool) "fallback applied preserved" true
+    Yojson.Safe.Util.(json |> member "fallback_applied" |> to_bool);
+  Alcotest.(check int) "fallback hops preserved" 1
+    Yojson.Safe.Util.(json |> member "fallback_hops" |> to_int);
+  Alcotest.(check string) "selected model preserved" "openai:qwen3.5-35b"
+    Yojson.Safe.Util.(json |> member "selected_model" |> to_string);
+  Alcotest.(check int) "attempt count preserved" 2
+    Yojson.Safe.Util.(json |> member "attempts" |> to_list |> List.length);
+  Alcotest.(check int) "fallback event count preserved" 1
+    Yojson.Safe.Util.(
+      json |> member "fallback_events" |> to_list |> List.length);
+  Alcotest.(check bool) "attempt details marked available" true
+    Yojson.Safe.Util.(json |> member "attempt_details_available" |> to_bool);
+  Alcotest.(check string) "attempt detail boundary preserved" "oas_metrics_callbacks"
+    Yojson.Safe.Util.(json |> member "attempt_details_source" |> to_string)
+
+let test_model_catalog_status_includes_cascade_metrics () =
+  let result =
+    Tool_model_catalog.dispatch () ~name:"masc_model_catalog"
+      ~args:(`Assoc [ ("action", `String "status") ])
+  in
+  match result with
+  | None -> Alcotest.fail "expected masc_model_catalog dispatch result"
+  | Some (ok, body) ->
+      Alcotest.(check bool) "status ok" true ok;
+      let json = Yojson.Safe.from_string body in
+      let metrics =
+        Yojson.Safe.Util.(json |> member "result" |> member "cascade_metrics")
+      in
+      Alcotest.(check bool) "cascade_metrics is list" true
+        (match metrics with `List _ -> true | _ -> false)
+
 let make_worker_meta ?(effective_model = "local-qwen") () :
     Worker_container_types.worker_container_meta =
   {
@@ -726,6 +804,10 @@ let () =
         test_default_config_path;
       Alcotest.test_case "all cascade names produce models" `Quick
         test_cascade_names_produce_models;
+      Alcotest.test_case "cascade observation json includes fallback fields" `Quick
+        test_cascade_observation_json_includes_fallback_fields;
+      Alcotest.test_case "model catalog status includes cascade metrics" `Quick
+        test_model_catalog_status_includes_cascade_metrics;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick

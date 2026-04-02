@@ -74,6 +74,13 @@ let agent_economy_earn_fn
   : (base_path:string -> agent_name:string -> reason:string -> unit) ref
   = ref (fun ~base_path:_ ~agent_name:_ ~reason:_ -> ())
 
+(** Stop keeper keepalive fiber — avoids Room_gc → Keeper_keepalive dep.
+    Called during zombie cleanup to terminate keeper fibers that would
+    otherwise continue making tool calls after agent removal. *)
+let stop_keeper_fn
+  : (string -> unit) ref
+  = ref (fun _name -> ())
+
 (** Relation materializer: agent leave — wraps Relation_materializer.on_agent_leave. *)
 let relation_on_leave_fn
   : (leaving_agent:string -> active_agents:string list -> unit) ref

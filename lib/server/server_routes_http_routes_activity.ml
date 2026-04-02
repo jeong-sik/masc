@@ -38,6 +38,28 @@ let json_upsert_string_field name value = function
   | _non_object ->
       failwith (Printf.sprintf "json_upsert_string_field: expected JSON object, got non-object for field %S" name)
 
+let governance_surface_for_param_key param_key =
+  Governance_registry.surfaces
+  |> List.find_opt (fun (surface : Governance_registry.surface) ->
+       List.mem param_key surface.param_keys)
+
+let governance_param_risk param_key =
+  governance_surface_for_param_key param_key
+  |> Option.map (fun (surface : Governance_registry.surface) -> surface.risk)
+
+let respond_high_risk_param_blocked request reqd ~param_key ~risk =
+  respond_json_with_cors ~status:`Forbidden request reqd
+    (Yojson.Safe.to_string
+       (`Assoc
+          [
+            ("ok", `Bool false);
+            ( "error",
+              `String
+                (Printf.sprintf
+                   "runtime param %s is %s risk and no longer supports direct dashboard mutation after council removal"
+                   param_key risk) );
+          ]))
+
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
@@ -446,35 +468,49 @@ let add_routes ~sw ~clock router =
                    ("ok", `Bool false); ("error", `String "value is required")
                  ]))
              | Some value ->
-               let old_value =
-                 match Runtime_params.registry ()
-                   |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                 | Some (_, current, _, _, _) -> current
-                 | None -> `Null in
-               (match Runtime_params.set_by_key param_key value with
-                | Error msg ->
-                  respond_json_with_cors ~status:`Bad_request request reqd
-                    (Yojson.Safe.to_string (`Assoc [
-                      ("ok", `Bool false); ("error", `String msg)
-                    ]))
-                | Ok () ->
-                  Runtime_params.persist ~base_path;
-                  Runtime_params.record_audit ~base_path
-                    ~key:param_key ~old_value ~new_value:value ~actor ();
-                  Sse.broadcast
-                    (`Assoc [
-                      ("type", `String "governance_param_changed");
-                      ("param_key", `String param_key);
-                      ("old_value", old_value);
-                      ("new_value", value);
-                      ("actor", `String actor);
-                    ]);
-                  respond_json_with_cors request reqd
-                    (Yojson.Safe.to_string (`Assoc [
-                      ("ok", `Bool true);
-                      ("message", `String (Printf.sprintf "Set %s = %s"
-                        param_key (Yojson.Safe.to_string value)));
-                    ])))
+               (match governance_param_risk param_key with
+                | Some "high" ->
+                    respond_high_risk_param_blocked request reqd
+                      ~param_key ~risk:"high"
+                | _ ->
+                    let old_value =
+                      match Runtime_params.registry ()
+                        |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+                      | Some (_, current, _, _, _) -> current
+                      | None -> `Null
+                    in
+                    (match Runtime_params.set_by_key param_key value with
+                     | Error msg ->
+                         respond_json_with_cors ~status:`Bad_request request reqd
+                           (Yojson.Safe.to_string
+                              (`Assoc
+                                 [
+                                   ("ok", `Bool false);
+                                   ("error", `String msg);
+                                 ]))
+                     | Ok () ->
+                         Runtime_params.persist ~base_path;
+                         Runtime_params.record_audit ~base_path
+                           ~key:param_key ~old_value ~new_value:value ~actor ();
+                         Sse.broadcast
+                           (`Assoc
+                              [
+                                ("type", `String "governance_param_changed");
+                                ("param_key", `String param_key);
+                                ("old_value", old_value);
+                                ("new_value", value);
+                                ("actor", `String actor);
+                              ]);
+                         respond_json_with_cors request reqd
+                           (Yojson.Safe.to_string
+                              (`Assoc
+                                 [
+                                   ("ok", `Bool true);
+                                   ( "message",
+                                     `String
+                                       (Printf.sprintf "Set %s = %s" param_key
+                                          (Yojson.Safe.to_string value)) );
+                                 ]))))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd
                (Yojson.Safe.to_string (`Assoc [
@@ -501,36 +537,54 @@ let add_routes ~sw ~clock router =
                    ("ok", `Bool false); ("error", `String "param_key is required")
                  ]))
              else begin
-               let old_value =
-                 match Runtime_params.registry ()
-                   |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                 | Some (_, current, _, _, _) -> current
-                 | None -> `Null in
-               match Runtime_params.clear_by_key param_key with
-               | Error msg ->
-                 respond_json_with_cors ~status:`Bad_request request reqd
-                   (Yojson.Safe.to_string (`Assoc [
-                     ("ok", `Bool false); ("error", `String msg)
-                   ]))
-               | Ok () ->
-                 let new_value =
-                   match Runtime_params.registry ()
-                     |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                   | Some (_, _, default, _, _) -> default
-                   | None -> `Null in
-                 Runtime_params.persist ~base_path;
-                 Runtime_params.record_audit ~base_path
-                   ~key:param_key ~old_value ~new_value ~actor ();
-                 Sse.broadcast
-                   (`Assoc [
-                     ("type", `String "governance_param_changed");
-                     ("param_key", `String param_key);
-                   ]);
-                 respond_json_with_cors request reqd
-                   (Yojson.Safe.to_string (`Assoc [
-                     ("ok", `Bool true);
-                     ("message", `String (Printf.sprintf "Cleared %s to default" param_key));
-                   ]))
+               match governance_param_risk param_key with
+               | Some "high" ->
+                   respond_high_risk_param_blocked request reqd
+                     ~param_key ~risk:"high"
+               | _ ->
+                   let old_value =
+                     match Runtime_params.registry ()
+                       |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+                     | Some (_, current, _, _, _) -> current
+                     | None -> `Null
+                   in
+                   match Runtime_params.clear_by_key param_key with
+                   | Error msg ->
+                       respond_json_with_cors ~status:`Bad_request request reqd
+                         (Yojson.Safe.to_string
+                            (`Assoc
+                               [
+                                 ("ok", `Bool false);
+                                 ("error", `String msg);
+                               ]))
+                   | Ok () ->
+                       let new_value =
+                         match Runtime_params.registry ()
+                           |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+                         | Some (_, _, default, _, _) -> default
+                         | None -> `Null
+                       in
+                       Runtime_params.persist ~base_path;
+                       Runtime_params.record_audit ~base_path
+                         ~key:param_key ~old_value ~new_value ~actor ();
+                       Sse.broadcast
+                         (`Assoc
+                            [
+                              ("type", `String "governance_param_changed");
+                              ("param_key", `String param_key);
+                              ("old_value", old_value);
+                              ("new_value", new_value);
+                              ("actor", `String actor);
+                            ]);
+                       respond_json_with_cors request reqd
+                         (Yojson.Safe.to_string
+                            (`Assoc
+                               [
+                                 ("ok", `Bool true);
+                                 ( "message",
+                                   `String
+                                     (Printf.sprintf "Cleared %s to default" param_key) );
+                               ]))
              end
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd

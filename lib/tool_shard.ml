@@ -515,7 +515,7 @@ let shard_governance : shard = {
   tools = governance_tools;
   removable = true;
   description =
-    "Governance workflow: cases, briefs, petitions, rulings, feed, status";
+    "Governance compatibility stub: council removed, no governance tools exposed";
 }
 
 (** Autoresearch tools: filtered subset for keeper use (excludes swarm_start). *)

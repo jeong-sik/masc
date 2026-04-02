@@ -258,7 +258,4 @@ let () =
         Alcotest.test_case "json error" `Quick
           test_parse_keeper_chat_response_json_error;
       ] );
-    ( "parse_requested_action_removed",
-      [
-      ] );
   ]

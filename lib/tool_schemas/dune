@@ -20,7 +20,6 @@
    tool_schemas_inline_verify
    tool_schemas_inline_infra
    tool_schemas_inline_episodes
-   tool_schemas_inline_convo
    tool_schemas_inline)
  (wrapped false)
  (libraries masc_types))

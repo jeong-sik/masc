@@ -53,7 +53,10 @@ let test_shard_governance_exists () =
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
     (* Council removed: governance shard exists but has 0 tools *)
     Alcotest.(check int) "no tools after council removal" 0
-      (List.length s.Tool_shard.tools)
+      (List.length s.Tool_shard.tools);
+    Alcotest.(check string) "stub description"
+      "Governance compatibility stub: council removed, no governance tools exposed"
+      s.Tool_shard.description
   | None -> Alcotest.fail "governance shard not found"
 
 let test_shard_coding_exists () =

@@ -543,6 +543,11 @@ let test_permission_for_tool_keeper_create_from_persona () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
+let test_permission_for_tool_set_param () =
+  match Auth.permission_for_tool "masc_set_param" with
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
+
 (* keeper policy auth tests removed — policy tools no longer registered in Auth *)
 
 (* ============================================================
@@ -714,6 +719,7 @@ let () =
         test_permission_for_tool_autoresearch_stop;
       test_case "keeper_create_from_persona" `Quick
         test_permission_for_tool_keeper_create_from_persona;
+      test_case "set_param" `Quick test_permission_for_tool_set_param;
       test_case "unknown" `Quick test_permission_for_tool_unknown;
       test_case "empty" `Quick test_permission_for_tool_empty;
     ];

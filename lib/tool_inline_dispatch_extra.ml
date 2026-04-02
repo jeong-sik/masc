@@ -314,8 +314,4 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_reclassify" ->
       Some (Tool_board.handle_tool name arguments)
 
-  | "masc_convo_start" | "masc_convo_reply" | "masc_convo_conclude"
-  | "masc_convo_get" | "masc_convo_list" ->
-      Some (false, "Council module has been removed. Conversation tools are no longer available.")
-
   | _ -> None

@@ -108,11 +108,6 @@ let all_known_tool_names =
     "masc_config";
     "masc_config_snapshot";
     "masc_consolidate_learning";
-    "masc_convo_conclude";
-    "masc_convo_get";
-    "masc_convo_list";
-    "masc_convo_reply";
-    "masc_convo_start";
     "masc_dashboard";
     "masc_deliver";
     "masc_detachment_list";

@@ -1544,7 +1544,7 @@ let test_keeper_up_treats_null_tool_access_as_absent () =
           (`Assoc
             [
               ("name", `String "null-tool-access");
-              ("goal", `String "Reject null canonical tool_access");
+              ("goal", `String "Treat null canonical tool_access as absent");
               ("tool_access", `Null);
               ("tool_preset", `String "minimal");
             ])

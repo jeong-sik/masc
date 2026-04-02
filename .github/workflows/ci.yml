@@ -50,6 +50,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Guard pending release tag on main PRs
         if: github.event_name == 'pull_request' && github.base_ref == 'main'
@@ -58,7 +59,7 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x scripts/check-release-train-guard.sh
-          git fetch origin "${{ github.base_ref }}" --depth=100
+          git fetch origin "${{ github.base_ref }}" --depth=100 --tags
           scripts/check-release-train-guard.sh \
             --base "$BASE_REF" \
             --head "$HEAD_REF"

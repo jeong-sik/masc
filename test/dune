@@ -172,6 +172,11 @@
  (modules test_meta_cognition_feedback)
  (libraries masc_test_deps))
 
+(test
+ (name test_worker_run_evidence_summary)
+ (modules test_worker_run_evidence_summary test_tool_team_session_support)
+ (libraries masc_test_deps))
+
 ; ============================================================
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.

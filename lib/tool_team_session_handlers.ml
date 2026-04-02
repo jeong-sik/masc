@@ -315,24 +315,7 @@ let handle_verify_trace ctx args : result =
           in
           let verification_result meta_json worker_run_id =
             let worker_run_summary =
-              `Assoc
-                [
-                  ("worker_run_id", `String worker_run_id);
-                  ("worker_name", Yojson.Safe.Util.member "worker_name" meta_json);
-                  ("status", Yojson.Safe.Util.member "status" meta_json);
-                  ("mode", Yojson.Safe.Util.member "mode" meta_json);
-                  ("wait_mode", Yojson.Safe.Util.member "wait_mode" meta_json);
-                  ("success", Yojson.Safe.Util.member "success" meta_json);
-                  ("execution_scope", Yojson.Safe.Util.member "execution_scope" meta_json);
-                  ("requested_worker_class", Yojson.Safe.Util.member "requested_worker_class" meta_json);
-                  ("requested_worker_size", Yojson.Safe.Util.member "requested_worker_size" meta_json);
-                  ("resolved_runtime", Yojson.Safe.Util.member "resolved_runtime" meta_json);
-                  ("resolved_model", Yojson.Safe.Util.member "resolved_model" meta_json);
-                  ("routing_reason", Yojson.Safe.Util.member "routing_reason" meta_json);
-                  ("tool_names", Yojson.Safe.Util.member "tool_names" meta_json);
-                  ("tool_call_count", Yojson.Safe.Util.member "tool_call_count" meta_json);
-                  ("output_preview", Yojson.Safe.Util.member "output_preview" meta_json);
-                ]
+              Worker_run_evidence_summary.summary_json meta_json
             in
             let session_root = oas_trace_session_root ctx.config in
             match evidence_session_id_of_json meta_json with
@@ -369,10 +352,7 @@ let handle_verify_trace ctx args : result =
                                       [
                                         ("worker_run_id", `String worker_run_id);
                                         ("trace_capability", `String "raw");
-                                        ( "worker_run",
-                                          Option.fold ~none:worker_run_summary
-                                            ~some:Oas.Sessions.worker_run_to_yojson
-                                            bundle.latest_worker_run );
+                                        ("worker_run", worker_run_summary);
                                         ( "trace_ref",
                                           Oas.Raw_trace.run_ref_to_yojson summary.run_ref );
                                         ("verification", verification);
@@ -402,10 +382,7 @@ let handle_verify_trace ctx args : result =
                                         ("trace_capability", `String "summary_only");
                                         ("ok", `Bool false);
                                         ("error", `String detail);
-                                        ( "worker_run",
-                                          Option.fold ~none:worker_run_summary
-                                            ~some:Oas.Sessions.worker_run_to_yojson
-                                            bundle.latest_worker_run );
+                                        ("worker_run", worker_run_summary);
                                         ( "session_conformance",
                                           Oas.Conformance.report_to_yojson report );
                                       ] );
@@ -423,10 +400,7 @@ let handle_verify_trace ctx args : result =
                                     ( "error",
                                       `String
                                         "direct evidence proof bundle did not contain a raw trace run" );
-                                    ( "worker_run",
-                                      Option.fold ~none:worker_run_summary
-                                        ~some:Oas.Sessions.worker_run_to_yojson
-                                        bundle.latest_worker_run );
+                                    ("worker_run", worker_run_summary);
                                     ( "session_conformance",
                                       Oas.Conformance.report_to_yojson report );
                                   ] );

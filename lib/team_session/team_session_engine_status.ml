@@ -329,33 +329,7 @@ let pending_worker_names (session : Team_session_types.session) ready_names
   |> Team_session_types.dedup_strings |> List.sort String.compare
 
 let worker_run_status_json (json : Yojson.Safe.t) =
-  let open Yojson.Safe.Util in
-  `Assoc
-    [
-      ("worker_run_id", member "worker_run_id" json);
-      ("worker_name", member "worker_name" json);
-      ("status", member "status" json);
-      ("mode", member "mode" json);
-      ("wait_mode", member "wait_mode" json);
-      ("success", member "success" json);
-      ("trace_capability", member "trace_capability" json);
-      ("execution_scope", member "execution_scope" json);
-      ("requested_worker_class", member "requested_worker_class" json);
-      ("requested_worker_size", member "requested_worker_size" json);
-      ("resolved_runtime", member "resolved_runtime" json);
-      ("resolved_model", member "resolved_model" json);
-      ("routing_reason", member "routing_reason" json);
-      ("validated", member "validated" json);
-      ("final_text", member "final_text" json);
-      ("stop_reason", member "stop_reason" json);
-      ("failure_reason", member "failure_reason" json);
-      ("tool_names", member "tool_names" json);
-      ("tool_call_count", member "tool_call_count" json);
-      ("output_preview", member "output_preview" json);
-      ("session_conformance", member "session_conformance" json);
-      ("error", member "error" json);
-      ("ts_iso", member "ts_iso" json);
-    ]
+  Worker_run_evidence_summary.summary_json json
 
 let status_sections ?events (config : Room.config) (session : Team_session_types.session) =
   let events =

@@ -32,7 +32,11 @@ import {
   KeeperNeighborhood,
   RuntimeSignals,
 } from './keeper-detail-runtime'
-import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
+import {
+  KeeperConfigPanel,
+  loadKeeperConfig,
+  resetKeeperConfig,
+} from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
 import { AgentJournalStream } from './agent-detail-journal'
 import { KeeperTrajectoryTimeline } from './keeper-trajectory-timeline'
@@ -47,6 +51,7 @@ export const selectedKeeper = signal<Keeper | null>(null)
 export function openKeeperDetail(k: Keeper) {
   selectedKeeper.value = k
   selectKeeper(k.name)
+  void loadKeeperConfig(k.name)
 }
 
 export function closeKeeperDetail() {

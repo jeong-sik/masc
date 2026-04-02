@@ -971,7 +971,94 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
            ("meta_cognition_ms", `Int meta_cognition_ms);
          ]
 
-let dashboard_shell_http_json ?clock (config : Room.config) : Yojson.Safe.t =
+let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Room.config) :
+    Yojson.Safe.t =
+  let auth_cfg = Auth.load_auth_config config.base_path in
+  let token = auth_token_from_request request in
+  let requested_agent =
+    match agent_from_request request with
+    | Some raw ->
+        let value = String.trim raw in
+        if String.equal value "" then None else Some value
+    | None -> None
+  in
+  let token_present = Option.is_some token in
+  let resolved_agent_result =
+    resolve_agent_name_for_auth ~base_path:config.base_path request ~token
+  in
+  let resolved_agent_name_result =
+    match resolved_agent_result with
+    | Error err -> Error err
+    | Ok agent_name_opt ->
+        if auth_cfg.enabled && auth_cfg.require_token && token_present
+           && Option.is_none agent_name_opt
+        then
+          Error
+            (Types.Unauthorized
+               "Agent name required (X-MASC-Agent or token-bound credential)")
+        else
+          Ok (Option.value ~default:"dashboard" agent_name_opt)
+  in
+  let effective_agent =
+    match resolved_agent_name_result with
+    | Ok agent_name -> Some agent_name
+    | Error _ -> requested_agent
+  in
+  let effective_role_result =
+    match resolved_agent_name_result with
+    | Error err -> Error err
+    | Ok agent_name ->
+        Auth.resolve_role_with_auth_config config.base_path ~auth_cfg
+          ~agent_name ~token
+  in
+  let endpoint_gate_result =
+    match
+      if token_present then Ok ()
+      else ensure_same_origin_browser_request request
+    with
+    | Error err -> Error err
+    | Ok () -> (
+        match
+          ensure_strict_http_token_auth
+            ~endpoint:"HTTP tool access for masc_keeper_msg" auth_cfg
+        with
+        | Ok _ -> Ok ()
+        | Error msg -> Error (Types.Unauthorized msg))
+  in
+  let can_keeper_msg, keeper_msg_error =
+    match endpoint_gate_result with
+    | Error err -> (false, Some (Types.masc_error_to_string err))
+    | Ok () -> (
+        match resolved_agent_name_result, effective_role_result with
+        | Error err, _ | _, Error err ->
+            (false, Some (Types.masc_error_to_string err))
+        | Ok agent_name, Ok role -> (
+            match
+              Auth.authorize_tool_for_role ~agent_name ~role
+                ~tool_name:"masc_keeper_msg"
+            with
+            | Ok () -> (true, None)
+            | Error err -> (false, Some (Types.masc_error_to_string err))))
+  in
+  let effective_role =
+    match effective_role_result with
+    | Ok role -> Some (Types.agent_role_to_string role)
+    | Error _ -> None
+  in
+  `Assoc
+    [
+      ("enabled", `Bool auth_cfg.enabled);
+      ("require_token", `Bool auth_cfg.require_token);
+      ("default_role", `String (Types.agent_role_to_string auth_cfg.default_role));
+      ("token_present", `Bool token_present);
+      ("requested_agent", Json_util.string_opt_to_json requested_agent);
+      ("effective_agent", Json_util.string_opt_to_json effective_agent);
+      ("effective_role", Json_util.string_opt_to_json effective_role);
+      ("can_keeper_msg", `Bool can_keeper_msg);
+      ("keeper_msg_error", Json_util.string_opt_to_json keeper_msg_error);
+    ]
+
+let dashboard_shell_http_json ?clock ?request (config : Room.config) : Yojson.Safe.t =
   let current_room = dashboard_current_room_id config in
   let cache_key =
     Printf.sprintf "shell:coord=%s:workspace=%s:room=%s"
@@ -987,9 +1074,20 @@ let dashboard_shell_http_json ?clock (config : Room.config) : Yojson.Safe.t =
     | Some clock -> Some clock
     | None -> Eio_context.get_clock_opt ()
   in
-  match clock_opt with
-  | Some clock ->
-      Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:15.0 ~clock
-        ~timeout_sec:dashboard_shell_timeout_s compute
-  | None ->
-      Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+  let payload =
+    match clock_opt with
+    | Some clock ->
+        Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:15.0 ~clock
+          ~timeout_sec:dashboard_shell_timeout_s compute
+    | None ->
+        Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+  in
+  match request with
+  | None -> payload
+  | Some request -> (
+      match payload with
+      | `Assoc fields ->
+          `Assoc
+            (("auth", dashboard_shell_auth_json ~request config)
+            :: List.remove_assoc "auth" fields)
+      | other -> other)

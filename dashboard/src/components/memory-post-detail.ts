@@ -65,10 +65,11 @@ function CommentItem({
   depth?: number
   childrenMap: Map<string, BoardComment[]>
 }) {
-  const needsTruncation = (comment.content?.length ?? 0) > 300
+  const contentChars = Array.from(comment.content ?? '')
+  const needsTruncation = contentChars.length > 300
   const [expanded, setExpanded] = useState(false)
   const displayText = needsTruncation && !expanded
-    ? `${comment.content.slice(0, 297)}...`
+    ? `${contentChars.slice(0, 297).join('')}...`
     : comment.content
   const isReplying = replyingTo.value === comment.id
   const indent = depth > 0 ? `ml-${Math.min(depth * 4, 12)}` : ''

@@ -15,6 +15,7 @@ import { AttentionSpotlight } from './attention-spotlight'
 import { NarrativeTimeline } from './narrative-timeline'
 import { AgentAvatar } from './agent-avatar'
 import { TransportHealthPanel } from '../transport-health'
+import { ConnectorStatusPanel } from '../connector-status'
 import { PerfSnapshotPanel } from '../perf-snapshot'
 import { RouteLink } from '../common/route-link'
 import { shellMetaCognition } from '../../store'
@@ -508,6 +509,10 @@ export function Overview() {
         <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
           <${PerfSnapshotPanel} />
         </div>
+      </div>
+
+      <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
+        <${ConnectorStatusPanel} />
       </div>
 
       ${hasJournal

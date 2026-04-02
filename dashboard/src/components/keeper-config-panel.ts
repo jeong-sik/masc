@@ -126,9 +126,13 @@ function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number |
   runtimeDraft.value = { ...d, [field]: value }
 }
 
-export async function loadKeeperConfig(name: string): Promise<void> {
-  if (configKeeperName.value === name && configState.value.status === 'loaded') return
-  if (configKeeperName.value !== name) {
+export async function loadKeeperConfig(
+  name: string,
+  options?: { force?: boolean },
+): Promise<void> {
+  const force = options?.force === true
+  if (!force && configKeeperName.value === name && configState.value.status === 'loaded') return
+  if (configKeeperName.value !== name || force) {
     configResource.reset()
   }
   configKeeperName.value = name
@@ -143,6 +147,20 @@ export function resetKeeperConfig(): void {
   saveError.value = null
   runtimeDraft.value = null
   runtimeSaving.value = false
+}
+
+export function peekLoadedKeeperConfig(name: string): KeeperConfig | null {
+  const state = configState.value
+  if (configKeeperName.value !== name || state.status !== 'loaded') return null
+  return state.data
+}
+
+export function peekKeeperConfigLoadStatus(
+  name: string,
+): 'idle' | 'loading' | 'loaded' | 'error' | 'other' {
+  const state = configState.value
+  if (configKeeperName.value !== name) return 'other'
+  return state.status
 }
 
 // ── Helpers ──────────────────────────────────────────────

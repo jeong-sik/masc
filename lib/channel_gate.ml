@@ -93,6 +93,12 @@ let dedup_cleanup ~now =
     in
     List.iter (Hashtbl.remove dedup_table) to_remove)
 
+let dedup_table_size () =
+  with_dedup_lock (fun () -> Hashtbl.length dedup_table)
+
+(* Register dedup_table_size callback to break cycle *)
+let () = Channel_gate_metrics.register_dedup_size_fn dedup_table_size
+
 (* ── Validation (pure) ──────────────────────────────────────── *)
 
 let validation_error_to_string = function
@@ -192,16 +198,30 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
           let duration_ms =
             int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
           in
+          let ch = Agent_identity.string_of_channel msg.channel in
+          let keeper = String.trim msg.keeper_name in
+          Channel_gate_metrics.record_message
+            ~channel:ch ~keeper ~duration_ms ~success:true;
           let reply = extract_reply_text body in
           let stats = match extract_turn_stats body with
             | Some s -> Some { s with duration_ms }
             | None -> Some { model_used = ""; duration_ms; tokens_used = 0 }
           in
-          Ok { keeper_name = String.trim msg.keeper_name;
-               content = reply; turn_stats = stats }
+          Ok { keeper_name = keeper; content = reply; turn_stats = stats }
       | Some (false, err) ->
+          let duration_ms =
+            int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
+          in
+          Channel_gate_metrics.record_message
+            ~channel:(Agent_identity.string_of_channel msg.channel)
+            ~keeper:(String.trim msg.keeper_name)
+            ~duration_ms ~success:false;
           Error (Keeper_error err)
       | None ->
+          Channel_gate_metrics.record_message
+            ~channel:(Agent_identity.string_of_channel msg.channel)
+            ~keeper:(String.trim msg.keeper_name)
+            ~duration_ms:0 ~success:false;
           Error Dispatch_unavailable
 
 (* ── JSON helpers ───────────────────────────────────────────── *)

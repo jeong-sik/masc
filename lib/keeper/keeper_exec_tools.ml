@@ -56,6 +56,19 @@ let ensure_keeper_board_post_args ~author ~source = function
           (fun (k, _) -> k <> "author" && k <> "post_kind" && k <> "meta")
           fields
       in
+      let has_hearth =
+        List.exists
+          (fun (k, v) ->
+            k = "hearth"
+            && (match v with `String s -> String.trim s <> "" | _ -> false))
+          fields
+      in
+      let fields =
+        if has_hearth then fields
+        else
+          ("hearth", `String author)
+          :: List.filter (fun (k, _) -> k <> "hearth") fields
+      in
       `Assoc
         ([
            ("author", `String author);
@@ -105,6 +118,37 @@ let execute_keeper_tool_call
                 ("tool", `String name) ])
   else
   match name with
+  | "keeper_tools_list" ->
+      let names = keeper_allowed_tool_names meta in
+      let categorize n =
+        if String.starts_with ~prefix:"keeper_board" n then "board"
+        else if String.starts_with ~prefix:"keeper_voice" n then "voice"
+        else if String.starts_with ~prefix:"keeper_task" n then "coordination"
+        else if String.starts_with ~prefix:"keeper_shell" n || n = "keeper_bash" || n = "keeper_github" then "shell"
+        else if String.starts_with ~prefix:"keeper_fs" n || String.starts_with ~prefix:"keeper_library" n then "filesystem"
+        else if String.starts_with ~prefix:"masc_code" n || String.starts_with ~prefix:"masc_worktree" n then "coding"
+        else if String.starts_with ~prefix:"masc_governance" n || String.starts_with ~prefix:"masc_petition" n || String.starts_with ~prefix:"masc_case" n then "governance"
+        else if String.starts_with ~prefix:"masc_autoresearch" n then "autoresearch"
+        else if String.starts_with ~prefix:"masc_" n then "masc_bridge"
+        else if String.starts_with ~prefix:"keeper_" n then "base"
+        else "other"
+      in
+      let groups : (string, string list) Hashtbl.t = Hashtbl.create 16 in
+      List.iter (fun n ->
+        let cat = categorize n in
+        let prev = match Hashtbl.find_opt groups cat with Some l -> l | None -> [] in
+        Hashtbl.replace groups cat (n :: prev)
+      ) names;
+      let entries =
+        Hashtbl.fold (fun cat ns acc ->
+          (cat, `List (List.rev_map (fun n -> `String n) ns)) :: acc
+        ) groups []
+      in
+      Yojson.Safe.to_string
+        (`Assoc [
+          ("total", `Int (List.length names));
+          ("categories", `Assoc (List.sort (fun (a, _) (b, _) -> String.compare a b) entries));
+        ])
   | "keeper_time_now" ->
       Yojson.Safe.to_string
         (`Assoc

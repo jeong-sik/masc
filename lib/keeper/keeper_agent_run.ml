@@ -319,6 +319,7 @@ let run_turn
     "keeper_library_read", "라이브러리 문서 읽기 지식";
     "keeper_time_now", "시간 현재 타임스탬프";
     "keeper_context_status", "컨텍스트 상태 토큰 사용량";
+    "keeper_tools_list", "도구 목록 기능 할수있는것 능력";
     "keeper_broadcast", "브로드캐스트 알림 공지 전달";
     "keeper_tasks_list", "태스크 목록 할일 백로그";
     "keeper_tasks_audit", "태스크 감사 고아 방치";
@@ -430,7 +431,8 @@ let run_turn
   let always_include_tools =
     Keeper_exec_tools.core_always_tools
     @ [ "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
-        "keeper_tasks_list" ]
+        "keeper_tasks_list";
+        "keeper_tools_list" ]         (* self-introspection — #4519 *)
     |> Keeper_exec_tools.dedupe_tool_names
   in
   (* Layer 2: Universe — all tool names that the dispatch can handle.

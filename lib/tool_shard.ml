@@ -52,6 +52,18 @@ from this session without re-reading full history.";
       ("required", `List [`String "query"]);
     ];
   };
+  (* Tool self-introspection — lets the keeper enumerate its own capabilities *)
+  {
+    name = "keeper_tools_list";
+    description = "List all tools currently available to you, grouped by category. \
+Use when asked 'what can you do?' or when you need to discover your capabilities. \
+Returns tool names organized by category. Only includes tools allowed by your \
+current preset and policy.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
 ]
 
 let board_tools : Types.tool_schema list = [

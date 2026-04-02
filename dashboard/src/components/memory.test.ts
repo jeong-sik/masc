@@ -9,16 +9,13 @@ import { route } from '../router'
 import '@testing-library/jest-dom'
 
 // Mock dependencies
-vi.mock('../store', () => ({
-  boardPosts: { value: [] },
-  boardLoading: { value: false },
-  boardSortMode: { value: 'recent' },
-  boardExcludeSystem: { value: true },
-  boardExcludeAutomation: { value: false },
-  boardAuthorFilter: { value: '' },
-  lastBoardRefreshAt: { value: 0 },
-  refreshBoard: vi.fn(),
-}))
+vi.mock('../store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../store')>()
+  return {
+    ...actual,
+    refreshBoard: vi.fn(),
+  }
+})
 
 vi.mock('../router', () => ({
   route: { value: { params: {} } },

@@ -164,12 +164,12 @@ let log_keeper_memory_write
     @param user_message The user's message to the keeper
     @param cascade_name Cascade profile name for model selection
     @param generation Current generation counter
-    @param max_turns Maximum agent turns (default 3)
+    @param max_turns Maximum agent turns (default 50)
     @param guardrails Optional OAS guardrails for tool safety gates
     @param temperature MODEL temperature override; when omitted, resolved
            from [Cascade_inference] with a 0.3 fallback
     @param max_tokens Maximum output tokens override; when omitted, resolved
-           from [Cascade_inference] with a 4096 fallback
+           from [Cascade_inference] with a 2048 fallback
     @param is_retry When [true], replays the current user message into the
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)

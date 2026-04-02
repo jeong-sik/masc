@@ -7,6 +7,7 @@ import { signal } from '@preact/signals'
 import { fetchKeeperConfig, patchKeeperConfig } from '../api/dashboard'
 import type { KeeperConfigUpdatePayload } from '../api/dashboard'
 import type { KeeperConfig } from '../types'
+import type { KeeperConfigLoadStatus } from './keeper-detail-source'
 import { formatTokens } from '../lib/format-number'
 import { showToast } from './common/toast'
 import { createAsyncResource, loaded } from '../lib/async-state'
@@ -157,7 +158,7 @@ export function peekLoadedKeeperConfig(name: string): KeeperConfig | null {
 
 export function peekKeeperConfigLoadStatus(
   name: string,
-): 'idle' | 'loading' | 'loaded' | 'error' | 'other' {
+): KeeperConfigLoadStatus {
   const state = configState.value
   if (configKeeperName.value !== name) return 'other'
   return state.status

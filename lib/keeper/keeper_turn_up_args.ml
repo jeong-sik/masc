@@ -57,9 +57,12 @@ let json_assoc_member_opt key (json : Yojson.Safe.t) =
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
 
-let json_member_present key (json : Yojson.Safe.t) =
+let json_non_null_member_present key (json : Yojson.Safe.t) =
   match json with
-  | `Assoc fields -> List.mem_assoc key fields
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some `Null | None -> false
+      | Some _ -> true)
   | _ -> false
 
 let parse_present_tool_name_list_opt args key =
@@ -83,10 +86,10 @@ let resolve_tool_name_list ~preferred ~fallback =
 
 let parse_tool_access_input (args : Yojson.Safe.t) :
     (tool_access option * tool_preset option * string list option, string) result =
-  let tool_access_present = json_member_present "tool_access" args in
-  let tool_preset_present = json_member_present "tool_preset" args in
-  let tool_also_allow_present = json_member_present "tool_also_allow" args in
-  let tool_custom_allowlist_present = json_member_present "tool_custom_allowlist" args in
+  let tool_access_present = json_non_null_member_present "tool_access" args in
+  let tool_preset_present = json_non_null_member_present "tool_preset" args in
+  let tool_also_allow_present = json_non_null_member_present "tool_also_allow" args in
+  let tool_custom_allowlist_present = json_non_null_member_present "tool_custom_allowlist" args in
   if tool_access_present
      && (tool_preset_present || tool_also_allow_present || tool_custom_allowlist_present)
   then

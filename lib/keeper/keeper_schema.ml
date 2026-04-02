@@ -114,7 +114,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}."); 
+            "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
         ("tool_preset", `Assoc [
           ("type", `String "string");
           ("description", `String "Compatibility field. Use tool_access.kind='preset' for new callers.");
@@ -256,7 +256,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}."); 
+            "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
         ("tool_preset", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "minimal"; `String "messaging"; `String "coding"; `String "research"; `String "full"]);

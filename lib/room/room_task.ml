@@ -402,6 +402,9 @@ let transition_task_r config ~agent_name ~task_id ~action
                              completed_at = now;
                              notes = if notes = "" then None else Some notes;
                            }, None)
+                       | Types.Done_action, Types.Done _ ->
+                           (* Idempotent: already done, return current state unchanged *)
+                           Ok (task.task_status, None)
                        | Types.Cancel, Types.Todo ->
                            Ok (Types.Cancelled {
                              cancelled_by = agent_name;

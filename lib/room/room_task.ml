@@ -431,8 +431,9 @@ let transition_task_r config ~agent_name ~task_id ~action
                      in
                      (match transition with
                       | Error e -> Error e
-                      | Ok (new_status, _) when new_status = task.task_status ->
-                          (* Idempotent no-op: status unchanged, skip write/events *)
+                      | Ok (new_status, None) when new_status = task.task_status ->
+                          (* Idempotent no-op: status unchanged, skip write/events.
+                             Match None explicitly so set_current=Some is never silently dropped. *)
                           Ok (Printf.sprintf "✅ %s already %s (no-op)" task_id
                                 (task_status_to_string task.task_status))
                       | Ok (new_status, set_current) ->

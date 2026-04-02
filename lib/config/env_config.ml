@@ -81,4 +81,4 @@ let print_summary () =
     Keep callers on [Env_config] while root-level wrappers may enrich the same
     read model with additional server metadata. *)
 let to_json () : Yojson.Safe.t =
-  Env_config_snapshot.to_json ~server_meta:(`Assoc []) ()
+  Env_config_snapshot.to_json ()

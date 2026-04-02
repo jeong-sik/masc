@@ -153,10 +153,8 @@ let find_config_entry json env_name =
 
 let test_to_json_uses_canonical_introspection_shape () =
   let json = Env_config.to_json () in
-  check bool "server meta exists" true
-    (match Yojson.Safe.Util.member "server" json with
-    | `Assoc _ -> true
-    | _ -> false);
+  check yojson "server meta omitted on config wrapper" `Null
+    (Yojson.Safe.Util.member "server" json);
   check bool "categories exist" true
     (match Yojson.Safe.Util.member "categories" json with
     | `Assoc _ -> true

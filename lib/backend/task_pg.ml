@@ -138,7 +138,9 @@ let status_of_db ~status ~assignee ~claimed_at ~started_at ~completed_at ~cancel
         cancelled_at = Option.value cancelled_at ~default:"";
         reason;
       }
-  | _ -> Todo  (* fallback *)
+  | unknown ->
+      Log.Backend.warn "[task_pg] unknown task status %S in DB, defaulting to Todo" unknown;
+      Todo
 
 (** {1 Queries} *)
 

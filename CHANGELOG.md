@@ -1,6 +1,32 @@
 # Changelog
 
 
+## [2.216.0] - 2026-04-02
+
+### Added
+- **Team-session delegate readiness** -- block delegation to unplanned/unready workers with readiness truth checks (#4547).
+- **Tool prefilter** -- TF-IDF cosine similarity module for progressive tool disclosure (#4588).
+- **Keeper comment-stream dedup** -- deduplicate board comment events in keeper streams (#4585).
+- **Keeper tag-based dispatch** -- add tag-based dispatch for masc_* tools (#4594).
+
+### Fixed
+- **Shutdown cleanup** -- cancel SSE eviction and session reaper on SIGTERM (#4599).
+- **Shutdown log ordering** -- move 'Shutdown complete' log after all fibers finish (#4601).
+- **CI release guard** -- block PRs while release tag is pending (#4600).
+- **Keeper retry logging** -- include error detail in retry log, check stop before turn (#4598, #4569).
+- **Keeper debug guard** -- restore keeper_debug guard for zero-friction debug log (#4596).
+- **Dashboard planning tab** -- noise removal, whitespace, empty states (#4587).
+- **Dashboard padding** -- unify shell padding to 8px/16px token scale (#4555).
+- **Start path guard** -- honor MASC_BASE_PATH from parent project (#4564).
+- **Orchestrator zombie cleanup** -- stop keeper fibers during zombie cleanup (#4566).
+
+### Changed
+- **Operator type split** -- extract review_item type to dedicated module (#4550).
+- **Keeper default preset** -- change default tool preset from Full to Research (#4589, #4558).
+- **Dashboard I/O** -- skip expensive per-keeper I/O in keepers_json (#4591).
+- **Keeper audit logs** -- demote routine audit logs from info to debug (#4586).
+- **Legacy migration** -- skip legacy_trace_dir_migration when perpetual dir absent (#4577).
+
 ## [2.215.0] - 2026-04-02
 
 ### Added

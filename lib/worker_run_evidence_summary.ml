@@ -26,6 +26,12 @@ let list_member key json =
   | `List items -> items
   | _ -> []
 
+let string_list_member key json =
+  list_member key json
+  |> List.filter_map (function
+       | `String value when String.trim value <> "" -> Some (String.trim value)
+       | _ -> None)
+
 let has_non_null key json =
   match U.member key json with
   | `Null -> false
@@ -39,6 +45,28 @@ let string_list_to_json values =
   `List (List.map (fun value -> `String value) values)
 
 let trace_capability json = string_member_opt "trace_capability" json
+
+let tool_surface_names json =
+  let explicit = string_list_member "tool_surface_names" json in
+  if explicit <> [] then
+    Team_session_types.dedup_strings explicit
+  else
+    Team_session_types.dedup_strings
+      (string_list_member "tool_surface_masc_names" json
+      @ string_list_member "tool_surface_shell_names" json)
+
+let tool_surface_status json =
+  match string_member_opt "tool_surface_status" json with
+  | Some _ as value -> value
+  | None ->
+      Some
+        (if tool_surface_names json <> [] then "available" else "missing")
+
+let tool_surface_status_with_names ~names json =
+  match string_member_opt "tool_surface_status" json with
+  | Some _ as value -> value
+  | None ->
+      Some (if names <> [] then "available" else "missing")
 
 let trace_validated json =
   match bool_member_opt "validated" json with
@@ -113,6 +141,10 @@ let proof_evidence_state json =
 
 let summary_json json =
   let summary = U.member "trace_summary" json in
+  let normalized_tool_surface_names = tool_surface_names json in
+  let normalized_tool_surface_status =
+    tool_surface_status_with_names ~names:normalized_tool_surface_names json
+  in
   let summary_member key =
     match summary with
     | `Assoc _ -> U.member key summary
@@ -137,6 +169,18 @@ let summary_json json =
       ("resolved_runtime", U.member "resolved_runtime" json);
       ("resolved_model", U.member "resolved_model" json);
       ("routing_reason", U.member "routing_reason" json);
+      ( "tool_surface_status",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          normalized_tool_surface_status );
+      ("tool_surface_source", U.member "tool_surface_source" json);
+      ("tool_surface_names", string_list_to_json normalized_tool_surface_names);
+      ( "tool_surface_masc_names",
+        string_list_to_json (string_list_member "tool_surface_masc_names" json)
+      );
+      ( "tool_surface_shell_names",
+        string_list_to_json
+          (string_list_member "tool_surface_shell_names" json) );
+      ("tool_surface_count", `Int (List.length normalized_tool_surface_names));
       ("tool_names", U.member "tool_names" json);
       ("tool_call_count", U.member "tool_call_count" json);
       ("output_preview", U.member "output_preview" json);

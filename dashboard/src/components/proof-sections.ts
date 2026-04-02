@@ -89,6 +89,7 @@ export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) 
 export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEvidence }) {
   const preview = workerRunEvidencePreview(item)
   const validationFailures = Array.isArray(item.validation_failures) ? item.validation_failures : []
+  const toolSurfaceNames = Array.isArray(item.tool_surface_names) ? item.tool_surface_names : []
   const toolNames = Array.isArray(item.tool_names) ? item.tool_names : []
   return html`
     <article class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm hover:border-accent/30 transition-all duration-200 flex flex-col gap-3">
@@ -120,9 +121,20 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
             <span class="text-[12px] text-text-body leading-relaxed whitespace-pre-wrap">${validationFailures.join(' · ')}</span>
           </div>`
         : null}
+      ${toolSurfaceNames.length > 0
+        ? html`<div class="flex flex-col gap-2 mt-2 pt-3 border-t border-card-border/50">
+            <strong class="text-[11px] font-semibold uppercase tracking-widest text-text-muted">사용 가능 도구</strong>
+            <div class="flex flex-wrap gap-2">
+              ${toolSurfaceNames.map(name => html`<span class="px-2 py-1 rounded-md text-[10px] font-medium bg-white/5 text-text-body border border-white/10 shadow-sm">${name}</span>`)}
+            </div>
+          </div>`
+        : null}
       ${toolNames.length > 0
-        ? html`<div class="flex flex-wrap gap-2 mt-2 pt-3 border-t border-card-border/50">
-            ${toolNames.map(name => html`<span class="px-2 py-1 rounded-md text-[10px] font-medium bg-accent/10 text-accent border border-accent/20 shadow-sm">${name}</span>`)}
+        ? html`<div class="flex flex-col gap-2 mt-2 pt-3 border-t border-card-border/50">
+            <strong class="text-[11px] font-semibold uppercase tracking-widest text-text-muted">실행 도구</strong>
+            <div class="flex flex-wrap gap-2">
+              ${toolNames.map(name => html`<span class="px-2 py-1 rounded-md text-[10px] font-medium bg-accent/10 text-accent border border-accent/20 shadow-sm">${name}</span>`)}
+            </div>
           </div>`
         : null}
     </article>

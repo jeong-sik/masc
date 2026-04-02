@@ -44,7 +44,8 @@ let sample_proof ~(run_id : string) : Oas.Cdal_proof.t =
       };
     capability_snapshot =
       {
-        Oas.Cdal_proof.tools = [];
+        Oas.Cdal_proof.tools =
+          [ "file_read"; "file_write"; "shell_exec"; "masc_team_session_step" ];
         mcp_servers = [];
         max_turns = 10;
         max_tokens = Some 4096;
@@ -159,6 +160,7 @@ let persist_snapshot ?proof step_env =
     ~worker_name:"worker-proof"
     ~mode:"spawn"
     ~wait_mode:Team_session_types.Wait_blocking
+    ~execution_scope:Team_session_types.Limited_code_change
     ~status:`Completed
     ~resolved_runtime:"llama-8085"
     ~resolved_model:"glm-5"
@@ -188,7 +190,15 @@ let test_persist_worker_run_snapshot_with_proof () =
   check string "proof execution mode" "execute"
     (json |> U.member "proof_execution_mode" |> U.to_string);
   check int "proof evidence count" 2
-    (json |> U.member "proof_evidence_count" |> U.to_int)
+    (json |> U.member "proof_evidence_count" |> U.to_int);
+  check string "tool surface status" "available"
+    (json |> U.member "tool_surface_status" |> U.to_string);
+  check string "tool surface source" "local_worker_tools"
+    (json |> U.member "tool_surface_source" |> U.to_string);
+  check (list string) "tool surface shell names"
+    [ "file_read"; "file_write"; "shell_exec" ]
+    (json |> U.member "tool_surface_shell_names" |> U.to_list
+   |> List.map U.to_string)
 
 let test_persist_worker_run_snapshot_without_proof () =
   with_snapshot_env @@ fun config step_env ->
@@ -205,7 +215,9 @@ let test_persist_worker_run_snapshot_without_proof () =
   check bool "proof_execution_mode null" true
     (json |> U.member "proof_execution_mode" = `Null);
   check bool "proof_evidence_count null" true
-    (json |> U.member "proof_evidence_count" = `Null)
+    (json |> U.member "proof_evidence_count" = `Null);
+  check string "tool surface status without proof" "available"
+    (json |> U.member "tool_surface_status" |> U.to_string)
 
 let test_persist_worker_run_snapshot_rejects_invalid_run_id () =
   with_snapshot_env @@ fun config step_env ->

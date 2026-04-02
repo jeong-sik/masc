@@ -227,6 +227,21 @@ let seed_worker_run_meta config session_id =
         ("execution_scope", `String "limited_code_change");
         ("requested_worker_class", `String "executor");
         ("requested_worker_size", `String "lg");
+        ("tool_surface_status", `String "available");
+        ("tool_surface_source", `String "local_worker_tools");
+        ( "tool_surface_names",
+          `List
+            [
+              `String "file_read";
+              `String "file_write";
+              `String "shell_exec";
+              `String "masc_status";
+              `String "masc_team_session_step";
+            ] );
+        ( "tool_surface_masc_names",
+          `List [ `String "masc_status"; `String "masc_team_session_step" ] );
+        ( "tool_surface_shell_names",
+          `List [ `String "file_read"; `String "file_write"; `String "shell_exec" ] );
         ("resolved_runtime", `String "llama-8085");
         ("resolved_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
         ("routing_reason", `String "explicit_task_profile");
@@ -359,6 +374,14 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
         (worker |> U.member "resolved_runtime" |> U.to_string);
       check string "worker resolved model" "qwen3.5-35b-a3b-ud-q8-xl"
         (worker |> U.member "resolved_model" |> U.to_string);
+      check string "worker tool surface status" "available"
+        (worker |> U.member "tool_surface_status" |> U.to_string);
+      check int "worker tool surface count" 5
+        (worker |> U.member "tool_surface_count" |> U.to_int);
+      check (list string) "worker tool surface names"
+        [ "file_read"; "file_write"; "shell_exec"; "masc_status"; "masc_team_session_step" ]
+        (worker |> U.member "tool_surface_names" |> U.to_list
+       |> List.map U.to_string);
       check string "worker result_status" "completed"
         (worker |> U.member "result_status" |> U.to_string);
       check string "worker proof run id" "proof-run-123"

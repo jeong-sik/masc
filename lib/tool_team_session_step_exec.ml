@@ -42,6 +42,63 @@ let proof_result_status_to_string = function
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
+let local_worker_tool_names_of_scope scope =
+  Team_session_oas_bridge.supported_local_worker_tool_names_for_scope
+    (Some scope)
+
+let local_shell_tool_names_of_scope = function
+  | Team_session_types.Observe_only ->
+      [ "file_read"; "shell_exec" ]
+  | _ ->
+      [ "file_read"; "file_write"; "shell_exec" ]
+
+let tool_surface_source_of_mode = function
+  | "swarm" -> Some "swarm_masc_tools"
+  | "spawn" | "delegate" -> Some "local_worker_tools"
+  | _ -> None
+
+let dedup_tool_names values =
+  Team_session_types.dedup_strings values |> List.sort String.compare
+
+let tool_surface_fields ~mode ?execution_scope ?(proof : Oas.Cdal_proof.t option)
+    () =
+  let tool_surface_masc_names =
+    match mode, execution_scope with
+    | "swarm", Some scope ->
+        Team_session_oas_bridge.supported_local_worker_tool_names_for_scope
+          (Some scope)
+    | ("spawn" | "delegate"), Some scope ->
+        local_worker_tool_names_of_scope scope
+    | _ -> []
+  in
+  let tool_surface_shell_names =
+    match mode, execution_scope with
+    | ("spawn" | "delegate"), Some scope ->
+        local_shell_tool_names_of_scope scope
+    | _ -> []
+  in
+  let tool_surface_names =
+    let proof_tool_names =
+      match proof with
+      | Some proof -> proof.capability_snapshot.tools
+      | None -> []
+    in
+    dedup_tool_names
+      (proof_tool_names @ tool_surface_masc_names @ tool_surface_shell_names)
+  in
+  [
+    ( "tool_surface_status",
+      `String
+        (if tool_surface_names <> [] then "available" else "missing") );
+    ( "tool_surface_source",
+      Option.fold ~none:`Null ~some:(fun value -> `String value)
+        (if tool_surface_names <> [] then tool_surface_source_of_mode mode
+         else None) );
+    ("tool_surface_names", json_string_list tool_surface_names);
+    ("tool_surface_masc_names", json_string_list tool_surface_masc_names);
+    ("tool_surface_shell_names", json_string_list tool_surface_shell_names);
+  ]
+
 let proof_summary_fields ~(worker_run_id : string)
     ?(proof : Oas.Cdal_proof.t option) () =
   let null_fields =
@@ -492,6 +549,9 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
   let proof_fields =
     proof_summary_fields ~worker_run_id ?proof ()
   in
+  let tool_surface_fields =
+    tool_surface_fields ~mode ?execution_scope ?proof ()
+  in
   if Room_utils.path_exists env.ctx.config checkpoint_path then
     Team_session_store.save_worker_run_checkpoint_text env.ctx.config
       env.session_id worker_run_id
@@ -527,7 +587,7 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
         ("stop_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.stop_reason) oas_worker);
         ("failure_reason", Option.fold ~none:`Null ~some:(fun worker -> Option.fold ~none:`Null ~some:(fun s -> `String s) worker.Oas.Sessions.failure_reason) oas_worker);
         ("ts_iso", `String (Types.now_iso ()));
-      ] @ proof_fields))
+      ] @ tool_surface_fields @ proof_fields))
 
 let release_prepared_runtime (prepared : prepared_spawn) ~success
     ?error ?latency_ms () =
@@ -654,42 +714,6 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
           assigned_runtime;
           lease_released = false;
         }
-
-let local_worker_tool_names_of_scope scope =
-  match scope with
-  | Team_session_types.Observe_only ->
-      Tool_access_policy.resolve
-        {
-          allow = Surface Tool_catalog.Local_worker;
-          deny =
-            Names
-              [
-                "masc_claim_next";
-                "masc_transition";
-                "masc_add_task";
-                "masc_heartbeat";
-                "masc_board_post";
-                "masc_board_comment";
-                "masc_board_vote";
-                "masc_worktree_create";
-                "masc_worktree_remove";
-                "masc_run_init";
-                "masc_run_plan";
-                "masc_run_log";
-                "masc_run_deliverable";
-                "masc_repair_loop_start";
-                "masc_repair_loop_iterate";
-                "masc_repair_loop_stop";
-              ];
-        }
-  | _ ->
-      Team_session_oas_bridge.supported_local_worker_tool_names
-
-let local_shell_tool_names_of_scope = function
-  | Team_session_types.Observe_only ->
-      [ "file_read"; "shell_exec" ]
-  | _ ->
-      [ "file_read"; "file_write"; "shell_exec" ]
 
 let materialize_prepared_execution (env : _ step_env) (prepared : prepared_spawn)
     : prepared_execution =

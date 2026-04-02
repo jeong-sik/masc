@@ -60,7 +60,8 @@ let keeper_voice_tool_schemas =
   | None -> []
 
 let keeper_base_tool_names =
-  [ "keeper_time_now"; "keeper_context_status"; "keeper_memory_search" ]
+  [ "keeper_time_now"; "keeper_context_status"; "keeper_list_my_tools";
+    "keeper_memory_search" ]
 
 let keeper_filesystem_tool_names = [ "keeper_fs_read" ]
 let keeper_library_tool_names = [ "keeper_library_search"; "keeper_library_read" ]

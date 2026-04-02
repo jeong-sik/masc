@@ -8,9 +8,10 @@ import { LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
 import type { UnifiedTraceEvent, TraceEventKind } from '../session-trace/session-trace-state'
 
-type ActivityFilter = 'all' | 'tool_call' | 'broadcast' | 'task'
+export type ActivityFilter = 'all' | 'tool_call' | 'broadcast' | 'task'
 
-const activeFilter = signal<ActivityFilter>('all')
+/** Exported so task-detail-state.ts resetState() can clear it. */
+export const activeFilter = signal<ActivityFilter>('all')
 
 function kindIcon(kind: TraceEventKind): string {
   switch (kind) {

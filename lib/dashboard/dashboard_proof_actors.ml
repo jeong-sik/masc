@@ -71,104 +71,16 @@ let worker_run_meta_jsons config = function
              else None)
 
 let worker_run_trace_capability json =
-  match U.member "trace_capability" json with
-  | `String value -> Some value
-  | _ -> None
+  Worker_run_evidence_summary.trace_capability json
 
 let worker_run_trace_validated json =
-  match U.member "validated" json with
-  | `Bool value -> Some value
-  | _ -> (
-      match U.member "trace_validation" json |> U.member "ok" with
-      | `Bool value -> Some value
-      | _ -> None)
-
-let session_conformance_failures json =
-  match U.member "session_conformance" json |> U.member "checks" with
-  | `List items ->
-      items
-      |> List.filter_map (fun item ->
-             match U.member "name" item, U.member "passed" item with
-             | `String name, `Bool false -> Some name
-             | _ -> None)
-  | _ -> []
+  Worker_run_evidence_summary.trace_validated json
 
 let worker_run_validation_failures json =
-  let trace_failures =
-    match U.member "trace_validation" json |> U.member "checks" with
-    | `List items ->
-        items
-        |> List.filter_map (fun item ->
-               match U.member "name" item, U.member "passed" item with
-               | `String name, `Bool false -> Some name
-               | _ -> None)
-    | _ -> []
-  in
-  Team_session_types.dedup_strings
-    (trace_failures @ session_conformance_failures json)
+  Worker_run_evidence_summary.validation_failures json
 
 let worker_run_summary_json json =
-  let summary = U.member "trace_summary" json in
-  let base_fields =
-    [
-      ("session_id", U.member "session_id" json);
-      ("operation_id", U.member "operation_id" json);
-      ("worker_run_id", U.member "worker_run_id" json);
-      ("cdal_run_id", U.member "cdal_run_id" json);
-      ("contract_id", U.member "contract_id" json);
-      ("result_status", U.member "result_status" json);
-      ("worker_name", U.member "worker_name" json);
-      ("status", U.member "status" json);
-      ("mode", U.member "mode" json);
-      ("wait_mode", U.member "wait_mode" json);
-      ( "trace_capability",
-        Option.fold ~none:`Null ~some:(fun s -> `String s)
-          (worker_run_trace_capability json) );
-      ( "trace_validated",
-        Option.fold ~none:`Null ~some:(fun v -> `Bool v)
-          (worker_run_trace_validated json) );
-      ( "validation_failures",
-        `List
-          (List.map (fun item -> `String item)
-             (worker_run_validation_failures json)) );
-      ("success", U.member "success" json);
-      ("execution_scope", U.member "execution_scope" json);
-      ("requested_worker_class", U.member "requested_worker_class" json);
-      ("requested_worker_size", U.member "requested_worker_size" json);
-      ("resolved_runtime", U.member "resolved_runtime" json);
-      ("resolved_model", U.member "resolved_model" json);
-      ("routing_reason", U.member "routing_reason" json);
-      ("tool_names", U.member "tool_names" json);
-      ("tool_call_count", U.member "tool_call_count" json);
-      ("output_preview", U.member "output_preview" json);
-      ("record_count", U.member "record_count" summary);
-      ("assistant_block_count", U.member "assistant_block_count" summary);
-      ("final_text", if U.member "final_text" json <> `Null then U.member "final_text" json else U.member "final_text" summary);
-      ("stop_reason", if U.member "stop_reason" json <> `Null then U.member "stop_reason" json else U.member "stop_reason" summary);
-      ("failure_reason", U.member "failure_reason" json);
-      ("error", if U.member "error" json <> `Null then U.member "error" json else U.member "error" summary);
-      ("proof_present", U.member "proof_present" json);
-      ("tool_trace_refs", U.member "tool_trace_refs" json);
-      ("raw_evidence_refs", U.member "raw_evidence_refs" json);
-      ("checkpoint_ref", U.member "checkpoint_ref" json);
-      ("evidence_refs", U.member "evidence_refs" json);
-      ("session_conformance", U.member "session_conformance" json);
-      ("ts_iso", U.member "ts_iso" json);
-    ]
-  in
-  let proof_fields =
-    match U.member "proof_run_id" json with
-    | `String _ ->
-        [
-          ("proof_run_id", U.member "proof_run_id" json);
-          ("proof_status", U.member "proof_status" json);
-          ("proof_risk_class", U.member "proof_risk_class" json);
-          ("proof_execution_mode", U.member "proof_execution_mode" json);
-          ("proof_evidence_count", U.member "proof_evidence_count" json);
-        ]
-    | _ -> []
-  in
-  `Assoc (base_fields @ proof_fields)
+  Worker_run_evidence_summary.summary_json json
 
 let actor_activity_state (acc : actor_acc) =
   if acc.observed_event_count > 0 then

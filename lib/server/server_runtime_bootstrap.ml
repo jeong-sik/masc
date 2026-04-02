@@ -407,6 +407,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           Server_startup_state.fail_lazy_task ~task:task_name ~error
     in
     let start_lazy_startup state =
+      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let has_legacy_traces =
+        Sys.file_exists (Filename.concat masc_root "perpetual")
+      in
       let tasks =
         [
           ("restore_sessions", fun () -> restore_persisted_sessions state);
@@ -431,7 +435,12 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ("prompt_bootstrap", fun () -> bootstrap_prompt_state state);
           ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);
           ("tool_metrics_restore", fun () -> restore_tool_metrics_from_disk state);
-          ("legacy_trace_dir_migration", fun () -> migrate_legacy_trace_dirs state);
+        ]
+        @ (if has_legacy_traces then
+             [("legacy_trace_dir_migration", fun () ->
+                 migrate_legacy_trace_dirs state)]
+           else [])
+        @ [
           ("jsonl_prune", fun () -> startup_prune_jsonl state);
           ( "keeper_checkpoint_prune",
             fun () -> startup_prune_keeper_checkpoints state );

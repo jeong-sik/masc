@@ -48,6 +48,7 @@ let all_known_tool_names =
     "masc_agent_card";
     "masc_agent_fitness";
     "masc_agent_relations";
+    "masc_agent_timeline";
     "masc_agent_update";
     "masc_agents";
     "masc_approve";
@@ -59,6 +60,9 @@ let all_known_tool_names =
     "masc_auth_refresh";
     "masc_auth_revoke";
     "masc_auth_status";
+    "masc_audit_query";
+    "masc_audit_stats";
+    "masc_audit_trail";
     "masc_autoresearch_cycle";
     "masc_autoresearch_inject";
     "masc_autoresearch_record_finding";
@@ -105,8 +109,11 @@ let all_known_tool_names =
     "masc_code_write";
     "masc_collaboration_evidence";
     "masc_collaboration_graph";
+    "masc_compact_context";
     "masc_config";
     "masc_consolidate_learning";
+    "masc_cost_log";
+    "masc_cost_report";
     "masc_dashboard";
     "masc_deliver";
     "masc_detachment_list";
@@ -123,6 +130,7 @@ let all_known_tool_names =
     "masc_error_resolve";
     "masc_feature_flags";
     "masc_find_by_capability";
+    "masc_fire_task";
     "masc_gc";
     "masc_get_metrics";
     "masc_goal_dispatch";
@@ -131,6 +139,7 @@ let all_known_tool_names =
     "masc_goal_review";
     "masc_goal_snapshot";
     "masc_goal_upsert";
+    "masc_governance_report";
     "masc_governance_set";
     "masc_handover_claim";
     "masc_handover_create";
@@ -185,6 +194,7 @@ let all_known_tool_names =
     "masc_mcp_session";
     "masc_messages";
     "masc_meta_cognition_snapshot";
+    "masc_model_catalog";
     "masc_note_add";
     "masc_observe_alerts";
     "masc_observe_capacity";
@@ -227,6 +237,8 @@ let all_known_tool_names =
     "masc_portal_send";
     "masc_portal_status";
     "masc_progress";
+    "masc_rate_limit_config";
+    "masc_rate_limit_status";
     "masc_recall_search";
     "masc_register_capabilities";
     "masc_reject";
@@ -234,6 +246,10 @@ let all_known_tool_names =
     "masc_relay_now";
     "masc_relay_smart_check";
     "masc_relay_status";
+    "masc_repair_loop_iterate";
+    "masc_repair_loop_start";
+    "masc_repair_loop_status";
+    "masc_repair_loop_stop";
     "masc_repo_synthesis_swarm_start";
     "masc_reset";
     "masc_resume";
@@ -267,6 +283,11 @@ let all_known_tool_names =
     "masc_team_session_step";
     "masc_team_session_stop";
     "masc_team_session_verify_trace";
+    "masc_tempo";
+    "masc_tempo_adjust";
+    "masc_tempo_get";
+    "masc_tempo_reset";
+    "masc_tempo_set";
     "masc_tool_admin_snapshot";
     "masc_tool_admin_update";
     "masc_tool_help";

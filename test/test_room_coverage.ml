@@ -418,6 +418,30 @@ let test_transition_version_mismatch () =
     | _ -> Alcotest.fail "Expected TaskInvalidState for version mismatch"
   )
 
+let test_transition_done_idempotent () =
+  with_test_env (fun config ->
+    let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
+    let _ = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Done_action () in
+    (* Second done call should succeed as no-op *)
+    let result = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Done_action () in
+    match result with
+    | Ok msg -> Alcotest.(check bool) "done idempotent" true (str_contains msg "no-op")
+    | Error e -> Alcotest.failf "Expected Ok (no-op), got error: %s" (Types.masc_error_to_string e)
+  )
+
+let test_transition_cancel_idempotent () =
+  with_test_env (fun config ->
+    let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
+    (* Cancel from Todo (allowed) *)
+    let _ = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Cancel () in
+    (* Second cancel call should succeed as no-op *)
+    let result = Room.transition_task_r config ~agent_name:"claude" ~task_id:"task-001" ~action:Types.Cancel () in
+    match result with
+    | Ok msg -> Alcotest.(check bool) "cancel idempotent" true (str_contains msg "no-op")
+    | Error e -> Alcotest.failf "Expected Ok (no-op), got error: %s" (Types.masc_error_to_string e)
+  )
+
 (* ============================================================ *)
 (* Observability Tests                                           *)
 (* ============================================================ *)
@@ -1011,6 +1035,8 @@ let () =
       Alcotest.test_case "release" `Quick test_transition_release;
       Alcotest.test_case "invalid" `Quick test_transition_invalid;
       Alcotest.test_case "version mismatch" `Quick test_transition_version_mismatch;
+      Alcotest.test_case "done idempotent" `Quick test_transition_done_idempotent;
+      Alcotest.test_case "cancel idempotent" `Quick test_transition_cancel_idempotent;
     ];
 
     (* === Observability === *)

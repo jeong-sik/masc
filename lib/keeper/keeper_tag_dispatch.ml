@@ -293,6 +293,15 @@ let dispatch
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+      let exn_type =
+        let raw = Printexc.to_string exn in
+        (* Sanitize: expose exception type but not internal paths/details
+           that may leak server internals to tool callers. *)
+        match String.index_opt raw '(' with
+        | Some i -> String.sub raw 0 i
+        | None -> if String.length raw > 80 then String.sub raw 0 80 else raw
+      in
+      Log.Keeper.warn "tag dispatch exception for %s: %s"
+        name (Printexc.to_string exn);
       Some (false,
-        Printf.sprintf "keeper tag dispatch error for %s: %s"
-          name (Printexc.to_string exn))
+        Printf.sprintf "keeper dispatch error for %s: %s" name exn_type)

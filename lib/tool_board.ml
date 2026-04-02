@@ -113,13 +113,13 @@ let resolve_board_post_kind ~author (raw_kind : string option) :
        | Some kind -> Ok kind
        | None -> Error (Printf.sprintf "unknown post_kind: %s" raw))
   | None ->
-      (* Auto-classify only when registry hook is available.
-         Without a registry, default to Human_post to avoid
-         false positives from the name-shape heuristic. *)
       let author_lc = String.lowercase_ascii (String.trim author) in
-      (match !agent_lookup_hook with
-       | Some _ when is_agent author_lc -> Ok Board.Automation_post
-       | _ -> Ok Board.Human_post)
+      if author_lc = "" || author_lc = "anonymous" then
+        Ok Board.Automation_post
+      else
+        (match !agent_lookup_hook with
+         | Some _ when is_agent author_lc -> Ok Board.Automation_post
+         | _ -> Ok Board.Human_post)
 
 (** {1 Formatters} *)
 

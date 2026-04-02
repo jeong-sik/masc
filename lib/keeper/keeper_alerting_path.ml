@@ -8,6 +8,14 @@ let starts_with ~(prefix : string) (s : string) : bool =
   let lp = String.length prefix in
   String.length s >= lp && String.sub s 0 lp = prefix
 
+let strip_trailing_slash s =
+  let rec find_end i =
+    if i > 0 && s.[i - 1] = '/' then find_end (i - 1) else i
+  in
+  let len = String.length s in
+  let end_pos = find_end len in
+  if end_pos = len then s else String.sub s 0 end_pos
+
 let normalize_path_for_check (path : string) : string =
   try Unix.realpath path
   with Unix.Unix_error _ ->
@@ -49,7 +57,10 @@ let resolve_keeper_target_path ~(config : Room.config)
         else ""
       in
       let matches_any =
-        List.exists (fun ap -> starts_with ~prefix:ap rel) allowed_paths
+        List.exists (fun ap ->
+          let ap' = strip_trailing_slash ap in
+          rel = ap' || starts_with ~prefix:(ap' ^ "/") rel
+        ) allowed_paths
       in
       if matches_any then Ok candidate
       else

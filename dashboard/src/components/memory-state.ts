@@ -43,9 +43,6 @@ export const SORT_MODES: { id: BoardSortMode; label: string }[] = [
   { id: 'discussed', label: '토론 많은 순' },
 ]
 
-// ── Signals: board filters ─────────────────────────────────────────
-export const boardAuthorFilter = signal('')
-
 // ── Signals: detail view ───────────────────────────────────────────
 export const detailPost = signal<BoardPost | null>(null)
 export const detailComments = signal<BoardComment[]>([])

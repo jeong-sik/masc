@@ -123,7 +123,10 @@ let load_file_config path =
         }
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | _ -> malformed_fail_closed
+    | exn ->
+        Log.CmdPlane.warn "worker-runtime config malformed at %s: %s" path
+          (Printexc.to_string exn);
+        malformed_fail_closed
   else default
 
 let apply_env_overrides (config : t) =

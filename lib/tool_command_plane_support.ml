@@ -232,7 +232,7 @@ let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv 
   let finalize exit_code =
     let stdout = In_channel.with_open_bin stdout_path In_channel.input_all in
     let stderr = In_channel.with_open_bin stderr_path In_channel.input_all in
-    (match stdin_path_opt with
+    (match !stdin_path_opt with
     | Some stdin_path -> (
         try Sys.remove stdin_path
         with Eio.Cancel.Cancelled _ as e -> raise e

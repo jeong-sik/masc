@@ -40,7 +40,8 @@ let make_config_root root =
 
 (* OCaml stdlib lacks Unix.unsetenv; putenv name "" is only an
    approximation. Code that treats [""] as missing is fine, but
-   Sys.getenv_opt still sees the variable as present. *)
+   Sys.getenv_opt (or Option.is_some checks on it) still sees the
+   variable as present, so tests must not assume true unset semantics. *)
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   (match value with

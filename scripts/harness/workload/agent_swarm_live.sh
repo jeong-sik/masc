@@ -430,6 +430,10 @@ if live_workers is None:
     live_workers = sum(1 for row in workers if row.get("turn_observed") is True)
 
 completed_workers = sum(1 for row in workers if row.get("status") == "ok")
+joined_workers = completed_workers  # joined == completed in compat harness
+live_workers = sum(1 for row in workers if row.get("attached") is True)
+task_bound = sum(1 for row in workers if row.get("turn_observed") is True)
+fresh_heartbeats = live_workers  # best available proxy from post-hoc data
 final_markers_seen = sum(1 for row in workers if row.get("final_marker_seen") is True)
 fresh_heartbeats = (
     sum(1 for row in workers if row.get("heartbeat_fresh") is True)
@@ -447,7 +451,7 @@ payload = {
     "required_final_markers": required_final_markers,
     "joined_workers": joined_workers,
     "live_workers": live_workers,
-    "current_task_bound": live_workers,
+    "current_task_bound": task_bound,
     "fresh_heartbeats": fresh_heartbeats,
     "completed_workers": completed_workers,
     "final_markers_seen": final_markers_seen,

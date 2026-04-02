@@ -1347,6 +1347,134 @@ let test_keeper_up_accepts_canonical_tool_access () =
             [ "masc_status"; "masc_board_list" ] names
       | _ -> fail "expected custom tool_access")
 
+let test_keeper_up_accepts_tool_custom_allowlist_compat () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "tool-custom-compat";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "tool-custom-compat");
+              ("goal", `String "Exercise compat custom allowlist input");
+              ("tool_custom_allowlist", `List [ `String "masc_status"; `String "masc_board_list" ]);
+            ])
+      in
+      if not ok then fail ("keeper up failed: " ^ body);
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "tool-custom-compat" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after compat custom allowlist create"
+        | Error e -> fail e
+      in
+      match meta.Masc_mcp.Keeper_types.tool_access with
+      | Masc_mcp.Keeper_types.Custom names ->
+          check (list string) "compat custom allowlist preserved"
+            [ "masc_status"; "masc_board_list" ] names
+      | _ -> fail "expected custom tool_access from tool_custom_allowlist")
+
+let test_keeper_up_update_allows_canonical_tool_access_override () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "tool-access-override";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, create_body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "tool-access-override");
+              ("goal", `String "Create preset keeper before override");
+              ("tool_preset", `String "minimal");
+              ("tool_also_allow", `List [ `String "masc_governance_status" ]);
+            ])
+      in
+      if not ok then fail ("initial keeper up failed: " ^ create_body);
+      let ok, update_body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "tool-access-override");
+              ("goal", `String "Override with canonical tool_access");
+              ( "tool_access",
+                `Assoc
+                  [
+                    ("kind", `String "custom");
+                    ("tools", `List [ `String "masc_status" ]);
+                  ] );
+            ])
+      in
+      if not ok then fail ("override keeper up failed: " ^ update_body);
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "tool-access-override" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after canonical override update"
+        | Error e -> fail e
+      in
+      match meta.Masc_mcp.Keeper_types.tool_access with
+      | Masc_mcp.Keeper_types.Custom names ->
+          check (list string) "canonical override wins"
+            [ "masc_status" ] names
+      | _ -> fail "expected canonical tool_access override to produce custom policy")
+
+let test_keeper_up_rejects_mixed_tool_access_inputs () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let keeper_ctx : _ Masc_mcp.Keeper_types.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let ok, body =
+        Masc_mcp.Keeper_turn.handle_keeper_up keeper_ctx
+          (`Assoc
+            [
+              ("name", `String "mixed-tool-input");
+              ("goal", `String "Reject mixed tool policy inputs");
+              ("tool_preset", `String "minimal");
+              ( "tool_access",
+                `Assoc
+                  [
+                    ("kind", `String "custom");
+                    ("tools", `List [ `String "masc_status" ]);
+                  ] );
+            ])
+      in
+      check bool "keeper up rejects mixed tool inputs" false ok;
+      check bool "mixed input error surfaced" true
+        (contains_substring body "tool_access cannot be combined"))
+
 let test_keeper_up_persists_explicit_goal_horizons () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1978,6 +2106,66 @@ let test_read_meta_warns_on_unknown_keys () =
            (fun message -> contains_substring message "unknown keys: mystery_key")
            messages))
 
+let test_read_meta_warns_on_compat_tool_keys () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "compat-key-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "compat-key-demo");
+              ("goal", `String "Warn on compat tool keys");
+              ("tool_preset", `String "coding");
+              ("tool_also_allow", `List [ `String "masc_status" ]);
+            ])
+      in
+      if not ok then fail ("keeper up failed: " ^ body);
+      let meta_path =
+        Masc_mcp.Keeper_types.keeper_meta_path config "compat-key-demo"
+      in
+      let original_json = Yojson.Safe.from_file meta_path in
+      let compat_json =
+        match original_json with
+        | `Assoc fields ->
+            `Assoc
+              ( ("tool_preset", `String "coding")
+              :: ("tool_also_allow", `List [ `String "masc_status" ])
+              :: List.remove_assoc "tool_access" fields )
+        | _ -> fail "expected keeper meta object"
+      in
+      let oc = open_out meta_path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc (Yojson.Safe.pretty_to_string compat_json));
+      let baseline = latest_log_seq () in
+      let _ =
+        match Masc_mcp.Keeper_types.read_meta config "compat-key-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after compat key warning read"
+        | Error e -> fail e
+      in
+      let messages = recent_keeper_log_messages ~since_seq:baseline in
+      check bool "compat key warning emitted" true
+        (List.exists
+           (fun message -> contains_substring message "uses compatibility tool keys")
+           messages))
+
 let test_keeper_up_recreates_cached_keeper_dir_after_base_reset () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2149,6 +2337,12 @@ let () =
            test_keeper_up_update_clears_explicit_tool_lists;
          test_case "keeper up accepts canonical tool_access" `Quick
            test_keeper_up_accepts_canonical_tool_access;
+         test_case "keeper up accepts tool_custom_allowlist compat" `Quick
+           test_keeper_up_accepts_tool_custom_allowlist_compat;
+         test_case "keeper up update allows canonical tool_access override" `Quick
+           test_keeper_up_update_allows_canonical_tool_access_override;
+         test_case "keeper up rejects mixed tool_access inputs" `Quick
+           test_keeper_up_rejects_mixed_tool_access_inputs;
          test_case "write_meta syncs registry meta" `Quick
            test_write_meta_syncs_registry_meta;
          test_case "keeper up persists allowed paths" `Quick
@@ -2163,6 +2357,8 @@ let () =
            test_legacy_presence_keepalive_false_migrates_to_paused;
          test_case "read_meta warns on unknown keys" `Quick
            test_read_meta_warns_on_unknown_keys;
+         test_case "read_meta warns on compat tool keys" `Quick
+           test_read_meta_warns_on_compat_tool_keys;
          test_case "keeper repair passes with provided source_text" `Quick
            test_keeper_repair_passes_with_provided_source_text;
          test_case "keeper up recreates cached keeper dir after base reset (issue #3710)" `Quick

@@ -232,7 +232,7 @@ let make_hooks
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
                 (!meta_ref).name tool_name (Printexc.to_string exn));
         if List.mem tool_name board_write_tools then
-          Log.Keeper.info "keeper:%s social_event tool=%s"
+          Log.Keeper.debug "keeper:%s social_event tool=%s"
             (!meta_ref).name tool_name;
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
@@ -290,7 +290,7 @@ let make_hooks
     on_idle = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; _ } ->
-        Log.Keeper.info "keeper:%s idle_turns=%d"
+        Log.Keeper.debug "keeper:%s idle_turns=%d"
           (!meta_ref).name consecutive_idle_turns;
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);

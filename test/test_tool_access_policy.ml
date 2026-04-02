@@ -8,12 +8,14 @@ open Alcotest
 open Masc_mcp
 
 let init_keeper_tool_registry () =
-  Tool_dispatch.register_module_tag
-    ~schemas:Tool_schemas_inline.schemas
-    ~tag:Tool_dispatch.Mod_inline;
-  Tool_tag_init.register_all ();
-  Tool_board.register ();
-  Tool_dispatch.mark_tag_registry_initialized ()
+  if not Tool_dispatch.is_tag_registry_initialized () then begin
+    Tool_dispatch.register_module_tag
+      ~schemas:Tool_schemas_inline.schemas
+      ~tag:Tool_dispatch.Mod_inline;
+    Tool_tag_init.register_all ();
+    Tool_board.register ();
+    Tool_dispatch.mark_tag_registry_initialized ()
+  end
 
 (* ================================================================ *)
 (* Selector basics                                                   *)

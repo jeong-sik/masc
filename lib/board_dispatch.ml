@@ -184,6 +184,15 @@ let post_matches_author_filter ~needle ~comments_for_post (post : Board.post) =
          agent_matches_author_filter ~needle comment.author)
        (comments_for_post post)
 
+let matching_post_ids_for_comment_author_filter ~needle (comments : Board.comment list) =
+  let matches = Hashtbl.create 64 in
+  List.iter
+    (fun (comment : Board.comment) ->
+      if agent_matches_author_filter ~needle comment.author then
+        Hashtbl.replace matches (Board.Post_id.to_string comment.post_id) true)
+    comments;
+  matches
+
 (** {1 Dispatch Functions} *)
 
 let create_post ~author ~content ?title ?body ~post_kind ?meta_json
@@ -278,11 +287,6 @@ let list_posts ?(visibility_filter=None) ?hearth ?author_filter ?post_kind_filte
         else
           Board.list_posts store ~visibility_filter ?hearth ~limit:fetch_limit ()
       in
-      let comments_for_post (post : Board.post) =
-        match Board.get_comments store ~post_id:(Board.Post_id.to_string post.id) with
-        | Ok comments -> comments
-        | Error _ -> []
-      in
       let sorted =
         posts
         |> apply_visibility_and_hearth_filters
@@ -293,8 +297,15 @@ let list_posts ?(visibility_filter=None) ?hearth ?author_filter ?post_kind_filte
         match author_filter with
         | None -> filtered
         | Some needle ->
+            let matching_comment_post_ids =
+              Board.list_comments store ~limit:max_int ()
+              |> matching_post_ids_for_comment_author_filter ~needle
+            in
             List.filter
-              (post_matches_author_filter ~needle ~comments_for_post)
+              (fun (post : Board.post) ->
+                agent_matches_author_filter ~needle post.author
+                || Hashtbl.mem matching_comment_post_ids
+                     (Board.Post_id.to_string post.id))
               filtered
       in
       Board.take limit filtered

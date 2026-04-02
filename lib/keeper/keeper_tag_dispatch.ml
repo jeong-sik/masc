@@ -221,16 +221,6 @@ let dispatch
              ~name ~args
        | Error e, _ | _, Error e -> Some (false, e))
 
-  | Mod_research ->
-      (match require_sw (), require_clock (), require_net () with
-       | Ok sw, Ok clock, Ok net ->
-           Tool_research.dispatch
-             { Tool_research.base_path = config.base_path;
-               agent_name = Some agent_name; sw; net; clock }
-             ~name ~args
-       | Error e, _, _ | _, Error e, _ | _, _, Error e ->
-           Some (false, e))
-
   | Mod_autoresearch ->
       (* Keeper already handles masc_autoresearch_* before reaching this path.
          If we get here, provide a minimal context without team session starter. *)

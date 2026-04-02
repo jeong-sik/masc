@@ -175,7 +175,6 @@ type module_tag =
   | Mod_inline
   | Mod_improve_loop
   | Mod_autoresearch
-  | Mod_research
   | Mod_shard
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512

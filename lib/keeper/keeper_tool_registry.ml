@@ -45,10 +45,6 @@ let keeper_autoresearch_tool_names =
   Tool_shard.autoresearch_keeper_tools
   |> List.map (fun (t : Types.tool_schema) -> t.name)
 
-let keeper_research_loop_tool_names =
-  Tool_research.schemas
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
-
 let keeper_coding_tool_names = Tool_code_write.tool_names
 
 let keeper_internal_candidate_tool_names =

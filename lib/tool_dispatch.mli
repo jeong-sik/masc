@@ -101,7 +101,6 @@ type module_tag =
   | Mod_inline
   | Mod_improve_loop
   | Mod_autoresearch
-  | Mod_research
   | Mod_shard
 
 val register_module_tag : schemas:Types.tool_schema list -> tag:module_tag -> unit

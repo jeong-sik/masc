@@ -71,7 +71,6 @@ let keeper_all_candidate_tool_names () =
     @ keeper_coding_shard_tool_names
     @ keeper_coding_tool_names
     @ keeper_autoresearch_tool_names
-    @ keeper_research_loop_tool_names
     @ injected_masc_tool_names () )
 
 (* ── Presets ──────────────────────────────────────────────────── *)
@@ -110,7 +109,6 @@ let preset_allowlist = function
         @ keeper_board_tool_names
         @ keeper_governance_tool_names
         @ keeper_autoresearch_tool_names
-        @ keeper_research_loop_tool_names
         @ select_existing_masc_tool_names keeper_core_masc_tool_names )
   | Full -> keeper_all_candidate_tool_names ()
 
@@ -267,7 +265,6 @@ let keeper_preset_universe_model_tools (meta : keeper_meta) : Types.tool_schema 
   let scoped = keeper_preset_universe_tool_names meta in
   let all_schemas =
     (keeper_default_model_tools meta)
-    @ Tool_research.schemas
     @ Tool_shard.autoresearch_keeper_tools
     @ Tool_shard.coding_tools
     @ Tool_code_write.schemas
@@ -284,7 +281,6 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
   else
     let all_schemas =
       (keeper_default_model_tools meta)
-      @ Tool_research.schemas
       @ Tool_shard.autoresearch_keeper_tools
       @ Tool_shard.coding_tools
       @ Tool_code_write.schemas
@@ -309,7 +305,6 @@ let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
   let universe = keeper_universe_tool_names meta in
   let all_schemas =
     (keeper_default_model_tools meta)
-    @ Tool_research.schemas
     @ Tool_shard.autoresearch_keeper_tools
     @ Tool_shard.coding_tools
     @ Tool_code_write.schemas

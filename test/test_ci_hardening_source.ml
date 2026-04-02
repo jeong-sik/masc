@@ -477,12 +477,7 @@ let test_worktree_list_contracts () =
   check bool "worker oas no longer reads global net directly" true
     (file_not_contains_pattern "lib/worker_oas.ml"
        "Eio_context.get_net_opt ()");
-  check bool "research dispatch uses threaded net capability from state" true
-    (file_contains_pattern "lib/mcp_server_eio_execute.ml"
-       "match state.Mcp_server.net with");
-  check bool "research dispatch no longer falls back to global Eio net" true
-    (file_not_contains_pattern "lib/mcp_server_eio_execute.ml"
-       "Eio_context.get_net ()");
+  (* research dispatch assertions removed — lib/research/ subsystem deleted (#4715) *)
   check bool "worktree create/remove still require join" true
     (file_contains_pattern "lib/tool_worktree.ml"
        {|let _tool_spec_requires_join = [ "masc_worktree_create"; "masc_worktree_remove" ]|});

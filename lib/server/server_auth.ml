@@ -309,6 +309,7 @@ let is_public_read_path path =
   String.equal path "/health"
   || String.equal path "/health/live"
   || String.equal path "/health/ready"
+  || String.equal path "/api/v1/gate/health"
   || String.equal path "/"
   || String.equal path "/dashboard"
   || String.equal path "/dashboard/"

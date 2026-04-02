@@ -3,7 +3,7 @@
     The canonical category definitions, masking rules, and source attribution
     live in [Env_config_snapshot] inside the [masc_config] sub-library. This
     wrapper adds root-runtime metadata that is only available from the main
-    server library. *)
+    server library, which already depends on [masc_mcp.config] in [lib/dune]. *)
 
 let server_meta () =
   let git_commit =

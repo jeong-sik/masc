@@ -172,6 +172,15 @@ let test_to_json_masks_sensitive_values_and_tracks_sources () =
       check string "masked token" "supe***"
         (entry |> member "value" |> to_string))
 
+let test_to_json_treats_blank_env_as_default () =
+  with_env "MASC_ADMIN_TOKEN" "   " (fun () ->
+      let json = Env_config.to_json () in
+      let entry = find_config_entry json "MASC_ADMIN_TOKEN" in
+      let open Yojson.Safe.Util in
+      check string "blank source is default" "default"
+        (entry |> member "source" |> to_string);
+      check yojson "blank value omitted" `Null (entry |> member "value"))
+
 (* ============================================================
    print_summary Tests
    ============================================================ *)
@@ -401,6 +410,8 @@ let () =
         test_to_json_uses_canonical_introspection_shape;
       test_case "to_json masks sensitive values and tracks sources" `Quick
         test_to_json_masks_sensitive_values_and_tracks_sources;
+      test_case "to_json treats blank env as default" `Quick
+        test_to_json_treats_blank_env_as_default;
     ];
     "print_summary", [
       test_case "no error" `Quick test_print_summary_no_error;

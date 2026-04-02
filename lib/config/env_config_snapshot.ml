@@ -35,7 +35,7 @@ let entry ?(sensitive = false) ~default env_name description =
   { env_name; description; default_display = default; sensitive }
 
 let read_entry e =
-  let raw = Sys.getenv_opt e.env_name in
+  let raw = Env_config_core.trim_opt (Sys.getenv_opt e.env_name) in
   let display_value =
     match raw with
     | None -> None

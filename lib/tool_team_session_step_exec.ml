@@ -372,6 +372,24 @@ let append_delegate_requested_event (env : _ step_env) ~worker_run_id ~worker_na
           ("ts_iso", `String (Types.now_iso ()));
         ])
 
+let append_delegate_denied_event (env : _ step_env) ~worker_name ~delegate_prompt
+    ~blocked_reason ~guidance ~(readiness : Yojson.Safe.t) =
+  Team_session_store.append_event env.ctx.config env.session_id
+    ~event_type:"team_step_delegate_denied"
+    ~detail:
+      (`Assoc
+        [
+          ("actor", `String env.actor);
+          ("target_agent", `String worker_name);
+          ("delegate_prompt", `String delegate_prompt);
+          ("worker_backend", `String "local");
+          ("blocked_reason", `String blocked_reason);
+          ("guidance", `String guidance);
+          ("readiness", readiness);
+          ("wait_mode", `String (Team_session_types.wait_mode_to_string env.wait_mode));
+          ("ts_iso", `String (Types.now_iso ()));
+        ])
+
 let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
     ~mode ~wait_mode ?execution_scope ?tool_names ?tool_call_count
     ?requested_worker_class ?requested_worker_size

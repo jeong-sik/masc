@@ -460,6 +460,31 @@ let test_delegate_rejects_not_ready_worker_with_guidance () =
   in
   Alcotest.(check bool) "mentions not ready guidance" true
     (String.length message > 0 && contains 0);
+  Alcotest.(check bool) "mentions delegate-ready status path" true
+    (String.contains message '.'
+     && String.length message > 0
+     &&
+     (try
+        let _ =
+          Str.search_forward
+            (Str.regexp_string "delegate_ready_worker_names")
+            message 0
+        in
+        true
+      with Not_found -> false));
+  let denied_events =
+    Team_session_store.read_events config session_id
+    |> List.filter (fun json ->
+           Yojson.Safe.Util.member "event_type" json
+           = `String "team_step_delegate_denied")
+  in
+  Alcotest.(check int) "delegate denied event recorded" 1
+    (List.length denied_events);
+  let denied_detail =
+    List.hd denied_events |> Yojson.Safe.Util.member "detail"
+  in
+  Alcotest.(check string) "delegate denied reason" "pending_checkpoint"
+    Yojson.Safe.Util.(denied_detail |> member "blocked_reason" |> to_string);
   cleanup_dir base_dir
 
 (* ── single-agent fallback gate (#3651) tests ─────────────── *)

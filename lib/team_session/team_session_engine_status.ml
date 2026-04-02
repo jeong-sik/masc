@@ -132,6 +132,115 @@ let recent_worker_run_meta_jsons config session_id =
            Some (Room_utils.read_json config path)
          else None)
 
+type worker_delegate_readiness = {
+  worker_name : string;
+  spawn_role : string option;
+  execution_scope : string option;
+  runtime_pool : string option;
+  routing_reason : string option;
+  has_meta : bool;
+  has_checkpoint : bool;
+  in_flight : bool;
+  delegate_ready : bool;
+  blocked_reason : string option;
+  guidance : string;
+}
+
+let worker_delegate_guidance = function
+  | Some "missing_container" ->
+      "Spawn or rehydrate the worker before delegating."
+  | Some "pending_checkpoint" ->
+      "Wait for the worker to finish its first run and write a checkpoint."
+  | Some "broken_container" ->
+      "Repair or respawn the worker; a checkpoint exists without worker metadata."
+  | Some "in_flight" ->
+      "Wait for the active worker run to complete before delegating again."
+  | Some _ | None -> "Worker is ready for delegation."
+
+let worker_delegate_readiness_to_json (entry : worker_delegate_readiness) =
+  `Assoc
+    [
+      ("worker_name", `String entry.worker_name);
+      ( "spawn_role",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          entry.spawn_role );
+      ( "execution_scope",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          entry.execution_scope );
+      ( "runtime_pool",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          entry.runtime_pool );
+      ( "routing_reason",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          entry.routing_reason );
+      ("has_meta", `Bool entry.has_meta);
+      ("has_checkpoint", `Bool entry.has_checkpoint);
+      ("in_flight", `Bool entry.in_flight);
+      ("delegate_ready", `Bool entry.delegate_ready);
+      ( "blocked_reason",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          entry.blocked_reason );
+      ("guidance", `String entry.guidance);
+    ]
+
+let planned_worker_for_actor (session : Team_session_types.session) worker_name =
+  List.find_opt
+    (fun (worker : Team_session_types.planned_worker) ->
+      match worker.runtime_actor with
+      | Some actor -> String.equal (String.trim actor) worker_name
+      | None -> false)
+    session.planned_workers
+
+let worker_delegate_readiness_list ?events config
+    (session : Team_session_types.session) =
+  let snapshot = worker_run_event_snapshot ?events config session in
+  Team_session_types.planned_worker_actor_names session
+  |> List.map (fun worker_name ->
+         let has_meta =
+           Room_utils.path_exists config
+             (Team_session_store.worker_container_meta_path config
+                session.session_id worker_name)
+         in
+         let has_checkpoint =
+           Room_utils.path_exists config
+             (Team_session_store.worker_container_checkpoint_path config
+                session.session_id worker_name)
+         in
+         let in_flight = List.mem worker_name snapshot.in_flight_actors in
+         let blocked_reason =
+           if in_flight then Some "in_flight"
+           else
+             match (has_meta, has_checkpoint) with
+             | false, false -> Some "missing_container"
+             | true, false -> Some "pending_checkpoint"
+             | false, true -> Some "broken_container"
+             | true, true -> None
+         in
+         let planned_worker = planned_worker_for_actor session worker_name in
+         {
+           worker_name;
+           spawn_role = Option.bind planned_worker (fun worker -> worker.spawn_role);
+           execution_scope =
+             Option.bind planned_worker (fun worker ->
+                 Option.map Team_session_types.execution_scope_to_string
+                   worker.execution_scope);
+           runtime_pool =
+             Option.bind planned_worker (fun worker -> worker.runtime_pool);
+           routing_reason =
+             Option.bind planned_worker (fun worker -> worker.routing_reason);
+           has_meta;
+           has_checkpoint;
+           in_flight;
+           delegate_ready = Option.is_none blocked_reason;
+           blocked_reason;
+           guidance = worker_delegate_guidance blocked_reason;
+         })
+
+let worker_delegate_readiness config (session : Team_session_types.session)
+    worker_name =
+  worker_delegate_readiness_list config session
+  |> List.find_opt (fun entry -> String.equal entry.worker_name worker_name)
+
 let ready_worker_names config (session : Team_session_types.session) =
   Team_session_types.planned_worker_actor_names session
   |> List.filter (fun worker_name ->
@@ -209,6 +318,19 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
       |> List.rev
     in
     let ready_workers = ready_worker_names config session in
+    let worker_readiness =
+      worker_delegate_readiness_list ~events config session
+    in
+    let delegate_ready_workers =
+      worker_readiness
+      |> List.filter (fun entry -> entry.delegate_ready)
+      |> List.map (fun entry -> entry.worker_name)
+    in
+    let blocked_workers =
+      worker_readiness
+      |> List.filter (fun entry -> not entry.delegate_ready)
+      |> List.map (fun entry -> entry.worker_name)
+    in
     let pending_workers =
       pending_worker_names session ready_workers snapshot.in_flight_actors
     in
@@ -222,8 +344,16 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
         ("in_flight_actor_names", `List (List.map (fun id -> `String id) snapshot.in_flight_actors));
         ("ready_worker_count", `Int (List.length ready_workers));
         ("ready_worker_names", `List (List.map (fun name -> `String name) ready_workers));
+        ( "delegate_ready_worker_names",
+          `List
+            (List.map (fun name -> `String name) delegate_ready_workers) );
+        ( "blocked_worker_names",
+          `List (List.map (fun name -> `String name) blocked_workers) );
         ("pending_worker_count", `Int (List.length pending_workers));
         ("pending_worker_names", `List (List.map (fun name -> `String name) pending_workers));
+        ( "worker_readiness",
+          `List
+            (List.map worker_delegate_readiness_to_json worker_readiness) );
         ("recent_runs", `List recent_runs);
       ]
   in

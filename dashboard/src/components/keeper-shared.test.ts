@@ -38,10 +38,14 @@ vi.mock('../api/keeper', () => ({
   shutdownKeeper,
 }))
 
-vi.mock('../store', () => ({
-  invalidateDashboardCache,
-  refreshDashboard,
-}))
+vi.mock('../store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../store')>()
+  return {
+    ...actual,
+    invalidateDashboardCache,
+    refreshDashboard,
+  }
+})
 
 vi.mock('./common/toast', () => ({
   showToast: vi.fn(),
@@ -49,6 +53,7 @@ vi.mock('./common/toast', () => ({
 
 import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-runtime'
 import { hydrateKeeperStatus } from '../keeper-runtime'
+import { shellAuthSummary } from '../store'
 import { showToast } from './common/toast'
 import { KeeperConversationPanel, KeeperRuntimeActions } from './keeper-shared'
 
@@ -69,6 +74,7 @@ describe('KeeperConversationPanel', () => {
     keeperHydrating.value = {}
     keeperActionErrors.value = {}
     keeperStreamStartedAt.value = {}
+    shellAuthSummary.value = null
   })
 
   afterEach(() => {

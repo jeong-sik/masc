@@ -161,6 +161,7 @@ val dashboard_messages_safe :
 val provider_capacity_json : unit -> Yojson.Safe.t
 val dashboard_shell_http_json :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?request:Httpun.Request.t ->
   Room.config ->
   Yojson.Safe.t
 

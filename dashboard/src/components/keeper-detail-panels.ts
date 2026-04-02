@@ -218,7 +218,7 @@ function formatDuration(sec: number): string {
 export function ContextChart({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   if (series.length < 2) {
-    const pct = ((keeper.context?.context_ratio ?? 0) * 100)
+    const pct = ((keeper.context_ratio ?? keeper.context?.context_ratio ?? 0) * 100)
     const color = ctxColor(pct)
     return html`
       <div class="flex items-center gap-3 mb-5 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">

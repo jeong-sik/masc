@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
 import { isOfflineStatus } from '../lib/status-utils'
+import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import type { Keeper, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -23,7 +24,7 @@ import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import { showToast } from './common/toast'
 import { signal } from '@preact/signals'
-import { invalidateDashboardCache, refreshDashboard } from '../store'
+import { invalidateDashboardCache, refreshDashboard, shellAuthSummary } from '../store'
 
 const keeperBooting = signal<Record<string, boolean>>({})
 const keeperShuttingDown = signal<Record<string, boolean>>({})
@@ -265,6 +266,8 @@ export function KeeperConversationPanel({
   const sending = keeperSending.value[keeperName] ?? false
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
+  const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
+  const composerDisabled = !keeperName || chatAccess.blocked
 
   const expandHistory = async () => {
     setHistoryExpanded(true)
@@ -273,6 +276,10 @@ export function KeeperConversationPanel({
 
   const submit = async () => {
     const prompt = draft.trim()
+    if (chatAccess.blocked) {
+      showToast(chatAccess.message ?? '직접 통신 권한이 없습니다.', 'error')
+      return
+    }
     if (!keeperName || !prompt) return
     setDraft('')
     try {
@@ -335,6 +342,13 @@ export function KeeperConversationPanel({
         </div>
 
         <div class="px-4 py-4">
+          ${chatAccess.message
+            ? html`
+                <div class="mb-4 rounded-[16px] border border-[rgba(245,158,11,0.18)] bg-[rgba(245,158,11,0.08)] px-3 py-2.5 text-[12px] leading-[1.6] text-[#f4d79e]">
+                  ${chatAccess.message}
+                </div>
+              `
+            : null}
           <${ChatTranscript}
             entries=${thread}
             emptyText="아직 직접 대화가 없습니다. 내부 키퍼 프롬프트와 도구 호출은 숨김 처리됩니다."
@@ -354,8 +368,8 @@ export function KeeperConversationPanel({
         <div class="border-t border-[rgba(148,163,184,0.12)] bg-[rgba(255,255,255,0.03)] px-4 py-4">
           <${ChatComposer}
             draft=${draft}
-            placeholder=${placeholder}
-            disabled=${!keeperName}
+            placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : placeholder}
+            disabled=${composerDisabled}
             streaming=${sending}
             streamStartedAt=${keeperStreamStartedAt.value[keeperName] ?? null}
             onDraftChange=${setDraft}

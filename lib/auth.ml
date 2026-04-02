@@ -381,8 +381,8 @@ let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) res
 
 (** Resolve the effective role for an agent from auth context.
     Returns Error for invalid tokens (no silent downgrade). *)
-let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
-  let auth_cfg = load_auth_config config in
+let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token :
+    (agent_role, masc_error) result =
   if not auth_cfg.enabled then
     Ok Admin  (* Auth disabled = full access *)
   else if (match read_initial_admin config with
@@ -399,6 +399,35 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
         else
           Ok auth_cfg.default_role
 
+let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
+  let auth_cfg = load_auth_config config in
+  resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token
+
+let authorize_tool_for_role ~agent_name ~role ~tool_name :
+    (unit, masc_error) result =
+  let policy = Tool_access_role.policy_for_role role in
+  if not (Tool_access_policy.allows_name policy tool_name) then
+    Error (Forbidden { agent = agent_name; action = tool_name })
+  else if not (is_tool_auth_strict_enabled ()) then
+    Ok ()  (* Non-strict: policy check is sufficient *)
+  else
+    (* Strict mode: additional gate for unmapped tools *)
+    match permission_for_tool tool_name with
+    | Some _ -> Ok ()  (* Mapped tool — policy already checked *)
+    | None ->
+        if is_masc_tool_name tool_name
+           || is_protocol_canonical_tool_name tool_name then
+          (* Unmapped internal tool: require at least Worker *)
+          if has_permission role CanBroadcast then Ok ()
+          else Error (Forbidden { agent = agent_name; action = tool_name })
+        else
+          Error
+            (Forbidden
+               {
+                 agent = agent_name;
+                 action = "use unknown non-masc tool: " ^ tool_name;
+               })
+
 (** Policy-based tool authorization.
     Replaces authorize_tool with a single Tool_access_policy check.
     Invalid/expired tokens are rejected (not silently downgraded).
@@ -410,27 +439,7 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
 let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match resolve_role config ~agent_name ~token with
   | Error e -> Error e
-  | Ok role ->
-      let policy = Tool_access_role.policy_for_role role in
-      if not (Tool_access_policy.allows_name policy tool_name) then
-        Error (Forbidden { agent = agent_name; action = tool_name })
-      else if not (is_tool_auth_strict_enabled ()) then
-        Ok ()  (* Non-strict: policy check is sufficient *)
-      else
-        (* Strict mode: additional gate for unmapped tools *)
-        match permission_for_tool tool_name with
-        | Some _ -> Ok ()  (* Mapped tool — policy already checked *)
-        | None ->
-            if is_masc_tool_name tool_name
-               || is_protocol_canonical_tool_name tool_name then
-              (* Unmapped internal tool: require at least Worker *)
-              if has_permission role CanBroadcast then Ok ()
-              else Error (Forbidden { agent = agent_name; action = tool_name })
-            else
-              Error (Forbidden {
-                agent = agent_name;
-                action = "use unknown non-masc tool: " ^ tool_name
-              })
+  | Ok role -> authorize_tool_for_role ~agent_name ~role ~tool_name
 
 (* ============================================ *)
 (* Room secret (for room-level auth)            *)

@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('./store', () => ({
-  refreshShell: vi.fn(),
-  refreshExecution: vi.fn(),
-  refreshBoard: vi.fn(),
-  refreshGoals: vi.fn(),
-}))
+vi.mock('./store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./store')>()
+  return {
+    ...actual,
+    refreshShell: vi.fn(),
+    refreshExecution: vi.fn(),
+    refreshBoard: vi.fn(),
+    refreshGoals: vi.fn(),
+  }
+})
 
 vi.mock('./room-truth-store', () => ({
   requestRoomTruth: vi.fn(),

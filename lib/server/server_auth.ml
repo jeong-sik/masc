@@ -314,17 +314,24 @@ let is_public_read_path path =
 
 let resolve_agent_name_for_auth ~base_path request ~token :
     (string option, Types.masc_error) result =
-  match agent_from_request request with
-  | Some raw when String.trim raw <> "" -> Ok (Some (String.trim raw))
-  | _ ->
-      (match token with
-       | None -> Ok None
-       | Some t ->
-           (match Auth.resolve_agent_from_token base_path ~token:t with
-            | Ok agent_name -> Ok (Some agent_name)
-            | Error (Types.InvalidToken _ as e) -> Error e
-            | Error (Types.TokenExpired _ as e) -> Error e
-            | Error _ -> Ok None))
+  (* Prefer token-bound agent name over header to prevent transient
+     actor names (e.g. "dashboard-eager-manta") from overriding the
+     authenticated credential subject (#4628). *)
+  match token with
+  | Some t ->
+      (match Auth.resolve_agent_from_token base_path ~token:t with
+       | Ok agent_name -> Ok (Some agent_name)
+       | Error (Types.InvalidToken _ as e) -> Error e
+       | Error (Types.TokenExpired _ as e) -> Error e
+       | Error _ ->
+           (* Token lookup failed for other reasons; fall back to header *)
+           (match agent_from_request request with
+            | Some raw when String.trim raw <> "" -> Ok (Some (String.trim raw))
+            | _ -> Ok None))
+  | None ->
+      (match agent_from_request request with
+       | Some raw when String.trim raw <> "" -> Ok (Some (String.trim raw))
+       | _ -> Ok None)
 
 let authorize_permission_request ~base_path ~permission request :
     (unit, Types.masc_error) result =

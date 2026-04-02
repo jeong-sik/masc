@@ -71,6 +71,19 @@ function keeperTopTools(keeper: Keeper): string[] {
     .filter((item): item is string => item !== null)
 }
 
+export function resolveKeeperCurrentTaskLabel(
+  keeper: Keeper | null | undefined,
+): string {
+  const runtimeState = linkedRuntimeState(keeper)
+  if (!keeper) return 'unlinked'
+  if (runtimeState === 'offline') return 'offline'
+  if (!keeper.agent) return 'not_collected'
+  if (typeof keeper.agent.current_task === 'string' && keeper.agent.current_task.trim() !== '') {
+    return keeper.agent.current_task
+  }
+  return 'unassigned'
+}
+
 // ── Shared row component ─────────────────────────────────
 
 function SignalRow({ label, value }: { label: string; value: string | number }) {
@@ -237,7 +250,10 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
 // ── Neighborhood & Tool Audit ────────────────────────────
 
 export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
-  useEffect(() => { showAllowlistEditor.value = false }, [keeper.name])
+  useEffect(() => {
+    showAllowlistEditor.value = false
+    void loadKeeperConfig(keeper.name)
+  }, [keeper.name])
 
   const keeperConfig = peekLoadedKeeperConfig(keeper.name)
   const configLoadStatus = peekKeeperConfigLoadStatus(keeper.name)
@@ -265,9 +281,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
   const linkedRecentFallback = toolAuditStateLabel(linkedRecentToolsEmptyState(keeper))
   const runtimeState = linkedRuntimeState(keeper)
-  const currentTaskLabel =
-    keeper.agent?.current_task
-    ?? (runtimeState === 'offline' ? 'offline' : 'not_collected')
+  const currentTaskLabel = resolveKeeperCurrentTaskLabel(keeper)
   const skillRouteLabel =
     keeper.skill_primary
     ?? (runtimeState === 'offline' ? 'offline' : 'not_collected')

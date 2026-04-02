@@ -82,6 +82,15 @@ let write_file path contents =
     ~finally:(fun () -> close_out oc)
     (fun () -> output_string oc contents)
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
 let test_resolve_masc_base_path_keeps_git_root_resolution_when_env_ignored () =
   let scratch = Filename.temp_dir "room-utils-worktree" "" in
   let repo_root = Filename.concat scratch "repo" in
@@ -136,6 +145,45 @@ let test_resolve_masc_base_path_allows_test_opt_in () =
     (fun () ->
       check string "opt-in preserves inherited env" explicit
         (Room_utils.resolve_masc_base_path requested))
+
+let test_resolve_masc_base_path_ignores_dual_masc_roots_outside_test_override ()
+    =
+  let scratch = Filename.temp_dir "room-utils-dual-roots" "" in
+  let requested = Filename.concat scratch "repo" in
+  let explicit = Filename.concat scratch "parent-root" in
+  Unix.mkdir requested 0o755;
+  Unix.mkdir explicit 0o755;
+  Unix.mkdir (Filename.concat requested ".masc") 0o755;
+  Unix.mkdir (Filename.concat explicit ".masc") 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      with_envs
+        [ ("MASC_BASE_PATH", Some explicit);
+          ("MASC_ALLOW_INHERITED_BASE_PATH", None);
+          ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+        (fun () ->
+          check string "dual roots prefer requested path" requested
+            (Room_utils.resolve_masc_base_path requested)))
+
+let test_resolve_masc_base_path_allows_dual_root_opt_in () =
+  let scratch = Filename.temp_dir "room-utils-dual-opt-in" "" in
+  let requested = Filename.concat scratch "repo" in
+  let explicit = Filename.concat scratch "parent-root" in
+  Unix.mkdir requested 0o755;
+  Unix.mkdir explicit 0o755;
+  Unix.mkdir (Filename.concat requested ".masc") 0o755;
+  Unix.mkdir (Filename.concat explicit ".masc") 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      with_envs
+        [ ("MASC_BASE_PATH", Some explicit);
+          ("MASC_ALLOW_INHERITED_BASE_PATH", Some "true");
+          ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+        (fun () ->
+          check string "opt-in preserves explicit dual-root env" explicit
+            (Room_utils.resolve_masc_base_path requested)))
 
 let test_default_config_syncs_test_base_path_env () =
   let requested =
@@ -561,6 +609,10 @@ let () =
         test_resolve_masc_base_path_keeps_matching_explicit_env;
       test_case "allows explicit opt-in to inherited env" `Quick
         test_resolve_masc_base_path_allows_test_opt_in;
+      test_case "ignores dual .masc roots by default" `Quick
+        test_resolve_masc_base_path_ignores_dual_masc_roots_outside_test_override;
+      test_case "allows dual-root opt-in" `Quick
+        test_resolve_masc_base_path_allows_dual_root_opt_in;
       test_case "default config syncs test base env" `Quick
         test_default_config_syncs_test_base_path_env;
     ];

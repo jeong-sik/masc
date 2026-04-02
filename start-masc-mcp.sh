@@ -67,6 +67,13 @@ release_build_lock() {
     _masc_cleanup_lock
 }
 
+is_truthy() {
+    case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|y|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 build_dashboard_spa() {
     local dashboard_dir="$SCRIPT_DIR/dashboard"
     local log_file=""
@@ -369,28 +376,21 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Guard against worktree env inheritance: when a worktree child inherits
-# MASC_BASE_PATH pointing to its own repo root, both paths have .masc/
-# and using the parent path would silently operate on the wrong room state.
-#
-# Exception: if BASE_PATH is a genuinely different project (not this repo's
-# root), the user intentionally configured a parent project as MASC root
-# (e.g. MASC_BASE_PATH=~/me in .zshenv while running from ~/me/workspace/*/masc-mcp).
-# REPO_ENV_ROOT (git common dir) identifies the repo boundary.
+# Guard against inherited MASC_BASE_PATH ambiguity. When the caller shell
+# exports a parent project root and both that root and this checkout have
+# their own .masc directories, the server can silently read/write the wrong
+# state tree. Explicit --base-path must still win; inherited env needs an
+# opt-in to survive this ambiguity.
 if [ "$BASE_PATH_EXPLICIT" != "1" ] && \
    [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && \
    [ -n "$BASE_PATH" ] && \
-   [ "$BASE_PATH" != "$SCRIPT_DIR" ]; then
-    RESOLVED_ENV_ROOT="$(cd "$REPO_ENV_ROOT" && pwd)"
+   [ "$BASE_PATH" != "$SCRIPT_DIR" ] && \
+   ! is_truthy "${MASC_ALLOW_INHERITED_BASE_PATH:-0}"; then
     RESOLVED_BASE="$(cd "$BASE_PATH" 2>/dev/null && pwd || echo "$BASE_PATH")"
-    if [ "$RESOLVED_BASE" = "$RESOLVED_ENV_ROOT" ]; then
-        # BASE_PATH is this repo's own root — worktree inheritance. Guard applies.
-        if [ -d "$SCRIPT_DIR/.masc" ] && [ -d "$BASE_PATH/.masc" ]; then
-            echo "WARN: Ignoring inherited MASC_BASE_PATH=$BASE_PATH (same repo root). Using $SCRIPT_DIR for server state." >&2
-            BASE_PATH="$SCRIPT_DIR"
-        fi
+    if [ -d "$SCRIPT_DIR/.masc" ] && [ -d "$RESOLVED_BASE/.masc" ]; then
+        echo "WARN: Ignoring inherited MASC_BASE_PATH=$BASE_PATH because both $SCRIPT_DIR and $RESOLVED_BASE have .masc. Use --base-path or MASC_ALLOW_INHERITED_BASE_PATH=1 to keep the inherited root." >&2
+        BASE_PATH="$SCRIPT_DIR"
     fi
-    # If BASE_PATH is a different project, honor the env var unconditionally.
 fi
 
 if [ "$PORT_EXPLICIT" != "1" ]; then

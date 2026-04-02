@@ -473,3 +473,7 @@ let normalize_digest_target_type value =
       | "team_session" -> Ok "team_session"
       | _ -> Error "target_type must be one of: room, team_session")
   | None -> Ok "room"
+
+(* review_item type + helpers are in Operator_digest_review_types
+   to avoid field name collision with attention_item in modules
+   that include Operator_digest_types *)

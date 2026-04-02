@@ -48,7 +48,8 @@ export interface Message {
 export interface BoardPost {
   id: string
   author: string
-  post_kind?: 'human' | 'automation' | 'system'
+  post_kind?: 'direct' | 'automation' | 'system'
+  classification_reason?: string | null
   title: string
   body: string
   content: string

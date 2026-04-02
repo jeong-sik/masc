@@ -38,6 +38,21 @@ let json_upsert_string_field name value = function
   | _non_object ->
       failwith (Printf.sprintf "json_upsert_string_field: expected JSON object, got non-object for field %S" name)
 
+let json_ensure_meta_source source = function
+  | `Assoc fields ->
+      let meta_json =
+        match List.assoc_opt "meta" fields with
+        | Some (`Assoc meta_fields as existing_meta) -> (
+            match List.assoc_opt "source" meta_fields with
+            | Some (`String current) when String.trim current <> "" -> existing_meta
+            | _ -> `Assoc (("source", `String source) :: List.remove_assoc "source" meta_fields))
+        | _ -> `Assoc [ ("source", `String source) ]
+      in
+      let fields = ("meta", meta_json) :: List.remove_assoc "meta" fields in
+      `Assoc fields
+  | _non_object ->
+      failwith "json_ensure_meta_source: expected JSON object"
+
 let governance_surface_for_param_key param_key =
   Governance_registry.surfaces
   |> List.find_opt (fun (surface : Governance_registry.surface) ->
@@ -258,6 +273,7 @@ let add_routes ~sw ~clock router =
              let args =
                Yojson.Safe.from_string body_str
                |> json_upsert_string_field "author" agent_name
+               |> json_ensure_meta_source "dashboard_board_post"
              in
              let (ok, msg) = Tool_board.handle_tool "masc_board_post" args in
              let status = if ok then `Created else `Bad_request in

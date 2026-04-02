@@ -73,23 +73,24 @@ describe('Memory Component', () => {
     expect(screen.getByText(/메모리 피드 불러오는 중/)).toBeInTheDocument()
   })
   
-  it('renders a list of human posts', () => {
+  it('renders a list of direct posts', () => {
     boardPosts.value = [
       {
         id: 'post-1',
         title: 'Test Post',
         body: 'Hello world',
-        author: 'human-agent',
+        author: 'direct-agent',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         comment_count: 0,
         votes: 0,
-        post_kind: 'human',
+        post_kind: 'direct',
       }
     ] as any
     render(h(Memory, null))
     expect(screen.getByText('Test Post')).toBeInTheDocument()
-    expect(screen.getByText(/현재 목록은 사람 글만 있어서/)).toBeInTheDocument()
+    expect(screen.getByText(/현재 목록은 직접 작성 글만 있어서/)).toBeInTheDocument()
+    expect(screen.getByText(/직접 작성 글 \(1\)/)).toBeInTheDocument()
   })
 
   it('separates automation posts into the autonomy section', () => {

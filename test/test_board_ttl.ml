@@ -64,7 +64,7 @@ let () =
     Printf.printf "✓ Sweeper removed 0 permanent posts\n"
   in
 
-  let test_post_kind_human_default () =
+  let test_post_kind_direct_default () =
     let store = create_store () in
     match
       create_post store ~author:"test-agent" ~content:"Human post"
@@ -73,9 +73,14 @@ let () =
     | Ok post ->
         let json = post_to_yojson post in
         let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
-        assert (String.equal kind "human");
-        Printf.printf "✓ Default board post kind is human\n"
-    | Error e -> fail_board_test "Failed to create human post" e
+        let reason =
+          Yojson.Safe.Util.(json |> member "classification_reason" |> to_string)
+        in
+        assert (String.equal kind "direct");
+        assert
+          (String.equal reason "Direct board post without automation provenance.");
+        Printf.printf "✓ Default board post kind is direct\n"
+    | Error e -> fail_board_test "Failed to create direct post" e
   in
 
   let test_post_kind_automation_contract () =
@@ -114,7 +119,12 @@ let test_post_kind_keeper_provenance_upgrade () =
         assert (classify_post_kind post = Automation_post);
         let json = post_to_yojson post in
         let kind = Yojson.Safe.Util.(json |> member "post_kind" |> to_string) in
+        let reason =
+          Yojson.Safe.Util.(json |> member "classification_reason" |> to_string)
+        in
         assert (String.equal kind "automation");
+        assert
+          (String.equal reason "Keeper board adapter forced automation classification.");
         Printf.printf "✓ Keeper provenance preserves automation post kind\n"
   | Error e -> fail_board_test "Failed to create keeper provenance post" e
   in
@@ -123,7 +133,7 @@ let test_post_kind_keeper_provenance_upgrade () =
   test_permanent_post ();
   test_expiring_post ();
   test_sweeper_skips_permanent ();
-  test_post_kind_human_default ();
+  test_post_kind_direct_default ();
   test_post_kind_automation_contract ();
   test_post_kind_system_contract ();
   test_post_kind_keeper_provenance_upgrade ();

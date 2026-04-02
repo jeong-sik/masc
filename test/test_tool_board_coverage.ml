@@ -203,7 +203,7 @@ let test_post_create_structured_payload () =
     Yojson.Safe.Util.(json |> member "body" |> to_string);
   Alcotest.(check string) "content alias" "Visible answer"
     Yojson.Safe.Util.(json |> member "content" |> to_string);
-  Alcotest.(check string) "public posts stay human" "human"
+  Alcotest.(check string) "public posts stay direct" "direct"
     Yojson.Safe.Util.(json |> member "post_kind" |> to_string);
   Alcotest.(check string) "source meta kept" "keeper_autonomy"
     Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string);
@@ -737,7 +737,7 @@ let () =
         ] );
       ( "post_kind_registry",
         [
-          Alcotest.test_case "no hook: defaults to human" `Quick (fun () ->
+          Alcotest.test_case "no hook: defaults to direct" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
@@ -747,8 +747,8 @@ let () =
               ("author", `String "claude-agent")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check bool) "classified as human" true
-              (contains_substring msg {|"post_kind": "human"|}));
+            Alcotest.(check bool) "classified as direct" true
+              (contains_substring msg {|"post_kind": "direct"|}));
           Alcotest.test_case "with hook: agent classified as automation" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -761,7 +761,7 @@ let () =
             Alcotest.(check bool) "post created" true ok;
             Alcotest.(check bool) "classified as automation" true
               (contains_substring msg {|"post_kind": "automation"|}));
-          Alcotest.test_case "with hook: non-agent stays human" `Quick (fun () ->
+          Alcotest.test_case "with hook: non-agent stays direct" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
@@ -771,9 +771,9 @@ let () =
               ("author", `String "sangsu")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check bool) "classified as human" true
-              (contains_substring msg {|"post_kind": "human"|}));
-          Alcotest.test_case "explicit override respected" `Quick (fun () ->
+            Alcotest.(check bool) "classified as direct" true
+              (contains_substring msg {|"post_kind": "direct"|}));
+          Alcotest.test_case "legacy human override normalizes to direct" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
@@ -784,7 +784,7 @@ let () =
               ("post_kind", `String "human")
             ]) in
             Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check bool) "explicit human override" true
-              (contains_substring msg {|"post_kind": "human"|}));
+            Alcotest.(check bool) "legacy override normalized to direct" true
+              (contains_substring msg {|"post_kind": "direct"|}));
         ] );
     ]

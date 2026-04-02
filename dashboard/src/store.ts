@@ -89,6 +89,7 @@ export const boardPosts = signal<BoardPost[]>([])
 export const boardSortMode = signal<BoardSortMode>('recent')
 export const boardExcludeSystem = signal(true)
 export const boardExcludeAutomation = signal(false)
+export const boardAuthorFilter = signal('')
 
 export function removeBoardPost(postId: string | undefined): void {
   if (!postId) return
@@ -440,6 +441,7 @@ export async function refreshBoard(): Promise<void> {
     const data = await fetchDashboardMemory(boardSortMode.value, {
       excludeSystem: boardExcludeSystem.value,
       excludeAutomation: boardExcludeAutomation.value,
+      author: boardAuthorFilter.value || undefined,
     })
     boardPosts.value = data.posts ?? []
     lastBoardRefreshAt.value = new Date().toISOString()

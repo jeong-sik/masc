@@ -248,12 +248,13 @@ export function fetchDashboardPerf(): Promise<DashboardPerfResponse> {
 
 export function fetchDashboardMemory(
   sortMode: BoardSortMode,
-  opts?: { excludeSystem?: boolean; excludeAutomation?: boolean },
+  opts?: { excludeSystem?: boolean; excludeAutomation?: boolean; author?: string },
 ): Promise<DashboardMemoryResponse> {
   const params = new URLSearchParams()
   params.set('sort_by', sortMode)
   if (opts?.excludeSystem) params.set('exclude_system', 'true')
   if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
+  if (opts?.author) params.set('author', opts.author)
   return get(`/api/v1/dashboard/board${params.toString() ? `?${params}` : ''}`)
 }
 

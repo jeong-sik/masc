@@ -130,13 +130,13 @@ let request ?(timeout_sec=10.0) ?(fallback=true) body : (string, string) result 
         | Error _ as error -> error
         | Ok https ->
             let header_list = Cohttp.Header.to_list headers in
-            let code, body_str =
-              Masc_http_client.post_sync ~net ~https ~url ~headers:header_list
-                ~body ()
-            in
-            if not (Cohttp.Code.is_success code) then
-              Error (Printf.sprintf "HTTP %d" code)
-            else ensure_json_response body_str
+            (match Masc_http_client.post_sync ~net ~https ~url ~headers:header_list
+                ~body () with
+            | Error e -> Error (Printf.sprintf "HTTP request failed: %s" e)
+            | Ok (code, body_str) ->
+                if not (Cohttp.Code.is_success code) then
+                  Error (Printf.sprintf "HTTP %d" code)
+                else ensure_json_response body_str)
       in
       match Eio_context.get_clock_opt () with
       | Some clock ->

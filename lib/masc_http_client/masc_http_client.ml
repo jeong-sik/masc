@@ -51,39 +51,50 @@ let make_closing_client ~sw ~net ~https =
         (try Eio.Net.close sock with _ -> ()));
   client
 
+(** POST with structured error handling.
+    DNS resolution, TLS, and I/O errors return Error instead of crashing the fiber. *)
 let post_sync ~net ?(https = None) ~url ~headers ~body () =
-  Eio.Switch.run @@ fun sw ->
-  let client = make_closing_client ~sw ~net ~https in
-  let uri = Uri.of_string url in
-  let hdr =
-    Cohttp.Header.of_list (("connection", "close") :: headers)
-  in
-  let body_content = Eio.Flow.string_source body in
-  let resp, resp_body =
-    Cohttp_eio.Client.post client ~sw uri ~headers:hdr ~body:body_content
-  in
-  let code =
-    Cohttp.Response.status resp |> Cohttp.Code.code_of_status
-  in
-  let body_str =
-    Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024 * 1024)
-  in
-  (code, body_str)
+  try
+    Eio.Switch.run @@ fun sw ->
+    let client = make_closing_client ~sw ~net ~https in
+    let uri = Uri.of_string url in
+    let hdr =
+      Cohttp.Header.of_list (("connection", "close") :: headers)
+    in
+    let body_content = Eio.Flow.string_source body in
+    let resp, resp_body =
+      Cohttp_eio.Client.post client ~sw uri ~headers:hdr ~body:body_content
+    in
+    let code =
+      Cohttp.Response.status resp |> Cohttp.Code.code_of_status
+    in
+    let body_str =
+      Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024 * 1024)
+    in
+    Ok (code, body_str)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Printexc.to_string exn)
 
+(** GET with structured error handling. *)
 let get_sync ~net ?(https = None) ~url ~headers () =
-  Eio.Switch.run @@ fun sw ->
-  let client = make_closing_client ~sw ~net ~https in
-  let uri = Uri.of_string url in
-  let hdr =
-    Cohttp.Header.of_list (("connection", "close") :: headers)
-  in
-  let resp, resp_body =
-    Cohttp_eio.Client.get client ~sw ~headers:hdr uri
-  in
-  let code =
-    Cohttp.Response.status resp |> Cohttp.Code.code_of_status
-  in
-  let body_str =
-    Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024 * 1024)
-  in
-  (code, body_str)
+  try
+    Eio.Switch.run @@ fun sw ->
+    let client = make_closing_client ~sw ~net ~https in
+    let uri = Uri.of_string url in
+    let hdr =
+      Cohttp.Header.of_list (("connection", "close") :: headers)
+    in
+    let resp, resp_body =
+      Cohttp_eio.Client.get client ~sw ~headers:hdr uri
+    in
+    let code =
+      Cohttp.Response.status resp |> Cohttp.Code.code_of_status
+    in
+    let body_str =
+      Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024 * 1024)
+    in
+    Ok (code, body_str)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Printexc.to_string exn)

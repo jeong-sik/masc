@@ -196,11 +196,11 @@ let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
             | _ -> [])
         in
         let url = mcp_endpoint_url ~auth_token in
-        let status, raw_body =
-          Masc_http_client.post_sync ~net ~url ~headers ~body:request_body ()
-        in
-        if Cohttp.Code.is_success status then Ok raw_body
-        else Error (sprintf "MASC HTTP %d: %s" status raw_body)
+        (match Masc_http_client.post_sync ~net ~url ~headers ~body:request_body () with
+        | Error e -> Error (sprintf "MASC HTTP request failed: %s" e)
+        | Ok (status, raw_body) ->
+            if Cohttp.Code.is_success status then Ok raw_body
+            else Error (sprintf "MASC HTTP %d: %s" status raw_body))
       with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : string)

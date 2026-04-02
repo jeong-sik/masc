@@ -203,8 +203,10 @@ let masc_call ~sw:_ ~tool_name ~(args : Yojson.Safe.t) : (string, string) result
           ("Accept", "application/json, text/event-stream");
         ] in
         let code, body_str =
-          Masc_http_client.post_sync ~net ~url:(Uri.to_string uri)
-            ~headers ~body ()
+          match Masc_http_client.post_sync ~net ~url:(Uri.to_string uri)
+            ~headers ~body () with
+          | Ok v -> v
+          | Error e -> raise (Failure e)
         in
         if not (Cohttp.Code.is_success code) then
           Error (Printf.sprintf "MASC HTTP %d" code)

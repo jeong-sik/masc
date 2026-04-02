@@ -1,6 +1,31 @@
 open Masc_mcp
 open Test_tool_team_session_support
 
+let make_runtime ?model ?(max_concurrency = 2) id base_url =
+  {
+    Local_runtime_pool.id;
+    base_url;
+    model;
+    max_concurrency;
+    active_slots = 0;
+    queue_depth = 0;
+    latency_ema_ms = None;
+    failure_streak = 0;
+    cooldown_until = None;
+    last_error = None;
+    total_started = 0;
+    total_success = 0;
+    total_failure = 0;
+  }
+
+let install_runtime_pool runtimes =
+  Local_runtime_pool.pool :=
+    {
+      Local_runtime_pool.empty_pool with
+      runtimes;
+      fingerprint = Local_runtime_pool.current_fingerprint ();
+    }
+
 let test_step_spawn_batch_records_planned_workers () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->

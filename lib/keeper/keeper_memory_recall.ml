@@ -16,7 +16,10 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
       let ic = open_in path in
       Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
         let file_len = in_channel_length ic in
-        let read_start = max 0 (file_len - max_bytes) in
+        let read_start =
+          if max_bytes <= 0 then 0
+          else max 0 (file_len - max_bytes)
+        in
         seek_in ic read_start;
         let chunk_len = file_len - read_start in
         let buf = Bytes.create chunk_len in

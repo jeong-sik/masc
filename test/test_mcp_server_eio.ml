@@ -1568,6 +1568,34 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
 
   cleanup_dir base_path
 
+let test_execute_tool_generated_agent_name_uses_token_identity () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  let raw_token =
+    match Masc_mcp.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Types.Admin with
+    | Ok (token, _cred) -> token
+    | Error e -> Alcotest.fail (Types.masc_error_to_string e)
+  in
+
+  let (ok_status, status_msg) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
+      ~name:"masc_auth_status"
+      ~arguments:(`Assoc [("agent_name", `String "dashboard-eager-manta")])
+  in
+  Alcotest.(check bool) "auth status succeeds" true ok_status;
+  Alcotest.(check bool) "auth status payload returned" true
+    (contains_substring status_msg "Authentication Status");
+
+  cleanup_dir base_path
+
 let test_execute_tool_mcp_session_ignores_term_persistence () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2642,6 +2670,8 @@ let eio_tests = [
     test_should_read_legacy_persisted_agent_name;
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
   "explicit alias reuses joined nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
+  "generated agent_name uses token identity", `Quick,
+    test_execute_tool_generated_agent_name_uses_token_identity;
   "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;
   "convo start uses current room", `Quick, test_convo_start_uses_current_room;
 ]

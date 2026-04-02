@@ -39,6 +39,27 @@ let test_generate_token_unique () =
   let t2 = Auth.generate_token () in
   check bool "unique" true (t1 <> t2)
 
+let setup_test_room () =
+  let unique_id =
+    Printf.sprintf "masc-auth-coverage-%d-%d"
+      (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))
+  in
+  let tmp = Filename.concat (Filename.get_temp_dir_name ()) unique_id in
+  Unix.mkdir tmp 0o755;
+  let masc_dir = Filename.concat tmp ".masc" in
+  Unix.mkdir masc_dir 0o755;
+  tmp
+
+let cleanup_test_room dir =
+  let rec rm_rf path =
+    if Sys.is_directory path then begin
+      Array.iter (fun f -> rm_rf (Filename.concat path f)) (Sys.readdir path);
+      Unix.rmdir path
+    end else
+      Sys.remove path
+  in
+  try rm_rf dir with _ -> ()
+
 (* ============================================================
    sha256_hash Tests
    ============================================================ *)
@@ -610,6 +631,58 @@ let test_permission_for_tool_empty () =
   | None -> ()
   | Some _ -> fail "expected None for empty string"
 
+let test_resolve_agent_name_prefers_token_for_generated_actor () =
+  let module SA = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let raw_token =
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        | Ok (token, _cred) -> token
+        | Error e -> fail (Types.masc_error_to_string e)
+      in
+      let headers =
+        Httpun.Headers.of_list
+          [
+            ("authorization", "Bearer " ^ raw_token);
+            ("x-masc-agent", "dashboard-eager-manta");
+          ]
+      in
+      let request = Httpun.Request.create ~headers `POST "/mcp" in
+      match SA.resolve_agent_name_for_auth ~base_path:dir request ~token:(Some raw_token) with
+      | Ok (Some agent_name) ->
+          check string "token subject wins for generated actor" "stable-admin" agent_name
+      | Ok None -> fail "expected resolved agent name"
+      | Error e -> fail (Types.masc_error_to_string e))
+
+let test_resolve_agent_name_preserves_explicit_stable_actor () =
+  let module SA = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let raw_token =
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        | Ok (token, _cred) -> token
+        | Error e -> fail (Types.masc_error_to_string e)
+      in
+      let headers =
+        Httpun.Headers.of_list
+          [
+            ("authorization", "Bearer " ^ raw_token);
+            ("x-masc-agent", "dashboard-admin");
+          ]
+      in
+      let request = Httpun.Request.create ~headers `POST "/mcp" in
+      match SA.resolve_agent_name_for_auth ~base_path:dir request ~token:(Some raw_token) with
+      | Ok (Some agent_name) ->
+          check string "stable actor preserved" "dashboard-admin" agent_name
+      | Ok None -> fail "expected explicit stable actor"
+      | Error e -> fail (Types.masc_error_to_string e))
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -721,6 +794,10 @@ let () =
       test_case "header token only" `Quick test_http_auth_token_from_header_only;
       test_case "reject query token fallback" `Quick
         test_http_auth_rejects_query_token_fallback;
+      test_case "generated actor prefers token subject" `Quick
+        test_resolve_agent_name_prefers_token_for_generated_actor;
+      test_case "stable actor preserved" `Quick
+        test_resolve_agent_name_preserves_explicit_stable_actor;
       test_case "same-origin rejects missing origin without token" `Quick
         test_same_origin_browser_request_rejects_missing_origin;
       test_case "same-origin allows matching origin" `Quick

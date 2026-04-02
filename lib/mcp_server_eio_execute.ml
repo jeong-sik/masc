@@ -18,6 +18,9 @@ let resolve_join_state ~room_initialized ~join_required ~agent_name ~check_join 
 let is_ephemeral_agent_name name =
   String.length name >= 6 && String.sub name 0 6 = "agent-"
 
+let is_transient_agent_name name =
+  is_ephemeral_agent_name name || Nickname.is_generated_nickname name
+
 let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =
   (not has_explicit_agent_name) && is_ephemeral_agent_name agent_name
 
@@ -194,7 +197,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   let agent_name =
     match token with
-    | Some t when is_ephemeral_agent_name agent_name ->
+    (* Generated dashboard/session aliases should not outrank the
+       credential owner encoded by the bearer token. *)
+    | Some t when is_transient_agent_name agent_name ->
         (match Auth.resolve_agent_from_token config.base_path ~token:t with
          | Ok resolved -> resolved
          | Error _ -> agent_name)

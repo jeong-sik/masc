@@ -6,7 +6,7 @@
 
 import { signal } from '@preact/signals'
 import { fetchAgentTimeline, fetchKeeperTrajectory } from '../../api/dashboard'
-import type { AgentTimelineEvent, TrajectoryEntry } from '../../api/dashboard'
+import type { AgentTimelineEvent, AgentTimelineResponse, TrajectoryEntry, TrajectoryResponse } from '../../api/dashboard'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -179,6 +179,17 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
     }
   }
 
+  if (evt.type === 'joined' || evt.type === 'left') {
+    return {
+      id: `tl-${ts}-${evt.type}-${index}`,
+      ts,
+      ts_iso: evt.ts ?? new Date(ts).toISOString(),
+      kind: 'lifecycle',
+      summary: evt.type,
+      detail,
+    }
+  }
+
   const title = typeof detail.title === 'string' ? detail.title : ''
   const taskId = typeof detail.task_id === 'string' ? detail.task_id : ''
   return {
@@ -212,6 +223,28 @@ function trajectoryEntryToTrace(entry: TrajectoryEntry, index: number): UnifiedT
   }
 }
 
+// ── Pure merge function (reusable by task-detail) ──────
+
+/** Build a deduplicated, time-sorted trace from timeline + trajectory data.
+ *  Extracted from loadSessionTrace for reuse in task detail overlay. */
+export function buildTraceEvents(
+  timeline: AgentTimelineResponse,
+  trajectory: TrajectoryResponse | null,
+): UnifiedTraceEvent[] {
+  const timelineTraces = (timeline.events ?? []).map(timelineEventToTrace)
+  const trajectoryTraces = trajectory
+    ? (trajectory.entries ?? []).map(trajectoryEntryToTrace)
+    : []
+  const merged = [...timelineTraces, ...trajectoryTraces]
+  merged.sort((a, b) => a.ts - b.ts)
+  const seen = new Set<string>()
+  return merged.filter(e => {
+    if (seen.has(e.id)) return false
+    seen.add(e.id)
+    return true
+  })
+}
+
 // ── Actions ────────────────────────────────────────────
 
 const TIMELINE_HOURS = 24
@@ -235,21 +268,7 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
     // Discard result if slot was closed or a newer fetch was started during await.
     if (getSlot(agentName).fetchToken !== token) return
 
-    const timelineTraces = (timeline.events ?? []).map(timelineEventToTrace)
-    const trajectoryTraces = trajectory
-      ? (trajectory.entries ?? []).map(trajectoryEntryToTrace)
-      : []
-
-    // Merge, sort by timestamp ascending, deduplicate by id
-    const merged = [...timelineTraces, ...trajectoryTraces]
-    merged.sort((a, b) => a.ts - b.ts)
-
-    const seen = new Set<string>()
-    const deduped = merged.filter(e => {
-      if (seen.has(e.id)) return false
-      seen.add(e.id)
-      return true
-    })
+    const deduped = buildTraceEvents(timeline, trajectory)
 
     // Final stale check before writing
     if (getSlot(agentName).fetchToken !== token) return

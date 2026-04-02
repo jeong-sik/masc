@@ -15,8 +15,17 @@ import {
   taskEventsLoading,
   taskEventsError,
   assigneeGoalIds,
+  activeTab,
+  switchToActivityTab,
+  activityEvents,
+  activityLoading,
+  activityError,
+  hasActivityTab,
+  isKeeperAssignee,
   type NormalizedTaskEvent,
+  type TaskDetailTab,
 } from './task-detail-state'
+import { TaskActivityList } from './task-activity-list'
 import { goalById, priorityLabel } from './goal-helpers'
 
 // -- Event timeline (inline, NormalizedTaskEvent shape) --------------
@@ -129,30 +138,58 @@ export function TaskDetailOverlay() {
         >\u2715</button>
       </div>
 
+      ${'' /* Tab bar */}
+      ${hasActivityTab(task) ? html`
+        <div class="flex items-center gap-1 px-6 pt-3 pb-0">
+          ${(['overview', 'activity'] as TaskDetailTab[]).map(tab => html`
+            <button
+              key=${tab}
+              type="button"
+              class="px-3 py-1.5 rounded-lg text-[12px] font-medium border cursor-pointer transition-colors ${
+                activeTab.value === tab
+                  ? 'border-accent/40 bg-accent/12 text-[#9ad9ff]'
+                  : 'border-transparent text-text-muted hover:bg-[var(--white-8)]'
+              }"
+              onClick=${() => tab === 'activity' ? switchToActivityTab(task) : (activeTab.value = 'overview')}
+            >${tab === 'overview' ? '개요' : '담당자 최근 활동'}</button>
+          `)}
+        </div>
+      ` : null}
+
       ${'' /* Body */}
       <div class="flex flex-col gap-5 p-6">
-        ${'' /* Description */}
-        ${task.description ? html`
+        ${activeTab.value === 'overview' ? html`
+          ${'' /* Description */}
+          ${task.description ? html`
+            <div>
+              <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">설명</div>
+              <div class="text-[13px] leading-relaxed text-text-body whitespace-pre-wrap break-words">${task.description}</div>
+            </div>
+          ` : null}
+
+          ${'' /* Goal relation */}
+          <${GoalRelationSection} goalIds=${goalIds} />
+
+          ${'' /* Recent task events */}
           <div>
-            <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">설명</div>
-            <div class="text-[13px] leading-relaxed text-text-body whitespace-pre-wrap break-words">${task.description}</div>
+            <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">최근 태스크 이벤트</div>
+            <${TaskEventsSection} />
           </div>
-        ` : null}
 
-        ${'' /* Goal relation */}
-        <${GoalRelationSection} goalIds=${goalIds} />
-
-        ${'' /* Recent task events */}
-        <div>
-          <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">최근 태스크 이벤트</div>
-          <${TaskEventsSection} />
-        </div>
-
-        ${'' /* Metadata */}
-        <div class="flex flex-wrap items-center gap-3 text-[11px] text-text-dim border-t border-[var(--card-border)] pt-4">
-          ${task.created_at ? html`<span>생성: <${TimeAgo} timestamp=${task.created_at} /></span>` : null}
-          <span class="font-mono">${task.id}</span>
-        </div>
+          ${'' /* Metadata */}
+          <div class="flex flex-wrap items-center gap-3 text-[11px] text-text-dim border-t border-[var(--card-border)] pt-4">
+            ${task.created_at ? html`<span>생성: <${TimeAgo} timestamp=${task.created_at} /></span>` : null}
+            <span class="font-mono">${task.id}</span>
+          </div>
+        ` : html`
+          ${'' /* Activity tab */}
+          <${TaskActivityList}
+            events=${activityEvents.value}
+            loading=${activityLoading.value}
+            error=${activityError.value}
+            showToolCalls=${isKeeperAssignee(task)}
+          />
+        `}
       </div>
     <//>
   `

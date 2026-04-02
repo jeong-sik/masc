@@ -181,7 +181,7 @@ let test_run_process_with_timeout_returns_124_on_timeout () =
   let result =
     Lib.Tool_command_plane_support.run_process_with_timeout
       ~clock_opt:(Some (Eio.Stdenv.clock env)) ~timeout_sec:1
-      ~prog:"/bin/sh" ~argv:[ "/bin/sh"; "-c"; "trap '' TERM; sleep 5" ]
+      ~prog:"/bin/sh" ~argv:[ "/bin/sh"; "-c"; "trap '' TERM; kill -STOP $$" ]
       ~env:(Unix.environment ()) ()
   in
   check int "timeout exit code" 124 result.exit_code

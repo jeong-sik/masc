@@ -272,7 +272,9 @@ let room_recommendations ?command_plane_summary config =
   in
   dedup_recommendations signal_recommendations
 
-type review_item = {
+(* Re-export from Operator_digest_review_types without [include] to
+   avoid conflicting [module U] and leaking [open] directives. *)
+type review_item = Operator_digest_review_types.review_item = {
   id : string;
   kind : string;
   target_type : string;
@@ -291,36 +293,14 @@ type review_item = {
   friction : Yojson.Safe.t;
   advice : Yojson.Safe.t;
 }
-
-let review_empty_advice_json =
-  `Assoc
-    [
-      ("active_summary", `Null);
-      ("active_guidance_layer", `Null);
-      ("authoritative_judgment_available", `Bool false);
-    ]
-
-let review_truth_ref_json ~target_type ~target_id =
-  `Assoc
-    [
-      ("target_type", `String target_type);
-      ("target_id", string_option_to_json target_id);
-    ]
-
-let json_string_opt json key =
-  json |> U.member key |> U.to_string_option
-
-let json_float_opt json key =
-  match json |> U.member key with
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
-  | `Intlit raw -> (try Some (float_of_string raw) with Failure _ -> None)
-  | _ -> None
-
-let json_bool_opt json key =
-  match json |> U.member key with
-  | `Bool value -> Some value
-  | _ -> None
+let review_empty_advice_json = Operator_digest_review_types.review_empty_advice_json
+let review_truth_ref_json = Operator_digest_review_types.review_truth_ref_json
+let json_string_opt = Operator_digest_review_types.json_string_opt
+let json_float_opt = Operator_digest_review_types.json_float_opt
+let json_bool_opt = Operator_digest_review_types.json_bool_opt
+let review_fingerprint = Operator_digest_review_types.review_fingerprint
+let stale_sec_of_iso = Operator_digest_review_types.stale_sec_of_iso
+let review_action_copy = Operator_digest_review_types.review_action_copy
 
 let room_state_json config =
   if not (Room.is_initialized config) then
@@ -378,30 +358,8 @@ let lightweight_keeper_rows config =
                    ("updated_at", `String meta.updated_at);
                  ]))
 
-let review_fingerprint parts =
-  let payload = String.concat "|" parts in
-  Digestif.SHA256.(digest_string payload |> to_hex)
-
-let stale_sec_of_iso ~now iso =
-  Option.bind iso (fun value ->
-      try Some (max 0 (int_of_float (now -. Types.parse_iso8601 value)))
-      with Failure _ -> None)
-
-let review_action_copy = function
-  | "broadcast" -> "전체 공지"
-  | "room_pause" -> "방 일시정지"
-  | "room_resume" -> "방 재개"
-  | "team_note" -> "세션 메모"
-  | "team_broadcast" -> "세션 공지"
-  | "team_task_inject" -> "세션 작업 주입"
-  | "team_worker_spawn_batch" -> "세션 작업자 교체"
-  | "team_stop" -> "세션 중지"
-  | "keeper_message" -> "키퍼 메시지"
-  | "keeper_probe" -> "키퍼 점검"
-  | "keeper_recover" -> "키퍼 복구"
-  | "review_resolve" -> "검토 해결"
-  | "review_defer" -> "검토 보류"
-  | other -> other
+(* review_fingerprint, stale_sec_of_iso, review_action_copy
+   — now in Operator_digest_review_types (available via include above) *)
 
 let urgency_rank = function
   | "now" -> 1

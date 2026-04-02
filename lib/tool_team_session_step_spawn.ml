@@ -31,6 +31,8 @@ let execute_spawn_pipeline
     List.iter
       (fun (execution : prepared_execution) ->
         let prepared = execution.prepared in
+        append_spawn_requested_event_with_backend ~worker_run_id:prepared.worker_run_id
+          prepared ~worker_backend:(Some execution.worker_backend);
         release_prepared_runtime prepared ~success:false ~error ();
         append_spawn_event
           ~worker_run_id:prepared.worker_run_id
@@ -174,7 +176,8 @@ let execute_spawn_pipeline
                    | Ok () ->
                        (match ensure_all prepared_spawns_for_actors with
                        | Error msg ->
-                           fail_all_prepared prepared_spawns ~error:msg;
+                           fail_all_prepared_executions prepared_executions
+                             ~error:msg;
                            Some (`Assoc [ ("error", `String msg) ])
                        | Ok () ->
                        let execute_spawn ~run_sw index

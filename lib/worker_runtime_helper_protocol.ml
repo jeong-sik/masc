@@ -1,4 +1,5 @@
 module Oas = Agent_sdk
+module Llm_provider = Llm_provider
 
 type error_kind =
   | Spec_parse
@@ -25,52 +26,126 @@ let error_kind_of_string value =
   | "internal" -> Some Internal
   | _ -> None
 
-let hex_char value =
-  if value < 10 then Char.chr (Char.code '0' + value)
-  else Char.chr (Char.code 'a' + value - 10)
+let option_to_yojson to_json = function
+  | Some value -> to_json value
+  | None -> `Null
 
-let hex_encode text =
-  let len = String.length text in
-  let bytes = Bytes.create (len * 2) in
-  for idx = 0 to len - 1 do
-    let code = Char.code text.[idx] in
-    Bytes.set bytes (idx * 2) (hex_char ((code lsr 4) land 0xF));
-    Bytes.set bytes ((idx * 2) + 1) (hex_char (code land 0xF))
-  done;
-  Bytes.unsafe_to_string bytes
+let ( let* ) = Result.bind
 
-let hex_value = function
-  | '0' .. '9' as ch -> Char.code ch - Char.code '0'
-  | 'a' .. 'f' as ch -> 10 + Char.code ch - Char.code 'a'
-  | 'A' .. 'F' as ch -> 10 + Char.code ch - Char.code 'A'
-  | ch ->
-      invalid_arg
-        (Printf.sprintf "invalid hex character in worker helper payload: %c" ch)
+let int_option_of_yojson = function
+  | `Null -> Ok None
+  | `Int value -> Ok (Some value)
+  | `Intlit value -> (
+      try Ok (Some (int_of_string value))
+      with Failure _ -> Error "invalid int option in worker helper payload")
+  | _ -> Error "invalid int option in worker helper payload"
 
-let hex_decode text =
-  let len = String.length text in
-  if len mod 2 <> 0 then invalid_arg "hex payload length must be even";
-  let bytes = Bytes.create (len / 2) in
-  let rec loop idx =
-    if idx >= len then ()
-    else
-      let hi = hex_value text.[idx] in
-      let lo = hex_value text.[idx + 1] in
-      Bytes.set bytes (idx / 2) (Char.chr ((hi lsl 4) lor lo));
-      loop (idx + 2)
-  in
-  loop 0;
-  Bytes.unsafe_to_string bytes
+let float_option_of_yojson = function
+  | `Null -> Ok None
+  | `Float value -> Ok (Some value)
+  | `Int value -> Ok (Some (float_of_int value))
+  | `Intlit value -> (
+      try Ok (Some (float_of_string value))
+      with Failure _ -> Error "invalid float option in worker helper payload")
+  | `String value -> (
+      try Ok (Some (float_of_string value))
+      with Failure _ -> Error "invalid float option in worker helper payload")
+  | _ -> Error "invalid float option in worker helper payload"
 
-let marshal_run_result (run_result : Worker_container_types.run_result) =
-  run_result |> fun value -> Marshal.to_string value [] |> hex_encode
+let string_list_of_yojson = function
+  | `List values ->
+      List.fold_right
+        (fun value acc ->
+          match (value, acc) with
+          | `String s, Ok rest -> Ok (s :: rest)
+          | _, Ok _ -> Error "invalid string list in worker helper payload"
+          | _, Error msg -> Error msg)
+        values (Ok [])
+  | _ -> Error "invalid string list in worker helper payload"
 
-let unmarshal_run_result payload =
-  let raw = hex_decode payload in
-  Marshal.from_string raw 0
+let api_response_to_yojson =
+  option_to_yojson Llm_provider.Cache.response_to_json
+
+let api_response_of_yojson = function
+  | `Null -> Ok None
+  | json -> (
+      match Llm_provider.Cache.response_of_json json with
+      | Some response -> Ok (Some response)
+      | None -> Error "invalid api_response in worker helper payload")
+
+let proof_to_yojson =
+  option_to_yojson Oas.Cdal_proof.to_json
+
+let proof_of_yojson = function
+  | `Null -> Ok None
+  | json -> (
+      match Oas.Cdal_proof.of_json json with
+      | Ok proof -> Ok (Some proof)
+      | Error msg -> Error ("invalid proof in worker helper payload: " ^ msg))
+
+let run_result_to_yojson (run_result : Worker_container_types.run_result) =
+  `Assoc
+    [
+      ("output", `String run_result.output);
+      ("model_used", `String run_result.model_used);
+      ("input_tokens", option_to_yojson (fun v -> `Int v) run_result.input_tokens);
+      ("output_tokens", option_to_yojson (fun v -> `Int v) run_result.output_tokens);
+      ("cost_usd", option_to_yojson (fun v -> `Float v) run_result.cost_usd);
+      ("tool_call_count", `Int run_result.tool_call_count);
+      ("tool_names", `List (List.map (fun name -> `String name) run_result.tool_names));
+      ("session_id", `String run_result.session_id);
+      ( "raw_trace_run",
+        option_to_yojson Oas.Raw_trace.run_ref_to_yojson run_result.raw_trace_run );
+      ("api_response", api_response_to_yojson run_result.api_response);
+      ("proof", proof_to_yojson run_result.proof);
+    ]
+
+let run_result_of_yojson (json : Yojson.Safe.t) :
+    (Worker_container_types.run_result, string) result =
+  let open Yojson.Safe.Util in
+  try
+    let output = json |> member "output" |> to_string in
+    let model_used = json |> member "model_used" |> to_string in
+    let tool_call_count = json |> member "tool_call_count" |> to_int in
+    let session_id = json |> member "session_id" |> to_string in
+    let* input_tokens = int_option_of_yojson (json |> member "input_tokens") in
+    let* output_tokens =
+      int_option_of_yojson (json |> member "output_tokens")
+    in
+    let* cost_usd = float_option_of_yojson (json |> member "cost_usd") in
+    let* tool_names = string_list_of_yojson (json |> member "tool_names") in
+    let* raw_trace_run =
+      match json |> member "raw_trace_run" with
+      | `Null -> Ok None
+      | value -> (
+          match Oas.Raw_trace.run_ref_of_yojson value with
+          | Ok run_ref -> Ok (Some run_ref)
+          | Error msg ->
+              Error ("invalid raw_trace_run in worker helper payload: " ^ msg))
+    in
+    let* api_response = api_response_of_yojson (json |> member "api_response") in
+    let* proof = proof_of_yojson (json |> member "proof") in
+    let run_result : Worker_container_types.run_result = {
+      output;
+      model_used;
+      input_tokens;
+      output_tokens;
+      cost_usd;
+      tool_call_count;
+      tool_names;
+      session_id;
+      raw_trace_run;
+      api_response;
+      proof;
+    } in
+    Ok run_result
+  with
+  | Yojson.Json_error msg -> Error ("invalid worker helper run_result JSON: " ^ msg)
+  | Type_error (msg, _) -> Error ("invalid worker helper run_result JSON: " ^ msg)
+  | Failure msg -> Error msg
 
 let success_json (run_result : Worker_container_types.run_result) =
-  `Assoc [ ("ok_marshaled", `String (marshal_run_result run_result)) ]
+  `Assoc [ ("ok", run_result_to_yojson run_result) ]
 
 let error_json (payload : error_payload) =
   `Assoc
@@ -88,9 +163,11 @@ let parse_stdout (stdout : string) :
   let open Yojson.Safe.Util in
   try
     let json = Yojson.Safe.from_string stdout in
-    match json |> member "ok_marshaled" with
-    | `String payload ->
-        Ok (Ok (unmarshal_run_result payload))
+    match json |> member "ok" with
+    | `Assoc _ as payload -> (
+        match run_result_of_yojson payload with
+        | Ok run_result -> Ok (Ok run_result)
+        | Error msg -> Error msg)
     | _ -> (
         match json |> member "error" with
         | `Assoc fields ->
@@ -108,8 +185,7 @@ let parse_stdout (stdout : string) :
               | _ -> Internal
             in
             Ok (Error { message; kind })
-        | _ -> Error "worker helper stdout did not contain ok_marshaled or error")
+        | _ -> Error "worker helper stdout did not contain ok or error")
   with
-  | Invalid_argument msg -> Error msg
   | Failure msg -> Error msg
   | Yojson.Json_error msg -> Error ("invalid worker helper JSON: " ^ msg)

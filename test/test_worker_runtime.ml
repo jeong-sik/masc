@@ -25,6 +25,13 @@ let rec mkdir_p dir =
     Unix.mkdir dir 0o755
   end
 
+let with_eio f =
+  Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Fun.protect
+    ~finally:(fun () -> Time_compat.clear_clock ())
+    (fun () -> f env)
+
 let write_file path content =
   let oc = open_out path in
   output_string oc content;
@@ -169,6 +176,16 @@ let test_rewrite_custom_model_label_for_container () =
   check string "loopback custom label rewritten to host alias"
     "custom:qwen-test@http://host.docker.internal:8085" rewritten
 
+let test_run_process_with_timeout_returns_124_on_timeout () =
+  with_eio @@ fun env ->
+  let result =
+    Lib.Tool_command_plane_support.run_process_with_timeout
+      ~clock_opt:(Some (Eio.Stdenv.clock env)) ~timeout_sec:1
+      ~prog:"/bin/sh" ~argv:[ "/bin/sh"; "-c"; "trap '' TERM; sleep 5" ]
+      ~env:(Unix.environment ()) ()
+  in
+  check int "timeout exit code" 124 result.exit_code
+
 let () =
   Alcotest.run "worker_runtime"
     [
@@ -187,4 +204,7 @@ let () =
       ( "rewrites",
         [ test_case "custom loopback model label rewritten for container" `Quick
             test_rewrite_custom_model_label_for_container ] );
+      ( "process_timeout",
+        [ test_case "timeout maps to exit code 124" `Quick
+            test_run_process_with_timeout_returns_124_on_timeout ] );
     ]

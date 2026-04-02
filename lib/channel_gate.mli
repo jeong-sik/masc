@@ -48,7 +48,8 @@ type validation_error =
   | Duplicate_message of string
 
 val validate : inbound_message -> (unit, validation_error) result
-(** Pure validation.  Returns [Ok ()] when the message can proceed. *)
+(** Validation plus idempotency gate.  Returns [Ok ()] when the message can proceed.
+    Duplicate detection consumes the idempotency key on first success. *)
 
 val validation_error_to_string : validation_error -> string
 

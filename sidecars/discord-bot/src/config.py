@@ -83,7 +83,7 @@ class BotConfig(BaseSettings):
         return f"{base}/api/v1/gate/health"
 
 
-# Singleton - created at import time, fails fast on missing config.
+# Lazy singleton - instantiated on first get_config() call.
 _config: BotConfig | None = None
 
 DISCORD_MESSAGE_LIMIT: Final[int] = 2000

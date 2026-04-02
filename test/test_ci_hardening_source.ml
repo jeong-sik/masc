@@ -92,7 +92,15 @@ let test_route_auth_contracts () =
        {|h2_authorize_tool state ~tool_name:"masc_dispatch_tick"|});
   check bool "h2 gateway operator confirm uses tool auth" true
     (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|h2_authorize_tool state ~tool_name:"masc_operator_confirm"|})
+       {|h2_authorize_tool state ~tool_name:"masc_operator_confirm"|});
+  check bool "channel gate message route uses tool auth" true
+    (file_contains_pattern
+       "lib/server/server_routes_http_routes_channel_gate.ml"
+       {|with_tool_auth ~tool_name:"channel_gate"|});
+  check bool "channel gate health route stays public read" true
+    (file_contains_pattern
+       "lib/server/server_routes_http_routes_channel_gate.ml"
+       {|with_public_read (fun state _req reqd ->|})
 
 let test_http_write_auth_contracts () =
   check bool "server auth no longer accepts query token fallback" true

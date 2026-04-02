@@ -3,7 +3,8 @@
     Provides [/api/v1/gate/*] endpoints for external channel consumers
     (Discord bots, Telegram bots, etc.) to interact with keepers.
 
-    All endpoints use Bearer token auth via [with_tool_auth].
+    All Channel Gate API endpoints use Bearer token auth via [with_tool_auth],
+    except [/api/v1/gate/health], which is public and uses [with_public_read].
 
     @since 2.217.0 *)
 

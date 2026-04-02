@@ -47,6 +47,21 @@ let test_get_messages_raw_since_seq_stops_early () =
       ["Message 3"] contents
   )
 
+let test_get_messages_raw_large_history_keeps_newest_window () =
+  with_test_env (fun config ->
+    for i = 1 to 20 do
+      let _ =
+        Room.broadcast config ~from_agent:"claude"
+          ~content:(Printf.sprintf "Message %d" i)
+      in
+      ()
+    done;
+    let msgs = Room.get_messages_raw config ~since_seq:5 ~limit:3 in
+    let contents = List.map (fun (msg : Types.message) -> msg.content) msgs in
+    Alcotest.(check (list string)) "large history keeps newest 3"
+      [ "Message 20"; "Message 19"; "Message 18" ] contents
+  )
+
 let () =
   Alcotest.run "Room raw message regression" [
     ("messages_raw", [
@@ -54,5 +69,7 @@ let () =
         test_get_messages_raw_limit_and_order;
       Alcotest.test_case "since_seq filters older history" `Quick
         test_get_messages_raw_since_seq_stops_early;
+      Alcotest.test_case "large history keeps newest window" `Quick
+        test_get_messages_raw_large_history_keeps_newest_window;
     ]);
   ]

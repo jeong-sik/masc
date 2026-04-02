@@ -184,6 +184,30 @@ let extract_seq_from_filename name =
   | None -> 0
   | Some idx -> Safe_ops.int_of_string_with_default ~default:0 (String.sub name 0 idx)
 
+let select_recent_message_names ~since_seq ~limit names =
+  let insert_candidate acc name =
+    let seq = extract_seq_from_filename name in
+    if limit <= 0 || seq <= since_seq then
+      acc
+    else
+      let rec insert prefix = function
+        | [] -> List.rev_append prefix [ (seq, name) ]
+        | ((existing_seq, _) as existing) :: rest ->
+            if seq >= existing_seq then
+              List.rev_append prefix ((seq, name) :: existing :: rest)
+            else
+              insert (existing :: prefix) rest
+      in
+      insert [] acc |> take_first limit
+  in
+  names
+  |> List.fold_left
+       (fun acc name ->
+         safe_yield ();
+         insert_candidate acc name)
+       []
+  |> List.map snd
+
 let message_name_from_key key =
   match List.rev (String.split_on_char ':' key) with
   | name :: _ -> name
@@ -243,7 +267,7 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
           Sys.readdir msgs_path
           |> Array.to_list
           |> List.filter is_valid_filename
-          |> List.sort (fun a b -> compare (extract_seq_from_filename b) (extract_seq_from_filename a))
+          |> select_recent_message_names ~since_seq ~limit
         in
         let rec loop remaining acc = function
           | _ when remaining <= 0 -> List.rev acc

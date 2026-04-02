@@ -198,6 +198,21 @@ let () = test "dispatch_web_search_requires_query" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_web_search_rejects_long_query" (fun () ->
+  let ctx = make_test_ctx () in
+  let query = String.make 501 'a' in
+  let args = `Assoc [ ("query", `String query) ] in
+  match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+  | Some (success, result) ->
+      assert (not success);
+      let json = parse_json result in
+      assert (Yojson.Safe.Util.member "status" json = `String "error");
+      assert
+        (Yojson.Safe.Util.member "message" json
+         = `String "query must be at most 500 characters")
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "parse_bing_rss_items" (fun () ->
   let payload =
     {|<?xml version="1.0" encoding="utf-8" ?>

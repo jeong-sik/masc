@@ -20,6 +20,8 @@ type context = {
 
 type web_search_hit = string * string * string
 
+let max_web_search_query_length = 500
+
 let json_error message =
   Yojson.Safe.to_string
     (`Assoc [ ("status", `String "error"); ("message", `String message) ])
@@ -146,7 +148,8 @@ let fetch_bing_rss ~query =
   | Error e -> Error e
   | Ok (status_opt, payload) -> (
       match status_opt with
-      | Some 200 | None -> Ok (search_url, payload)
+      | Some 200 -> Ok (search_url, payload)
+      | None -> Error "search endpoint returned no HTTP status"
       | Some status ->
           Error
             (Printf.sprintf "search endpoint returned HTTP %d" status))
@@ -257,6 +260,12 @@ let handle_web_search _ctx args =
   let query = String.trim (get_string args "query" "") in
   if query = "" then
     (false, json_error "query is required")
+  else if String.length query > max_web_search_query_length then
+    ( false,
+      json_error
+        (Printf.sprintf
+           "query must be at most %d characters"
+           max_web_search_query_length) )
   else
     let limit = max 1 (min 10 (get_int args "limit" 5)) in
     match fetch_bing_rss ~query with

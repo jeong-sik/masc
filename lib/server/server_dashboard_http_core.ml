@@ -986,29 +986,59 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Room.confi
   let resolved_agent_result =
     resolve_agent_name_for_auth ~base_path:config.base_path request ~token
   in
-  let effective_agent =
+  let resolved_agent_name_result =
     match resolved_agent_result with
-    | Ok agent_name_opt -> Some (Option.value ~default:"dashboard" agent_name_opt)
+    | Error err -> Error err
+    | Ok agent_name_opt ->
+        if auth_cfg.enabled && auth_cfg.require_token && token_present
+           && Option.is_none agent_name_opt
+        then
+          Error
+            (Types.Unauthorized
+               "Agent name required (X-MASC-Agent or token-bound credential)")
+        else
+          Ok (Option.value ~default:"dashboard" agent_name_opt)
+  in
+  let effective_agent =
+    match resolved_agent_name_result with
+    | Ok agent_name -> Some agent_name
     | Error _ -> requested_agent
   in
   let effective_role_result =
-    match resolved_agent_result, effective_agent with
-    | Error err, _ -> Error err
-    | Ok _, Some agent_name ->
-        Auth.resolve_role config.base_path ~agent_name ~token
-    | Ok _, None -> Ok auth_cfg.default_role
+    match resolved_agent_name_result with
+    | Error err -> Error err
+    | Ok agent_name ->
+        Auth.resolve_role_with_auth_config config.base_path ~auth_cfg
+          ~agent_name ~token
+  in
+  let endpoint_gate_result =
+    match
+      if token_present then Ok ()
+      else ensure_same_origin_browser_request request
+    with
+    | Error err -> Error err
+    | Ok () -> (
+        match
+          ensure_strict_http_token_auth
+            ~endpoint:"HTTP tool access for masc_keeper_msg" auth_cfg
+        with
+        | Ok _ -> Ok ()
+        | Error msg -> Error (Types.Unauthorized msg))
   in
   let can_keeper_msg, keeper_msg_error =
-    match resolved_agent_result, effective_agent with
-    | Error err, _ -> (false, Some (Types.masc_error_to_string err))
-    | Ok _, Some agent_name -> (
-        match
-          Auth.authorize_tool_v2 config.base_path ~agent_name ~token
-            ~tool_name:"masc_keeper_msg"
-        with
-        | Ok () -> (true, None)
-        | Error err -> (false, Some (Types.masc_error_to_string err)))
-    | Ok _, None -> (false, Some "Agent resolution failed for masc_keeper_msg")
+    match endpoint_gate_result with
+    | Error err -> (false, Some (Types.masc_error_to_string err))
+    | Ok () -> (
+        match resolved_agent_name_result, effective_role_result with
+        | Error err, _ | _, Error err ->
+            (false, Some (Types.masc_error_to_string err))
+        | Ok agent_name, Ok role -> (
+            match
+              Auth.authorize_tool_for_role ~agent_name ~role
+                ~tool_name:"masc_keeper_msg"
+            with
+            | Ok () -> (true, None)
+            | Error err -> (false, Some (Types.masc_error_to_string err))))
   in
   let effective_role =
     match effective_role_result with

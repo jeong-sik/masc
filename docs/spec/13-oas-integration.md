@@ -147,6 +147,7 @@ type run_result = {
   session_id : string;
   turns : int;
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
+  cascade_observation : cascade_observation option;
 }
 ```
 
@@ -159,6 +160,12 @@ type run_result = {
 3. 첫 번째 available provider를 primary로 Agent 구성
 4. OAS `named_cascade`가 내부적으로 fallback 처리
 5. `accept` 콜백으로 응답 유효성 검증
+
+관측 경계:
+- MASC는 configured labels, resolved candidate models, 최종 selected model은 관측 가능
+- `Llm_provider.Metrics` callback을 통해 actual request attempt와 cascade fallback event는 관측 가능하다
+- `raw_trace`에는 아직 provider attempt record가 없으므로 raw-trace만으로는 opaque 하다
+- 따라서 attempt details source는 `oas_metrics_callbacks` 또는 `no_oas_observation`처럼 경계를 명시한다
 
 Hardcoded fallback (cascade.json 없을 때):
 - `llama:{MASC_DEFAULT_MODEL}` (로컬)

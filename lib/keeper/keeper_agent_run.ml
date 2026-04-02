@@ -25,6 +25,7 @@ type turn_prompt = {
 type run_result = {
   response_text : string;
   model_used : string;
+  cascade_observation : Oas_worker.cascade_observation option;
   turn_count : int;
   tool_calls_made : int;
   usage : Agent_sdk.Types.api_usage;
@@ -800,6 +801,7 @@ let run_turn
          Ok {
            response_text;
            model_used = model;
+           cascade_observation = result.cascade_observation;
            turn_count = result.turns;
            tool_calls_made = List.length tool_names;
            usage;

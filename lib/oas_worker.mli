@@ -18,6 +18,38 @@
 
 module Oas = Agent_sdk
 
+type cascade_attempt = {
+  attempt_index : int;
+  model_id : string;
+  model_label : string option;
+  latency_ms : int option;
+  error : string option;
+}
+
+type cascade_fallback_event = {
+  from_model_id : string;
+  from_model_label : string option;
+  to_model_id : string;
+  to_model_label : string option;
+  reason : string;
+}
+
+type cascade_observation = {
+  cascade_name : string;
+  configured_labels : string list;
+  candidate_models : string list;
+  primary_model : string option;
+  selected_model : string option;
+  selected_model_raw : string option;
+  selected_index : int option;
+  fallback_hops : int option;
+  fallback_applied : bool;
+  attempts : cascade_attempt list;
+  fallback_events : cascade_fallback_event list;
+  attempt_details_available : bool;
+  attempt_details_source : string;
+}
+
 type stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
@@ -29,11 +61,13 @@ type run_result = {
   turns : int;
   trace_ref : Oas.Raw_trace.run_ref option;
   proof : Oas.Cdal_proof.t option;
+  cascade_observation : cascade_observation option;
   stop_reason : stop_reason;
 }
 
 (** Cascade call/error metrics as JSON array, sorted by call count. *)
 val cascade_metrics_json : unit -> Yojson.Safe.t
+val cascade_observation_to_json : cascade_observation -> Yojson.Safe.t
 
 (** Locate config/cascade.json via CWD or ME_ROOT.
     Delegates to {!Model_spec.cascade_config_path}. *)

@@ -623,6 +623,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
   {
     response_text = text;
     model_used = model;
+    cascade_observation = None;
     turn_count = 1;
     tool_calls_made = List.length tools;
     usage = { input_tokens = input_tok; output_tokens = output_tok; cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = None };
@@ -678,6 +679,117 @@ let test_metrics_noop_response () =
   check int "autonomous unchanged" minimal_meta.runtime.autonomous_action_count
     updated.runtime.autonomous_action_count;
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns
+
+let test_append_metrics_snapshot_includes_cascade_observation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let result =
+        {
+          (make_run_result ~text:"Observed" ~tools:[]
+             ~model:"openai:qwen3.5-35b" ~input_tok:40 ~output_tok:20)
+          with
+          cascade_observation =
+            Some
+              {
+                Masc_mcp.Oas_worker.cascade_name = "keeper_unified";
+                configured_labels = [ "glm:auto"; "llama:auto" ];
+                candidate_models =
+                  [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
+                primary_model = Some "glm:glm-5.1";
+                selected_model = Some "openai:qwen3.5-35b";
+                selected_model_raw = Some "qwen3.5-35b";
+                selected_index = Some 1;
+                fallback_hops = Some 1;
+                fallback_applied = true;
+                attempts =
+                  [
+                    {
+                      Masc_mcp.Oas_worker.attempt_index = 0;
+                      model_id = "glm-5.1";
+                      model_label = Some "glm:glm-5.1";
+                      latency_ms = None;
+                      error = Some "HTTP 503";
+                    };
+                    {
+                      attempt_index = 1;
+                      model_id = "qwen3.5-35b";
+                      model_label = Some "openai:qwen3.5-35b";
+                      latency_ms = Some 187;
+                      error = None;
+                    };
+                  ];
+                fallback_events =
+                  [
+                    {
+                      from_model_id = "glm-5.1";
+                      from_model_label = Some "glm:glm-5.1";
+                      to_model_id = "qwen3.5-35b";
+                      to_model_label = Some "openai:qwen3.5-35b";
+                      reason = "HTTP 503";
+                    };
+                  ];
+                attempt_details_available = true;
+                attempt_details_source = "oas_metrics_callbacks";
+              };
+        }
+      in
+      UT.append_metrics_snapshot
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~result
+        ~latency_ms:123
+        ~turn_cost:0.01
+        ~turn_generation:1
+        ~channel:"turn"
+        ~snapshot_source:"test"
+        ~context_ratio:0.1
+        ~context_tokens:10
+        ~context_max:100
+        ~message_count:2
+        ~compaction:
+          {
+            Masc_mcp.Keeper_exec_context.applied = false;
+            trigger = None;
+            decision = "no_compaction";
+            before_tokens = 0;
+            after_tokens = 0;
+            saved_tokens = 0;
+          }
+        ~handoff_json:None
+        ();
+      let metrics_store =
+        Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+      in
+      let line =
+        match Dated_jsonl.read_recent_lines metrics_store 1 with
+        | [ line ] -> line
+        | _ -> fail "expected one metrics line"
+      in
+      let json = Yojson.Safe.from_string line in
+      check bool "cascade field present" true
+        Yojson.Safe.Util.(json |> member "cascade" <> `Null);
+      check string "cascade name persisted" "keeper_unified"
+        Yojson.Safe.Util.(
+          json |> member "cascade" |> member "cascade_name" |> to_string);
+      check bool "fallback applied persisted" true
+        Yojson.Safe.Util.(
+          json |> member "cascade" |> member "fallback_applied" |> to_bool);
+      check int "attempts persisted" 2
+        Yojson.Safe.Util.(
+          json |> member "cascade" |> member "attempts" |> to_list
+          |> List.length);
+      check bool "attempt details available persisted" true
+        Yojson.Safe.Util.(
+          json |> member "cascade" |> member "attempt_details_available" |> to_bool);
+      check string "attempt detail boundary persisted" "oas_metrics_callbacks"
+        Yojson.Safe.Util.(
+          json |> member "cascade" |> member "attempt_details_source" |> to_string))
 
 let test_metrics_persist_social_state_fields () =
   let result =
@@ -1104,6 +1216,8 @@ let () =
           test_case "text response" `Quick test_metrics_text_response;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
+          test_case "snapshot includes cascade observation" `Quick
+            test_append_metrics_snapshot_includes_cascade_observation;
           test_case "social fields" `Quick
             test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;

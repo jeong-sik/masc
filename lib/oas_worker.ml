@@ -26,28 +26,398 @@ let default_max_tokens = 4096
 (* Cascade metrics                                                   *)
 (* ================================================================ *)
 
+type cascade_observation = {
+  cascade_name : string;
+  configured_labels : string list;
+  candidate_models : string list;
+  primary_model : string option;
+  selected_model : string option;
+  selected_model_raw : string option;
+  selected_index : int option;
+  fallback_hops : int option;
+  fallback_applied : bool;
+  attempts : cascade_attempt list;
+  fallback_events : cascade_fallback_event list;
+  attempt_details_available : bool;
+  attempt_details_source : string;
+}
+
+and cascade_attempt = {
+  attempt_index : int;
+  model_id : string;
+  model_label : string option;
+  latency_ms : int option;
+  error : string option;
+}
+
+and cascade_fallback_event = {
+  from_model_id : string;
+  from_model_label : string option;
+  to_model_id : string;
+  to_model_label : string option;
+  reason : string;
+}
+
 type cascade_counter = {
   mutable calls : int;
   mutable successes : int;
   mutable failures : int;
   mutable rejected : int;
+  mutable fallback_calls : int;
+  mutable total_attempts : int;
+  mutable total_fallback_events : int;
+  mutable last_selected_model : string option;
+  mutable last_selected_index : int option;
+  mutable last_candidate_models : string list;
+  mutable last_attempts : cascade_attempt list;
+  mutable last_fallback_events : cascade_fallback_event list;
+  mutable last_attempt_details_available : bool;
+  mutable last_attempt_details_source : string option;
+  selected_models : (string, int) Hashtbl.t;
+  attempted_models : (string, int) Hashtbl.t;
+  errored_models : (string, int) Hashtbl.t;
 }
 
 let cascade_counters : (string, cascade_counter) Hashtbl.t = Hashtbl.create 8
 let cascade_max_keys = 256
 
-let record_cascade ~cascade_name ~outcome =
+let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
+  match cfg.kind with
+  | Llm_provider.Provider_config.Anthropic -> "claude"
+  | Llm_provider.Provider_config.OpenAI_compat -> "openai"
+  | Llm_provider.Provider_config.Gemini -> "gemini"
+  | Llm_provider.Provider_config.Glm -> "glm"
+  | Llm_provider.Provider_config.Claude_code -> "claude_code"
+
+let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
+  Printf.sprintf "%s:%s" (provider_name_of_config cfg) cfg.model_id
+
+let model_label_option_of_model_id
+    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
+    (model_id : string) =
+  let matches =
+    candidate_cfgs
+    |> List.filter (fun (cfg : Llm_provider.Provider_config.t) ->
+           String.equal cfg.model_id model_id)
+    |> List.map model_label_of_config
+    |> List.sort_uniq String.compare
+  in
+  match matches with
+  | [ label ] -> Some label
+  | _ -> None
+
+let strip_latest_suffix s =
+  let trimmed = String.trim s in
+  if String.length trimmed > 7
+     && String.sub trimmed (String.length trimmed - 7) 7 = ":latest"
+  then String.sub trimmed 0 (String.length trimmed - 7)
+  else trimmed
+
+let selected_index_of_model ~(selected_model_raw : string option)
+    ~(candidate_cfgs : Llm_provider.Provider_config.t list) =
+  match selected_model_raw with
+  | None -> None
+  | Some raw ->
+      let selected = strip_latest_suffix raw in
+      let rec loop idx = function
+        | [] -> None
+        | cfg :: rest ->
+            let candidate_label = model_label_of_config cfg |> strip_latest_suffix in
+            let candidate_model = strip_latest_suffix cfg.model_id in
+            if selected = candidate_label || selected = candidate_model then Some idx
+            else loop (idx + 1) rest
+      in
+      loop 0 candidate_cfgs
+
+let cascade_observation_of_candidates ~cascade_name ~configured_labels
+    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
+    ~(selected_model_raw : string option)
+    ?(attempts = [])
+    ?(fallback_events = [])
+    ?(attempt_details_available = false)
+    ?(attempt_details_source = "opaque_named_cascade")
+    () : cascade_observation =
+  let candidate_models = List.map model_label_of_config candidate_cfgs in
+  let primary_model = match candidate_models with first :: _ -> Some first | [] -> None in
+  let selected_index =
+    selected_index_of_model ~selected_model_raw ~candidate_cfgs
+  in
+  let selected_model =
+    match selected_index with
+    | Some idx -> List.nth_opt candidate_models idx
+    | None -> Option.map String.trim selected_model_raw
+  in
+  let fallback_hops = Option.map (fun idx -> max 0 idx) selected_index in
+  let fallback_applied =
+    match fallback_hops with
+    | Some hops -> hops > 0
+    | None -> false
+  in
+  {
+    cascade_name;
+    configured_labels;
+    candidate_models;
+    primary_model;
+    selected_model;
+    selected_model_raw;
+    selected_index;
+    fallback_hops;
+    fallback_applied;
+    attempts;
+    fallback_events;
+    attempt_details_available;
+    attempt_details_source;
+  }
+
+type cascade_metrics_capture = {
+  mutable next_attempt_index : int;
+  mutable attempts_rev : cascade_attempt list;
+  mutable fallback_events_rev : cascade_fallback_event list;
+}
+
+let cascade_attempt_to_json (attempt : cascade_attempt) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("attempt_index", `Int attempt.attempt_index);
+      ("model_id", `String attempt.model_id);
+      ("model_label", Json_util.string_opt_to_json attempt.model_label);
+      ("latency_ms", Json_util.int_opt_to_json attempt.latency_ms);
+      ("error", Json_util.string_opt_to_json attempt.error);
+    ]
+
+let cascade_fallback_event_to_json (event : cascade_fallback_event) :
+    Yojson.Safe.t =
+  `Assoc
+    [
+      ("from_model_id", `String event.from_model_id);
+      ("from_model_label", Json_util.string_opt_to_json event.from_model_label);
+      ("to_model_id", `String event.to_model_id);
+      ("to_model_label", Json_util.string_opt_to_json event.to_model_label);
+      ("reason", `String event.reason);
+    ]
+
+let update_first_attempt_if ~predicate ~update attempts_rev =
+  let rec loop = function
+    | [] -> None
+    | attempt :: rest ->
+        if predicate attempt then Some (update attempt :: rest)
+        else Option.map (fun rest' -> attempt :: rest') (loop rest)
+  in
+  loop attempts_rev
+
+let record_attempt_start (capture : cascade_metrics_capture)
+    ~(candidate_cfgs : Llm_provider.Provider_config.t list) ~(model_id : string) =
+  let attempt_index = capture.next_attempt_index in
+  capture.next_attempt_index <- capture.next_attempt_index + 1;
+  capture.attempts_rev <-
+    {
+      attempt_index;
+      model_id;
+      model_label = model_label_option_of_model_id ~candidate_cfgs model_id;
+      latency_ms = None;
+      error = None;
+    }
+    :: capture.attempts_rev
+
+let ensure_terminal_attempt (capture : cascade_metrics_capture)
+    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
+    ~(model_id : string) ~(latency_ms : int option) ~(error : string option) =
+  let is_open attempt =
+    String.equal attempt.model_id model_id
+    && Option.is_none attempt.latency_ms
+    && Option.is_none attempt.error
+  in
+  let update attempt = { attempt with latency_ms; error } in
+  match update_first_attempt_if ~predicate:is_open ~update capture.attempts_rev with
+  | Some attempts_rev -> capture.attempts_rev <- attempts_rev
+  | None ->
+      let attempt_index = capture.next_attempt_index in
+      capture.next_attempt_index <- capture.next_attempt_index + 1;
+      capture.attempts_rev <-
+        {
+          attempt_index;
+          model_id;
+          model_label = model_label_option_of_model_id ~candidate_cfgs model_id;
+          latency_ms;
+          error;
+        }
+        :: capture.attempts_rev
+
+let record_fallback_event (capture : cascade_metrics_capture)
+    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
+    ~(from_model : string) ~(to_model : string) ~(reason : string) =
+  capture.fallback_events_rev <-
+    {
+      from_model_id = from_model;
+      from_model_label =
+        model_label_option_of_model_id ~candidate_cfgs from_model;
+      to_model_id = to_model;
+      to_model_label = model_label_option_of_model_id ~candidate_cfgs to_model;
+      reason;
+    }
+    :: capture.fallback_events_rev
+
+let cascade_metrics_for_candidates
+    ~(candidate_cfgs : Llm_provider.Provider_config.t list) () =
+  let capture =
+    { next_attempt_index = 0; attempts_rev = []; fallback_events_rev = [] }
+  in
+  let metrics : Llm_provider.Metrics.t =
+    {
+      on_cache_hit = (fun ~model_id:_ -> ());
+      on_cache_miss = (fun ~model_id:_ -> ());
+      on_request_start =
+        (fun ~model_id ->
+          record_attempt_start capture ~candidate_cfgs ~model_id);
+      on_request_end =
+        (fun ~model_id ~latency_ms ->
+          ensure_terminal_attempt capture ~candidate_cfgs ~model_id
+            ~latency_ms:(Some latency_ms) ~error:None);
+      on_error =
+        (fun ~model_id ~error ->
+          ensure_terminal_attempt capture ~candidate_cfgs ~model_id
+            ~latency_ms:None ~error:(Some error));
+      on_cascade_fallback =
+        (fun ~from_model ~to_model ~reason ->
+          record_fallback_event capture ~candidate_cfgs ~from_model ~to_model
+            ~reason);
+    }
+  in
+  (capture, metrics)
+
+let cascade_observation_with_metrics ~cascade_name ~configured_labels
+    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
+    ~(selected_model_raw : string option) ~(capture : cascade_metrics_capture) =
+  cascade_observation_of_candidates ~cascade_name ~configured_labels
+    ~candidate_cfgs ~selected_model_raw
+    ~attempts:(List.rev capture.attempts_rev)
+    ~fallback_events:(List.rev capture.fallback_events_rev)
+    ~attempt_details_available:true
+    ~attempt_details_source:"oas_metrics_callbacks"
+    ()
+
+let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("cascade_name", `String obs.cascade_name);
+      ( "configured_labels",
+        `List (List.map (fun label -> `String label) obs.configured_labels) );
+      ( "candidate_models",
+        `List (List.map (fun label -> `String label) obs.candidate_models) );
+      ("primary_model", Json_util.string_opt_to_json obs.primary_model);
+      ("selected_model", Json_util.string_opt_to_json obs.selected_model);
+      ("selected_model_raw", Json_util.string_opt_to_json obs.selected_model_raw);
+      ("selected_index", Json_util.int_opt_to_json obs.selected_index);
+      ("fallback_hops", Json_util.int_opt_to_json obs.fallback_hops);
+      ("fallback_applied", `Bool obs.fallback_applied);
+      ( "attempts",
+        `List (List.map cascade_attempt_to_json obs.attempts) );
+      ( "fallback_events",
+        `List
+          (List.map cascade_fallback_event_to_json obs.fallback_events) );
+      ("attempt_details_available", `Bool obs.attempt_details_available);
+      ("attempt_details_source", `String obs.attempt_details_source);
+    ]
+
+let increment_counter table key =
+  let count = Option.value ~default:0 (Hashtbl.find_opt table key) in
+  Hashtbl.replace table key (count + 1)
+
+let distribution_json table =
+  Hashtbl.fold
+    (fun model count acc ->
+      `Assoc [ ("model", `String model); ("count", `Int count) ] :: acc)
+    table []
+  |> List.sort (fun left right ->
+         let count_of = function
+           | `Assoc fields ->
+               (match List.assoc_opt "count" fields with
+               | Some (`Int count) -> count
+               | _ -> 0)
+           | _ -> 0
+         in
+         Int.compare (count_of right) (count_of left))
+
+let attempt_model_display (attempt : cascade_attempt) =
+  match attempt.model_label with
+  | Some label when String.trim label <> "" -> label
+  | _ -> attempt.model_id
+
+let record_cascade ~observation ~cascade_name ~outcome =
   let c = match Hashtbl.find_opt cascade_counters cascade_name with
     | Some c -> c
     | None ->
       if Hashtbl.length cascade_counters >= cascade_max_keys then
-        { calls = 0; successes = 0; failures = 0; rejected = 0 }
+        {
+          calls = 0;
+          successes = 0;
+          failures = 0;
+          rejected = 0;
+          fallback_calls = 0;
+          total_attempts = 0;
+          total_fallback_events = 0;
+          last_selected_model = None;
+          last_selected_index = None;
+          last_candidate_models = [];
+          last_attempts = [];
+          last_fallback_events = [];
+          last_attempt_details_available = false;
+          last_attempt_details_source = None;
+          selected_models = Hashtbl.create 8;
+          attempted_models = Hashtbl.create 8;
+          errored_models = Hashtbl.create 8;
+        }
       else begin
-        let c = { calls = 0; successes = 0; failures = 0; rejected = 0 } in
+        let c =
+          {
+            calls = 0;
+            successes = 0;
+            failures = 0;
+            rejected = 0;
+            fallback_calls = 0;
+            total_attempts = 0;
+            total_fallback_events = 0;
+            last_selected_model = None;
+            last_selected_index = None;
+            last_candidate_models = [];
+            last_attempts = [];
+            last_fallback_events = [];
+            last_attempt_details_available = false;
+            last_attempt_details_source = None;
+            selected_models = Hashtbl.create 8;
+            attempted_models = Hashtbl.create 8;
+            errored_models = Hashtbl.create 8;
+          }
+        in
         Hashtbl.replace cascade_counters cascade_name c; c
       end
   in
   c.calls <- c.calls + 1;
+  (match observation with
+  | Some obs ->
+      c.last_candidate_models <- obs.candidate_models;
+      c.last_selected_model <- obs.selected_model;
+      c.last_selected_index <- obs.selected_index;
+      c.last_attempts <- obs.attempts;
+      c.last_fallback_events <- obs.fallback_events;
+      c.last_attempt_details_available <- obs.attempt_details_available;
+      c.last_attempt_details_source <- Some obs.attempt_details_source;
+      if obs.fallback_applied then c.fallback_calls <- c.fallback_calls + 1;
+      c.total_attempts <- c.total_attempts + List.length obs.attempts;
+      c.total_fallback_events <-
+        c.total_fallback_events + List.length obs.fallback_events;
+      (match obs.selected_model with
+      | Some model when String.trim model <> "" ->
+          increment_counter c.selected_models model
+      | _ -> ());
+      List.iter
+        (fun attempt ->
+          increment_counter c.attempted_models (attempt_model_display attempt);
+          match attempt.error with
+          | Some _ -> increment_counter c.errored_models (attempt_model_display attempt)
+          | None -> ())
+        obs.attempts
+  | None -> ());
   (match outcome with
   | `Success -> c.successes <- c.successes + 1
   | `Failure -> c.failures <- c.failures + 1
@@ -64,7 +434,25 @@ let cascade_metrics_json () : Yojson.Safe.t =
       ("successes", `Int c.successes);
       ("failures", `Int c.failures);
       ("rejected", `Int c.rejected);
-        ("error_rate", `Float error_rate);
+      ("fallback_calls", `Int c.fallback_calls);
+      ("total_attempts", `Int c.total_attempts);
+      ("total_fallback_events", `Int c.total_fallback_events);
+      ("last_selected_model", Json_util.string_opt_to_json c.last_selected_model);
+      ("last_selected_index", Json_util.int_opt_to_json c.last_selected_index);
+      ( "last_candidate_models",
+        `List (List.map (fun model -> `String model) c.last_candidate_models) );
+      ( "last_attempts",
+        `List (List.map cascade_attempt_to_json c.last_attempts) );
+      ( "last_fallback_events",
+        `List
+          (List.map cascade_fallback_event_to_json c.last_fallback_events) );
+      ("last_attempt_details_available", `Bool c.last_attempt_details_available);
+      ( "last_attempt_details_source",
+        Json_util.string_opt_to_json c.last_attempt_details_source );
+      ("selected_models", `List (distribution_json c.selected_models));
+      ("attempted_models", `List (distribution_json c.attempted_models));
+      ("errored_models", `List (distribution_json c.errored_models));
+      ("error_rate", `Float error_rate);
       ] :: acc
     ) cascade_counters [] in
     `List (List.sort (fun a b ->
@@ -145,6 +533,7 @@ type run_result = {
   turns : int;
   trace_ref : Oas.Raw_trace.run_ref option;
   proof : Oas.Cdal_proof.t option;
+  cascade_observation : cascade_observation option;
   stop_reason : stop_reason;
 }
 
@@ -373,8 +762,18 @@ let run
     let trace_ref = Oas.Agent.last_raw_trace_run agent in
     Oas.Agent.close agent;
     (match result with
-    | Ok response -> Ok { response; checkpoint; session_id; turns; trace_ref; proof;
-                          stop_reason = Completed }
+    | Ok response ->
+      Ok
+        {
+          response;
+          checkpoint;
+          session_id;
+          turns;
+          trace_ref;
+          proof;
+          cascade_observation = None;
+          stop_reason = Completed;
+        }
     | Error (Oas.Error.Agent (Oas.Error.MaxTurnsExceeded r)) ->
       (* Turn budget exhaustion is not a fatal error — the agent made progress.
          Return Ok with TurnBudgetExhausted so callers can checkpoint and resume
@@ -386,9 +785,17 @@ let run
           "[turn budget exhausted: %d/%d turns used]" r.turns r.limit)];
         usage = None;
       } in
-      Ok { response = partial_response; checkpoint; session_id; turns;
-           trace_ref; proof;
-           stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit } }
+      Ok
+        {
+          response = partial_response;
+          checkpoint;
+          session_id;
+          turns;
+          trace_ref;
+          proof;
+          cascade_observation = None;
+          stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
+        }
     | Error err ->
       (match proof with
        | Some p ->
@@ -576,13 +983,19 @@ let run_named
   | Ok (sw, net) ->
   let defaults = default_model_strings ~cascade_name in
   let config_path = default_config_path () in
+  let configured_labels =
+    Llm_provider.Cascade_config.resolve_model_strings
+      ?config_path ~name:cascade_name ~defaults ()
+  in
+  let candidate_cfgs = resolve_cascade_providers ~cascade_name in
+  let capture, metrics = cascade_metrics_for_candidates ~candidate_cfgs () in
   let named_cascade = Oas.Api.named_cascade ?config_path
-    ~name:cascade_name ~defaults () in
+    ~metrics ~name:cascade_name ~defaults () in
   let name = Printf.sprintf "oas-%s" cascade_name in
   (* Use first available provider config as primary for Builder.
      OAS named_cascade handles actual fallback — this is just the
      initial provider for Agent construction. *)
-  let primary_provider = match resolve_cascade_providers ~cascade_name with
+  let primary_provider = match candidate_cfgs with
     | cfg :: _ -> cfg
     | [] ->
       Llm_provider.Provider_config.make
@@ -616,13 +1029,28 @@ let run_named
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in
   match run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?agent_ref ?proof_ref ?contract goal with
   | Ok result when accept result.response ->
-    record_cascade ~cascade_name ~outcome:`Success;
+    let observation =
+      cascade_observation_with_metrics ~cascade_name ~configured_labels
+        ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
+        ~capture
+    in
+    let result = { result with cascade_observation = Some observation } in
+    record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
     Ok result
-  | Ok _ ->
-    record_cascade ~cascade_name ~outcome:`Rejected;
+  | Ok result ->
+    let observation =
+      cascade_observation_with_metrics ~cascade_name ~configured_labels
+        ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
+        ~capture
+    in
+    record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
     Error (Printf.sprintf "cascade %s: response rejected by accept" cascade_name)
   | Error e ->
-    record_cascade ~cascade_name ~outcome:`Failure;
+    let observation =
+      cascade_observation_with_metrics ~cascade_name ~configured_labels
+        ~candidate_cfgs ~selected_model_raw:None ~capture
+    in
+    record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
     Error e
 
 (** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").

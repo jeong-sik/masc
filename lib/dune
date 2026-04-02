@@ -516,8 +516,6 @@
    tool_autoresearch_repo_synthesis
    tool_autoresearch_cycle
    tool_autoresearch
-   ;; Code Research Loop — tool_research adapter (core logic in masc_research library)
-   tool_research
    ;; godsplit-catalog: tool_catalog decomposition (private sub-modules)
    tool_catalog_surfaces
    tool_catalog_tiers
@@ -754,8 +752,6 @@
    masc_process
    ;; Autoresearch leaf modules (types, serde, storage, metric, git, file)
    masc_autoresearch
-   ;; Research loop — experimental, non-core (extracted sub-library)
-   masc_research
    ;; Board types (extracted sub-library — first step toward board isolation)
    masc_board
    ;; Room coordination (extracted sub-library)

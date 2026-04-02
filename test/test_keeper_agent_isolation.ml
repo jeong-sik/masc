@@ -14,7 +14,6 @@ module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Tool_shard = Masc_mcp.Tool_shard
 module Tool_permissions = Masc_mcp.Tool_permissions
 module Keeper_types = Masc_mcp.Keeper_types
-module Tool_research = Masc_mcp.Tool_research
 module Tool_code_write = Masc_mcp.Tool_code_write
 
 (* ============================================================
@@ -53,8 +52,6 @@ let known_non_keeper_tool_names : string list =
     Tool_shard.governance_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name);
     Tool_shard.autoresearch_keeper_tools
-    |> List.map (fun (t : Types.tool_schema) -> t.name);
-    Tool_research.schemas
     |> List.map (fun (t : Types.tool_schema) -> t.name);
     Tool_shard.coding_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name);

@@ -222,14 +222,7 @@ let dispatch
        | Error e, _ | _, Error e -> Some (false, e))
 
   | Mod_research ->
-      (match require_sw (), require_clock (), require_net () with
-       | Ok sw, Ok clock, Ok net ->
-           Tool_research.dispatch
-             { Tool_research.base_path = config.base_path;
-               agent_name = Some agent_name; sw; net; clock }
-             ~name ~args
-       | Error e, _, _ | _, Error e, _ | _, _, Error e ->
-           Some (false, e))
+      Some (false, "masc_research tools have been removed; use masc_autoresearch_* instead")
 
   | Mod_autoresearch ->
       (* Keeper already handles masc_autoresearch_* before reaching this path.

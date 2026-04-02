@@ -364,7 +364,16 @@ let run_turn
     Keeper_exec_tools.core_always_tools
     @ [ "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
         "keeper_tasks_list"; "keeper_fs_read"; "keeper_shell_readonly";
-        "keeper_board_get"; "keeper_board_post" ]
+        "keeper_board_get"; "keeper_board_post";
+        (* Category anchors: one representative per major tool category
+           so the LLM knows these capabilities exist even when BM25
+           retrieval favours keeper_* internal tools.  See #4520. *)
+        "masc_governance_status";    (* governance *)
+        "masc_code_search";          (* coding shard *)
+        "masc_plan_get";             (* planning *)
+        "masc_tasks";                (* task management *)
+        "masc_agent_card";           (* agent introspection *)
+      ]
     |> Keeper_exec_tools.dedupe_tool_names
   in
   (* Layer 2: Universe — all tool names that the dispatch can handle.

@@ -1,6 +1,53 @@
 open Masc_mcp
 open Test_tool_team_session_support
 
+module Oas = Agent_sdk
+
+let write_minimal_worker_meta config session_id worker_name =
+  Team_session_store.write_text_file
+    (Team_session_store.worker_container_meta_path config session_id
+       worker_name)
+    (Printf.sprintf {|{"worker_name":"%s"}|} worker_name)
+
+let write_valid_worker_checkpoint config session_id worker_name =
+  let checkpoint : Oas.Checkpoint.t =
+    {
+      Oas.Checkpoint.version = Oas.Checkpoint.checkpoint_version;
+      session_id;
+      agent_name = worker_name;
+      model = "qwen3.5-35b-a3b-ud-q8-xl";
+      system_prompt = None;
+      messages = [];
+      usage = Oas.Types.empty_usage;
+      turn_count = 0;
+      created_at = 0.0;
+      tools = [];
+      tool_choice = None;
+      disable_parallel_tool_use = false;
+      temperature = None;
+      top_p = None;
+      top_k = None;
+      min_p = None;
+      enable_thinking = None;
+      response_format_json = false;
+      thinking_budget = None;
+      cache_system_prompt = false;
+      max_input_tokens = None;
+      max_total_tokens = None;
+      context = Oas.Context.create ();
+      mcp_sessions = [];
+      working_context = None;
+    }
+  in
+  match
+    Worker_container.save_worker_checkpoint ~base_path:config.base_path
+      ~team_session_id:(Some session_id) ~worker_name checkpoint
+  with
+  | Ok () -> ()
+  | Error err ->
+      Alcotest.failf "failed to save worker checkpoint for %s: %s"
+        worker_name err
+
 let test_prove_strong_requires_additional_evidence () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -487,6 +534,95 @@ let test_delegate_rejects_not_ready_worker_with_guidance () =
     Yojson.Safe.Util.(denied_detail |> member "blocked_reason" |> to_string);
   cleanup_dir base_dir
 
+let test_delegate_ready_worker_accepts_background () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"delegate-ready-background"
+    |> get_session_id
+  in
+  ignore
+    (Team_session_store.update_session config session_id (fun session ->
+         {
+           session with
+           planned_workers =
+             [
+               {
+                 Team_session_types.spawn_agent = "default";
+                 runtime_actor = Some "llama-local-ready";
+                 spawn_role = Some "implementer";
+                 spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
+                 execution_scope = Some Team_session_types.Limited_code_change;
+                 thinking_enabled = None;
+                 thinking_budget = None;
+                 max_turns = None;
+                 timeout_seconds = Some 300;
+                 worker_class = Some Team_session_types.Worker_executor;
+                 parent_actor = None;
+                 capsule_mode = None;
+                 runtime_pool = Some "local";
+                 lane_id = None;
+                 controller_level = None;
+                 control_domain = None;
+                 supervisor_actor = None;
+                 model_tier = Some Team_session_types.Tier_35b;
+                 task_profile = Some Team_session_types.Profile_normalize;
+                 risk_level = Some Team_session_types.Risk_low;
+                 routing_confidence = Some 0.9;
+                 routing_reason = Some "test-ready";
+                 routing_escalated = false;
+               };
+             ];
+           updated_at_iso = Types.now_iso ();
+         }));
+  write_minimal_worker_meta config session_id "llama-local-ready";
+  write_valid_worker_checkpoint config session_id "llama-local-ready";
+  let delegate_ok, delegate_body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("wait_mode", `String "background");
+            ("target_agent", `String "implementer");
+            ("delegate_prompt", `String "continue");
+          ])
+  in
+  Alcotest.(check bool) "delegate accepted" true delegate_ok;
+  let delegate_json =
+    parse_json_exn delegate_body |> result_field |> Yojson.Safe.Util.member "delegate"
+  in
+  Alcotest.(check string) "accepted worker name" "llama-local-ready"
+    Yojson.Safe.Util.(delegate_json |> member "worker_name" |> to_string);
+  Alcotest.(check string) "accepted status" "accepted"
+    Yojson.Safe.Util.(delegate_json |> member "status" |> to_string);
+  Alcotest.(check string) "accepted wait mode" "background"
+    Yojson.Safe.Util.(delegate_json |> member "wait_mode" |> to_string);
+  let denied_events =
+    Team_session_store.read_events config session_id
+    |> List.filter (fun json ->
+           Yojson.Safe.Util.member "event_type" json
+           = `String "team_step_delegate_denied")
+  in
+  Alcotest.(check int) "no delegate denied event on ready worker" 0
+    (List.length denied_events);
+  let requested_events =
+    Team_session_store.read_events config session_id
+    |> List.filter (fun json ->
+           Yojson.Safe.Util.member "event_type" json
+           = `String "team_step_delegate_requested")
+  in
+  Alcotest.(check int) "delegate requested event recorded" 1
+    (List.length requested_events);
+  cleanup_dir base_dir
+
 let test_delegate_rejects_corrupt_checkpoint_worker () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -614,6 +750,84 @@ let test_delegate_rejects_corrupt_checkpoint_worker () =
   Alcotest.(check bool) "status keeps corrupt worker not delegate-ready" false
     Yojson.Safe.Util.(corrupt_readiness |> member "delegate_ready" |> to_bool);
   Alcotest.(check string) "status blocked reason" "corrupt_checkpoint"
+    Yojson.Safe.Util.(corrupt_readiness |> member "blocked_reason" |> to_string);
+  cleanup_dir base_dir
+
+let test_status_marks_corrupt_meta_worker_blocked () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"status-corrupt-meta"
+    |> get_session_id
+  in
+  ignore
+    (Team_session_store.update_session config session_id (fun session ->
+         {
+           session with
+           planned_workers =
+             [
+               {
+                 Team_session_types.spawn_agent = "default";
+                 runtime_actor = Some "llama-local-meta";
+                 spawn_role = Some "implementer";
+                 spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
+                 execution_scope = Some Team_session_types.Limited_code_change;
+                 thinking_enabled = None;
+                 thinking_budget = None;
+                 max_turns = None;
+                 timeout_seconds = Some 300;
+                 worker_class = Some Team_session_types.Worker_executor;
+                 parent_actor = None;
+                 capsule_mode = None;
+                 runtime_pool = Some "local";
+                 lane_id = None;
+                 controller_level = None;
+                 control_domain = None;
+                 supervisor_actor = None;
+                 model_tier = Some Team_session_types.Tier_35b;
+                 task_profile = Some Team_session_types.Profile_normalize;
+                 risk_level = Some Team_session_types.Risk_low;
+                 routing_confidence = Some 0.9;
+                 routing_reason = Some "test-corrupt-meta";
+                 routing_escalated = false;
+               };
+             ];
+           updated_at_iso = Types.now_iso ();
+         }));
+  Team_session_store.write_text_file
+    (Team_session_store.worker_container_meta_path config session_id
+       "llama-local-meta")
+    "{}";
+  write_valid_worker_checkpoint config session_id "llama-local-meta";
+  let status_ok, status_body =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "status ok" true status_ok;
+  let worker_runs =
+    parse_json_exn status_body |> result_field
+    |> Yojson.Safe.Util.member "worker_runs"
+  in
+  let readiness_entries =
+    Yojson.Safe.Util.(worker_runs |> member "worker_readiness" |> to_list)
+  in
+  let corrupt_readiness =
+    List.find
+      (fun json ->
+        Yojson.Safe.Util.(
+          json |> member "worker_name" |> to_string = "llama-local-meta"))
+      readiness_entries
+  in
+  Alcotest.(check bool) "status keeps corrupt meta worker not delegate-ready" false
+    Yojson.Safe.Util.(corrupt_readiness |> member "delegate_ready" |> to_bool);
+  Alcotest.(check string) "status corrupt meta reason" "corrupt_meta"
     Yojson.Safe.Util.(corrupt_readiness |> member "blocked_reason" |> to_string);
   cleanup_dir base_dir
 

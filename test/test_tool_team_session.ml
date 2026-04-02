@@ -114,9 +114,17 @@ let () =
             Test_tool_team_session_misc
               .test_delegate_rejects_not_ready_worker_with_guidance;
           Alcotest.test_case
+            "delegate-ready-worker-accepts-background" `Quick
+            Test_tool_team_session_misc
+              .test_delegate_ready_worker_accepts_background;
+          Alcotest.test_case
             "delegate-rejects-corrupt-checkpoint-worker" `Quick
             Test_tool_team_session_misc
               .test_delegate_rejects_corrupt_checkpoint_worker;
+          Alcotest.test_case
+            "status-marks-corrupt-meta-worker-blocked" `Quick
+            Test_tool_team_session_misc
+              .test_status_marks_corrupt_meta_worker_blocked;
           Alcotest.test_case
             "delegate-rejects-unplanned-worker-container" `Quick
             Test_tool_team_session_misc

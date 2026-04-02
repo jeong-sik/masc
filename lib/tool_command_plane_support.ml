@@ -153,10 +153,14 @@ let run_process ~prog ~argv ~env =
   in
   Eio_guard.run_in_systhread f
 
+let rec waitpid_nointr flags pid =
+  try Unix.waitpid flags pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr flags pid
+
 let wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid =
   let start = Unix.gettimeofday () in
   let rec loop () =
-    match Unix.waitpid [ Unix.WNOHANG ] pid with
+    match waitpid_nointr [ Unix.WNOHANG ] pid with
     | 0, _ ->
         if Unix.gettimeofday () -. start >= float_of_int timeout_sec then
           `Timeout
@@ -257,25 +261,14 @@ let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv 
       (match clock_opt with
       | Some clock -> Eio.Time.sleep clock 1.0
       | None -> Time_compat.sleep 1.0);
-      let exit_code =
-        match Unix.waitpid [ Unix.WNOHANG ] pid with
-        | 0, _ ->
-            (try Unix.kill pid Sys.sigkill with
-             | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
-             | exn -> Log.CmdPlane.warn "sigkill pid %d: %s" pid (Printexc.to_string exn));
-            let _, status = Unix.waitpid [] pid in
-            (match status with
-            | Unix.WEXITED code -> code
-            | Unix.WSIGNALED code -> 128 + code
-            | Unix.WSTOPPED code -> 256 + code)
-        | _, status -> (
-            match status with
-            | Unix.WEXITED code -> code
-            | Unix.WSIGNALED code -> 128 + code
-            | Unix.WSTOPPED code -> 256 + code)
-      in
-      finalize
-        (if exit_code = 0 then 124 else exit_code)
+      (match waitpid_nointr [ Unix.WNOHANG ] pid with
+      | 0, _ ->
+          (try Unix.kill pid Sys.sigkill with
+           | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+           | exn -> Log.CmdPlane.warn "sigkill pid %d: %s" pid (Printexc.to_string exn));
+          ignore (waitpid_nointr [] pid)
+      | _, _ -> ());
+      finalize 124
 
 let json_with_process_metadata json ({ exit_code; stdout; stderr } : process_result) =
   match json with

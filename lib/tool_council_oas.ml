@@ -262,7 +262,30 @@ let feed_ctx_of (ctx : context) : Tool_council_feed.context =
 let handle_clear_param ctx args =
   let fctx = feed_ctx_of ctx in
   let submit_petition _ctx petition_args =
-    handle_petition_submit ctx petition_args
+    let open Yojson.Safe.Util in
+    let title = member "title" petition_args |> to_string_option
+      |> Option.value ~default:"Clear runtime parameter" in
+    let subject_type = member "subject_type" petition_args |> to_string_option
+      |> Option.value ~default:"param_change" in
+    let risk_class = match member "risk_class" petition_args |> to_string_option with
+      | Some s -> (match GV2.risk_class_of_string s with Ok r -> r | Error _ -> GV2.High)
+      | None -> GV2.High in
+    let requested_action = match member "requested_action" petition_args with
+      | `Null -> None
+      | ra ->
+        let at = member "action_type" ra |> to_string_option
+          |> Option.value ~default:"clear_param" in
+        let payload = match member "payload" ra with `Null -> None | p -> Some p in
+        Some ({ action_type = at; target_type = Some "param";
+                target_id = None; payload } : GV2.action_request) in
+    let source_refs = match member "source_refs" petition_args with
+      | `List items -> List.filter_map to_string_option items
+      | _ -> [] in
+    match GV2.submit_petition ctx.base_path ~title ~origin:ctx.agent_name
+      ~subject_type ~risk_class ~requested_action ~source_refs
+      ~created_by:ctx.agent_name with
+    | Ok result -> (true, Printf.sprintf "Petition created: case %s" result.case_.id)
+    | Error msg -> (false, msg)
   in
   Tool_council_feed.handle_clear_param ~submit_petition fctx args
 

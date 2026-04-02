@@ -423,6 +423,100 @@ let () =
          (Str.regexp_string "petition") s 0); true with Not_found -> false))
   in
 
+  let test_handle_clear_param_low_risk () =
+    let tmp_dir = Filename.temp_dir "masc_clearparam_" "" in
+    let masc_dir = Filename.concat tmp_dir ".masc" in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    let ctx =
+      Tool_council_feed.{ base_path = tmp_dir; agent_name = "test-agent";
+        room_config = None }
+    in
+    (* First set a medium-risk param to a non-default value *)
+    let set_args = `Assoc [
+      ("param_key", `String "keeper.max_consecutive_hb_failures");
+      ("value", `Int 15);
+    ] in
+    let submit_petition _ctx _args = (false, "unexpected petition") in
+    let (ok, _) =
+      Tool_council_feed.handle_set_param ~submit_petition ctx set_args
+    in
+    Alcotest.(check bool) "set succeeded" true ok;
+    Alcotest.(check int) "value overridden" 15
+      (Runtime_params.get Governance_registry.keeper_max_hb_failures);
+    (* Now clear it *)
+    let petition_called = ref false in
+    let submit_petition2 _ctx _args =
+      petition_called := true; (false, "unexpected petition")
+    in
+    let clear_args = `Assoc [
+      ("param_key", `String "keeper.max_consecutive_hb_failures");
+    ] in
+    let (ok2, _msg) =
+      Tool_council_feed.handle_clear_param ~submit_petition:submit_petition2 ctx clear_args
+    in
+    Alcotest.(check bool) "clear succeeded" true ok2;
+    Alcotest.(check bool) "no petition for low risk" false !petition_called;
+    (* Cleanup *)
+    rm_rf tmp_dir
+  in
+
+  let test_handle_clear_param_high_risk_triggers_petition () =
+    let ctx =
+      Tool_council_feed.{ base_path = "/tmp"; agent_name = "test-agent";
+        room_config = None }
+    in
+    let petition_called = ref false in
+    let submit_petition _ctx _args =
+      petition_called := true; (true, "petition-456")
+    in
+    let args = `Assoc [
+      ("param_key", `String "inference.default_model");
+    ] in
+    let (ok, msg) =
+      Tool_council_feed.handle_clear_param ~submit_petition ctx args
+    in
+    Alcotest.(check bool) "petition created" true !petition_called;
+    Alcotest.(check bool) "ok" true ok;
+    Alcotest.(check bool) "mentions petition" true
+      (try ignore (Str.search_forward
+         (Str.regexp_string "petition") (String.lowercase_ascii msg) 0); true
+       with Not_found -> false)
+  in
+
+  let test_handle_prompt_override_set_clear () =
+    let tmp_dir = Filename.temp_dir "masc_prompt_" "" in
+    let masc_dir = Filename.concat tmp_dir ".masc" in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    let ctx =
+      Tool_council_feed.{ base_path = tmp_dir; agent_name = "test-agent";
+        room_config = None }
+    in
+    let key = "test_prompt_key_for_override" in
+    (* Register a default prompt so get_prompt works *)
+    Prompt_registry.register_default ~key ~default:"original" ~description:"test" ();
+    (* Set override *)
+    let set_args = `Assoc [
+      ("key", `String key);
+      ("action", `String "set");
+      ("value", `String "overridden");
+    ] in
+    let (ok, _msg) = Tool_council_feed.handle_prompt_override ctx set_args in
+    Alcotest.(check bool) "set succeeded" true ok;
+    Alcotest.(check string) "override applied"
+      "overridden" (Prompt_registry.get_prompt key);
+    (* Clear override *)
+    let clear_args = `Assoc [
+      ("key", `String key);
+      ("action", `String "clear");
+    ] in
+    let (ok2, _msg2) = Tool_council_feed.handle_prompt_override ctx clear_args in
+    Alcotest.(check bool) "clear succeeded" true ok2;
+    Alcotest.(check string) "default restored"
+      "original" (Prompt_registry.get_prompt key);
+    (* Cleanup *)
+    rm_rf tmp_dir
+  in
+
   let test_handle_runtime_params_includes_keeper () =
     let ctx =
       Tool_council_feed.{ base_path = "/tmp"; agent_name = "test-agent";
@@ -528,6 +622,18 @@ let () =
             test_handle_set_param_high_risk_triggers_petition;
           Alcotest.test_case "runtime params includes keeper" `Quick
             test_handle_runtime_params_includes_keeper;
+        ] );
+      ( "handle_clear_param",
+        [
+          Alcotest.test_case "low-risk param clear" `Quick
+            test_handle_clear_param_low_risk;
+          Alcotest.test_case "high-risk triggers petition" `Quick
+            test_handle_clear_param_high_risk_triggers_petition;
+        ] );
+      ( "handle_prompt_override",
+        [
+          Alcotest.test_case "set and clear" `Quick
+            test_handle_prompt_override_set_clear;
         ] );
       ( "crash_persistence",
         [

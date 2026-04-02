@@ -28,6 +28,7 @@
    cache_eio
    cascade_inference
    cancellation
+   channel_gate
    command_plane_v2
    command_plane_orchestra
    cp_types
@@ -114,6 +115,7 @@
    server_routes_http_routes_command_plane_write
    server_routes_http_routes_provider_runs
    server_routes_http_routes_activity
+   server_routes_http_routes_channel_gate
    server_h2_gateway
    server_h2_gateway_helpers
    server_h2_gateway_routes_extra

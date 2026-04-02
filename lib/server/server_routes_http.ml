@@ -15,3 +15,4 @@ let make_routes ~port ~host ~sw ~clock =
   |> Server_routes_http_routes_command_plane_read.add_routes
   |> Server_routes_http_routes_command_plane_write.add_routes ~sw ~clock
   |> Server_routes_http_routes_activity.add_routes ~sw ~clock
+  |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock

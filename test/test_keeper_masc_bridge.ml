@@ -3,15 +3,7 @@
 module KET = Masc_mcp.Keeper_exec_tools
 
 let init_keeper_tool_registry () =
-  if not Masc_mcp.Tool_dispatch.(is_tag_registry_initialized ()) then begin
-    let open Masc_mcp in
-    Tool_dispatch.register_module_tag
-      ~schemas:Tool_schemas_inline.schemas
-      ~tag:Tool_dispatch.Mod_inline;
-    Tool_tag_init.register_all ();
-    Tool_board.register ();
-    Tool_dispatch.mark_tag_registry_initialized ()
-  end
+  Masc_test_deps.init_keeper_tool_registry ()
 
 let prime_keeper_bridge () =
   init_keeper_tool_registry ();

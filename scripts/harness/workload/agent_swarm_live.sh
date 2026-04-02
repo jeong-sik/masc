@@ -206,17 +206,20 @@ attached_count = int(sys.argv[3])
 team_turn_count = int(sys.argv[4])
 session_id = sys.argv[5]
 
-effective = min(worker_count, spawn_success, attached_count, team_turn_count)
+spawned_limit = min(worker_count, spawn_success)
+attached_limit = min(worker_count, attached_count)
+turn_limit = min(worker_count, team_turn_count)
+completed_limit = min(spawned_limit, attached_limit, turn_limit)
 workers = []
 for index in range(1, worker_count + 1):
-    ok = index <= effective
+    completed = index <= completed_limit
     workers.append(
         {
             "name": f"local64-smoke-{index:02d}",
-            "status": "ok" if ok else "failed",
-            "final_marker_seen": ok,
-            "attached": ok,
-            "turn_observed": ok,
+            "status": "ok" if completed else "failed",
+            "final_marker_seen": completed,
+            "attached": index <= attached_limit,
+            "turn_observed": index <= turn_limit,
         }
     )
 
@@ -226,7 +229,7 @@ print(
             "mode": "team_session_local64_compat",
             "session_id": session_id,
             "summary": {
-                "successful_workers": effective,
+                "successful_workers": completed_limit,
                 "spawn_success_count": spawn_success,
                 "attached_count": attached_count,
                 "team_turn_count": team_turn_count,
@@ -409,11 +412,30 @@ summary_path = Path(sys.argv[7])
 
 harness = json.loads(harness_path.read_text())
 slot = json.loads(slot_path.read_text()) if slot_path.exists() else {}
+harness_summary = harness.get("summary") or {}
 workers = harness.get("workers") or []
-joined_workers = sum(1 for row in workers if row.get("attached") is True)
-live_workers = sum(1 for row in workers if row.get("turn_observed") is True)
+
+def read_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+joined_workers = read_int(harness_summary.get("attached_count"))
+if joined_workers is None:
+    joined_workers = sum(1 for row in workers if row.get("attached") is True)
+
+live_workers = read_int(harness_summary.get("team_turn_count"))
+if live_workers is None:
+    live_workers = sum(1 for row in workers if row.get("turn_observed") is True)
+
 completed_workers = sum(1 for row in workers if row.get("status") == "ok")
 final_markers_seen = sum(1 for row in workers if row.get("final_marker_seen") is True)
+fresh_heartbeats = (
+    sum(1 for row in workers if row.get("heartbeat_fresh") is True)
+    if any("heartbeat_fresh" in row for row in workers)
+    else completed_workers
+)
 pass_hot_concurrency = int(slot.get("peak_active_slots") or 0) >= min_hot_slots and bool(slot.get("hot_window_ok"))
 pass_end_to_end = completed_workers == worker_count and final_markers_seen >= required_final_markers
 
@@ -426,7 +448,7 @@ payload = {
     "joined_workers": joined_workers,
     "live_workers": live_workers,
     "current_task_bound": live_workers,
-    "fresh_heartbeats": completed_workers,
+    "fresh_heartbeats": fresh_heartbeats,
     "completed_workers": completed_workers,
     "final_markers_seen": final_markers_seen,
     "peak_hot_slots": int(slot.get("peak_active_slots") or 0),

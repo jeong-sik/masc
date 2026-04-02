@@ -173,7 +173,7 @@ function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
     key: `intervention:${entry.id}`,
     kind: 'intervention' as const,
     at: entry.at,
-    actor: entry.actor || 'dashboard',
+    actor: entry.actor || 'unknown',
     label: actionTypeLabel(entry.action_type),
     target: prettyTargetLabel(entry.target_label),
     detail: formatMessageContent(entry.message) || '세부 내용 없음',

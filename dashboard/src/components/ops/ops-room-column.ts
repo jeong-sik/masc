@@ -61,7 +61,7 @@ export function OpsRoomColumn() {
   const judgeRuntime = roomDigest?.operator_judge_runtime ?? snapshot?.operator_judge_runtime
   const guidanceLayer = roomDigest?.active_guidance_layer ?? 'fallback'
   const roomFeed = recentMessages.slice(0, 5)
-  const currentActor = actorName.value.trim() || 'dashboard'
+  const currentActor = actorName.value.trim() || 'unknown'
   const actorOptions = pendingConfirms
     .map(item => item.actor?.trim() ?? '')
     .filter(Boolean)

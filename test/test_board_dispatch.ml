@@ -174,6 +174,51 @@ let test_list_posts_with_filters () =
   Alcotest.(check string) "human remains" "filter-human"
     (human_only |> List.hd |> fun (p : Board.post) -> Board.Agent_id.to_string p.author)
 
+let test_list_posts_matches_comment_author () =
+  let matching_post =
+    match
+      Board_dispatch.create_post ~author:"post-owner-a"
+        ~content:"comment author should surface this post"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let other_post =
+    match
+      Board_dispatch.create_post ~author:"post-owner-b"
+        ~content:"different comment author"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let matching_post_id = Board.Post_id.to_string matching_post.id in
+  let other_post_id = Board.Post_id.to_string other_post.id in
+  (match
+     Board_dispatch.add_comment ~post_id:matching_post_id
+       ~author:"comment-match-agent" ~content:"I touched this thread" ()
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  (match
+     Board_dispatch.add_comment ~post_id:other_post_id
+       ~author:"comment-other-agent" ~content:"Different author" ()
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let filtered =
+    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent
+      ~author_filter:"MATCH-AGENT" ~limit:20 ()
+  in
+  let ids =
+    List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id) filtered
+  in
+  Alcotest.(check bool) "matching comment author includes post" true
+    (List.mem matching_post_id ids);
+  Alcotest.(check bool) "non matching comment author excluded" false
+    (List.mem other_post_id ids)
+
 let test_reclassify_posts_dry_run_and_apply () =
   let post_id = seed_legacy_keeper_post () in
   let dry_run = Board_dispatch.reclassify_posts ~dry_run:true () in
@@ -354,6 +399,8 @@ let () =
       Alcotest.test_case "list" `Quick (with_eio test_list_posts);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
       Alcotest.test_case "filters" `Quick (with_eio test_list_posts_with_filters);
+      Alcotest.test_case "comment author filter" `Quick
+        (with_eio test_list_posts_matches_comment_author);
       Alcotest.test_case "reclassify dry-run and apply" `Quick
         (with_eio test_reclassify_posts_dry_run_and_apply);
     ];

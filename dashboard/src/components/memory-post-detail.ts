@@ -39,9 +39,10 @@ function expiryChip(post: BoardPost) {
 // ── Comment tree building ──────────────────────────────────────────
 function buildCommentTree(comments: BoardComment[]): { roots: BoardComment[]; childrenMap: Map<string, BoardComment[]> } {
   const childrenMap = new Map<string, BoardComment[]>()
+  const commentIds = new Set(comments.map((comment) => comment.id))
   const roots: BoardComment[] = []
   for (const c of comments) {
-    if (c.parent_id) {
+    if (c.parent_id && commentIds.has(c.parent_id)) {
       const siblings = childrenMap.get(c.parent_id) ?? []
       siblings.push(c)
       childrenMap.set(c.parent_id, siblings)
@@ -53,7 +54,17 @@ function buildCommentTree(comments: BoardComment[]): { roots: BoardComment[]; ch
 }
 
 // ── Comment item ───────────────────────────────────────────────────
-function CommentItem({ comment, postId, depth = 0, replies = [] }: { comment: BoardComment; postId: string; depth?: number; replies?: BoardComment[] }) {
+function CommentItem({
+  comment,
+  postId,
+  depth = 0,
+  childrenMap,
+}: {
+  comment: BoardComment
+  postId: string
+  depth?: number
+  childrenMap: Map<string, BoardComment[]>
+}) {
   const needsTruncation = (comment.content?.length ?? 0) > 300
   const [expanded, setExpanded] = useState(false)
   const displayText = needsTruncation && !expanded
@@ -61,6 +72,7 @@ function CommentItem({ comment, postId, depth = 0, replies = [] }: { comment: Bo
     : comment.content
   const isReplying = replyingTo.value === comment.id
   const indent = depth > 0 ? `ml-${Math.min(depth * 4, 12)}` : ''
+  const replies = childrenMap.get(comment.id) ?? []
 
   return html`
     <div class="${indent}">
@@ -107,7 +119,7 @@ function CommentItem({ comment, postId, depth = 0, replies = [] }: { comment: Bo
       </div>
       ${replies.length > 0 ? html`
         <div class="flex flex-col gap-1.5 mt-1.5">
-          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} replies=${[]} />`)}
+          ${replies.map(reply => html`<${CommentItem} key=${reply.id} comment=${reply} postId=${postId} depth=${depth + 1} childrenMap=${childrenMap} />`)}
         </div>
       ` : null}
     </div>
@@ -115,7 +127,7 @@ function CommentItem({ comment, postId, depth = 0, replies = [] }: { comment: Bo
 }
 
 // ── Comment thread ─────────────────────────────────────────────────
-function CommentThread({ comments, postId }: { comments: BoardComment[]; postId: string }) {
+export function CommentThread({ comments, postId }: { comments: BoardComment[]; postId: string }) {
   if (comments.length === 0) return html`<${EmptyState} message="아직 댓글이 없습니다" compact />`
 
   const { roots, childrenMap } = buildCommentTree(comments)
@@ -133,7 +145,7 @@ function CommentThread({ comments, postId }: { comments: BoardComment[]; postId:
           onClick=${() => setExpanded(true)}
         >이전 댓글 ${hiddenCount}개 더 보기</button>
       ` : null}
-      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} replies=${childrenMap.get(comment.id) ?? []} />`)}
+      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${childrenMap} />`)}
       ${expanded && hiddenCount > 0 ? html`
         <button type="button"
           class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 text-left py-1"

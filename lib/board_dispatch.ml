@@ -167,6 +167,23 @@ let sort_posts_in_memory ~sort_by (posts : Board.post list) =
         let cmp = compare b.reply_count a.reply_count in
         if cmp <> 0 then cmp else compare b.created_at a.created_at) posts
 
+let normalize_author_filter = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some (String.lowercase_ascii trimmed)
+  | None -> None
+
+let agent_matches_author_filter ~needle (agent_id : Board.Agent_id.t) =
+  let author = Board.Agent_id.to_string agent_id |> String.lowercase_ascii in
+  String_util.contains_substring author needle
+
+let post_matches_author_filter ~needle ~comments_for_post (post : Board.post) =
+  agent_matches_author_filter ~needle post.author
+  || List.exists
+       (fun (comment : Board.comment) ->
+         agent_matches_author_filter ~needle comment.author)
+       (comments_for_post post)
+
 (** {1 Dispatch Functions} *)
 
 let create_post ~author ~content ?title ?body ~post_kind ?meta_json
@@ -223,8 +240,22 @@ let get_post ~post_id =
   | Jsonl store -> Board.get_post store ~post_id
   | Postgres t -> Board_pg.get_post t ~post_id
 
-let list_posts ?(visibility_filter=None) ?hearth ?post_kind_filter ?(sort_by=Hot)
+let list_posts ?(visibility_filter=None) ?hearth ?author_filter ?post_kind_filter ?(sort_by=Hot)
     ?(exclude_system=false) ?(exclude_automation=false) ?(limit=50) () =
+  let author_filter = normalize_author_filter author_filter in
+  let apply_visibility_and_hearth_filters posts =
+    let posts =
+      match visibility_filter with
+      | Some visibility ->
+          List.filter (fun (post : Board.post) -> post.visibility = visibility) posts
+      | None -> posts
+    in
+    match hearth with
+    | Some hearth_name ->
+        let hearth_name = String.lowercase_ascii (String.trim hearth_name) in
+        List.filter (fun (post : Board.post) -> post.hearth = Some hearth_name) posts
+    | None -> posts
+  in
   let apply_post_kind_filter posts =
     posts
     |> List.filter (fun (p : Board.post) ->
@@ -237,10 +268,35 @@ let list_posts ?(visibility_filter=None) ?hearth ?post_kind_filter ?(sort_by=Hot
   in
   match backend () with
   | Jsonl store ->
-      let fetch_limit = max limit 200 in
-      let posts = Board.list_posts store ~visibility_filter ?hearth ~limit:fetch_limit () in
-      let sorted = sort_posts_in_memory ~sort_by posts in
+      let fetch_limit =
+        if Option.is_some author_filter then Board.Limits.max_posts
+        else max limit 200
+      in
+      let posts =
+        if Option.is_some author_filter then
+          Board.search_posts store ~predicate:(fun _ -> true) ~limit:fetch_limit
+        else
+          Board.list_posts store ~visibility_filter ?hearth ~limit:fetch_limit ()
+      in
+      let comments_for_post (post : Board.post) =
+        match Board.get_comments store ~post_id:(Board.Post_id.to_string post.id) with
+        | Ok comments -> comments
+        | Error _ -> []
+      in
+      let sorted =
+        posts
+        |> apply_visibility_and_hearth_filters
+        |> sort_posts_in_memory ~sort_by
+      in
       let filtered = apply_post_kind_filter sorted in
+      let filtered =
+        match author_filter with
+        | None -> filtered
+        | Some needle ->
+            List.filter
+              (post_matches_author_filter ~needle ~comments_for_post)
+              filtered
+      in
       Board.take limit filtered
   | Postgres t ->
       let pg_sort = match sort_by with
@@ -255,7 +311,10 @@ let list_posts ?(visibility_filter=None) ?hearth ?post_kind_filter ?(sort_by=Hot
       in
       (* Over-fetch when post-query filtering is needed to avoid short results *)
       let fetch_limit = if needs_filter then max limit (limit * 3) else limit in
-      let posts = Board_pg.list_posts t ~visibility_filter ?hearth ~sort_by:pg_sort ~limit:fetch_limit () in
+      let posts =
+        Board_pg.list_posts t ~visibility_filter ?hearth ?author_filter
+          ~sort_by:pg_sort ~limit:fetch_limit ()
+      in
       let filtered = apply_post_kind_filter posts in
       Board.take limit filtered
 

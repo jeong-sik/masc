@@ -312,9 +312,16 @@ let get_post t ~post_id =
 
 type sort_order = Hot | Trending | Recent | Updated | Discussed
 
-let list_posts t ?(visibility_filter=None) ?hearth ?(sort_by=Hot) ?(limit=50) () =
+let list_posts t ?(visibility_filter=None) ?hearth ?author_filter ?(sort_by=Hot) ?(limit=50) () =
   let vis_str = Option.map visibility_to_string visibility_filter in
   let hearth_norm = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
+  let author_norm =
+    match author_filter with
+    | Some raw ->
+        let trimmed = String.trim raw in
+        if trimmed = "" then None else Some trimmed
+    | None -> None
+  in
   let lim = max 1 (min limit 5200) in
   let q = match sort_by with
     | Hot -> list_hot_q
@@ -325,7 +332,7 @@ let list_posts t ?(visibility_filter=None) ?hearth ?(sort_by=Hot) ?(limit=50) ()
   in
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    C.collect_list q (vis_str, hearth_norm, lim)
+    C.collect_list q (vis_str, hearth_norm, author_norm, lim)
   ) t.pool with
   | Ok rows -> List.filter_map post_of_row rows
   | Error err ->
@@ -579,7 +586,7 @@ let reclassify_posts t ?(limit = 5200) ?(dry_run = true) () =
       if scan_limit = 0 then
         Ok []
       else
-        C.collect_list list_recent_q (None, None, scan_limit)
+        C.collect_list list_recent_q (None, None, None, scan_limit)
     in
     let posts = List.filter_map post_of_row rows in
     let changed = ref 0 in

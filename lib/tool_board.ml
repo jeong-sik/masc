@@ -161,13 +161,31 @@ let format_comment ?(indent=0) (c : Board.comment) =
 (** Format comments as a tree structure, grouping replies under parents.
     max_depth limits nesting (default 5). Beyond that, comments render flat. *)
 let format_comment_tree ?(max_depth=5) (comments : Board.comment list) =
-  let roots = List.filter (fun (c : Board.comment) -> c.parent_id = None) comments in
-  let children_of parent_id =
-    List.filter (fun (c : Board.comment) ->
-      match c.parent_id with
-      | Some pid -> Board.Comment_id.to_string pid = Board.Comment_id.to_string parent_id
-      | None -> false
+  let visible_comment_ids = Hashtbl.create (List.length comments) in
+  let children_map = Hashtbl.create (List.length comments) in
+  let comment_id = Board.Comment_id.to_string in
+  List.iter (fun (comment : Board.comment) ->
+    Hashtbl.replace visible_comment_ids (comment_id comment.id) true
+  ) comments;
+  List.iter (fun (comment : Board.comment) ->
+    match comment.parent_id with
+    | Some parent_id ->
+        let key = comment_id parent_id in
+        let existing = Hashtbl.find_opt children_map key |> Option.value ~default:[] in
+        Hashtbl.replace children_map key (comment :: existing)
+    | None -> ()
+  ) comments;
+  let roots =
+    List.filter (fun (comment : Board.comment) ->
+      match comment.parent_id with
+      | None -> true
+      | Some parent_id -> not (Hashtbl.mem visible_comment_ids (comment_id parent_id))
     ) comments
+  in
+  let children_of parent_id =
+    Hashtbl.find_opt children_map (comment_id parent_id)
+    |> Option.value ~default:[]
+    |> List.rev
   in
   let rec render depth indent (c : Board.comment) =
     let self = format_comment ~indent c in
@@ -293,28 +311,11 @@ let handle_post_list args =
   match sort_by_result with
   | Error msg -> (false, Printf.sprintf "❌ %s" msg)
   | Ok sort_by ->
-      let base_fetch = limit + offset + 100 in
-      let fetch_limit =
-        if Option.is_some author_filter then max 500 base_fetch
-        else base_fetch
-      in
-      let all_posts = Board_dispatch.list_posts ~visibility_filter ?hearth
-        ~exclude_system
-        ~exclude_automation
-        ~sort_by:(dispatch_sort_of sort_by) ~limit:fetch_limit () in
-
-      (* Sorting is already handled by Board_dispatch *)
-      let sorted_posts = all_posts in
-      (* Author filter: case-insensitive substring match *)
-      let sorted_posts = match author_filter with
-        | None -> sorted_posts
-        | Some needle ->
-            let needle_lower = String.lowercase_ascii needle in
-            List.filter (fun (p : Board.post) ->
-              let author_str = Board.Agent_id.to_string p.author in
-              let author_lower = String.lowercase_ascii author_str in
-              String_util.contains_substring author_lower needle_lower
-            ) sorted_posts
+      let fetch_limit = limit + offset + 100 in
+      let sorted_posts =
+        Board_dispatch.list_posts ~visibility_filter ?hearth ?author_filter
+          ~exclude_system ~exclude_automation
+          ~sort_by:(dispatch_sort_of sort_by) ~limit:fetch_limit ()
       in
 
       let posts =

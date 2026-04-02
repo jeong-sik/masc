@@ -4,6 +4,7 @@ open Board
 open Pg_infix
 
 let ttl_where = "(expires_at = 0 OR expires_at > extract(epoch from now()))"
+let comment_ttl_where = "(c.expires_at = 0 OR c.expires_at > extract(epoch from now()))"
 
 (* Post row: 16 fields packed as t4(t4, t4, t4, t4) *)
 let post_row_t = Caqti_type.(
@@ -125,15 +126,26 @@ let update_post_kind_q =
   (Caqti_type.(t2 string string) ->. Caqti_type.unit)
   "UPDATE masc_board_posts SET post_kind = $2 WHERE id = $1"
 
-(* Sort-order specific list queries. $1=visibility (NULL=any), $2=hearth (NULL=any), $3=limit.
+(* Sort-order specific list queries.
+   $1=visibility (NULL=any), $2=hearth (NULL=any),
+   $3=author filter (matches post author or visible comment author), $4=limit.
    NOTE: PostgreSQL cannot infer type from `$n IS NULL` alone, so explicit ::TEXT cast needed. *)
 let mk_list_q order_clause =
-  (Caqti_type.(t3 (option string) (option string) int) ->* post_row_t)
+  (Caqti_type.(t4 (option string) (option string) (option string) int) ->* post_row_t)
   (Printf.sprintf
     "SELECT %s FROM masc_board_posts \
-     WHERE %s AND ($1::TEXT IS NULL OR visibility = $1) AND ($2::TEXT IS NULL OR hearth = $2) \
-     ORDER BY %s LIMIT $3"
-    post_columns ttl_where order_clause)
+     WHERE %s \
+       AND ($1::TEXT IS NULL OR visibility = $1) \
+       AND ($2::TEXT IS NULL OR hearth = $2) \
+       AND ($3::TEXT IS NULL \
+         OR author ILIKE '%%' || $3 || '%%' \
+         OR EXISTS ( \
+           SELECT 1 FROM masc_board_comments c \
+           WHERE c.post_id = masc_board_posts.id \
+             AND %s \
+             AND c.author ILIKE '%%' || $3 || '%%')) \
+     ORDER BY %s LIMIT $4"
+    post_columns ttl_where comment_ttl_where order_clause)
 
 let list_hot_q = mk_list_q "(votes_up - votes_down) DESC, created_at DESC"
 let list_recent_q = mk_list_q "created_at DESC"

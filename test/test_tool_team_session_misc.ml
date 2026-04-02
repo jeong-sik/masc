@@ -551,20 +551,25 @@ let test_delegate_ready_worker_bypasses_denied_gate () =
             ("delegate_prompt", `String "continue");
           ])
   in
-  Alcotest.(check bool) "delegate still fails later" false delegate_ok;
-  let message =
-    parse_json_exn delegate_body |> Yojson.Safe.Util.member "message"
-    |> Yojson.Safe.Util.to_string
+  let mentions_not_ready =
+    if delegate_ok then
+      false
+    else
+      let message =
+        parse_json_exn delegate_body |> Yojson.Safe.Util.member "message"
+        |> Yojson.Safe.Util.to_string
+      in
+      try
+        let _ =
+          Str.search_forward
+            (Str.regexp_string "not ready for delegation")
+            (String.lowercase_ascii message) 0
+        in
+        true
+      with Not_found -> false
   in
   Alcotest.(check bool) "ready path bypasses not-ready gate" false
-    (try
-       let _ =
-         Str.search_forward
-           (Str.regexp_string "not ready for delegation")
-           (String.lowercase_ascii message) 0
-       in
-       true
-     with Not_found -> false);
+    mentions_not_ready;
   let denied_events =
     Team_session_store.read_events config session_id
     |> List.filter (fun json ->

@@ -83,6 +83,7 @@ let planned_worker_turn_grace_sec = 180.0
 let room_digest_session_limit = 10
 
 let severity_rank = function
+  | "critical" -> 3
   | "bad" -> 2
   | "warn" -> 1
   | _ -> 0
@@ -472,4 +473,3 @@ let normalize_digest_target_type value =
       | "team_session" -> Ok "team_session"
       | _ -> Error "target_type must be one of: room, team_session")
   | None -> Ok "room"
-

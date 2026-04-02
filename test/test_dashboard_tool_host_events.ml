@@ -157,6 +157,32 @@ let test_generic_failure_envelope_is_retryable_without_operator_action () =
   check bool "generic operator action omitted" true
     Yojson.Safe.Util.(failure_envelope |> member "operator_action" = `Null)
 
+let test_blank_entity_id_is_normalized_out () =
+  let details =
+    Dashboard_tool_host_events.details_json
+      {
+        agent_name = "codex";
+        client_name = "codex";
+        tool_name = "masc_keeper_msg";
+        transport = "mcp_http";
+        phase = Some "tools/call";
+        message = "upstream returned malformed payload";
+        request_id = Some "   ";
+        session_id = Some "";
+        trace_id = Some "trace-7";
+        timeout_ms = None;
+      }
+  in
+  let failure_envelope = Yojson.Safe.Util.member "failure_envelope" details in
+  check string "normalized entity_id uses first non-empty id" "trace-7"
+    Yojson.Safe.Util.(failure_envelope |> member "entity_id" |> to_string);
+  check bool "blank request_id omitted from evidence" true
+    Yojson.Safe.Util.
+      (failure_envelope |> member "evidence_ref" |> member "request_id" = `Null);
+  check bool "blank session_id omitted from evidence" true
+    Yojson.Safe.Util.
+      (failure_envelope |> member "evidence_ref" |> member "session_id" = `Null)
+
 let () =
   run "Dashboard_tool_host_events"
     [
@@ -169,5 +195,7 @@ let () =
             test_record_writes_audit_ring_and_telemetry;
           test_case "generic failure envelope stays retryable" `Quick
             test_generic_failure_envelope_is_retryable_without_operator_action;
+          test_case "blank entity_id is normalized out" `Quick
+            test_blank_entity_id_is_normalized_out;
         ] );
     ]

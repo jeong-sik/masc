@@ -52,6 +52,9 @@ let trim_to_option value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
 
+let first_non_empty values =
+  List.find_map (fun value -> Option.bind value trim_to_option) values
+
 let tool_host_cause_code ?timeout_ms message =
   let lower = String.lowercase_ascii message in
   if Option.is_some timeout_ms
@@ -82,10 +85,7 @@ let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
   {
     surface = "tool_host";
     entity_kind = "tool_call";
-    entity_id =
-      (match request_id with
-       | Some _ -> request_id
-       | None -> (match session_id with Some _ -> session_id | None -> trace_id));
+    entity_id = first_non_empty [ request_id; session_id; trace_id ];
     cause_code;
     severity = Bad;
     summary = summary_for_tool_host ~client_name ~tool_name ~transport phase;

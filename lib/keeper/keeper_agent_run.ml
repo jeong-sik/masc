@@ -127,9 +127,6 @@ let log_keeper_friction
     Log.Keeper.warn "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
       keeper_name blocked groups tripwires
   else if blocked > 0 || groups > 0 then
-    Log.Keeper.info "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
-      keeper_name blocked groups tripwires
-  else if Keeper_types_profile.keeper_debug then
     Log.Keeper.debug "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
       keeper_name blocked groups tripwires
 

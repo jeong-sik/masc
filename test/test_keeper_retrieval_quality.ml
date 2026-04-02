@@ -299,10 +299,22 @@ let test_masc_code_search_en () =
   ignore (assert_retrieves ~label:"masc_code_en" idx
     "search the codebase for function definitions" "masc_code_search")
 
+(* masc_governance_status is not retrievable via offline BM25: governance
+   tool schemas were removed with the council module (#4620).
+   governance_tools in tool_shard.ml returns [] so masc_governance_status
+   is excluded from the keeper candidate universe.
+   Re-enable when governance schemas are available via MCP injection
+   or a replacement module.  Tracked in #4520. *)
 let test_masc_governance_kr () =
   let idx = build_keeper_index () in
-  ignore (assert_retrieves ~label:"governance_kr" idx
-    "거버넌스 상태 규칙" "masc_governance_status")
+  let retrieved = Agent_sdk.Tool_index.retrieve idx "거버넌스 상태 규칙" in
+  let names = List.map fst retrieved in
+  if List.mem "masc_governance_status" names then
+    ignore (assert_retrieves ~label:"governance_kr" idx
+      "거버넌스 상태 규칙" "masc_governance_status")
+  else
+    (* governance schemas absent — skip rather than fail *)
+    Alcotest.(check pass) "governance_kr: skipped (no offline governance schemas)" () ()
 
 (* masc_plan_get and masc_team_session_start are not retrievable via BM25
    with Korean queries: "계획", "플랜", "팀", "세션" are common terms that

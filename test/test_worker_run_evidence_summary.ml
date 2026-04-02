@@ -148,6 +148,16 @@ let test_summary_distinguishes_missing_vs_unavailable_evidence () =
   in
   check string "proof absent without refs is unavailable" "unavailable"
     U.(unavailable_proof |> member "proof_evidence_status" |> to_string);
+  let trace_only_evidence_refs =
+    Worker_run_evidence_summary.summary_json
+      (sample_meta ~proof_present:(`Bool false) ~proof_run_id:`Null
+         ~tool_trace_refs:(`List []) ~raw_evidence_refs:(`List [])
+         ~checkpoint_ref:`Null
+         ~evidence_refs:(`List [ `String "traces/wr-evidence-1.jsonl" ]) ())
+  in
+  check string "trace-only evidence refs do not imply proof availability"
+    "unavailable"
+    U.(trace_only_evidence_refs |> member "proof_evidence_status" |> to_string);
   check bool "proof fields stay absent when no proof_run_id" false
     (has_key "proof_run_id" unavailable_proof);
   check bool "proof status stays absent when no proof_run_id" false

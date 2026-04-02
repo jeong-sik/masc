@@ -170,7 +170,7 @@ let test_step_spawn_batch_applies_hybrid_routing () =
           (fun worker -> worker.Team_session_types.spawn_role = Some "normalizer")
           session.planned_workers
       in
-      Alcotest.(check (option string)) "normalizer model" (Some "qwen9-worker")
+      Alcotest.(check (option string)) "normalizer model" (Some "qwen35-lead")
         normalizer.spawn_model;
       Alcotest.(check (option string)) "normalizer profile" (Some "normalize")
         (Option.map Team_session_types.task_profile_to_string

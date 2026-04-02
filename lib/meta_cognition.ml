@@ -810,20 +810,23 @@ let snapshot_json ?hearth ~limit config =
     comment_sources ?hearth_filter:hearth post_by_id comments
   in
   let sources = post_sources @ comment_sources in
-  let beliefs =
+  let all_beliefs =
     belief_rules
     |> List.filter_map (fun rule -> belief_json ~limit rule sources)
     |> List.sort (fun a b ->
            let count_of json key = json |> Yojson.Safe.Util.member key |> Yojson.Safe.Util.to_int in
            compare (count_of b "support_agent_count") (count_of a "support_agent_count"))
-    |> take limit
   in
-  let contested_beliefs =
-    beliefs
+  let total_belief_count = List.length all_beliefs in
+  let beliefs = take limit all_beliefs in
+  let all_contested =
+    all_beliefs
     |> List.filter (fun json ->
            json |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string
            |> String.equal "contested")
   in
+  let total_contested_belief_count = List.length all_contested in
+  let contested_beliefs = take limit all_contested in
   let tensions =
     tension_rules
     |> List.filter_map (fun rule -> tension_json ~limit governance_cases rule sources)
@@ -879,7 +882,9 @@ let snapshot_json ?hearth ~limit config =
             ("governance_case_count", `Int (List.length governance_cases));
           ] );
       ("beliefs", `List beliefs);
+      ("total_belief_count", `Int total_belief_count);
       ("contested_beliefs", `List contested_beliefs);
+      ("total_contested_belief_count", `Int total_contested_belief_count);
       ("tensions", `List tensions);
       ("collective_desires", `List collective_desires);
       ("social_edges", `List social_edges);
@@ -935,20 +940,15 @@ let first_item_or_null json key =
   | `List (item :: _) -> item
   | _ -> `Null
 
-let list_length json key =
-  match Yojson.Safe.Util.member key json with
-  | `List items -> List.length items
-  | _ -> 0
-
 let summary_json ?hearth config =
   let snapshot = snapshot_json ?hearth ~limit:3 config in
-  let full_snapshot = snapshot_json ?hearth ~limit:1000 config in
   `Assoc
     [
       ( "stagnation_score",
         Yojson.Safe.Util.member "stagnation_score" snapshot );
-      ("belief_count", `Int (list_length full_snapshot "beliefs"));
-      ("contested_belief_count", `Int (list_length full_snapshot "contested_beliefs"));
+      ("belief_count", Yojson.Safe.Util.member "total_belief_count" snapshot);
+      ("contested_belief_count",
+        Yojson.Safe.Util.member "total_contested_belief_count" snapshot);
       ( "dominant_belief",
         assoc_subset_or_null
           (first_item_or_null snapshot "beliefs")

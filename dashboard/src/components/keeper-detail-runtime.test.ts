@@ -4,7 +4,7 @@ import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types
 import {
   resolveKeeperObservedToolAudit,
   resolveKeeperToolPolicy,
-} from './keeper-detail-runtime'
+} from './keeper-detail-source'
 
 describe('resolveKeeperToolPolicy', () => {
   it('uses keeper config as the authoritative policy source', () => {
@@ -116,6 +116,30 @@ describe('resolveKeeperObservedToolAudit', () => {
       agent_name: 'sangsu',
       status: 'active',
     }
+
+    expect(resolveKeeperObservedToolAudit(keeper, missionBrief)).toEqual({
+      source: 'dashboard_summary',
+      latestToolNames: ['dashboard_summary_tool'],
+      latestToolCallCount: 1,
+      toolAuditSource: 'keeper_metrics',
+      toolAuditAt: '2026-04-01T12:00:00Z',
+    })
+  })
+
+  it('does not treat mission compatibility allowlists as observed audit freshness', () => {
+    const keeper: Keeper = {
+      name: 'sangsu',
+      status: 'active',
+      latest_tool_names: ['dashboard_summary_tool'],
+      latest_tool_call_count: 1,
+      tool_audit_source: 'keeper_metrics',
+      tool_audit_at: '2026-04-01T12:00:00Z',
+    }
+
+    const missionBrief = {
+      name: 'sangsu',
+      allowed_tool_names: ['compat_only_allowlist'],
+    } as DashboardMissionKeeperBrief & { allowed_tool_names: string[] }
 
     expect(resolveKeeperObservedToolAudit(keeper, missionBrief)).toEqual({
       source: 'dashboard_summary',

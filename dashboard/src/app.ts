@@ -19,6 +19,7 @@ import {
 } from './components/dashboard-shell'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
+import { TaskDetailOverlay } from './components/goals/task-detail-overlay'
 import { ToastContainer } from './components/common/toast'
 import { AuthStatus, RemoteWarningBanner } from './components/auth-status'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
@@ -127,6 +128,7 @@ export function App() {
 
       <${KeeperDetailOverlay} />
       <${AgentDetailOverlay} />
+      <${TaskDetailOverlay} />
       <${ToastContainer} />
     </div>
   `

@@ -20,6 +20,7 @@ import {
   sortByPriority,
   sortByTimeDesc,
 } from './goal-helpers'
+import { openTaskDetail } from './task-detail-state'
 
 const deletingTaskId = signal<string | null>(null)
 const REPO_ISSUES_BASE = 'https://github.com/jeong-sik/masc-mcp/issues'
@@ -99,7 +100,11 @@ export function KanbanCard({ task }: { task: Task }) {
         </button>
       </div>
 
-      <div class="text-[14px] font-semibold leading-snug text-text-strong whitespace-pre-wrap break-words">${task.title}</div>
+      <button
+        type="button"
+        class="text-left text-[14px] font-semibold leading-snug text-text-strong whitespace-pre-wrap break-words cursor-pointer bg-transparent border-none p-0 font-[inherit] transition-colors hover:text-accent"
+        onClick=${() => openTaskDetail(task)}
+      >${task.title}</button>
 
       ${hasDescription ? html`
         <div class="flex flex-col gap-2">

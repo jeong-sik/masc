@@ -65,3 +65,7 @@ val dispatch_tick_json :
 val observe_operations_json : Room.config -> Yojson.Safe.t
 
 val observe_capacity_json : Room.config -> Yojson.Safe.t
+
+(** {1 Failover} *)
+
+val pick_failover_leader : string list -> Cp_types.detachment_record -> string option

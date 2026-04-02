@@ -566,7 +566,7 @@ let stalled_or_quiet_detachment now (detachment : detachment_record) =
       |> Option.map (fun ts -> now -. ts > 1800.0)
       |> Option.value ~default:false
 
-(** Pick failover leader using shuffle to distribute load evenly.
+(** Pick failover leader using deterministic hash-based selection.
     BUG-006: List.find_opt always returned the first eligible agent,
     causing failover to concentrate on a single keeper. *)
 let pick_failover_leader live_agents (detachment : detachment_record) =
@@ -582,10 +582,13 @@ let pick_failover_leader live_agents (detachment : detachment_record) =
   | [] -> None
   | [single] -> Some single
   | _ ->
-      (* Pick based on hash of current time to distribute without needing Random.self_init *)
-      let arr = Array.of_list eligible in
+      (* Deterministic selection: hash detachment id + sorted roster to get
+         a stable index that is replayable and testable. *)
+      let sorted = List.sort String.compare eligible in
+      let arr = Array.of_list sorted in
       let n = Array.length arr in
-      let idx = abs (Hashtbl.hash (Unix.gettimeofday ())) mod n in
+      let seed = Hashtbl.hash (detachment.detachment_id, sorted) in
+      let idx = (seed land max_int) mod n in
       Some arr.(idx)
 
 let maybe_escalation_target units (detachment : detachment_record) =

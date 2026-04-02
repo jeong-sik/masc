@@ -319,7 +319,7 @@ let list_posts t ?(visibility_filter=None) ?hearth ?author_filter ?(sort_by=Hot)
     match author_filter with
     | Some raw ->
         let trimmed = String.trim raw in
-        if trimmed = "" then None else Some trimmed
+        if trimmed = "" then None else Some (String.lowercase_ascii trimmed)
     | None -> None
   in
   let lim = max 1 (min limit 5200) in

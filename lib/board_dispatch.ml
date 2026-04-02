@@ -177,13 +177,6 @@ let agent_matches_author_filter ~needle (agent_id : Board.Agent_id.t) =
   let author = Board.Agent_id.to_string agent_id |> String.lowercase_ascii in
   String_util.contains_substring author needle
 
-let post_matches_author_filter ~needle ~comments_for_post (post : Board.post) =
-  agent_matches_author_filter ~needle post.author
-  || List.exists
-       (fun (comment : Board.comment) ->
-         agent_matches_author_filter ~needle comment.author)
-       (comments_for_post post)
-
 let matching_post_ids_for_comment_author_filter ~needle (comments : Board.comment list) =
   let matches = Hashtbl.create 64 in
   List.iter

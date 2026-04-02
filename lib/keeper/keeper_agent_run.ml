@@ -347,7 +347,7 @@ let run_turn
     "masc_autoresearch_stop", "자동연구 리서치 중지";
     "masc_autoresearch_cycle", "자동연구 리서치 사이클 실행";
     "masc_autoresearch_search_findings", "자동연구 결과 검색 발견";
-    "masc_plan_get", "계획 플랜 조회 현재";
+    "masc_plan_get", "계획 플랜 마일스톤 로드맵 프로젝트 전략";
     "masc_plan_update", "계획 플랜 수정 업데이트";
     "masc_plan_init", "계획 플랜 초기화 생성";
     "masc_plan_set_task", "계획 태스크 설정 할당";
@@ -361,7 +361,7 @@ let run_turn
     "masc_keeper_list", "키퍼 목록 현황";
     "masc_keeper_msg", "키퍼 메시지 전달 대화";
     "masc_keeper_status", "키퍼 상태 확인";
-    "masc_team_session_start", "팀세션 시작 스웜";
+    "masc_team_session_start", "팀 세션 병렬 작업 스웜 멀티 에이전트 시작";
     "masc_team_session_status", "팀세션 상태 현황";
     "masc_team_session_stop", "팀세션 중지 종료";
     "masc_team_session_step", "팀세션 단계 스텝 실행";

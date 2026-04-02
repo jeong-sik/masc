@@ -180,6 +180,7 @@ function SortBar() {
         <input
           type="text"
           placeholder="Author"
+          aria-label="Filter posts by author"
           value=${boardAuthorFilter.value}
           class="px-2.5 py-1 rounded-lg text-[11px] font-medium border bg-transparent text-[var(--text)] border-[var(--border-slate-16)] placeholder:text-[var(--text-muted)] w-28 focus:outline-none focus:border-[var(--accent)]"
           onKeyDown=${(e: KeyboardEvent) => {

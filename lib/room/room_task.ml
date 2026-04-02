@@ -405,6 +405,9 @@ let transition_task_r config ~agent_name ~task_id ~action
                        | Types.Done_action, Types.Done _ ->
                            (* Idempotent: already done, return current state unchanged *)
                            Ok (task.task_status, None)
+                       | Types.Cancel, Types.Cancelled _ ->
+                           (* Idempotent: already cancelled *)
+                           Ok (task.task_status, None)
                        | Types.Cancel, Types.Todo ->
                            Ok (Types.Cancelled {
                              cancelled_by = agent_name;
@@ -428,6 +431,10 @@ let transition_task_r config ~agent_name ~task_id ~action
                      in
                      (match transition with
                       | Error e -> Error e
+                      | Ok (new_status, _) when new_status = task.task_status ->
+                          (* Idempotent no-op: status unchanged, skip write/events *)
+                          Ok (Printf.sprintf "✅ %s already %s (no-op)" task_id
+                                (task_status_to_string task.task_status))
                       | Ok (new_status, set_current) ->
                           let new_tasks = List.map (fun t ->
                             if t.id = task_id then { t with task_status = new_status } else t

@@ -1139,4 +1139,38 @@ let () =
           test_case "render_inline with replacement" `Quick
             test_render_inline_with_replacement;
         ] );
+      ( "transient_network_error",
+        [
+          test_case "connection reset detected" `Quick (fun () ->
+            check bool "readv reset" true
+              (UT.is_transient_network_error
+                 "Network error: All models failed: Eio.Io Net Connection_reset Unix_error (Connection reset by peer, \"readv\", \"\")"));
+          test_case "broken pipe detected" `Quick (fun () ->
+            check bool "writev broken pipe" true
+              (UT.is_transient_network_error
+                 "Network error: All models failed: Eio.Io Net Connection_reset Unix_error (Broken pipe, \"writev\", \"\")"));
+          test_case "end of file detected" `Quick (fun () ->
+            check bool "eof" true
+              (UT.is_transient_network_error
+                 "Agent execution exception: End_of_file"));
+          test_case "connection closed detected" `Quick (fun () ->
+            check bool "closed" true
+              (UT.is_transient_network_error
+                 "Network error: All models failed: connection closed by peer"));
+          test_case "connection refused detected" `Quick (fun () ->
+            check bool "refused" true
+              (UT.is_transient_network_error
+                 "Eio.Io Net Connection refused"));
+          test_case "auth error not transient" `Quick (fun () ->
+            check bool "auth 401" false
+              (UT.is_transient_network_error
+                 "HTTP error: 401 Unauthorized"));
+          test_case "rate limit not transient" `Quick (fun () ->
+            check bool "rate limit" false
+              (UT.is_transient_network_error
+                 "HTTP error: 429 Too Many Requests"));
+          test_case "empty string not transient" `Quick (fun () ->
+            check bool "empty" false
+              (UT.is_transient_network_error ""));
+        ] );
     ]

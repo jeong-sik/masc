@@ -65,6 +65,9 @@ val broadcast_lifecycle_events :
   handoff_json:Yojson.Safe.t option ->
   unit
 
+(** Detect transient TCP/TLS errors eligible for retry. Exposed for testing. *)
+val is_transient_network_error : string -> bool
+
 val run_unified_turn :
   config:Room.config ->
   meta:Keeper_types.keeper_meta ->

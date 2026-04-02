@@ -47,12 +47,22 @@ let inject_masc_schemas (schemas : Types.tool_schema list) =
       | Some _ -> true
       | None -> false
   in
+  (* masc_board_* tools that have keeper_board_* wrappers with auto-injected
+     author/voter fields. Exposing both leads to the LLM calling the raw
+     masc_* variant without the required author, causing "author is required". *)
+  let has_keeper_board_wrapper name =
+    match name with
+    | "masc_board_comment" | "masc_board_post"
+    | "masc_board_vote" | "masc_board_delete" -> true
+    | _ -> false
+  in
   masc_schemas_ref :=
     List.filter (fun (s : Types.tool_schema) ->
       String.starts_with ~prefix:"masc_" s.name
       && not (is_keeper_mcp_context_required s.name)
       && supported_in_keeper s.name
-      && not (is_keeper_denied s.name))
+      && not (is_keeper_denied s.name)
+      && not (has_keeper_board_wrapper s.name))
       schemas
 
 let select_existing_masc_tool_names names =

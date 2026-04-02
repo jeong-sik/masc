@@ -122,7 +122,8 @@ let execute_spawn_pipeline
                in
                    let docker_specs =
                      prepared_executions
-                     |> List.filter_map (fun (execution : prepared_execution) ->
+                     |> List.mapi (fun i execution -> (i, execution))
+                     |> List.filter_map (fun (i, (execution : prepared_execution)) ->
                             match execution.worker_backend with
                             | Worker_execution_backend.Local -> None
                             | Worker_execution_backend.Docker ->
@@ -130,7 +131,7 @@ let execute_spawn_pipeline
                                 let worker_name =
                                   Option.value
                                     ~default:
-                                      (Printf.sprintf "spawn-%d-%s" 0
+                                      (Printf.sprintf "spawn-%d-%s" i
                                          prepared.worker_run_id)
                                     prepared.runtime_actor_name
                                 in

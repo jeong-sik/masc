@@ -38,6 +38,9 @@ let make_config_root root =
   write_file (Filename.concat config "cascade.json") "{}";
   config
 
+(* OCaml stdlib lacks Unix.unsetenv; putenv name "" is the closest
+   approximation.  Code under test guards with [value <> ""] so this
+   behaves like an unset for practical purposes. *)
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   (match value with

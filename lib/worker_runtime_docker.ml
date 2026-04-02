@@ -90,6 +90,16 @@ let allowlisted_env_pairs () =
       ("LLAMA_SERVER_URL", docker_llama_server_url ());
     ]
   in
+  (* Keys with empty override values signal removal from inherited env. *)
+  let cleared_keys =
+    overrides
+    |> List.filter_map (fun (key, value) ->
+           if String.trim value = "" then Some key else None)
+  in
+  let inherited =
+    inherited
+    |> List.filter (fun (key, _) -> not (List.mem key cleared_keys))
+  in
   let overrides =
     overrides
     |> List.filter_map (fun (key, value) ->
@@ -273,12 +283,13 @@ let run_worker_spec ?clock_opt (spec : Worker_execution_spec.t) :
   Fun.protect
     ~finally:(fun () -> best_effort_remove_container ?clock_opt name)
     (fun () ->
+      let effective_timeout_sec = max 10 spec.timeout_sec in
       let stdin_content =
         Worker_execution_spec.to_yojson spec |> Yojson.Safe.to_string
       in
       let result =
         Tool_command_plane_support.run_process_with_timeout ~clock_opt
-          ~stdin_content ~timeout_sec:(max 10 spec.timeout_sec)
+          ~stdin_content ~timeout_sec:effective_timeout_sec
           ~prog:"docker" ~argv:(docker_argv spec)
           ~env:(Unix.environment ()) ()
       in
@@ -305,7 +316,7 @@ let run_worker_spec ?clock_opt (spec : Worker_execution_spec.t) :
       | 124 ->
           Error
             (Printf.sprintf "Docker worker timed out after %ds%s"
-               spec.timeout_sec
+               effective_timeout_sec
                (if String.trim result.stderr = "" then ""
                 else
                   "\n[stderr]\n"

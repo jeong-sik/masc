@@ -362,10 +362,10 @@ let run_cmd host port base_path =
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | _ -> ());
-      Log.Server.info "MASC MCP: Shutdown complete."
+      Log.Server.info "MASC MCP: Server stopped, waiting for background fibers..."
     with
     | Eio.Cancel.Cancelled _ ->
-        Log.Server.info "MASC MCP: Shutdown complete."
+        Log.Server.info "MASC MCP: Server cancelled, waiting for background fibers..."
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) when attempt < max_bind_retries ->
         let delay = Float.min 30.0 (2.0 ** Float.of_int attempt) in
         Log.Server.warn "Port %d in use, retrying in %.0fs (attempt %d/%d)"
@@ -380,7 +380,8 @@ let run_cmd host port base_path =
         Log.Server.error "[FATAL] Permission denied binding to port %d" port;
         exit 1)
   in
-  try_start 0
+  try_start 0;
+  Log.Server.info "MASC MCP: Shutdown complete."
 
 let cmd =
   let doc = "MASC MCP Server" in

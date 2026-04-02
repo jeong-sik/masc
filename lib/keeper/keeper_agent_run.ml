@@ -370,7 +370,6 @@ let run_turn
     "masc_agent_card", "에이전트 카드 프로필 정보";
     "masc_agents", "에이전트 목록 현황 누구";
     "masc_agent_update", "에이전트 업데이트 상태변경";
-    "masc_agent_fitness", "에이전트 적합도 평가";
     "masc_keeper_up", "키퍼 시작 기동 생성";
     "masc_keeper_down", "키퍼 중지 종료";
     "masc_keeper_list", "키퍼 목록 현황";

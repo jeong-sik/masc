@@ -2,7 +2,7 @@ import { h } from 'preact'
 import { render, screen } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { Memory } from './memory'
-import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation } from '../store'
+import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardAuthorFilter } from '../store'
 import { route } from '../router'
 
 // Ensure jest-dom matchers are available
@@ -15,6 +15,7 @@ vi.mock('../store', () => ({
   boardSortMode: { value: 'recent' },
   boardExcludeSystem: { value: true },
   boardExcludeAutomation: { value: false },
+  boardAuthorFilter: { value: '' },
   lastBoardRefreshAt: { value: 0 },
   refreshBoard: vi.fn(),
 }))
@@ -44,6 +45,7 @@ describe('Memory Component', () => {
     boardSortMode.value = 'recent'
     boardExcludeSystem.value = true
     boardExcludeAutomation.value = false
+    boardAuthorFilter.value = ''
     route.value = { params: {} } as any
   })
 

@@ -135,8 +135,13 @@ let extract_turn_stats (body : string) : turn_stats option =
   try
     let json = Yojson.Safe.from_string body in
     let open Yojson.Safe.Util in
-    let model = json |> member "model_used" |> to_string_option
-                |> Option.value ~default:"" in
+    let model =
+      json |> member "model_used" |> to_string_option
+      |> Option.value
+           ~default:
+             (json |> member "model" |> to_string_option
+              |> Option.value ~default:"")
+    in
     let dur = json |> member "duration_ms" |> to_int_option
               |> Option.value ~default:0 in
     let tok = json |> member "total_tokens" |> to_int_option

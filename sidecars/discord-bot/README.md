@@ -28,6 +28,7 @@ the Channel Gate's HTTP API. No business logic, no LLM calls.
 ```bash
 cp .env.example .env
 # Edit .env with your tokens and keeper mapping
+# BotConfig auto-loads .env from the current working directory
 ```
 
 ### 3. Run

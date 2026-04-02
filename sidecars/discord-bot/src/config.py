@@ -16,7 +16,7 @@ from pydantic_settings import BaseSettings
 class BotConfig(BaseSettings):
     """Bot configuration from environment variables."""
 
-    model_config = {"env_prefix": "", "case_sensitive": True}
+    model_config = {"env_prefix": "", "case_sensitive": True, "env_file": ".env"}
 
     # Required
     discord_bot_token: str

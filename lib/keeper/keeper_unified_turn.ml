@@ -28,8 +28,9 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
     ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
-(** Detect transient TCP/TLS errors that warrant a single immediate retry.
-    These patterns match OAS cascade error messages for connection-level failures. *)
+(** Detect transient TCP/TLS errors that warrant retry with backoff.
+    These patterns match OAS cascade error messages for connection-level failures.
+    See #4523: Connection_reset/Broken_pipe/EOF from idle TCP teardown. *)
 let transient_error_patterns =
   [ "Connection_reset"; "Broken pipe"; "End_of_file";
     "connection closed"; "Connection refused" ]
@@ -38,6 +39,17 @@ let is_transient_network_error (msg : string) : bool =
   List.exists
     (fun needle -> string_contains_substring ~needle msg)
     transient_error_patterns
+
+(** Max transient retries (excluding the initial attempt).  Total attempts
+    = 1 initial + max_transient_retries.  OAS internal retry is 3 per
+    provider; this outer retry covers cases where all providers fail
+    transiently (e.g. TCP keepalive expiry across all backends). *)
+let max_transient_retries = 2
+
+(** Exponential backoff delay for transient retry [attempt] (1-indexed).
+    Delays: 1s, 2s — total wait 3s before giving up. *)
+let transient_backoff_sec (attempt : int) : float =
+  Float.min 4.0 (1.0 *. Float.of_int (1 lsl (attempt - 1)))
 
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
@@ -589,7 +601,11 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
            No dynamic_context needed here. *)
         { system_prompt; dynamic_context = "" }
       in
-      (* 5. Run via OAS Agent.run() with transient-error retry *)
+      (* 5. Run via OAS Agent.run() with transient-error retry.
+         Exponential backoff (1s, 2s, 4s) up to max_transient_retries.
+         OAS already retries 3x per provider internally; this outer loop
+         covers simultaneous backend failures (e.g. TCP keepalive expiry
+         across all providers).  See #4523. *)
       let run_result, latency_ms =
         Keeper_exec_context.timed (fun () ->
           let do_run ?(is_retry = false) () =
@@ -604,14 +620,21 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_retry
               ()
           in
-          match do_run () with
-          | Ok _ as ok -> ok
-          | Error e when is_transient_network_error e ->
-              Log.Keeper.warn "%s: transient network error, retrying once: %s"
-                meta.name (short_preview e);
-              Eio.Fiber.yield ();
-              do_run ~is_retry:true ()
-          | Error _ as err -> err)
+          let rec retry_loop attempt =
+            match do_run ~is_retry:(attempt > 1) () with
+            | Ok _ as ok -> ok
+            | Error e when is_transient_network_error e
+                           && attempt <= max_transient_retries ->
+                let delay = transient_backoff_sec attempt in
+                Log.Keeper.warn
+                  "%s: transient network error (retry %d/%d), backoff %.0fs: %s"
+                  meta.name attempt max_transient_retries delay
+                  (short_preview e);
+                Eio.Time.sleep (Eio_context.get_clock ()) delay;
+                retry_loop (attempt + 1)
+            | result -> result
+          in
+          retry_loop 1)
       in
       match run_result with
       | Error e ->

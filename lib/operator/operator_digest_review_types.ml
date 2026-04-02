@@ -5,9 +5,11 @@
     [severity], [target_type], [target_id]. Modules that include
     Operator_digest_types would see ambiguous field resolution. *)
 
-module U = Yojson.Safe.Util
 open Operator_pending_confirm
 open Operator_digest_types
+
+(* Local alias — not leaked when this module is included/re-exported. *)
+module U_ = Yojson.Safe.Util
 
 type review_item = {
   id : string;
@@ -45,17 +47,17 @@ let review_truth_ref_json ~target_type ~target_id =
     ]
 
 let json_string_opt json key =
-  json |> U.member key |> U.to_string_option
+  json |> U_.member key |> U_.to_string_option
 
 let json_float_opt json key =
-  match json |> U.member key with
+  match json |> U_.member key with
   | `Float value -> Some value
   | `Int value -> Some (float_of_int value)
   | `Intlit raw -> (try Some (float_of_string raw) with Failure _ -> None)
   | _ -> None
 
 let json_bool_opt json key =
-  match json |> U.member key with
+  match json |> U_.member key with
   | `Bool value -> Some value
   | _ -> None
 

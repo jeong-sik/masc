@@ -272,7 +272,35 @@ let room_recommendations ?command_plane_summary config =
   in
   dedup_recommendations signal_recommendations
 
-include Operator_digest_review_types
+(* Re-export from Operator_digest_review_types without [include] to
+   avoid conflicting [module U] and leaking [open] directives. *)
+type review_item = Operator_digest_review_types.review_item = {
+  id : string;
+  kind : string;
+  target_type : string;
+  target_id : string option;
+  severity : string;
+  urgency : string;
+  summary : string;
+  why_now : string;
+  source : string;
+  authoritative : bool;
+  fingerprint : string;
+  stale_sec : int option;
+  confirm_required : bool;
+  recommended_action : recommended_action option;
+  truth_ref : Yojson.Safe.t;
+  friction : Yojson.Safe.t;
+  advice : Yojson.Safe.t;
+}
+let review_empty_advice_json = Operator_digest_review_types.review_empty_advice_json
+let review_truth_ref_json = Operator_digest_review_types.review_truth_ref_json
+let json_string_opt = Operator_digest_review_types.json_string_opt
+let json_float_opt = Operator_digest_review_types.json_float_opt
+let json_bool_opt = Operator_digest_review_types.json_bool_opt
+let review_fingerprint = Operator_digest_review_types.review_fingerprint
+let stale_sec_of_iso = Operator_digest_review_types.stale_sec_of_iso
+let review_action_copy = Operator_digest_review_types.review_action_copy
 
 let room_state_json config =
   if not (Room.is_initialized config) then

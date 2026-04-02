@@ -37,6 +37,19 @@ export function getStoredToken(): string | null {
   return sessionStorage.getItem(TOKEN_STORAGE_KEY)
 }
 
+export function setStoredToken(token: string): void {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token)
+}
+
+export function clearStoredToken(): void {
+  sessionStorage.removeItem(TOKEN_STORAGE_KEY)
+}
+
+export function isRemoteAccess(): boolean {
+  const host = window.location.hostname
+  return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1'
+}
+
 export function currentDashboardActor(): string {
   return resolveDashboardActorName() || 'dashboard'
 }

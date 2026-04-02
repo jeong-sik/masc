@@ -20,6 +20,7 @@ import {
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
+import { AuthStatus, RemoteWarningBanner } from './components/auth-status'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
 
 export const sidebarCollapsed = signal(false)
@@ -101,11 +102,16 @@ export function App() {
           </div>
 
           <div class="flex shrink-0 flex-col items-end gap-2">
-            <${ConnectionStatus} />
+            <div class="flex items-center gap-2">
+              <${AuthStatus} />
+              <${ConnectionStatus} />
+            </div>
             <${BuildIdentityBadge} />
           </div>
         </div>
       </header>
+
+      <${RemoteWarningBanner} />
 
       <div class="flex flex-1 gap-2.5 overflow-hidden p-2.5 max-[1100px]:flex-col max-[1100px]:gap-2 max-[1100px]:p-2">
         <aside id="dashboard-side-rail" class="${sidebarCollapsed.value ? 'w-14' : 'w-[220px]'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-[300px] ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">

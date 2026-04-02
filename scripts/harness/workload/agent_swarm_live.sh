@@ -410,6 +410,8 @@ summary_path = Path(sys.argv[7])
 harness = json.loads(harness_path.read_text())
 slot = json.loads(slot_path.read_text()) if slot_path.exists() else {}
 workers = harness.get("workers") or []
+joined_workers = sum(1 for row in workers if row.get("attached") is True)
+live_workers = sum(1 for row in workers if row.get("turn_observed") is True)
 completed_workers = sum(1 for row in workers if row.get("status") == "ok")
 final_markers_seen = sum(1 for row in workers if row.get("final_marker_seen") is True)
 pass_hot_concurrency = int(slot.get("peak_active_slots") or 0) >= min_hot_slots and bool(slot.get("hot_window_ok"))
@@ -421,9 +423,9 @@ payload = {
     "expected_workers": worker_count,
     "min_hot_slots": min_hot_slots,
     "required_final_markers": required_final_markers,
-    "joined_workers": completed_workers,
-    "live_workers": completed_workers,
-    "current_task_bound": completed_workers,
+    "joined_workers": joined_workers,
+    "live_workers": live_workers,
+    "current_task_bound": live_workers,
     "fresh_heartbeats": completed_workers,
     "completed_workers": completed_workers,
     "final_markers_seen": final_markers_seen,

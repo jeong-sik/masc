@@ -13,6 +13,8 @@ type context = {
 
 val schemas : Types.tool_schema list
 
+val parse_bing_rss_items : string -> (string * string * string) list
+
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
 
 val tool_inventory_json :

@@ -78,6 +78,7 @@ let keeper_core_masc_tool_names =
     "masc_dashboard";
     "masc_agent_card";
     "masc_tool_help";
+    "masc_web_search";
   ]
 
 let keeper_coding_masc_tool_names =

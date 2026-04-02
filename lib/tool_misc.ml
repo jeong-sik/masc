@@ -18,6 +18,163 @@ type context = {
   agent_name: string;
 }
 
+type web_search_hit = string * string * string
+
+let json_error message =
+  Yojson.Safe.to_string
+    (`Assoc [ ("status", `String "error"); ("message", `String message) ])
+
+let json_ok fields =
+  Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
+
+let normalize_spaces text =
+  text
+  |> Re.replace_string (Re.Pcre.re "[ \t\r\n]+" |> Re.compile) ~by:" "
+  |> String.trim
+
+let strip_html_tags text =
+  Re.replace_string (Re.Pcre.re "<[^>]+>" |> Re.compile) ~by:"" text
+
+let strip_cdata text =
+  text
+  |> Re.replace_string (Re.str "<![CDATA[" |> Re.compile) ~by:""
+  |> Re.replace_string (Re.str "]]>" |> Re.compile) ~by:""
+
+let decode_html_entities text =
+  let basic =
+    [
+      ("&amp;", "&");
+      ("&lt;", "<");
+      ("&gt;", ">");
+      ("&quot;", "\"");
+      ("&#39;", "'");
+      ("&#039;", "'");
+      ("&nbsp;", " ");
+    ]
+    |> List.fold_left
+         (fun acc (entity, replacement) ->
+           Re.replace_string (Re.str entity |> Re.compile) ~by:replacement acc)
+         text
+  in
+  let len = String.length basic in
+  let buf = Buffer.create len in
+  let decode_numeric entity =
+    let body = String.sub entity 2 (String.length entity - 3) in
+    try
+      if String.length body > 1
+         && (body.[0] = 'x' || body.[0] = 'X')
+      then
+        Some
+          (int_of_string ("0" ^ body)
+           |> Uchar.of_int
+           |> Buffer.add_utf_8_uchar buf;
+           "")
+      else
+        Some
+          (int_of_string body
+           |> Uchar.of_int
+           |> Buffer.add_utf_8_uchar buf;
+           "")
+    with _ -> None
+  in
+  let rec loop index =
+    if index >= len then
+      Buffer.contents buf
+    else if basic.[index] <> '&' then (
+      Buffer.add_char buf basic.[index];
+      loop (index + 1))
+    else
+      match String.index_from_opt basic index ';' with
+      | None ->
+          Buffer.add_char buf basic.[index];
+          loop (index + 1)
+      | Some semi ->
+          let entity = String.sub basic index (semi - index + 1) in
+          if String.length entity >= 4
+             && String.sub entity 0 2 = "&#"
+          then (
+            match decode_numeric entity with
+            | Some _ -> loop (semi + 1)
+            | None ->
+                Buffer.add_string buf entity;
+                loop (semi + 1))
+          else (
+            Buffer.add_string buf entity;
+            loop (semi + 1))
+  in
+  loop 0
+
+let clean_search_text text =
+  text |> strip_cdata |> strip_html_tags |> decode_html_entities |> normalize_spaces
+
+let search_field pattern block =
+  match Re.exec_opt (Re.Pcre.re pattern |> Re.compile) block with
+  | None -> None
+  | Some groups -> Some (Re.Group.get groups 1 |> clean_search_text)
+
+let parse_bing_rss_items (payload : string) : web_search_hit list =
+  let item_re = Re.Pcre.re "<item>([\\s\\S]*?)</item>" |> Re.compile in
+  Re.all item_re payload
+  |> List.filter_map (fun groups ->
+         let block = Re.Group.get groups 1 in
+         match
+           search_field "<title>([\\s\\S]*?)</title>" block,
+           search_field "<link>([\\s\\S]*?)</link>" block,
+           search_field "<description>([\\s\\S]*?)</description>" block
+         with
+         | Some title, Some url, Some snippet
+           when title <> "" && url <> "" ->
+             Some (title, url, snippet)
+         | Some title, Some url, None
+           when title <> "" && url <> "" ->
+             Some (title, url, "")
+         | _ -> None)
+
+let take_results limit hits =
+  let rec loop remaining acc = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | hit :: rest -> loop (remaining - 1) (hit :: acc) rest
+  in
+  loop limit [] hits
+
+let fetch_bing_rss ~query =
+  let search_url =
+    "https://www.bing.com/search?format=rss&q=" ^ Uri.pct_encode query
+  in
+  match Tool_local_runtime_http.http_get_text_with_status ~timeout_sec:15 search_url with
+  | Error e -> Error e
+  | Ok (status_opt, payload) -> (
+      match status_opt with
+      | Some 200 | None -> Ok (search_url, payload)
+      | Some status ->
+          Error
+            (Printf.sprintf "search endpoint returned HTTP %d" status))
+
+let web_search_result_json ~query ~search_url ~engine (hits : web_search_hit list) =
+  let results =
+    hits
+    |> List.map (fun (title, url, snippet) ->
+           `Assoc
+             [
+               ("title", `String title);
+               ("url", `String url);
+               ("snippet", `String snippet);
+             ])
+  in
+  json_ok
+    [
+      ( "result",
+        `Assoc
+          [
+            ("query", `String query);
+            ("engine", `String engine);
+            ("search_url", `String search_url);
+            ("result_count", `Int (List.length hits));
+            ("results", `List results);
+          ] );
+    ]
+
 (* ================================================================ *)
 (* Handlers (retained in facade)                                    *)
 (* ================================================================ *)
@@ -95,6 +252,18 @@ let handle_tool_help _ctx args =
     | None -> (false, Printf.sprintf "❌ unknown tool: %s" tool_name)
     | Some entry ->
         (true, Yojson.Safe.pretty_to_string (Tool_help_registry.entry_json entry))
+
+let handle_web_search _ctx args =
+  let query = String.trim (get_string args "query" "") in
+  if query = "" then
+    (false, json_error "query is required")
+  else
+    let limit = max 1 (min 10 (get_int args "limit" 5)) in
+    match fetch_bing_rss ~query with
+    | Error e -> (false, json_error e)
+    | Ok (search_url, payload) ->
+        let hits = parse_bing_rss_items payload |> take_results limit in
+        (true, web_search_result_json ~query ~search_url ~engine:"bing_rss" hits)
 
 let handle_keeper_tool_catalog _ctx args =
   let include_hidden = get_bool args "include_hidden" false in
@@ -205,6 +374,7 @@ let dispatch ctx ~name ~args : result option =
   | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ctx args)
   | "masc_tool_stats" -> Some (handle_tool_stats ctx args)
   | "masc_tool_help" -> Some (handle_tool_help ctx args)
+  | "masc_web_search" -> Some (handle_web_search ctx args)
   | "masc_tool_admin_snapshot" -> Some (Tool_misc_admin.handle_tool_admin_snapshot admin_ctx args)
   | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update admin_ctx args)
   | "masc_keeper_tool_catalog" -> Some (handle_keeper_tool_catalog ctx args)
@@ -219,7 +389,15 @@ let schemas = Tool_schemas_misc.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_transport_status"; "masc_websocket_discovery"; "masc_verify_handoff"; "masc_tool_help"; "masc_dashboard" ]
+let _tool_spec_read_only =
+  [
+    "masc_transport_status";
+    "masc_websocket_discovery";
+    "masc_verify_handoff";
+    "masc_tool_help";
+    "masc_web_search";
+    "masc_dashboard";
+  ]
 
 let () =
   List.iter

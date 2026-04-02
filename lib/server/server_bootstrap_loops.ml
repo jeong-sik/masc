@@ -206,6 +206,15 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
     Eio.Time.sleep clock 5.0;
     let config = state.room_config in
+    let masc_root = Room.masc_root_dir config in
+    let keeper_path = Filename.concat masc_root "keepers" in
+    let all_count =
+      match Safe_ops.list_dir_safe keeper_path with
+      | Ok files -> List.length (List.filter (fun f -> Filename.check_suffix f ".json") files)
+      | Error _ -> -1
+    in
+    Log.Keeper.info "autoboot: base_path=%s masc_root=%s keeper_json_count=%d"
+      config.base_path masc_root all_count;
     let names = Keeper_types.keepalive_keeper_names config in
     Log.Keeper.info "autoboot: %d keeper(s) to boot: [%s]"
       (List.length names) (String.concat ", " names);

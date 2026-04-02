@@ -119,7 +119,7 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
         | Some `Null -> Error "tool_access must not be null"
         | Some _ -> Error "tool_access must be an object"
         | None -> Ok None
-      else if tool_custom_allowlist_present then (
+      else if json_assoc_member_opt "tool_custom_allowlist" args <> None then (
         match parse_present_tool_name_list_opt args "tool_custom_allowlist" with
         | Ok (Some names) -> Ok (Some (Custom names))
         | Ok None -> Ok None

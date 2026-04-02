@@ -46,6 +46,11 @@ class MascBot(discord.Client):
         await self.tree.sync()
         logger.info("Slash commands synced")
 
+    async def close(self) -> None:
+        """Release resources on shutdown."""
+        await self.gate.aclose()
+        await super().close()
+
     async def on_ready(self) -> None:
         assert self.user is not None
         logger.info("Bot ready: %s (id=%s)", self.user.name, self.user.id)

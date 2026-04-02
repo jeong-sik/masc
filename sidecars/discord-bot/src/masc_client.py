@@ -56,7 +56,11 @@ class GateResponse:
 
 
 class MascGateClient:
-    """HTTP client for the Channel Gate API."""
+    """HTTP client for the Channel Gate API.
+
+    Uses a shared httpx.AsyncClient for connection pooling.
+    Call ``aclose()`` on shutdown to release the underlying pool.
+    """
 
     def __init__(self) -> None:
         cfg = get_config()
@@ -68,6 +72,22 @@ class MascGateClient:
             "Authorization": f"Bearer {cfg.masc_api_token}",
             "Content-Type": "application/json",
         }
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Return the shared client, lazily creating it on first use."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout,
+                headers=self._headers,
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client and release connections."""
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
     async def send_message(
         self,
@@ -102,14 +122,10 @@ class MascGateClient:
             "idempotency_key": f"discord-msg-{message_id}",
         }
 
+        client = self._get_client()
         for attempt in range(1, self._max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    resp = await client.post(
-                        self._url,
-                        json=payload,
-                        headers=self._headers,
-                    )
+                resp = await client.post(self._url, json=payload)
 
                 data: dict[str, Any] = resp.json()
 
@@ -152,8 +168,8 @@ class MascGateClient:
     async def health_check(self) -> bool:
         """Check if the gate is reachable."""
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.get(self._health_url)
-                return resp.status_code == 200
+            client = self._get_client()
+            resp = await client.get(self._health_url)
+            return resp.status_code == 200
         except Exception:
             return False

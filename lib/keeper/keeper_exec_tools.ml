@@ -614,31 +614,61 @@ let execute_keeper_tool_call
         Safe_ops.json_float ~default:30.0 "timeout_sec" args
         |> fun n -> max 1.0 (min 180.0 n)
       in
-      let gh_cmd =
-        if cmd <> "" then "gh " ^ cmd
-        else if gh_args <> [] then
-          "gh " ^ String.concat " " (List.map Filename.quote gh_args)
+      let gh_raw =
+        if cmd <> "" then cmd
+        else if gh_args <> [] then String.concat " " gh_args
         else ""
       in
-      if gh_cmd = "" then
+      if gh_raw = "" then
         Yojson.Safe.to_string
           (`Assoc [ ("error", `String "cmd_or_args_required") ])
-      else
-        let root = project_root_of_config config in
-        let shell_cmd =
-          Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd
-        in
-        let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec
-            [ "/bin/zsh"; "-lc"; shell_cmd ]
-        in
-        Yojson.Safe.to_string
-          (`Assoc
-            [
-              ("ok", `Bool (st = Unix.WEXITED 0));
-              ("status", process_status_to_json st);
-              ("output", `String (truncate_tool_output out));
+      else begin
+        match Worker_dev_tools.validate_gh_command gh_raw with
+        | Error reason ->
+          Log.Keeper.warn "keeper_github blocked: %s (cmd=%s)" reason gh_raw;
+          Yojson.Safe.to_string
+            (`Assoc [
+              ("ok", `Bool false);
+              ("error", `String "command_blocked");
+              ("reason", `String reason);
             ])
+        | Ok () ->
+          if Worker_dev_tools.is_gh_destructive_operation gh_raw then begin
+            Log.Keeper.info
+              "keeper_github destructive-gate: %s (keeper=%s)"
+              gh_raw (meta.name);
+            Yojson.Safe.to_string
+              (`Assoc [
+                ("ok", `Bool false);
+                ("error", `String "destructive_operation_gated");
+                ("reason", `String
+                  "This gh command performs a destructive mutation \
+                   (merge/close/delete/archive). Use read-only commands \
+                   (view/list/diff/checks) or request operator approval.");
+                ("cmd", `String ("gh " ^ gh_raw));
+              ])
+          end else begin
+            let gh_cmd =
+              if cmd <> "" then "gh " ^ cmd
+              else "gh " ^ String.concat " " (List.map Filename.quote gh_args)
+            in
+            let root = project_root_of_config config in
+            let shell_cmd =
+              Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd
+            in
+            let st, out =
+              Process_eio.run_argv_with_status ~timeout_sec
+                [ "/bin/zsh"; "-lc"; shell_cmd ]
+            in
+            Yojson.Safe.to_string
+              (`Assoc
+                [
+                  ("ok", `Bool (st = Unix.WEXITED 0));
+                  ("status", process_status_to_json st);
+                  ("output", `String (truncate_tool_output out));
+                ])
+          end
+      end
   | "keeper_tasks_list" ->
       let status_filter = Safe_ops.json_string_opt "status" args in
       let include_done =

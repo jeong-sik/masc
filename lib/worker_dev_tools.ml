@@ -150,6 +150,88 @@ let is_write_operation cmd =
     List.mem cmd_name ["mv"; "cp"; "mkdir"; "touch"; "chmod"]
   | [] -> false
 
+(* --- gh CLI validation for keeper_github --- *)
+
+(** Top-level gh CLI commands allowed for keeper_github.
+    Commands not in this list are rejected at the allowlist gate. *)
+let gh_allowed_commands =
+  [
+    "api"; "gist"; "issue"; "label"; "pr"; "release";
+    "repo"; "run"; "search"; "status";
+  ]
+
+(** Specific (command, subcommand) pairs that are always blocked
+    regardless of allowlist. These are irreversible or catastrophic. *)
+let gh_blocked_operations =
+  [
+    ("repo", "delete");
+    ("gist", "delete");
+  ]
+
+(** Extract the top-level command and its first subcommand from a gh
+    command string (the portion after "gh ").
+    Flags (starting with '-') are skipped when looking for the subcommand.
+    Example: "pr view 123" -> (Some "pr", Some "view") *)
+let extract_gh_command_pair cmd =
+  let parts =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+  in
+  match parts with
+  | [] -> (None, None)
+  | [ x ] -> (Some x, None)
+  | x :: y :: _ ->
+    if String.length y > 0 && y.[0] = '-' then (Some x, None)
+    else (Some x, Some y)
+
+(** Validate a gh CLI command string for safety.
+    Checks: (1) shell metacharacters, (2) top-level command allowlist,
+    (3) blocked operation pairs.
+    [cmd] is the portion after "gh ", e.g. "pr view 123". *)
+let validate_gh_command cmd =
+  let trimmed = String.trim cmd in
+  if trimmed = "" then Error "gh command must not be empty"
+  else if contains_forbidden_shell_chars trimmed then
+    Error
+      "Shell chaining/redirection is not allowed in gh commands. \
+       Pass a single gh subcommand."
+  else
+    match extract_gh_command_pair trimmed with
+    | (None, _) -> Error "gh command must not be empty"
+    | (Some command, subcmd) ->
+      if not (List.mem command gh_allowed_commands) then
+        Error
+          (Printf.sprintf
+             "gh command blocked: '%s' is not in the approved command list"
+             command)
+      else
+        let sub = Option.value ~default:"" subcmd in
+        if List.exists (fun (c, s) -> c = command && s = sub)
+             gh_blocked_operations
+        then
+          Error
+            (Printf.sprintf "gh %s %s is blocked for safety" command sub)
+        else Ok ()
+
+(** Check if a gh command is a destructive mutation that should be gated.
+    Returns [true] for high-risk operations like merge, close, delete.
+    Low-risk writes (create, comment) return [false] and are allowed. *)
+let is_gh_destructive_operation cmd =
+  let parts =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+  in
+  match parts with
+  | "pr" :: sub :: _ -> List.mem sub [ "merge"; "close" ]
+  | "issue" :: sub :: _ -> List.mem sub [ "close"; "delete"; "transfer" ]
+  | "release" :: sub :: _ -> List.mem sub [ "delete" ]
+  | "repo" :: sub :: _ -> List.mem sub [ "archive"; "rename" ]
+  | "label" :: sub :: _ -> List.mem sub [ "delete" ]
+  | "api" :: _ ->
+    let upper_parts = List.map String.uppercase_ascii parts in
+    List.mem "DELETE" upper_parts
+  | _ -> false
+
 (* --- Recursive mkdir --- *)
 
 let mkdir_p path _perm =

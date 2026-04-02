@@ -134,6 +134,44 @@ let test_cluster_name_opt_trims_empty () =
     check string "cluster_name empty -> default" "default"
       (Env_config.cluster_name ()))
 
+let find_config_entry json env_name =
+  let open Yojson.Safe.Util in
+  json
+  |> member "categories"
+  |> to_assoc
+  |> List.to_seq
+  |> Seq.flat_map (fun (_category, value) ->
+         match value with
+         | `List entries -> List.to_seq entries
+         | _ -> Seq.empty)
+  |> Seq.find
+       (fun entry ->
+         String.equal (entry |> member "env" |> to_string) env_name)
+  |> function
+  | Some entry -> entry
+  | None -> failwith ("missing config entry: " ^ env_name)
+
+let test_to_json_uses_canonical_introspection_shape () =
+  let json = Env_config.to_json () in
+  check bool "server meta exists" true
+    (match Yojson.Safe.Util.member "server" json with
+    | `Assoc _ -> true
+    | _ -> false);
+  check bool "categories exist" true
+    (match Yojson.Safe.Util.member "categories" json with
+    | `Assoc _ -> true
+    | _ -> false)
+
+let test_to_json_masks_sensitive_values_and_tracks_sources () =
+  with_env "MASC_ADMIN_TOKEN" "super-secret-token" (fun () ->
+      let json = Env_config.to_json () in
+      let entry = find_config_entry json "MASC_ADMIN_TOKEN" in
+      let open Yojson.Safe.Util in
+      check string "source is env" "env" (entry |> member "source" |> to_string);
+      check bool "marked sensitive" true (entry |> member "sensitive" |> to_bool);
+      check string "masked token" "supe***"
+        (entry |> member "value" |> to_string))
+
 (* ============================================================
    print_summary Tests
    ============================================================ *)
@@ -359,6 +397,10 @@ let () =
       test_case "masc_host reads primary env" `Quick test_masc_host_prefers_primary_over_deprecated;
       test_case "assets dir reads primary env" `Quick test_assets_dir_prefers_primary_over_deprecated;
       test_case "cluster_name_opt trims empty" `Quick test_cluster_name_opt_trims_empty;
+      test_case "to_json uses canonical introspection shape" `Quick
+        test_to_json_uses_canonical_introspection_shape;
+      test_case "to_json masks sensitive values and tracks sources" `Quick
+        test_to_json_masks_sensitive_values_and_tracks_sources;
     ];
     "print_summary", [
       test_case "no error" `Quick test_print_summary_no_error;

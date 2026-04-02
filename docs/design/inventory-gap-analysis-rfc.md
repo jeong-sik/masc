@@ -511,7 +511,7 @@ Wave 1 완료 조건: `scripts/check-version-truth.sh` green + dead handler 0개
 | 순서 | 갭 | 노력 | 산출물 |
 |------|-----|------|--------|
 | 5 | C1: Keeper Memory | 5-7일 | tool-based memory + post-turn fallback + E2E 테스트 (I1 해소) |
-| 6 | C2: Config Introspection | 2-3일 | `masc_config_snapshot` read-only 도구 |
+| 6 | C2: Config Introspection | 2-3일 | `masc_config` read-only consolidation |
 | 7 | M6: Transport Health | 2-3일 | gRPC listening 상태 수정 |
 
 Wave 2 완료 조건: `find .masc/keepers -name "memory.jsonl" | wc -l` > 0 + config 도구 등록 확인

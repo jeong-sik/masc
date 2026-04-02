@@ -418,7 +418,6 @@ let dispatch ctx ~name ~args : result option =
   | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update admin_ctx args)
   | "masc_keeper_tool_catalog" -> Some (handle_keeper_tool_catalog ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)
-  | "masc_config_snapshot" -> Some (Tool_misc_admin.handle_config_snapshot args)
   | "masc_feature_flags" -> Some (Tool_misc_admin.handle_feature_flags args)
   | _ -> None
 

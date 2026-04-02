@@ -200,10 +200,6 @@ let enforcement_summary_json () =
 (* Handlers                                                         *)
 (* ================================================================ *)
 
-let handle_config_snapshot _args : result =
-  let json = Env_config_introspect.to_json () in
-  (true, Yojson.Safe.pretty_to_string json)
-
 let handle_feature_flags args : result =
   let category_filter =
     match U.member "category" args with

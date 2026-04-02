@@ -129,6 +129,23 @@ let selected_index_of_model ~(selected_model_raw : string option)
       in
       loop 0 candidate_cfgs
 
+let normalized_selected_model ~(selected_model_raw : string option)
+    ~(candidate_cfgs : Llm_provider.Provider_config.t list)
+    ~(candidate_models : string list) ~(selected_index : int option) =
+  match selected_index with
+  | Some idx -> List.nth_opt candidate_models idx
+  | None ->
+      (match selected_model_raw with
+      | None -> None
+      | Some raw ->
+          let trimmed = String.trim raw in
+          if trimmed = "" then None
+          else
+            let stripped = strip_latest_suffix trimmed in
+            match model_label_option_of_model_id ~candidate_cfgs stripped with
+            | Some label -> Some label
+            | None -> Some trimmed)
+
 let cascade_observation_of_candidates ~cascade_name ~configured_labels
     ~(candidate_cfgs : Llm_provider.Provider_config.t list)
     ~(selected_model_raw : string option)
@@ -143,9 +160,8 @@ let cascade_observation_of_candidates ~cascade_name ~configured_labels
     selected_index_of_model ~selected_model_raw ~candidate_cfgs
   in
   let selected_model =
-    match selected_index with
-    | Some idx -> List.nth_opt candidate_models idx
-    | None -> Option.map String.trim selected_model_raw
+    normalized_selected_model ~selected_model_raw ~candidate_cfgs
+      ~candidate_models ~selected_index
   in
   let fallback_hops = Option.map (fun idx -> max 0 idx) selected_index in
   let fallback_applied =

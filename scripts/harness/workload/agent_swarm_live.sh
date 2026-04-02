@@ -434,7 +434,7 @@ final_markers_seen = sum(1 for row in workers if row.get("final_marker_seen") is
 fresh_heartbeats = (
     sum(1 for row in workers if row.get("heartbeat_fresh") is True)
     if any("heartbeat_fresh" in row for row in workers)
-    else completed_workers
+    else 0
 )
 pass_hot_concurrency = int(slot.get("peak_active_slots") or 0) >= min_hot_slots and bool(slot.get("hot_window_ok"))
 pass_end_to_end = completed_workers == worker_count and final_markers_seen >= required_final_markers

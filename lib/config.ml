@@ -25,6 +25,18 @@ let raw_all_tool_schemas : Types.tool_schema list =
     @ Tool_team_session.schemas
     @ Tool_voice.schemas
     @ Tool_autoresearch.schemas
+    (* Tool_spec-registered modules missing from prior schema assembly.
+       Without these, the tools dispatch correctly but are invisible
+       in tools/list responses.  See #4724. *)
+    @ Tool_agent_timeline.schemas
+    @ Tool_audit.schemas
+    @ Tool_compact.schemas
+    @ Tool_cost.schemas
+    @ Tool_fire_task.schemas
+    @ Tool_model_catalog.schemas
+    @ Tool_rate_limit.schemas
+    @ Tool_repair_loop.schemas
+    @ Tool_tempo.schemas
     )
 
 (** Validate tool schemas at module initialization time.

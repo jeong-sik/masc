@@ -8,8 +8,7 @@ let autoresearch_allowlist =
   ["masc_autoresearch_start"; "masc_autoresearch_cycle";
    "masc_autoresearch_status"; "masc_autoresearch_stop";
    "masc_autoresearch_inject"; "masc_autoresearch_record_finding";
-   "masc_autoresearch_search_findings";
-   "masc_research_start"; "masc_research_status"]
+   "masc_autoresearch_search_findings"]
 
 let make_test_meta ?(name = "test-keeper") ?(preset = Keeper_types.Full)
     ?(also_allow = []) ?tool_access ()

@@ -103,11 +103,10 @@ let proactive_seed_for_soul_profile (profile : string) : string =
   | "delivery" ->
       "Delivery hint: prioritize concrete next actions and execution momentum."
   | "research" ->
-      "Research hint: you have access to masc_research_start and masc_research_status tools. \
-       Periodically call masc_research_start with max_iterations=5 to find code improvements. \
-       After each run, check masc_research_status and report results to the board. \
-       Prioritize hypotheses, evidence, and validation steps. \
-       Track keep rate — if it drops below 50%, adjust strategy."
+      "Research hint: you have access to masc_autoresearch_* tools. \
+       Use masc_autoresearch_start to begin an autonomous experiment loop. \
+       Check masc_autoresearch_status for progress and masc_autoresearch_search_findings for results. \
+       Prioritize hypotheses, evidence, and validation steps."
   | "relationship" ->
       "Relationship hint: prioritize user intent alignment and collaboration continuity."
   | "minimal" ->

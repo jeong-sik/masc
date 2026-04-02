@@ -91,7 +91,6 @@ When `soul_profile = "research"`, these tools are added (any policy mode):
 
 | Source | Tools | Note |
 |--------|-------|------|
-| `Tool_research.schemas` | `masc_research_start`, `masc_research_status` | Research loop control |
 | `Tool_shard.autoresearch_keeper_tools` | `masc_autoresearch_{start,status,stop,inject,cycle,record_finding,search_findings}` | Autoresearch suite |
 
 These overlap with `Tool_permissions.admin_tools` for `masc_autoresearch_start` and `masc_autoresearch_stop`. Keepers access them via shard allocation, not through the dispatch permission hook.

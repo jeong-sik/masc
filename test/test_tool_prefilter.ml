@@ -157,6 +157,26 @@ let test_scores_positive () =
   check bool "all scores > 0" true all_positive
 
 (* ================================================================ *)
+(* Tests: synonym_text API                                          *)
+(* ================================================================ *)
+
+let test_synonym_text_known () =
+  let text = Tool_prefilter.synonym_text "masc_dashboard" in
+  check bool "non-empty for known tool" true (String.length text > 0);
+  check string "expected synonyms"
+    "happening activity overview summary monitor big picture" text
+
+let test_synonym_text_unknown () =
+  let text = Tool_prefilter.synonym_text "nonexistent_tool" in
+  check string "empty for unknown" "" text
+
+let test_synonym_text_enriches_description () =
+  let base = "Render the MASC dashboard" in
+  let enriched = base ^ " " ^ Tool_prefilter.synonym_text "masc_dashboard" in
+  check bool "enriched longer than base" true
+    (String.length enriched > String.length base)
+
+(* ================================================================ *)
 (* Test runner                                                      *)
 (* ================================================================ *)
 
@@ -188,5 +208,11 @@ let () =
           test_case "single tool" `Quick test_single_tool;
           test_case "scores descending" `Quick test_scores_descending;
           test_case "scores positive" `Quick test_scores_positive;
+        ] );
+      ( "synonym_text",
+        [
+          test_case "known tool returns keywords" `Quick test_synonym_text_known;
+          test_case "unknown tool returns empty" `Quick test_synonym_text_unknown;
+          test_case "enriches description" `Quick test_synonym_text_enriches_description;
         ] );
     ]

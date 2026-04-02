@@ -25,3 +25,8 @@ val filter_with_scores :
   (Types.tool_schema * float) list
 (** Return top-[k] tools with their cosine similarity scores.
     Returns [[]] on zero overlap. Useful for logging/debugging. *)
+
+val synonym_text : string -> string
+(** Return space-separated synonym keywords for a tool [name].
+    Returns [""] if no synonyms are defined.
+    Useful for enriching BM25 index descriptions with user-facing vocabulary. *)

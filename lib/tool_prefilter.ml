@@ -44,6 +44,11 @@ let synonym_lookup =
   List.iter (fun (name, kws) -> Hashtbl.replace tbl name kws) synonyms;
   tbl
 
+let synonym_text name =
+  match Hashtbl.find_opt synonym_lookup name with
+  | Some kws -> String.concat " " kws
+  | None -> ""
+
 (* ================================================================ *)
 (* Tokenizer                                                        *)
 (* ================================================================ *)

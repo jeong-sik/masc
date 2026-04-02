@@ -123,7 +123,7 @@ let test_stale_cleanup () =
   
   (* Cleanup should work without errors *)
   let cleaned = Agent_registry_eio.cleanup_stale_sessions () in
-  check bool "cleanup ok" true (cleaned >= 0)
+  check int "cleanup with active session returns 0" 0 cleaned
 
 let () =
   run "Identity E2E" [

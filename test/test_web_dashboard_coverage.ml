@@ -150,21 +150,24 @@ let test_html_contains_stylesheet () =
       (contains_re "rel=\"stylesheet\"" html
        || contains_substr "<style>" html)
   else
-    check bool "fallback ok" true true
+    check bool "fallback has no production assets" true
+      (contains_substr "Dashboard build not found" html)
 
 let test_html_contains_script () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
     check bool "has script" true (contains_re "<script" html)
   else
-    check bool "fallback ok" true true
+    check bool "fallback has no production assets" true
+      (contains_substr "Dashboard build not found" html)
 
 let test_html_contains_app_mount () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
     check bool "has app mount div" true (contains_substr "id=\"app\"" html)
   else
-    check bool "fallback ok" true true
+    check bool "fallback has no production assets" true
+      (contains_substr "Dashboard build not found" html)
 
 let test_html_ends_with_html_tag () =
   let html = Web_dashboard.html () in

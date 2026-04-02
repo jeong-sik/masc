@@ -77,6 +77,13 @@ infrastructure/**/*.env
 # Agent planning scratch
 planning/
 
+# Python sidecar artifacts
+__pycache__/
+*.pyc
+*.egg-info/
+sidecars/**/venv/
+sidecars/**/.venv/
+
 # Scratch files from local workflows
 issue*.md
 .nvimlog

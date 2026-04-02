@@ -238,14 +238,17 @@ let test_inherited_base_path_with_dual_masc_roots_is_sanitized () =
       copy_script (script_path ()) script;
       make_fake_eio_exe dir;
       let stale_root = Filename.concat dir "stale-root" in
+      let home_dir = Filename.concat dir "empty-home" in
       mkdir_p (Filename.concat dir ".masc");
       mkdir_p (Filename.concat stale_root ".masc");
+      mkdir_p home_dir;
       let capture = Filename.concat dir "captured-sanitized.txt" in
       let code, stdout, stderr =
         run_shell ~cwd:dir
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
+              ("HOME", home_dir);
               ("MASC_BASE_PATH", stale_root);
               ("MASC_ALLOW_INHERITED_BASE_PATH", "");
             ]
@@ -295,14 +298,17 @@ let test_dual_masc_roots_opt_in_preserves_inherited_base_path () =
       copy_script (script_path ()) script;
       make_fake_eio_exe dir;
       let inherited_root = Filename.concat dir "shared-root" in
+      let home_dir = Filename.concat dir "empty-home" in
       mkdir_p (Filename.concat dir ".masc");
       mkdir_p (Filename.concat inherited_root ".masc");
+      mkdir_p home_dir;
       let capture = Filename.concat dir "captured-opt-in.txt" in
       let code, stdout, stderr =
         run_shell ~cwd:dir
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
+              ("HOME", home_dir);
               ("MASC_BASE_PATH", inherited_root);
               ("MASC_ALLOW_INHERITED_BASE_PATH", "1");
             ]

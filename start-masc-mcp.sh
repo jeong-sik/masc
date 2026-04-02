@@ -74,6 +74,46 @@ is_truthy() {
     esac
 }
 
+# Resolve a path to its git-root equivalent (worktree-aware).
+# Used both by the ambiguity guard and the final MASC_BASE_PATH export
+# so both see the same effective base path.
+resolve_base_path() {
+    local path="$1"
+
+    if [ -f "$path/.git" ]; then
+        local gitdir
+        gitdir="$(sed -n 's/^gitdir: //p' "$path/.git")"
+        if [ -n "$gitdir" ]; then
+            case "$gitdir" in
+                */.git/worktrees/*)
+                    echo "${gitdir%/.git/worktrees/*}"
+                    return
+                    ;;
+                */.git)
+                    echo "${gitdir%/.git}"
+                    return
+                    ;;
+            esac
+        fi
+    fi
+
+    if [ -d "$path/.git" ]; then
+        echo "$path"
+        return
+    fi
+
+    if command -v git >/dev/null 2>&1; then
+        local git_root
+        git_root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)"
+        if [ -n "$git_root" ]; then
+            echo "$git_root"
+            return
+        fi
+    fi
+
+    echo "$path"
+}
+
 build_dashboard_spa() {
     local dashboard_dir="$SCRIPT_DIR/dashboard"
     local log_file=""
@@ -386,7 +426,9 @@ if [ "$BASE_PATH_EXPLICIT" != "1" ] && \
    [ -n "$BASE_PATH" ] && \
    [ "$BASE_PATH" != "$SCRIPT_DIR" ] && \
    ! is_truthy "${MASC_ALLOW_INHERITED_BASE_PATH:-0}"; then
-    RESOLVED_BASE="$(cd "$BASE_PATH" 2>/dev/null && pwd || echo "$BASE_PATH")"
+    # Use the same git-root-aware resolution that will be used for the
+    # final MASC_BASE_PATH export so this guard sees the effective path.
+    RESOLVED_BASE="$(resolve_base_path "$BASE_PATH")"
     if [ -d "$SCRIPT_DIR/.masc" ] && [ -d "$RESOLVED_BASE/.masc" ]; then
         echo "WARN: Ignoring inherited MASC_BASE_PATH=$BASE_PATH because both $SCRIPT_DIR and $RESOLVED_BASE have .masc. Use --base-path or MASC_ALLOW_INHERITED_BASE_PATH=1 to keep the inherited root." >&2
         BASE_PATH="$SCRIPT_DIR"
@@ -529,43 +571,6 @@ if [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
         fi
     fi
 fi
-
-resolve_base_path() {
-    local path="$1"
-
-    if [ -f "$path/.git" ]; then
-        local gitdir
-        gitdir="$(sed -n 's/^gitdir: //p' "$path/.git")"
-        if [ -n "$gitdir" ]; then
-            case "$gitdir" in
-                */.git/worktrees/*)
-                    echo "${gitdir%/.git/worktrees/*}"
-                    return
-                    ;;
-                */.git)
-                    echo "${gitdir%/.git}"
-                    return
-                    ;;
-            esac
-        fi
-    fi
-
-    if [ -d "$path/.git" ]; then
-        echo "$path"
-        return
-    fi
-
-    if command -v git >/dev/null 2>&1; then
-        local git_root
-        git_root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)"
-        if [ -n "$git_root" ]; then
-            echo "$git_root"
-            return
-        fi
-    fi
-
-    echo "$path"
-}
 
 RESOLVED_BASE_PATH="$(resolve_base_path "$BASE_PATH")"
 export MASC_BASE_PATH="$RESOLVED_BASE_PATH"

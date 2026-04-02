@@ -1,6 +1,34 @@
 # Changelog
 
 
+## [2.217.0] - 2026-04-02
+
+### Added
+- **Channel Gate + Discord sidecar** -- Discord bot adapter for keeper channel gate (#4623).
+- **Docker worker runtime** -- containerized worker backend for isolated execution (#4622).
+- **Task detail overlay** -- click task to see events timeline, keeper goals, activity trace (#4610).
+- **Activity tab** -- assignee recent activity with tool call trace for keeper assignees (#4582).
+
+### Fixed
+- **Keeper BM25 Korean keywords** -- add Korean search keywords to masc_* tools (#4520, #4629).
+- **Keeper always-include anchors** -- category anchor tools in always-include list (#4520, #4619).
+- **Gate health endpoint** -- register health in public_read_path, invalid JSON returns 400 (#4636).
+- **Gate Eio.Mutex** -- replace Stdlib.Mutex with Eio.Mutex in Channel Gate dedup (#4634).
+- **Auth subject resolution** -- fix transient actor auth subject (#4627).
+- **Dashboard null checks** -- explicit null checks for activity fields (#4641).
+- **Dashboard ARIA/padding** -- listitem role, padding scale, description overflow (#4610).
+
+### Changed
+- **Remove council module** -- council removed entirely (#4620).
+- **Remove hardcoded model tiers** -- model tier inference from model names removed (#4625).
+- **HTTP client Result.t** -- return Result.t instead of failwith (#4621).
+- **Keeper tool policy schema** -- unify keeper tool policy schema (#4633).
+- **Auto-responder Result.t** -- propagate Result.t directly (#4631).
+- **Meta-cognition gate** -- centralize meta-cognition interpretation (#4608).
+
+### Reverted
+- **Base-path drift fix** -- reverted (#4626) due to side effects.
+
 ## [2.216.0] - 2026-04-02
 
 ### Added

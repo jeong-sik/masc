@@ -118,6 +118,10 @@ let () =
             Test_tool_team_session_misc
               .test_delegate_ready_worker_bypasses_denied_gate;
           Alcotest.test_case
+            "delegate-rejects-unplanned-worker-container" `Quick
+            Test_tool_team_session_misc
+              .test_delegate_rejects_unplanned_worker_container;
+          Alcotest.test_case
             "verify-trace-reports-summary-only-without-checkpoint" `Quick
             Test_tool_team_session_misc.test_verify_trace_reports_summary_only_without_checkpoint;
           Alcotest.test_case "memory-backend-event-lock-serializes-fibers"

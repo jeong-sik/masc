@@ -155,6 +155,8 @@ let worker_delegate_guidance = function
       "Repair or respawn the worker; a checkpoint exists without worker metadata."
   | Some "in_flight" ->
       "Wait for the active worker run to complete before delegating again."
+  | Some "unplanned_worker" ->
+      "Delegate only to workers that are still present in the current planned worker set."
   | Some _ -> "Worker is blocked for an unspecified reason."
   | None -> "Worker is ready for delegation."
 
@@ -192,55 +194,96 @@ let planned_worker_for_actor (session : Team_session_types.session) worker_name 
       | None -> false)
     session.planned_workers
 
+let worker_container_actor_names config session_id =
+  Team_session_store.workers_dir config session_id
+  |> Room_utils.list_dir config
+  |> List.filter (fun name ->
+         let trimmed = String.trim name in
+         trimmed <> "" && not (String.contains trimmed '/'))
+  |> Team_session_types.dedup_strings
+  |> List.sort String.compare
+
+let build_worker_delegate_readiness_entry config ~snapshot
+    (session : Team_session_types.session) worker_name
+    (planned_worker : Team_session_types.planned_worker option) =
+  let has_container_dir =
+    Room_utils.path_exists config
+      (Team_session_store.worker_container_dir config session.session_id
+         worker_name)
+  in
+  let has_meta =
+    Room_utils.path_exists config
+      (Team_session_store.worker_container_meta_path config
+         session.session_id worker_name)
+  in
+  let has_checkpoint =
+    Room_utils.path_exists config
+      (Team_session_store.worker_container_checkpoint_path config
+         session.session_id worker_name)
+  in
+  let in_flight = List.mem worker_name snapshot.in_flight_actors in
+  let blocked_reason =
+    if in_flight then Some "in_flight"
+    else
+      match planned_worker with
+      | None when has_container_dir -> Some "unplanned_worker"
+      | None -> Some "missing_container"
+      | Some _ -> (
+          match (has_meta, has_checkpoint) with
+          | false, false -> Some "missing_container"
+          | true, false -> Some "pending_checkpoint"
+          | false, true -> Some "broken_container"
+          | true, true -> None)
+  in
+  {
+    worker_name;
+    spawn_role = Option.bind planned_worker (fun worker -> worker.spawn_role);
+    execution_scope =
+      Option.bind planned_worker (fun worker ->
+          Option.map Team_session_types.execution_scope_to_string
+            worker.execution_scope);
+    runtime_pool =
+      Option.bind planned_worker (fun worker -> worker.runtime_pool);
+    routing_reason =
+      Option.bind planned_worker (fun worker -> worker.routing_reason);
+    has_meta;
+    has_checkpoint;
+    in_flight;
+    delegate_ready = Option.is_none blocked_reason;
+    blocked_reason;
+    guidance = worker_delegate_guidance blocked_reason;
+  }
+
 let worker_delegate_readiness_list ?events config
     (session : Team_session_types.session) =
   let snapshot = worker_run_event_snapshot ?events config session in
-  Team_session_types.planned_worker_actor_names session
+  let worker_names =
+    Team_session_types.planned_worker_actor_names session
+    @ worker_container_actor_names config session.session_id
+    |> Team_session_types.dedup_strings
+    |> List.sort String.compare
+  in
+  worker_names
   |> List.map (fun worker_name ->
-         let has_meta =
-           Room_utils.path_exists config
-             (Team_session_store.worker_container_meta_path config
-                session.session_id worker_name)
-         in
-         let has_checkpoint =
-           Room_utils.path_exists config
-             (Team_session_store.worker_container_checkpoint_path config
-                session.session_id worker_name)
-         in
-         let in_flight = List.mem worker_name snapshot.in_flight_actors in
-         let blocked_reason =
-           if in_flight then Some "in_flight"
-           else
-             match (has_meta, has_checkpoint) with
-             | false, false -> Some "missing_container"
-             | true, false -> Some "pending_checkpoint"
-             | false, true -> Some "broken_container"
-             | true, true -> None
-         in
          let planned_worker = planned_worker_for_actor session worker_name in
-         {
-           worker_name;
-           spawn_role = Option.bind planned_worker (fun worker -> worker.spawn_role);
-           execution_scope =
-             Option.bind planned_worker (fun worker ->
-                 Option.map Team_session_types.execution_scope_to_string
-                   worker.execution_scope);
-           runtime_pool =
-             Option.bind planned_worker (fun worker -> worker.runtime_pool);
-           routing_reason =
-             Option.bind planned_worker (fun worker -> worker.routing_reason);
-           has_meta;
-           has_checkpoint;
-           in_flight;
-           delegate_ready = Option.is_none blocked_reason;
-           blocked_reason;
-           guidance = worker_delegate_guidance blocked_reason;
-         })
+         build_worker_delegate_readiness_entry config ~snapshot session
+           worker_name planned_worker)
 
 let worker_delegate_readiness config (session : Team_session_types.session)
     worker_name =
-  worker_delegate_readiness_list config session
-  |> List.find_opt (fun entry -> String.equal entry.worker_name worker_name)
+  let snapshot = worker_run_event_snapshot config session in
+  let planned_worker = planned_worker_for_actor session worker_name in
+  let has_container_dir =
+    Room_utils.path_exists config
+      (Team_session_store.worker_container_dir config session.session_id
+         worker_name)
+  in
+  if Option.is_some planned_worker || has_container_dir then
+    Some
+      (build_worker_delegate_readiness_entry config ~snapshot session
+         worker_name planned_worker)
+  else
+    None
 
 let ready_worker_names config (session : Team_session_types.session) =
   Team_session_types.planned_worker_actor_names session

@@ -575,6 +575,78 @@ let test_delegate_ready_worker_bypasses_denied_gate () =
     (List.length denied_events);
   cleanup_dir base_dir
 
+let test_delegate_rejects_unplanned_worker_container () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"delegate-unplanned-worker" |> get_session_id in
+  Team_session_store.write_text_file
+    (Team_session_store.worker_container_meta_path config session_id
+       "rogue-worker")
+    "{}";
+  let delegate_ok, delegate_body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("wait_mode", `String "blocking");
+            ("target_agent", `String "rogue-worker");
+            ("delegate_prompt", `String "continue");
+          ])
+  in
+  Alcotest.(check bool) "delegate denied for unplanned worker" false delegate_ok;
+  let delegate_json = parse_json_exn delegate_body in
+  let message = Yojson.Safe.Util.(delegate_json |> member "message" |> to_string) in
+  Alcotest.(check bool) "mentions unplanned worker reason" true
+    (try
+       let _ =
+         Str.search_forward (Str.regexp_string "unplanned_worker") message 0
+       in
+       true
+     with Not_found -> false);
+  let readiness = Yojson.Safe.Util.(delegate_json |> member "readiness") in
+  Alcotest.(check string) "readiness blocked reason" "unplanned_worker"
+    Yojson.Safe.Util.(readiness |> member "blocked_reason" |> to_string);
+  let denied_events =
+    Team_session_store.read_events config session_id
+    |> List.filter (fun json ->
+           Yojson.Safe.Util.member "event_type" json
+           = `String "team_step_delegate_denied")
+  in
+  Alcotest.(check int) "delegate denied event recorded once" 1
+    (List.length denied_events);
+  let status_ok, status_body =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "status ok" true status_ok;
+  let worker_runs =
+    parse_json_exn status_body |> result_field |> Yojson.Safe.Util.member "worker_runs"
+  in
+  Alcotest.(check (list string)) "blocked worker names include rogue worker"
+    [ "rogue-worker" ]
+    Yojson.Safe.Util.(
+      worker_runs |> member "blocked_worker_names" |> to_list |> List.map to_string);
+  let readiness_entries =
+    Yojson.Safe.Util.(worker_runs |> member "worker_readiness" |> to_list)
+  in
+  let rogue_readiness =
+    List.find
+      (fun json ->
+        Yojson.Safe.Util.(json |> member "worker_name" |> to_string = "rogue-worker"))
+      readiness_entries
+  in
+  Alcotest.(check string) "status blocked reason" "unplanned_worker"
+    Yojson.Safe.Util.(rogue_readiness |> member "blocked_reason" |> to_string);
+  cleanup_dir base_dir
+
 (* ── single-agent fallback gate (#3651) tests ─────────────── *)
 
 let make_pw ?(worker_class : Team_session_types.worker_class option)

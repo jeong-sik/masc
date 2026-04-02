@@ -5,7 +5,7 @@
 > Updated: 2026-04-02
 
 Execution companion for capsule-only coordination hardening:
-[docs/design/masc-capsule-execution-plan.md](docs/design/masc-capsule-execution-plan.md)
+[design/masc-capsule-execution-plan.md](design/masc-capsule-execution-plan.md)
 
 ## Product Promise
 

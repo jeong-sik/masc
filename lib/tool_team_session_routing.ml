@@ -203,26 +203,8 @@ let inferred_worker_model () =
       runtime_inventory_models ()
       |> List.find_opt (fun model -> contains_size_token_ci model "9b")
 
-let infer_model_tier_from_model_name model_name =
-  match trim_opt model_name with
-  | None -> None
-  | Some model_name -> (
-      match
-        (inferred_worker_model (), inferred_middle_model (), inferred_lead_model ())
-      with
-      | Some worker_model, _, _ when String.equal worker_model model_name ->
-          Some Team_session_types.Tier_9b
-      | _, Some middle_model, _ when String.equal middle_model model_name ->
-          Some Team_session_types.Tier_27b
-      | _, _, Some lead_model when String.equal lead_model model_name ->
-          Some Team_session_types.Tier_35b
-      | _ when contains_size_token_ci model_name "35b" ->
-          Some Team_session_types.Tier_35b
-      | _ when contains_size_token_ci model_name "27b" ->
-          Some Team_session_types.Tier_27b
-      | _ when contains_size_token_ci model_name "9b" ->
-          Some Team_session_types.Tier_9b
-      | _ -> None)
+(* Model tier inference removed (#4505). Cascade handles model selection. *)
+let infer_model_tier_from_model_name _model_name = None
 
 let default_risk_for_profile = function
   | Team_session_types.Profile_extract

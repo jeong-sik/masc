@@ -103,31 +103,8 @@ let execution_scope_or_default = function
   | Some scope -> scope
   | None -> Team_session_types.Limited_code_change
 
-let infer_model_tier_from_model_name model_name =
-  let model_name = String.trim model_name in
-  let haystack = String.lowercase_ascii model_name in
-  let contains needle =
-    let needle = String.lowercase_ascii needle in
-    let needle_len = String.length needle in
-    let haystack_len = String.length haystack in
-    let rec loop idx =
-      if needle_len = 0 then true
-      else if idx + needle_len > haystack_len then false
-      else if String.sub haystack idx needle_len = needle then true
-      else loop (idx + 1)
-    in
-    loop 0
-  in
-  if model_name = "" then
-    None
-  else if contains "35b" then
-      Some Team_session_types.Tier_35b
-  else if contains "27b" then
-      Some Team_session_types.Tier_27b
-  else if contains "9b" then
-      Some Team_session_types.Tier_9b
-  else
-    None
+(* Model tier inference removed (#4505). Cascade handles model selection
+   without hardcoded name→tier mapping. *)
 
 let worker_profiles_of_scope scope =
   match scope with
@@ -138,18 +115,13 @@ let worker_profiles_of_scope scope =
   | Team_session_types.Autonomous ->
       (Profile_session_dev, Shell_dev)
 
-let derive_effective_tier worker_size model_id =
+let derive_effective_tier worker_size _model_id =
   match worker_size with
   | Some size -> Team_session_types.model_tier_of_worker_size size
-  | None -> infer_model_tier_from_model_name model_id
+  | None -> None
 
-let effective_worker_size worker_size model_id =
-  match worker_size with
-  | Some _ as explicit -> explicit
-  | None ->
-      Option.bind
-        (infer_model_tier_from_model_name model_id)
-        Team_session_types.worker_size_of_model_tier
+let effective_worker_size worker_size _model_id =
+  worker_size
 
 let worker_meta_to_yojson (meta : worker_container_meta) =
   `Assoc

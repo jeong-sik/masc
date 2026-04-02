@@ -6,9 +6,9 @@ type digest_result =
   | Skipped
   | Failed of string
 
-let digest_hearth = "meta-cognition"
+let digest_hearth = Meta_cognition.digest_hearth
 let digest_author = "meta-cognition-observer"
-let digest_source = "meta_cognition_digest"
+let digest_source = Meta_cognition.digest_source
 
 let summary_json snapshot =
   json_assoc_field "summary" (json_assoc_field "meta_cognition" snapshot)
@@ -28,15 +28,7 @@ let should_emit snapshot =
       Log.Dashboard.warn "meta-cognition digest parse failed in should_emit: %s" err;
       false
 
-let post_digest_key post =
-  match post.Board.meta_json with
-  | Some (`Assoc fields) -> (
-      match List.assoc_opt "source" fields, List.assoc_opt "digest_key" fields with
-      | Some (`String source), Some (`String digest_key)
-        when String.equal (String.lowercase_ascii (String.trim source)) digest_source ->
-          Some digest_key
-      | _ -> None)
-  | _ -> None
+let post_digest_key = Meta_cognition.post_digest_key
 
 let digest_posts_with_keys () =
   Board_dispatch.list_posts ~hearth:digest_hearth

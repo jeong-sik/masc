@@ -266,6 +266,20 @@ let derived_operator_digest_json (config : Room.config) execution_json
             ( "top_item",
               match meta_attention with
               | Some item -> item
+              | None when has_warn ->
+                  (* Derive top_item from execution-side session warning *)
+                  (match List.find_opt (fun row ->
+                    let h = json_string_field_opt "health" row in
+                    h = Some "warn" || h = Some "bad") session_briefs with
+                  | Some row -> `Assoc [
+                      ("source", `String "execution");
+                      ("severity", json_string_field_opt "health" row
+                        |> Option.value ~default:"warn" |> fun s -> `String s);
+                      ("label", match json_string_field_opt "session_id" row with
+                        | Some sid -> `String (Printf.sprintf "Session %s needs attention" sid)
+                        | None -> `String "Session needs attention");
+                    ]
+                  | None -> `Null)
               | None -> `Null );
             ("provenance", `String "derived");
           ] );

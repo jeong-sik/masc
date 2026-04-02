@@ -166,7 +166,12 @@ let load_jsonl_safe path =
   if not (Sys.file_exists path) then []
   else
     try Fs_compat.load_jsonl path
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Log.Pages.warn "load_jsonl_safe: failed to load %s: %s"
+          path (Printexc.to_string exn);
+        []
 
 let load_board_posts config =
   let path = Filename.concat (Room.masc_dir config) "board_posts.jsonl" in
@@ -885,10 +890,9 @@ let snapshot_json ?hearth ~limit config =
       ( "evidence_refs",
         `List
           [
-            `String (Filename.concat (Room.masc_dir config) "board_posts.jsonl");
-            `String (Filename.concat (Room.masc_dir config) "board_comments.jsonl");
-            `String
-              (Filename.concat (Room.masc_dir config) "governance_v2/cases");
+            `String "board:posts";
+            `String "board:comments";
+            `String "governance:cases";
           ] );
       ( "notes",
         `List
@@ -938,12 +942,13 @@ let list_length json key =
 
 let summary_json ?hearth config =
   let snapshot = snapshot_json ?hearth ~limit:3 config in
+  let full_snapshot = snapshot_json ?hearth ~limit:1000 config in
   `Assoc
     [
       ( "stagnation_score",
         Yojson.Safe.Util.member "stagnation_score" snapshot );
-      ("belief_count", `Int (list_length snapshot "beliefs"));
-      ("contested_belief_count", `Int (list_length snapshot "contested_beliefs"));
+      ("belief_count", `Int (list_length full_snapshot "beliefs"));
+      ("contested_belief_count", `Int (list_length full_snapshot "contested_beliefs"));
       ( "dominant_belief",
         assoc_subset_or_null
           (first_item_or_null snapshot "beliefs")

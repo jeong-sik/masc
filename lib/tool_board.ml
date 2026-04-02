@@ -272,6 +272,13 @@ let handle_post_list args =
   in
   let exclude_system = get_bool args "exclude_system" false in
   let exclude_automation = get_bool args "exclude_automation" false in
+  let author_filter =
+    match get_string_opt args "author" with
+    | Some s ->
+        let s = String.trim s in
+        if s = "" then None else Some s
+    | None -> None
+  in
   let since = get_float_opt args "since" in
 
   let visibility_filter = match visibility_str with
@@ -286,13 +293,29 @@ let handle_post_list args =
   match sort_by_result with
   | Error msg -> (false, Printf.sprintf "❌ %s" msg)
   | Ok sort_by ->
+      let base_fetch = limit + offset + 100 in
+      let fetch_limit =
+        if Option.is_some author_filter then max 500 base_fetch
+        else base_fetch
+      in
       let all_posts = Board_dispatch.list_posts ~visibility_filter ?hearth
         ~exclude_system
         ~exclude_automation
-        ~sort_by:(dispatch_sort_of sort_by) ~limit:(limit + offset + 100) () in
+        ~sort_by:(dispatch_sort_of sort_by) ~limit:fetch_limit () in
 
       (* Sorting is already handled by Board_dispatch *)
       let sorted_posts = all_posts in
+      (* Author filter: case-insensitive substring match *)
+      let sorted_posts = match author_filter with
+        | None -> sorted_posts
+        | Some needle ->
+            let needle_lower = String.lowercase_ascii needle in
+            List.filter (fun (p : Board.post) ->
+              let author_str = Board.Agent_id.to_string p.author in
+              let author_lower = String.lowercase_ascii author_str in
+              String_util.contains_substring author_lower needle_lower
+            ) sorted_posts
+      in
 
       let posts =
         if random then
@@ -513,6 +536,7 @@ let tool_post_list : Types.tool_schema = {
       ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort order: hot (score+recency), trending (engagement/age), recent (newest first), updated (most recently active), discussed (most comments)")]);
       ("exclude_system", `Assoc [("type", `String "boolean"); ("description", `String "Exclude system posts like Activity Reports (default: false)")]);
       ("exclude_automation", `Assoc [("type", `String "boolean"); ("description", `String "Exclude automation posts (heartbeat, probes, etc.) (default: false)")]);
+      ("author", `Assoc [("type", `String "string"); ("description", `String "Filter posts by author name (case-insensitive substring match)")]);
       ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show a 🔔 indicator")]);
     ]);
   ];

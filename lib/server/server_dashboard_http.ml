@@ -17,6 +17,11 @@ let dashboard_room_truth_focus_json =
 
 let dashboard_memory_http_json request : Yojson.Safe.t =
   let hearth = query_param request "hearth" in
+  let author_filter =
+    query_param request "author"
+    |> Option.map String.trim
+    |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
+  in
   let sort_by = board_sort_order_of_request request in
   let exclude_system = bool_query_param request "exclude_system" ~default:false in
   let exclude_automation =
@@ -24,12 +29,22 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
   in
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+  let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
   let fetch_limit =
-    board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
+    if Option.is_some author_filter then max 500 base_fetch
+    else base_fetch
   in
   let posts =
     Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
       ~exclude_automation ~limit:fetch_limit ()
+  in
+  let posts = match author_filter with
+    | None -> posts
+    | Some needle ->
+        let needle_lc = String.lowercase_ascii needle in
+        List.filter (fun (p : Board.post) ->
+          let a = String.lowercase_ascii (Board.Agent_id.to_string p.author) in
+          Dashboard_utils.string_contains ~needle:needle_lc a) posts
   in
   let karma_map = Board_dispatch.get_all_karma () in
   let get_karma author =

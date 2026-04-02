@@ -74,6 +74,7 @@ This path is the easiest default when you want local MCP development plus transp
 
 - shortcut script: `scripts/start-loopback.sh`
 - keep the server loopback-only with `--host 127.0.0.1`
+- keep keeper autoboot off by default on this shortcut path; override with `MASC_KEEPER_BOOTSTRAP_ENABLED=true scripts/start-loopback.sh` when you intentionally want bootstrap scan on local 8935
 - keep the fixed default ports when you are not juggling multiple instances:
   - HTTP / MCP: `127.0.0.1:8935`
   - gRPC: `127.0.0.1:8936`
@@ -98,7 +99,7 @@ Things to watch:
 - do not bind `0.0.0.0` or `::` for routine local development; that moves you onto the remote-exposure path and auth requirements become stricter
 - do not point `MASC_HTTP_BASE_URL` at a public host when you only want local development
 - if you only need target-scoped `.masc/` isolation and do not need gRPC / WS / WebRTC, use `scripts/run-local.sh` instead
-- `scripts/start-loopback.sh` is just a thin wrapper over `./start-masc-mcp.sh --http --host 127.0.0.1 --port 8935`; pass extra args after it only when you intentionally want to override the defaults
+- `scripts/start-loopback.sh` is a thin wrapper over `MASC_KEEPER_BOOTSTRAP_ENABLED=false ./start-masc-mcp.sh --http --host 127.0.0.1 --port 8935`; pass extra args after it only when you intentionally want to override the defaults
 
 ## MCP Client Setup
 

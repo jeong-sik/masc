@@ -8,6 +8,9 @@ let source_root () =
 let script_path () =
   Filename.concat (source_root ()) "start-masc-mcp.sh"
 
+let loopback_script_path () =
+  Filename.concat (source_root ()) "scripts/start-loopback.sh"
+
 let quote = Filename.quote
 
 let read_file path =
@@ -95,6 +98,7 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'SUPABASE_DB_URL=%%s\n' "${SUPABASE_DB_URL:-}"
   printf 'MASC_BASE_PATH=%%s\n' "${MASC_BASE_PATH:-}"
   printf 'MASC_CONFIG_DIR=%%s\n' "${MASC_CONFIG_DIR:-}"
+  printf 'MASC_KEEPER_BOOTSTRAP_ENABLED=%%s\n' "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
   printf 'MASC_WEBRTC_ENABLED=%%s\n' "${MASC_WEBRTC_ENABLED:-}"
   printf 'ARGS=%%s\n' "$*"
@@ -292,6 +296,54 @@ let test_worktree_prefers_local_build_over_workspace_build () =
       check bool "local build wins in worktree" true
         (contains_substring captured "FAKE_EXE_MARKER=local"))
 
+let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
+    =
+  with_temp_dir "start-loopback-script" (fun dir ->
+      let repo_root = Filename.concat dir "repo-root" in
+      let scripts_dir = Filename.concat repo_root "scripts" in
+      mkdir_p scripts_dir;
+      let start_script = Filename.concat repo_root "start-masc-mcp.sh" in
+      let loopback_script = Filename.concat scripts_dir "start-loopback.sh" in
+      copy_script (script_path ()) start_script;
+      copy_script (loopback_script_path ()) loopback_script;
+      write_file (Filename.concat repo_root ".env.local")
+        "MASC_KEEPER_BOOTSTRAP_ENABLED=true\n";
+      make_fake_eio_exe repo_root;
+      let home_dir = Filename.concat dir "home" in
+      let capture_default = Filename.concat dir "captured-loopback-default.txt" in
+      let code_default, stdout_default, stderr_default =
+        run_shell ~cwd:repo_root
+          ~env:[ ("FAKE_CAPTURE_FILE", capture_default); ("HOME", home_dir) ]
+          (Printf.sprintf "%s --port 9961 --base-path %s"
+             (quote loopback_script) (quote repo_root))
+      in
+      if code_default <> 0 then
+        failf "loopback script failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code_default stdout_default stderr_default;
+      let captured_default = read_file capture_default in
+      check bool "loopback disables keeper autoboot by default" true
+        (contains_substring captured_default "MASC_KEEPER_BOOTSTRAP_ENABLED=false");
+      let capture_override =
+        Filename.concat dir "captured-loopback-override.txt"
+      in
+      let code_override, stdout_override, stderr_override =
+        run_shell ~cwd:repo_root
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture_override);
+              ("HOME", home_dir);
+              ("MASC_KEEPER_BOOTSTRAP_ENABLED", "true");
+            ]
+          (Printf.sprintf "%s --port 9962 --base-path %s"
+             (quote loopback_script) (quote repo_root))
+      in
+      if code_override <> 0 then
+        failf "loopback script override failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code_override stdout_override stderr_override;
+      let captured_override = read_file capture_override in
+      check bool "loopback preserves explicit keeper autoboot override" true
+        (contains_substring captured_override "MASC_KEEPER_BOOTSTRAP_ENABLED=true"))
+
 let () =
   run "start_masc_mcp_script"
     [
@@ -309,5 +361,9 @@ let () =
             test_inherited_base_path_with_dual_masc_roots_is_sanitized;
           test_case "worktree prefers local build over workspace build" `Quick
             test_worktree_prefers_local_build_over_workspace_build;
+          test_case
+            "loopback disables keeper autoboot by default and preserves override"
+            `Quick
+            test_loopback_disables_keeper_autoboot_by_default_and_preserves_override;
         ] );
     ]

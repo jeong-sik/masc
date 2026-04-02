@@ -510,6 +510,29 @@ let run_turn
           Log.Keeper.info
             "keeper:%s turn_budget turn=%d/%d last_turn=%b"
             meta.name turn max_turns is_last_turn;
+        (* Context overflow guard: cap tool count to prevent exceeding
+           small model context windows (e.g. 8K).  ~118 tokens/tool schema,
+           so 40 tools ≈ 4700 tokens — safe for 8K models.  Beyond 40,
+           truncate to always_include_tools + top BM25 results.
+           Configurable via MASC_KEEPER_MAX_TOOLS_PER_TURN. *)
+        let max_tools =
+          Keeper_config.int_of_env_default
+            "MASC_KEEPER_MAX_TOOLS_PER_TURN" ~default:40 ~min_v:5 ~max_v:200
+        in
+        let all_allowed =
+          if List.length all_allowed > max_tools then begin
+            Log.Keeper.info
+              "context overflow guard: %d tools > max %d, truncating"
+              (List.length all_allowed) max_tools;
+            let essential = List.filter
+              (fun name -> List.mem name always_include_tools) all_allowed in
+            let non_essential = List.filter
+              (fun name -> not (List.mem name always_include_tools)) all_allowed in
+            let budget = max_tools - List.length essential in
+            essential @ (List.filteri (fun i _ -> i < budget) non_essential)
+          end else
+            all_allowed
+        in
         let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
         Agent_sdk.Hooks.AdjustParams
           { current_params with

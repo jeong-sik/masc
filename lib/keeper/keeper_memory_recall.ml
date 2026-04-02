@@ -8,21 +8,40 @@ let cost_usd_of_usage (usage : Agent_sdk.Types.api_usage) ~(model_id : string) :
   let pricing = Llm_provider.Pricing.pricing_for_model model_id in Llm_provider.Pricing.estimate_cost ~pricing
         ~input_tokens:usage.input_tokens ~output_tokens:usage.output_tokens ()
 
-let read_file_tail_lines path ~max_bytes:_ ~max_lines : string list =
+let read_file_tail_lines path ~max_bytes ~max_lines : string list =
   if max_lines <= 0 then []
   else if not (Fs_compat.file_exists path) then []
   else
     try
-      let content = Fs_compat.load_file path in
-      let lines =
-        content
-        |> String.split_on_char '\n'
-        |> List.filter (fun s -> String.trim s <> "")
-      in
-      let n = List.length lines in
-      let drop = max 0 (n - max_lines) in
-      lines |> List.mapi (fun i s -> (i, s)) |> List.filter (fun (i, _) -> i >= drop) |> List.map snd
-    with Sys_error _ ->
+      let ic = open_in path in
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        let file_len = in_channel_length ic in
+        let read_start =
+          if max_bytes <= 0 then 0
+          else max 0 (file_len - max_bytes)
+        in
+        seek_in ic read_start;
+        let chunk_len = file_len - read_start in
+        let buf = Bytes.create chunk_len in
+        really_input ic buf 0 chunk_len;
+        let content = Bytes.unsafe_to_string buf in
+        let lines =
+          content
+          |> String.split_on_char '\n'
+          |> List.filter (fun s -> String.trim s <> "")
+        in
+        (* When reading from mid-file, first line may be partial — drop it *)
+        let lines =
+          if read_start > 0 then
+            match lines with _ :: rest -> rest | [] -> []
+          else lines
+        in
+        let n = List.length lines in
+        if n <= max_lines then lines
+        else
+          let drop = n - max_lines in
+          List.filteri (fun i _ -> i >= drop) lines)
+    with Sys_error _ | End_of_file ->
       []
 
 let read_keeper_memory_summary

@@ -487,7 +487,7 @@ let test_delegate_rejects_not_ready_worker_with_guidance () =
     Yojson.Safe.Util.(denied_detail |> member "blocked_reason" |> to_string);
   cleanup_dir base_dir
 
-let test_delegate_ready_worker_bypasses_denied_gate () =
+let test_delegate_rejects_corrupt_checkpoint_worker () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -497,7 +497,10 @@ let test_delegate_ready_worker_bypasses_denied_gate () =
   let ctx : _ Tool_team_session.context =
     { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
   in
-  let session_id = start_session_exn ctx ~goal:"delegate-ready-bypass" |> get_session_id in
+  let session_id =
+    start_session_exn ctx ~goal:"delegate-corrupt-checkpoint"
+    |> get_session_id
+  in
   ignore
     (Team_session_store.update_session config session_id (fun session ->
          {
@@ -551,14 +554,14 @@ let test_delegate_ready_worker_bypasses_denied_gate () =
             ("delegate_prompt", `String "continue");
           ])
   in
-  let delegate_json = parse_json_exn delegate_body in
-  Alcotest.(check bool) "ready path reaches runtime failure" false
+  Alcotest.(check bool) "delegate denied for corrupt checkpoint" false
     delegate_ok;
+  let delegate_json = parse_json_exn delegate_body in
   let message =
     Yojson.Safe.Util.member "message" delegate_json
     |> Yojson.Safe.Util.to_string
   in
-  Alcotest.(check bool) "ready path bypasses not-ready gate" false
+  Alcotest.(check bool) "mentions not ready guidance" true
     (try
        let _ =
          Str.search_forward
@@ -567,11 +570,11 @@ let test_delegate_ready_worker_bypasses_denied_gate () =
        in
        true
      with Not_found -> false);
-  Alcotest.(check bool) "runtime failure points at checkpoint state" true
+  Alcotest.(check bool) "mentions corrupt checkpoint reason" true
     (try
        let _ =
          Str.search_forward
-           (Str.regexp_string "worker checkpoint is not available")
+           (Str.regexp_string "corrupt_checkpoint")
            (String.lowercase_ascii message) 0
        in
        true
@@ -582,8 +585,36 @@ let test_delegate_ready_worker_bypasses_denied_gate () =
            Yojson.Safe.Util.member "event_type" json
            = `String "team_step_delegate_denied")
   in
-  Alcotest.(check int) "no delegate denied event on ready path" 0
+  Alcotest.(check int) "delegate denied event recorded" 1
     (List.length denied_events);
+  let denied_detail =
+    List.hd denied_events |> Yojson.Safe.Util.member "detail"
+  in
+  Alcotest.(check string) "delegate denied reason" "corrupt_checkpoint"
+    Yojson.Safe.Util.(denied_detail |> member "blocked_reason" |> to_string);
+  let status_ok, status_body =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "status ok" true status_ok;
+  let worker_runs =
+    parse_json_exn status_body |> result_field
+    |> Yojson.Safe.Util.member "worker_runs"
+  in
+  let readiness_entries =
+    Yojson.Safe.Util.(worker_runs |> member "worker_readiness" |> to_list)
+  in
+  let corrupt_readiness =
+    List.find
+      (fun json ->
+        Yojson.Safe.Util.(
+          json |> member "worker_name" |> to_string = "llama-local-ready"))
+      readiness_entries
+  in
+  Alcotest.(check bool) "status keeps corrupt worker not delegate-ready" false
+    Yojson.Safe.Util.(corrupt_readiness |> member "delegate_ready" |> to_bool);
+  Alcotest.(check string) "status blocked reason" "corrupt_checkpoint"
+    Yojson.Safe.Util.(corrupt_readiness |> member "blocked_reason" |> to_string);
   cleanup_dir base_dir
 
 let test_delegate_rejects_unplanned_worker_container () =

@@ -114,9 +114,9 @@ let () =
             Test_tool_team_session_misc
               .test_delegate_rejects_not_ready_worker_with_guidance;
           Alcotest.test_case
-            "delegate-ready-worker-bypasses-denied-gate" `Quick
+            "delegate-rejects-corrupt-checkpoint-worker" `Quick
             Test_tool_team_session_misc
-              .test_delegate_ready_worker_bypasses_denied_gate;
+              .test_delegate_rejects_corrupt_checkpoint_worker;
           Alcotest.test_case
             "delegate-rejects-unplanned-worker-container" `Quick
             Test_tool_team_session_misc

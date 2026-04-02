@@ -153,6 +153,10 @@ let worker_delegate_guidance = function
       "Wait for the worker to finish its first run and write a checkpoint."
   | Some "broken_container" ->
       "Repair or respawn the worker; a checkpoint exists without worker metadata."
+  | Some "corrupt_meta" ->
+      "Repair or respawn the worker; worker metadata is present but unreadable."
+  | Some "corrupt_checkpoint" ->
+      "Repair or respawn the worker; worker checkpoint is present but unreadable."
   | Some "in_flight" ->
       "Wait for the active worker run to complete before delegating again."
   | Some "unplanned_worker" ->
@@ -212,6 +216,7 @@ let worker_container_actor_names config session_id =
 let build_worker_delegate_readiness_entry config ~snapshot
     (session : Team_session_types.session) worker_name
     (planned_worker : Team_session_types.planned_worker option) =
+  let team_session_id = Some session.session_id in
   let has_meta =
     Room_utils.path_exists config
       (Team_session_store.worker_container_meta_path config
@@ -229,6 +234,20 @@ let build_worker_delegate_readiness_entry config ~snapshot
             worker_name)
        <> []
   in
+  let meta_is_valid =
+    has_meta
+    &&
+    Option.is_some
+      (Worker_container.load_worker_meta ~base_path:config.base_path
+         ~team_session_id ~worker_name)
+  in
+  let checkpoint_is_valid =
+    has_checkpoint
+    &&
+    Option.is_some
+      (Worker_container.load_worker_checkpoint ~base_path:config.base_path
+         ~team_session_id ~worker_name)
+  in
   let in_flight = List.mem worker_name snapshot.in_flight_actors in
   let blocked_reason =
     if in_flight then Some "in_flight"
@@ -241,6 +260,8 @@ let build_worker_delegate_readiness_entry config ~snapshot
           | false, false -> Some "missing_container"
           | true, false -> Some "pending_checkpoint"
           | false, true -> Some "broken_container"
+          | true, true when not meta_is_valid -> Some "corrupt_meta"
+          | true, true when not checkpoint_is_valid -> Some "corrupt_checkpoint"
           | true, true -> None)
   in
   {

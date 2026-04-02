@@ -4,9 +4,13 @@ import { signal } from '@preact/signals'
 import { fetchTaskHistory } from '../../api/actions'
 import { fetchAgentTimeline, fetchKeeperTrajectory } from '../../api/dashboard'
 import { buildTraceEvents, type UnifiedTraceEvent } from '../session-trace/session-trace-state'
-import { activeFilter } from './task-activity-list'
 import { findKeeper } from '../../lib/keeper-utils'
 import type { Task } from '../../types'
+
+// -- Activity filter (owned here, consumed by task-activity-list) ---
+
+export type ActivityFilter = 'all' | 'tool_call' | 'broadcast' | 'task'
+export const activeFilter = signal<ActivityFilter>('all')
 
 // -- Normalized task event (from masc_task_history raw JSON) --------
 

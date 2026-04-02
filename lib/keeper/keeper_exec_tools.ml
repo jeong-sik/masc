@@ -790,7 +790,7 @@ let execute_keeper_tool_call
                       Yojson.Safe.to_string
                         (`Assoc [ ("error", `String "tool_not_supported_in_keeper");
                                   ("tool", `String name);
-                                  ("hint", `String "tag dispatch returned None; check tag_dispatch_fn wiring at server init") ]))
+                                  ("hint", `String "tag dispatch returned None; tool may be unsupported, blocked, or misconfigured") ]))
              | None ->
                  Yojson.Safe.to_string
                    (`Assoc [ ("error", `String "unregistered_masc_tool");

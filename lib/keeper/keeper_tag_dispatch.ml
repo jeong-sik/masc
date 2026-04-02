@@ -102,10 +102,13 @@ let dispatch
       Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args
   | Mod_control ->
       (* Review #4579: Mod_control exposes room lifecycle tools.
-         Too risky for autonomous keeper dispatch. Return None so the
-         caller treats it as unsupported rather than advertising a tool
-         that always fails. *)
-      None
+         Too risky for autonomous keeper dispatch. Return explicit error
+         (not None) so callers distinguish intentional blocking from
+         unknown-tool-for-tag. None is reserved for "tag has no handler
+         for this tool name". *)
+      Some (false,
+        Printf.sprintf
+          "tool '%s' is blocked in keeper context (Mod_control is operator-only)" name)
   | Mod_agent_timeline ->
       Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name }
         ~name ~args

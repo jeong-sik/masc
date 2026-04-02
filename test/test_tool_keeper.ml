@@ -1445,6 +1445,57 @@ let test_keeper_up_update_allows_canonical_tool_access_override () =
             [ "masc_status" ] names
       | _ -> fail "expected canonical tool_access override to produce custom policy")
 
+let test_keeper_up_update_accepts_tool_custom_allowlist_compat () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "tool-custom-update";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, create_body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "tool-custom-update");
+              ("goal", `String "Create preset keeper before compat custom update");
+              ("tool_preset", `String "minimal");
+            ])
+      in
+      if not ok then fail ("initial keeper up failed: " ^ create_body);
+      let ok, update_body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "tool-custom-update");
+              ("goal", `String "Override with compat custom allowlist");
+              ("tool_custom_allowlist", `List [ `String "masc_status"; `String "masc_board_list" ]);
+            ])
+      in
+      if not ok then fail ("compat custom update failed: " ^ update_body);
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "tool-custom-update" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after compat custom update"
+        | Error e -> fail e
+      in
+      match meta.Masc_mcp.Keeper_types.tool_access with
+      | Masc_mcp.Keeper_types.Custom names ->
+          check (list string) "compat custom update wins"
+            [ "masc_status"; "masc_board_list" ] names
+      | _ -> fail "expected compat custom allowlist update to produce custom policy")
+
 let test_keeper_up_rejects_mixed_tool_access_inputs () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1474,6 +1525,31 @@ let test_keeper_up_rejects_mixed_tool_access_inputs () =
       check bool "keeper up rejects mixed tool inputs" false ok;
       check bool "mixed input error surfaced" true
         (contains_substring body "tool_access cannot be combined"))
+
+let test_keeper_up_rejects_tool_custom_allowlist_with_also_allow () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let keeper_ctx : _ Masc_mcp.Keeper_types.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let ok, body =
+        Masc_mcp.Keeper_turn.handle_keeper_up keeper_ctx
+          (`Assoc
+            [
+              ("name", `String "mixed-custom-compat");
+              ("goal", `String "Reject mixed compat tool inputs");
+              ("tool_custom_allowlist", `List [ `String "masc_status" ]);
+              ("tool_also_allow", `List [ `String "masc_board_list" ]);
+            ])
+      in
+      check bool "keeper up rejects compat mixed tool inputs" false ok;
+      check bool "compat mixed input error surfaced" true
+        (contains_substring body "tool_custom_allowlist cannot be combined"))
 
 let test_keeper_up_persists_explicit_goal_horizons () =
   Eio_main.run @@ fun env ->
@@ -2341,8 +2417,12 @@ let () =
            test_keeper_up_accepts_tool_custom_allowlist_compat;
          test_case "keeper up update allows canonical tool_access override" `Quick
            test_keeper_up_update_allows_canonical_tool_access_override;
+         test_case "keeper up update accepts tool_custom_allowlist compat" `Quick
+           test_keeper_up_update_accepts_tool_custom_allowlist_compat;
          test_case "keeper up rejects mixed tool_access inputs" `Quick
            test_keeper_up_rejects_mixed_tool_access_inputs;
+         test_case "keeper up rejects tool_custom_allowlist with also_allow" `Quick
+           test_keeper_up_rejects_tool_custom_allowlist_with_also_allow;
          test_case "write_meta syncs registry meta" `Quick
            test_write_meta_syncs_registry_meta;
          test_case "keeper up persists allowed paths" `Quick

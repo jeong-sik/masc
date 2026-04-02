@@ -239,13 +239,14 @@ let check_self_comment_status ~self_tokens ~(post_id : string)
               && c.created_at > my_latest_ts)
             comments
         in
-        if external_after = [] then `No_new_external
-        else
+        match external_after with
+        | [] -> `No_new_external
+        | hd :: tl ->
           let latest =
             List.fold_left
               (fun (acc : Board.comment) (c : Board.comment) ->
                 if c.created_at > acc.created_at then c else acc)
-              (List.hd external_after) external_after
+              hd tl
           in
           `New_external
             ( List.length external_after,

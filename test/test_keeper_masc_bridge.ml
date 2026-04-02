@@ -197,6 +197,67 @@ let test_tool_access_legacy_restricted_keeps_internal_and_listed_tools () =
   Alcotest.(check bool) "restricted does not unlock unrelated masc tool" false
     (List.mem "masc_autoresearch_cycle" names)
 
+let test_tool_access_projection_preset_keys_loaded () =
+  let meta =
+    match Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String "compat-preset");
+          ("agent_name", `String "compat-preset");
+          ("trace_id", `String "compat-preset-trace");
+          ("tool_preset", `String "coding");
+          ("tool_also_allow", `List [ `String "masc_governance_status" ]);
+        ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith e
+  in
+  match meta.Masc_mcp.Keeper_types.tool_access with
+  | Masc_mcp.Keeper_types.Preset
+      { preset = Masc_mcp.Keeper_types.Coding; also_allow } ->
+      Alcotest.(check (list string))
+        "compat preset keeps also_allow"
+        [ "masc_governance_status" ] also_allow
+  | _ -> Alcotest.fail "expected coding preset from compatibility keys"
+
+let test_tool_access_projection_custom_allowlist_loaded () =
+  let meta =
+    match Masc_mcp.Keeper_types.meta_of_json
+      (`Assoc
+        [
+          ("name", `String "compat-custom");
+          ("agent_name", `String "compat-custom");
+          ("trace_id", `String "compat-custom-trace");
+          ("tool_custom_allowlist", `List [ `String "masc_status" ]);
+        ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith e
+  in
+  match meta.Masc_mcp.Keeper_types.tool_access with
+  | Masc_mcp.Keeper_types.Custom names ->
+      Alcotest.(check (list string))
+        "compat custom allowlist preserved"
+        [ "masc_status" ] names
+  | _ -> Alcotest.fail "expected Custom allowlist from compatibility keys"
+
+let test_tool_access_projection_invalid_preset_rejected () =
+  match Masc_mcp.Keeper_types.meta_of_json
+    (`Assoc
+      [
+        ("name", `String "compat-invalid-preset");
+        ("agent_name", `String "compat-invalid-preset");
+        ("trace_id", `String "compat-invalid-preset-trace");
+        ("tool_preset", `String "bogus");
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected invalid compatibility preset to fail"
+  | Error e ->
+      Alcotest.(check string)
+        "invalid compatibility preset error"
+        "meta parse error: invalid keeper tool_preset: bogus"
+        e
+
 let test_tool_access_preset_empty_json_preserved () =
   let meta =
     match Masc_mcp.Keeper_types.meta_of_json
@@ -478,6 +539,12 @@ let () =
             test_tool_access_legacy_unrestricted_maps_to_full;
           Alcotest.test_case "legacy restricted keeps internal tools" `Quick
             test_tool_access_legacy_restricted_keeps_internal_and_listed_tools;
+          Alcotest.test_case "compat preset keys load preset policy" `Quick
+            test_tool_access_projection_preset_keys_loaded;
+          Alcotest.test_case "compat custom allowlist loads custom policy" `Quick
+            test_tool_access_projection_custom_allowlist_loaded;
+          Alcotest.test_case "compat invalid preset rejected" `Quick
+            test_tool_access_projection_invalid_preset_rejected;
           Alcotest.test_case "preset empty json preserved" `Quick
             test_tool_access_preset_empty_json_preserved;
           Alcotest.test_case "custom empty json preserved" `Quick

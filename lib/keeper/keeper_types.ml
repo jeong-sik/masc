@@ -209,47 +209,91 @@ let tool_access_to_json access =
           ("tools", `List (List.map (fun s -> `String s) names));
         ]
 
+let json_member_present key (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> false
+
+let json_object_member_present key (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member key json with
+  | `Assoc _ -> true
+  | _ -> false
+
+let string_list_field_result ?label ~field_name (json : Yojson.Safe.t) =
+  let label = Option.value ~default:field_name label in
+  match Yojson.Safe.Util.member field_name json with
+  | `List items ->
+      let rec collect acc index = function
+        | [] -> Ok (List.rev acc)
+        | `String value :: rest -> collect (value :: acc) (index + 1) rest
+        | _ :: _ ->
+            Error
+              (Printf.sprintf
+                 "keeper %s[%d] must be a string"
+                 label index)
+      in
+      collect [] 0 items
+  | `Null ->
+      Error (Printf.sprintf "keeper %s must be an array of strings" label)
+  | _ ->
+      Error (Printf.sprintf "keeper %s must be an array of strings" label)
+
+let string_list_field_opt_result ?label ~field_name (json : Yojson.Safe.t) =
+  match Yojson.Safe.Util.member field_name json with
+  | `Null -> Ok []
+  | _ -> string_list_field_result ?label ~field_name json
+
+let parse_tool_preset_projection (json : Yojson.Safe.t) =
+  let preset_member = Yojson.Safe.Util.member "tool_preset" json in
+  match preset_member with
+  | `String raw -> (
+      match tool_preset_of_string raw with
+      | Some preset -> Ok preset
+      | None ->
+          Error
+            (Printf.sprintf "invalid keeper tool_preset: %s" raw))
+  | `Null -> Error "keeper tool_preset required"
+  | _ -> Error "keeper tool_preset must be a string"
+
+let tool_access_projection_of_meta_json (json : Yojson.Safe.t) =
+  let custom_present = json_member_present "tool_custom_allowlist" json in
+  let preset_present = json_member_present "tool_preset" json in
+  let also_allow_present = json_member_present "tool_also_allow" json in
+  let legacy_allowlist_present = json_member_present "tool_allowlist" json in
+  if custom_present then
+    match string_list_field_result ~field_name:"tool_custom_allowlist" json with
+    | Ok tools -> Ok (normalize_tool_access (Custom tools))
+    | Error msg -> Error msg
+  else if preset_present || also_allow_present then
+    match parse_tool_preset_projection json with
+    | Error msg -> Error msg
+    | Ok preset -> (
+        match string_list_field_opt_result ~field_name:"tool_also_allow" json with
+        | Ok also_allow ->
+            Ok (normalize_tool_access (Preset { preset; also_allow }))
+        | Error msg -> Error msg)
+  else if legacy_allowlist_present then
+    match string_list_field_result ~field_name:"tool_allowlist" json with
+    | Ok names -> Ok (migrate_legacy_restricted_tools names)
+    | Error msg -> Error msg
+  else
+    Ok (migrate_legacy_restricted_tools legacy_standard_tool_names)
+
 let tool_access_of_meta_json (json : Yojson.Safe.t) =
   match Yojson.Safe.Util.member "tool_access" json with
   | `Null ->
-      let legacy_allowlist =
-        match Safe_ops.json_string_list "tool_allowlist" json with
-        | [] -> legacy_standard_tool_names
-        | names -> names
-      in
-      Ok (migrate_legacy_restricted_tools legacy_allowlist)
+      tool_access_projection_of_meta_json json
   | `Assoc _ as access_json -> (
       let kind =
         Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
-      in
-      let string_list_field field_name =
-        match Yojson.Safe.Util.member field_name access_json with
-        | `List items ->
-            let rec collect acc index = function
-              | [] -> Ok (List.rev acc)
-              | `String value :: rest -> collect (value :: acc) (index + 1) rest
-              | _ :: _ ->
-                  Error
-                    (Printf.sprintf
-                       "keeper tool_access.%s[%d] must be a string"
-                       field_name index)
-            in
-            collect [] 0 items
-        | `Null ->
-            Error (Printf.sprintf "keeper tool_access.%s must be an array of strings" field_name)
-        | _ ->
-            Error (Printf.sprintf "keeper tool_access.%s must be an array of strings" field_name)
-      in
-      let string_list_field_opt field_name =
-        match Yojson.Safe.Util.member field_name access_json with
-        | `Null -> Ok []
-        | _ -> string_list_field field_name
       in
       match kind with
       | Some "unrestricted" ->
           Ok (Preset { preset = Full; also_allow = [] } |> normalize_tool_access)
       | Some "restricted" -> (
-          match string_list_field_opt "tools" with
+          match string_list_field_opt_result
+                  ~field_name:"tools" ~label:"tool_access.tools" access_json
+          with
           | Ok tools -> Ok (migrate_legacy_restricted_tools tools)
           | Error msg -> Error msg)
       | Some "preset" -> (
@@ -267,20 +311,151 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
                        "invalid keeper tool_access.preset: %s"
                        raw)
               | Some preset -> (
-                  match string_list_field_opt "also_allow" with
+                  match string_list_field_opt_result
+                          ~field_name:"also_allow" ~label:"tool_access.also_allow" access_json
+                  with
                   | Ok also_allow ->
                       Ok
                         (normalize_tool_access
                            (Preset { preset; also_allow }))
                   | Error msg -> Error msg)))
       | Some "custom" -> (
-          match string_list_field "tools" with
+          match string_list_field_result
+                  ~field_name:"tools" ~label:"tool_access.tools" access_json
+          with
           | Ok tools -> Ok (normalize_tool_access (Custom tools))
           | Error msg -> Error msg)
       | Some other ->
           Error (Printf.sprintf "invalid keeper tool_access.kind: %s" other)
       | None -> Error "keeper tool_access.kind required")
   | _ -> Error "keeper tool_access must be an object"
+
+let canonical_keeper_meta_key_names =
+  [
+    "name";
+    "agent_name";
+    "trace_id";
+    "trace_history";
+    "goal";
+    "short_goal";
+    "mid_goal";
+    "long_goal";
+    "soul_profile";
+    "social_model";
+    "cascade_name";
+    "will";
+    "needs";
+    "desires";
+    "instructions";
+    "policy_voice_enabled";
+    "execution_scope";
+    "allowed_paths";
+    "scope_kind";
+    "tool_access";
+    "tool_denylist";
+    "room_scope";
+    "mention_targets";
+    "room_signal_prompt_enabled";
+    "joined_room_ids";
+    "last_seen_seq_by_room";
+    "generation";
+    "proactive_enabled";
+    "proactive_idle_sec";
+    "proactive_cooldown_sec";
+    "compaction_profile";
+    "compaction_ratio_gate";
+    "compaction_message_gate";
+    "compaction_token_gate";
+    "continuity_compaction_cooldown_sec";
+    "auto_handoff";
+    "handoff_threshold";
+    "handoff_cooldown_sec";
+    "voice_enabled";
+    "voice_channel";
+    "voice_agent_id";
+    "last_handoff_ts";
+    "created_at";
+    "updated_at";
+    "total_turns";
+    "total_input_tokens";
+    "total_output_tokens";
+    "total_tokens";
+    "total_cost_usd";
+    "last_turn_ts";
+    "last_model_used";
+    "last_input_tokens";
+    "last_output_tokens";
+    "last_total_tokens";
+    "last_latency_ms";
+    "compaction_count";
+    "last_compaction_ts";
+    "last_compaction_before_tokens";
+    "last_compaction_after_tokens";
+    "proactive_count_total";
+    "last_proactive_ts";
+    "last_proactive_reason";
+    "last_proactive_preview";
+    "last_compaction_check_ts";
+    "last_compaction_decision";
+    "last_continuity_update_ts";
+    "continuity_summary";
+    "active_goal_ids";
+    "active_team_session_id";
+    "last_team_session_started_at";
+    "team_session_start_count_total";
+    "last_autonomous_action_at";
+    "autonomous_action_count";
+    "autonomous_turn_count";
+    "autonomous_text_turn_count";
+    "autonomous_tool_turn_count";
+    "board_reactive_turn_count";
+    "mention_reactive_turn_count";
+    "noop_turn_count";
+    "last_speech_act";
+    "last_blocker";
+    "last_need";
+    "paused";
+    "current_task_id";
+  ]
+
+let compatibility_keeper_meta_key_names =
+  [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist"; "tool_allowlist" ]
+
+let known_keeper_meta_key_names =
+  canonical_keeper_meta_key_names
+  @ compatibility_keeper_meta_key_names
+
+let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+      let unknown =
+        fields
+        |> List.filter_map (fun (key, _) ->
+               if List.mem key known_keeper_meta_key_names then None else Some key)
+        |> dedupe_keep_order
+      in
+      if unknown <> [] then
+        Log.Keeper.warn
+          "keeper meta %s has unknown keys: %s"
+          path (String.concat ", " unknown)
+  | _ -> ()
+
+let warn_tool_access_compat_keys ~path (json : Yojson.Safe.t) =
+  let compat_present =
+    compatibility_keeper_meta_key_names
+    |> List.filter (fun key -> json_member_present key json)
+  in
+  match compat_present with
+  | [] -> ()
+  | fields ->
+      if json_object_member_present "tool_access" json then
+        Log.Keeper.warn
+          "keeper meta %s has tool_access plus compatibility tool keys; ignoring %s"
+          path (String.concat ", " fields)
+      else
+        Log.Keeper.warn
+          "keeper meta %s uses compatibility tool keys (%s); prefer canonical tool_access"
+          path (String.concat ", " fields)
 
 (* -- Updater helpers for nested record updates -- *)
 
@@ -818,9 +993,13 @@ let read_meta_file_path path : (keeper_meta option, string) result =
         let json, _scrubbed =
           scrub_persisted_keeper_meta_json ~path json
         in
+        warn_unknown_keeper_meta_keys ~path json;
+        warn_tool_access_compat_keys ~path json;
         (match meta_of_json json with
          | Ok meta -> Ok (Some meta)
-         | Error e -> Error e)
+         | Error e ->
+             Log.Keeper.warn "keeper meta parse failed for %s: %s" path e;
+             Error e)
 
 let keeper_names config =
   let dir = keeper_dir config in

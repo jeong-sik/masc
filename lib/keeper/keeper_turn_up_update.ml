@@ -9,8 +9,8 @@ open Keeper_keepalive
 open Keeper_turn_up_args
 
 let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result =
-  match old.tool_access, p.tool_preset_opt, p.tool_also_allow_opt with
-  | Custom _, None, Some _ ->
+  match p.tool_access_opt, old.tool_access, p.tool_preset_opt, p.tool_also_allow_opt with
+  | None, Custom _, None, Some _ ->
       (false, "tool_also_allow requires a preset-based keeper policy; set tool_preset first")
   | _ ->
   let goal_provided = Option.is_some p.goal_opt in
@@ -89,25 +89,28 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       ~fallback_token:old.compaction.token_gate
   in
   let tool_access =
-    match old.tool_access with
-    | Preset current ->
-        let preset = Option.value ~default:current.preset p.tool_preset_opt in
-        let also_allow =
-          resolve_tool_name_list
-            ~preferred:p.tool_also_allow_opt
-            ~fallback:(Some current.also_allow)
-        in
-        Preset { preset; also_allow }
-    | Custom names -> (
-        match p.tool_preset_opt with
-        | Some preset ->
+    match p.tool_access_opt with
+    | Some access -> access
+    | None ->
+        match old.tool_access with
+        | Preset current ->
+            let preset = Option.value ~default:current.preset p.tool_preset_opt in
             let also_allow =
               resolve_tool_name_list
                 ~preferred:p.tool_also_allow_opt
-                ~fallback:p.profile_defaults.tool_also_allow
+                ~fallback:(Some current.also_allow)
             in
             Preset { preset; also_allow }
-        | None -> Custom names)
+        | Custom names -> (
+            match p.tool_preset_opt with
+            | Some preset ->
+                let also_allow =
+                  resolve_tool_name_list
+                    ~preferred:p.tool_also_allow_opt
+                    ~fallback:p.profile_defaults.tool_also_allow
+                in
+                Preset { preset; also_allow }
+            | None -> Custom names)
   in
   let tool_denylist =
     resolve_tool_name_list

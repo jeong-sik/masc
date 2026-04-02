@@ -31,6 +31,7 @@ type parsed_args = {
   compaction_message_gate_opt : int option;
   compaction_token_gate_opt : int option;
   continuity_compaction_cooldown_sec_opt : int option;
+  tool_access_opt : tool_access option;
   tool_preset_opt : tool_preset option;
   tool_also_allow_opt : string list option;
   tool_denylist_opt : string list option;
@@ -51,15 +52,92 @@ let normalize_tool_name_list names =
   |> List.filter (fun name -> name <> "")
   |> dedupe_keep_order
 
-let get_present_tool_name_list_opt args key =
-  match Yojson.Safe.Util.member key args with
-  | `Null -> None
-  | _ -> Some (normalize_tool_name_list (get_string_list args key))
+let json_assoc_member_opt key (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let json_member_present key (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> false
+
+let parse_present_tool_name_list_opt args key =
+  match json_assoc_member_opt key args with
+  | None -> Ok None
+  | Some (`List items) ->
+      let rec collect acc index = function
+        | [] -> Ok (Some (normalize_tool_name_list (List.rev acc)))
+        | `String value :: rest -> collect (value :: acc) (index + 1) rest
+        | _ :: _ ->
+            Error (Printf.sprintf "%s[%d] must be a string" key index)
+      in
+      collect [] 0 items
+  | Some `Null -> Error (Printf.sprintf "%s must not be null" key)
+  | Some _ -> Error (Printf.sprintf "%s must be an array of strings" key)
 
 let resolve_tool_name_list ~preferred ~fallback =
   first_some preferred fallback
   |> Option.value ~default:[]
   |> normalize_tool_name_list
+
+let parse_tool_access_input (args : Yojson.Safe.t) :
+    (tool_access option * tool_preset option * string list option, string) result =
+  let tool_access_present = json_member_present "tool_access" args in
+  let tool_preset_present = json_member_present "tool_preset" args in
+  let tool_also_allow_present = json_member_present "tool_also_allow" args in
+  let tool_custom_allowlist_present = json_member_present "tool_custom_allowlist" args in
+  if tool_access_present
+     && (tool_preset_present || tool_also_allow_present || tool_custom_allowlist_present)
+  then
+    Error
+      "tool_access cannot be combined with tool_preset, tool_also_allow, or tool_custom_allowlist"
+  else if tool_custom_allowlist_present && (tool_preset_present || tool_also_allow_present) then
+    Error
+      "tool_custom_allowlist cannot be combined with tool_preset or tool_also_allow"
+  else
+    let tool_access_opt =
+      if tool_access_present then
+        match json_assoc_member_opt "tool_access" args with
+        | Some ((`Assoc _) as access_json) -> (
+            match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
+            | Ok access -> Ok (Some access)
+            | Error msg -> Error msg)
+        | Some `Null -> Error "tool_access must not be null"
+        | Some _ -> Error "tool_access must be an object"
+        | None -> Ok None
+      else if tool_custom_allowlist_present then (
+        match parse_present_tool_name_list_opt args "tool_custom_allowlist" with
+        | Ok (Some names) -> Ok (Some (Custom names))
+        | Ok None -> Ok None
+        | Error msg -> Error msg)
+      else
+        Ok None
+    in
+    match tool_access_opt with
+    | Error msg -> Error msg
+    | Ok tool_access_opt ->
+        let tool_preset_opt =
+          match json_assoc_member_opt "tool_preset" args with
+          | None -> Ok None
+          | Some (`String raw) -> (
+              match tool_preset_of_string raw with
+              | Some preset -> Ok (Some preset)
+              | None ->
+                  Error
+                    (Printf.sprintf
+                       "invalid tool_preset '%s' (allowed: minimal, messaging, coding, research, full)"
+                       raw))
+          | Some `Null -> Error "tool_preset must not be null"
+          | Some _ -> Error "tool_preset must be a string"
+        in
+        let tool_also_allow_opt =
+          parse_present_tool_name_list_opt args "tool_also_allow"
+        in
+        (match tool_preset_opt, tool_also_allow_opt with
+        | Error msg, _ | _, Error msg -> Error msg
+        | Ok tool_preset_opt, Ok tool_also_allow_opt ->
+            Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt))
 
 let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
@@ -76,25 +154,12 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let compaction_profile_opt_res =
       parse_compaction_profile_opt args "compaction_profile"
     in
-    match soul_profile_opt_res, compaction_profile_opt_res with
-    | Error e, _ | _, Error e -> Error (false, e)
-    | Ok soul_profile_opt, Ok compaction_profile_opt ->
-    let tool_preset_opt =
-      match get_string_opt args "tool_preset" with
-      | None -> Ok None
-      | Some raw -> (
-          match tool_preset_of_string raw with
-          | Some preset -> Ok (Some preset)
-          | None ->
-              Error
-                (false,
-                 Printf.sprintf
-                   "invalid tool_preset '%s' (allowed: minimal, messaging, coding, research, full)"
-                   raw))
-    in
-    match tool_preset_opt with
-    | Error e -> Error e
-    | Ok tool_preset_opt ->
+    let tool_access_input_res = parse_tool_access_input args in
+    match soul_profile_opt_res, compaction_profile_opt_res, tool_access_input_res with
+    | Error e, _, _ | _, Error e, _ -> Error (false, e)
+    | _, _, Error e -> Error (false, e)
+    | Ok soul_profile_opt, Ok compaction_profile_opt,
+      Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt) ->
     let goal_opt = get_string_opt args "goal" in
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
@@ -120,8 +185,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let continuity_compaction_cooldown_sec_opt =
       Safe_ops.json_int_opt "continuity_compaction_cooldown_sec" args
     in
-    let tool_also_allow_opt = get_present_tool_name_list_opt args "tool_also_allow" in
-    let tool_denylist_opt = get_present_tool_name_list_opt args "tool_denylist" in
+    let tool_denylist_opt_res = parse_present_tool_name_list_opt args "tool_denylist" in
     let auto_handoff_opt = get_bool_opt args "auto_handoff" in
     let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
     let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in
@@ -162,6 +226,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let will_opt = parse_self_model_opt args "will" in
     let needs_opt = parse_self_model_opt args "needs" in
     let desires_opt = parse_self_model_opt args "desires" in
+    match tool_denylist_opt_res with
+    | Error msg -> Error (false, msg)
+    | Ok tool_denylist_opt ->
     Ok {
       name;
       soul_profile_opt;
@@ -186,6 +253,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       compaction_message_gate_opt;
       compaction_token_gate_opt;
       continuity_compaction_cooldown_sec_opt;
+      tool_access_opt;
       tool_preset_opt;
       tool_also_allow_opt;
       tool_denylist_opt;

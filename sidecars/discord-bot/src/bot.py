@@ -104,7 +104,12 @@ class MascBot(discord.Client):
             await channel.send(embed=embed)
             return
 
-        # Short replies: plain text. Long replies: embed.
+        if len(response.reply) > 4096:
+            for chunk in chunk_text(response.reply):
+                await channel.send(chunk)
+            return
+
+        # Short replies: plain text. Medium replies or replies with stats: embed.
         if len(response.reply) <= 500 and not response.model_used:
             chunks = chunk_text(response.reply)
             for chunk in chunks:
@@ -142,8 +147,12 @@ async def keeper_ask(
     )
 
     if response.ok:
-        embed = format_keeper_embed(response)
-        await interaction.followup.send(embed=embed)
+        if len(response.reply) > 4096:
+            for chunk in chunk_text(response.reply):
+                await interaction.followup.send(chunk)
+        else:
+            embed = format_keeper_embed(response)
+            await interaction.followup.send(embed=embed)
     else:
         embed = format_error_embed(response.error)
         await interaction.followup.send(embed=embed)

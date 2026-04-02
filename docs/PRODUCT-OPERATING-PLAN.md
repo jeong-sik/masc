@@ -33,7 +33,7 @@ The front-door promise is level 1. Levels 2-4 are real, but they are not the fir
 | Remote-safe operator | Working | Supporting | `docs/REMOTE-MCP-OPERATOR.md` | auth and release posture still need tightening | keep surface reduced and explicit |
 | Multi-transport matrix | Working but not front-door | Experimental | implementation status appendix, live transport issues | reachable state and reported state can diverge | fix health truth before promotion |
 | Auth and API contract posture | Not done for product promise | Advanced / supporting | `docs/PRODUCT-REVIEW.md` | non-local default is still too weak, REST contract is not crisp | design + narrow hardening slices |
-| Config introspection | Not done for product promise | Supporting | open issues `#3364`, `#3365`, `#3363` | operators cannot inspect current runtime cleanly | centralize config and expose read-only snapshot |
+| Config introspection | Working but split | Supporting | `masc_config`, `masc_config_snapshot`, `/api/v1/dashboard/config`, open issues `#3364`, `#3365`, `#3363` | read contract is duplicated and not yet centralized enough to promise as SSOT | centralize config and expose one canonical read-only snapshot |
 | Release and doc truth | Not done for product promise | Front door | stale roadmap/version drift | package, roadmap, changelog, and release lane drift | enforce version truth in docs and workflow |
 | Research and legacy surfaces | Deferred | Experimental | archived docs, implementation appendix | merged surface area is wider than product promise | keep clearly labeled and avoid front-door promotion |
 

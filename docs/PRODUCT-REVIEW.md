@@ -55,7 +55,7 @@ Why:
 What still blocks stronger promises:
 
 - transport health can disagree with real reachability
-- config introspection is missing
+- config introspection exists, but the read contract is split and not yet strong enough to treat as a clean SSOT
 - some read paths still need stronger truth guarantees
 
 ### 4. Remote-safe or ops-grade posture

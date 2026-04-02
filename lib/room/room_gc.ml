@@ -127,7 +127,9 @@ let cleanup_zombies
            Without this, the keeper fiber continues running (fiber_stop stays
            false) and makes tool calls indefinitely after cleanup. *)
         (try !Room_hooks.stop_keeper_fn name
-         with _ -> ());
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn -> Log.Gc.warn "gc stop_keeper_fn error for %s: %s" name (Printexc.to_string exn));
         ()
       ) !zombie_entries;
 

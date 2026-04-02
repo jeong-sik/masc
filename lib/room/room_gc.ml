@@ -451,12 +451,13 @@ let gc config ?(days=7) () =
   else
     results := "✅ No stale CP data" :: !results;
   (* Log event *)
-  let cp_json =
-    Printf.sprintf "{\"dead_units\":%d,\"orphan_units\":%d,\"ops_archived\":%d,\"orphan_dets\":%d,\"dropped_intents\":%d}"
-      cp_result.dead_units_removed cp_result.orphaned_units_removed
-      cp_result.operations_archived cp_result.detachments_removed
-      cp_result.intents_removed
-  in
+  let cp_json = Yojson.Safe.to_string (`Assoc [
+    ("dead_units", `Int cp_result.dead_units_removed);
+    ("orphan_units", `Int cp_result.orphaned_units_removed);
+    ("ops_archived", `Int cp_result.operations_archived);
+    ("orphan_dets", `Int cp_result.detachments_removed);
+    ("dropped_intents", `Int cp_result.intents_removed);
+  ]) in
   (* 9. Archive stale room directories (no file modified in N days).
          Prevents .masc/rooms/ from growing unbounded and slowing down
          snapshot computation (each room adds hundreds of JSON files). *)

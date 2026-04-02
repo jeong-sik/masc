@@ -161,15 +161,16 @@ let wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid =
   loop ()
 
 let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv ~env () =
+  let stdin_path_opt, stdin_fd =
+    match stdin_content with
+    | None -> (None, Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0)
+    | Some content ->
+        let stdin_path = Filename.temp_file "masc_cp_stdin_" ".log" in
+        Out_channel.with_open_bin stdin_path (fun oc -> Out_channel.output_string oc content);
+        (Some stdin_path, Unix.openfile stdin_path [ Unix.O_RDONLY ] 0)
+  in
   let stdout_path = Filename.temp_file "masc_cp_stdout_" ".log" in
   let stderr_path = Filename.temp_file "masc_cp_stderr_" ".log" in
-  let stdin_fd, stdin_writer =
-    match stdin_content with
-    | None -> (Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0, None)
-    | Some _ ->
-        let read_fd, write_fd = Unix.pipe ~cloexec:true () in
-        (read_fd, Some write_fd)
-  in
   let stdout_fd =
     Unix.openfile stdout_path
       [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
@@ -183,25 +184,19 @@ let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv 
       stderr_fd
   in
   Unix.close stdin_fd;
-  (match stdin_content, stdin_writer with
-  | Some content, Some write_fd ->
-      let rec write_all offset =
-        if offset < String.length content then
-          let written =
-            Unix.write_substring write_fd content offset
-              (String.length content - offset)
-          in
-          write_all (offset + written)
-      in
-      (try write_all 0 with
-      | Unix.Unix_error _ -> ());
-      Unix.close write_fd
-  | _ -> ());
   Unix.close stdout_fd;
   Unix.close stderr_fd;
   let finalize exit_code =
     let stdout = In_channel.with_open_bin stdout_path In_channel.input_all in
     let stderr = In_channel.with_open_bin stderr_path In_channel.input_all in
+    (match stdin_path_opt with
+    | Some stdin_path -> (
+        try Sys.remove stdin_path
+        with Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             Log.CmdPlane.warn "failed to remove stdin tmpfile %s: %s" stdin_path
+               (Printexc.to_string exn))
+    | None -> ());
     (try Sys.remove stdout_path with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.CmdPlane.warn "failed to remove stdout tmpfile %s: %s" stdout_path (Printexc.to_string exn));
     (try Sys.remove stderr_path with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

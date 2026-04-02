@@ -30,6 +30,10 @@ let () =
           Alcotest.test_case "digest room tool host attention" `Quick
             Test_operator_control_snapshot
             .test_digest_room_includes_tool_host_failure_attention;
+          Alcotest.test_case "operator digest severity rank supports critical"
+            `Quick
+            Test_operator_control_snapshot
+            .test_operator_digest_severity_rank_supports_critical;
           Alcotest.test_case "digest room prefers fresh operator judgment"
             `Quick
             Test_operator_control_judgment

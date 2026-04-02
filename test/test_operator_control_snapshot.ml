@@ -457,6 +457,13 @@ let test_digest_room_includes_tool_host_failure_attention () =
           (item |> member "evidence" |> member "failure_envelope"
          |> member "operator_action" |> to_string))
 
+let test_operator_digest_severity_rank_supports_critical () =
+  Alcotest.(check int) "critical rank" 3
+    (Operator_digest.severity_rank "critical");
+  Alcotest.(check bool) "critical outranks bad" true
+    (Operator_digest.severity_rank "critical"
+    > Operator_digest.severity_rank "bad")
+
 let test_digest_team_session_can_skip_workers () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

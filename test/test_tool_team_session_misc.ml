@@ -9,7 +9,7 @@ let write_minimal_worker_meta config session_id worker_name =
        worker_name)
     (Printf.sprintf {|{"worker_name":"%s"}|} worker_name)
 
-let write_valid_worker_checkpoint config session_id worker_name =
+let write_valid_worker_checkpoint (config : Room.config) session_id worker_name =
   let checkpoint : Oas.Checkpoint.t =
     {
       Oas.Checkpoint.version = Oas.Checkpoint.checkpoint_version;

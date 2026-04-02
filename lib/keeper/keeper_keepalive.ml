@@ -486,7 +486,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                        ~pending_board_events:(Some pending_board_events)
                        ~config:ctx.config ~meta:meta_after_triage
                     in
-                   if
+                   if Atomic.get stop then
+                     meta_after_triage
+                   else if
                      Keeper_world_observation.should_run_unified_turn
                        ~meta:meta_after_triage
                        obs

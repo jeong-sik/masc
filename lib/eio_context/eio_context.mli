@@ -55,12 +55,7 @@ val get_switch : unit -> Eio.Switch.t
 (** Get the Eio switch.
     @raise Invalid_argument if not initialized. *)
 
-val get_https_connector :
-  unit ->
-  (Uri.t ->
-   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-   [ `Close | `Flow | `R | `Shutdown | `Tls | `W ] Eio.Resource.t)
-(** TLS connector for Cohttp_eio HTTPS support. *)
+(** [get_https_connector] removed — use [get_https_connector_result] instead. *)
 
 val get_https_connector_result :
   unit ->

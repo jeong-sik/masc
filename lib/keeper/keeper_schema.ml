@@ -2,6 +2,50 @@
 
 open Types
 
+let string_array_schema =
+  `Assoc [
+    ("type", `String "array");
+    ("items", `Assoc [ ("type", `String "string") ]);
+  ]
+
+let tool_access_schema description =
+  let preset_shape =
+    `Assoc [
+      ("type", `String "object");
+      ("description", `String "Preset-based tool policy.");
+      ("properties", `Assoc [
+        ("kind", `Assoc [ ("const", `String "preset") ]);
+        ("preset", `Assoc [
+          ("type", `String "string");
+          ("enum",
+            `List
+              [ `String "minimal"; `String "messaging"; `String "coding";
+                `String "research"; `String "full" ]);
+        ]);
+        ("also_allow", string_array_schema);
+      ]);
+      ("required", `List [ `String "kind"; `String "preset" ]);
+      ("additionalProperties", `Bool false);
+    ]
+  in
+  let custom_shape =
+    `Assoc [
+      ("type", `String "object");
+      ("description", `String "Custom tool allowlist policy.");
+      ("properties", `Assoc [
+        ("kind", `Assoc [ ("const", `String "custom") ]);
+        ("tools", string_array_schema);
+      ]);
+      ("required", `List [ `String "kind"; `String "tools" ]);
+      ("additionalProperties", `Bool false);
+    ]
+  in
+  `Assoc [
+    ("type", `String "object");
+    ("description", `String description);
+    ("oneOf", `List [ preset_shape; custom_shape ]);
+  ]
+
 let keeper_schemas : tool_schema list = [
   {
     name = "masc_persona_list";
@@ -68,10 +112,9 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
         ]);
-        ("tool_access", `Assoc [
-          ("type", `String "object");
-          ("description", `String "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
-        ]);
+        ("tool_access",
+          tool_access_schema
+            "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}."); 
         ("tool_preset", `Assoc [
           ("type", `String "string");
           ("description", `String "Compatibility field. Use tool_access.kind='preset' for new callers.");
@@ -211,10 +254,9 @@ let keeper_schemas : tool_schema list = [
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Restrict file writes to these path prefixes. Empty list uses computed defaults based on execution_scope. Use [\"*\"] for explicit full access.");
         ]);
-        ("tool_access", `Assoc [
-          ("type", `String "object");
-          ("description", `String "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
-        ]);
+        ("tool_access",
+          tool_access_schema
+            "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}."); 
         ("tool_preset", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "minimal"; `String "messaging"; `String "coding"; `String "research"; `String "full"]);

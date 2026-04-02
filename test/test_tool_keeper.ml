@@ -1526,6 +1526,31 @@ let test_keeper_up_rejects_mixed_tool_access_inputs () =
       check bool "mixed input error surfaced" true
         (contains_substring body "tool_access cannot be combined"))
 
+let test_keeper_up_rejects_null_tool_access_field () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let keeper_ctx : _ Masc_mcp.Keeper_types.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let ok, body =
+        Masc_mcp.Keeper_turn.handle_keeper_up keeper_ctx
+          (`Assoc
+            [
+              ("name", `String "null-tool-access");
+              ("goal", `String "Reject null canonical tool_access");
+              ("tool_access", `Null);
+              ("tool_preset", `String "minimal");
+            ])
+      in
+      check bool "keeper up rejects null tool_access field" false ok;
+      check bool "null tool_access error surfaced" true
+        (contains_substring body "tool_access cannot be combined"))
+
 let test_keeper_up_rejects_tool_custom_allowlist_with_also_allow () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -2421,6 +2446,8 @@ let () =
            test_keeper_up_update_accepts_tool_custom_allowlist_compat;
          test_case "keeper up rejects mixed tool_access inputs" `Quick
            test_keeper_up_rejects_mixed_tool_access_inputs;
+         test_case "keeper up rejects null tool_access field" `Quick
+           test_keeper_up_rejects_null_tool_access_field;
          test_case "keeper up rejects tool_custom_allowlist with also_allow" `Quick
            test_keeper_up_rejects_tool_custom_allowlist_with_also_allow;
          test_case "write_meta syncs registry meta" `Quick

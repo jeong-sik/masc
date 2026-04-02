@@ -210,9 +210,9 @@ let tool_access_to_json access =
         ]
 
 let json_member_present key (json : Yojson.Safe.t) =
-  match Yojson.Safe.Util.member key json with
-  | `Null -> false
-  | _ -> true
+  match json with
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> false
 
 let string_list_field_result ?label ~field_name (json : Yojson.Safe.t) =
   let label = Option.value ~default:field_name label in

@@ -387,6 +387,8 @@ phase_report_string() {
   local value="$2"
   if ! phase_enabled "$phase"; then
     printf 'skipped'
+  elif [[ "$value" == "2" ]]; then
+    printf 'simulated'
   elif [[ "$value" == "1" ]]; then
     printf 'pass'
   else
@@ -401,24 +403,24 @@ run_dry_run() {
     [[ -n "$TARGET_PHASES" ]] && ! phase_enabled "$phase" && continue
     snapshot_file="$SNAP_DIR/${phase}-keeper-status.json"
     heartbeat_file="$SNAP_DIR/${phase}-heartbeat.txt"
-    write_json_pretty "$snapshot_file" "$(jq -nc --arg phase "$phase" --arg run_id "$RUN_ID" '{dry_run:true,phase:$phase,run_id:$run_id}')"
-    write_text "$heartbeat_file" "Active heartbeats:\n  • dry-run: agent=keeper-dry-run-agent interval=5s message=\"dry-run\" uptime=1s"
-    append_phase "$phase" "pass" "dry-run synthetic success" "$snapshot_file" "$heartbeat_file"
+    write_json_pretty "$snapshot_file" "$(jq -nc --arg phase "$phase" --arg run_id "$RUN_ID" '{simulated:true,dry_run:true,phase:$phase,run_id:$run_id}')"
+    write_text "$heartbeat_file" "[simulated] Active heartbeats:\n  • dry-run: agent=keeper-dry-run-agent interval=5s message=\"dry-run\" uptime=1s"
+    append_phase "$phase" "simulated" "dry-run synthetic (not runtime proof)" "$snapshot_file" "$heartbeat_file"
   done
-  BOOTSTRAP_PASS=1
-  LIVENESS_PASS=1
-  CONTINUITY_PASS=1
-  COMPACTION_PASS=1
-  HANDOFF_PASS=1
-  RECOVERY_PASS=1
-  LATEST_INPUT_PREVIEW="dry-run validation input"
-  LATEST_OUTPUT_PREVIEW="dry-run validation output"
-  LATEST_TRACE_ID="trace-dry-run"
-  LATEST_GENERATION="1"
-  LATEST_COMPACTIONS="1"
-  LATEST_HANDOFFS="1"
-  LATEST_HEALTH="healthy"
-  LATEST_HEARTBEAT="active"
+  BOOTSTRAP_PASS=2
+  LIVENESS_PASS=2
+  CONTINUITY_PASS=2
+  COMPACTION_PASS=2
+  HANDOFF_PASS=2
+  RECOVERY_PASS=2
+  LATEST_INPUT_PREVIEW="[simulated] dry-run validation input"
+  LATEST_OUTPUT_PREVIEW="[simulated] dry-run validation output"
+  LATEST_TRACE_ID="trace-dry-run-simulated"
+  LATEST_GENERATION="0"
+  LATEST_COMPACTIONS="0"
+  LATEST_HANDOFFS="0"
+  LATEST_HEALTH="simulated"
+  LATEST_HEARTBEAT="simulated"
 }
 
 cleanup() {
@@ -449,7 +451,10 @@ finalize_report() {
   if ! phase_enabled handoff; then handoff_ok=1; fi
   if ! phase_enabled recovery; then recovery_ok=1; fi
 
-  if [[ $bootstrap_ok -eq 1 && $liveness_ok -eq 1 && $continuity_ok -eq 1 ]]; then
+  if [[ "$(normalize_bool "$DRY_RUN")" == "1" ]]; then
+    classification="DRY_RUN"
+    VALIDATION_EXIT_CODE=2
+  elif [[ $bootstrap_ok -eq 1 && $liveness_ok -eq 1 && $continuity_ok -eq 1 ]]; then
     if [[ $compaction_ok -eq 1 && $handoff_ok -eq 1 && $recovery_ok -eq 1 ]]; then
       classification="PASS"
       VALIDATION_EXIT_CODE=0

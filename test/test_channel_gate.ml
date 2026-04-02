@@ -25,6 +25,13 @@ let test_validate_rejects_empty_keeper_name () =
   | Ok () -> fail "expected Empty_keeper_name"
   | Error _ -> fail "expected Empty_keeper_name"
 
+let test_validate_rejects_empty_content () =
+  reset_dedup ();
+  match Channel_gate.validate (make_message ~content:"   " ~idempotency_key:"empty-content" ()) with
+  | Error Channel_gate.Empty_content -> ()
+  | Ok () -> fail "expected Empty_content"
+  | Error _ -> fail "expected Empty_content"
+
 let test_validate_rejects_duplicate_message () =
   reset_dedup ();
   let key = Printf.sprintf "dup-%d" (Unix.getpid ()) in
@@ -50,16 +57,28 @@ let test_validate_allows_key_after_cleanup () =
   | Ok () -> ()
   | Error _ -> fail "cleanup should evict expired idempotency key"
 
+let test_validation_error_to_string () =
+  check string "empty content" "content is required"
+    (Channel_gate.validation_error_to_string Channel_gate.Empty_content);
+  check string "duplicate message"
+    "duplicate message (idempotency_key=dup)"
+    (Channel_gate.validation_error_to_string
+       (Channel_gate.Duplicate_message "dup"))
+
 let () =
   Alcotest.run "Channel_gate"
     [
       ( "validate",
         [
+          test_case "rejects empty content" `Quick
+            test_validate_rejects_empty_content;
           test_case "rejects empty keeper name" `Quick
             test_validate_rejects_empty_keeper_name;
           test_case "rejects duplicate message" `Quick
             test_validate_rejects_duplicate_message;
           test_case "allows key after cleanup" `Quick
             test_validate_allows_key_after_cleanup;
+          test_case "stringifies validation errors" `Quick
+            test_validation_error_to_string;
         ] );
     ]

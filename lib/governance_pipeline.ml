@@ -289,34 +289,12 @@ let audit_decision (config : Room.config) (decision : governance_decision) =
 
 (* ── Auto-Petition for High/Critical Risk ──────────────────── *)
 
-let maybe_create_petition ~config ~(decision : governance_decision) =
-  if risk_level_to_int decision.risk >= risk_level_to_int High then begin
-    let module GV2 = Council.Governance_v2 in
-    let gv2_risk = GV2.High in
-    let action : GV2.action_request = {
-      action_type = "review_tool_usage";
-      target_type = Some "tool";
-      target_id = Some decision.tool_name;
-      payload = Some (`Assoc [
-        ("risk_level", `String (risk_level_to_string decision.risk));
-        ("trace_id", `String decision.trace_id);
-      ]);
-    } in
-    match GV2.submit_petition config.Room.base_path
-      ~title:(Printf.sprintf "High-risk tool: %s" decision.tool_name)
-      ~origin:"governance-pipeline"
-      ~subject_type:"tool_call"
-      ~risk_class:gv2_risk
-      ~requested_action:(Some action)
-      ~source_refs:[decision.trace_id]
-      ~created_by:"governance-pipeline"
-    with
-    | Ok result ->
-      Log.Governance.info "auto-petition created: case=%s tool=%s"
-        result.case_.id decision.tool_name
-    | Error msg ->
-      Log.Governance.warn "auto-petition failed: %s" msg
-  end
+let maybe_create_petition ~config:_ ~(decision : governance_decision) =
+  (* Council module removed — auto-petition is a no-op.
+     High-risk decisions are still logged via audit_decision. *)
+  if risk_level_to_int decision.risk >= risk_level_to_int High then
+    Log.Governance.info "high-risk tool=%s (petition skipped, council removed)"
+      decision.tool_name
 
 (* ── Pre-Hook Construction ──────────────────────────────────── *)
 

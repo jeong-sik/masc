@@ -227,11 +227,8 @@ let () = Room_hooks.cleanup_board_artifacts_fn := (fun () ->
          else removed)
        0)
 
-(* Governance stale case purge — wraps Council.Governance_v2 for GC *)
-let () = Room_hooks.governance_purge_fn := (fun base_path ->
-  let test = Council.Governance_v2.purge_stale_test_cases base_path in
-  let artifact = Council.Governance_v2.purge_stale_artifact_cases base_path in
-  (test, artifact))
+(* Governance stale case purge — council removed, no-op *)
+let () = Room_hooks.governance_purge_fn := (fun _base_path -> (0, 0))
 
 (* Subscription auto-subscribe on join — wraps Subscriptions for room_eio *)
 let () = Room_hooks.subscribe_messages_fn := (fun ~subscriber ->

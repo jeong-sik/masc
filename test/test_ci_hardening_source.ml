@@ -555,21 +555,11 @@ let test_http_client_fd_safety_contracts () =
   check bool "voice bridge builds clients through masc http client" true
     (file_contains_pattern "lib/voice/voice_bridge_core.ml"
        "Masc_http_client.make_closing_client");
-  check bool "council thread persistence uses closing client" true
-    (file_contains_pattern "lib/council/thread_persist.ml"
-       "Masc_http_client.make_closing_client")
+  ()
 
 let test_router_contract_alignment () =
-  (* Petition schema uses subject_type as canonical field *)
-  check bool "petition schema accepts subject_type field" true
-    (file_contains_pattern "lib/tool_council_internal_schemas.ml"
-       {|("subject_type", `Assoc|});
-  check bool "petition handler reads subject_type from args" true
-    (file_contains_pattern "lib/tool_council_oas.ml"
-       {|let by_schema = get_string args "subject_type" ""|});
-  check bool "petition handler keeps legacy subject fallback" true
-    (file_contains_pattern "lib/tool_council_oas.ml"
-       {|else get_string args "subject" ""|})
+  (* Council module removed — petition schema/handler contract checks removed *)
+  ()
 
 let test_runtime_precondition_contracts () =
   check bool "team session support resolves start env via helper" true
@@ -584,9 +574,8 @@ let test_runtime_precondition_contracts () =
   check bool "h2 governance routes use server state guard helper" true
     (file_contains_pattern "lib/server/server_h2_gateway_routes_extra.ml"
        "let with_server_state f =");
-  check bool "council deploy action uses unsupported contract wording" true
-    (file_contains_pattern "lib/council/executor.ml"
-       "deploy action unsupported")
+  (* Council module removed — executor contract check removed *)
+  ()
 
 let () =
   run "ci_hardening_source"

@@ -677,15 +677,6 @@
  (modules test_harness_shell_helpers)
  (libraries alcotest unix))
 
-(test
- (name test_governance_v2)
- (modules test_governance_v2)
- (libraries council alcotest unix re))
-
-(test
- (name test_council)
- (modules test_council)
- (libraries council alcotest unix re))
 
 (test
  (name test_dated_jsonl)

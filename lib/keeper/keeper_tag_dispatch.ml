@@ -253,14 +253,6 @@ let dispatch
 
   (* ── Tier D: Cycle-breaking — modules that back-reference Keeper_exec_* *)
 
-  | Mod_council ->
-      (* Tool_council_oas requires Operator_approval -> Operator_control
-         -> Keeper_exec_status, creating a dependency cycle.
-         Governance tools are accessible via MCP client path. *)
-      Some (false,
-        Printf.sprintf
-          "tool '%s' requires governance context (use MCP client)" name)
-
   | Mod_compact ->
       (* Tool_compact depends on Keeper_exec_context. *)
       Some (false,

@@ -1,6 +1,6 @@
 (** Room Hooks — Callback refs for upper-layer dependencies.
 
-    Room modules must not depend on Activity_graph, Board, Council,
+    Room modules must not depend on Activity_graph, Board,
     Agent_economy, Relation_materializer, or Oas_worker directly.
     Instead, they call these callback refs which are wired at startup
     by room.ml (the hub module that already depends on everything).
@@ -125,7 +125,7 @@ let cleanup_board_artifacts_fn
   : (unit -> int) ref
   = ref (fun () -> 0)
 
-(** Governance stale case purge — wraps Council.Governance_v2.purge_*.
+(** Governance stale case purge (council removed, no-op stub).
     Returns (test_cases_purged, artifact_cases_purged). *)
 let governance_purge_fn
   : (string -> int * int) ref

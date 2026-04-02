@@ -459,23 +459,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_code.dispatch { Tool_code.config; agent_name } ~name ~args:arguments
     | Mod_code_write ->
         Tool_code_write.dispatch { Tool_code_write.config; agent_name } ~name ~args:arguments
-    | Mod_council ->
-        let policy = Agent_sdk.Policy.create [
-          { Agent_sdk.Policy.name = "governance_gate";
-            priority = 10;
-            applies_to = (fun _ -> true);
-            evaluate = (fun dp -> match dp with
-              | Agent_sdk.Policy.BeforeToolCall { tool_name; _ } ->
-                if Operator_approval.confirm_required tool_name then
-                  Agent_sdk.Policy.AllowWithCondition "requires operator confirmation"
-                else Agent_sdk.Policy.Allow
-              | _ -> Agent_sdk.Policy.Allow);
-          }
-        ] in
-        Tool_council_oas.dispatch { base_path = config.base_path; agent_name;
-                                    room_config = Some config;
-                                    policy = Some policy;
-                                    audit = None } ~name ~args:arguments
     | Mod_a2a ->
         Tool_a2a.dispatch { Tool_a2a.config; agent_name } ~name ~args:arguments
     | Mod_handover ->

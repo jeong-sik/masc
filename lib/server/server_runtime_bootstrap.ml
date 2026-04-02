@@ -34,16 +34,6 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Eio_context.set_net net;
   Eio_context.set_clock clock;
   Eio_context.set_mono_clock mono_clock;
-  let https_connector =
-    match Eio_context.get_https_connector_result () with
-    | Ok connector -> Some connector
-    | Error message ->
-        Log.Server.warn
-          "HTTPS connector unavailable during bootstrap; HTTPS persistence calls will be disabled: %s"
-          message;
-        None
-  in
-  Council.Thread_persist.set_eio_context ?https_connector ~clock net;
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   let caqti_env : Caqti_eio.stdenv =
     object

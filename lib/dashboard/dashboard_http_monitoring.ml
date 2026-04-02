@@ -135,137 +135,22 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
 
 let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
   : Yojson.Safe.t * bool =
-  let warn_age_s =
-    int_of_env_default
-      "MASC_DASHBOARD_COUNCIL_AGE_WARN_SEC"
-      ~default:3600
-      ~min_v:60
-      ~max_v:604800
-  in
-  let bad_age_s =
-    int_of_env_default
-      "MASC_DASHBOARD_COUNCIL_AGE_BAD_SEC"
-      ~default:21600
-      ~min_v:120
-      ~max_v:1209600
-  in
-  let slo_target_quorum_age_s =
-    int_of_env_default
-      "MASC_DASHBOARD_COUNCIL_SLO_SEC"
-      ~default:1800
-      ~min_v:30
-      ~max_v:86400
-  in
-  let module GV2 = Council.Governance_v2 in
-  try
-    let cases : GV2.case_record list = GV2.list_cases base_path in
-    let count status =
-      List.fold_left
-        (fun acc (case_ : GV2.case_record) ->
-          if case_.GV2.status = status then acc + 1 else acc)
-        0 cases
-    in
-    let pending_ruling = count GV2.Pending_ruling in
-    let ready_auto_execute = count GV2.Ready_auto_execute in
-    let needs_human_gate = count GV2.Needs_human_gate in
-    let executed = count GV2.Executed in
-    let blocked =
-      List.fold_left
-        (fun acc (case_ : GV2.case_record) ->
-          match case_.GV2.status with
-          | GV2.Blocked | GV2.Closed -> acc + 1
-          | GV2.Pending_ruling | GV2.Ready_auto_execute
-          | GV2.Needs_human_gate | GV2.Executed -> acc)
-        0 cases
-    in
-    let cases_open = pending_ruling + ready_auto_execute + needs_human_gate in
-    let oldest_open_case_ts_opt =
-      List.fold_left
-        (fun acc (case_ : GV2.case_record) ->
-          match case_.GV2.status with
-          | GV2.Pending_ruling | GV2.Ready_auto_execute | GV2.Needs_human_gate ->
-              (match acc with
-              | None -> Some case_.GV2.updated_at
-              | Some prev -> Some (min prev case_.GV2.updated_at))
-          | GV2.Executed | GV2.Blocked | GV2.Closed -> acc)
-        None cases
-    in
-    let oldest_open_case_age_s =
-      match oldest_open_case_ts_opt with
-      | None -> None
-      | Some ts -> safe_age_seconds_opt ~now_ts ~event_ts:ts
-    in
-    let latest_activity_ts_opt =
-      List.fold_left
-        (fun acc (case_ : GV2.case_record) ->
-          match acc with
-          | None -> Some case_.GV2.updated_at
-          | Some prev -> Some (max prev case_.GV2.updated_at))
-        None cases
-    in
-    let last_activity_age_s =
-      match latest_activity_ts_opt with
-      | None -> None
-      | Some ts -> safe_age_seconds_opt ~now_ts ~event_ts:ts
-    in
-    let base_alert =
-      match last_activity_age_s with
-      | None -> if cases_open > 0 then "warn" else "ok"
-      | Some age when age >= bad_age_s -> "bad"
-      | Some age when age >= warn_age_s -> "warn"
-      | Some _ -> "ok"
-    in
-    let slo_breached =
-      match oldest_open_case_age_s with
-      | Some age -> cases_open > 0 && age >= slo_target_quorum_age_s
-      | None -> false
-    in
-    let judge_json = Dashboard_governance.judge_runtime_json base_path in
-    let judge_online =
-      match Yojson.Safe.Util.member "judge_online" judge_json with
-      | `Bool value -> value
-      | _ -> false
-    in
-    let alert_level =
-      if needs_human_gate > 0 then
-        match oldest_open_case_age_s with
-        | Some age when age >= bad_age_s -> "bad"
-        | _ -> "warn"
-      else base_alert
-    in
-    (`Assoc [
-      ("alert_level", `String alert_level);
-      ("cases_open", `Int cases_open);
-      ("pending_ruling", `Int pending_ruling);
-      ("ready_auto_execute", `Int ready_auto_execute);
-      ("needs_human_gate", `Int needs_human_gate);
-      ("executed", `Int executed);
-      ("blocked", `Int blocked);
-      ("oldest_open_case_age_s", json_int_opt oldest_open_case_age_s);
-      ("last_activity_age_s", json_int_opt last_activity_age_s);
-      ("slo_target_case_age_s", `Int slo_target_quorum_age_s);
-      ("slo_breached", `Bool slo_breached);
-      ("judge_online", `Bool judge_online);
-    ], true)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Dashboard.error "governance_monitoring_json failed: %s"
-      (Printexc.to_string exn);
-    (`Assoc [
-      ("alert_level", `String "bad");
-      ("cases_open", `Int 0);
-      ("pending_ruling", `Int 0);
-      ("ready_auto_execute", `Int 0);
-      ("needs_human_gate", `Int 0);
-      ("executed", `Int 0);
-      ("blocked", `Int 0);
-      ("oldest_open_case_age_s", `Null);
-      ("last_activity_age_s", `Null);
-      ("slo_target_case_age_s", `Int slo_target_quorum_age_s);
-      ("slo_breached", `Bool false);
-      ("judge_online", `Bool false);
-    ], false)
+  ignore (now_ts, base_path);
+  (* Council module removed — return empty governance status *)
+  (`Assoc [
+    ("alert_level", `String "ok");
+    ("cases_open", `Int 0);
+    ("pending_ruling", `Int 0);
+    ("ready_auto_execute", `Int 0);
+    ("needs_human_gate", `Int 0);
+    ("executed", `Int 0);
+    ("blocked", `Int 0);
+    ("oldest_open_case_age_s", `Null);
+    ("last_activity_age_s", `Null);
+    ("slo_target_case_age_s", `Int 0);
+    ("slo_breached", `Bool false);
+    ("judge_online", `Bool false);
+  ], true)
 
 let slot_monitoring_json () : Yojson.Safe.t =
   try

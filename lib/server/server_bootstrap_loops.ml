@@ -325,10 +325,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           let ar_reaped = Agent_registry_eio.cleanup_stale_sessions () in
           if ar_reaped > 0 then
             Log.Server.info "Reaped %d stale agent registry sessions" ar_reaped;
-          (* Consensus: remove closed/cancelled voting sessions older than 1h *)
-          let cs_reaped = Council.Consensus.cleanup_closed () in
-          if cs_reaped > 0 then
-            Log.Server.info "Reaped %d closed consensus sessions" cs_reaped;
           (* A2A: remove heartbeat snapshots for offline agents *)
           let active_agents =
             List.map (fun (id : Agent_identity.t) -> id.agent_name)

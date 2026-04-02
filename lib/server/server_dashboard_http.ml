@@ -67,19 +67,8 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
 let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-  let status_filter =
-    match query_param request "status" with
-    | None -> None
-    | Some raw -> (
-        match String.lowercase_ascii (String.trim raw) with
-        | "pending_ruling" -> Some Council.Governance_v2.Pending_ruling
-        | "ready_auto_execute" -> Some Council.Governance_v2.Ready_auto_execute
-        | "needs_human_gate" -> Some Council.Governance_v2.Needs_human_gate
-        | "executed" -> Some Council.Governance_v2.Executed
-        | "blocked" -> Some Council.Governance_v2.Blocked
-        | "closed" -> Some Council.Governance_v2.Closed
-        | _ -> None)
-  in
+  let status_filter = None in
+  ignore (query_param request "status");
   Dashboard_governance.dashboard_json ~base_path ~limit ~offset
     ~status_filter
 

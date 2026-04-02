@@ -37,7 +37,6 @@ module Auth = Masc_mcp.Auth
 module Board = Masc_mcp.Board
 module Board_dispatch = Masc_mcp.Board_dispatch
 module Board_listener = Masc_mcp.Board_listener
-module Council = Council
 module Task_dispatch = Masc_mcp.Task_dispatch
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress

@@ -32,7 +32,6 @@ module Auth = Auth
 module Board = Board
 module Board_dispatch = Board_dispatch
 module Board_listener = Board_listener
-module Council = Council
 module Task_dispatch = Task_dispatch
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Progress

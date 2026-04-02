@@ -535,7 +535,7 @@ let test_delegate_ready_worker_bypasses_denied_gate () =
   Team_session_store.write_text_file
     (Team_session_store.worker_container_meta_path config session_id
        "llama-local-ready")
-    "{}";
+    {|{"worker_name":"llama-local-ready"}|};
   Team_session_store.write_text_file
     (Team_session_store.worker_container_checkpoint_path config session_id
        "llama-local-ready")
@@ -552,29 +552,30 @@ let test_delegate_ready_worker_bypasses_denied_gate () =
           ])
   in
   let delegate_json = parse_json_exn delegate_body in
-  if delegate_ok then (
-    Alcotest.(check string) "success path keeps resolved worker"
-      "llama-local-ready"
-      Yojson.Safe.Util.(
-        member "delegate" delegate_json |> member "worker_name"
-        |> to_string);
-    Alcotest.(check bool) "success path reports delegate payload" true
-      Yojson.Safe.Util.(
-        member "delegate" delegate_json <> `Null))
-  else
-    let message =
-      Yojson.Safe.Util.member "message" delegate_json
-      |> Yojson.Safe.Util.to_string
-    in
-    Alcotest.(check bool) "ready path bypasses not-ready gate" false
-      (try
-         let _ =
-           Str.search_forward
-             (Str.regexp_string "not ready for delegation")
-             (String.lowercase_ascii message) 0
-         in
-         true
-       with Not_found -> false);
+  Alcotest.(check bool) "ready path reaches runtime failure" false
+    delegate_ok;
+  let message =
+    Yojson.Safe.Util.member "message" delegate_json
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check bool) "ready path bypasses not-ready gate" false
+    (try
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "not ready for delegation")
+           (String.lowercase_ascii message) 0
+       in
+       true
+     with Not_found -> false);
+  Alcotest.(check bool) "runtime failure points at checkpoint state" true
+    (try
+       let _ =
+         Str.search_forward
+           (Str.regexp_string "worker checkpoint is not available")
+           (String.lowercase_ascii message) 0
+       in
+       true
+     with Not_found -> false);
   let denied_events =
     Team_session_store.read_events config session_id
     |> List.filter (fun json ->

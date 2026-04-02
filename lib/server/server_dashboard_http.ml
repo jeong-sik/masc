@@ -17,7 +17,11 @@ let dashboard_room_truth_focus_json =
 
 let dashboard_memory_http_json request : Yojson.Safe.t =
   let hearth = query_param request "hearth" in
-  let author_filter = query_param request "author" in
+  let author_filter =
+    query_param request "author"
+    |> Option.map String.trim
+    |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
+  in
   let sort_by = board_sort_order_of_request request in
   let exclude_system = bool_query_param request "exclude_system" ~default:false in
   let exclude_automation =
@@ -25,9 +29,10 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
   in
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+  let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
   let fetch_limit =
-    if Option.is_some author_filter then 500
-    else board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
+    if Option.is_some author_filter then max 500 base_fetch
+    else base_fetch
   in
   let posts =
     Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system

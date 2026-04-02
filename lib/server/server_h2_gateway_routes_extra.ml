@@ -51,12 +51,17 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       let exclude_automation =
         bool_query_param httpun_request "exclude_automation" ~default:false
       in
-      let author_filter = query_param httpun_request "author" in
+      let author_filter =
+        query_param httpun_request "author"
+        |> Option.map String.trim
+        |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
+      in
       let limit = int_query_param httpun_request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
       let offset = int_query_param httpun_request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
+      let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
       let fetch_limit =
-        if Option.is_some author_filter then 500
-        else board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
+        if Option.is_some author_filter then max 500 base_fetch
+        else base_fetch
       in
       let posts =
         Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system

@@ -272,7 +272,13 @@ let handle_post_list args =
   in
   let exclude_system = get_bool args "exclude_system" false in
   let exclude_automation = get_bool args "exclude_automation" false in
-  let author_filter = get_string_opt args "author" in
+  let author_filter =
+    match get_string_opt args "author" with
+    | Some s ->
+        let s = String.trim s in
+        if s = "" then None else Some s
+    | None -> None
+  in
   let since = get_float_opt args "since" in
 
   let visibility_filter = match visibility_str with
@@ -287,9 +293,10 @@ let handle_post_list args =
   match sort_by_result with
   | Error msg -> (false, Printf.sprintf "❌ %s" msg)
   | Ok sort_by ->
+      let base_fetch = limit + offset + 100 in
       let fetch_limit =
-        if Option.is_some author_filter then 500
-        else limit + offset + 100
+        if Option.is_some author_filter then max 500 base_fetch
+        else base_fetch
       in
       let all_posts = Board_dispatch.list_posts ~visibility_filter ?hearth
         ~exclude_system
@@ -306,12 +313,7 @@ let handle_post_list args =
             List.filter (fun (p : Board.post) ->
               let author_str = Board.Agent_id.to_string p.author in
               let author_lower = String.lowercase_ascii author_str in
-              let rec check i =
-                if i + String.length needle_lower > String.length author_lower then false
-                else if String.sub author_lower i (String.length needle_lower) = needle_lower then true
-                else check (i + 1)
-              in
-              check 0
+              String_util.contains_substring author_lower needle_lower
             ) sorted_posts
       in
 

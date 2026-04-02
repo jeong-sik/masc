@@ -179,7 +179,7 @@ let test_to_json_treats_blank_env_as_default () =
       let open Yojson.Safe.Util in
       check string "blank source is default" "default"
         (entry |> member "source" |> to_string);
-      check yojson "blank value omitted" `Null (entry |> member "value"))
+      check bool "blank value omitted" true (entry |> member "value" = `Null))
 
 (* ============================================================
    print_summary Tests

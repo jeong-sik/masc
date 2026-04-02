@@ -599,6 +599,12 @@
  (modules test_normalized_actor)
  (libraries masc_test_deps))
 
+; Failover leader deterministic selection
+(test
+ (name test_failover_leader)
+ (modules test_failover_leader)
+ (libraries masc_test_deps))
+
 ; Dashboard Collaboration Evidence (2 modules)
 (test
  (name test_dashboard_collaboration_evidence)

@@ -280,8 +280,9 @@ export function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSu
 }
 
 function truncatePostTitle(title: string): string {
-  if (title.length <= 96) return title
-  return `${title.slice(0, 93)}...`
+  const chars = Array.from(title)
+  if (chars.length <= 96) return title
+  return `${chars.slice(0, 93).join('')}...`
 }
 
 function stripTitleMarkdown(line: string): string {

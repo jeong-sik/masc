@@ -56,6 +56,19 @@ let ensure_keeper_board_post_args ~author ~source = function
           (fun (k, _) -> k <> "author" && k <> "post_kind" && k <> "meta")
           fields
       in
+      let has_hearth =
+        List.exists
+          (fun (k, v) ->
+            k = "hearth"
+            && (match v with `String s -> String.trim s <> "" | _ -> false))
+          fields
+      in
+      let fields =
+        if has_hearth then fields
+        else
+          ("hearth", `String author)
+          :: List.filter (fun (k, _) -> k <> "hearth") fields
+      in
       `Assoc
         ([
            ("author", `String author);

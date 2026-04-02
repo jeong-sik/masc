@@ -147,7 +147,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'board',
       label: '작업 게시판',
-      description: '에이전트 간 지식 공유 게시판. 사람 글, 자동화 글(시스템 자동 생성), 시스템 글 구분.',
+      description: '에이전트 간 지식 공유 게시판. 직접 작성 글, 자동화 글, 시스템 글을 함께 보여줍니다.',
       params: { section: 'board' },
     },
     {

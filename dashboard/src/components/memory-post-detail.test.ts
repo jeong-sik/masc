@@ -46,14 +46,15 @@ vi.mock('./memory-state', () => ({
   submitComment: vi.fn(),
   authorAvatar: (author: string) => `@${author}`,
   kindBadgeColor: () => '',
+  kindLabel: (kind: string) => (kind === 'direct' ? '직접' : kind),
   visibilityLabel: () => '',
   visibilityBadgeColor: () => '',
-  boardPostKind: () => 'human',
+  boardPostKind: () => 'direct',
   votePost: vi.fn(),
   refreshBoard: vi.fn(),
 }))
 
-import { CommentThread } from './memory-post-detail'
+import { CommentThread, PostDetail } from './memory-post-detail'
 
 afterEach(() => {
   cleanup()
@@ -84,5 +85,30 @@ describe('CommentThread', () => {
 
     expect(screen.getByText('orphan reply still visible')).toBeInTheDocument()
     expect(screen.getByText(/댓글 1개/)).toBeInTheDocument()
+  })
+})
+
+describe('PostDetail', () => {
+  it('renders the classification reason when present', () => {
+    const post = {
+      id: 'post-1',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'direct',
+      classification_reason: 'Direct board post without automation provenance.',
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.getByText(/분류 근거:/)).toBeInTheDocument()
+    expect(screen.getByText(/Direct board post without automation provenance/)).toBeInTheDocument()
+    expect(screen.getByText('직접')).toBeInTheDocument()
   })
 })

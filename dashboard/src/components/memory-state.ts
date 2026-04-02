@@ -97,15 +97,15 @@ export function isUpdated(post: BoardPost): boolean {
   return post.updated_at !== post.created_at
 }
 
-export function boardPostKind(post: BoardPost): 'human' | 'automation' | 'system' {
-  return post.post_kind ?? 'human'
+export function boardPostKind(post: BoardPost): 'direct' | 'automation' | 'system' {
+  return post.post_kind ?? 'direct'
 }
 
 export type VisibleBoardGroups = {
-  human: BoardPost[]
+  direct: BoardPost[]
   automation: BoardPost[]
   system: BoardPost[]
-  totalHuman: number
+  totalDirect: number
   totalAutomation: number
   totalSystem: number
   hiddenAutomation: number
@@ -113,19 +113,19 @@ export type VisibleBoardGroups = {
 }
 
 export function splitVisiblePosts(posts: BoardPost[]): VisibleBoardGroups {
-  const human: BoardPost[] = []
+  const direct: BoardPost[] = []
   const automation: BoardPost[] = []
   const system: BoardPost[] = []
-  let totalHuman = 0
+  let totalDirect = 0
   let totalAutomation = 0
   let totalSystem = 0
   let hiddenAutomation = 0
   let hiddenSystem = 0
   posts.forEach(post => {
     const kind = boardPostKind(post)
-    if (kind === 'human') {
-      totalHuman += 1
-      human.push(post)
+    if (kind === 'direct') {
+      totalDirect += 1
+      direct.push(post)
       return
     }
     if (kind === 'automation') {
@@ -145,10 +145,10 @@ export function splitVisiblePosts(posts: BoardPost[]): VisibleBoardGroups {
     system.push(post)
   })
   return {
-    human,
+    direct,
     automation,
     system,
-    totalHuman,
+    totalDirect,
     totalAutomation,
     totalSystem,
     hiddenAutomation,
@@ -157,8 +157,8 @@ export function splitVisiblePosts(posts: BoardPost[]): VisibleBoardGroups {
 }
 
 export function filterHint(grouped: VisibleBoardGroups): string | null {
-  if (grouped.totalAutomation === 0 && grouped.totalSystem === 0 && grouped.totalHuman > 0) {
-    return '현재 목록은 사람 글만 있어서 자동화·시스템 필터를 눌러도 보이는 글 수가 그대로일 수 있습니다.'
+  if (grouped.totalAutomation === 0 && grouped.totalSystem === 0 && grouped.totalDirect > 0) {
+    return '현재 목록은 직접 작성 글만 있어서 자동화·시스템 필터를 눌러도 보이는 글 수가 그대로일 수 있습니다.'
   }
   if (boardExcludeAutomation.value && grouped.hiddenAutomation > 0) {
     return `자동화 글 ${grouped.hiddenAutomation}건이 숨겨져 있습니다.`
@@ -180,7 +180,7 @@ export function authorAvatar(name: string): string {
 
 export function kindLabel(kind: string): string {
   switch (kind) {
-    case 'human': return '사람'
+    case 'direct': return '직접'
     case 'automation': return '자동화'
     case 'system': return '시스템'
     default: return kind
@@ -189,7 +189,7 @@ export function kindLabel(kind: string): string {
 
 export function kindBadgeColor(kind: string): string {
   switch (kind) {
-    case 'human': return 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)]'
+    case 'direct': return 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)]'
     case 'automation': return 'bg-[var(--cyan-16)] text-[#38bdf8] border-[rgba(34,211,238,0.3)]'
     case 'system': return 'bg-[var(--slate-gray-15)] text-[var(--text-slate)] border-[var(--border-slate-22)]'
     default: return 'bg-[var(--white-8)] text-[var(--text-muted)] border-[var(--border-slate-16)]'

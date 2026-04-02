@@ -206,11 +206,12 @@ let visibility_of_string = function
   | _ -> None
 
 let post_kind_to_string = function
-  | Human_post -> "human"
+  | Human_post -> "direct"
   | Automation_post -> "automation"
   | System_post -> "system"
 
 let post_kind_of_string = function
+  | "direct" -> Some Human_post
   | "human" -> Some Human_post
   | "automation" -> Some Automation_post
   | "system" -> Some System_post
@@ -271,6 +272,29 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
     Human_post
 
 let classify_post_kind (p : post) = p.post_kind
+
+let post_classification_reason (p : post) =
+  let author = String.lowercase_ascii (Agent_id.to_string p.author) in
+  match p.post_kind, meta_source p.meta_json with
+  | Human_post, Some "dashboard_board_post" ->
+      "Direct board post created from the dashboard without automation override."
+  | Human_post, Some source ->
+      Printf.sprintf
+        "Direct board post without automation override (source=%s)." source
+  | Human_post, None ->
+      "Direct board post without automation provenance."
+  | Automation_post, Some "keeper_board_post" ->
+      "Keeper board adapter forced automation classification."
+  | Automation_post, Some "dashboard_board_post" ->
+      "Dashboard board post classified as automation for a joined agent author."
+  | Automation_post, Some source ->
+      Printf.sprintf "Automation provenance source: %s." source
+  | Automation_post, None when legacy_author_looks_automation author ->
+      "Legacy automation classification from author naming heuristic."
+  | Automation_post, None ->
+      "Automation post preserved by board post_kind contract."
+  | System_post, _ ->
+      "System post reserved for platform or operator authored messages."
 
 let post_matches_filters ~exclude_system ~exclude_automation (p : post) =
   let kind = p.post_kind in
@@ -390,6 +414,7 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
     ("title", `String p.title);
     ("body", `String p.body);
     ("post_kind", `String (post_kind_to_string p.post_kind));
+    ("classification_reason", `String (post_classification_reason p));
     ("content", `String p.content);
     ("visibility", `String (visibility_to_string p.visibility));
     ("created_at", `Float p.created_at);

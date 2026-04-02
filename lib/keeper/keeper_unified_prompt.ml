@@ -24,7 +24,7 @@ let format_board_events
        (fun (event : Keeper_world_observation.pending_board_event) ->
          let kind =
            match event.post_kind with
-           | Board.Human_post -> "human"
+           | Board.Human_post -> "direct"
            | Board.Automation_post -> "automation"
            | Board.System_post -> "system"
          in

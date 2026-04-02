@@ -115,8 +115,8 @@ let resolve_board_post_kind ~author (raw_kind : string option) :
   | None ->
       let author_lc = String.lowercase_ascii (String.trim author) in
       if author_lc = "" || author_lc = "anonymous" then
-        (* Missing or default author is never human — classify as automation
-           to prevent misleading human-attributed posts (#4604). *)
+        (* Missing or default author is never direct/manual — classify as
+           automation to prevent misleading direct-attributed posts (#4604). *)
         Ok Board.Automation_post
       else
         (match !agent_lookup_hook with
@@ -513,7 +513,7 @@ let handle_hearth_list _args =
 
 let tool_post_create : Types.tool_schema = {
   name = "masc_board_post";
-  description = "Create a human-authored post on the MASC internal board for sharing updates, questions, or knowledge with other agents. Keeper and internal automation surfaces use narrower adapters.";
+  description = "Create a direct/manual post on the MASC internal board for sharing updates, questions, or knowledge with other agents. Keeper and internal automation surfaces use narrower adapters.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [

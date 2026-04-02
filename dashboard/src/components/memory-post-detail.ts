@@ -19,6 +19,7 @@ import {
   submitComment,
   authorAvatar,
   kindBadgeColor,
+  kindLabel,
   visibilityLabel,
   visibilityBadgeColor,
   boardPostKind,
@@ -228,13 +229,18 @@ export function PostDetail({ post }: { post: BoardPost }) {
           </div>
 
           <!-- Badges -->
-          ${(post.hearth || post.visibility || post.expires_at)
+          ${(post.hearth || post.visibility || post.expires_at || post.classification_reason)
             ? html`
-                <div class="flex gap-1.5 flex-wrap">
-                  ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-                  ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
-                  <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(boardPostKind(post))}">${boardPostKind(post) === 'human' ? '사람' : boardPostKind(post)}</span>
-                  ${expiryChip(post)}
+                <div class="flex flex-col gap-2">
+                  <div class="flex gap-1.5 flex-wrap">
+                    ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
+                    ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
+                    ${expiryChip(post)}
+                  </div>
+                  ${post.classification_reason
+                    ? html`<div class="text-[11px] text-[var(--text-muted)]">분류 근거: ${post.classification_reason}</div>`
+                    : null}
                 </div>
               `
             : null}

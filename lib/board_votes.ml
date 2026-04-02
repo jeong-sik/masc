@@ -575,6 +575,7 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
     ("title", `String p.title);
     ("body", `String p.body);
     ("post_kind", `String (post_kind_to_string p.post_kind));
+    ("classification_reason", `String (post_classification_reason p));
     ("content", `String p.body);
     ("flair", flair_json);
     ("visibility", `String (visibility_to_string p.visibility));

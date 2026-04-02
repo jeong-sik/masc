@@ -376,10 +376,10 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     post_kind:
       (() => {
         const rawKind = asString(raw.post_kind, '').trim().toLowerCase()
-        return rawKind === 'automation' || rawKind === 'system' || rawKind === 'human'
-          ? rawKind
-          : undefined
+        if (rawKind === 'human' || rawKind === 'direct') return 'direct'
+        return rawKind === 'automation' || rawKind === 'system' ? rawKind : undefined
       })(),
+    classification_reason: asString(raw.classification_reason, '').trim() || null,
     title,
     body,
     content,
@@ -446,7 +446,8 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
     const post = normalizeBoardPost(postRaw) ?? {
       id: postId,
       author: 'unknown',
-      post_kind: 'human',
+      post_kind: 'direct',
+      classification_reason: null,
       title: 'Post',
       body: '',
       content: '',

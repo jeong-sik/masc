@@ -228,7 +228,7 @@ function SortBar() {
 function MemorySummary() {
   const sortLabel = SORT_MODES.find(mode => mode.id === boardSortMode.value)?.label ?? boardSortMode.value
   const grouped = splitVisiblePosts(boardPosts.value)
-  const visibleCount = grouped.human.length + grouped.automation.length + grouped.system.length
+  const visibleCount = grouped.direct.length + grouped.automation.length + grouped.system.length
   const automationPolicy = grouped.totalAutomation === 0
     ? '자동화 글 없음'
     : boardExcludeAutomation.value
@@ -377,7 +377,7 @@ function PostCard({ post }: { post: BoardPost }) {
 export function Memory() {
   useEffect(() => () => { selectedPostIds.value = new Set() }, [])
   const grouped = splitVisiblePosts(boardPosts.value)
-  const posts = [...grouped.human, ...grouped.automation, ...grouped.system]
+  const posts = [...grouped.direct, ...grouped.automation, ...grouped.system]
   const hint = filterHint(grouped)
   const postId = route.value.params.post ?? null
   const post = postId
@@ -425,7 +425,7 @@ export function Memory() {
         : posts.length === 0
           ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
           : html`
-              ${renderSection('사람이 쓴 글', grouped.human, visibleLimit)}
+              ${renderSection('직접 작성 글', grouped.direct, visibleLimit)}
               ${renderSection('자율 글', grouped.automation, automationVisibleLimit)}
               ${renderSection('시스템 글', grouped.system, systemVisibleLimit)}
             `}

@@ -129,6 +129,9 @@ let log_keeper_friction
   else if blocked > 0 || groups > 0 then
     Log.Keeper.debug "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
       keeper_name blocked groups tripwires
+  else if Keeper_types_profile.keeper_debug then
+    Log.Keeper.debug "keeper:%s friction: blocked=%d groups=%d tripwires=%d"
+      keeper_name blocked groups tripwires
 
 let log_keeper_memory_write
     ~(keeper_name : string)

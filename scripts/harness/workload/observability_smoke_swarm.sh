@@ -25,7 +25,8 @@
 #   4. Assert: distinct cascade_name values and visible model/cascade evidence across keepers
 #
 # Exit codes:
-#   0 - PASS (or graceful skip if server unavailable)
+#   0 - PASS (or graceful skip when OBS_PERMISSIVE=1)
+#   2 - SKIP (default when a prerequisite/environment is unavailable)
 #   1 - FAIL
 
 set -euo pipefail
@@ -102,8 +103,7 @@ else
 fi
 
 if ! obs_wait_for_ready "$PORT" "$HEALTH_TIMEOUT_SEC"; then
-  echo "SKIP: server did not become healthy (not running or build missing)"
-  exit 0
+  obs_skip "server did not become healthy (not running or build missing)"
 fi
 
 # ── step 2: bootstrap room ──

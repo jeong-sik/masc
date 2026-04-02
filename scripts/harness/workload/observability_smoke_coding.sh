@@ -22,7 +22,8 @@
 #   - No raw API key patterns in any preview field
 #
 # Exit codes:
-#   0 - PASS (or graceful skip if server unavailable)
+#   0 - PASS (or graceful skip when OBS_PERMISSIVE=1)
+#   2 - SKIP (default when a prerequisite/environment is unavailable)
 #   1 - FAIL
 
 set -euo pipefail
@@ -87,8 +88,7 @@ else
 fi
 
 if ! obs_wait_for_ready "$PORT" "$HEALTH_TIMEOUT_SEC"; then
-  echo "SKIP: server did not become healthy (not running or build missing)"
-  exit 0
+  obs_skip "server did not become healthy (not running or build missing)"
 fi
 
 # ── step 2: bootstrap room ──
@@ -150,8 +150,7 @@ proof_json="$(curl -fsS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" \
   "http://127.0.0.1:${PORT}/api/v1/dashboard/proof?session_id=${TEAM_SESSION_ID}" 2>/dev/null || true)"
 
 if [ -z "$proof_json" ]; then
-  echo "SKIP: proof endpoint returned empty"
-  exit 0
+  obs_skip "proof endpoint returned empty"
 fi
 
 # Extract all tool_input_preview values and check lengths

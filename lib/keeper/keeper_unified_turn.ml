@@ -630,7 +630,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   "%s: transient network error (retry %d/%d), backoff %.0fs: %s"
                   meta.name attempt max_transient_retries delay
                   (short_preview e);
-                Eio_unix.sleep delay;
+                Eio.Time.sleep (Eio_context.get_clock ()) delay;
                 retry_loop (attempt + 1)
             | result -> result
           in

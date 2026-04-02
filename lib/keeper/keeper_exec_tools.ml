@@ -27,6 +27,20 @@ let on_keeper_tool_call :
   (tool_name:string -> success:bool -> duration_ms:int -> unit) ref =
   ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
 
+(** Tag-based dispatch callback for masc_* tools.
+    Set at server initialization to Keeper_tag_dispatch.dispatch.
+    Breaks the dependency cycle: keeper_exec_tools cannot import Tool_*
+    modules directly because Config -> Operator_control -> Keeper_exec_tools
+    creates a cycle with any Tool_* that depends on Config.
+
+    Default: returns None (falls through to "unregistered" error).
+    See: mcp_server_eio.ml initialization, #4579. *)
+let tag_dispatch_fn :
+  (config:Room.config -> agent_name:string ->
+   tag:Tool_dispatch.module_tag -> name:string ->
+   args:Yojson.Safe.t -> (bool * string) option) ref =
+  ref (fun ~config:_ ~agent_name:_ ~tag:_ ~name:_ ~args:_ -> None)
+
 (** Estimate total token count for a working context (system prompt + messages).
     Mirrors [Keeper_exec_context.token_count] but avoids a dependency cycle. *)
 let count_context_tokens (ctx : working_context) =
@@ -744,6 +758,10 @@ let execute_keeper_tool_call
       | Some err ->
           Yojson.Safe.to_string (`Assoc [ ("error", `String err) ])
       | None ->
+      (* Phase 1: Try handler registry first.
+         Preserves masc_board_* which is registered in both tag_registry
+         (as Mod_inline) and handler_registry (via Tool_board.register).
+         Without this priority, Mod_inline would fail for keepers. *)
       (match Tool_dispatch.mint_token ~name with
        | Error reason ->
            Yojson.Safe.to_string
@@ -751,15 +769,31 @@ let execute_keeper_tool_call
                        ("tool", `String name);
                        ("reason", `String reason) ])
        | Ok token ->
-      let result = Tool_dispatch.dispatch ~token ~args in
-      (match result with
+      (match Tool_dispatch.dispatch ~token ~args with
         | Some (true, msg) -> msg
         | Some (false, msg) ->
             Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
         | None ->
-            Yojson.Safe.to_string
-              (`Assoc [ ("error", `String "unregistered_masc_tool");
-                        ("tool", `String name) ]))))
+            (* Phase 2: Handler returned None — try tag-based dispatch.
+               Most masc_* tools are only in tag_registry, not handler_registry.
+               tag_dispatch_fn is set to Keeper_tag_dispatch.dispatch at server
+               init (mcp_server_eio.ml) to break the dependency cycle. #4579 *)
+            (match Tool_dispatch.lookup_tag name with
+             | Some tag ->
+                 (match !tag_dispatch_fn
+                          ~config ~agent_name:meta.name ~tag ~name ~args with
+                  | Some (true, msg) -> msg
+                  | Some (false, msg) ->
+                      Yojson.Safe.to_string
+                        (`Assoc [ ("error", `String msg) ])
+                  | None ->
+                      Yojson.Safe.to_string
+                        (`Assoc [ ("error", `String "keeper_dispatch_none");
+                                  ("tool", `String name) ]))
+             | None ->
+                 Yojson.Safe.to_string
+                   (`Assoc [ ("error", `String "unregistered_masc_tool");
+                             ("tool", `String name) ])))))
   | other ->
       Yojson.Safe.to_string
         (`Assoc [ ("error", `String "unknown_tool"); ("tool", `String other) ])

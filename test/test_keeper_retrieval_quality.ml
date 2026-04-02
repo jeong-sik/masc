@@ -32,6 +32,7 @@ let build_keeper_index () =
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with top_k = 20 } in
   let korean_keywords = [
+    "keeper_list_my_tools", "도구 목록 능력 뭐 할 수 있어 기능";
     "keeper_board_post", "게시판 글 작성 올리기 포스트";
     "keeper_board_get", "게시판 글 읽기 조회 확인";
     "keeper_board_list", "게시판 목록 최근글";
@@ -403,6 +404,17 @@ let () =
         [
           Alcotest.test_case "github PR (en)" `Quick test_github_pr_en;
           Alcotest.test_case "github issue (kr)" `Quick test_github_issue_kr;
+        ] );
+      ( "self_discovery",
+        [
+          Alcotest.test_case "list tools (kr)" `Quick (fun () ->
+            let idx = build_keeper_index () in
+            ignore (assert_retrieves ~label:"list_tools_kr" idx
+              "도구 목록 뭐 할 수 있어" "keeper_list_my_tools"));
+          Alcotest.test_case "list tools (en)" `Quick (fun () ->
+            let idx = build_keeper_index () in
+            ignore (assert_retrieves ~label:"list_tools_en" idx
+              "list all my available tools and capabilities" "keeper_list_my_tools"));
         ] );
       ( "masc_tools",
         [

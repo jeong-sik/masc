@@ -26,6 +26,18 @@ Use to timestamp events, check elapsed time, or include current time in reports.
       ("properties", `Assoc []);
     ];
   };
+  (* Tool self-discovery *)
+  {
+    name = "keeper_list_my_tools";
+    description = "List all tools available to you, grouped by category. \
+Call when asked about your capabilities, when planning multi-step operations, \
+or when you need to discover what actions you can take. Returns tool names \
+and descriptions organized by group (board, filesystem, tasks, voice, masc, etc).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
   (* Context status *)
   {
     name = "keeper_context_status";

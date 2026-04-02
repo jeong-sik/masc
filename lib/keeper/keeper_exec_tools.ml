@@ -105,6 +105,60 @@ let execute_keeper_tool_call
                 ("tool", `String name) ])
   else
   match name with
+  | "keeper_list_my_tools" ->
+      let allowed = keeper_allowed_tool_names meta in
+      let all_schemas = keeper_universe_model_tools meta in
+      let categorize name =
+        if String.starts_with ~prefix:"keeper_board_" name then "board"
+        else if String.starts_with ~prefix:"keeper_memory_" name
+             || String.starts_with ~prefix:"keeper_library_" name then "knowledge"
+        else if String.starts_with ~prefix:"keeper_task" name then "tasks"
+        else if String.starts_with ~prefix:"keeper_voice_" name then "voice"
+        else if String.starts_with ~prefix:"keeper_fs_" name
+             || name = "keeper_shell_readonly"
+             || name = "keeper_bash"
+             || name = "keeper_write" then "filesystem"
+        else if name = "keeper_github" then "vcs"
+        else if String.starts_with ~prefix:"masc_code_" name then "masc_code"
+        else if String.starts_with ~prefix:"masc_board_" name then "masc_board"
+        else if String.starts_with ~prefix:"masc_keeper_" name then "masc_keeper"
+        else if String.starts_with ~prefix:"masc_plan_" name then "masc_plan"
+        else if String.starts_with ~prefix:"masc_team_session_" name then "masc_team_session"
+        else if String.starts_with ~prefix:"masc_worktree_" name then "masc_worktree"
+        else if String.starts_with ~prefix:"masc_governance_" name then "masc_governance"
+        else if String.starts_with ~prefix:"masc_autoresearch_" name then "masc_autoresearch"
+        else if String.starts_with ~prefix:"masc_agent_" name
+             || name = "masc_agents" then "masc_agent"
+        else if String.starts_with ~prefix:"masc_" name then "masc_core"
+        else if String.starts_with ~prefix:"keeper_" name then "keeper_core"
+        else "other"
+      in
+      let groups : (string, (string * string) list) Hashtbl.t = Hashtbl.create 16 in
+      List.iter (fun name ->
+        let cat = categorize name in
+        let desc = match List.find_opt (fun (s : Types.tool_schema) -> s.name = name) all_schemas with
+          | Some s -> s.description
+          | None -> ""
+        in
+        let desc_short = if String.length desc > 80 then String.sub desc 0 80 ^ "..." else desc in
+        let existing = match Hashtbl.find_opt groups cat with Some l -> l | None -> [] in
+        Hashtbl.replace groups cat ((name, desc_short) :: existing)
+      ) allowed;
+      let entries = Hashtbl.fold (fun cat tools acc ->
+        let tools_json = List.rev_map (fun (n, d) ->
+          `Assoc [("name", `String n); ("description", `String d)]
+        ) tools in
+        `Assoc [("category", `String cat); ("tools", `List tools_json)] :: acc
+      ) groups [] in
+      Yojson.Safe.to_string
+        (`Assoc [
+          ("total_tools", `Int (List.length allowed));
+          ("groups", `List (List.sort (fun a b ->
+            compare
+              (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "category" a))
+              (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "category" b))
+          ) entries));
+        ])
   | "keeper_time_now" ->
       Yojson.Safe.to_string
         (`Assoc

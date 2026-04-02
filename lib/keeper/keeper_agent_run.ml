@@ -304,6 +304,7 @@ let run_turn
      Appending Korean keywords gives BM25 term overlap across languages.
      Keys must match actual tool names from keeper_tools. *)
   let korean_keywords = [
+    "keeper_list_my_tools", "도구 목록 능력 뭐 할 수 있어 기능";
     "keeper_board_post", "게시판 글 작성 올리기 포스트";
     "keeper_board_get", "게시판 글 읽기 조회 확인";
     "keeper_board_list", "게시판 목록 최근글";

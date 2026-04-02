@@ -186,6 +186,86 @@ let () = test "dispatch_websocket_discovery" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_web_search_requires_query" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [] in
+  match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+  | Some (success, result) ->
+      assert (not success);
+      let json = parse_json result in
+      assert (Yojson.Safe.Util.member "status" json = `String "error");
+      assert (Yojson.Safe.Util.member "message" json = `String "query is required")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_web_search_rejects_long_query" (fun () ->
+  let ctx = make_test_ctx () in
+  let query = String.make 501 'a' in
+  let args = `Assoc [ ("query", `String query) ] in
+  match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+  | Some (success, result) ->
+      assert (not success);
+      let json = parse_json result in
+      assert (Yojson.Safe.Util.member "status" json = `String "error");
+      assert
+        (Yojson.Safe.Util.member "message" json
+         = `String "query must be at most 500 characters")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "parse_bing_rss_items" (fun () ->
+  let payload =
+    {|<?xml version="1.0" encoding="utf-8" ?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>OpenAI &amp; ChatGPT</title>
+      <link>https://openai.com/</link>
+      <description>OpenAI&#39;s <b>latest</b> updates.</description>
+    </item>
+    <item>
+      <title><![CDATA[Example Result]]></title>
+      <link>https://example.com/hello?a=1&amp;b=2</link>
+      <description><![CDATA[Snippet with <b>markup</b> &amp; detail]]></description>
+    </item>
+  </channel>
+</rss>|}
+  in
+  let items = Tool_misc.parse_bing_rss_items payload in
+  assert (List.length items = 2);
+  match items with
+  | (title1, url1, snippet1) :: (title2, url2, snippet2) :: _ ->
+      assert (title1 = "OpenAI & ChatGPT");
+      assert (url1 = "https://openai.com/");
+      assert (snippet1 = "OpenAI's latest updates.");
+      assert (title2 = "Example Result");
+      assert (url2 = "https://example.com/hello?a=1&b=2");
+      assert (snippet2 = "Snippet with markup & detail")
+  | _ -> failwith "expected two parsed items"
+)
+
+let () = test "looks_like_rss_payload" (fun () ->
+  assert (Tool_misc.looks_like_rss_payload "<rss><channel></channel></rss>");
+  assert (Tool_misc.looks_like_rss_payload "<?xml version=\"1.0\"?><rss version=\"2.0\"></rss>");
+  assert (not (Tool_misc.looks_like_rss_payload "<html><body>captcha</body></html>"))
+)
+
+let () = test "parse_bing_rss_items_drops_non_http_links" (fun () ->
+  let payload =
+    {|<rss><channel>
+    <item><title>safe</title><link>https://example.com/</link><description>ok</description></item>
+    <item><title>bad</title><link>javascript:alert(1)</link><description>bad</description></item>
+    </channel></rss>|}
+  in
+  let items = Tool_misc.parse_bing_rss_items payload in
+  assert (List.length items = 1);
+  match items with
+  | [ (title, url, _snippet) ] ->
+      assert (title = "safe");
+      assert (url = "https://example.com/")
+  | _ -> failwith "expected one safe parsed item"
+)
+
 let () = test "dispatch_webrtc_offer" (fun () ->
   let ctx = make_test_ctx () in
   let args =

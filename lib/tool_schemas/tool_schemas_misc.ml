@@ -178,6 +178,27 @@ Use from the answering side after a prior masc_webrtc_offer call.";
     ];
   };
   {
+    name = "masc_web_search";
+    description = "Search the public web and return top result titles, URLs, and snippets. \
+Read-only helper for current-information lookups before deeper file or repo work. \
+Uses a public RSS-backed search endpoint and returns structured JSON.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Search query text");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum number of results to return (default 5, max 10)");
+          ("default", `Int 5);
+        ]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
+  {
     name = "masc_tool_admin_snapshot";
     description = "Return a unified admin snapshot of tool inventory, auth/RBAC, and command-plane surfaces.";
     input_schema = `Assoc [

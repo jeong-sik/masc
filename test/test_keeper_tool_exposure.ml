@@ -187,7 +187,8 @@ let test_research_preset_has_read_tools () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   (* keeper_read removed: dead alias with no schema, keeper_fs_read is the actual tool *)
   check bool "has keeper_fs_read" true (has_tool "keeper_fs_read" tools);
-  check bool "has keeper_library_search" true (has_tool "keeper_library_search" tools)
+  check bool "has keeper_library_search" true (has_tool "keeper_library_search" tools);
+  check bool "has masc_web_search" true (has_tool "masc_web_search" tools)
 
 let test_coding_preset_has_coordination_tools () =
   let meta = make_meta ~preset:Keeper_types.Coding () in

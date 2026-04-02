@@ -129,7 +129,7 @@ let public_mcp_surface_tools =
     "masc_transport_status"; "masc_websocket_discovery";
     "masc_webrtc_offer"; "masc_webrtc_answer";
     (* Utility *)
-    "masc_tool_help"; "masc_check";
+    "masc_tool_help"; "masc_web_search"; "masc_check";
   ]
 
 let spawned_agent_surface_tools =
@@ -148,7 +148,7 @@ let spawned_agent_surface_tools =
     "masc_relay_status"; "masc_relay_checkpoint";
     "masc_board_list"; "masc_board_post"; "masc_board_comment";
     "masc_board_vote"; "masc_board_get";
-    "masc_tool_help";
+    "masc_tool_help"; "masc_web_search";
     "masc_portal_open"; "masc_portal_send"; "masc_portal_status";
     "masc_team_session_start"; "masc_team_session_step";
     "masc_team_session_status"; "masc_team_session_events";

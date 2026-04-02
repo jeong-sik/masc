@@ -38,24 +38,21 @@ let post_digest_key post =
       | _ -> None)
   | _ -> None
 
-let latest_digest_post () =
+let digest_posts_with_keys () =
   Board_dispatch.list_posts ~hearth:digest_hearth
     ~post_kind_filter:Board.Automation_post ~sort_by:Board_dispatch.Recent
     ~limit:20 ()
-  |> List.find_map (fun post ->
+  |> List.filter_map (fun post ->
          Option.map (fun digest_key -> (post, digest_key)) (post_digest_key post))
 
+let latest_digest_post () =
+  match digest_posts_with_keys () with
+  | head :: _ -> Some head
+  | [] -> None
+
 let already_posted digest_key =
-  match latest_digest_post () with
-  | Some (_post, existing) when String.equal existing digest_key -> true
-  | _ ->
-      Board_dispatch.list_posts ~hearth:digest_hearth
-        ~post_kind_filter:Board.Automation_post ~sort_by:Board_dispatch.Recent
-        ~limit:20 ()
-      |> List.exists (fun post ->
-             match post_digest_key post with
-             | Some existing -> String.equal existing digest_key
-             | None -> false)
+  digest_posts_with_keys ()
+  |> List.exists (fun (_post, existing) -> String.equal existing digest_key)
 
 let title_of_interpretation (summary : Meta_cognition.summary_input)
     (interpretation : Meta_cognition.interpretation) =

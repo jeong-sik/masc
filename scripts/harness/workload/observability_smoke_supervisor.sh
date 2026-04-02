@@ -17,7 +17,8 @@
 #   HEALTH_TIMEOUT_SEC   - server health check timeout (default: 30)
 #
 # Exit codes:
-#   0 - PASS (or graceful skip if server unavailable)
+#   0 - PASS (or graceful skip when OBS_PERMISSIVE=1)
+#   2 - SKIP (default when a prerequisite/environment is unavailable)
 #   1 - FAIL
 
 set -euo pipefail

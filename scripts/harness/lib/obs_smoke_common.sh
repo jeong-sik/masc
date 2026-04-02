@@ -7,8 +7,12 @@ FAIL_COUNT=0
 
 # Exit code 2 = skipped (distinct from 0=pass, 1=fail).
 # Set OBS_PERMISSIVE=1 to treat skips as exit 0 for local dev convenience.
-OBS_SKIP_EXIT=${OBS_PERMISSIVE:+0}
-OBS_SKIP_EXIT=${OBS_SKIP_EXIT:-2}
+OBS_SKIP_EXIT=2
+case "${OBS_PERMISSIVE:-}" in
+  1|true|TRUE|yes|YES)
+    OBS_SKIP_EXIT=0
+    ;;
+esac
 
 obs_skip() {
   echo "SKIP: $1"

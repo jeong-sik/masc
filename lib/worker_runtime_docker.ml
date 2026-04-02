@@ -104,7 +104,13 @@ let container_name (spec : Worker_execution_spec.t) =
         worker_run_id
     | _ -> spec.worker_name
   in
-  "masc-worker-" ^ String.lowercase_ascii (Room_utils.safe_filename token)
+  let unique_suffix =
+    Printf.sprintf "%d-%d" (Unix.getpid ())
+      (int_of_float (Unix.gettimeofday () *. 1000.0))
+  in
+  Printf.sprintf "masc-worker-%s-%s"
+    (String.lowercase_ascii (Room_utils.safe_filename token))
+    unique_suffix
 
 let artifact_dir (spec : Worker_execution_spec.t) =
   Worker_container.worker_container_dir ~base_path:spec.base_path
@@ -262,7 +268,6 @@ let docker_argv (spec : Worker_execution_spec.t) =
 let run_worker_spec ?clock_opt (spec : Worker_execution_spec.t) :
     (Worker_container_types.run_result, string) result =
   let name = container_name spec in
-  best_effort_remove_container ?clock_opt name;
   Fun.protect
     ~finally:(fun () -> best_effort_remove_container ?clock_opt name)
     (fun () ->

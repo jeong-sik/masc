@@ -13,7 +13,7 @@ RUN opam exec -- bash -lc "scripts/opam-pin-external-deps.sh && opam install . -
 FROM debian:12-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git \
+ && apt-get install -y --no-install-recommends ca-certificates curl git libsqlite3-0 libssl3 zlib1g \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /src/_build/install/default/bin/masc-worker-run /usr/local/bin/masc-worker-run

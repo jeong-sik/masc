@@ -66,7 +66,7 @@ let websocket_discovery_json request =
   let (host, port) = advertised_host_port request in
   let ctx =
     Transport_read_model.make_http_context ~include_configured:true
-      ~allow_legacy_accept ~host
+      ~allow_legacy_accept:Server_routes_http_common.allow_legacy_accept ~host
       ~base_url:(Printf.sprintf "http://%s:%d" host port) ()
   in
   Transport_read_model.websocket_discovery_json ctx
@@ -75,7 +75,7 @@ let transport_json request =
   let (host, port) = advertised_host_port request in
   let ctx =
     Transport_read_model.make_http_context ~include_configured:true
-      ~allow_legacy_accept ~host
+      ~allow_legacy_accept:Server_routes_http_common.allow_legacy_accept ~host
       ~base_url:(Printf.sprintf "http://%s:%d" host port) ()
   in
   Transport_read_model.transport_status_json ctx

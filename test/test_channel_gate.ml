@@ -81,6 +81,36 @@ let test_failed_validation_does_not_consume_idempotency_key () =
   | Ok () -> ()
   | Error _ -> fail "failed validation should not consume idempotency key"
 
+let test_validate_serializes_duplicate_race_under_eio () =
+  reset_dedup ();
+  let key = unique_key "concurrent" in
+  let with_eio f =
+    Eio_main.run @@ fun _env ->
+    Eio_guard.enable ();
+    Fun.protect ~finally:Eio_guard.disable f
+  in
+  with_eio (fun () ->
+    let results = Array.make 16 (Error Channel_gate.Empty_content) in
+    Eio.Fiber.all
+      (List.init 16 (fun i -> fun () ->
+         results.(i) <- Channel_gate.validate (make_message ~idempotency_key:key ())
+      ));
+    let ok_count, duplicate_count =
+      Array.fold_left
+        (fun (oks, dups) -> function
+          | Ok () -> (oks + 1, dups)
+          | Error (Channel_gate.Duplicate_message dup_key) ->
+              check string "duplicate key is preserved" key dup_key;
+              (oks, dups + 1)
+          | Error err ->
+              fail
+                (Printf.sprintf "unexpected validation result: %s"
+                   (Channel_gate.validation_error_to_string err)))
+        (0, 0) results
+    in
+    check int "exactly one fresh message wins" 1 ok_count;
+    check int "all other fibers see duplicate" 15 duplicate_count)
+
 let test_validation_error_to_string () =
   check string "empty content" "content is required"
     (Channel_gate.validation_error_to_string Channel_gate.Empty_content);
@@ -108,6 +138,8 @@ let () =
             test_validate_allows_key_after_cleanup;
           test_case "failed validation does not consume key" `Quick
             test_failed_validation_does_not_consume_idempotency_key;
+          test_case "serializes duplicate race under eio" `Quick
+            test_validate_serializes_duplicate_race_under_eio;
           test_case "stringifies validation errors" `Quick
             test_validation_error_to_string;
         ] );

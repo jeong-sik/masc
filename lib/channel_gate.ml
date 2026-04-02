@@ -46,18 +46,20 @@ let dedup_ttl_sec () =
   | Some s -> (try max 10.0 (min 3600.0 (float_of_string s)) with _ -> 300.0)
   | None -> 300.0
 
-(* ── Deduplication (TTL hashtable, mutex-protected) ─────────── *)
+(* ── Deduplication (TTL hashtable, Eio-guarded mutex) ───────── *)
 
 (** Seen idempotency keys with their insertion timestamp. *)
 let dedup_table : (string, float) Hashtbl.t = Hashtbl.create 256
 
-let dedup_mutex = Mutex.create ()
+let dedup_mutex = Eio.Mutex.create ()
 
 (** Max dedup entries to prevent unbounded memory growth. *)
 let dedup_max_entries = 10_000
 
+let with_dedup_lock f = Eio_guard.with_mutex dedup_mutex f
+
 let dedup_check key =
-  Mutex.protect dedup_mutex (fun () ->
+  with_dedup_lock (fun () ->
     let now = Unix.gettimeofday () in
     let result =
       match Hashtbl.find_opt dedup_table key with
@@ -82,7 +84,7 @@ let dedup_check key =
     result)
 
 let dedup_cleanup ~now =
-  Mutex.protect dedup_mutex (fun () ->
+  with_dedup_lock (fun () ->
     let ttl = dedup_ttl_sec () in
     let to_remove =
       Hashtbl.fold

@@ -14,58 +14,10 @@ let mcp_profile_by_session : (string, Server_mcp_transport_http_types.tool_profi
     Concurrent HTTP request fibers can race on Hashtbl read/write. *)
 let session_mutex = Eio.Mutex.create ()
 
-(** Infer the repo root from a binary's path.
-    Typical layout: [<repo>/_build/default/bin/main_eio.exe].
-    Returns [Some repo_root] when the binary lives under a [_build/] tree
-    and the inferred root contains a [.masc/] directory.
-
-    [?exe_path] overrides [Sys.executable_name] for testing. *)
-let infer_repo_root_from_exe ?(exe_path = Sys.executable_name) () =
-  let exe =
-    try Unix.realpath exe_path
-    with Unix.Unix_error _ -> exe_path
-  in
-  (* Walk up from exe dir looking for a _build/ ancestor, then take its parent *)
-  let rec walk dir =
-    if dir = "/" || dir = "." then None
-    else if Filename.basename dir = "_build" then
-      let candidate = Filename.dirname dir in
-      if Sys.file_exists (Filename.concat candidate ".masc") then
-        Some candidate
-      else
-        None
-    else walk (Filename.dirname dir)
-  in
-  walk (Filename.dirname exe)
-
 let default_base_path () =
-  let env_candidate =
-    match Env_config_core.base_path_opt () with
-    | Some _ as bp -> bp
-    | None -> Env_config_core.me_root_opt ()
-  in
-  let repo_root = infer_repo_root_from_exe () in
-  match env_candidate with
-  | Some path ->
-    (* Guard: if the binary lives in a different repo than the env-provided
-       path, prefer the binary's repo root.  This prevents base-path drift
-       when MCP clients auto-restart the binary and inherit a stale
-       MASC_BASE_PATH or ME_ROOT pointing to a parent project. *)
-    (match repo_root with
-     | Some root ->
-       let norm p = try Unix.realpath p with Unix.Unix_error _ -> p in
-       if String.equal (norm root) (norm path) then path
-       else begin
-         Printf.eprintf
-           "WARN: env base-path (%s) differs from binary repo root (%s); using repo root.\n%!"
-           path root;
-         root
-       end
-     | None -> path)
-  | None ->
-    (match repo_root with
-     | Some root -> root
-     | None -> Sys.getcwd ())
+  match Env_config_core.me_root_opt () with
+  | Some path -> path
+  | None -> Sys.getcwd ()
 
 let is_valid_protocol_version version =
   List.mem version mcp_protocol_versions

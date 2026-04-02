@@ -115,21 +115,9 @@ let add_routes ~sw ~clock router =
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
-         let fetch_limit =
-           if Option.is_some author_filter then max 500 base_fetch
-           else base_fetch
-         in
          let posts =
            Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
-             ~exclude_automation ~limit:fetch_limit ()
-         in
-         let posts = match author_filter with
-           | None -> posts
-           | Some needle ->
-               let needle_lc = String.lowercase_ascii needle in
-               List.filter (fun (p : Board.post) ->
-                 let a = String.lowercase_ascii (Board.Agent_id.to_string p.author) in
-                 Dashboard_utils.string_contains ~needle:needle_lc a) posts
+             ~exclude_automation ?author_filter ~limit:base_fetch ()
          in
          let karma_map = Board_dispatch.get_all_karma () in
          let get_karma author =

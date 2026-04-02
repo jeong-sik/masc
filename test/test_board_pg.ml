@@ -151,6 +151,64 @@ let test_add_and_get_comments = with_pg_backend (fun t ->
           Alcotest.(check bool) "has comment" true (List.length comments >= 1)
 )
 
+let test_list_posts_matches_comment_author = with_pg_backend (fun t ->
+  let matching_post =
+    match
+      Board_pg.create_post t ~author:"pg-test-owner-a"
+        ~content:"pg comment author filter match"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let other_post =
+    match
+      Board_pg.create_post t ~author:"pg-test-owner-b"
+        ~content:"pg comment author filter miss"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let matching_post_id = Board.Post_id.to_string matching_post.id in
+  let other_post_id = Board.Post_id.to_string other_post.id in
+  (match
+     Board_pg.add_comment t ~post_id:matching_post_id
+       ~author:"pg-test-comment-match" ~content:"visible author match" ()
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  (match
+     Board_pg.add_comment t ~post_id:other_post_id
+       ~author:"pg-test-comment-miss" ~content:"other author" ()
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let filtered =
+    Board_pg.list_posts t ~sort_by:Board_pg.Recent
+      ~author_filter:"COMMENT-MATCH" ~limit:10 ()
+  in
+  let ids =
+    List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id) filtered
+  in
+  Alcotest.(check bool) "matching comment author includes post" true
+    (List.mem matching_post_id ids);
+  Alcotest.(check bool) "non matching comment author excluded" false
+    (List.mem other_post_id ids)
+)
+
+let test_author_filter_treats_wildcards_literally = with_pg_backend (fun t ->
+  ignore
+    (Board_pg.create_post t ~author:"pg-test-wildcard-alpha"
+       ~content:"pg literal wildcard filter" ~post_kind:Board.Human_post ());
+  let filtered =
+    Board_pg.list_posts t ~sort_by:Board_pg.Recent
+      ~author_filter:"%" ~limit:10 ()
+  in
+  Alcotest.(check int) "percent does not match all authors" 0
+    (List.length filtered)
+)
+
 (** {1 Vote Operations} *)
 
 let test_vote_post = with_pg_backend (fun t ->
@@ -338,6 +396,10 @@ let () =
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick test_add_and_get_comments;
+      Alcotest.test_case "comment author filter" `Quick
+        test_list_posts_matches_comment_author;
+      Alcotest.test_case "literal wildcard filter" `Quick
+        test_author_filter_treats_wildcards_literally;
     ];
     "votes", [
       Alcotest.test_case "upvote" `Quick test_vote_post;

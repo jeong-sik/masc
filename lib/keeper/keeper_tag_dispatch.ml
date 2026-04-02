@@ -278,11 +278,3 @@ let dispatch
           mcp_state = None; mcp_session_id = None; auth_token = None }
       in
       Tool_command_plane.dispatch ctx ~name ~args
-
-  (* ── Fallback: future module_tag variants ──────────────────── *)
-  (* Safety net for new Mod_* variants added after this code.
-     Without this, a missing arm causes Match_failure at runtime. *)
-  | _ ->
-      Some (false,
-        Printf.sprintf
-          "tool '%s' has no keeper dispatch handler (unhandled module tag)" name)

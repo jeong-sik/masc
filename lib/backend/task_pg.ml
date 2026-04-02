@@ -113,7 +113,7 @@ let status_to_db (status : task_status) : string * string option * string option
       ("cancelled", None, None, None, None, Some cancelled_at, Some cancelled_by, reason)
 
 (** Convert DB representation to task_status *)
-let status_of_db ~status ~assignee ~claimed_at ~started_at ~completed_at ~cancelled_at ~cancelled_by ~notes ~reason : task_status =
+let status_of_db ~id ~status ~assignee ~claimed_at ~started_at ~completed_at ~cancelled_at ~cancelled_by ~notes ~reason : task_status =
   match status with
   | "todo" -> Todo
   | "claimed" ->
@@ -139,7 +139,7 @@ let status_of_db ~status ~assignee ~claimed_at ~started_at ~completed_at ~cancel
         reason;
       }
   | unknown ->
-      Log.Backend.warn "[task_pg] unknown task status %S in DB, defaulting to Todo" unknown;
+      Log.Backend.warn "[task_pg] unknown task status %S for task %S in DB, defaulting to Todo" unknown id;
       Todo
 
 (** {1 Queries} *)
@@ -245,7 +245,7 @@ let row_to_task (((id, title, description), (priority, status, assignee),
     worktree = None;  (* Worktree loaded separately if needed *)
     required_role;
     stage = None;
-    task_status = status_of_db ~status ~assignee ~claimed_at ~started_at
+    task_status = status_of_db ~id ~status ~assignee ~claimed_at ~started_at
                     ~completed_at ~cancelled_at:None ~cancelled_by:None ~notes ~reason:None;
   }
 

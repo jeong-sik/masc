@@ -15,10 +15,9 @@ import {
   taskEventsLoading,
   taskEventsError,
   assigneeGoalIds,
-  goalById,
   type NormalizedTaskEvent,
 } from './task-detail-state'
-import { priorityLabel } from './goal-helpers'
+import { goalById, priorityLabel } from './goal-helpers'
 
 // -- Event timeline (inline, NormalizedTaskEvent shape) --------------
 

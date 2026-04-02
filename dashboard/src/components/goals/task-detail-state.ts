@@ -3,8 +3,7 @@
 import { signal } from '@preact/signals'
 import { fetchTaskHistory } from '../../api/actions'
 import { findKeeper } from '../../lib/keeper-utils'
-import { goals } from '../../store'
-import type { Task, Goal } from '../../types'
+import type { Task } from '../../types'
 
 // -- Normalized task event (from masc_task_history raw JSON) --------
 
@@ -89,9 +88,5 @@ async function loadTaskEvents(taskId: string): Promise<void> {
 
 export function assigneeGoalIds(task: Task): string[] {
   const keeper = findKeeper(task.assignee)
-  return (keeper as Record<string, unknown>)?.active_goal_ids as string[] ?? []
-}
-
-export function goalById(id: string): Goal | undefined {
-  return goals.value.find(g => g.id === id)
+  return keeper?.active_goal_ids ?? []
 }

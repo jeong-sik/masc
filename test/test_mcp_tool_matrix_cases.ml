@@ -106,7 +106,6 @@ let all_known_tool_names =
     "masc_collaboration_evidence";
     "masc_collaboration_graph";
     "masc_config";
-    "masc_config_snapshot";
     "masc_consolidate_learning";
     "masc_dashboard";
     "masc_deliver";

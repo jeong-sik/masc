@@ -113,7 +113,7 @@ let run_validator ?clock ~(cwd : string) ~(timeout_sec : int) argv :
     | prog :: _ ->
         Tool_command_plane_support.run_process_with_timeout
           ~clock_opt:clock ~timeout_sec ~prog ~argv
-          ~env:(Unix.environment ())
+          ~env:(Unix.environment ()) ()
   in
   {
     command = argv;

@@ -336,7 +336,12 @@ let append_delegate_event (env : _ step_env) ~worker_run_id ~worker_name ~delega
           ("ts_iso", `String (Types.now_iso ()));
         ])
 
-let append_spawn_requested_event (env : _ step_env) ~worker_run_id prepared =
+let rec append_spawn_requested_event (env : _ step_env) ~worker_run_id prepared =
+  append_spawn_requested_event_with_backend env ~worker_run_id prepared
+    ~worker_backend:None
+
+and append_spawn_requested_event_with_backend (env : _ step_env) ~worker_run_id
+    prepared ~worker_backend =
   Team_session_store.append_event env.ctx.config env.session_id
     ~event_type:"team_step_spawn_requested"
     ~detail:
@@ -349,7 +354,14 @@ let append_spawn_requested_event (env : _ step_env) ~worker_run_id prepared =
               ~some:(fun s -> `String s)
               prepared.runtime_actor_name );
           ("spawn_role", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.spawn_role);
-          ("worker_backend", if env.deps.is_local_spawn_agent prepared.spec.spawn_agent then `String "local" else `Null);
+          ( "worker_backend",
+            match worker_backend with
+            | Some backend ->
+                `String (Worker_execution_backend.to_string backend)
+            | None ->
+                if env.deps.is_local_spawn_agent prepared.spec.spawn_agent then
+                  `String "local"
+                else `Null );
           ("wait_mode", `String (Team_session_types.wait_mode_to_string env.wait_mode));
           ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
           ("resolved_model", `String prepared.runtime_model_label);
@@ -651,3 +663,60 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
           assigned_runtime;
           lease_released = false;
         }
+
+let local_worker_tool_names_of_scope scope =
+  match scope with
+  | Team_session_types.Observe_only ->
+      Tool_access_policy.resolve
+        {
+          allow = Surface Tool_catalog.Local_worker;
+          deny =
+            Names
+              [
+                "masc_claim_next";
+                "masc_transition";
+                "masc_add_task";
+                "masc_heartbeat";
+                "masc_board_post";
+                "masc_board_comment";
+                "masc_board_vote";
+                "masc_worktree_create";
+                "masc_worktree_remove";
+                "masc_run_init";
+                "masc_run_plan";
+                "masc_run_log";
+                "masc_run_deliverable";
+                "masc_repair_loop_start";
+                "masc_repair_loop_iterate";
+                "masc_repair_loop_stop";
+              ];
+        }
+  | _ ->
+      Team_session_oas_bridge.supported_local_worker_tool_names
+
+let local_shell_tool_names_of_scope = function
+  | Team_session_types.Observe_only ->
+      [ "file_read"; "shell_exec" ]
+  | _ ->
+      [ "file_read"; "file_write"; "shell_exec" ]
+
+let materialize_prepared_execution (env : _ step_env) (prepared : prepared_spawn)
+    : prepared_execution =
+  let execution_scope =
+    match env.deps.effective_execution_scope_of_spec prepared.spec with
+    | Some scope -> scope
+    | None ->
+        Team_session_types.effective_execution_scope
+          ~worker_class:prepared.spec.worker_class
+          prepared.spec.execution_scope
+  in
+  {
+    prepared;
+    execution_scope;
+    local_worker_tool_names = local_worker_tool_names_of_scope execution_scope;
+    local_shell_tool_names = local_shell_tool_names_of_scope execution_scope;
+    delivery_contract =
+      delivery_contract_for_session env.ctx.config env.session_id;
+    worker_backend =
+      Worker_runtime_config.backend_for_scope execution_scope;
+  }

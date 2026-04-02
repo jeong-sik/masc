@@ -172,10 +172,16 @@
    sdk_tool_contract
    tool_schema_dsl
    worker_oas
+   worker_execution_backend
+   worker_execution_spec
    worker_runtime
+   worker_runtime_config
+   worker_runtime_docker
+   worker_runtime_helper_protocol
    worker_container_types
    worker_container
    worker_container_runners
+   worker_run_once
    worker_dev_tools
    worker_tool_input
    worker_verification

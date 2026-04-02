@@ -49,6 +49,15 @@ type prepared_spawn = {
   mutable lease_released : bool;
 }
 
+type prepared_execution = {
+  prepared : prepared_spawn;
+  execution_scope : Team_session_types.execution_scope;
+  local_worker_tool_names : string list;
+  local_shell_tool_names : string list;
+  delivery_contract : Team_session_types.delivery_contract option;
+  worker_backend : Worker_execution_backend.t;
+}
+
 (** OAS worker evidence payload for trace integration. *)
 type oas_worker_evidence = {
   trace_ref : Oas.Raw_trace.run_ref option;
@@ -146,4 +155,3 @@ type step_deps = {
     Oas.Raw_trace.run_ref ->
     (Yojson.Safe.t * Yojson.Safe.t) option;
 }
-

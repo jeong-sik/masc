@@ -509,11 +509,11 @@ let test_team_session_spawn_tool_contracts () =
     (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
        "Worker_runtime.run_worker");
   check bool "team session spawn branches on local spawn agents" true
-    (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
-       "if deps.is_local_spawn_agent prepared.spec.spawn_agent");
+    (file_contains_pattern "lib/tool_team_session_step_exec.ml"
+       "if env.deps.is_local_spawn_agent spec.spawn_agent then");
   check bool "team session spawn contract uses scoped tool names" true
-    (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
-       "supported_local_worker_tool_names");
+    (file_contains_pattern "lib/tool_team_session_step_exec.ml"
+       "local_worker_tool_names_of_scope");
   check bool "team session bridge exposes scoped local worker tools" true
     (file_contains_pattern "lib/team_session/team_session_oas_bridge.ml"
        "supported_local_worker_tool_names_for_scope")

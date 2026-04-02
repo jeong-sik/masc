@@ -43,39 +43,48 @@ module Http = Http_server_eio
     Response (error):
     {[ { "ok": false, "error": "keeper_name is required" } ]}
 *)
+(** Map typed gate_error to HTTP status code. *)
+let http_status_of_gate_error : Channel_gate.gate_error -> Httpun.Status.t = function
+  | Validation (Duplicate_message _) -> `Conflict
+  | Validation _ -> `Bad_request
+  | Keeper_error _ -> `Bad_gateway
+  | Dispatch_unavailable -> `Service_unavailable
+  | Internal _ -> `Internal_server_error
+
 let handle_gate_message ~sw ~clock state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let result =
       try
         let json = Yojson.Safe.from_string body_str in
         match Channel_gate.inbound_of_json json with
-        | Error e -> Error e
+        | Error e -> Error (Channel_gate.Validation Channel_gate.Empty_content, e)
         | Ok msg ->
-            Channel_gate.handle_inbound
+            (match Channel_gate.handle_inbound
               ~sw ~clock
               ~proc_mgr:(state.Mcp_server.proc_mgr)
               ~net:(state.Mcp_server.net)
               ~config:state.Mcp_server.room_config
               msg
+            with
+            | Ok out -> Ok out
+            | Error gate_err ->
+                Error (gate_err, Channel_gate.gate_error_to_string gate_err))
       with
-      | Yojson.Json_error e -> Error ("invalid json: " ^ e)
+      | Yojson.Json_error e -> Error (Channel_gate.Internal e, "invalid json")
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error ("internal error: " ^ Printexc.to_string exn)
+      | exn ->
+          (* Log details server-side, return generic message to client *)
+          Log.Misc.error "channel_gate internal error: %s" (Printexc.to_string exn);
+          Error (Channel_gate.Internal "", "internal error")
     in
     match result with
     | Ok out ->
         respond_json_with_cors ~status:`OK request reqd
           (Yojson.Safe.to_string (Channel_gate.outbound_to_json out))
-    | Error msg ->
-        let status =
-          if String.length msg > 8
-             && String.sub msg 0 9 = "duplicate" then `Conflict
-          else if String.length msg > 6
-             && String.sub msg 0 6 = "keeper" then `Bad_gateway
-          else `Bad_request
-        in
+    | Error (gate_err, client_msg) ->
+        let status = http_status_of_gate_error gate_err in
         respond_json_with_cors ~status request reqd
-          (Yojson.Safe.to_string (Channel_gate.error_json msg))
+          (Yojson.Safe.to_string (Channel_gate.error_json client_msg))
   )
 
 (** GET /api/v1/gate/events?channel=<channel>&keeper=<keeper>

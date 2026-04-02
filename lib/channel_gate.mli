@@ -63,6 +63,16 @@ val dedup_cleanup : now:float -> unit
 
 (** {1 Dispatch} *)
 
+(** {1 Dispatch errors (typed, not string)} *)
+
+type gate_error =
+  | Validation of validation_error
+  | Keeper_error of string
+  | Dispatch_unavailable
+  | Internal of string
+
+val gate_error_to_string : gate_error -> string
+
 val handle_inbound :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
@@ -70,7 +80,7 @@ val handle_inbound :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
   config:Room.config ->
   inbound_message ->
-  (outbound_message, string) result
+  (outbound_message, gate_error) result
 (** Validate, dedup, dispatch to keeper, return response.
     The only non-deterministic step is the keeper turn itself
     (which is on the other side of the boundary). *)

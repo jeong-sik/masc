@@ -47,15 +47,32 @@ class BotConfig(BaseSettings):
             raise ValueError("MASC_API_TOKEN is required")
         return v.strip()
 
-    def keeper_map(self) -> dict[str, str]:
-        """Parse DISCORD_KEEPER_MAP JSON into dict."""
+    @field_validator("discord_keeper_map")
+    @classmethod
+    def validate_keeper_map_json(cls, v: str) -> str:
+        """Validate that DISCORD_KEEPER_MAP is valid JSON at startup."""
+        if not v.strip():
+            return "{}"
         try:
-            raw: object = json.loads(self.discord_keeper_map)
-            if not isinstance(raw, dict):
-                return {}
-            return {str(k): str(v) for k, v in raw.items()}
-        except json.JSONDecodeError:
+            parsed: object = json.loads(v)
+            if not isinstance(parsed, dict):
+                raise ValueError(
+                    f"DISCORD_KEEPER_MAP must be a JSON object, got {type(parsed).__name__}"
+                )
+        except json.JSONDecodeError as e:
+            raise ValueError(f"DISCORD_KEEPER_MAP is not valid JSON: {e}") from e
+        return v
+
+    def keeper_map(self) -> dict[str, str]:
+        """Parse DISCORD_KEEPER_MAP JSON into dict.
+
+        Safe to call without try/except because validate_keeper_map_json
+        guarantees valid JSON at startup.
+        """
+        raw: object = json.loads(self.discord_keeper_map)
+        if not isinstance(raw, dict):
             return {}
+        return {str(k): str(v) for k, v in raw.items()}
 
     def gate_message_url(self) -> str:
         base = self.masc_mcp_url.rstrip("/")

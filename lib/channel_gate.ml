@@ -53,31 +53,43 @@ let dedup_table : (string, float) Hashtbl.t = Hashtbl.create 256
 
 let dedup_mutex = Mutex.create ()
 
+(** Max dedup entries to prevent unbounded memory growth. *)
+let dedup_max_entries = 10_000
+
 let dedup_check key =
-  Mutex.lock dedup_mutex;
-  let now = Unix.gettimeofday () in
-  let result =
-    match Hashtbl.find_opt dedup_table key with
-    | Some ts when now -. ts < dedup_ttl_sec () -> true
-    | Some _ ->
-        Hashtbl.remove dedup_table key;
-        false
-    | None -> false
-  in
-  if not result then Hashtbl.replace dedup_table key now;
-  Mutex.unlock dedup_mutex;
-  result
+  Mutex.protect dedup_mutex (fun () ->
+    let now = Unix.gettimeofday () in
+    let result =
+      match Hashtbl.find_opt dedup_table key with
+      | Some ts when now -. ts < dedup_ttl_sec () -> true
+      | Some _ ->
+          Hashtbl.remove dedup_table key;
+          false
+      | None -> false
+    in
+    if not result then begin
+      (* Evict oldest if at capacity *)
+      if Hashtbl.length dedup_table >= dedup_max_entries then begin
+        let oldest_key = ref "" in
+        let oldest_ts = ref Float.max_float in
+        Hashtbl.iter (fun k ts ->
+          if ts < !oldest_ts then begin oldest_key := k; oldest_ts := ts end
+        ) dedup_table;
+        if !oldest_key <> "" then Hashtbl.remove dedup_table !oldest_key
+      end;
+      Hashtbl.replace dedup_table key now
+    end;
+    result)
 
 let dedup_cleanup ~now =
-  Mutex.lock dedup_mutex;
-  let ttl = dedup_ttl_sec () in
-  let to_remove =
-    Hashtbl.fold
-      (fun k ts acc -> if now -. ts >= ttl then k :: acc else acc)
-      dedup_table []
-  in
-  List.iter (Hashtbl.remove dedup_table) to_remove;
-  Mutex.unlock dedup_mutex
+  Mutex.protect dedup_mutex (fun () ->
+    let ttl = dedup_ttl_sec () in
+    let to_remove =
+      Hashtbl.fold
+        (fun k ts acc -> if now -. ts >= ttl then k :: acc else acc)
+        dedup_table []
+    in
+    List.iter (Hashtbl.remove dedup_table) to_remove)
 
 (* ── Validation (pure) ──────────────────────────────────────── *)
 
@@ -90,6 +102,18 @@ let validation_error_to_string = function
   | Empty_idempotency_key -> "idempotency_key is required"
   | Duplicate_message key ->
       Printf.sprintf "duplicate message (idempotency_key=%s)" key
+
+type gate_error =
+  | Validation of validation_error
+  | Keeper_error of string
+  | Dispatch_unavailable
+  | Internal of string
+
+let gate_error_to_string = function
+  | Validation e -> validation_error_to_string e
+  | Keeper_error msg -> Printf.sprintf "keeper error: %s" msg
+  | Dispatch_unavailable -> "keeper dispatch unavailable"
+  | Internal _ -> "internal error"
 
 let validate (msg : inbound_message) =
   let content = String.trim msg.content in
@@ -136,7 +160,7 @@ let extract_reply_text (body : string) : string =
 
 let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
   match validate msg with
-  | Error e -> Error (validation_error_to_string e)
+  | Error e -> Error (Validation e)
   | Ok () ->
       let args =
         `Assoc [
@@ -169,9 +193,9 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
           Ok { keeper_name = String.trim msg.keeper_name;
                content = reply; turn_stats = stats }
       | Some (false, err) ->
-          Error (Printf.sprintf "keeper error: %s" err)
+          Error (Keeper_error err)
       | None ->
-          Error "keeper dispatch unavailable"
+          Error Dispatch_unavailable
 
 (* ── JSON helpers ───────────────────────────────────────────── *)
 

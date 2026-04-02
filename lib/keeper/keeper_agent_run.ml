@@ -376,16 +376,36 @@ let run_turn
     :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   (* Layer 1: Policy fallback — when BM25 confidence is low, fall back
-     to the preset/custom-allowed set (not the full universe).
-     This prevents overwhelming the LLM with 80+ tools on every turn. *)
+     to a capped subset of the preset-allowed tools.
+     Full-preset keepers can have 300+ policy-allowed tools; sending all
+     of them as fallback produces ~39K tokens which exceeds 8K model
+     context windows.  Cap to max_fallback_tools, prioritizing keeper_*
+     tools (preset-scoped, always relevant) then standard-tier MASC
+     tools (coordination essentials).  See #4592. *)
   let policy_allowed =
     Keeper_exec_tools.keeper_allowed_tool_names !meta_ref
   in
+  let max_fallback_tools = 30 in
   let fallback_tools =
-    List.filter (fun name ->
-      not (List.mem name always_include_tools)
-      && List.mem name policy_allowed
-    ) all_tool_names
+    let candidates =
+      List.filter (fun name ->
+        not (List.mem name always_include_tools)
+        && List.mem name policy_allowed
+      ) all_tool_names
+    in
+    if List.length candidates <= max_fallback_tools then
+      candidates
+    else
+      let keeper = List.filter (fun n ->
+        String.starts_with ~prefix:"keeper_" n) candidates in
+      let masc_std = List.filter (fun n ->
+        String.starts_with ~prefix:"masc_" n
+        && Tool_catalog_tiers.is_in_tier Standard n
+      ) candidates in
+      let merged = keeper @ masc_std in
+      if List.length merged > max_fallback_tools then
+        List.filteri (fun i _ -> i < max_fallback_tools) merged
+      else merged
   in
   let confidence_threshold = 0.5 in
   (* Runtime tool overlay: external callers (masc_tool_grant/revoke)

@@ -155,7 +155,8 @@ let worker_delegate_guidance = function
       "Repair or respawn the worker; a checkpoint exists without worker metadata."
   | Some "in_flight" ->
       "Wait for the active worker run to complete before delegating again."
-  | Some _ | None -> "Worker is ready for delegation."
+  | Some _ -> "Worker is blocked for an unspecified reason."
+  | None -> "Worker is ready for delegation."
 
 let worker_delegate_readiness_to_json (entry : worker_delegate_readiness) =
   `Assoc

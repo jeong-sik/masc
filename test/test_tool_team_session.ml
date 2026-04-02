@@ -114,6 +114,10 @@ let () =
             Test_tool_team_session_misc
               .test_delegate_rejects_not_ready_worker_with_guidance;
           Alcotest.test_case
+            "delegate-ready-worker-bypasses-denied-gate" `Quick
+            Test_tool_team_session_misc
+              .test_delegate_ready_worker_bypasses_denied_gate;
+          Alcotest.test_case
             "verify-trace-reports-summary-only-without-checkpoint" `Quick
             Test_tool_team_session_misc.test_verify_trace_reports_summary_only_without_checkpoint;
           Alcotest.test_case "memory-backend-event-lock-serializes-fibers"

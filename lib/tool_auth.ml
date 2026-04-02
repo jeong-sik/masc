@@ -94,23 +94,26 @@ Pass this token in requests to authenticate.
 
 let handle_auth_refresh ctx args =
   let target_agent = target_agent_name ctx args in
-  let token = get_string args "token" "" in
-  match Auth.refresh_token ctx.config.base_path ~agent_name:target_agent ~old_token:token with
-  | Ok (new_token, cred) ->
-      let expires = match cred.expires_at with
-        | Some exp -> exp
-        | None -> "never"
-      in
-      let msg = Printf.sprintf {|🔄 **Token Refreshed for %s**
+  if target_agent <> ctx.agent_name then
+    (false, "agent_name must match the authenticated agent for refresh")
+  else
+    let token = get_string args "token" "" in
+    match Auth.refresh_token ctx.config.base_path ~agent_name:target_agent ~old_token:token with
+    | Ok (new_token, cred) ->
+        let expires = match cred.expires_at with
+          | Some exp -> exp
+          | None -> "never"
+        in
+        let msg = Printf.sprintf {|🔄 **Token Refreshed for %s**
 
 New Token:
 `%s`
 
 Expires: %s
 |} target_agent new_token expires in
-      (true, msg)
-  | Error e ->
-      (false, Types.masc_error_to_string e)
+        (true, msg)
+    | Error e ->
+        (false, Types.masc_error_to_string e)
 
 let handle_auth_revoke ctx args =
   let target_agent = target_agent_name ctx args in

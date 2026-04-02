@@ -134,6 +134,7 @@ let () = test "handle_auth_list_empty" (fun () ->
 (* Test auth_revoke dispatch *)
 let () = test "dispatch_auth_revoke" (fun () ->
   let ctx = make_test_ctx () in
+  ignore (Auth.create_token ctx.config.base_path ~agent_name:ctx.agent_name ~role:Types.Worker);
   let args = `Assoc [] in
   match Tool_auth.dispatch ctx ~name:"masc_auth_revoke" ~args with
   | Some (success, _result) -> assert success
@@ -160,15 +161,14 @@ let () = test "handle_auth_create_token_respects_agent_name" (fun () ->
 
 let () = test "handle_auth_refresh_respects_agent_name" (fun () ->
   let ctx = make_test_ctx () in
-  let target = "dashboard-eager-manta" in
   let old_token =
-    match Auth.create_token ctx.config.base_path ~agent_name:target ~role:Types.Worker with
+    match Auth.create_token ctx.config.base_path ~agent_name:ctx.agent_name ~role:Types.Worker with
     | Ok (raw_token, _cred) -> raw_token
     | Error e -> failwith (Types.masc_error_to_string e)
   in
   let args =
     `Assoc [
-      ("agent_name", `String target);
+      ("agent_name", `String ctx.agent_name);
       ("token", `String old_token);
     ]
   in
@@ -176,9 +176,22 @@ let () = test "handle_auth_refresh_respects_agent_name" (fun () ->
   assert success;
   let new_token = extract_first_backtick_value result in
   assert (new_token <> old_token);
-  match Auth.verify_token ctx.config.base_path ~agent_name:target ~token:new_token with
+  match Auth.verify_token ctx.config.base_path ~agent_name:ctx.agent_name ~token:new_token with
   | Ok _ -> ()
   | Error e -> failwith (Types.masc_error_to_string e)
+)
+
+let () = test "handle_auth_refresh_rejects_other_agent" (fun () ->
+  let ctx = make_test_ctx () in
+  let args =
+    `Assoc [
+      ("agent_name", `String "dashboard-eager-manta");
+      ("token", `String "dummy-token");
+    ]
+  in
+  let (success, result) = Tool_auth.handle_auth_refresh ctx args in
+  assert (not success);
+  assert (contains_substring result "authenticated agent")
 )
 
 let () = test "handle_auth_revoke_respects_agent_name" (fun () ->

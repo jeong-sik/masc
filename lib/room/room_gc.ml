@@ -109,7 +109,7 @@ let cleanup_zombies
     if !zombie_entries = [] then
       "✅ No zombie agents found"
     else begin
-      (* Phase 2: Transition status to Inactive + stop heartbeats.
+      (* Phase 2: Transition status to Inactive + stop heartbeats + stop keeper fibers.
          Note: If later phases fail (task release or file deletion), the agent
          remains in active_agents with an Inactive file. This is intentional:
          Inactive+in-list is self-healing (next GC cycle cleans up), whereas
@@ -123,6 +123,11 @@ let cleanup_zombies
           | Error err -> Log.Gc.warn "gc status update parse error for %s: %s" name err
         with Sys_error msg -> Log.Gc.warn "gc status update I/O error for %s: %s" name msg);
         let _stopped = Heartbeat.stop_by_agent ~agent_name:name in
+        (* Stop keeper fiber via hook to prevent zombie tool calls.
+           Without this, the keeper fiber continues running (fiber_stop stays
+           false) and makes tool calls indefinitely after cleanup. *)
+        (try !Room_hooks.stop_keeper_fn name
+         with _ -> ());
         ()
       ) !zombie_entries;
 

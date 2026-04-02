@@ -57,9 +57,12 @@ let json_assoc_member_opt key (json : Yojson.Safe.t) =
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
 
-let json_member_present key (json : Yojson.Safe.t) =
+let json_non_null_member_present key (json : Yojson.Safe.t) =
   match json with
-  | `Assoc fields -> List.mem_assoc key fields
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some `Null | None -> false
+      | Some _ -> true)
   | _ -> false
 
 let parse_present_tool_name_list_opt args key =
@@ -81,12 +84,19 @@ let resolve_tool_name_list ~preferred ~fallback =
   |> Option.value ~default:[]
   |> normalize_tool_name_list
 
+let reject_legacy_tool_access_kind access_json =
+  match json_assoc_member_opt "kind" access_json with
+  | Some (`String ("restricted" | "unrestricted")) ->
+      Error
+        "tool_access.kind must be \"preset\" or \"custom\"; legacy kinds \"restricted\" and \"unrestricted\" are not supported for this endpoint"
+  | _ -> Ok ()
+
 let parse_tool_access_input (args : Yojson.Safe.t) :
     (tool_access option * tool_preset option * string list option, string) result =
-  let tool_access_present = json_member_present "tool_access" args in
-  let tool_preset_present = json_member_present "tool_preset" args in
-  let tool_also_allow_present = json_member_present "tool_also_allow" args in
-  let tool_custom_allowlist_present = json_member_present "tool_custom_allowlist" args in
+  let tool_access_present = json_non_null_member_present "tool_access" args in
+  let tool_preset_present = json_non_null_member_present "tool_preset" args in
+  let tool_also_allow_present = json_non_null_member_present "tool_also_allow" args in
+  let tool_custom_allowlist_present = json_non_null_member_present "tool_custom_allowlist" args in
   if tool_access_present
      && (tool_preset_present || tool_also_allow_present || tool_custom_allowlist_present)
   then
@@ -97,22 +107,22 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
       "tool_custom_allowlist cannot be combined with tool_preset or tool_also_allow"
   else
     let tool_access_opt =
-      if tool_access_present then
-        match json_assoc_member_opt "tool_access" args with
-        | Some ((`Assoc _) as access_json) -> (
-            match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
-            | Ok access -> Ok (Some access)
-            | Error msg -> Error msg)
-        | Some `Null -> Error "tool_access must not be null"
-        | Some _ -> Error "tool_access must be an object"
-        | None -> Ok None
-      else if tool_custom_allowlist_present then (
-        match parse_present_tool_name_list_opt args "tool_custom_allowlist" with
-        | Ok (Some names) -> Ok (Some (Custom names))
-        | Ok None -> Ok None
-        | Error msg -> Error msg)
-      else
-        Ok None
+      match json_assoc_member_opt "tool_access" args with
+      | Some ((`Assoc _) as access_json) -> (
+          match reject_legacy_tool_access_kind access_json with
+          | Error msg -> Error msg
+          | Ok () -> (
+              match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
+              | Ok access -> Ok (Some access)
+              | Error msg -> Error msg))
+      | Some `Null -> Ok None
+      | Some _ -> Error "tool_access must be an object"
+      | None when json_assoc_member_opt "tool_custom_allowlist" args <> None -> (
+          match parse_present_tool_name_list_opt args "tool_custom_allowlist" with
+          | Ok (Some names) -> Ok (Some (Custom names))
+          | Ok None -> Ok None
+          | Error msg -> Error msg)
+      | None -> Ok None
     in
     match tool_access_opt with
     | Error msg -> Error msg

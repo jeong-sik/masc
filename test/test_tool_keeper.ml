@@ -1526,12 +1526,14 @@ let test_keeper_up_rejects_mixed_tool_access_inputs () =
       check bool "mixed input error surfaced" true
         (contains_substring body "tool_access cannot be combined"))
 
-let test_keeper_up_rejects_null_tool_access_field () =
+let test_keeper_up_treats_null_tool_access_as_absent () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> rm_rf base_dir)
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "null-tool-access";
+      rm_rf base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
       let keeper_ctx : _ Masc_mcp.Keeper_types.context =
@@ -1542,14 +1544,52 @@ let test_keeper_up_rejects_null_tool_access_field () =
           (`Assoc
             [
               ("name", `String "null-tool-access");
-              ("goal", `String "Reject null canonical tool_access");
+              ("goal", `String "Treat null canonical tool_access as absent");
               ("tool_access", `Null);
               ("tool_preset", `String "minimal");
             ])
       in
-      check bool "keeper up rejects null tool_access field" false ok;
-      check bool "null tool_access error surfaced" true
-        (contains_substring body "tool_access cannot be combined"))
+      if not ok then fail body;
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "null-tool-access" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after null tool_access create"
+        | Error e -> fail e
+      in
+      check bool "keeper up accepts null tool_access field as absent" true ok;
+      match meta.Masc_mcp.Keeper_types.tool_access with
+      | Masc_mcp.Keeper_types.Preset
+          { preset = Masc_mcp.Keeper_types.Minimal; also_allow } ->
+          check (list string) "null tool_access preserves tool_preset fallback" [] also_allow
+      | _ -> fail "expected null tool_access to fall back to tool_preset")
+
+let test_keeper_up_rejects_legacy_tool_access_kinds () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let keeper_ctx : _ Masc_mcp.Keeper_types.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let assert_kind_rejected kind =
+        let ok, body =
+          Masc_mcp.Keeper_turn.handle_keeper_up keeper_ctx
+            (`Assoc
+              [
+                ("name", `String ("legacy-tool-access-" ^ kind));
+                ("goal", `String "Reject legacy tool_access.kind in keeper_up");
+                ("tool_access", `Assoc [ ("kind", `String kind) ]);
+              ])
+        in
+        check bool ("legacy kind rejected: " ^ kind) false ok;
+        check bool ("legacy kind error surfaced: " ^ kind) true
+          (contains_substring body "tool_access.kind must be \"preset\" or \"custom\"")
+      in
+      assert_kind_rejected "restricted";
+      assert_kind_rejected "unrestricted")
 
 let test_keeper_up_rejects_tool_custom_allowlist_with_also_allow () =
   Eio_main.run @@ fun env ->
@@ -1575,6 +1615,30 @@ let test_keeper_up_rejects_tool_custom_allowlist_with_also_allow () =
       check bool "keeper up rejects compat mixed tool inputs" false ok;
       check bool "compat mixed input error surfaced" true
         (contains_substring body "tool_custom_allowlist cannot be combined"))
+
+let test_keeper_up_rejects_null_tool_custom_allowlist_field () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      let keeper_ctx : _ Masc_mcp.Keeper_types.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let ok, body =
+        Masc_mcp.Keeper_turn.handle_keeper_up keeper_ctx
+          (`Assoc
+            [
+              ("name", `String "null-tool-custom-allowlist");
+              ("goal", `String "Reject null compat custom allowlist");
+              ("tool_custom_allowlist", `Null);
+            ])
+      in
+      check bool "keeper up rejects null tool_custom_allowlist field" false ok;
+      check bool "null tool_custom_allowlist error surfaced" true
+        (contains_substring body "tool_custom_allowlist must not be null"))
 
 let test_keeper_up_persists_explicit_goal_horizons () =
   Eio_main.run @@ fun env ->
@@ -2207,6 +2271,48 @@ let test_read_meta_warns_on_unknown_keys () =
            (fun message -> contains_substring message "unknown keys: mystery_key")
            messages))
 
+let test_read_meta_on_fresh_writer_output_emits_no_unknown_key_warning () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "fresh-meta-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "fresh-meta-demo");
+              ("goal", `String "Read fresh writer output without schema drift warnings");
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      if not ok then fail ("keeper up failed: " ^ body);
+      let baseline = latest_log_seq () in
+      let _ =
+        match Masc_mcp.Keeper_types.read_meta config "fresh-meta-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after fresh read"
+        | Error e -> fail e
+      in
+      let messages = recent_keeper_log_messages ~since_seq:baseline in
+      check bool "fresh writer output emits no unknown key warning" false
+        (List.exists
+           (fun message -> contains_substring message "unknown keys:")
+           messages))
+
 let test_read_meta_warns_on_compat_tool_keys () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -2516,10 +2622,14 @@ let () =
            test_keeper_up_update_accepts_tool_custom_allowlist_compat;
          test_case "keeper up rejects mixed tool_access inputs" `Quick
            test_keeper_up_rejects_mixed_tool_access_inputs;
-         test_case "keeper up rejects null tool_access field" `Quick
-           test_keeper_up_rejects_null_tool_access_field;
+         test_case "keeper up treats null tool_access as absent" `Quick
+           test_keeper_up_treats_null_tool_access_as_absent;
+         test_case "keeper up rejects legacy tool_access kinds" `Quick
+           test_keeper_up_rejects_legacy_tool_access_kinds;
          test_case "keeper up rejects tool_custom_allowlist with also_allow" `Quick
            test_keeper_up_rejects_tool_custom_allowlist_with_also_allow;
+         test_case "keeper up rejects null tool_custom_allowlist field" `Quick
+           test_keeper_up_rejects_null_tool_custom_allowlist_field;
          test_case "write_meta syncs registry meta" `Quick
            test_write_meta_syncs_registry_meta;
          test_case "keeper up persists allowed paths" `Quick
@@ -2534,6 +2644,8 @@ let () =
            test_legacy_presence_keepalive_false_migrates_to_paused;
          test_case "read_meta warns on unknown keys" `Quick
            test_read_meta_warns_on_unknown_keys;
+         test_case "read_meta on fresh writer output emits no unknown key warning" `Quick
+           test_read_meta_on_fresh_writer_output_emits_no_unknown_key_warning;
          test_case "read_meta warns on compat tool keys" `Quick
            test_read_meta_warns_on_compat_tool_keys;
          test_case "read_meta treats null tool_access as compat warning" `Quick

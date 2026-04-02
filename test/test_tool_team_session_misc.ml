@@ -551,25 +551,30 @@ let test_delegate_ready_worker_bypasses_denied_gate () =
             ("delegate_prompt", `String "continue");
           ])
   in
-  let mentions_not_ready =
-    if delegate_ok then
-      false
-    else
-      let message =
-        parse_json_exn delegate_body |> Yojson.Safe.Util.member "message"
-        |> Yojson.Safe.Util.to_string
-      in
-      try
-        let _ =
-          Str.search_forward
-            (Str.regexp_string "not ready for delegation")
-            (String.lowercase_ascii message) 0
-        in
-        true
-      with Not_found -> false
-  in
-  Alcotest.(check bool) "ready path bypasses not-ready gate" false
-    mentions_not_ready;
+  let delegate_json = parse_json_exn delegate_body in
+  if delegate_ok then (
+    Alcotest.(check string) "success path keeps resolved worker"
+      "llama-local-ready"
+      Yojson.Safe.Util.(
+        member "delegate" delegate_json |> member "worker_name"
+        |> to_string);
+    Alcotest.(check bool) "success path reports delegate payload" true
+      Yojson.Safe.Util.(
+        member "delegate" delegate_json <> `Null))
+  else
+    let message =
+      Yojson.Safe.Util.member "message" delegate_json
+      |> Yojson.Safe.Util.to_string
+    in
+    Alcotest.(check bool) "ready path bypasses not-ready gate" false
+      (try
+         let _ =
+           Str.search_forward
+             (Str.regexp_string "not ready for delegation")
+             (String.lowercase_ascii message) 0
+         in
+         true
+       with Not_found -> false);
   let denied_events =
     Team_session_store.read_events config session_id
     |> List.filter (fun json ->

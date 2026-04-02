@@ -582,10 +582,13 @@ let pick_failover_leader live_agents (detachment : detachment_record) =
   | [] -> None
   | [single] -> Some single
   | _ ->
-      (* Pick based on hash of current time to distribute without needing Random.self_init *)
-      let arr = Array.of_list eligible in
+      (* Deterministic selection: hash detachment id + sorted roster to get
+         a stable index that is replayable and testable. *)
+      let sorted = List.sort String.compare eligible in
+      let arr = Array.of_list sorted in
       let n = Array.length arr in
-      let idx = abs (Hashtbl.hash (Unix.gettimeofday ())) mod n in
+      let seed = Hashtbl.hash (detachment.detachment_id, sorted) in
+      let idx = abs seed mod n in
       Some arr.(idx)
 
 let maybe_escalation_target units (detachment : detachment_record) =

@@ -140,6 +140,10 @@ let is_health_at_risk = Dashboard_utils.is_health_at_risk
 let is_session_terminal = Dashboard_utils.is_session_terminal
 let is_session_blocked = Dashboard_utils.is_session_blocked
 
+(** Tone ADT — re-exported from Dashboard_utils (SSOT). *)
+type tone = Dashboard_utils.tone = Tone_ok | Tone_warn | Tone_bad
+let string_of_tone = Dashboard_utils.string_of_tone
+
 let execution_tool_preview_limit = 8
 
 let cap_string_list ?(limit = execution_tool_preview_limit) values =
@@ -239,10 +243,7 @@ let severity_rank = function
   | "warn" | "blocked" | "paused" | "interrupted" -> 1
   | _ -> 0
 
-let tone_rank = function
-  | "bad" -> 2
-  | "warn" -> 1
-  | _ -> 0
+let tone_rank = Dashboard_utils.tone_rank
 
 let dashboard_fixture_name ?fixture () =
   let fixtures_enabled = Env_config.Dashboard_config.fixtures_enabled () in

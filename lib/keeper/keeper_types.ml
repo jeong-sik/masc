@@ -114,6 +114,7 @@ type keeper_meta = {
   tool_denylist: string list;
   room_scope: string;
   mention_targets: string list;
+  room_signal_prompt_enabled: bool;
   joined_room_ids: string list;
   last_seen_seq_by_room: (string * int) list;
   proactive: proactive_policy;
@@ -410,6 +411,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
       ("room_scope", `String m.room_scope);
       ("mention_targets", `List (List.map (fun s -> `String s) m.mention_targets));
+      ("room_signal_prompt_enabled", `Bool m.room_signal_prompt_enabled);
       ("joined_room_ids", `List (List.map (fun s -> `String s) m.joined_room_ids));
       ("last_seen_seq_by_room", room_seq_map_to_json m.last_seen_seq_by_room);
       ("generation", `Int rt.generation);
@@ -549,6 +551,11 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         in
         let mention_targets =
           Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
+        in
+        let room_signal_prompt_enabled =
+          Safe_ops.json_bool
+            ~default:default_room_signal_prompt_enabled
+            "room_signal_prompt_enabled" json
         in
         let joined_room_ids =
           Safe_ops.json_string_list "joined_room_ids" json
@@ -723,6 +730,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           tool_denylist;
           room_scope;
           mention_targets;
+          room_signal_prompt_enabled;
           joined_room_ids;
           last_seen_seq_by_room;
           proactive = {

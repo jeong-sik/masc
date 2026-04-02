@@ -117,6 +117,7 @@ type keeper_meta = {
   tool_denylist: string list;
   room_scope: string;
   mention_targets: string list;
+  room_signal_prompt_enabled: bool;
   joined_room_ids: string list;
   last_seen_seq_by_room: (string * int) list;
   proactive: proactive_policy;

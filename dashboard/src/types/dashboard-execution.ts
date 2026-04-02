@@ -5,6 +5,41 @@ import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, Gov
 
 // --- Dashboard projection responses ---
 
+export interface DashboardShellMetaCognitionBelief {
+  id: string
+  claim: string
+  status: string
+  confidence?: number | null
+  support_agent_count?: number | null
+  challenge_agent_count?: number | null
+}
+
+export interface DashboardShellMetaCognitionTension {
+  id: string
+  topic: string
+  kind?: string | null
+  severity?: string | null
+  recurrence_count?: number | null
+  needs_operator?: boolean
+}
+
+export interface DashboardShellMetaCognitionDesire {
+  id: string
+  desired_state: string
+  type?: string | null
+  actionability?: string | null
+  strength?: number | null
+}
+
+export interface DashboardShellMetaCognitionSummary {
+  stagnation_score: number
+  belief_count: number
+  contested_belief_count: number
+  dominant_belief?: DashboardShellMetaCognitionBelief | null
+  top_tension?: DashboardShellMetaCognitionTension | null
+  top_desire?: DashboardShellMetaCognitionDesire | null
+}
+
 export interface DashboardShellResponse {
   generated_at?: string
   status: ServerStatus
@@ -14,6 +49,7 @@ export interface DashboardShellResponse {
     keepers?: number
   }
   providers?: Record<string, unknown>
+  meta_cognition?: DashboardShellMetaCognitionSummary | null
 }
 
 export interface DashboardRoomTruthAttentionSummary {
@@ -28,6 +64,23 @@ export interface DashboardRoomTruthRecommendationSummary {
   count: number
   provenance?: string | null
   top_action?: OperatorRecommendedAction | null
+}
+
+export interface DashboardRoomTruthMetaCognitionDigest {
+  post_id: string
+  title: string
+  created_at: string
+  updated_at?: string | null
+  hearth?: string | null
+  digest_key?: string | null
+  matches_summary?: boolean
+  provenance?: string | null
+}
+
+export interface DashboardRoomTruthMetaCognition {
+  summary?: DashboardShellMetaCognitionSummary | null
+  latest_digest?: DashboardRoomTruthMetaCognitionDigest | null
+  provenance?: string | null
 }
 
 export interface DashboardRoomTruthFocus {
@@ -64,6 +117,7 @@ export interface DashboardRoomTruthResponse {
     active_lanes?: number
     provenance?: string | null
   }
+  meta_cognition?: DashboardRoomTruthMetaCognition | null
   operator?: {
     health?: string | null
     attention_summary?: DashboardRoomTruthAttentionSummary | null

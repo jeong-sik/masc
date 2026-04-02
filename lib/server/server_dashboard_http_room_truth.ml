@@ -156,6 +156,9 @@ let broadcast_room_truth_snapshot (state : Mcp_server.server_state) : unit =
           ]
       in
       Sse.broadcast_to Observers sse_json;
+      ignore
+        (Server_meta_cognition_feedback.maybe_post_digest
+           ~config:state.Mcp_server.room_config snapshot);
       Log.Dashboard.info "room-truth snapshot pushed via SSE"
 
 let () =

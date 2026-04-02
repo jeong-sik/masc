@@ -1,5 +1,5 @@
 import type { RouteState } from './types'
-import { refreshExecution, refreshBoard, refreshGoals } from './store'
+import { refreshExecution, refreshBoard, refreshGoals, refreshShell } from './store'
 import { requestRoomTruth } from './room-truth-store'
 import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import { refreshMissionSnapshot } from './mission-store'
@@ -30,6 +30,7 @@ async function refreshGovernanceSurface(): Promise<void> {
 }
 
 export type RefreshTask =
+  | 'shell'
   | 'roomTruth'
   | 'missionSnapshot'
   | 'execution'
@@ -46,7 +47,7 @@ export type RefreshTask =
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
   switch (routeState.tab) {
     case 'overview':
-      return ['roomTruth', 'missionSnapshot']
+      return ['shell', 'roomTruth', 'missionSnapshot']
     case 'monitoring':
       if (routeState.params.section === 'activity') {
         return ['execution', 'activityGraph']
@@ -89,6 +90,7 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
 }
 
 const REFRESHERS: Record<RefreshTask, () => void> = {
+  shell: () => { void refreshShell({ force: true }) },
   roomTruth: () => { requestRoomTruth() },
   missionSnapshot: () => { void refreshMissionSnapshot() },
   execution: () => { void refreshExecution({ force: true }) },

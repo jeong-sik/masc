@@ -69,6 +69,14 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
          else p.profile_defaults.mention_targets)
       ~name:p.name
   in
+  let room_signal_prompt_enabled =
+    match keeper_room_signal_prompt_enabled_override () with
+    | Some value -> value
+    | None ->
+        Option.value
+          ~default:default_room_signal_prompt_enabled
+          p.profile_defaults.room_signal_prompt_enabled
+  in
   let (compaction_profile, compaction_ratio_gate, compaction_message_gate, compaction_token_gate) =
     resolve_compaction_policy
       ~profile_opt:p.compaction_profile_opt
@@ -161,6 +169,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     voice_agent_id =
       Option.value ~default:old.voice_agent_id p.voice_agent_id_opt;
     mention_targets;
+    room_signal_prompt_enabled;
     proactive = {
       enabled =
         Option.value

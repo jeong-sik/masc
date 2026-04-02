@@ -21,6 +21,7 @@ import type {
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
   DashboardExecutionResponse,
+  DashboardShellMetaCognitionSummary,
 } from './types'
 import {
   fetchDashboardExecution,
@@ -48,6 +49,7 @@ import {
   normalizeExecutionContinuityBrief,
   mergeMessages,
   normalizeServerStatus, mergeServerStatus,
+  normalizeShellMetaCognitionSummary,
 } from './store-normalizers'
 
 // --- Shell counts (lightweight fallback from /dashboard/shell) ---
@@ -59,6 +61,7 @@ export interface ShellCounts {
 }
 
 export const shellCounts = signal<ShellCounts | null>(null)
+export const shellMetaCognition = signal<DashboardShellMetaCognitionSummary | null>(null)
 
 // --- Core state signals ---
 
@@ -340,6 +343,7 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
           keepers: data.counts.keepers ?? 0,
         }
       }
+      shellMetaCognition.value = normalizeShellMetaCognitionSummary(data.meta_cognition)
       lastShellRefreshAt = Date.now()
     } catch (err) {
       console.warn('[Dashboard] shell fetch error:', err)

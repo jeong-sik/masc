@@ -5,10 +5,12 @@ import {
   normalizeExecutionQueueItem,
   normalizeAttentionItem,
   normalizeRecommendedAction,
+  normalizeShellMetaCognitionSummary,
 } from './store-normalizers'
 import type {
   DashboardRoomTruthAttentionSummary,
   DashboardRoomTruthFocus,
+  DashboardRoomTruthMetaCognitionDigest,
   DashboardRoomTruthRecommendationSummary,
   DashboardRoomTruthResponse,
   PendingConfirmSummary,
@@ -77,6 +79,24 @@ function normalizeRecommendationSummary(raw: unknown): DashboardRoomTruthRecomme
   }
 }
 
+function normalizeMetaCognitionDigest(raw: unknown): DashboardRoomTruthMetaCognitionDigest | null {
+  if (!isRecord(raw)) return null
+  const postId = asString(raw.post_id)
+  const title = asString(raw.title)
+  const createdAt = asString(raw.created_at)
+  if (!postId || !title || !createdAt) return null
+  return {
+    post_id: postId,
+    title,
+    created_at: createdAt,
+    updated_at: asString(raw.updated_at) ?? null,
+    hearth: asString(raw.hearth) ?? null,
+    digest_key: asString(raw.digest_key) ?? null,
+    matches_summary: asBoolean(raw.matches_summary) ?? false,
+    provenance: asString(raw.provenance) ?? null,
+  }
+}
+
 function normalizeFocus(raw: unknown): DashboardRoomTruthFocus | null {
   if (!isRecord(raw)) return null
   const label = asString(raw.label)
@@ -111,6 +131,7 @@ export function normalizeRoomTruth(raw: unknown): DashboardRoomTruthResponse {
   const roomBlock = isRecord(root.room) ? root.room : {}
   const executionBlock = isRecord(root.execution) ? root.execution : {}
   const commandBlock = isRecord(root.command) ? root.command : {}
+  const metaCognitionBlock = isRecord(root.meta_cognition) ? root.meta_cognition : {}
   const operatorBlock = isRecord(root.operator) ? root.operator : {}
   return {
     generated_at: asString(root.generated_at),
@@ -139,6 +160,11 @@ export function normalizeRoomTruth(raw: unknown): DashboardRoomTruthResponse {
       moving_lanes: asNumber(commandBlock.moving_lanes),
       active_lanes: asNumber(commandBlock.active_lanes),
       provenance: asString(commandBlock.provenance) ?? null,
+    },
+    meta_cognition: {
+      summary: normalizeShellMetaCognitionSummary(metaCognitionBlock.summary),
+      latest_digest: normalizeMetaCognitionDigest(metaCognitionBlock.latest_digest),
+      provenance: asString(metaCognitionBlock.provenance) ?? null,
     },
     operator: {
       health: asString(operatorBlock.health) ?? null,

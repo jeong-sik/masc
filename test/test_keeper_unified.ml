@@ -71,6 +71,8 @@ let base_observation : WO.world_observation =
     unclaimed_task_count = 0;
     failed_task_count = 0;
     active_agent_count = 0;
+    room_signal_interpretation = None;
+    room_signal_digest_ref = None;
     last_turn_budget = None;
   }
 
@@ -136,6 +138,9 @@ let minimal_meta : Masc_mcp.Keeper_types.keeper_meta =
   match Masc_mcp.Keeper_types.meta_of_json json with
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
+
+let room_signal_meta =
+  { minimal_meta with room_signal_prompt_enabled = true }
 
 let test_observe_uses_precollected_board_events () =
   let base_dir = temp_dir () in
@@ -204,6 +209,56 @@ let test_collect_board_events_keeps_non_mentions () =
           check bool "explicit mention false" false event.explicit_mention;
           check (list string) "matched targets empty" [] event.matched_targets
       | _ -> fail "expected exactly one board event")
+
+let test_observe_collects_room_signal_when_enabled () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      Masc_mcp.Board_dispatch.init_jsonl ();
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let create_post ~author ~title ~content =
+        match
+          Masc_mcp.Board_dispatch.create_post ~author ~title ~content
+            ~post_kind:Masc_mcp.Board.Human_post ~hearth:"ops" ()
+        with
+        | Ok post -> post
+        | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e)
+      in
+      let root =
+        create_post ~author:"admin-keeper" ~title:"RBAC blockage"
+          ~content:
+            "All masc_* tools tested return unregistered_masc_tool. \
+             Operator intervention needed. keeper_* tools function normally."
+      in
+      (match
+         Masc_mcp.Board_dispatch.add_comment
+           ~post_id:(Masc_mcp.Board.Post_id.to_string root.id)
+           ~author:"keeper-a"
+           ~content:
+             "This contradicts the uniform block hypothesis. Access may be per-agent."
+           ()
+       with
+      | Ok _ -> ()
+      | Error e -> fail ("add_comment failed: " ^ Masc_mcp.Board.show_board_error e));
+      let obs =
+        WO.observe ~pending_board_events:(Some [])
+          ~config ~meta:room_signal_meta
+      in
+      match obs.room_signal_interpretation with
+      | Some interpretation ->
+          check string "primary room signal" "contested_belief"
+            (Masc_mcp.Meta_cognition.salience_to_string
+               interpretation.primary_salience);
+          check bool "room signal carries evidence refs" true
+            (interpretation.evidence_refs <> [])
+      | None -> fail "expected room signal interpretation")
 
 let test_scheduled_turn_uses_cooldown_only () =
   let meta =
@@ -458,6 +513,82 @@ let test_prompt_room_state_section () =
        try ignore (Str.search_forward (Str.regexp_string "Room State") user 0); true
        with Not_found -> false
      in found)
+
+let test_prompt_omits_room_signal_when_flag_disabled () =
+  let interpretation : Masc_mcp.Meta_cognition.interpretation =
+    {
+      primary_salience = Masc_mcp.Meta_cognition.Contested_belief;
+      secondary_saliences = [ Masc_mcp.Meta_cognition.Operator_tension ];
+      reason = "집단 인식에 이견이 있습니다.";
+      target_id = Some "belief:masc_tools_blocked";
+      evidence_refs = [ "post:p-root"; "comment:c-1" ];
+    }
+  in
+  let obs =
+    {
+      base_observation with
+      room_signal_interpretation = Some interpretation;
+      room_signal_digest_ref =
+        Some
+          {
+            Masc_mcp.Meta_cognition.post_id = "post-digest-1";
+            title = "Digest title";
+            created_at = "2026-04-02T00:00:00Z";
+            updated_at = Some "2026-04-02T00:01:00Z";
+            hearth = Some "meta-cognition";
+            digest_key = "abc123";
+            matches_summary = true;
+          };
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  check bool "room signal section omitted" true
+    (not (contains_substring user "Room Signal Interpretation"))
+
+let test_prompt_includes_room_signal_when_flag_enabled () =
+  let interpretation : Masc_mcp.Meta_cognition.interpretation =
+    {
+      primary_salience = Masc_mcp.Meta_cognition.Contested_belief;
+      secondary_saliences =
+        [
+          Masc_mcp.Meta_cognition.Operator_tension;
+          Masc_mcp.Meta_cognition.Stagnant_room;
+        ];
+      reason = "집단 인식에 이견이 있습니다.";
+      target_id = Some "belief:masc_tools_blocked";
+      evidence_refs = [ "post:p-root"; "comment:c-1" ];
+    }
+  in
+  let obs =
+    {
+      base_observation with
+      room_signal_interpretation = Some interpretation;
+      room_signal_digest_ref =
+        Some
+          {
+            Masc_mcp.Meta_cognition.post_id = "post-digest-1";
+            title = "Digest title";
+            created_at = "2026-04-02T00:00:00Z";
+            updated_at = Some "2026-04-02T00:01:00Z";
+            hearth = Some "meta-cognition";
+            digest_key = "abc123";
+            matches_summary = true;
+          };
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta:room_signal_meta ~observation:obs in
+  check bool "room signal section included" true
+    (contains_substring user "Room Signal Interpretation");
+  check bool "room signal primary included" true
+    (contains_substring user "room_signal_primary: contested_belief");
+  check bool "room signal secondary included" true
+    (contains_substring user "room_signal_secondary: operator_tension, stagnant_room");
+  check bool "room signal evidence refs included" true
+    (contains_substring user "room_signal_evidence_refs: post:p-root, comment:c-1");
+  check bool "room signal guard included" true
+    (contains_substring user "room_signal_guard:");
+  check bool "room digest ref included" true
+    (contains_substring user "room_digest_post_id: post-digest-1")
 
 (* ---------- Config tests ---------- *)
 
@@ -914,6 +1045,8 @@ let () =
             test_observe_uses_precollected_board_events;
           test_case "collects non-mention board events" `Quick
             test_collect_board_events_keeps_non_mentions;
+          test_case "collects room signal when enabled" `Quick
+            test_observe_collects_room_signal_when_enabled;
           test_case "scheduled turn uses cooldown only" `Quick
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn respects cooldown" `Quick
@@ -952,6 +1085,10 @@ let () =
           test_case "hustle economy" `Quick test_prompt_hustle_economy;
           test_case "includes worktree delta" `Quick test_prompt_includes_worktree_delta;
           test_case "room state section" `Quick test_prompt_room_state_section;
+          test_case "omits room signal when disabled" `Quick
+            test_prompt_omits_room_signal_when_flag_disabled;
+          test_case "includes room signal when enabled" `Quick
+            test_prompt_includes_room_signal_when_flag_enabled;
           test_case "prefers silence guidance" `Quick
             test_prompt_prefers_silence_guidance;
         ] );

@@ -17,8 +17,13 @@ import { AgentAvatar } from './agent-avatar'
 import { TransportHealthPanel } from '../transport-health'
 import { PerfSnapshotPanel } from '../perf-snapshot'
 import { RouteLink } from '../common/route-link'
+import { shellMetaCognition } from '../../store'
+import { navigateToPost } from '../../router'
 import type { ObservatoryAgent } from '../../observatory-store'
-import type { DashboardMissionSessionBrief } from '../../types'
+import type {
+  DashboardMissionSessionBrief,
+  DashboardShellMetaCognitionSummary,
+} from '../../types'
 import type { ReadonlySignal } from '@preact/signals'
 
 const OVERVIEW_STALE_MS = 300_000
@@ -154,6 +159,194 @@ function HomeSectionHeader({
   `
 }
 
+function metaCognitionTone(summary: DashboardShellMetaCognitionSummary): {
+  label: string
+  className: string
+} {
+  if (summary.contested_belief_count > 0 || summary.stagnation_score >= 0.7) {
+    return {
+      label: '긴장 높음',
+      className: 'border-bad/35 bg-bad/10 text-bad-light',
+    }
+  }
+  if (summary.stagnation_score >= 0.45) {
+    return {
+      label: '정체 감지',
+      className: 'border-warn/35 bg-warn/12 text-warn',
+    }
+  }
+  return {
+    label: '안정',
+    className: 'border-ok/30 bg-ok/10 text-ok',
+  }
+}
+
+function beliefStatusLabel(status?: string | null): string {
+  switch ((status ?? '').trim().toLowerCase()) {
+    case 'contested':
+      return '이견 있음'
+    case 'corroborated':
+      return '공감대 강함'
+    case 'emerging':
+      return '형성 중'
+    default:
+      return '신호 약함'
+  }
+}
+
+function tensionSeverityLabel(severity?: string | null): string {
+  switch ((severity ?? '').trim().toLowerCase()) {
+    case 'high':
+      return '긴장 높음'
+    case 'medium':
+      return '긴장 중간'
+    case 'low':
+      return '긴장 낮음'
+    default:
+      return '긴장 관찰'
+  }
+}
+
+function desireActionabilityLabel(actionability?: string | null): string {
+  switch ((actionability ?? '').trim().toLowerCase()) {
+    case 'operator':
+      return '운영자 액션'
+    case 'operator_or_platform':
+      return '운영자/플랫폼 액션'
+    case 'operator_or_scheduler':
+      return '운영자/스케줄러 액션'
+    case 'room_or_operator':
+      return 'room/운영자 액션'
+    default:
+      return '추가 판독 필요'
+  }
+}
+
+function MetaCognitionCard() {
+  const summary = shellMetaCognition.value
+  if (!summary) return null
+
+  const tone = metaCognitionTone(summary)
+  const stagnationPct = Math.round(summary.stagnation_score * 100)
+  const belief = summary.dominant_belief
+  const tension = summary.top_tension
+  const desire = summary.top_desire
+  const hasNarrative = Boolean(belief || tension || desire)
+  const focus = roomTruth.value?.focus?.source === 'meta_cognition'
+    ? roomTruth.value.focus
+    : null
+  const latestDigest = roomTruth.value?.meta_cognition?.latest_digest ?? null
+
+  return html`
+    <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
+      <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <${HomeSectionHeader} label="집단 메타인지" />
+          <div class="text-[12px] leading-relaxed text-[var(--text-muted)]">
+            게시물, 코멘트, 태스크, 거버넌스에서 읽은 현재 공감대와 긴장.
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tone.className}">
+            ${tone.label}
+          </span>
+          <span class="rounded-full border border-card-border/60 bg-card/55 px-2.5 py-1 text-[11px] font-semibold text-[var(--text-strong)]">
+            정체 ${stagnationPct}%
+          </span>
+          ${summary.contested_belief_count > 0
+            ? html`
+                <span class="rounded-full border border-[rgba(255,196,107,0.25)] bg-[rgba(255,196,107,0.12)] px-2.5 py-1 text-[11px] font-semibold text-[#ffd78f]">
+                  이견 ${summary.contested_belief_count}
+                </span>
+              `
+            : null}
+        </div>
+      </div>
+
+      ${focus
+        ? html`
+            <div class="mb-3 rounded-xl border border-accent/20 bg-accent/8 px-3 py-2 text-[12px] text-[var(--text-body)]">
+              <span class="font-semibold text-[var(--text-strong)]">room-truth focus</span>
+              <span class="ml-2">${focus.reason}</span>
+            </div>
+          `
+        : null}
+
+      ${latestDigest
+        ? html`
+            <div class="mb-3 rounded-xl border border-card-border/50 bg-card/40 px-3 py-3">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                    최근 board digest
+                  </div>
+                  <div class="mt-1 truncate text-[13px] font-semibold text-[var(--text-strong)]">
+                    ${latestDigest.title}
+                  </div>
+                  <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
+                    <span><${TimeAgo} timestamp=${latestDigest.created_at} /></span>
+                    <span>
+                      ${latestDigest.matches_summary ? '현재 summary 반영됨' : '현재 summary 반영 대기'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="rounded-lg border border-accent/25 bg-accent/10 px-3 py-1.5 text-[12px] font-semibold text-accent transition-colors hover:bg-accent/18"
+                  onClick=${() => navigateToPost(latestDigest.post_id)}
+                >
+                  게시물 열기
+                </button>
+              </div>
+            </div>
+          `
+        : null}
+
+      ${hasNarrative
+        ? html`
+            <div class="grid grid-cols-3 gap-3 max-[960px]:grid-cols-1">
+              <div class="rounded-xl border border-card-border/50 bg-card/48 p-3">
+                <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">공감대</div>
+                <div class="mt-2 text-[13px] font-medium leading-relaxed text-[var(--text-strong)]" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">
+                  ${belief?.claim ?? '아직 강한 belief가 드러나지 않았습니다.'}
+                </div>
+                <div class="mt-2 text-[11px] text-[var(--text-muted)]">
+                  ${belief ? `${beliefStatusLabel(belief.status)} · ${belief.support_agent_count ?? 0}명 지지` : '공감대 형성 전'}
+                </div>
+              </div>
+
+              <div class="rounded-xl border border-card-border/50 bg-card/48 p-3">
+                <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">긴장</div>
+                <div class="mt-2 text-[13px] font-medium leading-relaxed text-[var(--text-strong)]" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">
+                  ${tension?.topic ?? '아직 우세한 tension이 없습니다.'}
+                </div>
+                <div class="mt-2 text-[11px] text-[var(--text-muted)]">
+                  ${tension
+                    ? `${tensionSeverityLabel(tension.severity)}${tension.needs_operator ? ' · 운영자 개입 필요' : ''}`
+                    : '긴장 신호 약함'}
+                </div>
+              </div>
+
+              <div class="rounded-xl border border-card-border/50 bg-card/48 p-3">
+                <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">욕구</div>
+                <div class="mt-2 text-[13px] font-medium leading-relaxed text-[var(--text-strong)]" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">
+                  ${desire?.desired_state ?? '아직 뚜렷한 collective desire가 없습니다.'}
+                </div>
+                <div class="mt-2 text-[11px] text-[var(--text-muted)]">
+                  ${desire ? desireActionabilityLabel(desire.actionability) : '욕구 신호 약함'}
+                </div>
+              </div>
+            </div>
+          `
+        : html`
+            <div class="rounded-xl border border-dashed border-card-border/50 bg-card/40 px-4 py-5 text-[12px] text-[var(--text-muted)]">
+              아직 room-level 서사를 만들 만큼 강한 social signal이 쌓이지 않았습니다.
+            </div>
+          `}
+    </div>
+  `
+}
+
 function renderSessionCard(s: DashboardMissionSessionBrief) {
   const { primary, secondary } = splitSessionGoal(s.goal, s.session_id)
   const creator = (s.created_by ?? '').trim()
@@ -274,6 +467,7 @@ function AgentPulse() {
 export function Overview() {
   const snap = missionSnapshot.value
   const roomHealth = snap?.summary?.room_health ?? null
+  const metaCognitionCard = MetaCognitionCard()
   const hotSessions = HotSessions()
   const agentPulse = AgentPulse()
   const journalEntries = (
@@ -288,6 +482,8 @@ export function Overview() {
       <${OverviewFreshnessStrip} />
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
       <${AttentionSpotlight} snap=${snap} />
+
+      ${metaCognitionCard}
 
       ${hotSessions
         ? html`

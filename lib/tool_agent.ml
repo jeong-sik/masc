@@ -345,6 +345,13 @@ let handle_agent_relations ctx args =
   let json = Dashboard_agent_relations.json ~agent_name:target () in
   (true, Yojson.Safe.pretty_to_string json)
 
+(** Handle masc_meta_cognition_snapshot — deterministic room-level read model. *)
+let handle_meta_cognition_snapshot ctx args =
+  let limit = get_int args "limit" 5 |> max 1 |> min 20 in
+  let hearth = get_string_opt args "hearth" in
+  let json = Meta_cognition.snapshot_json ?hearth ~limit ctx.config in
+  (true, Yojson.Safe.pretty_to_string json)
+
 (** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
 let dispatch ctx ~name ~args =
   match name with
@@ -359,6 +366,8 @@ let dispatch ctx ~name ~args =
   | "masc_consolidate_learning" -> Some (handle_consolidate_learning ctx args)
   | "masc_agent_card" -> Some (handle_agent_card ctx args)
   | "masc_agent_relations" -> Some (handle_agent_relations ctx args)
+  | "masc_meta_cognition_snapshot" ->
+      Some (handle_meta_cognition_snapshot ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_agent.schemas
@@ -367,7 +376,8 @@ let schemas = Tool_schemas_agent.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_agents"; "masc_agent_card" ]
+let _tool_spec_read_only =
+  [ "masc_agents"; "masc_agent_card"; "masc_meta_cognition_snapshot" ]
 let _tool_spec_requires_join = [ "masc_register_capabilities" ]
 
 (* Heartbeat tools are dispatched by Tool_heartbeat, not Tool_agent.

@@ -60,6 +60,17 @@ let line_block label value =
   if value = "" then ""
   else Printf.sprintf "%s: %s\n" label value
 
+let format_room_signal_salience salience =
+  Meta_cognition.salience_to_string salience
+
+let has_room_signal_section
+    (observation : Keeper_world_observation.world_observation) =
+  match observation.room_signal_interpretation with
+  | Some interpretation ->
+      interpretation.primary_salience <> Meta_cognition.Stable
+      || interpretation.secondary_saliences <> []
+  | None -> false
+
 let build_prompt ~(meta : Keeper_types.keeper_meta)
     ~(observation : Keeper_world_observation.world_observation) : string * string
     =
@@ -174,6 +185,44 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     Buffer.add_string ubuf (format_board_events observation.pending_board_events);
     Buffer.add_string ubuf "\n";
     Buffer.add_string ubuf "\n");
+  if meta.room_signal_prompt_enabled && has_room_signal_section observation then (
+    match observation.room_signal_interpretation with
+    | Some interpretation ->
+        Buffer.add_string ubuf "### Room Signal Interpretation\n";
+        Buffer.add_string ubuf
+          (Printf.sprintf "- room_signal_primary: %s\n"
+             (format_room_signal_salience interpretation.primary_salience));
+        (match interpretation.secondary_saliences with
+         | [] -> ()
+         | secondary ->
+             Buffer.add_string ubuf
+               (Printf.sprintf "- room_signal_secondary: %s\n"
+                  (secondary
+                  |> List.map format_room_signal_salience
+                  |> String.concat ", ")));
+        Buffer.add_string ubuf
+          (Printf.sprintf "- room_signal_reason: %s\n" interpretation.reason);
+        (match interpretation.target_id with
+         | Some target_id ->
+             Buffer.add_string ubuf
+               (Printf.sprintf "- room_signal_target_id: %s\n" target_id)
+         | None -> ());
+        (match interpretation.evidence_refs with
+         | [] -> ()
+         | refs ->
+             Buffer.add_string ubuf
+               (Printf.sprintf "- room_signal_evidence_refs: %s\n"
+                  (String.concat ", " refs)));
+        (match observation.room_signal_digest_ref with
+         | Some digest ->
+             Buffer.add_string ubuf
+               (Printf.sprintf "- room_digest_post_id: %s\n" digest.post_id);
+             Buffer.add_string ubuf
+               (Printf.sprintf "- room_digest_title: %s\n" digest.title)
+         | None -> ());
+        Buffer.add_string ubuf
+          "- room_signal_guard: do not call keeper_board_post or keeper_task_claim from this derived signal alone; read at least one raw board item from room_signal_evidence_refs or room_digest_post_id first.\n\n"
+    | None -> ());
   (* Context health *)
   Buffer.add_string ubuf
     (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"

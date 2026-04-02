@@ -220,6 +220,7 @@ type keeper_profile_defaults = {
   scope_kind : string option;
   mention_targets : string list;
   proactive_enabled : bool option;
+  room_signal_prompt_enabled : bool option;
   shards : string list option;
   allowed_paths : string list option;
   execution_scope : string option;
@@ -253,6 +254,7 @@ let empty_keeper_profile_defaults = {
   scope_kind = None;
   mention_targets = [];
   proactive_enabled = None;
+  room_signal_prompt_enabled = None;
   shards = None;
   allowed_paths = None;
   execution_scope = None;
@@ -358,6 +360,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         scope_kind = str "scope_kind";
         mention_targets = strs "mention_targets";
         proactive_enabled = bool_ "proactive_enabled";
+        room_signal_prompt_enabled = bool_ "room_signal_prompt_enabled";
         shards =
           (match strs "shards" with
            | [] -> None
@@ -464,6 +467,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 scope_kind = Safe_ops.json_string_opt "scope_kind" keeper_json;
                 mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
                 proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
+                room_signal_prompt_enabled =
+                  Safe_ops.json_bool_opt "room_signal_prompt_enabled" keeper_json;
                 shards =
                   (match Safe_ops.json_string_list "shards" keeper_json with
                    | [] -> None

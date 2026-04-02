@@ -1,10 +1,11 @@
-(** Coverage tests for Tool_agent — Agent management and selection
+(** Coverage tests for Tool_agent — Agent management, selection, and meta-cognition
 
     Tests dispatch routing, handler execution, helper functions, and
-    selection strategies for 11 tools: masc_agents, masc_register_capabilities,
+    selection strategies for 12 tools: masc_agents, masc_register_capabilities,
     masc_agent_update, masc_find_by_capability, masc_get_metrics,
     masc_agent_fitness, masc_select_agent, masc_collaboration_graph,
-    masc_consolidate_learning, masc_agent_card, masc_agent_relations
+    masc_consolidate_learning, masc_agent_card, masc_agent_relations,
+    masc_meta_cognition_snapshot
 *)
 module Tool_args = Masc_mcp.Tool_args
 
@@ -47,6 +48,70 @@ let dispatch_exn ctx ~name ~args =
   | Some result -> result
   | None -> failwith ("dispatch returned None for " ^ name)
 
+let save_jsonl path entries =
+  let body =
+    entries
+    |> List.map Yojson.Safe.to_string
+    |> String.concat "\n"
+  in
+  Fs_compat.save_file path (if body = "" then "" else body ^ "\n")
+
+let post_json ~id ~author ?(title = "") ?(body = "") ?hearth ?thread_id
+    ?(created_at = 1000.0) () =
+  let fields =
+    [
+      ("id", `String id);
+      ("author", `String author);
+      ("title", `String title);
+      ("body", `String body);
+      ("content", `String body);
+      ("post_kind", `String "automation");
+      ("visibility", `String "internal");
+      ("created_at", `Float created_at);
+      ("updated_at", `Float created_at);
+      ("expires_at", `Float 0.0);
+      ("votes_up", `Int 0);
+      ("votes_down", `Int 0);
+      ("reply_count", `Int 0);
+    ]
+  in
+  let fields =
+    match hearth with
+    | Some value -> ("hearth", `String value) :: fields
+    | None -> fields
+  in
+  let fields =
+    match thread_id with
+    | Some value -> ("thread_id", `String value) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+let comment_json ~id ~post_id ~author ~content ?(created_at = 1000.0) () =
+  `Assoc
+    [
+      ("id", `String id);
+      ("post_id", `String post_id);
+      ("author", `String author);
+      ("content", `String content);
+      ("created_at", `Float created_at);
+      ("expires_at", `Float 0.0);
+      ("votes_up", `Int 0);
+      ("votes_down", `Int 0);
+    ]
+
+let json_list_ids key json =
+  let open Yojson.Safe.Util in
+  json |> member key |> to_list
+  |> List.filter_map (fun item ->
+         match item |> member "id" with
+         | `String value -> Some value
+         | _ -> None)
+
+let json_member_float key json =
+  let open Yojson.Safe.Util in
+  json |> member key |> to_float
+
 (* ============================================================
    Dispatch routing tests
    ============================================================ *)
@@ -79,6 +144,15 @@ let test_dispatch_select_agent () =
   with_ctx (fun ctx ->
   let result = Tool_agent.dispatch ctx ~name:"masc_select_agent" ~args:(`Assoc []) in
   Alcotest.(check bool) "select_agent dispatches" true (result <> None);
+  )
+
+let test_dispatch_meta_cognition_snapshot () =
+  with_ctx (fun ctx ->
+  let result =
+    Tool_agent.dispatch ctx ~name:"masc_meta_cognition_snapshot"
+      ~args:(`Assoc [])
+  in
+  Alcotest.(check bool) "meta_cognition dispatches" true (result <> None);
   )
 
 (* ============================================================
@@ -268,6 +342,108 @@ let test_dispatch_agent_relations () =
   )
 
 (* ============================================================
+   Handler tests — meta_cognition_snapshot
+   ============================================================ *)
+
+let test_meta_cognition_snapshot_detects_signals () =
+  with_ctx (fun ctx ->
+  ignore (Room.join ctx.config ~agent_name:"peer" ~capabilities:[] ());
+  ignore (Room.join ctx.config ~agent_name:"observer" ~capabilities:[] ());
+  let masc_dir = Room.masc_dir ctx.config in
+  save_jsonl
+    (Filename.concat masc_dir "board_posts.jsonl")
+    [
+      post_json ~id:"p-root" ~author:"admin-keeper"
+        ~title:"RBAC blockage"
+        ~body:
+          "All masc_* tools tested return unregistered_masc_tool. \
+           Operator intervention needed. keeper_* tools function normally."
+        ~hearth:"ops" ~created_at:1000.0 ();
+      post_json ~id:"p-follow" ~author:"detail-demo"
+        ~title:"Cross-check"
+        ~body:
+          "Confirmed same unregistered_masc_tool block. This is a policy restriction."
+        ~hearth:"ops" ~thread_id:"p-root" ~created_at:1005.0 ();
+      post_json ~id:"p-idle" ~author:"detail-demo"
+        ~title:"Idle status"
+        ~body:
+          "No active tasks. backlog empty. idle and available for new work. \
+           This could be a good window to seed new tasks or run a synthetic multi-agent exercise."
+        ~hearth:"ops" ~created_at:1010.0 ();
+    ];
+  save_jsonl
+    (Filename.concat masc_dir "board_comments.jsonl")
+    [
+      comment_json ~id:"c-1" ~post_id:"p-root"
+        ~author:"audit-keeper-decision"
+        ~content:"Corroborated. This aligns with admin-keeper's finding."
+        ~created_at:1006.0 ();
+    ];
+  let ok, body =
+    Tool_agent.handle_meta_cognition_snapshot ctx (`Assoc [ ("limit", `Int 5) ])
+  in
+  Alcotest.(check bool) "snapshot succeeds" true ok;
+  let json = Yojson.Safe.from_string body in
+  let belief_ids = json_list_ids "beliefs" json in
+  let tension_ids = json_list_ids "tensions" json in
+  let desire_ids = json_list_ids "collective_desires" json in
+  let open Yojson.Safe.Util in
+  let edges = json |> member "social_edges" |> to_list in
+  let has_corroborate_edge =
+    List.exists
+      (fun edge ->
+        edge |> member "from_agent" |> to_string = "audit-keeper-decision"
+        && edge |> member "to_agent" |> to_string = "admin-keeper"
+        && edge |> member "edge_type" |> to_string = "corroborates")
+      edges
+  in
+  Alcotest.(check bool) "tool blockage belief detected" true
+    (List.mem "belief:masc_tools_blocked" belief_ids);
+  Alcotest.(check bool) "idle backlog belief detected" true
+    (List.mem "belief:idle_backlog_empty" belief_ids);
+  Alcotest.(check bool) "tool blockage tension detected" true
+    (List.mem "tension:masc_tool_blockage" tension_ids);
+  Alcotest.(check bool) "task seeding desire detected" true
+    (List.mem "desire:task_seeding" desire_ids);
+  Alcotest.(check bool) "synthetic exercise desire detected" true
+    (List.mem "desire:synthetic_exercise" desire_ids);
+  Alcotest.(check bool) "social edge extracted" true has_corroborate_edge;
+  Alcotest.(check bool) "stagnation score elevated" true
+    (json_member_float "stagnation_score" json > 0.5);
+  )
+
+let test_meta_cognition_snapshot_marks_contested_belief () =
+  with_ctx (fun ctx ->
+  let masc_dir = Room.masc_dir ctx.config in
+  save_jsonl
+    (Filename.concat masc_dir "board_posts.jsonl")
+    [
+      post_json ~id:"p-root" ~author:"admin-keeper"
+        ~title:"RBAC blockage"
+        ~body:
+          "All masc_* tools tested return unregistered_masc_tool. \
+           keeper_* tools function normally."
+        ~hearth:"ops" ~created_at:1000.0 ();
+    ];
+  save_jsonl
+    (Filename.concat masc_dir "board_comments.jsonl")
+    [
+      comment_json ~id:"c-1" ~post_id:"p-root" ~author:"keeper-a"
+        ~content:
+          "This contradicts the uniform block hypothesis. Access may be per-agent."
+        ~created_at:1010.0 ();
+    ];
+  let ok, body =
+    Tool_agent.handle_meta_cognition_snapshot ctx (`Assoc [ ("limit", `Int 5) ])
+  in
+  Alcotest.(check bool) "snapshot succeeds" true ok;
+  let json = Yojson.Safe.from_string body in
+  let contested_ids = json_list_ids "contested_beliefs" json in
+  Alcotest.(check bool) "contested belief captured" true
+    (List.mem "belief:masc_tools_blocked" contested_ids);
+  )
+
+(* ============================================================
    Schema coverage — masc_agent_relations is registered
    ============================================================ *)
 
@@ -275,6 +451,16 @@ let test_schema_agent_relations_present () =
   let schemas = Tool_agent.schemas in
   let has_it = List.exists (fun (s : Types.tool_schema) ->
     s.name = "masc_agent_relations") schemas in
+  Alcotest.(check bool) "schema registered" true has_it
+
+let test_schema_meta_cognition_snapshot_present () =
+  let schemas = Tool_agent.schemas in
+  let has_it =
+    List.exists
+      (fun (s : Types.tool_schema) ->
+        s.name = "masc_meta_cognition_snapshot")
+      schemas
+  in
   Alcotest.(check bool) "schema registered" true has_it
 
 (* ============================================================
@@ -333,6 +519,8 @@ let () =
       Alcotest.test_case "register_capabilities dispatches" `Quick test_dispatch_register_capabilities;
       Alcotest.test_case "agent_update dispatches" `Quick test_dispatch_agent_update;
       Alcotest.test_case "select_agent dispatches" `Quick test_dispatch_select_agent;
+      Alcotest.test_case "meta_cognition dispatches" `Quick
+        test_dispatch_meta_cognition_snapshot;
     ]);
     ("agents", [
       Alcotest.test_case "handle_agents" `Quick test_handle_agents;
@@ -374,6 +562,14 @@ let () =
     ("agent_relations", [
       Alcotest.test_case "dispatches" `Quick test_dispatch_agent_relations;
       Alcotest.test_case "schema present" `Quick test_schema_agent_relations_present;
+    ]);
+    ("meta_cognition_snapshot", [
+      Alcotest.test_case "detects beliefs tensions desires and edges" `Quick
+        test_meta_cognition_snapshot_detects_signals;
+      Alcotest.test_case "marks contested belief" `Quick
+        test_meta_cognition_snapshot_marks_contested_belief;
+      Alcotest.test_case "schema present" `Quick
+        test_schema_meta_cognition_snapshot_present;
     ]);
     ("helpers", [
       Alcotest.test_case "get_string present" `Quick test_get_string_present;

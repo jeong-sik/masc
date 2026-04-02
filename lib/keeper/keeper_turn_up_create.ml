@@ -70,6 +70,14 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~fallback_targets:p.profile_defaults.mention_targets
       ~name:p.name
   in
+  let room_signal_prompt_enabled =
+    match keeper_room_signal_prompt_enabled_override () with
+    | Some value -> value
+    | None ->
+        Option.value
+          ~default:default_room_signal_prompt_enabled
+          p.profile_defaults.room_signal_prompt_enabled
+  in
   if goal = "" then begin
     Log.Keeper.warn "create_keeper failed: goal is required (name=%s)" p.name;
     (false, "goal is required when creating a keeper")
@@ -217,6 +225,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         voice_channel;
         voice_agent_id;
         mention_targets;
+        room_signal_prompt_enabled;
         joined_room_ids = [];
         last_seen_seq_by_room = [];
         proactive = {

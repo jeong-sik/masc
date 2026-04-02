@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('./store', () => ({
+  refreshShell: vi.fn(),
   refreshExecution: vi.fn(),
   refreshBoard: vi.fn(),
   refreshGoals: vi.fn(),
@@ -34,7 +35,7 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'overview',
       params: {},
-    })).toEqual(['roomTruth', 'missionSnapshot'])
+    })).toEqual(['shell', 'roomTruth', 'missionSnapshot'])
   })
 
   it('uses the current monitoring sections', () => {

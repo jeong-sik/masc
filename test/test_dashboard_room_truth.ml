@@ -1,6 +1,7 @@
 (** Dashboard room truth read-model regression tests. *)
 
 module Lib = Masc_mcp
+module Feedback = Masc_mcp.Server_meta_cognition_feedback
 
 open Alcotest
 
@@ -27,6 +28,58 @@ let cleanup_dir dir =
         Sys.remove path
   in
   rm dir
+
+let save_jsonl path entries =
+  let body =
+    entries
+    |> List.map Yojson.Safe.to_string
+    |> String.concat "\n"
+  in
+  Fs_compat.save_file path (if body = "" then "" else body ^ "\n")
+
+let post_json ~id ~author ?(title = "") ?(body = "") ?hearth ?thread_id
+    ?(created_at = 1000.0) () =
+  let fields =
+    [
+      ("id", `String id);
+      ("author", `String author);
+      ("title", `String title);
+      ("body", `String body);
+      ("content", `String body);
+      ("post_kind", `String "automation");
+      ("visibility", `String "internal");
+      ("created_at", `Float created_at);
+      ("updated_at", `Float created_at);
+      ("expires_at", `Float 0.0);
+      ("votes_up", `Int 0);
+      ("votes_down", `Int 0);
+      ("reply_count", `Int 0);
+    ]
+  in
+  let fields =
+    match hearth with
+    | Some value -> ("hearth", `String value) :: fields
+    | None -> fields
+  in
+  let fields =
+    match thread_id with
+    | Some value -> ("thread_id", `String value) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+let comment_json ~id ~post_id ~author ~content ?(created_at = 1000.0) () =
+  `Assoc
+    [
+      ("id", `String id);
+      ("post_id", `String post_id);
+      ("author", `String author);
+      ("content", `String content);
+      ("created_at", `Float created_at);
+      ("expires_at", `Float 0.0);
+      ("votes_up", `Int 0);
+      ("votes_down", `Int 0);
+    ]
 
 let request target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
@@ -264,6 +317,131 @@ let test_operator_digest_shape_matches_room_truth () =
         ) expected_keys;
       ))
 
+let test_dashboard_room_truth_promotes_meta_cognition_focus () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let module Mcp_server = Lib.Mcp_server in
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let config = state.Mcp_server.room_config in
+      ignore (Lib.Room.init config ~agent_name:None);
+      let masc_dir = Lib.Room.masc_dir config in
+      save_jsonl
+        (Filename.concat masc_dir "board_posts.jsonl")
+        [
+          post_json ~id:"p-root" ~author:"admin-keeper"
+            ~title:"RBAC blockage"
+            ~body:
+              "All masc_* tools tested return unregistered_masc_tool. \
+               Operator intervention needed. keeper_* tools function normally."
+            ~hearth:"ops" ~created_at:1000.0 ();
+        ];
+      save_jsonl
+        (Filename.concat masc_dir "board_comments.jsonl")
+        [
+          comment_json ~id:"c-1" ~post_id:"p-root" ~author:"keeper-a"
+            ~content:
+              "This contradicts the uniform block hypothesis. Access may be per-agent."
+            ~created_at:1010.0 ();
+        ];
+      warm_execution_cache ();
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Server_dashboard_http.dashboard_room_truth_http_json
+            ~state ~sw ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/room-truth")
+        in
+        let open Yojson.Safe.Util in
+        check int "meta contested belief count surfaced"
+          1
+          (json |> member "meta_cognition" |> member "summary"
+           |> member "contested_belief_count" |> to_int);
+        check string "meta interpretation primary surfaced"
+          "contested_belief"
+          (json |> member "meta_cognition" |> member "interpretation"
+           |> member "primary_salience" |> to_string);
+        check string "operator attention points at meta cognition"
+          "room_meta_cognition"
+          (json |> member "operator" |> member "attention_summary" |> member "top_item"
+           |> member "target_type" |> to_string);
+        check string "focus source becomes meta cognition"
+          "meta_cognition"
+          (json |> member "focus" |> member "source" |> to_string);
+        check string "focus jumps to overview"
+          "overview"
+          (json |> member "focus" |> member "suggested_tab" |> to_string);
+        check bool "focus params stay empty for overview"
+          true
+          (json |> member "focus" |> member "suggested_params" = `Assoc []);
+      ))
+
+let test_dashboard_room_truth_exposes_latest_meta_digest () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let module Mcp_server = Lib.Mcp_server in
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let config = state.Mcp_server.room_config in
+      ignore (Lib.Room.init config ~agent_name:None);
+      let masc_dir = Lib.Room.masc_dir config in
+      save_jsonl
+        (Filename.concat masc_dir "board_posts.jsonl")
+        [
+          post_json ~id:"p-root" ~author:"admin-keeper"
+            ~title:"RBAC blockage"
+            ~body:
+              "All masc_* tools tested return unregistered_masc_tool. \
+               Operator intervention needed. keeper_* tools function normally."
+            ~hearth:"ops" ~created_at:1000.0 ();
+        ];
+      save_jsonl
+        (Filename.concat masc_dir "board_comments.jsonl")
+        [
+          comment_json ~id:"c-1" ~post_id:"p-root" ~author:"keeper-a"
+            ~content:
+              "This contradicts the uniform block hypothesis. Access may be per-agent."
+            ~created_at:1010.0 ();
+        ];
+      warm_execution_cache ();
+      Eio.Switch.run (fun sw ->
+        let first_json =
+          Lib.Server_dashboard_http.dashboard_room_truth_http_json
+            ~state ~sw ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/room-truth")
+        in
+        let posted_id =
+          match Feedback.maybe_post_digest ~config first_json with
+          | Feedback.Posted post_id -> post_id
+          | Feedback.Deduped -> fail "expected fresh digest post"
+          | Feedback.Skipped -> fail "expected digest post, got skipped"
+          | Feedback.Failed err -> failf "expected digest post, got %s" err
+        in
+        let json =
+          Lib.Server_dashboard_http.dashboard_room_truth_http_json
+            ~state ~sw ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/room-truth")
+        in
+        let open Yojson.Safe.Util in
+        check string "meta latest digest id" posted_id
+          (json |> member "meta_cognition" |> member "latest_digest"
+           |> member "post_id" |> to_string);
+        check string "meta latest digest provenance" "board"
+          (json |> member "meta_cognition" |> member "latest_digest"
+           |> member "provenance" |> to_string);
+        check bool "meta latest digest matches summary" true
+          (json |> member "meta_cognition" |> member "latest_digest"
+           |> member "matches_summary" |> to_bool);
+        check string "meta latest digest hearth" "meta-cognition"
+          (json |> member "meta_cognition" |> member "latest_digest"
+           |> member "hearth" |> to_string);
+      ))
+
 let test_room_truth_cached_snapshot_matches_http_projection_blocks () =
   let dir = test_dir () in
   Fun.protect
@@ -291,7 +469,8 @@ let test_room_truth_cached_snapshot_matches_http_projection_blocks () =
             (Yojson.Safe.to_string (http_json |> member key))
             (Yojson.Safe.to_string (cached_snapshot |> member key))
         in
-        List.iter compare_block ["room"; "execution"; "command"; "operator"; "focus"];
+        List.iter compare_block
+          ["room"; "execution"; "meta_cognition"; "command"; "operator"; "focus"];
       ))
 
 let test_dashboard_room_truth_cold_cache_falls_back_to_partial_truth () =
@@ -339,6 +518,10 @@ let () =
           test_case "mixed runtimes keep counts aligned" `Quick
             test_dashboard_room_truth_mixed_runtime_counts;
           test_case "operator digest shape matches room-truth" `Quick test_operator_digest_shape_matches_room_truth;
+          test_case "meta cognition can drive room-truth focus" `Quick
+            test_dashboard_room_truth_promotes_meta_cognition_focus;
+          test_case "meta cognition exposes latest digest" `Quick
+            test_dashboard_room_truth_exposes_latest_meta_digest;
           test_case "cached snapshot matches HTTP projection blocks" `Quick
             test_room_truth_cached_snapshot_matches_http_projection_blocks;
           test_case "expired execution warmup falls back to partial truth" `Quick

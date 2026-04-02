@@ -6,20 +6,31 @@ open Keeper_types
 let ensure_keeper_meta config name =
   match read_meta config name with
   | Ok (Some meta) ->
-    (* Re-sync proactive_enabled from persona defaults on bootstrap.
+    (* Re-sync declarative keeper flags from profile/env defaults on bootstrap.
        Persisted meta may have stale values from a previous session;
-       persona config is the source of truth for declarative settings. *)
+       persona config plus explicit env overrides are the source of truth. *)
     let defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
     let target_proactive =
       match defaults.proactive_enabled with
       | Some v -> v
       | None -> Keeper_config.default_proactive_enabled
     in
-    if meta.proactive.enabled <> target_proactive then begin
-      Log.Keeper.info "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b for %s"
-        meta.proactive.enabled target_proactive meta.name;
+    let target_room_signal_prompt_enabled =
+      match Keeper_config.keeper_room_signal_prompt_enabled_override () with
+      | Some override -> override
+      | None ->
+          Option.value ~default:Keeper_config.default_room_signal_prompt_enabled
+            defaults.room_signal_prompt_enabled
+    in
+    if meta.proactive.enabled <> target_proactive
+       || meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled then begin
+      Log.Keeper.info
+        "ensure_keeper_meta: re-syncing proactive.enabled %b -> %b, room_signal_prompt_enabled %b -> %b for %s"
+        meta.proactive.enabled target_proactive
+        meta.room_signal_prompt_enabled target_room_signal_prompt_enabled meta.name;
       let updated = { meta with
         proactive = { meta.proactive with enabled = target_proactive };
+        room_signal_prompt_enabled = target_room_signal_prompt_enabled;
         updated_at = now_iso ();
       } in
       match write_meta config updated with

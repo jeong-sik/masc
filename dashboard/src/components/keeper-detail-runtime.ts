@@ -7,7 +7,7 @@ import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { TimeAgo } from './common/time-ago'
 import { missionSnapshot } from '../mission-store'
-import type { DashboardMissionKeeperBrief, Keeper } from '../types'
+import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
 import { serverStatus } from '../store'
 import { operatorSnapshot } from '../operator-store'
 import {
@@ -21,6 +21,10 @@ import {
 } from './common/tool-audit'
 import { ToolAllowlistEditor } from './tools/tool-allowlist-editor'
 import { loadTools } from './tools/tool-state'
+import {
+  peekKeeperConfigLoadStatus,
+  peekLoadedKeeperConfig,
+} from './keeper-config-panel'
 
 const showAllowlistEditor = signal(false)
 
@@ -69,6 +73,113 @@ function missionKeeperBrief(keeper: Keeper): DashboardMissionKeeperBrief | null 
     brief.name === keeper.name
       || (brief.agent_name && keeper.agent_name && brief.agent_name === keeper.agent_name))
     ?? null
+}
+
+type KeeperConfigLoadStatus = 'idle' | 'loading' | 'loaded' | 'error' | 'other'
+
+export interface KeeperToolPolicySnapshot {
+  source: 'keeper_config' | 'loading' | 'none'
+  mode: 'preset' | 'custom' | string
+  preset: Keeper['tool_preset']
+  alsoAllow: string[]
+  customAllowlist: string[]
+  denylist: string[]
+  resolvedAllowlist: string[]
+}
+
+export function resolveKeeperToolPolicy(
+  keeperConfig: Pick<KeeperConfig, 'tools'> | null,
+  loadStatus: KeeperConfigLoadStatus,
+): KeeperToolPolicySnapshot {
+  const tools = keeperConfig?.tools
+  if (tools) {
+    return {
+      source: 'keeper_config',
+      mode: tools.tool_policy_mode,
+      preset: tools.tool_preset ?? null,
+      alsoAllow: tools.tool_also_allow ?? [],
+      customAllowlist: tools.tool_custom_allowlist ?? [],
+      denylist: tools.tool_denylist ?? [],
+      resolvedAllowlist: tools.resolved_allowlist ?? [],
+    }
+  }
+
+  if (loadStatus === 'idle' || loadStatus === 'loading') {
+    return {
+      source: 'loading',
+      mode: 'preset',
+      preset: null,
+      alsoAllow: [],
+      customAllowlist: [],
+      denylist: [],
+      resolvedAllowlist: [],
+    }
+  }
+
+  return {
+    source: 'none',
+    mode: 'preset',
+    preset: null,
+    alsoAllow: [],
+    customAllowlist: [],
+    denylist: [],
+    resolvedAllowlist: [],
+  }
+}
+
+export interface KeeperObservedToolAuditSnapshot {
+  source: 'mission_brief' | 'dashboard_summary' | 'none'
+  latestToolNames: string[]
+  latestToolCallCount: number | null
+  toolAuditSource: string | null
+  toolAuditAt: string | null
+}
+
+export function resolveKeeperObservedToolAudit(
+  keeper: Keeper,
+  missionBrief: DashboardMissionKeeperBrief | null,
+): KeeperObservedToolAuditSnapshot {
+  const hasMissionAudit =
+    missionBrief != null && (
+      (missionBrief.latest_tool_names?.length ?? 0) > 0
+      || missionBrief.latest_tool_call_count != null
+      || !!missionBrief.tool_audit_source?.trim()
+      || !!missionBrief.tool_audit_at?.trim()
+    )
+
+  if (hasMissionAudit && missionBrief) {
+    return {
+      source: 'mission_brief',
+      latestToolNames: missionBrief.latest_tool_names ?? [],
+      latestToolCallCount: missionBrief.latest_tool_call_count ?? null,
+      toolAuditSource: missionBrief.tool_audit_source ?? null,
+      toolAuditAt: missionBrief.tool_audit_at ?? null,
+    }
+  }
+
+  const hasDashboardAudit =
+    (keeper.latest_tool_names?.length ?? 0) > 0
+    || keeper.latest_tool_call_count != null
+    || !!keeper.tool_audit_source?.trim()
+    || !!keeper.tool_audit_at?.trim()
+
+  if (hasDashboardAudit) {
+    return {
+      source: 'dashboard_summary',
+      latestToolNames: keeper.latest_tool_names ?? [],
+      latestToolCallCount: keeper.latest_tool_call_count ?? null,
+      toolAuditSource: keeper.tool_audit_source ?? null,
+      toolAuditAt: keeper.tool_audit_at ?? null,
+    }
+  }
+
+  return {
+    source: 'none',
+    latestToolNames: [],
+    latestToolCallCount: null,
+    toolAuditSource: null,
+    toolAuditAt: null,
+  }
 }
 
 // ── Shared row component ─────────────────────────────────
@@ -239,6 +350,8 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
 export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   useEffect(() => { showAllowlistEditor.value = false }, [keeper.name])
 
+  const keeperConfig = peekLoadedKeeperConfig(keeper.name)
+  const configLoadStatus = peekKeeperConfigLoadStatus(keeper.name)
   const room = operatorSnapshot.value?.room ?? {}
   const actions = (operatorSnapshot.value?.available_actions ?? [])
     .filter(action => action.target_type === 'keeper' || action.target_type === 'room')
@@ -246,17 +359,13 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const recentTools = keeperRecentTools(keeper)
   const topTools = keeperTopTools(keeper)
   const missionBrief = missionKeeperBrief(keeper)
-  const allowedTools =
-    missionBrief?.allowed_tool_names && missionBrief.allowed_tool_names.length > 0
-      ? missionBrief.allowed_tool_names
-      : keeper.allowed_tool_names ?? []
-  const observedTools =
-    missionBrief?.latest_tool_names && missionBrief.latest_tool_names.length > 0
-      ? missionBrief.latest_tool_names
-      : keeper.latest_tool_names ?? []
-  const toolCallCount = missionBrief?.latest_tool_call_count ?? keeper.latest_tool_call_count
-  const auditSource = missionBrief?.tool_audit_source ?? keeper.tool_audit_source
-  const auditAt = missionBrief?.tool_audit_at ?? keeper.tool_audit_at
+  const toolPolicy = resolveKeeperToolPolicy(keeperConfig, configLoadStatus)
+  const observedAudit = resolveKeeperObservedToolAudit(keeper, missionBrief)
+  const allowedTools = toolPolicy.resolvedAllowlist
+  const observedTools = observedAudit.latestToolNames
+  const toolCallCount = observedAudit.latestToolCallCount
+  const auditSource = observedAudit.toolAuditSource
+  const auditAt = observedAudit.toolAuditAt
   const capabilities = keeper.agent?.capabilities ?? []
   const roomName = room.current_room ?? room.room_id ?? serverStatus.value?.room ?? 'default'
   const project = room.project ?? serverStatus.value?.project ?? 'N/A'
@@ -273,8 +382,20 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const skillRouteLabel =
     keeper.skill_primary
     ?? (runtimeState === 'offline' ? 'offline' : 'not_collected')
+  const policyLoading = toolPolicy.source === 'loading'
+  const policyEditable = toolPolicy.source === 'keeper_config'
+  const toolPolicyLabel =
+    policyLoading
+      ? 'loading'
+      : toolPolicy.mode === 'custom'
+        ? 'custom'
+        : toolPolicy.preset ?? 'unset'
   const allowedToolCountLabel =
-    allowedTools.length > 0 ? String(allowedTools.length) : allowlistFallback
+    allowedTools.length > 0
+      ? String(allowedTools.length)
+      : policyLoading
+        ? 'loading'
+        : allowlistFallback
   const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? recentTools[0] ?? null
 
   return html`
@@ -285,11 +406,14 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />
       <${SignalRow} label="스킬 경로" value=${skillRouteLabel} />
       <${SignalRow} label="컨텍스트 출처" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
+      <${SignalRow} label="도구 정책" value=${toolPolicyLabel} />
+      <${SignalRow} label="정책 소스" value=${toolPolicy.source} />
       <${SignalRow} label="허용 도구 수" value=${allowedToolCountLabel} />
 
       <div class="flex justify-end mt-1">
         <button type="button"
-          class="py-1.5 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer"
+          class="py-1.5 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+          disabled=${!openToolsQuery}
           onClick=${() => { openToolsInventory(openToolsQuery) }}
         >
           도구 패널 열기
@@ -299,31 +423,38 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <div class="flex items-center justify-between mt-3">
         <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">허용된 도구</span>
         <button type="button"
-          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-default"
+          disabled=${!policyEditable}
           onClick=${() => {
             showAllowlistEditor.value = !showAllowlistEditor.value
             if (showAllowlistEditor.value) loadTools()
           }}
-        >${showAllowlistEditor.value ? '닫기' : '편집'}</button>
+        >${policyLoading ? '로딩 중' : policyEditable ? (showAllowlistEditor.value ? '닫기' : '편집') : '설정 필요'}</button>
       </div>
 
-      ${showAllowlistEditor.value
+      ${showAllowlistEditor.value && policyEditable
         ? html`<${ToolAllowlistEditor}
             keeperName=${keeper.name}
-            currentMode=${keeper.tool_policy_mode ?? 'preset'}
-            currentPreset=${keeper.tool_preset ?? 'full'}
-            currentAlsoAllow=${keeper.tool_also_allow ?? []}
-            currentCustomAllowlist=${keeper.tool_custom_allowlist ?? []}
-            currentDenylist=${keeper.tool_denylist ?? []}
+            currentMode=${toolPolicy.mode}
+            currentPreset=${toolPolicy.preset ?? 'full'}
+            currentAlsoAllow=${toolPolicy.alsoAllow}
+            currentCustomAllowlist=${toolPolicy.customAllowlist}
+            currentDenylist=${toolPolicy.denylist}
             resolvedAllowlist=${allowedTools}
             onUpdated=${() => { showAllowlistEditor.value = false; loadTools() }}
           />`
         : html`
-          <span class="text-[11px] text-[var(--text-muted)] leading-snug">이 키퍼 런타임에 현재 허용된 도구.</span>
+          <span class="text-[11px] text-[var(--text-muted)] leading-snug">
+            ${policyLoading
+              ? '정적 도구 정책을 불러오는 중입니다.'
+              : policyEditable
+                ? '이 키퍼 정책에서 해석된 allowlist입니다.'
+                : '정적 도구 정책을 아직 확인할 수 없습니다.'}
+          </span>
           <div class="flex flex-wrap gap-1.5">
             ${allowedTools.length > 0
               ? allowedTools.map((tool: string) => html`<${ToolChip} name=${tool} />`)
-              : html`<span class="text-[11px] text-[var(--text-muted)] italic">${allowlistFallback}</span>`}
+              : html`<span class="text-[11px] text-[var(--text-muted)] italic">${policyLoading ? 'loading' : policyEditable ? allowlistFallback : 'config_unavailable'}</span>`}
           </div>
         `}
 
@@ -335,6 +466,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       />
 
       <${SignalRow} label="도구 호출" value=${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback} />
+      <${SignalRow} label="관측 계층" value=${observedAudit.source} />
       <${SignalRow} label="감사 출처" value=${auditSource ?? metadataFallback} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">관측 시점</span>

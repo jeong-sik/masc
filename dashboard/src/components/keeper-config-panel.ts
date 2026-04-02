@@ -145,6 +145,20 @@ export function resetKeeperConfig(): void {
   runtimeSaving.value = false
 }
 
+export function peekLoadedKeeperConfig(name: string): KeeperConfig | null {
+  const state = configState.value
+  if (configKeeperName.value !== name || state.status !== 'loaded') return null
+  return state.data
+}
+
+export function peekKeeperConfigLoadStatus(
+  name: string,
+): 'idle' | 'loading' | 'loaded' | 'error' | 'other' {
+  const state = configState.value
+  if (configKeeperName.value !== name) return 'other'
+  return state.status
+}
+
 // ── Helpers ──────────────────────────────────────────────
 
 function ConfigRow({ label, value }: { label: string; value: string }) {

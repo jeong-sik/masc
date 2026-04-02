@@ -76,7 +76,7 @@ function GuideCard({
   title: string
   count: number
   summary: string
-  command: string
+  command?: string
   docHref: string
   docLabel: string
   children?: ComponentChildren
@@ -92,10 +92,12 @@ function GuideCard({
           ${count}
         </span>
       </div>
-      <p class="text-[13px] leading-relaxed text-text-muted">${summary}</p>
-      <div class="rounded-lg border border-card-border/60 bg-white/3 px-3 py-2 text-[12px] leading-relaxed text-text-body">
-        <code class="text-[11px] text-text-strong">${command}</code>
-      </div>
+      <p class="text-[13px] leading-relaxed text-text-muted whitespace-pre-wrap">${summary}</p>
+      ${command ? html`
+        <div class="rounded-lg border border-card-border/60 bg-white/3 px-3 py-2 text-[12px] leading-relaxed text-text-body">
+          <code class="text-[11px] text-text-strong">${command}</code>
+        </div>
+      ` : null}
       ${children}
       <div class="pt-1">
         <${ExternalDocLink} href=${docHref} label=${docLabel} />
@@ -118,10 +120,10 @@ export function Planning() {
       ? '장기 목표와 backlog 상태를 함께 추적합니다'
       : 'backlog와 장기 목표를 함께 보는 조감도입니다'
   const planStatusBody = onlyBacklogActive
-    ? '태스크는 execution projection에서 정상적으로 들어오고 있습니다. 장기 목표는 자동 생성되지 않으므로, 별도로 등록해야 이 화면에 표시됩니다.'
+    ? '태스크가 등록되어 있습니다. 장기 목표를 추가하면 여기에 함께 표시됩니다.'
     : hasGoals
-      ? 'backlog와 장기 목표가 각각 다른 데이터 소스에서 들어옵니다. 지금 화면은 두 흐름을 한 번에 보여 주는 조감도입니다.'
-      : '현재 등록된 장기 목표가 없습니다. goal은 자동으로 생기지 않으므로 명시적으로 등록해야 합니다.'
+      ? '장기 목표와 태스크를 한눈에 확인합니다.'
+      : '아직 등록된 항목이 없습니다.'
 
   return html`
     <div class="flex flex-col gap-6">
@@ -130,7 +132,7 @@ export function Planning() {
           <div class="max-w-[760px]">
             <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">Planning Status</div>
             <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.02em] text-text-strong">${planStatusHeadline}</h3>
-            <p class="mt-2 text-[13px] leading-relaxed text-text-muted">${planStatusBody}</p>
+            <p class="mt-2 text-[13px] leading-relaxed text-text-muted whitespace-pre-wrap">${planStatusBody}</p>
           </div>
           <${ActionButton}
             variant="ghost"
@@ -167,9 +169,8 @@ export function Planning() {
             title="장기 목표 파이프라인"
             count=${goals.value.length}
             summary=${hasGoals
-              ? '등록된 목표를 단기/중기/장기로 나눠 추적합니다. 목표가 있어야 파이프라인이 살아 있는지 판단할 수 있습니다.'
-              : '현재 등록된 goal이 없습니다. goal은 자동으로 생기지 않으므로 명시적으로 upsert해야 합니다.'}
-            command="masc_goal_upsert(...)"
+              ? '등록된 목표를 단기/중기/장기로 나눠 추적합니다.'
+              : '등록된 목표가 없습니다. 목표를 등록하면 여기에 표시됩니다.'}
             docHref=${COMMAND_PLANE_DOC_URL}
             docLabel="Command Plane Runbook"
           />
@@ -191,8 +192,7 @@ export function Planning() {
         <div class="p-5">
           ${hasGoals ? html`
             <div class="mb-4 text-[12px] leading-relaxed text-text-muted">
-              단기/중기/장기 목표를 메트릭 기준으로 구조화해 보여 줍니다. 여기는 backlog와 별도이며,
-              <code class="rounded bg-white/5 px-1 py-0.5 text-[11px] text-text-strong">masc_goal_upsert</code>로 등록한 목표만 노출됩니다.
+              단기/중기/장기 목표를 메트릭 기준으로 구조화해 보여 줍니다.
             </div>
             <${GoalsSummary} />
             <${FilterBar} />
@@ -211,9 +211,7 @@ export function Planning() {
             <div class="rounded-xl border border-card-border/60 bg-[rgba(7,12,20,0.82)] p-4">
               <div class="text-[14px] font-semibold text-text-strong">등록된 장기 목표가 없습니다</div>
               <div class="mt-2 text-[13px] leading-relaxed text-text-muted">
-                backlog 태스크와 goal pipeline은 서로 다릅니다. 장기 계획이 필요하면
-                <code class="mx-1 rounded bg-white/5 px-1 py-0.5 text-[11px] text-text-strong">masc_goal_upsert(...)</code>
-                로 먼저 등록해야 합니다.
+                backlog 태스크와 목표 파이프라인은 별개입니다. 장기 계획이 필요하면 목표를 등록하세요.
               </div>
               <div class="mt-3 flex flex-wrap gap-2">
                 <${ExternalDocLink} href=${COMMAND_PLANE_DOC_URL} label="goal 등록 가이드" />

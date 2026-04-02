@@ -47,6 +47,12 @@ export const groupedByHorizon = computed(() => {
   return groups
 })
 
+// -- Lookups -----------------------------------------------------
+
+export function goalById(id: string): Goal | undefined {
+  return goals.value.find(g => g.id === id)
+}
+
 // -- Helpers -----------------------------------------------------
 
 export function priorityStars(n: number): string {

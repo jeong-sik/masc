@@ -4,10 +4,12 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import type { ComponentChildren } from 'preact'
 import { EmptyState } from '../common/empty-state'
+import { LoadingState } from '../common/feedback-state'
+import { ActionButton } from '../common/button'
 import { Card } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
-import { tasksByStatus, refreshExecution } from '../../store'
+import { tasksByStatus, refreshExecution, executionLoading, executionLoaded, executionError } from '../../store'
 import { deleteTask } from '../../api/actions'
 import type { Task } from '../../types'
 import { truncate } from '../../lib/truncate'
@@ -85,7 +87,6 @@ export function KanbanCard({ task }: { task: Task }) {
       <div class="flex items-start justify-between gap-3">
         <div class="flex flex-wrap items-center gap-2">
           <span class="rounded-md border border-current/20 px-2 py-0.5 text-[11px] font-semibold">${priorityLabel(p)}</span>
-          <span class="rounded-md border border-card-border/70 bg-white/5 px-2 py-0.5 text-[11px] font-mono text-text-muted">${task.id}</span>
           ${scope ? html`<span class="rounded-md border border-card-border/70 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-body">${scope}</span>` : null}
         </div>
         <button
@@ -98,11 +99,11 @@ export function KanbanCard({ task }: { task: Task }) {
         </button>
       </div>
 
-      <div class="text-[14px] font-semibold leading-snug text-text-strong">${task.title}</div>
+      <div class="text-[14px] font-semibold leading-snug text-text-strong whitespace-pre-wrap break-words">${task.title}</div>
 
       ${hasDescription ? html`
         <div class="flex flex-col gap-2">
-          <div class="text-[13px] leading-relaxed text-text-body">${preview}</div>
+          <div class="text-[13px] leading-relaxed text-text-body whitespace-pre-wrap break-words">${preview}</div>
           ${canExpand ? html`
             <button
               type="button"
@@ -165,15 +166,39 @@ function TaskColumn({
 
 export function TaskBacklog() {
   const { todo, inProgress, done } = tasksByStatus.value
+  const totalTasks = todo.length + inProgress.length + done.length
   const sortedTodo = [...todo].sort(sortByPriority)
   const sortedInProgress = [...inProgress].sort(sortByPriority)
   const sortedDone = [...done].sort(sortByTimeDesc)
 
+  const isLoading = executionLoading.value && !executionLoaded.value
+  const hasError = Boolean(executionError.value)
+  const hasData = executionLoaded.value
+
+  if (isLoading) {
+    return html`<${Card} title="태스크 백로그" class="section"><${LoadingState}>백로그 불러오는 중...<//><//>`
+  }
+
+  if (hasError && !hasData) {
+    return html`
+      <${Card} title="태스크 백로그" class="section">
+        <div class="text-center py-6">
+          <div class="text-[13px] text-bad mb-3">데이터를 불러오지 못했습니다.</div>
+          <${ActionButton} variant="ghost" size="sm" onClick=${() => refreshExecution({ force: true })}>재시도<//>
+        </div>
+      <//>
+    `
+  }
+
+  if (hasData && totalTasks === 0) {
+    return html`<${Card} title="태스크 백로그" class="section"><${EmptyState} message="등록된 태스크가 없습니다" /><//>`
+  }
+
   return html`
     <${Card} title="태스크 백로그" class="section">
-      <div class="mb-4 text-[12px] leading-relaxed text-text-muted">
-        이 backlog는 현재 room의 실행 큐입니다. 목표 파이프라인과 별도이므로, 여기만 차 있어도 아래 섹션이 비어 있을 수 있습니다.
-      </div>
+      ${hasError && hasData ? html`
+        <div class="mb-3 rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
+      ` : null}
       <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-4 items-start">
         <${TaskColumn}
           title="할 일"

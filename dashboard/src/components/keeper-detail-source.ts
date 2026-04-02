@@ -1,4 +1,4 @@
-import { missionSnapshot } from '../mission-store'
+import { missionKeeperBriefs } from '../mission-store'
 import type {
   DashboardMissionKeeperBrief,
   Keeper,
@@ -11,9 +11,7 @@ export type KeeperConfigLoadStatus = 'idle' | 'loading' | 'loaded' | 'error' | '
 export function resolveKeeperMissionBrief(
   keeper: Pick<Keeper, 'name' | 'agent_name'>,
 ): DashboardMissionKeeperBrief | null {
-  const mission = missionSnapshot.value
-  if (!mission) return null
-  return mission.keeper_briefs.find(brief =>
+  return missionKeeperBriefs.value.find(brief =>
     brief.name === keeper.name
       || (brief.agent_name && keeper.agent_name && brief.agent_name === keeper.agent_name))
     ?? null

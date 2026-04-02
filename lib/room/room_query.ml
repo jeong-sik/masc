@@ -190,9 +190,15 @@ let select_recent_message_names ~since_seq ~limit names =
     if limit <= 0 || seq <= since_seq then
       acc
     else
-      (seq, name) :: acc
-      |> List.sort (fun (a, _) (b, _) -> compare b a)
-      |> take_first limit
+      let rec insert prefix = function
+        | [] -> List.rev_append prefix [ (seq, name) ]
+        | ((existing_seq, _) as existing) :: rest ->
+            if seq >= existing_seq then
+              List.rev_append prefix ((seq, name) :: existing :: rest)
+            else
+              insert (existing :: prefix) rest
+      in
+      insert [] acc |> take_first limit
   in
   names
   |> List.fold_left

@@ -41,6 +41,14 @@ val is_keeper_denied : string -> bool
 val on_keeper_tool_call :
   (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
 
+(** Tag-based dispatch callback for masc_* tools without handler registry entries.
+    Set at server init to [Keeper_tag_dispatch.dispatch]. Default: returns None.
+    See #4579. *)
+val tag_dispatch_fn :
+  (config:Room.config -> agent_name:string ->
+   tag:Tool_dispatch.module_tag -> name:string ->
+   args:Yojson.Safe.t -> (bool * string) option) ref
+
 (** masc_* tool names available for a keeper (filtered by allowlist/denylist). *)
 val keeper_masc_tool_names : keeper_meta -> string list
 

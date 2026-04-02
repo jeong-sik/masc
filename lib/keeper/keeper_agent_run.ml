@@ -193,6 +193,7 @@ let run_turn
     ?(trajectory_acc : Trajectory.accumulator option)
     ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
     ?_priority
+    ?(is_retry = false)
     ()
   : (run_result, string) result =
   (* 0. Resolve inference parameters via Cascade_inference *)
@@ -265,14 +266,19 @@ let run_turn
       ~base_system_prompt
       ~messages:ctx_work.messages
   in
-  (* 6. Append user message and persist *)
+  (* 6. Append user message and persist.
+     On retry (is_retry=true), the user message was already persisted by the
+     first attempt.  Checkpoint reload does not include it (checkpoint is
+     written only on success), so we still append to ctx — but skip persist
+     to avoid duplicate entries in the session history file. *)
   let user_msg = Agent_sdk.Types.user_msg user_message in
   (* Capture history BEFORE appending the current user_msg.
      OAS Agent.run appends user_msg from ~goal internally, so passing it
      in initial_messages would cause duplication. *)
   let history_messages = ctx_work.messages in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
-  Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
+  if not is_retry then
+    Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
   (* 7. Set up agent *)
   let ctx_ref = ref ctx_work in
   let agent_name = Printf.sprintf "keeper-%s" meta.name in

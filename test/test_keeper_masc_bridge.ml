@@ -2,9 +2,14 @@
 
 module KET = Masc_mcp.Keeper_exec_tools
 
+let init_keeper_tool_registry () =
+  Masc_test_deps.init_keeper_tool_registry ()
+
 let prime_keeper_bridge () =
+  init_keeper_tool_registry ();
   ignore (Masc_mcp.Mcp_server_eio.get_clock_opt ());
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas
+
 
 let make_meta ?tool_access ?(tool_denylist = []) () =
   let tool_access =
@@ -34,6 +39,7 @@ let allowed_names_of_json json =
   | Error e -> failwith e
 
 let test_inject_stores_filtered_masc () =
+  init_keeper_tool_registry ();
   let schemas : Types.tool_schema list =
     [
       { name = "masc_status"; description = ""; input_schema = `Assoc [] };
@@ -72,7 +78,9 @@ let test_full_preset_exposes_masc () =
   Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
   Alcotest.(check bool) "has masc_autoresearch_cycle" true
-    (List.mem "masc_autoresearch_cycle" names)
+    (List.mem "masc_autoresearch_cycle" names);
+  Alcotest.(check bool) "filters unsupported inline tool" false
+    (List.mem "masc_who" names)
 
 let test_messaging_preset_exposes_board () =
   prime_keeper_bridge ();
@@ -154,6 +162,22 @@ let test_preset_with_also_allow_opens_extra_tool () =
     (List.mem "masc_tasks" names);
   Alcotest.(check bool) "minimal omits board post" false
     (List.mem "keeper_board_post" names)
+
+let test_custom_keeps_registered_inline_board_tool () =
+  init_keeper_tool_registry ();
+  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  let meta =
+    make_meta
+      ~tool_access:
+        (Masc_mcp.Keeper_types.Custom
+           [ "masc_board_post"; "masc_who" ])
+      ()
+  in
+  let names = KET.keeper_masc_tool_names meta in
+  Alcotest.(check bool) "keeps board handler tool" true
+    (List.mem "masc_board_post" names);
+  Alcotest.(check bool) "drops unsupported inline tool" false
+    (List.mem "masc_who" names)
 
 let test_tool_access_missing_migrates_legacy_standard_policy () =
   let names =
@@ -533,6 +557,8 @@ let () =
             test_messaging_preset_exposes_board;
           Alcotest.test_case "preset also_allow opens extra tool" `Quick
             test_preset_with_also_allow_opens_extra_tool;
+          Alcotest.test_case "custom keeps registered inline board tool" `Quick
+            test_custom_keeps_registered_inline_board_tool;
         ] );
       ( "custom_policy",
         [

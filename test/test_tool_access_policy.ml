@@ -7,6 +7,9 @@
 open Alcotest
 open Masc_mcp
 
+let init_keeper_tool_registry () =
+  Masc_test_deps.init_keeper_tool_registry ()
+
 (* ================================================================ *)
 (* Selector basics                                                   *)
 (* ================================================================ *)
@@ -475,9 +478,12 @@ let make_gate_test_meta ?(name = "test-gate") () : Keeper_types.keeper_meta =
   | Error e -> failwith (Printf.sprintf "make_gate_test_meta failed: %s" e)
 
 let test_core_tools_are_core () =
+  init_keeper_tool_registry ();
   let core = Keeper_exec_tools.core_always_tools in
   check bool "masc_status is core" true
     (List.mem "masc_status" core);
+  check bool "masc_broadcast is not core" false
+    (List.mem "masc_broadcast" core);
   check bool "masc_heartbeat is core" true
     (List.mem "masc_heartbeat" core);
   check bool "masc_tool_help is core" true
@@ -490,6 +496,7 @@ let test_core_tools_are_core () =
     (Keeper_exec_tools.is_core_always_tool "keeper_bash")
 
 let test_universe_superset_of_policy () =
+  init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
   let meta = { base with
     tool_access = Preset { preset = Minimal; also_allow = [] };
@@ -505,6 +512,7 @@ let test_universe_superset_of_policy () =
     (List.length universe >= List.length policy)
 
 let test_minimal_preset_includes_core_masc () =
+  init_keeper_tool_registry ();
   let base = make_gate_test_meta ~name:"test-minimal" () in
   let meta = { base with
     tool_access = Preset { preset = Minimal; also_allow = [] };
@@ -525,6 +533,7 @@ let test_minimal_preset_includes_core_masc () =
 (* ================================================================ *)
 
 let test_preset_universe_subset_of_global () =
+  init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
   let meta = { base with
     tool_access = Preset { preset = Coding; also_allow = [] };
@@ -540,6 +549,7 @@ let test_preset_universe_subset_of_global () =
     (List.length scoped < List.length global)
 
 let test_preset_universe_includes_core () =
+  init_keeper_tool_registry ();
   let base = make_gate_test_meta ~name:"test-scoped" () in
   let meta = { base with
     tool_access = Preset { preset = Minimal; also_allow = [] };
@@ -556,6 +566,7 @@ let test_preset_universe_includes_core () =
     (List.mem "masc_broadcast" scoped)
 
 let test_preset_universe_sizes () =
+  init_keeper_tool_registry ();
   let make preset =
     let base = make_gate_test_meta () in
     { base with
@@ -578,6 +589,7 @@ let test_preset_universe_sizes () =
     true (coding_size <= full_size)
 
 let test_preset_universe_superset_of_policy () =
+  init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
   let meta = { base with
     tool_access = Preset { preset = Coding; also_allow = [] };
@@ -589,6 +601,20 @@ let test_preset_universe_superset_of_policy () =
     List.filter (fun name -> not (List.mem name scoped)) policy
   in
   check (list string) "all policy tools in preset universe" [] missing
+
+let test_registered_inline_board_tool_survives_filter () =
+  init_keeper_tool_registry ();
+  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  let base = make_gate_test_meta ~name:"test-board-inline" () in
+  let meta = { base with
+    tool_access = Custom [ "masc_board_post"; "masc_who" ];
+    tool_denylist = [];
+  } in
+  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "board handler tool survives" true
+    (List.mem "masc_board_post" allowed);
+  check bool "unsupported inline tool removed" false
+    (List.mem "masc_who" allowed)
 
 (* ================================================================ *)
 (* Runner                                                            *)
@@ -729,6 +755,8 @@ let () =
             test_universe_superset_of_policy;
           test_case "minimal preset includes core masc" `Quick
             test_minimal_preset_includes_core_masc;
+          test_case "registered inline board tool survives filter" `Quick
+            test_registered_inline_board_tool_survives_filter;
         ] );
       (* ======================================================== *)
       (* Preset-scoped universe (#4637)                            *)

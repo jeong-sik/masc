@@ -177,6 +177,39 @@ let read_metrics_file file : task_metric list =
         None
     ) lines
 
+let safe_yield () =
+  try Eio.Fiber.yield () with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
+
+let month_key ~year ~month =
+  (year * 12) + (month - 1)
+
+let month_key_of_unix timestamp =
+  let tm = Unix.gmtime timestamp in
+  month_key ~year:(tm.Unix.tm_year + 1900) ~month:(tm.Unix.tm_mon + 1)
+
+let parse_month_key_from_filename filename =
+  if not (Filename.check_suffix filename ".jsonl") then
+    None
+  else
+    match String.split_on_char '-' (Filename.chop_suffix filename ".jsonl") with
+    | [ year_s; month_s ] -> (
+        match int_of_string_opt year_s, int_of_string_opt month_s with
+        | Some year, Some month when month >= 1 && month <= 12 ->
+            Some (month_key ~year ~month)
+        | _ -> None)
+    | _ -> None
+
+let filter_recent_month_filenames ~now ~days filenames =
+  let cutoff = now -. (float_of_int days *. 86400.0) in
+  let min_month = month_key_of_unix cutoff in
+  let max_month = month_key_of_unix now in
+  List.filter
+    (fun filename ->
+      match parse_month_key_from_filename filename with
+      | Some key -> key >= min_month && key <= max_month
+      | None -> true)
+    filenames
+
 (** Get recent metrics for an agent - synchronous *)
 let get_recent config ~agent_id ~days : task_metric list =
   let now = Time_compat.now () in
@@ -185,10 +218,19 @@ let get_recent config ~agent_id ~days : task_metric list =
   if not (Sys.file_exists dir) then
     []
   else
-    let files = Sys.readdir dir |> Array.to_list
+    let files =
+      Sys.readdir dir |> Array.to_list
       |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
-      |> List.map (fun f -> Filename.concat dir f) in
-    let all_metrics = List.concat_map read_metrics_file files in
+      |> filter_recent_month_filenames ~now ~days
+      |> List.map (fun f -> Filename.concat dir f)
+    in
+    let all_metrics =
+      List.concat_map
+        (fun file ->
+          safe_yield ();
+          read_metrics_file file)
+        files
+    in
     List.filter (fun m -> m.started_at >= cutoff) all_metrics
 
 (** Calculate aggregated metrics for fitness - synchronous *)

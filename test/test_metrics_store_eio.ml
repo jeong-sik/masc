@@ -184,6 +184,27 @@ let test_generate_id () =
   assert (String.length (List.hd ids) > 10);
   print_endline "✓ test_generate_id passed"
 
+let test_filter_recent_month_filenames () =
+  let filenames =
+    [
+      "2025-12.jsonl";
+      "2026-01.jsonl";
+      "2026-02.jsonl";
+      "2026-03.jsonl";
+      "2026-04.jsonl";
+      "notes.jsonl";
+    ]
+  in
+  let filtered =
+    Metrics_store_eio.filter_recent_month_filenames
+      ~now:1_775_091_200.0
+      ~days:7
+      filenames
+  in
+  let expected = [ "2026-03.jsonl"; "2026-04.jsonl"; "notes.jsonl" ] in
+  assert (filtered = expected);
+  print_endline "✓ test_filter_recent_month_filenames passed"
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -196,4 +217,5 @@ let () =
   test_collaborators ();
   test_handoff_tracking ();
   test_generate_id ();
-  print_endline "\n✅ All 8 Metrics_store_eio tests passed!\n"
+  test_filter_recent_month_filenames ();
+  print_endline "\n✅ All 9 Metrics_store_eio tests passed!\n"

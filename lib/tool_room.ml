@@ -206,6 +206,7 @@ let status_summary_string (ctx : context) =
   let agents_with_state =
     List.map
       (fun (agent : Types.agent) ->
+        Room_query.safe_yield ();
         let is_zombie =
           safe_is_zombie_agent ~agent_name:agent.name agent.last_seen
         in
@@ -225,6 +226,7 @@ let status_summary_string (ctx : context) =
       (fun
          (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt, cancelled_cnt)
          (task : Types.task) ->
+        Room_query.safe_yield ();
         match task.task_status with
         | Types.Todo ->
             (task :: active, todo_cnt + 1, claimed_cnt, in_progress_cnt,
@@ -328,6 +330,7 @@ let status_summary_string (ctx : context) =
   | _ ->
       List.iter
         (fun ((agent : Types.agent), is_zombie) ->
+          Room_query.safe_yield ();
           let icon = agent_status_icon ~is_zombie agent.status in
           let you_marker =
             if String.equal agent.name actual_name then " (you)" else ""
@@ -344,6 +347,7 @@ let status_summary_string (ctx : context) =
   Buffer.add_string buf "\n📋 Quest Board:\n";
   List.iter
     (fun (task : Types.task) ->
+      Room_query.safe_yield ();
       let (status_icon, status_label) = task_status_badge task.task_status in
       let assignee = task_assignee task.task_status in
       Buffer.add_string buf

@@ -14,6 +14,7 @@ describe('workerRunEvidence helpers', () => {
       trace_validated: true,
       resolved_runtime: 'local',
       resolved_model: 'qwen',
+      tool_surface_names: ['file_read', 'file_write', 'shell_exec'],
       tool_call_count: 3,
     }
 
@@ -21,7 +22,17 @@ describe('workerRunEvidence helpers', () => {
     expect(workerRunEvidenceLabel(item)).toBe('검증됨')
     expect(workerRunEvidenceMeta(item)).toContain('local')
     expect(workerRunEvidenceMeta(item)).toContain('qwen')
+    expect(workerRunEvidenceMeta(item)).toContain('surface 3')
     expect(workerRunEvidenceMeta(item)).toContain('도구 3')
+  })
+
+  it('marks missing tool surface explicitly in meta', () => {
+    const item = {
+      worker_run_id: 'worker-surface-missing',
+      tool_surface_status: 'missing',
+    }
+
+    expect(workerRunEvidenceMeta(item)).toContain('surface missing')
   })
 
   it('prefers final text preview, then falls back to errors', () => {

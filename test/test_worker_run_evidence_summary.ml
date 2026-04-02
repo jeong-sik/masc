@@ -72,6 +72,21 @@ let sample_meta ?(trace_capability = `String "raw")
       ("execution_scope", `String "limited_code_change");
       ("requested_worker_class", `String "executor");
       ("requested_worker_size", `String "lg");
+      ("tool_surface_status", `String "available");
+      ("tool_surface_source", `String "local_worker_tools");
+      ( "tool_surface_names",
+        `List
+          [
+            `String "file_read";
+            `String "file_write";
+            `String "shell_exec";
+            `String "masc_status";
+            `String "masc_team_session_step";
+          ] );
+      ( "tool_surface_masc_names",
+        `List [ `String "masc_status"; `String "masc_team_session_step" ] );
+      ( "tool_surface_shell_names",
+        `List [ `String "file_read"; `String "file_write"; `String "shell_exec" ] );
       ("resolved_runtime", `String "llama-8085");
       ("resolved_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
       ("routing_reason", `String "explicit_task_profile");
@@ -117,6 +132,19 @@ let test_status_and_dashboard_use_canonical_summary () =
   check bool "status equals canonical" true (Yojson.Safe.equal canonical status_json);
   check bool "dashboard equals canonical" true
     (Yojson.Safe.equal canonical dashboard_json)
+
+let test_summary_projects_tool_surface_visibility () =
+  let meta_json = sample_meta () in
+  let summary = Worker_run_evidence_summary.summary_json meta_json in
+  check string "tool surface status" "available"
+    U.(summary |> member "tool_surface_status" |> to_string);
+  check string "tool surface source" "local_worker_tools"
+    U.(summary |> member "tool_surface_source" |> to_string);
+  check int "tool surface count" 5
+    U.(summary |> member "tool_surface_count" |> to_int);
+  check (list string) "tool surface names"
+    [ "file_read"; "file_write"; "shell_exec"; "masc_status"; "masc_team_session_step" ]
+    U.(summary |> member "tool_surface_names" |> to_list |> List.map to_string)
 
 let test_summary_distinguishes_missing_vs_unavailable_evidence () =
   let missing_trace =
@@ -213,6 +241,8 @@ let () =
         [
           test_case "status and dashboard use canonical summary" `Quick
             test_status_and_dashboard_use_canonical_summary;
+          test_case "projects tool surface visibility" `Quick
+            test_summary_projects_tool_surface_visibility;
           test_case "distinguishes missing vs unavailable evidence" `Quick
             test_summary_distinguishes_missing_vs_unavailable_evidence;
           test_case "verify_trace returns canonical worker run summary" `Quick

@@ -176,10 +176,21 @@ export function workerRunEvidenceLabel(item: DashboardProofWorkerRunEvidence): s
 }
 
 export function workerRunEvidenceMeta(item: DashboardProofWorkerRunEvidence): string {
+  const toolSurfaceCount =
+    typeof item.tool_surface_count === 'number'
+      ? item.tool_surface_count
+      : Array.isArray(item.tool_surface_names)
+        ? item.tool_surface_names.length
+        : null
   const parts = [
     item.resolved_runtime ?? null,
     item.resolved_model ?? null,
     item.mode ?? null,
+    item.tool_surface_status === 'missing'
+      ? 'surface missing'
+      : typeof toolSurfaceCount === 'number'
+        ? `surface ${toolSurfaceCount}`
+        : null,
     typeof item.tool_call_count === 'number' ? `도구 ${item.tool_call_count}` : null,
     typeof item.record_count === 'number' ? `레코드 ${item.record_count}` : null,
   ].filter((value): value is string => Boolean(value))

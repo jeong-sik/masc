@@ -332,6 +332,12 @@ export interface DashboardProofWorkerRunEvidence {
   execution_scope?: string | null
   requested_worker_class?: string | null
   requested_worker_size?: string | null
+  tool_surface_status?: string | null
+  tool_surface_source?: string | null
+  tool_surface_names?: string[]
+  tool_surface_masc_names?: string[]
+  tool_surface_shell_names?: string[]
+  tool_surface_count?: number | null
   resolved_runtime?: string | null
   resolved_model?: string | null
   routing_reason?: string | null

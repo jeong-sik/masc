@@ -176,3 +176,94 @@ let handle_set_param ~submit_petition ctx args =
                Printf.sprintf "Set %s = %s (low-risk, applied immediately)"
                  param_key (Yojson.Safe.to_string value))
         end
+
+let handle_clear_param ~submit_petition ctx args =
+  let param_key = get_string args "param_key" "" |> String.trim in
+  let reason = get_string args "reason" "" in
+  if param_key = "" then (false, "param_key is required")
+  else
+    let risk =
+      Governance_registry.surfaces
+      |> List.find_opt (fun (s : Governance_registry.surface) ->
+           List.mem param_key s.param_keys)
+      |> Option.map (fun (s : Governance_registry.surface) -> s.risk)
+      |> Option.value ~default:"low"
+    in
+    if risk = "high" then
+      let title =
+        Printf.sprintf "Clear %s to default%s" param_key
+          (if reason <> "" then " (" ^ reason ^ ")" else "")
+      in
+      let petition_args =
+        `Assoc [
+          ("title", `String title);
+          ("origin", `String "agent");
+          ("subject_type", `String "param_change");
+          ("risk_class", `String "high");
+          ("requested_action", `Assoc [
+            ("action_type", `String "clear_param");
+            ("payload", `Assoc [("param_key", `String param_key)]);
+          ]);
+          ("source_refs", `List [`String param_key]);
+        ]
+      in
+      let (ok, msg) = submit_petition ctx petition_args in
+      if ok then
+        (true, Printf.sprintf "High-risk parameter. Governance petition created.\n%s" msg)
+      else
+        (false, Printf.sprintf "Failed to create governance petition: %s" msg)
+    else begin
+      let old_value =
+        match Runtime_params.registry ()
+              |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+        | Some (_, current, _, _, _) -> current
+        | None -> `Null
+      in
+      match Runtime_params.clear_by_key param_key with
+      | Error msg -> (false, Printf.sprintf "clear_param failed: %s" msg)
+      | Ok () ->
+          let new_value =
+            match Runtime_params.registry ()
+                  |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+            | Some (_, _, default, _, _) -> default
+            | None -> `Null
+          in
+          Runtime_params.persist ~base_path:ctx.base_path;
+          Runtime_params.record_audit ~base_path:ctx.base_path
+            ~key:param_key ~old_value ~new_value ~actor:ctx.agent_name ();
+          Sse.broadcast
+            (`Assoc [
+              ("type", `String "governance_param_changed");
+              ("param_key", `String param_key);
+              ("old_value", old_value);
+              ("new_value", new_value);
+              ("actor", `String ctx.agent_name);
+            ]);
+          (true, Printf.sprintf "Cleared %s to default (low-risk, applied immediately)" param_key)
+    end
+
+let handle_prompt_override ctx args =
+  let key = get_string args "key" "" |> String.trim in
+  let action = get_string args "action" "set" in
+  if key = "" then (false, "key is required")
+  else
+    match action with
+    | "clear" ->
+      Prompt_registry.clear_prompt_override key;
+      (try Prompt_registry.persist_overrides ctx.base_path
+       with exn ->
+         Log.Pages.warn "prompt override persist (clear) failed: %s"
+           (Printexc.to_string exn));
+      (true, Printf.sprintf "Prompt override cleared for %s" key)
+    | "set" | _ ->
+      let value = get_string args "value" "" in
+      if value = "" then (false, "value is required when action is 'set'")
+      else
+        match Prompt_registry.set_override key value with
+        | Error msg -> (false, msg)
+        | Ok () ->
+          (try Prompt_registry.persist_overrides ctx.base_path
+           with exn ->
+             Log.Pages.warn "prompt override persist (set) failed: %s"
+               (Printexc.to_string exn));
+          (true, Printf.sprintf "Prompt override set for %s" key)

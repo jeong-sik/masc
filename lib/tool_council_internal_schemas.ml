@@ -256,4 +256,49 @@ Use masc_runtime_params to list available keys and their risk class.";
       ("required", `List [`String "param_key"; `String "value"]);
     ];
   };
+  {
+    name = "masc_clear_param";
+    description = "Reset a runtime parameter to its default value. Low-risk params clear immediately. \
+High-risk params create a governance petition requiring council approval. \
+Use masc_runtime_params to list available keys and current overrides.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("param_key", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Parameter key to reset to default. Use masc_runtime_params to list available keys.");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Why this reset is needed (recorded in audit log)");
+        ]);
+      ]);
+      ("required", `List [`String "param_key"]);
+    ];
+  };
+  {
+    name = "masc_prompt_override";
+    description = "Set or clear a prompt template override. Action 'set' overrides the template with the given value. \
+Action 'clear' removes the override, restoring the default. Changes are persisted to .masc/prompt_overrides.json. \
+Use GET /api/v1/prompts to see available prompt keys and current values.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("key", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Prompt template key to override or clear");
+        ]);
+        ("action", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "set"; `String "clear"]);
+          ("description", `String "Action to perform: 'set' to override, 'clear' to restore default");
+        ]);
+        ("value", `Assoc [
+          ("type", `String "string");
+          ("description", `String "New prompt template value (required when action is 'set')");
+        ]);
+      ]);
+      ("required", `List [`String "key"; `String "action"]);
+    ];
+  };
 ]

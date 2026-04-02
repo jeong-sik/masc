@@ -98,6 +98,7 @@ let all_known_tool_names =
     "masc_circuit_status";
     "masc_claim_next";
     "masc_cleanup_zombies";
+    "masc_clear_param";
     "masc_code_delete";
     "masc_code_edit";
     "masc_code_git";
@@ -241,6 +242,7 @@ let all_known_tool_names =
     "masc_portal_send";
     "masc_portal_status";
     "masc_progress";
+    "masc_prompt_override";
     "masc_recall_search";
     "masc_register_capabilities";
     "masc_reject";

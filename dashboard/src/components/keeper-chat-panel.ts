@@ -13,6 +13,8 @@ import { asString, isRecord } from './common/normalize'
 import { showToast } from './common/toast'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import type { KeeperConversationEntry } from '../types'
+import { shellAuthSummary } from '../store'
+import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -155,6 +157,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
   const buffer = streamBuffer.value
   const isStreaming = streaming.value
   const entries = messages.map((msg, index) => toConversationEntry(name, msg, index))
+  const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
   const transcriptEntries =
     isStreaming && buffer
       ? [
@@ -192,6 +195,9 @@ export function KeeperChatPanel({ name }: { name: string }) {
       </div>
 
       <div class="px-4 py-4">
+        ${chatAccess.message
+          ? html`<div class="mb-4 rounded-[18px] border border-[rgba(245,158,11,0.18)] bg-[rgba(245,158,11,0.08)] px-3 py-2.5 text-[12px] leading-[1.6] text-[#f4d79e]">${chatAccess.message}</div>`
+          : null}
         <${ChatTranscript}
           entries=${transcriptEntries}
           emptyText="직접 프롬프트를 보내 키퍼 대화를 시작하세요."
@@ -206,12 +212,18 @@ export function KeeperChatPanel({ name }: { name: string }) {
       <div class="border-t border-[rgba(148,163,184,0.12)] bg-[rgba(255,255,255,0.03)] px-4 py-4">
         <${ChatComposer}
           draft=${chatInput.value}
-          placeholder="메시지 입력..."
-          disabled=${false}
+          placeholder=${chatAccess.blocked ? '현재 actor는 direct keeper chat 권한이 없습니다' : '메시지 입력...'}
+          disabled=${chatAccess.blocked}
           streaming=${isStreaming}
           streamStartedAt=${streamStartedAt.value}
           onDraftChange=${(value: string) => { chatInput.value = value }}
-          onSend=${() => { void sendChat(name) }}
+          onSend=${() => {
+            if (chatAccess.blocked) {
+              showToast(chatAccess.message ?? '직접 통신 권한이 없습니다.', 'error')
+              return
+            }
+            void sendChat(name)
+          }}
           onAbort=${cancelStream}
         />
       </div>

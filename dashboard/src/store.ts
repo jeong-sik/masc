@@ -21,6 +21,7 @@ import type {
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
   DashboardExecutionResponse,
+  DashboardShellAuthSummary,
   DashboardShellMetaCognitionSummary,
 } from './types'
 import {
@@ -62,6 +63,7 @@ export interface ShellCounts {
 
 export const shellCounts = signal<ShellCounts | null>(null)
 export const shellMetaCognition = signal<DashboardShellMetaCognitionSummary | null>(null)
+export const shellAuthSummary = signal<DashboardShellAuthSummary | null>(null)
 
 // --- Core state signals ---
 
@@ -325,6 +327,21 @@ function applyPlanningEnvelope(data: {
     .filter((row): row is Goal => row !== null)
 }
 
+function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | null {
+  if (!isRecord(raw)) return null
+  return {
+    enabled: raw.enabled === true,
+    require_token: raw.require_token === true,
+    default_role: asString(raw.default_role) ?? null,
+    token_present: raw.token_present === true,
+    requested_agent: asString(raw.requested_agent) ?? null,
+    effective_agent: asString(raw.effective_agent) ?? null,
+    effective_role: asString(raw.effective_role) ?? null,
+    can_keeper_msg: raw.can_keeper_msg === true,
+    keeper_msg_error: asString(raw.keeper_msg_error) ?? null,
+  }
+}
+
 export async function refreshShell(opts?: RefreshOptions): Promise<void> {
   if (inflightShellRefresh) return inflightShellRefresh
   if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return
@@ -344,6 +361,7 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
         }
       }
       shellMetaCognition.value = normalizeShellMetaCognitionSummary(data.meta_cognition)
+      shellAuthSummary.value = normalizeShellAuthSummary(data.auth)
       lastShellRefreshAt = Date.now()
     } catch (err) {
       console.warn('[Dashboard] shell fetch error:', err)

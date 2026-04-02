@@ -40,6 +40,18 @@ export interface DashboardShellMetaCognitionSummary {
   top_desire?: DashboardShellMetaCognitionDesire | null
 }
 
+export interface DashboardShellAuthSummary {
+  enabled: boolean
+  require_token: boolean
+  default_role?: string | null
+  token_present: boolean
+  requested_agent?: string | null
+  effective_agent?: string | null
+  effective_role?: string | null
+  can_keeper_msg: boolean
+  keeper_msg_error?: string | null
+}
+
 export interface DashboardShellResponse {
   generated_at?: string
   status: ServerStatus
@@ -50,6 +62,7 @@ export interface DashboardShellResponse {
   }
   providers?: Record<string, unknown>
   meta_cognition?: DashboardShellMetaCognitionSummary | null
+  auth?: DashboardShellAuthSummary | null
 }
 
 export interface DashboardRoomTruthAttentionSummary {

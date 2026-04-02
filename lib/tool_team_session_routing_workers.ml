@@ -35,13 +35,6 @@ let parse_spawn_spec_from_object ?(default_timeout = 300)
         Team_session_types.worker_class_of_string
           (String.lowercase_ascii (String.trim raw)))
   in
-  let get_optional_worker_size key =
-    Option.bind
-      (get_optional_string key)
-      (fun raw ->
-        Team_session_types.worker_size_of_string
-          (String.lowercase_ascii (String.trim raw)))
-  in
   let get_optional_execution_scope key =
     Option.map
       Team_session_types.execution_scope_of_string
@@ -142,15 +135,12 @@ let parse_spawn_spec_from_object ?(default_timeout = 300)
           thinking_budget = policy_int "thinking_budget";
           max_turns = policy_int "max_turns";
           worker_class = get_optional_worker_class "worker_class";
-          worker_size = get_optional_worker_size "worker_size";
           parent_actor = get_optional_string "parent_actor";
           capsule_mode = get_optional_capsule_mode "capsule_mode";
           runtime_pool = get_optional_string "runtime_pool";
           lane_id = get_optional_string "lane_id";
           control_domain = get_optional_control_domain "control_domain";
           supervisor_actor = get_optional_string "supervisor_actor";
-          model_tier = None;
-          model_tier_explicit = false;
           task_profile = get_optional_task_profile "task_profile";
           risk_level = get_optional_risk_level "risk_level";
           routing_confidence = get_optional_float "routing_confidence";
@@ -256,12 +246,6 @@ let parse_step_spawn_specs args =
                       (fun raw ->
                         Team_session_types.worker_class_of_string
                           (String.lowercase_ascii (String.trim raw)));
-                  worker_size =
-                    Option.bind
-                      (get_string_opt args "worker_size")
-                      (fun raw ->
-                        Team_session_types.worker_size_of_string
-                          (String.lowercase_ascii (String.trim raw)));
                   parent_actor = get_string_opt args "parent_actor";
                   capsule_mode =
                     Option.bind
@@ -278,8 +262,6 @@ let parse_step_spawn_specs args =
                         Team_session_types.control_domain_of_string
                           (String.lowercase_ascii (String.trim raw)));
                   supervisor_actor = get_string_opt args "supervisor_actor";
-                  model_tier = None;
-                  model_tier_explicit = false;
                   task_profile =
                     Option.bind
                       (get_string_opt args "task_profile")
@@ -321,7 +303,6 @@ let planned_worker_of_spec ?runtime_actor (spec : spawn_spec) :
     controller_level = inferred_controller_level_of_spec spec;
     control_domain = spec.control_domain;
     supervisor_actor = spec.supervisor_actor;
-    model_tier = spec.model_tier;
     task_profile = spec.task_profile;
     risk_level = spec.risk_level;
     routing_confidence = spec.routing_confidence;
@@ -401,12 +382,6 @@ let register_planned_workers config session_id workers =
                 |> Team_session_types.counts_to_json );
               ( "control_domain_counts",
                 Team_session_types.control_domain_counts updated.planned_workers
-                |> Team_session_types.counts_to_json );
-              ( "tier_counts",
-                Team_session_types.model_tier_counts updated.planned_workers
-                |> Team_session_types.counts_to_json );
-              ( "worker_size_counts",
-                Team_session_types.worker_size_counts updated.planned_workers
                 |> Team_session_types.counts_to_json );
               ( "task_profile_counts",
                 Team_session_types.task_profile_counts updated.planned_workers

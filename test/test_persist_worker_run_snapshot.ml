@@ -104,7 +104,6 @@ let with_snapshot_env f =
             (fun ~session_id:_ ~prompt:_ -> "unused-worker");
           is_local_spawn_agent = (fun _ -> false);
           effective_execution_scope_of_spec = (fun _ -> None);
-          worker_size_of_spec = (fun _ -> None);
           inferred_controller_level_of_spec = (fun _ -> None);
           planned_worker_of_spec =
             (fun ?runtime_actor:_ _ ->

@@ -227,7 +227,7 @@ let test_step_spawn_requires_proc_mgr () =
   ignore (wait_until_terminal ctx session_id);
   cleanup_dir base_dir
 
-let test_step_spawn_default_local_allows_worker_size_without_spawn_model () =
+let test_step_spawn_default_local_without_spawn_model () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -250,7 +250,6 @@ let test_step_spawn_default_local_allows_worker_size_without_spawn_model () =
             ("spawn_prompt", `String "normalize evidence into strict JSON schema");
             ("spawn_role", `String "normalizer");
             ("worker_class", `String "executor");
-            ("worker_size", `String "lg");
             ("spawn_selection_note", `String selection_note);
           ])
   in
@@ -287,12 +286,6 @@ let test_step_spawn_default_local_allows_worker_size_without_spawn_model () =
   in
   Alcotest.(check (option string)) "worker backend" (Some "local")
     worker_backend;
-  let worker_size =
-    detail |> Yojson.Safe.Util.member "worker_size"
-    |> Yojson.Safe.Util.to_string_option
-  in
-  Alcotest.(check (option string)) "worker size in event" (Some "lg")
-    worker_size;
   let attached_events =
     Team_session_store.read_events config session_id
     |> List.filter (fun json ->
@@ -313,9 +306,6 @@ let test_step_spawn_default_local_allows_worker_size_without_spawn_model () =
     (Some "limited_code_change")
     (Option.map Team_session_types.execution_scope_to_string
        worker.execution_scope);
-  Alcotest.(check (option string)) "tier falls back when middle model is unavailable"
-    (Some "35b")
-    (Option.map Team_session_types.model_tier_to_string worker.model_tier);
   let recorded_selection_note =
     detail |> Yojson.Safe.Util.member "spawn_selection_note"
     |> Yojson.Safe.Util.to_string_option
@@ -370,7 +360,7 @@ let test_step_rejects_legacy_spawn_fields () =
   Alcotest.(check bool) "legacy spawn field rejected" false ok;
   let json = parse_json_exn body in
   Alcotest.(check string) "legacy spawn error"
-    "spawn_agent is no longer supported in masc_team_session_step; use spawn_prompt, spawn_role, worker_class, and worker_size"
+    "spawn_agent is no longer supported in masc_team_session_step; use spawn_prompt, spawn_role, and worker_class"
     (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
   cleanup_dir base_dir
 
@@ -408,7 +398,7 @@ let test_step_rejects_legacy_batch_spawn_fields () =
   Alcotest.(check bool) "legacy batch field rejected" false ok;
   let json = parse_json_exn body in
   Alcotest.(check string) "legacy batch error"
-    "spawn_batch[0].spawn_model is no longer supported in masc_team_session_step; use spawn_prompt, spawn_role, worker_class, and worker_size"
+    "spawn_batch[0].spawn_model is no longer supported in masc_team_session_step; use spawn_prompt, spawn_role, and worker_class"
     (json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string);
   cleanup_dir base_dir
 

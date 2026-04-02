@@ -78,7 +78,7 @@ let make_session
   }
 
 let make_worker_card
-    ?(status = "running") ?(model_tier = None) ?(risk_level = None) () :
+    ?(status = "running") ?(risk_level = None) () :
     Operator_digest_types.worker_card =
   {
     actor = Some "worker-1";
@@ -94,7 +94,6 @@ let make_worker_card
     controller_level = None;
     control_domain = None;
     supervisor_actor = None;
-    model_tier;
     task_profile = None;
     risk_level;
     routing_confidence = None;
@@ -157,29 +156,13 @@ let test_drift_no_workers () =
 let test_drift_consistent_tiers () =
   let cards =
     [
-      make_worker_card ~model_tier:(Some "opus") ();
-      make_worker_card ~model_tier:(Some "opus") ();
+      make_worker_card ();
+      make_worker_card ();
     ]
   in
   let session = make_session ~model_cascade:[ "opus" ] () in
   let result = Risk_digest.compute ~session ~worker_cards:cards in
   Alcotest.(check int) "no drift" 0 (List.length result.drift_risk)
-
-let test_drift_inconsistent_tiers () =
-  let cards =
-    [
-      make_worker_card ~model_tier:(Some "opus") ();
-      make_worker_card ~model_tier:(Some "sonnet") ();
-    ]
-  in
-  let session = make_session ~model_cascade:[ "opus" ] () in
-  let result = Risk_digest.compute ~session ~worker_cards:cards in
-  Alcotest.(check bool) "has drift signal" true (List.length result.drift_risk > 0);
-  match result.drift_risk with
-  | Risk_digest.Model_tier_inconsistency { expected; actual } :: _ ->
-      Alcotest.(check string) "expected opus" "opus" expected;
-      Alcotest.(check int) "2 unique tiers" 2 (List.length actual)
-  | _ -> Alcotest.fail "expected Model_tier_inconsistency"
 
 (* --- Unsafe edit risk tests --- *)
 
@@ -233,7 +216,6 @@ let test_ambiguity_no_contract_multi_worker () =
       controller_level = None;
       control_domain = None;
       supervisor_actor = None;
-      model_tier = None;
       task_profile = None;
       risk_level = None;
       routing_confidence = None;
@@ -286,8 +268,6 @@ let () =
         [
           Alcotest.test_case "no workers" `Quick test_drift_no_workers;
           Alcotest.test_case "consistent tiers" `Quick test_drift_consistent_tiers;
-          Alcotest.test_case "inconsistent tiers" `Quick
-            test_drift_inconsistent_tiers;
         ] );
       ( "unsafe_edit_risk",
         [

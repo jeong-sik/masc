@@ -12,7 +12,6 @@ type evidence_gap = {
 (** Compares delivery_contract.required_artifacts against evidence_refs. *)
 
 type drift_signal =
-  | Model_tier_inconsistency of { expected : string; actual : string list }
   | Cascade_length_change of { original : int; current : int }
 (** Structural drift signals from session metadata. *)
 

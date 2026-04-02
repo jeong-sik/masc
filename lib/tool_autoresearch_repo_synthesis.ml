@@ -36,7 +36,6 @@ let repo_synthesis_planned_workers ~max_workers =
       controller_level = Some Team_session_types.Controller_worker;
       control_domain = Some control_domain;
       supervisor_actor = None;
-      model_tier = None;
       task_profile = Some task_profile;
       risk_level = Some Team_session_types.Risk_low;
       routing_confidence = Some 0.8;

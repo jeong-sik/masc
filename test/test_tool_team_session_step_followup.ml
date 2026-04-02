@@ -55,7 +55,6 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
                         [
                           ("spawn_role", `String "explicit-manager");
                           ("worker_class", `String "manager");
-                          ("worker_size", `String "xlg");
                           ("lane_id", `String "lane-z");
                           ("control_domain", `String "quality");
                           ("supervisor_actor", `String "ctrl-custom");
@@ -66,7 +65,6 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
                         [
                           ("spawn_role", `String "explicit-worker");
                           ("worker_class", `String "executor");
-                          ("worker_size", `String "sm");
                           ("lane_id", `String "lane-q");
                           ("control_domain", `String "execution");
                           ("supervisor_actor", `String "ctrl-worker-custom");
@@ -85,10 +83,6 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
             worker.Team_session_types.spawn_role = Some "explicit-manager")
           session.planned_workers
       in
-      Alcotest.(check (option string)) "manager tier follows worker size"
-        (Some "35b")
-        (Option.map Team_session_types.model_tier_to_string
-           explicit_manager.model_tier);
       Alcotest.(check (option string)) "manager keeps explicit lane"
         (Some "lane-z") explicit_manager.lane_id;
       Alcotest.(check (option string)) "manager keeps explicit supervisor"
@@ -99,10 +93,6 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
             worker.Team_session_types.spawn_role = Some "explicit-worker")
           session.planned_workers
       in
-      Alcotest.(check (option string)) "worker tier follows worker size"
-        (Some "9b")
-        (Option.map Team_session_types.model_tier_to_string
-           explicit_worker.model_tier);
       Alcotest.(check (option string)) "worker keeps explicit lane"
         (Some "lane-q") explicit_worker.lane_id;
       Alcotest.(check (option string)) "worker keeps explicit supervisor"

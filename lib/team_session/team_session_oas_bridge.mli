@@ -10,7 +10,7 @@
     [planned_worker] record as JSON per worker.
     Metadata-only at the OAS boundary: 18 fields (runtime_actor,
     thinking_enabled/budget, timeout_seconds, capsule_mode, lane_id,
-    controller_level, control_domain, supervisor_actor, model_tier,
+    controller_level, control_domain, supervisor_actor,
     task_profile, risk_level, routing_confidence/reason/escalated, etc.).
 
     {b session (47 fields) -> swarm_config (12 fields)}

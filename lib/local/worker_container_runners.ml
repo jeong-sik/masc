@@ -21,7 +21,7 @@ let default_shell_tool_names execution_scope =
       [ "file_read"; "file_write"; "shell_exec" ]
 
 let build_execution_spec ~base_path ~worker_name ~model_label ~team_session_id
-    ?working_dir ?worker_class ?worker_size ?execution_scope
+    ?working_dir ?worker_class ?execution_scope
     ?thinking_enabled ~max_turns ?worker_run_id ?delivery_contract
     ?allowed_shell_tools ~role ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) () =
@@ -32,7 +32,6 @@ let build_execution_spec ~base_path ~worker_name ~model_label ~team_session_id
     team_session_id;
     working_dir;
     worker_class;
-    worker_size;
     execution_scope;
     thinking_enabled;
     max_turns;
@@ -205,7 +204,7 @@ let preflight_spawn_batch ?clock_opt specs =
   | _ -> Worker_runtime_docker.preflight_batch ?clock_opt docker_specs
 
 let run_worker ~sw ?net ~backend ~base_path ~worker_name ~model_label
-    ~team_session_id ~room_config ?working_dir ?worker_class ?worker_size
+    ~team_session_id ~room_config ?working_dir ?worker_class
     ?execution_scope ?thinking_enabled ?allowed_shell_tools ?max_turns
     ?worker_run_id ?delivery_contract ~role ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
@@ -213,7 +212,7 @@ let run_worker ~sw ?net ~backend ~base_path ~worker_name ~model_label
   let max_turns = Option.value ~default:10 max_turns in
   let spec =
     build_execution_spec ~base_path ~worker_name ~model_label
-      ~team_session_id ?working_dir ?worker_class ?worker_size
+      ~team_session_id ?working_dir ?worker_class
       ?execution_scope ?thinking_enabled ~max_turns ?worker_run_id
       ?delivery_contract ?allowed_shell_tools ~role ~selection_note ~prompt
       ~allowed_tools ~timeout_sec ()

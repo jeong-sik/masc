@@ -115,14 +115,6 @@ let worker_profiles_of_scope scope =
   | Team_session_types.Autonomous ->
       (Profile_session_dev, Shell_dev)
 
-let derive_effective_tier worker_size _model_id =
-  match worker_size with
-  | Some size -> Team_session_types.model_tier_of_worker_size size
-  | None -> None
-
-let effective_worker_size worker_size _model_id =
-  worker_size
-
 let worker_meta_to_yojson (meta : worker_container_meta) =
   `Assoc
     [
@@ -150,17 +142,7 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
           ~some:(fun kind ->
             `String (Team_session_types.worker_class_to_string kind))
           meta.worker_class );
-      ( "worker_size",
-        Option.fold ~none:`Null
-          ~some:(fun size ->
-            `String (Team_session_types.worker_size_to_string size))
-          meta.worker_size );
       ("effective_model", `String meta.effective_model);
-      ( "effective_tier",
-        Option.fold ~none:`Null
-          ~some:(fun tier ->
-            `String (Team_session_types.model_tier_to_string tier))
-          meta.effective_tier );
       ("checkpoint_path", `String meta.checkpoint_path);
       ("turn_log_path", `String meta.turn_log_path);
       ( "last_run_at",
@@ -225,21 +207,9 @@ let worker_meta_of_yojson json =
                     Team_session_types.worker_class_of_string
                       (String.lowercase_ascii (String.trim value))
                 | None -> None);
-              worker_size =
-                (match json |> member "worker_size" |> to_string_option with
-                | Some value ->
-                    Team_session_types.worker_size_of_string
-                      (String.lowercase_ascii (String.trim value))
-                | None -> None);
               effective_model =
                 json |> member "effective_model" |> to_string_option
                 |> Option.value ~default:"";
-              effective_tier =
-                (match json |> member "effective_tier" |> to_string_option with
-                | Some value ->
-                    Team_session_types.model_tier_of_string
-                      (String.lowercase_ascii (String.trim value))
-                | None -> None);
               checkpoint_path =
                 json |> member "checkpoint_path" |> to_string_option
                 |> Option.value ~default:"";
@@ -461,10 +431,9 @@ let oas_tool_names (tools : Oas.Tool.t list) =
 
 let make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
     ~mcp_session_id ~role ~selection_note ~execution_scope ~worker_class
-    ~worker_size ~effective_model ~thinking_enabled ~max_turns_override
+    ~effective_model ~thinking_enabled ~max_turns_override
     ~timeout_seconds =
   let tool_profile, shell_profile = worker_profiles_of_scope execution_scope in
-  let effective_tier = derive_effective_tier worker_size effective_model in
   {
     version = worker_container_version;
     worker_name;
@@ -480,9 +449,7 @@ let make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
     tool_profile;
     shell_profile;
     worker_class;
-    worker_size = effective_worker_size worker_size effective_model;
     effective_model;
-    effective_tier;
     checkpoint_path =
       worker_checkpoint_path ~base_path ~team_session_id ~worker_name;
     turn_log_path =

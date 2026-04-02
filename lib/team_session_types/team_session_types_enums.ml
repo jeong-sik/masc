@@ -82,16 +82,6 @@ type worker_class =
   | Worker_librarian
   | Worker_metacog
 
-type model_tier =
-  | Tier_35b
-  | Tier_27b
-  | Tier_9b
-
-type worker_size =
-  | Worker_sm
-  | Worker_lg
-  | Worker_xlg
-
 type task_profile =
   | Profile_extract
   | Profile_normalize
@@ -146,7 +136,6 @@ type planned_worker = {
   controller_level : controller_level option;
   control_domain : control_domain option;
   supervisor_actor : string option;
-  model_tier : model_tier option;
   task_profile : task_profile option;
   risk_level : risk_level option;
   routing_confidence : float option;
@@ -426,38 +415,6 @@ let worker_class_of_string = function
   | "librarian" -> Some Worker_librarian
   | "metacog" -> Some Worker_metacog
   | _ -> None
-
-let model_tier_to_string = function
-  | Tier_35b -> "35b"
-  | Tier_27b -> "27b"
-  | Tier_9b -> "9b"
-
-let model_tier_of_string = function
-  | "35b" -> Some Tier_35b
-  | "27b" -> Some Tier_27b
-  | "9b" -> Some Tier_9b
-  | _ -> None
-
-let worker_size_to_string = function
-  | Worker_sm -> "sm"
-  | Worker_lg -> "lg"
-  | Worker_xlg -> "xlg"
-
-let worker_size_of_string = function
-  | "sm" -> Some Worker_sm
-  | "lg" -> Some Worker_lg
-  | "xlg" -> Some Worker_xlg
-  | _ -> None
-
-let model_tier_of_worker_size = function
-  | Worker_sm -> Some Tier_9b
-  | Worker_lg -> Some Tier_27b
-  | Worker_xlg -> Some Tier_35b
-
-let worker_size_of_model_tier = function
-  | Tier_9b -> Some Worker_sm
-  | Tier_27b -> Some Worker_lg
-  | Tier_35b -> Some Worker_xlg
 
 let task_profile_to_string = function
   | Profile_extract -> "extract"

@@ -200,9 +200,7 @@ let make_worker_meta ?(effective_model = "local-qwen") () :
     tool_profile = Worker_container_types.Profile_session_min;
     shell_profile = Worker_container_types.Shell_readonly;
     worker_class = Some Team_session_types.Worker_executor;
-    worker_size = None;
     effective_model;
-    effective_tier = None;
     checkpoint_path = "/tmp/checkpoint.json";
     turn_log_path = "/tmp/turns.jsonl";
     last_run_at = None;

@@ -441,7 +441,6 @@ let persist_worker_run_proof_if_present ~(config : Room.config)
                     `String
                       (Team_session_types.worker_class_to_string kind))
                   planned_worker.worker_class );
-              ("requested_worker_size", `Null);
               ("resolved_runtime", `String "oas_swarm");
               ( "resolved_model",
                 Option.fold ~none:`Null ~some:(fun value -> `String value)

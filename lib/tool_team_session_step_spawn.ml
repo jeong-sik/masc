@@ -42,7 +42,6 @@ let execute_spawn_pipeline
           ?spawn_model:prepared.spec.spawn_model
           ~execution_scope:execution.execution_scope
           ?worker_class:prepared.spec.worker_class
-          ?worker_size:(deps.worker_size_of_spec prepared.spec)
           ~worker_backend:
             (Worker_execution_backend.to_string execution.worker_backend)
           ?parent_actor:prepared.spec.parent_actor
@@ -53,7 +52,6 @@ let execute_spawn_pipeline
             (deps.inferred_controller_level_of_spec prepared.spec)
           ?control_domain:prepared.spec.control_domain
           ?supervisor_actor:prepared.spec.supervisor_actor
-          ?model_tier:prepared.spec.model_tier
           ?task_profile:prepared.spec.task_profile
           ?risk_level:prepared.spec.risk_level
           ?routing_confidence:prepared.spec.routing_confidence
@@ -142,8 +140,6 @@ let execute_spawn_pipeline
                                      ~model_label:prepared.runtime_model_label
                                      ~team_session_id:(Some session_id)
                                      ?worker_class:prepared.spec.worker_class
-                                     ?worker_size:
-                                       (deps.worker_size_of_spec prepared.spec)
                                      ~execution_scope:
                                        execution.execution_scope
                                      ?thinking_enabled:
@@ -212,8 +208,6 @@ let execute_spawn_pipeline
                              ~status:`Failed ?execution_scope
                              ?requested_worker_class:
                                prepared.spec.worker_class
-                             ?requested_worker_size:
-                               (deps.worker_size_of_spec prepared.spec)
                              ?resolved_runtime:prepared.assigned_runtime
                              ~resolved_model:prepared.runtime_model_label
                              ?routing_reason:prepared.spec.routing_reason
@@ -232,8 +226,6 @@ let execute_spawn_pipeline
                              ?spawn_model:prepared.spec.spawn_model
                              ?execution_scope
                              ?worker_class:prepared.spec.worker_class
-                             ?worker_size:
-                               (deps.worker_size_of_spec prepared.spec)
                              ?worker_backend
                              ~wait_mode:
                                (Team_session_types.wait_mode_to_string
@@ -249,7 +241,6 @@ let execute_spawn_pipeline
                              ?control_domain:prepared.spec.control_domain
                              ?supervisor_actor:
                                prepared.spec.supervisor_actor
-                             ?model_tier:prepared.spec.model_tier
                              ?task_profile:prepared.spec.task_profile
                              ?risk_level:prepared.spec.risk_level
                              ?routing_confidence:
@@ -301,13 +292,6 @@ let execute_spawn_pipeline
                                        (Team_session_types
                                         .worker_class_to_string kind))
                                    prepared.spec.worker_class );
-                               ( "worker_size",
-                                 Option.fold ~none:`Null
-                                   ~some:(fun size ->
-                                     `String
-                                       (Team_session_types
-                                        .worker_size_to_string size))
-                                   (deps.worker_size_of_spec prepared.spec) );
                                ( "worker_backend",
                                  Option.fold ~none:`Null
                                    ~some:(fun s -> `String s)
@@ -346,8 +330,6 @@ let execute_spawn_pipeline
                                ~team_session_id:(Some session_id)
                                ~room_config:(Some ctx.config)
                                ?worker_class:prepared.spec.worker_class
-                               ?worker_size:
-                                 (deps.worker_size_of_spec prepared.spec)
                                ?execution_scope
                                ?thinking_enabled:
                                  prepared.spec.thinking_enabled
@@ -509,8 +491,6 @@ let execute_spawn_pipeline
                              ?execution_scope
                              ?requested_worker_class:
                                prepared.spec.worker_class
-                             ?requested_worker_size:
-                               (deps.worker_size_of_spec prepared.spec)
                              ?resolved_runtime:prepared.assigned_runtime
                              ~resolved_model
                              ?routing_reason:prepared.spec.routing_reason
@@ -534,8 +514,6 @@ let execute_spawn_pipeline
                              ?spawn_model:prepared.spec.spawn_model
                              ?execution_scope
                              ?worker_class:prepared.spec.worker_class
-                             ?worker_size:
-                               (deps.worker_size_of_spec prepared.spec)
                              ?worker_backend
                              ~wait_mode:
                                (Team_session_types.wait_mode_to_string
@@ -551,7 +529,6 @@ let execute_spawn_pipeline
                              ?control_domain:prepared.spec.control_domain
                              ?supervisor_actor:
                                prepared.spec.supervisor_actor
-                             ?model_tier:prepared.spec.model_tier
                              ?task_profile:prepared.spec.task_profile
                              ?risk_level:prepared.spec.risk_level
                              ?routing_confidence:
@@ -648,13 +625,6 @@ let execute_spawn_pipeline
                                        (Team_session_types
                                         .worker_class_to_string kind))
                                    prepared.spec.worker_class );
-                               ( "worker_size",
-                                 Option.fold ~none:`Null
-                                   ~some:(fun size ->
-                                     `String
-                                       (Team_session_types
-                                        .worker_size_to_string size))
-                                   (deps.worker_size_of_spec prepared.spec) );
                                ( "worker_backend",
                                  Option.fold ~none:`Null
                                    ~some:(fun s -> `String s)
@@ -744,14 +714,6 @@ let execute_spawn_pipeline
                                                  .worker_class_to_string
                                                    kind))
                                             prepared.spec.worker_class );
-                                        ( "worker_size",
-                                          Option.fold ~none:`Null
-                                            ~some:(fun size ->
-                                              `String
-                                                (Team_session_types
-                                                 .worker_size_to_string size))
-                                            (deps.worker_size_of_spec
-                                               prepared.spec) );
                                         ( "worker_backend",
                                           `String
                                             (Worker_execution_backend

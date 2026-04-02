@@ -21,15 +21,12 @@ type spawn_spec = {
   thinking_budget : int option;
   max_turns : int option;
   worker_class : Team_session_types.worker_class option;
-  worker_size : Team_session_types.worker_size option;
   parent_actor : string option;
   capsule_mode : Team_session_types.capsule_mode option;
   runtime_pool : string option;
   lane_id : string option;
   control_domain : Team_session_types.control_domain option;
   supervisor_actor : string option;
-  model_tier : Team_session_types.model_tier option;
-  model_tier_explicit : bool;
   task_profile : Team_session_types.task_profile option;
   risk_level : Team_session_types.risk_level option;
   routing_confidence : float option;
@@ -102,7 +99,6 @@ type step_deps = {
   is_local_spawn_agent : string -> bool;
   effective_execution_scope_of_spec :
     spawn_spec -> Team_session_types.execution_scope option;
-  worker_size_of_spec : spawn_spec -> Team_session_types.worker_size option;
   inferred_controller_level_of_spec :
     spawn_spec -> Team_session_types.controller_level option;
   planned_worker_of_spec :

@@ -389,7 +389,6 @@ let markdown_of_report ~(session : Team_session_types.session)
     | `List xs -> xs
     | _ -> []
   in
-  let tier_counts = summary_json |> member "tier_counts" in
   let task_profile_counts = summary_json |> member "task_profile_counts" in
   let escalation_count =
     summary_json |> member "escalation_count" |> to_int_option
@@ -553,7 +552,6 @@ let markdown_of_report ~(session : Team_session_types.session)
            item |> to_string_option |> Option.value ~default:"(unknown)")
     |> List.map (fun actor -> Printf.sprintf "- %s" actor)
   in
-  let tier_count_lines = count_assoc_lines tier_counts in
   let task_profile_count_lines = count_assoc_lines task_profile_counts in
   let policy_lines =
     [
@@ -719,8 +717,6 @@ let markdown_of_report ~(session : Team_session_types.session)
       "";
       "## Routing Distribution";
       Printf.sprintf "- Escalation count: %d" escalation_count;
-      (if tier_count_lines = [] then "- Model tiers: (not recorded)"
-       else String.concat "\n" tier_count_lines);
       (if task_profile_count_lines = [] then "- Task profiles: (not recorded)"
        else String.concat "\n" task_profile_count_lines);
       (if routing_reason_summary = [] then "- Routing rationale summary: (not recorded)"
@@ -909,10 +905,6 @@ let generate config (session : Team_session_types.session) :
                   `List (List.map (fun value -> `String value) spawn_tool_names)
                 );
                 ("write_capable_spawn_count", `Int write_capable_spawn_count);
-                ( "tier_counts",
-                  match Yojson.Safe.Util.member "tier_counts" summary_json with
-                  | `Assoc _ as json -> json
-                  | _ -> `Assoc [] );
                 ( "task_profile_counts",
                   match Yojson.Safe.Util.member "task_profile_counts" summary_json with
                   | `Assoc _ as json -> json

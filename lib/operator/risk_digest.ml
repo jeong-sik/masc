@@ -10,7 +10,6 @@ type evidence_gap = {
 }
 
 type drift_signal =
-  | Model_tier_inconsistency of { expected : string; actual : string list }
   | Cascade_length_change of { original : int; current : int }
 
 type unsafe_edit_signal =
@@ -55,42 +54,21 @@ let compute_evidence_gap (session : Team_session_types.session) : evidence_gap =
 
 (* --- Drift risk computation --- *)
 
-(** Check if worker model_tier values are consistent with the session cascade. *)
+(** Check structural drift signals for the session. *)
 let compute_drift_risk (session : Team_session_types.session)
-    (worker_cards : Operator_digest_types.worker_card list) : drift_signal list =
+    (_worker_cards : Operator_digest_types.worker_card list) : drift_signal list =
   let signals = ref [] in
-  (* Check model_tier consistency across active workers *)
-  let active_tiers =
-    List.filter_map
-      (fun (card : Operator_digest_types.worker_card) ->
-        if String.equal card.status "running" || String.equal card.status "idle"
-        then card.model_tier
-        else None)
-      worker_cards
-  in
-  let unique_tiers =
-    List.sort_uniq String.compare active_tiers
-  in
-  (match session.model_cascade with
-  | first_model :: _ when List.length unique_tiers > 1 ->
-      signals :=
-        Model_tier_inconsistency
-          { expected = first_model; actual = unique_tiers }
-        :: !signals
-  | _ -> ());
-  (* Check cascade length change vs planned workers *)
+  (* Cascade length change detection is retained as a structural check. *)
   let original_cascade_len = List.length session.model_cascade in
-  let active_cascade_models =
-    List.sort_uniq String.compare active_tiers |> List.length
-  in
+  let planned_count = List.length session.planned_workers in
   if
     original_cascade_len > 0
-    && active_cascade_models > 0
-    && active_cascade_models > original_cascade_len
+    && planned_count > 0
+    && planned_count > original_cascade_len
   then
     signals :=
       Cascade_length_change
-        { original = original_cascade_len; current = active_cascade_models }
+        { original = original_cascade_len; current = planned_count }
       :: !signals;
   List.rev !signals
 
@@ -195,13 +173,6 @@ let evidence_gap_to_yojson (eg : evidence_gap) : Yojson.Safe.t =
 
 let drift_signal_to_yojson (signal : drift_signal) : Yojson.Safe.t =
   match signal with
-  | Model_tier_inconsistency { expected; actual } ->
-      `Assoc
-        [
-          ("type", `String "model_tier_inconsistency");
-          ("expected", `String expected);
-          ("actual", `List (List.map (fun s -> `String s) actual));
-        ]
   | Cascade_length_change { original; current } ->
       `Assoc
         [

@@ -65,7 +65,6 @@ let auto_team_session_spawn_batch (meta : keeper_meta) (message : string) =
           ("spawn_prompt", `String (planner_spawn_prompt meta message));
           ("spawn_role", `String "planner");
           ("worker_class", `String "manager");
-          ("worker_size", `String "xlg");
           ("spawn_timeout_seconds", `Int 120);
           ("spawn_selection_note", `String "keeper auto-team-session generic_pair_v1 planner");
         ];
@@ -74,7 +73,6 @@ let auto_team_session_spawn_batch (meta : keeper_meta) (message : string) =
           ("spawn_prompt", `String (executor_spawn_prompt meta message));
           ("spawn_role", `String "executor");
           ("worker_class", `String "executor");
-          ("worker_size", `String "lg");
           ("spawn_timeout_seconds", `Int 120);
           ("spawn_selection_note", `String "keeper auto-team-session generic_pair_v1 executor");
         ];

@@ -50,9 +50,7 @@ type worker_container_meta = {
   tool_profile : tool_profile;
   shell_profile : shell_profile;
   worker_class : Team_session_types.worker_class option;
-  worker_size : Team_session_types.worker_size option;
   effective_model : string;
-  effective_tier : Team_session_types.model_tier option;
   checkpoint_path : string;
   turn_log_path : string;
   last_run_at : float option;

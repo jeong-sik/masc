@@ -100,7 +100,6 @@ let make_pw ?(spawn_model = None) () : Team_session_types.planned_worker =
     controller_level = None;
     control_domain = None;
     supervisor_actor = None;
-    model_tier = None;
     task_profile = None;
     risk_level = None;
     routing_confidence = None;

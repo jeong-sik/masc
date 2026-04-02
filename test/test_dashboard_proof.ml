@@ -64,7 +64,6 @@ let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ])
           controller_level = Some Controller_worker;
           control_domain = Some Domain_execution;
           supervisor_actor = Some "supervisor";
-          model_tier = Some Tier_35b;
           task_profile = Some Profile_synthesize;
           risk_level = Some Risk_medium;
           routing_confidence = Some 0.9;

@@ -18,6 +18,15 @@ let bool_of_env_default name ~(default : bool) =
       else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then false
       else default
 
+let bool_of_env_opt name =
+  match Sys.getenv_opt name with
+  | None -> None
+  | Some raw ->
+      let v = String.trim raw |> String.lowercase_ascii in
+      if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then Some true
+      else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then Some false
+      else None
+
 let validate_name name =
   (* Same rule as keeper script: conservative handle chars only. *)
   let re = Re.Pcre.re "^[A-Za-z0-9._-]+$" |> Re.compile in
@@ -31,9 +40,13 @@ let default_proactive_cooldown_sec = 1800
 let default_keeper_will = ""
 let default_keeper_needs = ""
 let default_keeper_desires = ""
+let default_room_signal_prompt_enabled = false
 let default_goal_horizon_max_chars = 480
 let default_drift_max_clauses = 6
 let default_drift_max_chars = 320
+
+let keeper_room_signal_prompt_enabled_override () =
+  bool_of_env_opt "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED"
 
 let canonical_soul_profile raw =
   match String.lowercase_ascii (String.trim raw) with

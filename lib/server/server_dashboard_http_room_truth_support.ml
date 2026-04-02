@@ -33,6 +33,25 @@ let dashboard_room_truth_focus_json ~initialized ~runtime_count
   let focus_of_attention top_item provenance =
     let target_type = json_string_field_opt "target_type" top_item in
     let target_id = json_string_field_opt "target_id" top_item in
+    let source, target_kind, suggested_tab, suggested_surface, suggested_params =
+      match target_type with
+      | Some "room_meta_cognition" ->
+          ( "meta_cognition",
+            "meta_cognition",
+            "overview",
+            None,
+            `Assoc [] )
+      | _ ->
+          ( "operator",
+            "attention",
+            "intervene",
+            None,
+            `Assoc
+              (List.filter_map
+                 (fun (key, value_opt) ->
+                   Option.map (fun value -> (key, `String value)) value_opt)
+                 [ ("target_type", target_type); ("target_id", target_id) ]) )
+    in
     `Assoc
       [
         ("label", `String "주의 필요");
@@ -40,21 +59,19 @@ let dashboard_room_truth_focus_json ~initialized ~runtime_count
           match json_string_field_opt "summary" top_item with
           | Some summary -> `String summary
           | None -> `String "Operator attention item requires follow-up." );
-        ("source", `String "operator");
+        ("source", `String source);
         ("provenance", `String provenance);
-        ("target_kind", `String "attention");
+        ("target_kind", `String target_kind);
         ( "target_id",
           match target_id with
           | Some value -> `String value
           | None -> `Null );
-        ("suggested_tab", `String "intervene");
-        ("suggested_surface", `Null);
-        ( "suggested_params",
-          `Assoc
-            (List.filter_map
-               (fun (key, value_opt) ->
-                 Option.map (fun value -> (key, `String value)) value_opt)
-               [ ("target_type", target_type); ("target_id", target_id) ]) );
+        ("suggested_tab", `String suggested_tab);
+        ( "suggested_surface",
+          match suggested_surface with
+          | Some value -> `String value
+          | None -> `Null );
+        ("suggested_params", suggested_params);
       ]
   in
   let focus_of_queue queue =
@@ -175,7 +192,41 @@ let dashboard_room_truth_focus_json ~initialized ~runtime_count
 let take_n n lst =
   if List.length lst <= n then lst else List.filteri (fun i _ -> i < n) lst
 
-let derived_operator_digest_json (config : Room.config) execution_json =
+let severity_of_meta_salience = function
+  | Meta_cognition.Operator_tension -> "bad"
+  | Meta_cognition.Contested_belief
+  | Meta_cognition.Operator_desire
+  | Meta_cognition.Stagnant_room -> "warn"
+  | Meta_cognition.Stable -> "info"
+
+let derived_meta_attention_item ~meta_cognition_json
+    (interpretation : Meta_cognition.interpretation) =
+  match interpretation.primary_salience with
+  | Meta_cognition.Stable -> None
+  | primary_salience ->
+      Some
+        (`Assoc
+           [
+             ("kind", `String "room_meta_cognition");
+             ("severity", `String (severity_of_meta_salience primary_salience));
+             ("summary", `String interpretation.reason);
+             ("target_type", `String "room_meta_cognition");
+             ( "target_id",
+               match interpretation.target_id with
+               | Some value -> `String value
+               | None -> `String "room:default" );
+             ("actor", `String "room");
+             ( "evidence",
+               `Assoc
+                 [
+                   ("summary", meta_cognition_json);
+                   ( "interpretation",
+                     Meta_cognition.interpretation_to_json interpretation );
+                 ] );
+           ])
+
+let derived_operator_digest_json (config : Room.config) execution_json
+    meta_cognition_json meta_interpretation =
   let session_briefs = json_list_field "session_briefs" execution_json in
   let has_warn =
     List.exists
@@ -184,14 +235,38 @@ let derived_operator_digest_json (config : Room.config) execution_json =
         h = Some "warn" || h = Some "bad")
       session_briefs
   in
-  let health = if has_warn then "warn" else "ok" in
+  let meta_attention =
+    Option.bind meta_interpretation
+      (derived_meta_attention_item ~meta_cognition_json)
+  in
+  let health = if has_warn || Option.is_some meta_attention then "warn" else "ok" in
+  let attention_count = if has_warn then 1 else if Option.is_some meta_attention then 1 else 0 in
+  let warn_count =
+    match meta_attention with
+    | Some item ->
+        if json_string_field_opt "severity" item = Some "bad" then 0 else 1
+    | None ->
+        if has_warn then 1 else 0
+  in
+  let bad_count =
+    match meta_attention with
+    | Some item ->
+        if json_string_field_opt "severity" item = Some "bad" then 1 else 0
+    | None -> 0
+  in
   `Assoc
     [
       ("health", `String health);
       ( "attention_summary",
         `Assoc
           [
-            ("count", `Int (if has_warn then 1 else 0));
+            ("count", `Int attention_count);
+            ("bad_count", `Int bad_count);
+            ("warn_count", `Int warn_count);
+            ( "top_item",
+              match meta_attention with
+              | Some item -> item
+              | None -> `Null );
             ("provenance", `String "derived");
           ] );
       ( "recommendation_summary",
@@ -299,7 +374,23 @@ let room_truth_command_summary_json command_summary_json =
 
 let compose_room_truth_snapshot ~(config : Room.config) ~initialized ~shell_json
     ~execution_json ~command_summary_json =
-  let operator_digest_json = derived_operator_digest_json config execution_json in
+  let meta_cognition_summary = json_assoc_field "meta_cognition" shell_json in
+  let meta_summary_input, meta_interpretation =
+    match Meta_cognition.parse_summary meta_cognition_summary with
+    | Ok summary_input ->
+        (Some summary_input, Some (Meta_cognition.interpret summary_input))
+    | Error err ->
+        Log.Dashboard.warn
+          "room-truth meta-cognition summary parse failed: %s" err;
+        (None, None)
+  in
+  let meta_cognition_latest_digest =
+    Meta_cognition.latest_digest_json ?summary:meta_summary_input ()
+  in
+  let operator_digest_json =
+    derived_operator_digest_json config execution_json meta_cognition_summary
+      meta_interpretation
+  in
   let top_queue = execution_top_queue execution_json in
   let execution_summary = execution_summary_json execution_json in
   let command_summary = room_truth_command_summary_json command_summary_json in
@@ -328,6 +419,18 @@ let compose_room_truth_snapshot ~(config : Room.config) ~initialized ~shell_json
             ("summary", execution_summary);
             ("top_queue", top_queue);
             ("provenance", `String "derived");
+          ] );
+      ( "meta_cognition",
+        `Assoc
+          [
+            ("summary", meta_cognition_summary);
+            ( "interpretation",
+              match meta_interpretation with
+              | Some interpretation ->
+                  Meta_cognition.interpretation_to_json interpretation
+              | None -> `Null );
+            ("latest_digest", meta_cognition_latest_digest);
+            ("provenance", `String "shell");
           ] );
       ("command", command_summary);
       ( "operator",

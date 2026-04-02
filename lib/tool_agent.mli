@@ -39,3 +39,6 @@ val handle_consolidate_learning : context -> Yojson.Safe.t -> bool * string
 
 (** Handle masc_agent_card *)
 val handle_agent_card : context -> Yojson.Safe.t -> bool * string
+
+(** Handle masc_meta_cognition_snapshot *)
+val handle_meta_cognition_snapshot : context -> Yojson.Safe.t -> bool * string

@@ -940,6 +940,9 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   let keepers_total, keepers_ms =
     measure_ms (fun () -> keeper_count config)
   in
+  let meta_cognition_json, meta_cognition_ms =
+    measure_ms (fun () -> Meta_cognition.summary_json config)
+  in
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));
@@ -952,6 +955,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
             ("keepers", `Int keepers_total);
           ] );
       ("providers", provider_capacity_json ());
+      ("meta_cognition", meta_cognition_json);
     ]
   |> with_projection_diagnostics ~surface:"shell" ~started_at
        ~extra:
@@ -964,6 +968,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
            ("agents_ms", `Int agents_ms);
            ("tasks_ms", `Int tasks_ms);
            ("keepers_ms", `Int keepers_ms);
+           ("meta_cognition_ms", `Int meta_cognition_ms);
          ]
 
 let dashboard_shell_http_json ?clock (config : Room.config) : Yojson.Safe.t =

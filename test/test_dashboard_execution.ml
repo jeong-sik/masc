@@ -21,6 +21,58 @@ let cleanup_dir dir =
   in
   rm dir
 
+let save_jsonl path entries =
+  let body =
+    entries
+    |> List.map Yojson.Safe.to_string
+    |> String.concat "\n"
+  in
+  Fs_compat.save_file path (if body = "" then "" else body ^ "\n")
+
+let post_json ~id ~author ?(title = "") ?(body = "") ?hearth ?thread_id
+    ?(created_at = 1000.0) () =
+  let fields =
+    [
+      ("id", `String id);
+      ("author", `String author);
+      ("title", `String title);
+      ("body", `String body);
+      ("content", `String body);
+      ("post_kind", `String "automation");
+      ("visibility", `String "internal");
+      ("created_at", `Float created_at);
+      ("updated_at", `Float created_at);
+      ("expires_at", `Float 0.0);
+      ("votes_up", `Int 0);
+      ("votes_down", `Int 0);
+      ("reply_count", `Int 0);
+    ]
+  in
+  let fields =
+    match hearth with
+    | Some value -> ("hearth", `String value) :: fields
+    | None -> fields
+  in
+  let fields =
+    match thread_id with
+    | Some value -> ("thread_id", `String value) :: fields
+    | None -> fields
+  in
+  `Assoc fields
+
+let comment_json ~id ~post_id ~author ~content ?(created_at = 1000.0) () =
+  `Assoc
+    [
+      ("id", `String id);
+      ("post_id", `String post_id);
+      ("author", `String author);
+      ("content", `String content);
+      ("created_at", `Float created_at);
+      ("expires_at", `Float 0.0);
+      ("votes_up", `Int 0);
+      ("votes_down", `Int 0);
+    ]
+
 let test_dashboard_execution_fixture () =
   let dir = test_dir () in
   (* Force filesystem backend to prevent PG auto-detection in hermetic tests *)
@@ -215,6 +267,52 @@ let test_dashboard_shell_surfaces_workspace_when_different () =
         (json |> member "projection_diagnostics" |> member "workspace_path"
          |> to_string))
 
+let test_dashboard_shell_includes_meta_cognition_summary () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Room_utils.default_config dir in
+      ignore (Lib.Room.init config ~agent_name:None);
+      let masc_dir = Lib.Room.masc_dir config in
+      save_jsonl
+        (Filename.concat masc_dir "board_posts.jsonl")
+        [
+          post_json ~id:"p-root" ~author:"admin-keeper"
+            ~title:"RBAC blockage"
+            ~body:
+              "All masc_* tools tested return unregistered_masc_tool. \
+               Operator intervention needed. keeper_* tools function normally."
+            ~hearth:"ops" ~created_at:1000.0 ();
+        ];
+      save_jsonl
+        (Filename.concat masc_dir "board_comments.jsonl")
+        [
+          comment_json ~id:"c-1" ~post_id:"p-root" ~author:"keeper-a"
+            ~content:
+              "This contradicts the uniform block hypothesis. Access may be per-agent."
+            ~created_at:1010.0 ();
+        ];
+      let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
+      let open Yojson.Safe.Util in
+      let meta = json |> member "meta_cognition" in
+      check int "meta belief count" 2
+        (meta |> member "belief_count" |> to_int);
+      check int "meta contested belief count" 1
+        (meta |> member "contested_belief_count" |> to_int);
+      check string "dominant belief surfaced" "belief:masc_tools_blocked"
+        (meta |> member "dominant_belief" |> member "id" |> to_string);
+      check string "dominant belief shows contested status" "contested"
+        (meta |> member "dominant_belief" |> member "status" |> to_string);
+      check string "top tension surfaced" "tension:masc_tool_blockage"
+        (meta |> member "top_tension" |> member "id" |> to_string);
+      check bool "top tension retains operator flag" true
+        (meta |> member "top_tension" |> member "needs_operator" |> to_bool);
+      check string "top desire surfaced" "desire:operator_guidance"
+        (meta |> member "top_desire" |> member "id" |> to_string))
+
 let create_keeper env sw config name =
   let ctx : _ Lib.Tool_keeper.context =
     {
@@ -338,6 +436,8 @@ let () =
             test_dashboard_shell_current_room_status;
           Alcotest.test_case "shell surfaces workspace separately" `Quick
             test_dashboard_shell_surfaces_workspace_when_different;
+          Alcotest.test_case "shell includes meta cognition summary" `Quick
+            test_dashboard_shell_includes_meta_cognition_summary;
           Alcotest.test_case "shell counts keepers cheaply" `Quick
             test_dashboard_shell_counts_keepers;
           Alcotest.test_case "shell excludes keeper agents from general count" `Quick

@@ -160,6 +160,17 @@
  (libraries masc_test_deps))
 
 ; ============================================================
+; Focused single-module tests
+; ============================================================
+(test
+ (name test_meta_cognition_snapshot)
+ (libraries masc_test_deps))
+
+(test
+ (name test_meta_cognition_feedback)
+ (libraries masc_test_deps))
+
+; ============================================================
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.
 ; ============================================================

@@ -132,6 +132,11 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active; since = "2.50.0" };
 
+  { env_name = "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED";
+    description = "Global override for keeper room-signal prompt injection";
+    default = false; category = "keeper";
+    lifecycle = Experimental; since = "2.214.0" };
+
   { env_name = "MASC_SLOT_YIELD_ENABLED";
     description = "Turn-level slot yielding during tool execution";
     default = false; category = "keeper";

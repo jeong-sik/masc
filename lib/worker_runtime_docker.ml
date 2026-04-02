@@ -7,6 +7,7 @@ type preflight_subject = {
 
 let helper_binary = "masc-worker-run"
 let docker_host_alias = "host.docker.internal"
+let container_counter = Atomic.make 0
 
 let path_within ~root path =
   let root =
@@ -105,8 +106,9 @@ let container_name (spec : Worker_execution_spec.t) =
     | _ -> spec.worker_name
   in
   let unique_suffix =
-    Printf.sprintf "%d-%d" (Unix.getpid ())
+    Printf.sprintf "%d-%d-%d" (Unix.getpid ())
       (int_of_float (Unix.gettimeofday () *. 1000.0))
+      (Atomic.fetch_and_add container_counter 1)
   in
   Printf.sprintf "masc-worker-%s-%s"
     (String.lowercase_ascii (Room_utils.safe_filename token))

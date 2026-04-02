@@ -10,7 +10,7 @@ RUN sudo apt-get update \
 
 RUN opam exec -- bash -lc "scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test -y && dune build @install"
 
-FROM debian:12-slim
+FROM ocaml/opam:debian-12-ocaml-5.4 AS runtime
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git libsqlite3-0 libssl3 zlib1g \

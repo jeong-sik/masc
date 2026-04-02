@@ -203,9 +203,6 @@ let inferred_worker_model () =
       runtime_inventory_models ()
       |> List.find_opt (fun model -> contains_size_token_ci model "9b")
 
-(* Model tier inference removed (#4505). Cascade handles model selection. *)
-let infer_model_tier_from_model_name _model_name = None
-
 let default_risk_for_profile = function
   | Team_session_types.Profile_extract
   | Team_session_types.Profile_normalize
@@ -495,12 +492,7 @@ let finalize_routing_decision ~spawn_model ~(decision : routing_decision) =
     | None -> resolved_model
   in
   let resolved_tier =
-    match trim_opt spawn_model with
-    | Some explicit ->
-        Option.value ~default:decision.model_tier
-          (infer_model_tier_from_model_name (Some explicit))
-    | None ->
-        if escalated then Team_session_types.Tier_35b else decision.model_tier
+    if escalated then Team_session_types.Tier_35b else decision.model_tier
   in
   (resolved_model, resolved_tier, escalated, reason)
 
@@ -512,9 +504,7 @@ let resolve_routing_for_spec (spec : spawn_spec) =
       match spec.worker_size with
       | Some size -> Team_session_types.model_tier_of_worker_size size
       | None -> (
-          match spec.model_tier with
-          | Some tier -> Some tier
-          | None -> infer_model_tier_from_model_name spec.spawn_model)
+          spec.model_tier)
     in
     let heuristic =
       heuristic_routing ~spawn_prompt:spec.spawn_prompt ~spawn_role:spec.spawn_role

@@ -34,7 +34,6 @@ type worker_card = {
   controller_level : string option;
   control_domain : string option;
   supervisor_actor : string option;
-  model_tier : string option;
   task_profile : string option;
   risk_level : string option;
   routing_confidence : float option;
@@ -63,7 +62,6 @@ type session_digest = {
   lane_counts : Yojson.Safe.t;
   controller_counts : Yojson.Safe.t;
   control_domain_counts : Yojson.Safe.t;
-  tier_counts : Yojson.Safe.t;
   task_profile_counts : Yojson.Safe.t;
   escalation_count : int;
   controller_tree : Yojson.Safe.t;
@@ -195,7 +193,6 @@ let worker_card_to_yojson (card : worker_card) =
       ("controller_level", string_option_to_json card.controller_level);
       ("control_domain", string_option_to_json card.control_domain);
       ("supervisor_actor", string_option_to_json card.supervisor_actor);
-      ("model_tier", string_option_to_json card.model_tier);
       ("task_profile", string_option_to_json card.task_profile);
       ("risk_level", string_option_to_json card.risk_level);
       ( "routing_confidence",
@@ -241,22 +238,6 @@ let spawn_batch_template_of_cards (cards : worker_card list) =
                  match card.spawn_role with
                  | Some role when String.trim role <> "" ->
                      ("spawn_role", `String role) :: fields
-                 | _ -> fields
-               in
-               let fields =
-                 match
-                   Option.bind card.model_tier
-                     (fun raw ->
-                       Team_session_types.model_tier_of_string
-                         (String.lowercase_ascii (String.trim raw)))
-                   |> Option.map Team_session_types.worker_size_of_model_tier
-                   |> Option.join
-                 with
-                 | Some worker_size ->
-                     ( "worker_size",
-                       `String
-                         (Team_session_types.worker_size_to_string worker_size) )
-                     :: fields
                  | _ -> fields
                in
                let fields =
@@ -330,7 +311,6 @@ let aggregate_runtime_pool_counts s   = aggregate_worker_counts s Team_session_t
 let aggregate_lane_counts s           = aggregate_worker_counts s Team_session_types.lane_counts
 let aggregate_controller_counts s     = aggregate_worker_counts s Team_session_types.controller_level_counts
 let aggregate_control_domain_counts s = aggregate_worker_counts s Team_session_types.control_domain_counts
-let aggregate_tier_counts s           = aggregate_worker_counts s Team_session_types.model_tier_counts
 let aggregate_task_profile_counts s   = aggregate_worker_counts s Team_session_types.task_profile_counts
 
 let aggregate_escalation_count s =
@@ -347,7 +327,6 @@ let aggregate_all_worker_metrics sessions =
     to_json Team_session_types.lane_counts,
     to_json Team_session_types.controller_level_counts,
     to_json Team_session_types.control_domain_counts,
-    to_json Team_session_types.model_tier_counts,
     to_json Team_session_types.task_profile_counts,
     Team_session_types.escalation_count workers )
 
@@ -387,7 +366,6 @@ let session_card_to_yojson ~actor (digest : session_digest) =
       ("lane_counts", digest.lane_counts);
       ("controller_counts", digest.controller_counts);
       ("control_domain_counts", digest.control_domain_counts);
-      ("tier_counts", digest.tier_counts);
       ("task_profile_counts", digest.task_profile_counts);
       ("escalation_count", `Int digest.escalation_count);
       ("controller_tree", digest.controller_tree);

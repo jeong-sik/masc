@@ -23,7 +23,7 @@ let is_local_spawn_agent agent_name =
   | "default" | "llama" -> true
   | _ -> false
 
-let legacy_spawn_fields = [ "spawn_agent"; "spawn_model"; "model_tier" ]
+let legacy_spawn_fields = [ "spawn_agent"; "spawn_model" ]
 
 let find_present_json_key keys json =
   List.find_opt (fun key -> Yojson.Safe.Util.member key json <> `Null) keys
@@ -33,16 +33,15 @@ let legacy_spawn_field_error ?batch_index field =
   | Some index ->
       Printf.sprintf
         "spawn_batch[%d].%s is no longer supported in masc_team_session_step; \
-         use spawn_prompt, spawn_role, worker_class, and worker_size"
+         use spawn_prompt, spawn_role, and worker_class"
         index field
   | None ->
       Printf.sprintf
         "%s is no longer supported in masc_team_session_step; use spawn_prompt, \
-         spawn_role, worker_class, and worker_size"
+         spawn_role, and worker_class"
         field
 
 type routing_decision = {
-  model_tier : Team_session_types.model_tier;
   task_profile : Team_session_types.task_profile;
   risk_level : Team_session_types.risk_level;
   confidence : float option;
@@ -63,15 +62,12 @@ type spawn_spec = Tool_team_session_step.spawn_spec = {
   thinking_budget : int option;
   max_turns : int option;
   worker_class : Team_session_types.worker_class option;
-  worker_size : Team_session_types.worker_size option;
   parent_actor : string option;
   capsule_mode : Team_session_types.capsule_mode option;
   runtime_pool : string option;
   lane_id : string option;
   control_domain : Team_session_types.control_domain option;
   supervisor_actor : string option;
-  model_tier : Team_session_types.model_tier option;
-  model_tier_explicit : bool;
   task_profile : Team_session_types.task_profile option;
   risk_level : Team_session_types.risk_level option;
   routing_confidence : float option;
@@ -98,33 +94,10 @@ let trim_opt = function
 
 let env_trim_opt name = Sys.getenv_opt name |> trim_opt
 
-let default_worker_size_for_class = function
-  | Some Team_session_types.Worker_manager ->
-      Some Team_session_types.Worker_xlg
-  | Some Team_session_types.Worker_executor ->
-      Some Team_session_types.Worker_lg
-  | Some Team_session_types.Worker_scout
-  | Some Team_session_types.Worker_librarian ->
-      Some Team_session_types.Worker_sm
-  | Some Team_session_types.Worker_metacog ->
-      Some Team_session_types.Worker_lg
-  | None -> Some Team_session_types.Worker_lg
-
 let effective_execution_scope_of_spec spec =
   Some
     (Team_session_types.effective_execution_scope
        ~worker_class:spec.worker_class spec.execution_scope)
-
-let explicit_worker_size_of_spec (spec : spawn_spec) =
-  match spec.worker_size with
-  | Some _ as size -> size
-  | None ->
-      Option.bind spec.model_tier Team_session_types.worker_size_of_model_tier
-
-let worker_size_of_spec (spec : spawn_spec) =
-  match explicit_worker_size_of_spec spec with
-  | Some _ as size -> size
-  | None -> default_worker_size_for_class spec.worker_class
 
 let contains_ci haystack needle =
   let haystack = String.lowercase_ascii haystack in
@@ -224,17 +197,6 @@ let min_risk left right =
       Team_session_types.Risk_medium
   | _ -> Team_session_types.Risk_low
 
-let default_tier_for_profile ~risk_level = function
-  | (Team_session_types.Profile_extract
-    | Team_session_types.Profile_normalize
-    | Team_session_types.Profile_summarize)
-    when risk_level <> Team_session_types.Risk_high ->
-      Team_session_types.Tier_9b
-  | (Team_session_types.Profile_verify | Team_session_types.Profile_synthesize)
-    when risk_level <> Team_session_types.Risk_high ->
-      Team_session_types.Tier_27b
-  | _ -> Team_session_types.Tier_35b
-
 let normalized_spawn_text ~spawn_prompt ~spawn_role =
   String.concat "\n"
     ([ spawn_prompt ]
@@ -291,7 +253,7 @@ let classify_risk ~task_profile ~spawn_prompt ~spawn_role =
   else base
 
 let heuristic_routing ~spawn_prompt ~spawn_role ~worker_class ~task_profile
-    ~risk_level ~model_tier ~routing_confidence ~routing_reason =
+    ~risk_level ~routing_confidence ~routing_reason =
   let resolved_profile =
     match task_profile with
     | Some profile -> Some (profile, "explicit_task_profile", 0.99)
@@ -321,11 +283,6 @@ let heuristic_routing ~spawn_prompt ~spawn_role ~worker_class ~task_profile
         | Some explicit -> explicit
         | None -> classify_risk ~task_profile:profile ~spawn_prompt ~spawn_role
       in
-      let resolved_tier =
-        match model_tier with
-        | Some explicit -> explicit
-        | None -> default_tier_for_profile ~risk_level:resolved_risk profile
-      in
       let confidence =
         match routing_confidence with
         | Some value -> Some value
@@ -338,7 +295,6 @@ let heuristic_routing ~spawn_prompt ~spawn_role ~worker_class ~task_profile
       in
       Some
         {
-          model_tier = resolved_tier;
           task_profile = profile;
           risk_level = resolved_risk;
           confidence;
@@ -352,13 +308,6 @@ let heuristic_routing ~spawn_prompt ~spawn_role ~worker_class ~task_profile
 
 let parse_routing_decision_json (json : Yojson.Safe.t) =
   let open Yojson.Safe.Util in
-  let model_tier =
-    match member "model_tier" json |> to_string_option with
-    | Some raw ->
-        Team_session_types.model_tier_of_string
-          (String.lowercase_ascii (String.trim raw))
-    | None -> None
-  in
   let task_profile =
     match member "task_profile" json |> to_string_option with
     | Some raw ->
@@ -373,8 +322,8 @@ let parse_routing_decision_json (json : Yojson.Safe.t) =
           (String.lowercase_ascii (String.trim raw))
     | None -> None
   in
-  match (model_tier, task_profile, risk_level) with
-  | Some model_tier, Some task_profile, Some risk_level ->
+  match (task_profile, risk_level) with
+  | Some task_profile, Some risk_level ->
       let confidence =
         match member "confidence" json with
         | `Float value -> Some value
@@ -399,7 +348,6 @@ let parse_routing_decision_json (json : Yojson.Safe.t) =
       in
       Some
         {
-          model_tier;
           task_profile;
           risk_level;
           confidence;
@@ -422,14 +370,10 @@ let model_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
       let role_text = Option.value ~default:"unspecified" spawn_role in
       let prompt =
         Printf.sprintf
-          "Classify the worker task for a quality-first 2-tier swarm router.\n\
-           Return strict JSON only with keys: model_tier, task_profile, risk_level, confidence, reason, escalate_if.\n\
-           model_tier must be one of [\"35b\",\"27b\",\"9b\"].\n\
+          "Classify the worker task for a swarm router.\n\
+           Return strict JSON only with keys: task_profile, risk_level, confidence, reason, escalate_if.\n\
            task_profile must be one of [\"extract\",\"normalize\",\"summarize\",\"verify\",\"decide\",\"synthesize\"].\n\
            risk_level must be one of [\"low\",\"medium\",\"high\"].\n\
-           Use 35b for root judgment, final arbitration, or high-risk outputs.\n\
-           Use 27b for lane managers, quality review, knowledge review, and medium-risk synthesis.\n\
-           Use 9b only for low-risk, machine-checkable, or strict-template subtasks.\n\
            worker_class=%s\n\
            spawn_role=%s\n\
            worker_prompt=%S\n"
@@ -451,9 +395,8 @@ let model_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
 
 let routing_summary_line (decision : routing_decision) =
   Printf.sprintf
-    "[routing] profile=%s tier=%s risk=%s confidence=%s reason=%s judge=%b escalated=%b"
+    "[routing] profile=%s risk=%s confidence=%s reason=%s judge=%b escalated=%b"
     (Team_session_types.task_profile_to_string decision.task_profile)
-    (Team_session_types.model_tier_to_string decision.model_tier)
     (Team_session_types.risk_level_to_string decision.risk_level)
     (match decision.confidence with
     | Some value -> Printf.sprintf "%.2f" value
@@ -467,49 +410,24 @@ let merge_selection_note selection_note routing_note =
   | Some note, Some routing when String.equal note routing -> Some note
   | Some note, Some routing -> Some (note ^ " | " ^ routing)
 
+(* Explicit spawn_model takes precedence; otherwise default to the
+   inferred lead model from environment/runtime configuration. *)
 let finalize_routing_decision ~spawn_model ~(decision : routing_decision) =
-  let resolved_model, escalated, reason =
-    match decision.model_tier with
-    | Team_session_types.Tier_35b -> (inferred_lead_model (), decision.escalated, decision.reason)
-    | Team_session_types.Tier_27b -> (
-        match inferred_middle_model () with
-        | Some model -> (Some model, decision.escalated, decision.reason)
-        | None ->
-            ( inferred_lead_model (),
-              true,
-              decision.reason ^ "; fallback:27b_unavailable->35b" ))
-    | Team_session_types.Tier_9b -> (
-        match inferred_worker_model () with
-        | Some model -> (Some model, decision.escalated, decision.reason)
-        | None ->
-            ( inferred_lead_model (),
-              true,
-              decision.reason ^ "; fallback:9b_unavailable->35b" ))
-  in
   let resolved_model =
     match trim_opt spawn_model with
-    | Some explicit -> Some explicit
-    | None -> resolved_model
+    | Some _ as explicit -> explicit
+    | None -> inferred_lead_model ()
   in
-  let resolved_tier =
-    if escalated then Team_session_types.Tier_35b else decision.model_tier
-  in
-  (resolved_model, resolved_tier, escalated, reason)
+  (resolved_model, decision.escalated, decision.reason)
 
 let resolve_routing_for_spec (spec : spawn_spec) =
   if not (is_local_spawn_agent spec.spawn_agent) then
     spec
   else
-    let explicit_tier =
-      match spec.worker_size with
-      | Some size -> Team_session_types.model_tier_of_worker_size size
-      | None -> (
-          spec.model_tier)
-    in
     let heuristic =
       heuristic_routing ~spawn_prompt:spec.spawn_prompt ~spawn_role:spec.spawn_role
         ~worker_class:spec.worker_class ~task_profile:spec.task_profile
-        ~risk_level:spec.risk_level ~model_tier:explicit_tier
+        ~risk_level:spec.risk_level
         ~routing_confidence:spec.routing_confidence
         ~routing_reason:spec.routing_reason
     in
@@ -521,43 +439,39 @@ let resolve_routing_for_spec (spec : spawn_spec) =
           in
           if confidence >= router_judge_confidence_threshold ()
              || Option.is_some spec.task_profile
-             || Option.is_some spec.model_tier
-             || Option.is_some spec.worker_size
           then
             decision
           else
             (match model_judge_routing ~spawn_prompt:spec.spawn_prompt
                      ~spawn_role:spec.spawn_role ~worker_class:spec.worker_class with
-            | Some model -> model
+            | Some judge_decision -> judge_decision
             | None ->
                 {
                   decision with
-                  model_tier = Team_session_types.Tier_35b;
                   risk_level = Team_session_types.Risk_high;
-                  reason = decision.reason ^ "; fallback:uncertain->35b";
+                  reason = decision.reason ^ "; fallback:uncertain";
                   escalated = true;
                 })
       | None -> (
           match model_judge_routing ~spawn_prompt:spec.spawn_prompt
                    ~spawn_role:spec.spawn_role ~worker_class:spec.worker_class with
-          | Some model -> model
+          | Some judge_decision -> judge_decision
           | None ->
               {
-                model_tier = Option.value ~default:Team_session_types.Tier_35b explicit_tier;
                 task_profile =
                   Option.value ~default:Team_session_types.Profile_synthesize
                     spec.task_profile;
                 risk_level =
                   Option.value ~default:Team_session_types.Risk_high spec.risk_level;
                 confidence = Some 0.0;
-                reason = Option.value ~default:"fallback:ambiguous->35b" spec.routing_reason;
+                reason = Option.value ~default:"fallback:ambiguous" spec.routing_reason;
                 judge_used = false;
                 escalate_if =
                   [ "worker failure"; "schema mismatch"; "context pressure"; "evidence conflict" ];
                 escalated = true;
               })
     in
-    let spawn_model, model_tier, routing_escalated, routing_reason =
+    let spawn_model, routing_escalated, routing_reason =
       finalize_routing_decision ~spawn_model:spec.spawn_model ~decision
     in
     let routing_confidence =
@@ -566,19 +480,12 @@ let resolve_routing_for_spec (spec : spawn_spec) =
       | None -> decision.confidence
     in
     let routing_note =
-      routing_summary_line { decision with model_tier; reason = routing_reason; escalated = routing_escalated }
-    in
-    let worker_size =
-      match spec.worker_size with
-      | Some _ as explicit -> explicit
-      | None -> Team_session_types.worker_size_of_model_tier model_tier
+      routing_summary_line { decision with reason = routing_reason; escalated = routing_escalated }
     in
     {
       spec with
       spawn_agent = normalize_spawn_agent spec.spawn_agent;
       spawn_model;
-      model_tier = Some model_tier;
-      worker_size;
       task_profile = Some decision.task_profile;
       risk_level = Some decision.risk_level;
       routing_confidence;
@@ -645,19 +552,6 @@ let inferred_supervisor_actor_of_spec ~lane_id ~control_domain (spec : spawn_spe
           | Some lane, _ -> Some (Printf.sprintf "ctrl-%s" lane)
           | None, _ -> Some "ctrl-root"))
 
-let controller_target_tier_of_spec ~control_domain (spec : spawn_spec) =
-  match control_domain with
-  | Some Team_session_types.Domain_meta -> Team_session_types.Tier_35b
-  | Some Team_session_types.Domain_quality
-  | Some Team_session_types.Domain_knowledge -> Team_session_types.Tier_27b
-  | _ -> (
-      match spec.worker_class with
-      | Some Team_session_types.Worker_manager -> Team_session_types.Tier_27b
-      | _ ->
-          Option.value
-            ~default:(Option.value ~default:Team_session_types.Tier_9b spec.model_tier)
-            spec.model_tier)
-
 let annotate_control_hierarchy_for_session
     (session : Team_session_types.session) (specs : spawn_spec list) =
   if
@@ -672,24 +566,10 @@ let annotate_control_hierarchy_for_session
         let supervisor_actor =
           inferred_supervisor_actor_of_spec ~lane_id ~control_domain spec
         in
-        let model_tier =
-          match spec.worker_size with
-          | Some worker_size ->
-              Team_session_types.model_tier_of_worker_size worker_size
-          | None -> (
-              match (spec.model_tier_explicit, spec.model_tier) with
-              | true, Some explicit -> Some explicit
-              | _ -> Some (controller_target_tier_of_spec ~control_domain spec))
-        in
         let spawn_model =
           match (spec.spawn_model_explicit, trim_opt spec.spawn_model) with
           | true, (Some _ as explicit) -> explicit
-          | _ -> (
-              match model_tier with
-              | Some Team_session_types.Tier_35b -> inferred_lead_model ()
-              | Some Team_session_types.Tier_27b -> inferred_middle_model ()
-              | Some Team_session_types.Tier_9b -> inferred_worker_model ()
-              | None -> spec.spawn_model)
+          | _ -> inferred_lead_model ()
         in
         {
           spec with
@@ -697,6 +577,5 @@ let annotate_control_hierarchy_for_session
           lane_id;
           control_domain;
           supervisor_actor;
-          model_tier;
         })
       specs

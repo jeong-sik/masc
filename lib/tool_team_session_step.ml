@@ -533,7 +533,6 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
                             ?execution_scope:
                               (deps.effective_execution_scope_of_spec failed_spec)
                             ?worker_class:failed_spec.worker_class
-                            ?worker_size:(deps.worker_size_of_spec failed_spec)
                             ?worker_backend:
                               (if deps.is_local_spawn_agent failed_spec.spawn_agent
                                then Some "local" else None)
@@ -544,7 +543,6 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
                             ?controller_level:(deps.inferred_controller_level_of_spec failed_spec)
                             ?control_domain:failed_spec.control_domain
                             ?supervisor_actor:failed_spec.supervisor_actor
-                            ?model_tier:failed_spec.model_tier
                             ?task_profile:failed_spec.task_profile
                             ?risk_level:failed_spec.risk_level
                             ?routing_confidence:failed_spec.routing_confidence

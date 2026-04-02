@@ -466,7 +466,6 @@ let test_delegate_rejects_not_ready_worker_with_guidance () =
                  controller_level = None;
                  control_domain = None;
                  supervisor_actor = None;
-                 model_tier = Some Team_session_types.Tier_35b;
                  task_profile = Some Team_session_types.Profile_normalize;
                  risk_level = Some Team_session_types.Risk_low;
                  routing_confidence = Some 0.9;
@@ -572,7 +571,6 @@ let test_delegate_ready_worker_accepts_background () =
                  controller_level = None;
                  control_domain = None;
                  supervisor_actor = None;
-                 model_tier = Some Team_session_types.Tier_35b;
                  task_profile = Some Team_session_types.Profile_normalize;
                  risk_level = Some Team_session_types.Risk_low;
                  routing_confidence = Some 0.9;
@@ -661,7 +659,6 @@ let test_delegate_rejects_corrupt_checkpoint_worker () =
                  controller_level = None;
                  control_domain = None;
                  supervisor_actor = None;
-                 model_tier = Some Team_session_types.Tier_35b;
                  task_profile = Some Team_session_types.Profile_normalize;
                  risk_level = Some Team_session_types.Risk_low;
                  routing_confidence = Some 0.9;
@@ -791,7 +788,6 @@ let test_status_marks_corrupt_meta_worker_blocked () =
                  controller_level = None;
                  control_domain = None;
                  supervisor_actor = None;
-                 model_tier = Some Team_session_types.Tier_35b;
                  task_profile = Some Team_session_types.Profile_normalize;
                  risk_level = Some Team_session_types.Risk_low;
                  routing_confidence = Some 0.9;
@@ -912,7 +908,7 @@ let make_pw ?(worker_class : Team_session_types.worker_class option)
     thinking_budget = None; max_turns = None; timeout_seconds = None;
     worker_class; parent_actor = None; capsule_mode = None;
     runtime_pool = None; lane_id = None; controller_level = None;
-    control_domain = None; supervisor_actor = None; model_tier = None;
+    control_domain = None; supervisor_actor = None;
     task_profile; risk_level = None; routing_confidence = None;
     routing_reason = None; routing_escalated = false }
 

@@ -51,7 +51,7 @@ let execute_spec ~sw ?net ~room_config (spec : Worker_execution_spec.t) :
       ~workspace_path ~team_session_id:spec.team_session_id
       ~worker_name:spec.worker_name ~mcp_session_id ~role:spec.role
       ~selection_note:spec.selection_note ~execution_scope
-      ~worker_class:spec.worker_class ~worker_size:spec.worker_size
+      ~worker_class:spec.worker_class
       ~effective_model:
         (match provider_and_model_id_of_label spec.model_label with
         | _provider, model_id -> model_id)

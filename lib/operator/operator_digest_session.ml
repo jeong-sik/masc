@@ -26,8 +26,6 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
                Option.map Team_session_types.control_domain_to_string
                  worker.control_domain,
                worker.supervisor_actor,
-               Option.map Team_session_types.model_tier_to_string
-                 worker.model_tier,
                Option.map Team_session_types.task_profile_to_string
                  worker.task_profile,
                Option.map Team_session_types.risk_level_to_string
@@ -44,7 +42,6 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
                  None,
                  None,
                  None,
-               None,
                None,
                None,
                None,
@@ -72,7 +69,6 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            controller_level,
            control_domain,
            supervisor_actor,
-           model_tier,
            task_profile,
            risk_level,
            routing_confidence,
@@ -135,7 +131,6 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            controller_level;
            control_domain;
            supervisor_actor;
-           model_tier;
            task_profile;
            risk_level;
            routing_confidence;
@@ -642,12 +637,6 @@ let build_session_digest ?status_json:cached_status config (session : Team_sessi
       | `Assoc _ as json -> json
       | _ ->
           Team_session_types.control_domain_counts session.planned_workers
-          |> Team_session_types.counts_to_json);
-    tier_counts =
-      (match U.member "tier_counts" summary with
-      | `Assoc _ as json -> json
-      | _ ->
-          Team_session_types.model_tier_counts session.planned_workers
           |> Team_session_types.counts_to_json);
     task_profile_counts =
       (match U.member "task_profile_counts" summary with

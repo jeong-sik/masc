@@ -31,7 +31,6 @@ type worker_card = {
   controller_level : string option;
   control_domain : string option;
   supervisor_actor : string option;
-  model_tier : string option;
   task_profile : string option;
   risk_level : string option;
   routing_confidence : float option;
@@ -60,7 +59,6 @@ type session_digest = {
   lane_counts : Yojson.Safe.t;
   controller_counts : Yojson.Safe.t;
   control_domain_counts : Yojson.Safe.t;
-  tier_counts : Yojson.Safe.t;
   task_profile_counts : Yojson.Safe.t;
   escalation_count : int;
   controller_tree : Yojson.Safe.t;
@@ -97,13 +95,12 @@ val aggregate_runtime_pool_counts : Team_session_types.session list -> Yojson.Sa
 val aggregate_lane_counts : Team_session_types.session list -> Yojson.Safe.t
 val aggregate_controller_counts : Team_session_types.session list -> Yojson.Safe.t
 val aggregate_control_domain_counts : Team_session_types.session list -> Yojson.Safe.t
-val aggregate_tier_counts : Team_session_types.session list -> Yojson.Safe.t
 val aggregate_task_profile_counts : Team_session_types.session list -> Yojson.Safe.t
 val aggregate_escalation_count : Team_session_types.session list -> int
 val aggregate_all_worker_metrics :
   Team_session_types.session list ->
   Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t *
-  Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int
+  Yojson.Safe.t * Yojson.Safe.t * int
 val aggregated_local_runtime_json : Team_session_types.session list -> Yojson.Safe.t
 
 val session_card_to_yojson : actor:string -> session_digest -> Yojson.Safe.t

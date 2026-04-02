@@ -145,11 +145,6 @@ let proof_markdown ~(session : Team_session_types.session)
              Option.value ~default:"(pending)"
                (Option.map String.trim worker.Team_session_types.runtime_actor)
            in
-           let tier =
-             Option.value ~default:"(unspecified)"
-               (Option.map Team_session_types.model_tier_to_string
-                  worker.Team_session_types.model_tier)
-           in
            let profile =
              Option.value ~default:"(unspecified)"
                (Option.map Team_session_types.task_profile_to_string
@@ -170,8 +165,8 @@ let proof_markdown ~(session : Team_session_types.session)
                worker.Team_session_types.routing_reason
            in
            Printf.sprintf
-             "- %s | role=%s | model=%s | runtime_actor=%s | tier=%s | profile=%s | risk=%s | confidence=%s | reason=%s"
-             worker.Team_session_types.spawn_agent role model actor tier
+             "- %s | role=%s | model=%s | runtime_actor=%s | profile=%s | risk=%s | confidence=%s | reason=%s"
+             worker.Team_session_types.spawn_agent role model actor
              profile risk confidence reason)
   in
   let failed_spawn_lines =
@@ -308,14 +303,6 @@ let proof_markdown ~(session : Team_session_types.session)
         (match spawn_models with
         | [] -> "(not recorded)"
        | xs -> String.concat ", " xs);
-      Printf.sprintf "- Model tier counts: %s"
-        (let pairs = Team_session_types.model_tier_counts planned_workers in
-         if pairs = [] then
-           "(not recorded)"
-         else
-           pairs
-           |> List.map (fun (key, count) -> Printf.sprintf "%s=%d" key count)
-           |> String.concat ", ");
       Printf.sprintf "- Task profile counts: %s"
         (let pairs = Team_session_types.task_profile_counts planned_workers in
          if pairs = [] then
@@ -554,9 +541,6 @@ let generate_proof ?(proof_level = default_proof_level) config
                 ( "spawn_selection_note_summary",
                   Option.fold ~none:`Null ~some:(fun note -> `String note)
                     spawn_selection_note_summary );
-                ( "tier_counts",
-                  Team_session_types.model_tier_counts session.planned_workers
-                  |> Team_session_types.counts_to_json );
                 ( "task_profile_counts",
                   Team_session_types.task_profile_counts session.planned_workers
                   |> Team_session_types.counts_to_json );

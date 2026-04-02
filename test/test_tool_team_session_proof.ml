@@ -56,7 +56,6 @@ let test_proof_exposes_spawn_selection_rationale () =
                    controller_level = None;
                    control_domain = None;
                    supervisor_actor = None;
-                   model_tier = Some Team_session_types.Tier_35b;
                    task_profile = Some Team_session_types.Profile_decide;
                    risk_level = Some Team_session_types.Risk_high;
                    routing_confidence = Some 0.97;
@@ -120,10 +119,6 @@ let test_proof_exposes_spawn_selection_rationale () =
     evidence |> Yojson.Safe.Util.member "unique_spawn_runtime_actors_count"
     |> Yojson.Safe.Util.to_int
   in
-  let tier_35b_count =
-    evidence |> Yojson.Safe.Util.member "tier_counts" |> Yojson.Safe.Util.member "35b"
-    |> Yojson.Safe.Util.to_int
-  in
   let decide_count =
     evidence |> Yojson.Safe.Util.member "task_profile_counts"
     |> Yojson.Safe.Util.member "decide" |> Yojson.Safe.Util.to_int
@@ -135,7 +130,6 @@ let test_proof_exposes_spawn_selection_rationale () =
   Alcotest.(check string) "selection note summary" selection_note recorded_note;
   Alcotest.(check int) "planned worker count" 1 planned_worker_count;
   Alcotest.(check int) "runtime actor count" 1 runtime_actor_count;
-  Alcotest.(check int) "proof tier count" 1 tier_35b_count;
   Alcotest.(check int) "proof decide count" 1 decide_count;
   Alcotest.(check bool) "spawn model included" true
     (List.mem spawn_model recorded_models);
@@ -210,7 +204,6 @@ let test_report_and_proof_expose_spawn_tool_usage () =
                    controller_level = None;
                    control_domain = Some Team_session_types.Domain_execution;
                    supervisor_actor = Some "tester";
-                   model_tier = Some Team_session_types.Tier_35b;
                    task_profile = Some Team_session_types.Profile_extract;
                    risk_level = Some Team_session_types.Risk_medium;
                    routing_confidence = Some 0.9;

@@ -190,7 +190,6 @@ type projected_worker_spec = {
   controller_level : string option;
   control_domain : string option;
   supervisor_actor : string option;
-  model_tier : string option;
   task_profile : string option;
   risk_level : string option;
   routing_confidence : float option;
@@ -221,7 +220,6 @@ type projected_session_metadata = {
   lane_counts : (string * int) list;
   controller_level_counts : (string * int) list;
   control_domain_counts : (string * int) list;
-  model_tier_counts : (string * int) list;
   worker_specs : projected_worker_spec list;
 }
 
@@ -257,8 +255,6 @@ let projected_worker_spec_of_planned_worker
     control_domain =
       Option.map Team_session_types.control_domain_to_string pw.control_domain;
     supervisor_actor = pw.supervisor_actor;
-    model_tier =
-      Option.map Team_session_types.model_tier_to_string pw.model_tier;
     task_profile =
       Option.map Team_session_types.task_profile_to_string pw.task_profile;
     risk_level =
@@ -309,8 +305,6 @@ let projected_session_metadata_of_session
       Team_session_types.controller_level_counts session.planned_workers;
     control_domain_counts =
       Team_session_types.control_domain_counts session.planned_workers;
-    model_tier_counts =
-      Team_session_types.model_tier_counts session.planned_workers;
     worker_specs =
       List.map projected_worker_spec_of_planned_worker session.planned_workers;
   }
@@ -331,7 +325,6 @@ let projected_worker_spec_to_json (spec : projected_worker_spec) :
     |> add_json_string_if_present "controller_level" spec.controller_level
     |> add_json_string_if_present "control_domain" spec.control_domain
     |> add_json_string_if_present "supervisor_actor" spec.supervisor_actor
-    |> add_json_string_if_present "model_tier" spec.model_tier
     |> add_json_string_if_present "task_profile" spec.task_profile
     |> add_json_string_if_present "risk_level" spec.risk_level
     |> add_json_string_if_present "routing_reason" spec.routing_reason
@@ -373,7 +366,6 @@ let metadata_of_session_projection (projection : projected_session_metadata) :
     ( "controller_level_counts",
       count_assoc_to_json projection.controller_level_counts );
     ("control_domain_counts", count_assoc_to_json projection.control_domain_counts);
-    ("model_tier_counts", count_assoc_to_json projection.model_tier_counts);
     ( "worker_specs",
       `List (List.map projected_worker_spec_to_json projection.worker_specs) );
   ]
@@ -426,10 +418,6 @@ let planned_worker_summary (pw : Team_session_types.planned_worker) : string opt
   add "class"
     (match pw.worker_class with
      | Some worker_class -> Team_session_types.worker_class_to_string worker_class
-     | None -> "");
-  add "tier"
-    (match pw.model_tier with
-     | Some tier -> Team_session_types.model_tier_to_string tier
      | None -> "");
   add "pool" (Option.value ~default:"" pw.runtime_pool);
   add "lane" (Option.value ~default:"" pw.lane_id);

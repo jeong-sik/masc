@@ -293,7 +293,6 @@ let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn ()
                     controller_level = Some Team_session_types.Controller_worker;
                     control_domain = Some Team_session_types.Domain_execution;
                     supervisor_actor = Some "ctrl-lane-a";
-                    model_tier = Some Team_session_types.Tier_9b;
                     task_profile = Some Team_session_types.Profile_normalize;
                     risk_level = Some Team_session_types.Risk_low;
                     routing_confidence = Some 0.82;
@@ -341,7 +340,5 @@ let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn ()
       let worker = List.hd spawn_batch in
       Alcotest.(check string) "spawn_role" "implementer-a"
         Yojson.Safe.Util.(worker |> member "spawn_role" |> to_string);
-      Alcotest.(check string) "worker_size" "sm"
-        Yojson.Safe.Util.(worker |> member "worker_size" |> to_string);
       Alcotest.(check string) "recommendation provenance" "fallback"
         Yojson.Safe.Util.(recommendation |> member "provenance" |> to_string))

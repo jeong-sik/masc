@@ -274,12 +274,6 @@ After masc_team_session_start; the primary write path for all session activity."
 	                              `String "metacog";
 	                            ] );
 	                      ] );
-	                  ( "worker_size",
-	                    `Assoc
-	                      [
-	                        ("type", `String "string");
-	                        ("enum", `List [ `String "sm"; `String "lg"; `String "xlg" ]);
-	                      ] );
 	                  ("parent_actor", `Assoc [ ("type", `String "string") ]);
 	                  ( "capsule_mode",
 	                    `Assoc
@@ -439,12 +433,6 @@ After masc_team_session_start; the primary write path for all session activity."
 	                                                `String "librarian";
 	                                                `String "metacog";
 	                                              ] );
-	                                        ] );
-	                                    ( "worker_size",
-	                                      `Assoc
-	                                        [
-	                                          ("type", `String "string");
-	                                          ("enum", `List [ `String "sm"; `String "lg"; `String "xlg" ]);
 	                                        ] );
 	                                    ("parent_actor", `Assoc [ ("type", `String "string") ]);
 	                                    ( "capsule_mode",

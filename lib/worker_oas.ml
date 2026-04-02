@@ -104,14 +104,8 @@ let description_of_meta (meta : Worker_container_types.worker_container_meta) : 
   add "execution_scope"
     (Team_session_types.execution_scope_to_string meta.execution_scope);
   add "effective_model" meta.effective_model;
-  (match meta.effective_tier with
-   | Some tier -> add "effective_tier" (Team_session_types.model_tier_to_string tier)
-   | None -> ());
   (match meta.worker_class with
    | Some cls -> add "worker_class" (Team_session_types.worker_class_to_string cls)
-   | None -> ());
-  (match meta.worker_size with
-   | Some size -> add "worker_size" (Team_session_types.worker_size_to_string size)
    | None -> ());
   String.concat "\n" (List.rev !lines)
 

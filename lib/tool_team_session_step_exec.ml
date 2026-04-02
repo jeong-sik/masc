@@ -173,16 +173,16 @@ let record_delivery_verdict_for_worker_run ~(config : Room.config)
             ])
 
 let append_spawn_event (env : _ step_env) ?worker_run_id ?spawn_agent ?runtime_actor ?spawn_role
-    ?spawn_model ?execution_scope ?worker_class ?worker_size
+    ?spawn_model ?execution_scope ?worker_class
     ?worker_backend ?wait_mode ?trace_capability
     ?parent_actor ?capsule_mode
     ?runtime_pool ?lane_id ?controller_level ?control_domain
-    ?supervisor_actor ?model_tier ?task_profile ?risk_level
+    ?supervisor_actor ?task_profile ?risk_level
     ?routing_confidence ?routing_reason ?assigned_runtime
     ?spawn_selection_note ?tool_names ?tool_call_count ~success
     ?exit_code
     ?elapsed_ms ?output_preview ?error () =
-  let _ = spawn_agent and _ = spawn_model and _ = model_tier in
+  let _ = spawn_agent and _ = spawn_model in
   let detail =
     `Assoc
       [
@@ -207,12 +207,6 @@ let append_spawn_event (env : _ step_env) ?worker_run_id ?spawn_agent ?runtime_a
               `String
                 (Team_session_types.worker_class_to_string kind))
             worker_class );
-        ( "worker_size",
-          Option.fold ~none:`Null
-            ~some:(fun size ->
-              `String
-                (Team_session_types.worker_size_to_string size))
-            worker_size );
         ( "worker_backend",
           Option.fold ~none:`Null ~some:(fun s -> `String s)
             worker_backend );
@@ -404,7 +398,7 @@ let append_delegate_denied_event (env : _ step_env) ~worker_name ~delegate_promp
 
 let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
     ~mode ~wait_mode ?execution_scope ?tool_names ?tool_call_count
-    ?requested_worker_class ?requested_worker_size
+    ?requested_worker_class
     ?resolved_runtime ?resolved_model ?routing_reason
     ~status
     ~success ?output_preview ?error ?trace_capability ?trace_ref
@@ -515,7 +509,6 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
         ("success", `Bool success);
         ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
         ("requested_worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) requested_worker_class);
-        ("requested_worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) requested_worker_size);
         ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
         ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_resolved_model);
         ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
@@ -567,7 +560,6 @@ let fail_all_prepared (env : _ step_env) ?(include_worker_run_id = true)
         ?execution_scope:
           (env.deps.effective_execution_scope_of_spec prepared.spec)
         ?worker_class:prepared.spec.worker_class
-        ?worker_size:(env.deps.worker_size_of_spec prepared.spec)
         ?worker_backend:
           (if env.deps.is_local_spawn_agent prepared.spec.spawn_agent then
              Some "local"
@@ -580,7 +572,6 @@ let fail_all_prepared (env : _ step_env) ?(include_worker_run_id = true)
           (env.deps.inferred_controller_level_of_spec prepared.spec)
         ?control_domain:prepared.spec.control_domain
         ?supervisor_actor:prepared.spec.supervisor_actor
-        ?model_tier:prepared.spec.model_tier
         ?task_profile:prepared.spec.task_profile
         ?risk_level:prepared.spec.risk_level
         ?routing_confidence:prepared.spec.routing_confidence

@@ -9,7 +9,6 @@ type t = {
   team_session_id : string option;
   working_dir : string option;
   worker_class : Team_session_types.worker_class option;
-  worker_size : Team_session_types.worker_size option;
   execution_scope : Team_session_types.execution_scope option;
   thinking_enabled : bool option;
   max_turns : int;
@@ -76,18 +75,6 @@ let worker_class_of_yojson = function
   | `Null -> None
   | _ -> None
 
-let worker_size_to_yojson = function
-  | Some worker_size ->
-      `String (Team_session_types.worker_size_to_string worker_size)
-  | None -> `Null
-
-let worker_size_of_yojson = function
-  | `String value ->
-      Team_session_types.worker_size_of_string
-        (String.lowercase_ascii (String.trim value))
-  | `Null -> None
-  | _ -> None
-
 let to_yojson (spec : t) =
   `Assoc
     [
@@ -97,7 +84,6 @@ let to_yojson (spec : t) =
       ("team_session_id", option_to_yojson (fun s -> `String s) spec.team_session_id);
       ("working_dir", option_to_yojson (fun s -> `String s) spec.working_dir);
       ("worker_class", worker_class_to_yojson spec.worker_class);
-      ("worker_size", worker_size_to_yojson spec.worker_size);
       ("execution_scope", execution_scope_to_yojson spec.execution_scope);
       ("thinking_enabled", option_to_yojson (fun v -> `Bool v) spec.thinking_enabled);
       ("max_turns", `Int spec.max_turns);
@@ -148,7 +134,6 @@ let of_yojson (json : Yojson.Safe.t) =
              team_session_id = option_string (json |> member "team_session_id");
              working_dir = option_string (json |> member "working_dir");
              worker_class = worker_class_of_yojson (json |> member "worker_class");
-             worker_size = worker_size_of_yojson (json |> member "worker_size");
              execution_scope =
                execution_scope_of_yojson (json |> member "execution_scope");
              thinking_enabled =

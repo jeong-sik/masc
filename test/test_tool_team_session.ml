@@ -50,8 +50,8 @@ let () =
               .test_step_updates_delivery_contract_and_status_exposes_it;
           Alcotest.test_case "step-spawn-requires-proc-mgr" `Quick
             Test_tool_team_session_step_validation.test_step_spawn_requires_proc_mgr;
-          Alcotest.test_case "step-spawn-default-local-allows-worker-size" `Quick
-            Test_tool_team_session_step_validation.test_step_spawn_default_local_allows_worker_size_without_spawn_model;
+          Alcotest.test_case "step-spawn-default-local-without-spawn-model" `Quick
+            Test_tool_team_session_step_validation.test_step_spawn_default_local_without_spawn_model;
           Alcotest.test_case "step-spawn-batch-defaults-execution-scope" `Quick
             Test_tool_team_session_step_validation.test_step_spawn_batch_defaults_execution_scope_by_worker_class;
           Alcotest.test_case "step-rejects-legacy-spawn-fields" `Quick
@@ -72,13 +72,6 @@ let () =
             `Quick Test_tool_team_session_step_routing.test_parse_step_spawn_specs_applies_worker_policy_fields;
           Alcotest.test_case "status-reports-worker-run-progress-summary" `Quick
             Test_tool_team_session_step_routing.test_status_reports_worker_run_progress_summary;
-          Alcotest.test_case "step-spawn-batch-infers-exact-env-model-tiers"
-            `Quick Test_tool_team_session_step_routing.test_step_spawn_batch_infers_exact_env_model_tiers;
-          Alcotest.test_case
-            "runtime-inventory-uses-token-boundaries-for-model-tiers"
-            `Quick
-            Test_tool_team_session_step_routing
-              .test_runtime_inventory_uses_token_boundaries_for_model_tiers;
           Alcotest.test_case
             "step-spawn-batch-preserves-explicit-hierarchical-assignments"
             `Quick Test_tool_team_session_step_followup.test_step_spawn_batch_preserves_explicit_hierarchical_assignments;

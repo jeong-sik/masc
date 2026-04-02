@@ -873,7 +873,6 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
               ("lane_census", aggregate_lane_counts tracked_sessions);
               ("controller_census", aggregate_controller_counts tracked_sessions);
               ("control_domains", aggregate_control_domain_counts tracked_sessions);
-              ("model_tiers", aggregate_tier_counts tracked_sessions);
               ("task_profiles", aggregate_task_profile_counts tracked_sessions);
               ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));
               ("local_runtime", aggregated_local_runtime_json tracked_sessions);

@@ -172,8 +172,6 @@ let test_step_spawn_batch_applies_hybrid_routing () =
       in
       Alcotest.(check (option string)) "normalizer model" (Some "qwen9-worker")
         normalizer.spawn_model;
-      Alcotest.(check (option string)) "normalizer tier" (Some "9b")
-        (Option.map Team_session_types.model_tier_to_string normalizer.model_tier);
       Alcotest.(check (option string)) "normalizer profile" (Some "normalize")
         (Option.map Team_session_types.task_profile_to_string
            normalizer.task_profile);
@@ -186,9 +184,6 @@ let test_step_spawn_batch_applies_hybrid_routing () =
       in
       Alcotest.(check (option string)) "final writer model" (Some "qwen35-lead")
         final_writer.spawn_model;
-      Alcotest.(check (option string)) "final writer tier" (Some "35b")
-        (Option.map Team_session_types.model_tier_to_string
-           final_writer.model_tier);
       Alcotest.(check (option string)) "final writer profile" (Some "synthesize")
         (Option.map Team_session_types.task_profile_to_string
            final_writer.task_profile);
@@ -203,10 +198,6 @@ let test_step_spawn_batch_applies_hybrid_routing () =
       let summary =
         parse_json_exn status_body |> result_field |> Yojson.Safe.Util.member "summary"
       in
-      Alcotest.(check int) "summary 35b count" 1
-        Yojson.Safe.Util.(summary |> member "tier_counts" |> member "35b" |> to_int);
-      Alcotest.(check int) "summary 9b count" 1
-        Yojson.Safe.Util.(summary |> member "tier_counts" |> member "9b" |> to_int);
       Alcotest.(check int) "summary normalize count" 1
         Yojson.Safe.Util.(summary |> member "task_profile_counts" |> member "normalize" |> to_int);
       Alcotest.(check int) "summary synthesize count" 1
@@ -319,7 +310,6 @@ let test_status_reports_worker_run_progress_summary () =
       controller_level = None;
       control_domain = None;
       supervisor_actor = None;
-      model_tier = Some Team_session_types.Tier_35b;
       task_profile = Some Team_session_types.Profile_normalize;
       risk_level = Some Team_session_types.Risk_low;
       routing_confidence = Some 0.9;
@@ -418,90 +408,6 @@ let test_status_reports_worker_run_progress_summary () =
   Alcotest.(check bool) "worker-b marked in flight" true
     Yojson.Safe.Util.(worker_b_readiness |> member "in_flight" |> to_bool);
   cleanup_dir base_dir
-
-let test_step_spawn_batch_infers_exact_env_model_tiers () =
-  with_eio @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Local_runtime_pool.reset ();
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
-      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
-      let ctx : _ Tool_team_session.context =
-        {
-          config;
-          agent_name = "owner";
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = None; net = None;
-        }
-      in
-      with_env "MASC_TEAM_SESSION_MODEL_35B" (Some "lead-model-exact") @@ fun () ->
-      with_env "MASC_TEAM_SESSION_MODEL_27B" (Some "middle-model-exact") @@ fun () ->
-      with_env "MASC_TEAM_SESSION_MODEL_9B" (Some "worker-model-exact") @@ fun () ->
-      with_env "MASC_TEAM_SESSION_ROUTER_JUDGE" (Some "false") @@ fun () ->
-      Local_runtime_pool.reset ();
-      let session_id =
-        start_session_exn ctx ~goal:"infer exact env model tiers"
-        |> get_session_id
-      in
-      let step_ok, _step_body =
-        dispatch_exn ctx ~name:"masc_team_session_step"
-          ~args:
-            (`Assoc
-              [
-                ("session_id", `String session_id);
-                ( "spawn_batch",
-                  `List
-                    [
-                      `Assoc
-                        [
-                          ("spawn_role", `String "exact-lead");
-                          ("worker_size", `String "xlg");
-                          ( "spawn_prompt",
-                            `String
-                              "final architecture decision and synthesize the proposal" );
-                        ];
-                      `Assoc
-                        [
-                          ("spawn_role", `String "exact-middle");
-                          ("worker_size", `String "lg");
-                          ( "spawn_prompt",
-                            `String
-                              "verify the retrieved evidence and highlight contradictions" );
-                        ];
-                    ] );
-              ])
-      in
-      Alcotest.(check bool) "batch step fails without proc manager" false step_ok;
-      let session =
-        Team_session_store.load_session config session_id |> Option.get
-      in
-      let exact_lead =
-        List.find
-          (fun worker -> worker.Team_session_types.spawn_role = Some "exact-lead")
-          session.planned_workers
-      in
-      Alcotest.(check (option string)) "exact lead model kept"
-        (Some "lead-model-exact") exact_lead.spawn_model;
-      Alcotest.(check (option string)) "exact lead tier inferred as 35b"
-        (Some "35b")
-        (Option.map Team_session_types.model_tier_to_string exact_lead.model_tier);
-      let exact_middle =
-        List.find
-          (fun worker -> worker.Team_session_types.spawn_role = Some "exact-middle")
-          session.planned_workers
-      in
-      Alcotest.(check (option string)) "exact middle model kept"
-        (Some "middle-model-exact") exact_middle.spawn_model;
-      Alcotest.(check (option string)) "exact middle tier inferred as 27b"
-        (Some "27b")
-        (Option.map Team_session_types.model_tier_to_string
-           exact_middle.model_tier))
 
 let test_runtime_inventory_uses_token_boundaries_for_model_tiers () =
   Fun.protect

@@ -140,7 +140,6 @@ let step_deps : Tool_team_session_step.step_deps =
     derived_local_runtime_actor;
     is_local_spawn_agent;
     effective_execution_scope_of_spec;
-    worker_size_of_spec;
     inferred_controller_level_of_spec;
     planned_worker_of_spec;
     register_planned_workers;

@@ -645,7 +645,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("swarm_status", swarm_status_json);
        ]
       @ (let (role_census, runtime_pools, lane_census, controller_census,
-              control_domains, model_tiers, task_profiles, escalation_count) =
+              control_domains, task_profiles, escalation_count) =
            timed "aggregates" (fun () -> aggregate_all_worker_metrics tracked_sessions)
          in
          [
@@ -654,7 +654,6 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
            ("lane_census", lane_census);
            ("controller_census", controller_census);
            ("control_domains", control_domains);
-           ("model_tiers", model_tiers);
            ("task_profiles", task_profiles);
            ("escalation_count", `Int escalation_count);
          ])

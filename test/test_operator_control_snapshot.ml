@@ -521,7 +521,6 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
                     controller_level = Some Team_session_types.Controller_lane;
                     control_domain = Some Team_session_types.Domain_execution;
                     supervisor_actor = Some "ctrl-root";
-                    model_tier = Some Team_session_types.Tier_35b;
                     task_profile = Some Team_session_types.Profile_decide;
                     risk_level = Some Team_session_types.Risk_high;
                     routing_confidence = Some 0.94;
@@ -546,7 +545,6 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
                     controller_level = Some Team_session_types.Controller_submanager;
                     control_domain = Some Team_session_types.Domain_meta;
                     supervisor_actor = Some "ctrl-global-metacog";
-                    model_tier = Some Team_session_types.Tier_35b;
                     task_profile = Some Team_session_types.Profile_verify;
                     risk_level = Some Team_session_types.Risk_high;
                     routing_confidence = Some 0.88;
@@ -571,7 +569,6 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
                     controller_level = Some Team_session_types.Controller_worker;
                     control_domain = Some Team_session_types.Domain_execution;
                     supervisor_actor = Some "ctrl-lane-a";
-                    model_tier = Some Team_session_types.Tier_9b;
                     task_profile = Some Team_session_types.Profile_normalize;
                     risk_level = Some Team_session_types.Risk_low;
                     routing_confidence = Some 0.83;
@@ -595,10 +592,6 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
         Yojson.Safe.Util.(snapshot |> member "role_census" |> member "metacog" |> to_int);
       Alcotest.(check int) "room runtime pool local64" 3
         Yojson.Safe.Util.(snapshot |> member "runtime_pools" |> member "local64" |> to_int);
-      Alcotest.(check int) "room tier 35b count" 2
-        Yojson.Safe.Util.(snapshot |> member "model_tiers" |> member "35b" |> to_int);
-      Alcotest.(check int) "room tier 9b count" 1
-        Yojson.Safe.Util.(snapshot |> member "model_tiers" |> member "9b" |> to_int);
       Alcotest.(check int) "room task profile normalize" 1
         Yojson.Safe.Util.(snapshot |> member "task_profiles" |> member "normalize" |> to_int);
       Alcotest.(check int) "room escalation count" 1
@@ -623,10 +616,6 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
       Alcotest.(check int) "session card runtime pool local64" 3
         Yojson.Safe.Util.
           (session_card |> member "runtime_pool_counts" |> member "local64" |> to_int);
-      Alcotest.(check int) "session card tier 35b count" 2
-        Yojson.Safe.Util.(session_card |> member "tier_counts" |> member "35b" |> to_int);
-      Alcotest.(check int) "session card tier 9b count" 1
-        Yojson.Safe.Util.(session_card |> member "tier_counts" |> member "9b" |> to_int);
       Alcotest.(check int) "session card profile decide count" 1
         Yojson.Safe.Util.
           (session_card |> member "task_profile_counts" |> member "decide" |> to_int);
@@ -644,8 +633,6 @@ let test_snapshot_and_digest_expose_role_runtime_census () =
         | Some card -> card
         | None -> Alcotest.fail "expected manager worker card"
       in
-      Alcotest.(check string) "manager card model tier" "35b"
-        Yojson.Safe.Util.(manager_card |> member "model_tier" |> to_string);
       Alcotest.(check string) "manager card task profile" "decide"
         Yojson.Safe.Util.(manager_card |> member "task_profile" |> to_string);
       Alcotest.(check string) "manager card risk level" "high"

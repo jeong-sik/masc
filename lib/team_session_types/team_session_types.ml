@@ -79,9 +79,6 @@ let planned_worker_key (w : planned_worker) =
           "supervisor:"
           ^ Option.value ~default:""
               (Option.map String.trim w.supervisor_actor);
-          "tier:"
-          ^ Option.value ~default:""
-              (Option.map model_tier_to_string w.model_tier);
           "profile:"
           ^ Option.value ~default:""
               (Option.map task_profile_to_string w.task_profile);
@@ -210,19 +207,6 @@ let control_domain_counts workers =
   count_by
     (fun (w : planned_worker) ->
       Option.map control_domain_to_string w.control_domain)
-    workers
-
-let model_tier_counts workers =
-  count_by
-    (fun (w : planned_worker) ->
-      Option.map model_tier_to_string w.model_tier)
-    workers
-
-let worker_size_counts workers =
-  count_by
-    (fun (w : planned_worker) ->
-      Option.bind w.model_tier worker_size_of_model_tier
-      |> Option.map worker_size_to_string)
     workers
 
 let task_profile_counts workers =
@@ -468,14 +452,6 @@ let planned_worker_to_yojson (w : planned_worker) =
       ( "supervisor_actor",
         Option.fold ~none:`Null ~some:(fun s -> `String s)
           w.supervisor_actor );
-      ( "model_tier",
-        Option.fold ~none:`Null
-          ~some:(fun tier -> `String (model_tier_to_string tier))
-          w.model_tier );
-      ( "worker_size",
-        Option.fold ~none:`Null
-          ~some:(fun size -> `String (worker_size_to_string size))
-          (Option.bind w.model_tier worker_size_of_model_tier) );
       ( "task_profile",
         Option.fold ~none:`Null
           ~some:(fun profile -> `String (task_profile_to_string profile))
@@ -547,24 +523,6 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
                     (String.lowercase_ascii (String.trim value)));
             supervisor_actor =
               member "supervisor_actor" json |> to_string_option;
-            model_tier =
-              (match
-                 Option.bind
-                   (member "model_tier" json |> to_string_option)
-                   (fun value ->
-                     model_tier_of_string
-                       (String.lowercase_ascii (String.trim value)))
-               with
-              | Some tier -> Some tier
-              | None ->
-                  let size_opt =
-                    match member "worker_size" json |> to_string_option with
-                    | Some value ->
-                        worker_size_of_string
-                          (String.lowercase_ascii (String.trim value))
-                    | None -> None
-                  in
-                  Option.bind size_opt model_tier_of_worker_size);
             task_profile =
               Option.bind
                 (member "task_profile" json |> to_string_option)

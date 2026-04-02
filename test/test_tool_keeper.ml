@@ -98,6 +98,16 @@ let contains_substring s needle =
     else loop (i + 1)
   in
   if n_len = 0 then true else loop 0
+
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+
+let recent_keeper_log_messages ~since_seq =
+  Log.Ring.recent ~limit:50 ~module_filter:"Keeper" ~since_seq ()
+  |> List.map (fun (entry : Log.Ring.entry) -> entry.message)
+
 let string_is_valid_utf8 s =
   let len = String.length s in
   let rec loop i =
@@ -1235,10 +1245,19 @@ let test_keeper_up_update_clears_explicit_tool_lists () =
         | Ok parsed -> parsed
         | Error (_, msg) -> fail ("failed to parse create args: " ^ msg)
       in
-      let ok, _ =
+      check (option (list string)) "parsed also_allow before create"
+        (Some [ "masc_governance_status" ]) create_parsed.tool_also_allow_opt;
+      let ok, create_body =
         Masc_mcp.Keeper_turn_up_create.create_keeper keeper_ctx create_parsed
       in
-      check bool "initial keeper create ok" true ok;
+      if not ok then fail ("initial keeper create failed: " ^ create_body);
+      let created_json =
+        Yojson.Safe.from_file (Masc_mcp.Keeper_types.keeper_meta_path config "tool-policy-demo")
+      in
+      check (list string) "persisted tool_access also_allow after create"
+        [ "masc_governance_status" ]
+        Yojson.Safe.Util.(
+          created_json |> member "tool_access" |> member "also_allow" |> to_list |> filter_string);
       let old_meta =
         match Masc_mcp.Keeper_types.read_meta config "tool-policy-demo" with
         | Ok (Some meta) -> meta
@@ -1281,6 +1300,52 @@ let test_keeper_up_update_clears_explicit_tool_lists () =
           check (list string) "update clears also_allow" [] also_allow
       | _ -> fail "expected minimal preset after update");
       check (list string) "update clears denylist" [] updated_meta.tool_denylist)
+
+let test_keeper_up_accepts_canonical_tool_access () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "tool-access-canonical";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, body =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "tool-access-canonical");
+              ("goal", `String "Exercise canonical tool_access input");
+              ( "tool_access",
+                `Assoc
+                  [
+                    ("kind", `String "custom");
+                    ("tools", `List [ `String "masc_status"; `String "masc_board_list" ]);
+                  ] );
+            ])
+      in
+      if not ok then fail ("keeper up failed: " ^ body);
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "tool-access-canonical" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after canonical tool_access create"
+        | Error e -> fail e
+      in
+      match meta.Masc_mcp.Keeper_types.tool_access with
+      | Masc_mcp.Keeper_types.Custom names ->
+          check (list string) "custom tool_access preserved"
+            [ "masc_status"; "masc_board_list" ] names
+      | _ -> fail "expected custom tool_access")
 
 let test_keeper_up_persists_explicit_goal_horizons () =
   Eio_main.run @@ fun env ->
@@ -1858,6 +1923,61 @@ let test_legacy_presence_keepalive_false_migrates_to_paused () =
       check bool "paused persisted after scrub" true
         Yojson.Safe.Util.(scrubbed_json |> member "paused" = `Bool true))
 
+let test_read_meta_warns_on_unknown_keys () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "unknown-key-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "unknown-key-demo");
+              ("goal", `String "Warn on unknown keeper meta keys");
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      let meta_path =
+        Masc_mcp.Keeper_types.keeper_meta_path config "unknown-key-demo"
+      in
+      let original_json = Yojson.Safe.from_file meta_path in
+      let mutated_json =
+        match original_json with
+        | `Assoc fields -> `Assoc (("mystery_key", `String "surprise") :: fields)
+        | _ -> fail "expected keeper meta object"
+      in
+      let oc = open_out meta_path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc (Yojson.Safe.pretty_to_string mutated_json));
+      let baseline = latest_log_seq () in
+      let _ =
+        match Masc_mcp.Keeper_types.read_meta config "unknown-key-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta after unknown key warning read"
+        | Error e -> fail e
+      in
+      let messages = recent_keeper_log_messages ~since_seq:baseline in
+      check bool "unknown key warning emitted" true
+        (List.exists
+           (fun message -> contains_substring message "unknown keys: mystery_key")
+           messages))
+
 let test_keeper_up_recreates_cached_keeper_dir_after_base_reset () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2027,6 +2147,8 @@ let () =
            test_keeper_up_update_preserves_proactive_when_omitted;
          test_case "keeper up update clears explicit tool lists" `Quick
            test_keeper_up_update_clears_explicit_tool_lists;
+         test_case "keeper up accepts canonical tool_access" `Quick
+           test_keeper_up_accepts_canonical_tool_access;
          test_case "write_meta syncs registry meta" `Quick
            test_write_meta_syncs_registry_meta;
          test_case "keeper up persists allowed paths" `Quick
@@ -2039,6 +2161,8 @@ let () =
            test_keeper_supervisor_recovers_missing_desired_keeper;
          test_case "legacy presence_keepalive false migrates to paused" `Quick
            test_legacy_presence_keepalive_false_migrates_to_paused;
+         test_case "read_meta warns on unknown keys" `Quick
+           test_read_meta_warns_on_unknown_keys;
          test_case "keeper repair passes with provided source_text" `Quick
            test_keeper_repair_passes_with_provided_source_text;
          test_case "keeper up recreates cached keeper dir after base reset (issue #3710)" `Quick

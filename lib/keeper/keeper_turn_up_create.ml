@@ -111,14 +111,20 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
     let handoff_threshold = Option.value ~default:0.85 p.handoff_threshold_opt in
     let handoff_cooldown_sec = Option.value ~default:300 p.handoff_cooldown_sec_opt in
-    let tool_preset =
-      Option.value ~default:Research
-        (first_some p.tool_preset_opt (preset_of_defaults p.profile_defaults))
-    in
-    let tool_also_allow =
-      resolve_tool_name_list
-        ~preferred:p.tool_also_allow_opt
-        ~fallback:p.profile_defaults.tool_also_allow
+    let tool_access =
+      match p.tool_access_opt with
+      | Some access -> access
+      | None ->
+          let tool_preset =
+            Option.value ~default:Research
+              (first_some p.tool_preset_opt (preset_of_defaults p.profile_defaults))
+          in
+          let tool_also_allow =
+            resolve_tool_name_list
+              ~preferred:p.tool_also_allow_opt
+              ~fallback:p.profile_defaults.tool_also_allow
+          in
+          Preset { preset = tool_preset; also_allow = tool_also_allow }
     in
     let tool_denylist =
       resolve_tool_name_list
@@ -218,7 +224,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         execution_scope;
         allowed_paths;
         scope_kind;
-        tool_access = Preset { preset = tool_preset; also_allow = tool_also_allow };
+        tool_access;
         tool_denylist;
         room_scope;
         voice_enabled;

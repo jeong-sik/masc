@@ -68,13 +68,24 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
         ]);
+        ("tool_access", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
+        ]);
         ("tool_preset", `Assoc [
           ("type", `String "string");
+          ("description", `String "Compatibility field. Use tool_access.kind='preset' for new callers.");
           ("enum", `List [`String "minimal"; `String "messaging"; `String "coding"; `String "research"; `String "full"]);
+        ]);
+        ("tool_custom_allowlist", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Compatibility field for custom allowlists. Use tool_access.kind='custom' for new callers.");
         ]);
         ("tool_also_allow", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Compatibility field. Adds tools on top of tool_preset.");
         ]);
         ("tool_denylist", `Assoc [
           ("type", `String "array");
@@ -200,15 +211,24 @@ let keeper_schemas : tool_schema list = [
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Restrict file writes to these path prefixes. Empty list uses computed defaults based on execution_scope. Use [\"*\"] for explicit full access.");
         ]);
+        ("tool_access", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
+        ]);
         ("tool_preset", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "minimal"; `String "messaging"; `String "coding"; `String "research"; `String "full"]);
-          ("description", `String "Base keeper tools preset. Default: full.");
+          ("description", `String "Compatibility field. Use tool_access.kind='preset' for new callers.");
+        ]);
+        ("tool_custom_allowlist", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Compatibility field for custom allowlists. Use tool_access.kind='custom' for new callers.");
         ]);
         ("tool_also_allow", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Additional tool names to add on top of the selected preset.");
+          ("description", `String "Compatibility field. Adds tools on top of tool_preset.");
         ]);
         ("tool_denylist", `Assoc [
           ("type", `String "array");

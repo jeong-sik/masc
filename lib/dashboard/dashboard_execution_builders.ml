@@ -102,22 +102,22 @@ let worker_state_of_agent
     match agent.status with
     | Types.Inactive ->
         ( "offline",
-          "bad",
+          Tone_bad,
           if last_signal_ts > 0.0 then "Offline or inactive" else "No recent presence" )
     | Types.Busy | Types.Active | Types.Listening ->
         if signal_age_s > signal_stale_sec then
           ( "quiet",
-            "bad",
+            Tone_bad,
             if has_work then "Working without a fresh signal" else "No fresh agent signal" )
         else if has_work then
           if signal_age_s > signal_quiet_sec then
-            ("quiet", "warn", "Execution looks quiet for too long")
+            ("quiet", Tone_warn, "Execution looks quiet for too long")
           else
-            ("working", "ok", "Task and live signal aligned")
+            ("working", Tone_ok, "Task and live signal aligned")
         else if signal_age_s > signal_quiet_sec then
-          ("quiet", "warn", "Quiet but still reachable")
+          ("quiet", Tone_warn, "Quiet but still reachable")
         else
-          ("watching", "ok", "Standing by for the next task")
+          ("watching", Tone_ok, "Standing by for the next task")
   in
   let focus =
     match trim_to_option (Option.value ~default:"" agent.current_task) with
@@ -140,7 +140,7 @@ let worker_state_of_agent
           ("name", `String agent.name);
           ("agent_name", `String agent.name);
           ("status", `String status_string);
-          ("tone", `String tone);
+          ("tone", `String (string_of_tone tone));
           ("state", `String state);
           ("note", `String note);
           ("focus", `String focus);
@@ -208,19 +208,19 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   in
   let (state, tone, note) =
     if is_keeper_offline status then
-      ("critical", "bad", "keeper 오프라인")
+      ("critical", Tone_bad, "keeper 오프라인")
     else if lifecycle = "handoff-imminent" then
-      ("critical", "bad", "핸드오프 임박")
+      ("critical", Tone_bad, "핸드오프 임박")
     else if lifecycle = "preparing" || lifecycle = "compacting" then
-      ("warning", "warn", "연속성 압력이 높습니다")
+      ("warning", Tone_warn, "연속성 압력이 높습니다")
     else if autonomous_turn_count = 0 && turn_count > 0 then
-      ("warning", "warn",
+      ("warning", Tone_warn,
        Printf.sprintf "자율 턴 없음 (턴 %d회 수행)" turn_count)
     else if last_action_age_s >= keeper_action_stale_sec then
-      ("warning", "warn",
+      ("warning", Tone_warn,
        Printf.sprintf "마지막 행동 %.0f시간 전" (last_action_age_s /. 3600.0))
     else
-      ("healthy", "ok", "정상 동작 중")
+      ("healthy", Tone_ok, "정상 동작 중")
   in
   let continuity =
     Printf.sprintf "Gen %d · Turns %d · Auto turns %d · Tool actions %d · Goals %d"
@@ -267,7 +267,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("name", `String name);
            ("agent_name", member_assoc "agent_name" keeper);
            ("status", `String status);
-           ("tone", `String tone);
+           ("tone", `String (string_of_tone tone));
            ("state", `String state);
            ("note", `String note);
            ("focus", `String focus);
@@ -341,11 +341,11 @@ let detachment_index command_plane_json =
 
 let operation_severity ~status ~blocker_summary =
   if List.mem status [ "failed"; "cancelled" ] then
-    "bad"
-  else if List.mem status [ "paused" ] || Option.is_some blocker_summary then
-    "warn"
+    Tone_bad
+  else if status = "paused" || Option.is_some blocker_summary then
+    Tone_warn
   else
-    "ok"
+    Tone_ok
 
 let build_operation_contexts command_plane_json =
   let operations =
@@ -429,8 +429,8 @@ let build_operation_contexts command_plane_json =
   |> List.sort (fun left right ->
          let by_severity =
            Int.compare
-             (severity_rank right.severity)
-             (severity_rank left.severity)
+             (tone_rank right.severity)
+             (tone_rank left.severity)
          in
          if by_severity <> 0 then by_severity
          else Float.compare right.last_seen_ts left.last_seen_ts)

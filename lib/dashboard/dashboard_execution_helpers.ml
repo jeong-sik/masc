@@ -1,3 +1,6 @@
+(** Tone ADT — must precede record types that use it. *)
+type tone = Dashboard_utils.tone = Tone_ok | Tone_warn | Tone_bad
+
 type queue_context = {
   severity_rank : int;
   last_seen_ts : float;
@@ -28,7 +31,7 @@ type session_seed = {
 
 type session_context = {
   session_id : string;
-  severity : string;
+  severity : tone;
   last_seen_ts : float;
   linked_operation_id : string option;
   member_names : string list;
@@ -37,7 +40,7 @@ type session_context = {
 
 type operation_context = {
   operation_id : string;
-  severity : string;
+  severity : tone;
   last_seen_ts : float;
   linked_session_id : string option;
   linked_detachment_id : string option;
@@ -140,6 +143,8 @@ let is_health_at_risk = Dashboard_utils.is_health_at_risk
 let is_session_terminal = Dashboard_utils.is_session_terminal
 let is_session_blocked = Dashboard_utils.is_session_blocked
 
+let string_of_tone = Dashboard_utils.string_of_tone
+
 let execution_tool_preview_limit = 8
 
 let cap_string_list ?(limit = execution_tool_preview_limit) values =
@@ -234,15 +239,14 @@ let dedup_strings items =
   List.sort_uniq String.compare
     (List.filter_map trim_to_option items)
 
+(** severity_rank works on raw JSON strings — broader matching than tone_rank.
+    Used by dashboard_mission / dashboard_mission_assembly for external JSON data. *)
 let severity_rank = function
   | "bad" | "critical" | "failed" -> 2
   | "warn" | "blocked" | "paused" | "interrupted" -> 1
   | _ -> 0
 
-let tone_rank = function
-  | "bad" -> 2
-  | "warn" -> 1
-  | _ -> 0
+let tone_rank = Dashboard_utils.tone_rank
 
 let dashboard_fixture_name ?fixture () =
   let fixtures_enabled = Env_config.Dashboard_config.fixtures_enabled () in

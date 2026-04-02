@@ -246,7 +246,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           | Some "running" -> 0 | Some "paused" -> 1 | _ -> 2 in
         let cmp = compare (status_ord a) (status_ord b) in
         if cmp <> 0 then cmp
-        else compare (severity_rank b.severity) (severity_rank a.severity)
+        else compare (tone_rank b.severity) (tone_rank a.severity)
       ) session_contexts in
       let limited_sessions = take 15 sorted_sessions in
       (* Operations: only active/paused, max 20 *)

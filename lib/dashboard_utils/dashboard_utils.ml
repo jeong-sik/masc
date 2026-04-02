@@ -129,3 +129,18 @@ let is_session_terminal status =
 
 let is_session_blocked status =
   List.mem status [ "failed"; "cancelled"; "interrupted" ]
+
+(** Dashboard tone — severity indicator for UI rendering.
+    ADT eliminates catch-all patterns and enforces exhaustive matching.
+    Serialized to string at JSON boundaries only. *)
+type tone = Tone_ok | Tone_warn | Tone_bad
+
+let string_of_tone = function
+  | Tone_ok -> "ok"
+  | Tone_warn -> "warn"
+  | Tone_bad -> "bad"
+
+let tone_rank = function
+  | Tone_bad -> 2
+  | Tone_warn -> 1
+  | Tone_ok -> 0

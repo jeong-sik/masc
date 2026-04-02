@@ -66,17 +66,17 @@ let event_summary event_json =
 
 let session_severity ~health ~status ~runtime_blocker =
   if status = "completed" then
-    if is_health_critical health || is_health_warning health then "warn"
-    else "ok"
+    if is_health_critical health || is_health_warning health then Tone_warn
+    else Tone_ok
   else if is_health_critical health || is_session_blocked status then
-    "bad"
+    Tone_bad
   else if is_health_warning health
           || status = "paused"
           || Option.is_some runtime_blocker
   then
-    "warn"
+    Tone_warn
   else
-    "ok"
+    Tone_ok
 
 let build_session_seed session_json session_cards =
   let session_id = string_field "session_id" session_json in
@@ -269,7 +269,7 @@ let build_session_contexts seeds operation_contexts : session_context list =
            match seed.top_recommendation with
            | Some _ -> intervene_handoff
            | None ->
-               if severity <> "ok" && Option.is_some linked_operation_id then
+               if severity <> Tone_ok && Option.is_some linked_operation_id then
                  command_handoff
                else
                  intervene_handoff
@@ -318,8 +318,8 @@ let build_session_contexts seeds operation_contexts : session_context list =
   |> List.sort (fun (left : session_context) (right : session_context) ->
          let by_severity =
            Int.compare
-             (severity_rank right.severity)
-             (severity_rank left.severity)
+             (tone_rank right.severity)
+             (tone_rank left.severity)
          in
          if by_severity <> 0 then by_severity
          else Float.compare right.last_seen_ts left.last_seen_ts)
@@ -337,22 +337,22 @@ let queue_summary_of_session (session_context : session_context) =
 let build_execution_queue session_contexts operation_contexts =
   let blocked_session_ids =
     session_contexts
-    |> List.filter (fun (session : session_context) -> session.severity <> "ok")
+    |> List.filter (fun (session : session_context) -> session.severity <> Tone_ok)
     |> List.map (fun (session : session_context) -> session.session_id)
   in
   let session_items =
     session_contexts
-    |> List.filter (fun (session : session_context) -> session.severity <> "ok")
+    |> List.filter (fun (session : session_context) -> session.severity <> Tone_ok)
     |> List.map (fun (session : session_context) ->
            {
-             severity_rank = severity_rank session.severity;
+             severity_rank = tone_rank session.severity;
              last_seen_ts = session.last_seen_ts;
              json =
                `Assoc
                  [
                    ("id", `String ("session-" ^ session.session_id));
                    ("kind", `String "session");
-                   ("severity", `String session.severity);
+                   ("severity", `String (string_of_tone session.severity));
                    ("status", member_assoc "status" session.json);
                    ("summary", `String (queue_summary_of_session session));
                    ("target_type", `String "team_session");
@@ -369,21 +369,21 @@ let build_execution_queue session_contexts operation_contexts =
   let operation_items =
     operation_contexts
     |> List.filter (fun (operation : operation_context) ->
-           operation.severity <> "ok"
+           operation.severity <> Tone_ok
            &&
            match operation.linked_session_id with
            | Some session_id -> not (List.mem session_id blocked_session_ids)
            | None -> true)
     |> List.map (fun (operation : operation_context) ->
            {
-             severity_rank = severity_rank operation.severity;
+             severity_rank = tone_rank operation.severity;
              last_seen_ts = operation.last_seen_ts;
              json =
                `Assoc
                  [
                    ("id", `String ("operation-" ^ operation.operation_id));
                    ("kind", `String "operation");
-                   ("severity", `String operation.severity);
+                   ("severity", `String (string_of_tone operation.severity));
                    ("status", member_assoc "status" operation.json);
                    ( "summary",
                      match trim_to_option (string_field "blocker_summary" operation.json) with

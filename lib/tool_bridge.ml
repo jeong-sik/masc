@@ -80,10 +80,10 @@ let params_of_json_schema (schema : Yojson.Safe.t) : Agent_sdk.Types.tool_param 
 
     {[
       let oas_tool = oas_tool_of_masc
-        ~name:"masc_vote_create"
-        ~description:"Create a vote..."
+        ~name:"masc_board_post"
+        ~description:"Post to the board..."
         ~input_schema:schema_json
-        (fun args -> handle_vote_create ctx args)
+        (fun args -> handle_board_post ctx args)
     ]} *)
 let oas_tool_of_masc ~name ~description ~input_schema
     handler : Agent_sdk.Tool.t =

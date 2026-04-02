@@ -79,8 +79,7 @@ let read_only_tools_inline =
    "masc_pending_interrupts"]
 
 let requires_join_tools_inline =
-  ["masc_broadcast"; "masc_listen"; "masc_leave";
-   "masc_vote_revoke"]
+  ["masc_broadcast"; "masc_listen"; "masc_leave"]
 
 let mcp_context_required_tools_inline =
   Tool_schemas_inline.schemas

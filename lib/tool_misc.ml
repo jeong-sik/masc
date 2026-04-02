@@ -109,13 +109,29 @@ let decode_html_entities text =
 let clean_search_text text =
   text |> strip_cdata |> strip_html_tags |> decode_html_entities |> normalize_spaces
 
+let looks_like_rss_payload payload =
+  let normalized = String.lowercase_ascii payload in
+  String.contains normalized '<'
+  && (Re.execp (Re.Pcre.re "<rss\\b" |> Re.compile) normalized
+      || Re.execp (Re.Pcre.re "<channel\\b" |> Re.compile) normalized)
+
+let valid_search_result_url url =
+  let trimmed = String.trim url in
+  if trimmed = "" then
+    false
+  else
+    let uri = Uri.of_string trimmed in
+    match Uri.scheme uri |> Option.map String.lowercase_ascii with
+    | Some "http" | Some "https" -> true
+    | _ -> false
+
 let search_field pattern block =
   match Re.exec_opt (Re.Pcre.re pattern |> Re.compile) block with
   | None -> None
   | Some groups -> Some (Re.Group.get groups 1 |> clean_search_text)
 
 let parse_bing_rss_items (payload : string) : web_search_hit list =
-  let item_re = Re.Pcre.re "<item>([\\s\\S]*?)</item>" |> Re.compile in
+  let item_re = Re.Pcre.re "<item\\b[^>]*>([\\s\\S]*?)</item>" |> Re.compile in
   Re.all item_re payload
   |> List.filter_map (fun groups ->
          let block = Re.Group.get groups 1 in
@@ -125,10 +141,10 @@ let parse_bing_rss_items (payload : string) : web_search_hit list =
            search_field "<description>([\\s\\S]*?)</description>" block
          with
          | Some title, Some url, Some snippet
-           when title <> "" && url <> "" ->
+           when title <> "" && valid_search_result_url url ->
              Some (title, url, snippet)
          | Some title, Some url, None
-           when title <> "" && url <> "" ->
+           when title <> "" && valid_search_result_url url ->
              Some (title, url, "")
          | _ -> None)
 
@@ -270,6 +286,8 @@ let handle_web_search _ctx args =
     let limit = max 1 (min 10 (get_int args "limit" 5)) in
     match fetch_bing_rss ~query with
     | Error e -> (false, json_error e)
+    | Ok (_search_url, payload) when not (looks_like_rss_payload payload) ->
+        (false, json_error "search endpoint returned a non-RSS payload")
     | Ok (search_url, payload) ->
         let hits = parse_bing_rss_items payload |> take_results limit in
         (true, web_search_result_json ~query ~search_url ~engine:"bing_rss" hits)

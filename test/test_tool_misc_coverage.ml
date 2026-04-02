@@ -244,6 +244,28 @@ let () = test "parse_bing_rss_items" (fun () ->
   | _ -> failwith "expected two parsed items"
 )
 
+let () = test "looks_like_rss_payload" (fun () ->
+  assert (Tool_misc.looks_like_rss_payload "<rss><channel></channel></rss>");
+  assert (Tool_misc.looks_like_rss_payload "<?xml version=\"1.0\"?><rss version=\"2.0\"></rss>");
+  assert (not (Tool_misc.looks_like_rss_payload "<html><body>captcha</body></html>"))
+)
+
+let () = test "parse_bing_rss_items_drops_non_http_links" (fun () ->
+  let payload =
+    {|<rss><channel>
+    <item><title>safe</title><link>https://example.com/</link><description>ok</description></item>
+    <item><title>bad</title><link>javascript:alert(1)</link><description>bad</description></item>
+    </channel></rss>|}
+  in
+  let items = Tool_misc.parse_bing_rss_items payload in
+  assert (List.length items = 1);
+  match items with
+  | [ (title, url, _snippet) ] ->
+      assert (title = "safe");
+      assert (url = "https://example.com/")
+  | _ -> failwith "expected one safe parsed item"
+)
+
 let () = test "dispatch_webrtc_offer" (fun () ->
   let ctx = make_test_ctx () in
   let args =

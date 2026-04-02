@@ -56,7 +56,7 @@ mcp_call() {
         local n
         n="$(echo "$args_json" | jq -r '.name // "unknown"')"
         jq -cn --arg n "$n" \
-          '{jsonrpc:"2.0",id:1,result:{content:[{type:"text",text:("{\"name\":\""+$n+"\",\"ok\":true}")}]}}'
+          '{jsonrpc:"2.0",id:1,result:{content:[{type:"text",text:("{\"simulated\":true,\"name\":\""+$n+"\",\"ok\":true}")}]}}'
         ;;
       masc_keeper_msg)
         DRY_TICK=$((DRY_TICK + 1))
@@ -83,9 +83,10 @@ mcp_call() {
           --argjson handoff "$handoff" \
           '{
              jsonrpc:"2.0",id:1,result:{content:[{type:"text",text:( {
+               simulated:true,
                name:$n,
                generation:0,
-               model_used:"dry-run:model",
+               model_used:"simulated:dry-run",
                latency_ms:$latency,
                context_ratio:$ratio,
                compacted:($compacted==1),

@@ -70,9 +70,9 @@ export function App() {
 
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--bg-0)] bg-[radial-gradient(ellipse_at_top,rgba(25,40,70,0.3)_0%,rgba(11,18,32,1)_80%)] text-[var(--text-body)]">
-      <header class="relative z-10 shrink-0 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(8,14,26,0.44)] px-3 py-2 backdrop-blur-xl lg:px-4 lg:py-2.5">
+      <header class="relative z-10 shrink-0 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(8,14,26,0.44)] px-4 py-2 backdrop-blur-xl">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[rgba(71,184,255,0.15)] to-transparent"></div>
-        <div class="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-4 max-[860px]:flex-col max-[860px]:items-stretch">
+        <div class="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-4 max-[860px]:flex-col max-[860px]:items-stretch">
           <div class="min-w-0">
             <div class="flex items-center gap-4">
               <button type="button"
@@ -113,13 +113,13 @@ export function App() {
 
       <${RemoteWarningBanner} />
 
-      <div class="flex flex-1 gap-2.5 overflow-hidden p-2.5 max-[1100px]:flex-col max-[1100px]:gap-2 max-[1100px]:p-2">
+      <div class="flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col">
         <aside id="dashboard-side-rail" class="${sidebarCollapsed.value ? 'w-14' : 'w-[220px]'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-[300px] ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
           <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
         </aside>
 
         <main class="min-w-0 flex-1 overflow-hidden rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(10,15,26,0.68)] backdrop-blur-lg max-[1100px]:min-h-0">
-          <div class="mx-auto h-full max-w-[1600px] overflow-y-auto p-3 lg:p-4">
+          <div class="mx-auto h-full max-w-[1600px] overflow-y-auto p-4">
             <${DashboardMain} />
           </div>
         </main>

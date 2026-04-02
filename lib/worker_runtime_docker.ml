@@ -233,7 +233,7 @@ let preflight_batch ?clock_opt (subjects : preflight_subject list) =
         in
         check_auth subjects
 
-let docker_argv (spec : Worker_execution_spec.t) =
+let docker_argv ~container_name (spec : Worker_execution_spec.t) =
   let image = Worker_runtime_config.docker_image () in
   let env_flags =
     allowlisted_env_pairs ()
@@ -260,7 +260,7 @@ let docker_argv (spec : Worker_execution_spec.t) =
     "run";
     "--rm";
     "--name";
-    container_name spec;
+    container_name;
     "-i";
     "--cap-drop=ALL";
     "--security-opt";
@@ -290,7 +290,7 @@ let run_worker_spec ?clock_opt (spec : Worker_execution_spec.t) :
       let result =
         Tool_command_plane_support.run_process_with_timeout ~clock_opt
           ~stdin_content ~timeout_sec:effective_timeout_sec
-          ~prog:"docker" ~argv:(docker_argv spec)
+          ~prog:"docker" ~argv:(docker_argv ~container_name:name spec)
           ~env:(Unix.environment ()) ()
       in
       persist_stderr_artifact spec result.stderr;

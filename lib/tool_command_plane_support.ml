@@ -93,6 +93,15 @@ let tail_text ?(max_chars = 4000) text =
   if len <= max_chars then text
   else String.sub text (len - max_chars) max_chars
 
+let close_fd_quietly fd =
+  try Unix.close fd with
+  | Unix.Unix_error _ -> ()
+
+let remove_path_quietly path =
+  try Sys.remove path with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> ()
+
 let swarm_live_run_dir config run_id =
   Filename.concat
     (Filename.concat (Cp_paths.control_plane_root_dir config) "swarm-live")
@@ -161,31 +170,65 @@ let wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid =
   loop ()
 
 let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv ~env () =
-  let stdin_path_opt, stdin_fd =
-    match stdin_content with
-    | None -> (None, Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0)
-    | Some content ->
-        let stdin_path = Filename.temp_file "masc_cp_stdin_" ".log" in
-        Out_channel.with_open_bin stdin_path (fun oc -> Out_channel.output_string oc content);
-        (Some stdin_path, Unix.openfile stdin_path [ Unix.O_RDONLY ] 0)
-  in
+  let stdin_path_opt = ref None in
+  let stdin_fd_opt = ref None in
+  let stdout_fd_opt = ref None in
+  let stderr_fd_opt = ref None in
   let stdout_path = Filename.temp_file "masc_cp_stdout_" ".log" in
   let stderr_path = Filename.temp_file "masc_cp_stderr_" ".log" in
-  let stdout_fd =
-    Unix.openfile stdout_path
-      [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
-  in
-  let stderr_fd =
-    Unix.openfile stderr_path
-      [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
+  let cleanup_setup () =
+    Option.iter close_fd_quietly !stdin_fd_opt;
+    stdin_fd_opt := None;
+    Option.iter close_fd_quietly !stdout_fd_opt;
+    stdout_fd_opt := None;
+    Option.iter close_fd_quietly !stderr_fd_opt;
+    stderr_fd_opt := None;
+    Option.iter remove_path_quietly !stdin_path_opt;
+    stdin_path_opt := None;
+    remove_path_quietly stdout_path;
+    remove_path_quietly stderr_path
   in
   let pid =
-    Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_fd
-      stderr_fd
+    try
+      let stdin_fd =
+        match stdin_content with
+        | None -> Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0
+        | Some content ->
+            let stdin_path, oc =
+              Filename.open_temp_file ~mode:[ Open_wronly; Open_creat; Open_trunc; Open_binary ]
+                ~perms:0o600 "masc_cp_stdin_" ".log"
+            in
+            stdin_path_opt := Some stdin_path;
+            Out_channel.output_string oc content;
+            close_out oc;
+            Unix.openfile stdin_path [ Unix.O_RDONLY ] 0
+      in
+      stdin_fd_opt := Some stdin_fd;
+      let stdout_fd =
+        Unix.openfile stdout_path
+          [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
+      in
+      stdout_fd_opt := Some stdout_fd;
+      let stderr_fd =
+        Unix.openfile stderr_path
+          [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
+      in
+      stderr_fd_opt := Some stderr_fd;
+      let pid =
+        Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_fd
+          stderr_fd
+      in
+      close_fd_quietly stdin_fd;
+      stdin_fd_opt := None;
+      close_fd_quietly stdout_fd;
+      stdout_fd_opt := None;
+      close_fd_quietly stderr_fd;
+      stderr_fd_opt := None;
+      pid
+    with exn ->
+      cleanup_setup ();
+      raise exn
   in
-  Unix.close stdin_fd;
-  Unix.close stdout_fd;
-  Unix.close stderr_fd;
   let finalize exit_code =
     let stdout = In_channel.with_open_bin stdout_path In_channel.input_all in
     let stderr = In_channel.with_open_bin stderr_path In_channel.input_all in

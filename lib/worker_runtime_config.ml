@@ -65,14 +65,19 @@ let env_image_opt () =
 let env_host_mcp_base_url_opt () =
   Sys.getenv_opt "MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL" |> trim_opt
 
+let execution_scope_of_string_opt value =
+  match String.lowercase_ascii (String.trim value) with
+  | "observe_only" -> Some Team_session_types.Observe_only
+  | "limited_code_change" -> Some Team_session_types.Limited_code_change
+  | "autonomous" -> Some Team_session_types.Autonomous
+  | _ -> None
+
 let scopes_of_json = function
   | `List values ->
       values
       |> List.filter_map (function
            | `String value ->
-               Some
-                 (Team_session_types.execution_scope_of_string
-                    (String.lowercase_ascii (String.trim value)))
+               execution_scope_of_string_opt value
            | _ -> None)
   | _ -> []
 
@@ -165,13 +170,17 @@ let reset () =
   cached := None
 
 let backend_for_scope scope =
-  let config = resolve () in
-  match config.team_session_spawn.backend with
-  | Worker_execution_backend.Local -> Worker_execution_backend.Local
-  | Worker_execution_backend.Docker ->
-      if List.mem scope config.team_session_spawn.docker_scopes then
-        Worker_execution_backend.Docker
-      else Worker_execution_backend.Local
+  match scope with
+  | Team_session_types.Observe_only ->
+      Worker_execution_backend.Local
+  | _ ->
+      let config = resolve () in
+      match config.team_session_spawn.backend with
+      | Worker_execution_backend.Local -> Worker_execution_backend.Local
+      | Worker_execution_backend.Docker ->
+          if List.mem scope config.team_session_spawn.docker_scopes then
+            Worker_execution_backend.Docker
+          else Worker_execution_backend.Local
 
 let docker_image () =
   (resolve ()).team_session_spawn.docker.image

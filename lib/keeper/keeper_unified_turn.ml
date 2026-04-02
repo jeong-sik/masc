@@ -40,15 +40,16 @@ let is_transient_network_error (msg : string) : bool =
     (fun needle -> string_contains_substring ~needle msg)
     transient_error_patterns
 
-(** Max transient retries before giving up.  OAS internal retry is 3 per
-    provider; this outer retry covers cases where all providers fail transiently
-    (e.g. TCP keepalive expiry across all backends simultaneously). *)
-let max_transient_retries = 3
+(** Max transient retries (excluding the initial attempt).  Total attempts
+    = 1 initial + max_transient_retries.  OAS internal retry is 3 per
+    provider; this outer retry covers cases where all providers fail
+    transiently (e.g. TCP keepalive expiry across all backends). *)
+let max_transient_retries = 2
 
-(** Exponential backoff delay for transient retry attempt [n] (0-indexed).
-    Delays: 1s, 2s, 4s — matches OAS internal backoff progression. *)
+(** Exponential backoff delay for transient retry [attempt] (1-indexed).
+    Delays: 1s, 2s — total wait 3s before giving up. *)
 let transient_backoff_sec (attempt : int) : float =
-  Float.min 4.0 (1.0 *. Float.of_int (1 lsl attempt))
+  Float.min 4.0 (1.0 *. Float.of_int (1 lsl (attempt - 1)))
 
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
@@ -620,21 +621,20 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ()
           in
           let rec retry_loop attempt =
-            match do_run ~is_retry:(attempt > 0) () with
+            match do_run ~is_retry:(attempt > 1) () with
             | Ok _ as ok -> ok
             | Error e when is_transient_network_error e
-                           && attempt < max_transient_retries ->
+                           && attempt <= max_transient_retries ->
                 let delay = transient_backoff_sec attempt in
                 Log.Keeper.warn
-                  "%s: transient network error (attempt %d/%d), backoff %.0fs: %s"
-                  meta.name (attempt + 1) max_transient_retries delay
+                  "%s: transient network error (retry %d/%d), backoff %.0fs: %s"
+                  meta.name attempt max_transient_retries delay
                   (short_preview e);
-                Eio.Fiber.yield ();
-                Unix.sleepf delay;
+                Eio_unix.sleep delay;
                 retry_loop (attempt + 1)
             | result -> result
           in
-          retry_loop 0)
+          retry_loop 1)
       in
       match run_result with
       | Error e ->

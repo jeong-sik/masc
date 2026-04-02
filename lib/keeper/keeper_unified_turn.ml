@@ -570,7 +570,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       (* 5. Run via OAS Agent.run() with transient-error retry *)
       let run_result, latency_ms =
         Keeper_exec_context.timed (fun () ->
-          let do_run () =
+          let do_run ?(is_retry = false) () =
             Keeper_agent_run.run_turn ~config ~meta ~base_dir
               ~max_context:primary_max_context ~build_turn_prompt
               ~user_message ~cascade_name:"keeper_unified"
@@ -579,6 +579,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
               ~max_cost_usd
+              ~is_retry
               ()
           in
           match do_run () with
@@ -587,7 +588,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               Log.Keeper.warn "%s: transient network error, retrying once: %s"
                 meta.name (short_preview e);
               Eio.Fiber.yield ();
-              do_run ()
+              do_run ~is_retry:true ()
           | Error _ as err -> err)
       in
       match run_result with

@@ -98,6 +98,7 @@ let keeper_coding_masc_tool_names =
     These are the survival-critical tools. *)
 let core_always_tools =
   [ "keeper_time_now"; "keeper_context_status";
+    "keeper_tools_list"; "keeper_tasks_list";
     "masc_status"; "masc_heartbeat"; "masc_tool_help";
     "extend_turns" ]
 

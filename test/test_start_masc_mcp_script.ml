@@ -164,6 +164,7 @@ let test_realtime_transports_default_enabled_and_preserve_override () =
               ("FAKE_CAPTURE_FILE", capture_default);
               ("HOME", home_dir);
               ("MASC_BASE_PATH", dir);
+              ("MASC_CONFIG_DIR", "");
             ]
           (Printf.sprintf "%s --http --port 9956 --base-path %s"
              (quote script) (quote dir))
@@ -218,6 +219,7 @@ let test_realtime_transports_fall_back_to_repo_config_when_home_missing () =
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", Filename.concat dir "empty-home");
               ("MASC_BASE_PATH", dir);
+              ("MASC_CONFIG_DIR", "");
             ]
           (Printf.sprintf "%s --http --port 9959 --base-path %s"
              (quote script) (quote dir))
@@ -236,15 +238,19 @@ let test_inherited_base_path_with_dual_masc_roots_is_sanitized () =
       copy_script (script_path ()) script;
       make_fake_eio_exe dir;
       let stale_root = Filename.concat dir "stale-root" in
+      let home_dir = Filename.concat dir "empty-home" in
       mkdir_p (Filename.concat dir ".masc");
       mkdir_p (Filename.concat stale_root ".masc");
+      mkdir_p home_dir;
       let capture = Filename.concat dir "captured-sanitized.txt" in
       let code, stdout, stderr =
         run_shell ~cwd:dir
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
+              ("HOME", home_dir);
               ("MASC_BASE_PATH", stale_root);
+              ("MASC_ALLOW_INHERITED_BASE_PATH", "");
             ]
           (Printf.sprintf "%s --http --port 9960" (quote script))
       in
@@ -254,6 +260,66 @@ let test_inherited_base_path_with_dual_masc_roots_is_sanitized () =
       let captured = read_file capture in
       check bool "inherited base path corrected to script root" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ dir)))
+
+let test_parent_project_base_path_with_dual_masc_roots_is_sanitized () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let parent = Filename.concat dir "parent-root" in
+      let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
+      let home_dir = Filename.concat dir "empty-home" in
+      mkdir_p repo;
+      mkdir_p home_dir;
+      mkdir_p (Filename.concat parent ".masc");
+      mkdir_p (Filename.concat repo ".masc");
+      let script = Filename.concat repo "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe repo;
+      let capture = Filename.concat dir "captured-parent-sanitized.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:repo
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("HOME", home_dir);
+              ("MASC_BASE_PATH", parent);
+              ("MASC_ALLOW_INHERITED_BASE_PATH", "");
+            ]
+          (Printf.sprintf "%s --http --port 9963" (quote script))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "parent root inheritance corrected to repo root" true
+        (contains_substring captured ("MASC_BASE_PATH=" ^ repo)))
+
+let test_dual_masc_roots_opt_in_preserves_inherited_base_path () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let script = Filename.concat dir "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe dir;
+      let inherited_root = Filename.concat dir "shared-root" in
+      let home_dir = Filename.concat dir "empty-home" in
+      mkdir_p (Filename.concat dir ".masc");
+      mkdir_p (Filename.concat inherited_root ".masc");
+      mkdir_p home_dir;
+      let capture = Filename.concat dir "captured-opt-in.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("HOME", home_dir);
+              ("MASC_BASE_PATH", inherited_root);
+              ("MASC_ALLOW_INHERITED_BASE_PATH", "1");
+            ]
+          (Printf.sprintf "%s --http --port 9964" (quote script))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "opt-in preserves inherited base path" true
+        (contains_substring captured ("MASC_BASE_PATH=" ^ inherited_root)))
 
 let test_worktree_prefers_local_build_over_workspace_build () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -305,7 +371,12 @@ let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
       let capture_default = Filename.concat dir "captured-loopback-default.txt" in
       let code_default, stdout_default, stderr_default =
         run_shell ~cwd:repo_root
-          ~env:[ ("FAKE_CAPTURE_FILE", capture_default); ("HOME", home_dir) ]
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture_default);
+              ("HOME", home_dir);
+              ("MASC_KEEPER_BOOTSTRAP_ENABLED", "");
+            ]
           (Printf.sprintf "%s --port 9961 --base-path %s"
              (quote loopback_script) (quote repo_root))
       in
@@ -351,6 +422,10 @@ let () =
             test_realtime_transports_fall_back_to_repo_config_when_home_missing;
           test_case "inherited base path with dual .masc roots is sanitized" `Quick
             test_inherited_base_path_with_dual_masc_roots_is_sanitized;
+          test_case "parent project inherited base path is sanitized" `Quick
+            test_parent_project_base_path_with_dual_masc_roots_is_sanitized;
+          test_case "dual roots opt-in preserves inherited base path" `Quick
+            test_dual_masc_roots_opt_in_preserves_inherited_base_path;
           test_case "worktree prefers local build over workspace build" `Quick
             test_worktree_prefers_local_build_over_workspace_build;
           test_case

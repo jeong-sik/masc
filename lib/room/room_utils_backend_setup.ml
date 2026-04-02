@@ -140,14 +140,45 @@ let rec find_git_root path =
 
 let bool_env name = Env_config_core.get_bool ~default:false name
 
+let normalize_base_path path =
+  let trimmed = String.trim path in
+  if trimmed = "" then ""
+  else if Filename.is_relative trimmed then Filename.concat (Sys.getcwd ()) trimmed
+  else trimmed
+
+let canonical_base_path path =
+  let normalized = normalize_base_path path in
+  match find_git_root normalized with
+  | Some git_root -> git_root
+  | None -> normalized
+  | exception _ -> normalized
+
+let path_has_masc_dir path =
+  let masc_dir = Filename.concat path ".masc" in
+  Sys.file_exists masc_dir && Sys.is_directory masc_dir
+
 let running_under_test_executable () =
   let executable =
     Sys.executable_name |> Filename.basename |> String.lowercase_ascii
   in
   String.starts_with ~prefix:"test_" executable
 
+let should_ignore_inherited_base_path ~requested_path ~explicit_path =
+  not (bool_env "MASC_ALLOW_INHERITED_BASE_PATH")
+  && String.trim requested_path <> ""
+  && not (String.equal requested_path ".")
+  &&
+  let requested = canonical_base_path requested_path in
+  let explicit = canonical_base_path explicit_path in
+  requested <> ""
+  && explicit <> ""
+  && not (String.equal requested explicit)
+  && path_has_masc_dir requested
+  && path_has_masc_dir explicit
+
 let should_ignore_inherited_test_base_path ~requested_path ~explicit_path =
   running_under_test_executable ()
+  && not (bool_env "MASC_ALLOW_INHERITED_BASE_PATH")
   && not (bool_env "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
   && String.trim requested_path <> ""
   && not (String.equal requested_path ".")
@@ -181,6 +212,14 @@ let resolve_requested_base_path path =
     the intended base path. *)
 let resolve_masc_base_path path =
   match Env_config_core.base_path_opt () with
+  | Some explicit
+    when should_ignore_inherited_base_path ~requested_path:path
+           ~explicit_path:explicit ->
+      let resolved = resolve_requested_base_path path in
+      Log.Room.warn
+        "Ignoring inherited MASC_BASE_PATH=%s because both %s and %s have .masc; using requested base path %s. Set MASC_ALLOW_INHERITED_BASE_PATH=1 to preserve the inherited root."
+        explicit (canonical_base_path path) (canonical_base_path explicit) resolved;
+      resolved
   | Some explicit
     when should_ignore_inherited_test_base_path ~requested_path:path
            ~explicit_path:explicit ->

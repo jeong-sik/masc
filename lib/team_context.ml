@@ -35,11 +35,11 @@ let findings_tail_max_bytes = 256 * 1024
 let take_last n items =
   if n <= 0 then []
   else
-    let rec advance lead lag remaining =
+    let rec advance lead lag distance =
       match lead with
       | [] -> lag
-      | _ :: lead_tail when remaining > 0 ->
-          advance lead_tail lag (remaining - 1)
+      | _ :: lead_tail when distance > 0 ->
+          advance lead_tail lag (distance - 1)
       | _ :: lead_tail -> (
           match lag with
           | [] -> []
@@ -106,7 +106,12 @@ let load_findings ~base_path ~team_session_id : string list =
                     (* If the bounded tail does not contain a full line boundary,
                        the remaining bytes are only a partial JSONL record and
                        must be dropped. *)
-                    | None -> ""
+                    | None ->
+                        Log.Misc.warn
+                          "team_context.findings tail read dropped partial data for %s \
+                           (increase findings_tail_max_bytes if this is expected)"
+                          path;
+                        ""
                 in
                 line_aligned_chunk
                 |> String.split_on_char '\n'

@@ -107,7 +107,7 @@ let fold_entries ~path ~init f =
   if not (Fs_compat.file_exists path) then init
   else begin
     warn_if_large path;
-    let read_all () =
+    let stream_lines () =
       In_channel.with_open_bin path (fun ic ->
         let rec loop acc =
           match input_line ic with
@@ -122,7 +122,7 @@ let fold_entries ~path ~init f =
         in
         loop init)
     in
-    Eio_guard.run_in_systhread read_all
+    Eio_guard.run_in_systhread stream_lines
   end
 
 (** Create a session-based JSONL [long_term_backend].

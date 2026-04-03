@@ -830,6 +830,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                      in
                      h2_respond_json h2_reqd (Yojson.Safe.to_string response) ~extra_headers:cors)
             with
+            | Invalid_argument msg ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (error_json msg))
+                  ~status:`Bad_request ~extra_headers:cors
             | Yojson.Json_error msg ->
                 h2_respond_json h2_reqd
                   (Yojson.Safe.to_string (error_json (Printf.sprintf "invalid json: %s" msg)))

@@ -239,6 +239,9 @@ let test_room_current_validation_contracts () =
   check bool "h2 gateway serves namespace current endpoint" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|"/api/v1/namespace/current"|});
+  check bool "h2 gateway maps invalid namespace writes to 400" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|Invalid_argument msg|});
   check bool "h2 gateway keeps room current alias endpoint during rollout" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|"/api/v1/room/current"|})

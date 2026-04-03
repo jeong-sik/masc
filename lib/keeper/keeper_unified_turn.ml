@@ -30,7 +30,9 @@ let find_substring ~(needle : string) (haystack : string) : int option =
   loop 0
 
 let string_contains_substring ~(needle : string) (haystack : string) : bool =
-  String_util.contains_substring haystack needle
+  match find_substring ~needle haystack with
+  | Some _ -> true
+  | None -> false
 
 let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
   string_contains_substring
@@ -695,9 +697,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_retry
               ()
           in
-          let rec retry_loop attempt ~(turn_meta : keeper_meta) ~generation =
+          let rec retry_loop attempt ~(turn_meta : keeper_meta) ~generation
+              ~max_context ~allow_overflow_retry =
             match do_run ~is_retry:(attempt > 1) ~turn_meta ~generation
-                    ~max_context:primary_max_context () with
+                    ~max_context () with
             | Ok _ as ok -> ok
             | Error e when is_transient_network_error e
                            && attempt <= max_transient_retries ->
@@ -708,23 +711,29 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   (short_preview e);
                 Eio.Time.sleep (Eio_context.get_clock ()) delay;
                 retry_loop (attempt + 1) ~turn_meta ~generation
+                  ~max_context ~allow_overflow_retry
             | Error e -> (
-                match
-                  recover_context_overflow_retry ~meta:turn_meta ~base_dir
-                    ~primary_max_context ~error:e
-                with
-                | Some retry_plan ->
-                    let retry_meta =
-                      meta_with_generation turn_meta
+                if not allow_overflow_retry then Error e
+                else
+                  match
+                    recover_context_overflow_retry ~meta:turn_meta ~base_dir
+                      ~primary_max_context:max_context ~error:e
+                  with
+                  | Some retry_plan ->
+                      let retry_meta =
+                        meta_with_generation turn_meta
+                          ~generation:retry_plan.retry_generation
+                      in
+                      Eio.Fiber.yield ();
+                      retry_loop 1 ~turn_meta:retry_meta
                         ~generation:retry_plan.retry_generation
-                    in
-                    Eio.Fiber.yield ();
-                    do_run ~is_retry:true ~turn_meta:retry_meta
-                      ~generation:retry_plan.retry_generation
-                      ~max_context:retry_plan.retry_max_context ()
-                | None -> Error e)
+                        ~max_context:retry_plan.retry_max_context
+                        ~allow_overflow_retry:false
+                  | None -> Error e)
           in
-          retry_loop 1 ~turn_meta:meta ~generation)
+          retry_loop 1 ~turn_meta:meta ~generation
+            ~max_context:primary_max_context
+            ~allow_overflow_retry:true)
       in
       match run_result with
       | Error e ->

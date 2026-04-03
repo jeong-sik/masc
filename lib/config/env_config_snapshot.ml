@@ -233,6 +233,10 @@ let dashboard_entries =
   [
     entry ~default:"false" "MASC_DASHBOARD_FIXTURES_ENABLED"
       "Enable dashboard test fixtures";
+    entry ~default:"false" "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED"
+      "Enable proactive command-plane snapshot refresh loop";
+    entry ~default:"30" "MASC_COMMAND_PLANE_SNAPSHOT_CACHE_TTL_S"
+      "TTL for on-demand command-plane snapshot cache hits";
     entry ~default:"(none)" "MASC_DASHBOARD_FIXTURE"
       "Dashboard fixture name override";
     entry ~default:"75" "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"

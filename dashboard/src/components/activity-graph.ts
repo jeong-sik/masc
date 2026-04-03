@@ -236,7 +236,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                         </span>
                         <div class="min-w-0 flex-1">
                           <div class="text-[12px] text-[var(--text-body)]">${eventDetail(event, 160)}</div>
-                          <div class="mt-1 text-[11px] text-[var(--text-muted)]">${event.room_id}</div>
+                          <div class="mt-1 text-[11px] text-[var(--text-muted)]">namespace: ${event.room_id}</div>
                         </div>
                         <span class="shrink-0 text-[11px] text-[var(--text-muted)]">
                           <${TimeAgo} timestamp=${event.ts_iso} />
@@ -384,7 +384,7 @@ export function ActivityGraphSurface() {
           <span>생성 시각: ${data.generated_at}</span>
           <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
           ${selectedTimeRange.value !== 'all' ? html`<span>필터: ${TIME_RANGES.find(r => r.value === selectedTimeRange.value)?.label}</span>` : null}
-          ${data.window.room_id ? html`<span>room: ${data.window.room_id}</span>` : null}
+          ${data.window.room_id ? html`<span>namespace: ${data.window.room_id}</span>` : null}
         </div>
       <//>
 

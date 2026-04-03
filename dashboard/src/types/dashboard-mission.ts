@@ -6,7 +6,8 @@ export interface DashboardMissionSummary {
   room_health?: string
   cluster?: string
   project?: string
-  current_room?: string | null
+  namespace_id?: string | null
+  namespace?: string | null
   paused?: boolean
   tempo_interval_s?: number
   active_agents?: number
@@ -55,7 +56,7 @@ export interface DashboardMissionSessionBrief {
   goal: string
   created_by?: string | null
   origin_kind?: 'human' | 'system' | string
-  room?: string | null
+  namespace?: string | null
   status?: string
   health?: string
   member_names: string[]
@@ -229,7 +230,7 @@ export interface DashboardMissionBriefingResponse {
   ttl_sec?: number
   criteria: string[]
   basis?: {
-    current_room?: string | null
+    namespace?: string | null
     crew_count?: number
     agent_count?: number
     keeper_count?: number
@@ -388,9 +389,9 @@ export interface DashboardProofResponse {
   raw_proof?: Record<string, unknown> | null
 }
 
-export interface OperatorRoomSnapshot {
-  room_id?: string
-  current_room?: string
+export interface OperatorNamespaceSnapshot {
+  namespace_id?: string
+  namespace?: string
   project?: string
   cluster?: string
   paused?: boolean
@@ -585,8 +586,8 @@ export interface OperatorReviewDecision {
 
 export interface OperatorReviewItem {
   id: string
-  kind: 'pending_confirm' | 'room_gate' | 'session_risk' | 'keeper_pressure' | string
-  target_type: 'room' | 'team_session' | 'keeper' | string
+  kind: 'pending_confirm' | 'namespace_gate' | 'room_gate' | 'session_risk' | 'keeper_pressure' | string
+  target_type: 'namespace' | 'room' | 'team_session' | 'keeper' | string
   target_id?: string | null
   severity: string
   urgency: 'now' | 'soon' | string
@@ -616,7 +617,7 @@ export interface OperatorReviewSummary {
 
 export interface OperatorDigest {
   trace_id?: string
-  target_type: 'room' | 'team_session' | string
+  target_type: 'namespace' | 'room' | 'team_session' | string
   target_id?: string | null
   health?: string
   judgment_owner?: string | null
@@ -631,7 +632,7 @@ export interface OperatorDigest {
   fallback_recommended_actions?: OperatorRecommendedAction[]
   recommendation_summary?: OperatorGuidanceSummary | null
   swarm_status?: CommandPlaneSwarmStatus
-  room?: OperatorRoomSnapshot
+  namespace?: OperatorNamespaceSnapshot
   attention_items: OperatorAttentionItem[]
   recommended_actions: OperatorRecommendedAction[]
   review_queue: OperatorReviewItem[]
@@ -657,7 +658,7 @@ export interface KeeperRecoverResult {
 }
 
 export interface OperatorSnapshot {
-  room: OperatorRoomSnapshot
+  namespace: OperatorNamespaceSnapshot
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
   operator_judge_runtime?: OperatorJudgeRuntime | null
@@ -673,6 +674,8 @@ export interface OperatorSnapshot {
 
 export type OperatorActionType =
   | 'broadcast'
+  | 'namespace_pause'
+  | 'namespace_resume'
   | 'room_pause'
   | 'room_resume'
   | 'social_sweep'
@@ -688,7 +691,7 @@ export type OperatorActionType =
   | 'review_resolve'
   | 'review_defer'
 
-export type OperatorTargetType = 'room' | 'team_session' | 'keeper' | 'review_item'
+export type OperatorTargetType = 'namespace' | 'room' | 'team_session' | 'keeper' | 'review_item'
 
 export interface OperatorActionRequest {
   actor: string

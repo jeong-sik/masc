@@ -1,8 +1,78 @@
 include Cp_snapshot
 
+let normalized_allowlist_value raw =
+  String.trim raw |> String.lowercase_ascii
 
-let unit_guard_json config unit_id =
-  let agents, _, units, _ = topology_units config in
+let normalize_allowlist raw =
+  raw
+  |> List.map normalized_allowlist_value
+  |> List.filter (fun item -> item <> "")
+
+let allowlist_allows_value allowlist value =
+  let allowlist = normalize_allowlist allowlist in
+  allowlist = []
+  || List.mem (normalized_allowlist_value value) allowlist
+
+let effective_capability_profile (unit : unit_record) =
+  unit.capability_profile
+  |> List.filter (fun raw ->
+         match Cp_search_fabric.extract_tag_value "tool" raw with
+         | Some tool_name ->
+             allowlist_allows_value unit.policy.tool_allowlist tool_name
+         | None -> (
+             match Cp_search_fabric.extract_tag_value "model" raw with
+             | Some model_name ->
+                 allowlist_allows_value unit.policy.model_allowlist model_name
+             | None -> true))
+
+let operation_policy_scope_label ~workload_profile ~stage =
+  let stage_label =
+    normalize_stage stage |> Option.value ~default:"generic"
+  in
+  Printf.sprintf "%s/%s" workload_profile stage_label
+
+let operation_requires_allowed_tools ~workload_profile ~stage =
+  match workload_profile, normalize_stage stage with
+  | "coding_task", Some ("implement" | "verify") -> true
+  | _ -> false
+
+let operation_requires_allowed_models ~workload_profile ~stage =
+  match workload_profile, normalize_stage stage with
+  | "research_pipeline", _ -> true
+  | "coding_task", Some ("inspect" | "review") -> true
+  | _ -> false
+
+let unit_policy_blocker (unit : unit_record) ~workload_profile ~stage =
+  let scope = operation_policy_scope_label ~workload_profile ~stage in
+  let effective_capabilities = effective_capability_profile unit in
+  let effective_tool_tags =
+    Cp_search_fabric.tag_values "tool" effective_capabilities
+  in
+  let effective_model_tags =
+    Cp_search_fabric.tag_values "model" effective_capabilities
+  in
+  if
+    operation_requires_allowed_tools ~workload_profile ~stage
+    && normalize_allowlist unit.policy.tool_allowlist <> []
+    && effective_tool_tags = []
+  then
+    Some
+      (Printf.sprintf
+         "assigned unit policy blocks %s: no allowed tool capability remains for unit %s"
+         scope unit.unit_id)
+  else if
+    operation_requires_allowed_models ~workload_profile ~stage
+    && normalize_allowlist unit.policy.model_allowlist <> []
+    && effective_model_tags = []
+  then
+    Some
+      (Printf.sprintf
+         "assigned unit policy blocks %s: no allowed model capability remains for unit %s"
+         scope unit.unit_id)
+  else
+    None
+
+let unit_guard_json_with ~agents ~units config unit_id =
   match lookup_unit units unit_id with
   | None -> Error (Printf.sprintf "assigned unit not found: %s" unit_id)
   | Some unit ->
@@ -32,13 +102,38 @@ let unit_guard_json config unit_id =
              unit.budget.active_operation_cap)
       else
         Ok
-          (`Assoc
-            [
-              ("unit_id", `String unit.unit_id);
-              ("live_roster", `Int live_count);
-              ("active_operations", `Int active_count);
-              ("active_operation_cap", `Int unit.budget.active_operation_cap);
-            ])
+          ( unit,
+            `Assoc
+              [
+                ("unit_id", `String unit.unit_id);
+                ("live_roster", `Int live_count);
+                ("active_operations", `Int active_count);
+                ("active_operation_cap", `Int unit.budget.active_operation_cap);
+              ] )
+
+let unit_guard_json config unit_id =
+  let agents, _, units, _ = topology_units config in
+  unit_guard_json_with ~agents ~units config unit_id
+  |> Result.map snd
+
+let operation_assignment_guard_json config unit_id ~workload_profile ~stage =
+  let agents, _, units, _ = topology_units config in
+  match unit_guard_json_with ~agents ~units config unit_id with
+  | Error _ as error -> error
+  | Ok (unit, guard) -> (
+      match unit_policy_blocker unit ~workload_profile ~stage with
+      | Some message -> Error message
+      | None -> (
+          match guard with
+          | `Assoc fields ->
+              Ok
+                (`Assoc
+                  ( fields
+                  @ [
+                      ( "effective_capability_profile",
+                        json_list_of_strings (effective_capability_profile unit) );
+                    ] ))
+          | _ -> Ok guard))
 
 let replace_operation operations (updated : operation_record) =
   updated
@@ -585,19 +680,24 @@ let operation_active_count operations unit_id =
 let search_candidates_for_operation config units operations
     (operation : operation_record) =
   let current_unit_id = Some operation.assigned_unit_id in
+  let workload_profile = operation_workload_profile operation in
+  let stage = operation.stage in
   candidate_units_for_operation units operations current_unit_id
   |> List.filter_map (fun (unit : unit_record) ->
-         match unit_guard_json config unit.unit_id with
+         match
+           operation_assignment_guard_json config unit.unit_id ~workload_profile
+             ~stage
+         with
          | Error _ -> None
          | Ok _ ->
              if decision_requires_approval units current_unit_id unit.unit_id then
                None
              else
-               Some
-                 {
+                Some
+                  {
                    Cp_search_fabric.unit_id = unit.unit_id;
                    label = unit.label;
-                   capability_profile = unit.capability_profile;
+                   capability_profile = effective_capability_profile unit;
                    active_operation_cap = unit.budget.active_operation_cap;
                    active_operations = operation_active_count operations unit.unit_id;
                    current_assignment = String.equal unit.unit_id operation.assigned_unit_id;

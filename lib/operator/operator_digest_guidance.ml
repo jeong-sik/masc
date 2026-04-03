@@ -7,12 +7,12 @@
 module U = Yojson.Safe.Util
 
 let judgment_surface_for_target_type = function
-  | "room" -> "command.warroom"
+  | "room" | "namespace" -> "command.namespace"
   | "team_session" -> "command.swarm"
-  | _ -> "command.warroom"
+  | _ -> "command.namespace"
 
 let judgment_target_type_of_string = function
-  | "room" -> Operator_judgment.Room
+  | "room" | "namespace" -> Operator_judgment.Room
   | "team_session" -> Operator_judgment.Team_session
   | _ -> Operator_judgment.Room
 

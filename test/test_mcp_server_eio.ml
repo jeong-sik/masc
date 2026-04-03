@@ -2447,17 +2447,9 @@ let test_execute_tool_autoresearch_uses_resolved_session_agent () =
   Fun.protect
     ~finally:(fun () ->
       Tool_dispatch.clear_hooks ();
-      Masc_mcp.Tool_permissions.set_capability_checker (fun _ _ -> false);
       cleanup_dir base_path)
     (fun () ->
       Tool_dispatch.clear_hooks ();
-      Masc_mcp.Tool_permissions.set_capability_checker
-        (fun agent cap ->
-          cap = "admin"
-          && (String.equal agent "codex"
-              || (String.length agent > 6
-                  && String.sub agent 0 6 = "codex-")));
-      Masc_mcp.Tool_permissions.install ~get_agent_name:(fun () -> None);
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       let sid = "mcp-autoresearch-session-agent" in
       let (ok_init, _) =
@@ -2485,11 +2477,10 @@ let test_execute_tool_autoresearch_uses_resolved_session_agent () =
               ])
       in
       Alcotest.(check bool) "start fails" false ok_start;
-      (* Session resolution lost in #2882 squash merge — identity check
-         fails before reaching workdir validation. *)
-      Alcotest.(check bool) "fails at identity or validation" true
-        (contains_substring msg "permission denied: no agent identity"
-         || contains_substring msg "workdir is not inside a git repository"))
+      (* Without the legacy Tool_permissions pre-hook, the call reaches
+         workdir validation which rejects non-git directories. *)
+      Alcotest.(check bool) "fails at workdir validation" true
+        (contains_substring msg "workdir is not inside a git repository"))
 
 (* ===== Test Suites ===== *)
 

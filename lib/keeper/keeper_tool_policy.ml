@@ -37,8 +37,6 @@ let inject_masc_schemas (schemas : Types.tool_schema list) =
     else
       match Tool_dispatch.lookup_tag name with
       | Some Tool_dispatch.Mod_inline
-      | Some Tool_dispatch.Mod_encryption
-      | Some Tool_dispatch.Mod_rate_limit
       | Some Tool_dispatch.Mod_compact
       | Some Tool_dispatch.Mod_keeper
       | Some Tool_dispatch.Mod_operator
@@ -180,11 +178,11 @@ let filter_by_universe ~(lookup : tool_access_lookup) (name : string) : bool =
 (** Execution gate: core tools bypass policy, others require policy allowlist.
     All tools must exist in candidate_set — rejects hallucinated tool names. *)
 let can_execute ~(lookup : tool_access_lookup) (name : string) : bool =
-  if not (Hashtbl.mem lookup.candidate_set name
-          || Keeper_tool_registry.is_core_always_tool name) then
+  if Keeper_tool_registry.is_core_always_tool name then
+    (* Core tools bypass candidate_set — only deny_set blocks them *)
+    not (Hashtbl.mem lookup.deny_set name)
+  else if not (Hashtbl.mem lookup.candidate_set name) then
     false
-  else if Keeper_tool_registry.is_core_always_tool name then
-    filter_by_universe ~lookup name
   else
     filter_by_access ~lookup name
 

@@ -15,13 +15,21 @@ let test_snapshot_has_expected_sections () =
       ignore (Room.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
       ignore (Room.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
-      let room = Yojson.Safe.Util.member "room" json in
-      Alcotest.(check bool) "room present" true
-        (Yojson.Safe.Util.member "room" json <> `Null);
-      Alcotest.(check bool) "room initialized" true
-        Yojson.Safe.Util.(room |> member "initialized" |> to_bool);
+      let namespace = Yojson.Safe.Util.member "namespace" json in
+      Alcotest.(check bool) "namespace present" true
+        (Yojson.Safe.Util.member "namespace" json <> `Null);
+      Alcotest.(check bool) "namespace initialized" true
+        Yojson.Safe.Util.(namespace |> member "initialized" |> to_bool);
       Alcotest.(check bool) "project nonempty" true
-        (String.trim Yojson.Safe.Util.(room |> member "project" |> to_string) <> "");
+        (String.trim Yojson.Safe.Util.(namespace |> member "project" |> to_string) <> "");
+      Alcotest.(check string) "namespace field flattened default" "default"
+        Yojson.Safe.Util.(namespace |> member "namespace" |> to_string);
+      Alcotest.(check string) "namespace_id flattened default" "default"
+        Yojson.Safe.Util.(namespace |> member "namespace_id" |> to_string);
+      Alcotest.(check string) "namespace exposed" "default"
+        Yojson.Safe.Util.(namespace |> member "namespace" |> to_string);
+      Alcotest.(check string) "namespace mode flattened" "flattened"
+        Yojson.Safe.Util.(namespace |> member "namespace_mode" |> to_string);
       Alcotest.(check bool) "sessions present" true
         (Yojson.Safe.Util.member "sessions" json <> `Null);
       Alcotest.(check bool) "keepers present" true
@@ -70,21 +78,21 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "owner"));
       let ctx = operator_ctx env sw config "owner" in
-      let request_room_pause actor =
+      let request_namespace_pause actor =
         match
           Operator_control.action_json ctx
             (`Assoc
               [
                 ("actor", `String actor);
-                ("action_type", `String "room_pause");
-                ("target_type", `String "room");
+                ("action_type", `String "namespace_pause");
+                ("target_type", `String "namespace");
               ])
         with
         | Ok _ -> ()
         | Error err -> Alcotest.fail err
       in
-      request_room_pause "operator-a";
-      request_room_pause "operator-b";
+      request_namespace_pause "operator-a";
+      request_namespace_pause "operator-b";
       let snapshot = Operator_control.snapshot_json ~actor:"operator-a" ctx in
       let summary = Yojson.Safe.Util.(snapshot |> member "pending_confirm_summary") in
       Alcotest.(check string) "actor filter" "operator-a"
@@ -103,10 +111,10 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
       let confirm_required_actions =
         Yojson.Safe.Util.(summary |> member "confirm_required_actions" |> to_list)
       in
-      Alcotest.(check bool) "room pause listed" true
+      Alcotest.(check bool) "namespace pause listed" true
         (List.exists
            (fun row ->
-             Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "room_pause")
+             Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "namespace_pause")
            confirm_required_actions);
       Alcotest.(check bool) "team stop listed" true
         (List.exists
@@ -216,6 +224,77 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
       Alcotest.(check int) "lightweight recent_actions omitted" 0
         Yojson.Safe.Util.(json |> member "recent_actions" |> to_list |> List.length))
 
+let test_snapshot_lightweight_summary_caps_completed_sessions_by_recency () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let team = team_ctx env sw config "owner" in
+      let now = Time_compat.now () in
+      let update_session_exn session_id f =
+        match Team_session_store.update_session config session_id f with
+        | Ok _ -> ()
+        | Error err -> Alcotest.fail err
+      in
+      let running_session_id = start_session_exn team in
+      let paused_session_id = start_session_exn team in
+      update_session_exn paused_session_id (fun session ->
+          {
+            session with
+            status = Team_session_types.Paused;
+            updated_at_iso = iso_of_unix (now -. 2.0);
+          });
+      let completed_session started_at updated_at =
+        let session_id = start_session_exn team in
+        update_session_exn session_id (fun session ->
+            {
+              session with
+              status = Team_session_types.Completed;
+              started_at;
+              planned_end_at = started_at +. 120.0;
+              stopped_at = Some updated_at;
+              last_event_at = Some updated_at;
+              updated_at_iso = iso_of_unix updated_at;
+            });
+        session_id
+      in
+      let recent_long_session_id =
+        completed_session (now -. 10_000.0) (now -. 1.0)
+      in
+      let _recent_completed_a = completed_session (now -. 10.0) (now -. 10.0) in
+      let _recent_completed_b = completed_session (now -. 20.0) (now -. 20.0) in
+      let _recent_completed_c = completed_session (now -. 30.0) (now -. 30.0) in
+      let _recent_completed_d = completed_session (now -. 40.0) (now -. 40.0) in
+      let oldest_completed_session_id =
+        completed_session (now -. 50.0) (now -. 50.0)
+      in
+      let json =
+        Operator_control.snapshot_json ~view:"summary"
+          ~include_keepers:false ~include_messages:false ~include_command_plane:false
+          ~lightweight_summary:true
+          (operator_ctx env sw config "owner")
+      in
+      let session_ids =
+        Yojson.Safe.Util.(json |> member "sessions" |> member "items" |> to_list)
+        |> List.map (fun row -> Yojson.Safe.Util.(row |> member "session_id" |> to_string))
+      in
+      Alcotest.(check int) "lightweight summary keeps active plus 5 recent completed" 7
+        (List.length session_ids);
+      Alcotest.(check bool) "running session preserved" true
+        (List.mem running_session_id session_ids);
+      Alcotest.(check bool) "paused session preserved" true
+        (List.mem paused_session_id session_ids);
+      Alcotest.(check bool) "recency beats early start time" true
+        (List.mem recent_long_session_id session_ids);
+      Alcotest.(check bool) "oldest completed session capped out" false
+        (List.mem oldest_completed_session_id session_ids))
+
 let test_orchestra_room_core_shape () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -231,10 +310,13 @@ let test_orchestra_room_core_shape () =
       ignore (Room.broadcast config ~from_agent:"owner" ~content:"orchestra seed");
       let json = Command_plane_orchestra.json (operator_ctx env sw config "owner") in
       let nodes = Yojson.Safe.Util.(json |> member "nodes" |> to_list) in
-      Alcotest.(check bool) "room node exists" true
+      Alcotest.(check bool) "namespace node exists" true
         (List.exists
-           (fun row -> Yojson.Safe.Util.(row |> member "kind" |> to_string) = "room")
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "kind" |> to_string) = "namespace")
            nodes);
+      Alcotest.(check bool) "namespace block present" true
+        (Yojson.Safe.Util.member "namespace" json <> `Null);
       Alcotest.(check int) "session count" 0
         Yojson.Safe.Util.(json |> member "summary" |> member "session_count" |> to_int);
       Alcotest.(check string) "focus kind" "node"
@@ -258,8 +340,8 @@ let test_orchestra_includes_session_edge_and_pending_signal () =
            (`Assoc
              [
                ("actor", `String "dashboard");
-               ("action_type", `String "room_pause");
-               ("target_type", `String "room");
+               ("action_type", `String "namespace_pause");
+               ("target_type", `String "namespace");
              ])
        with
       | Ok _ -> ()
@@ -276,7 +358,7 @@ let test_orchestra_includes_session_edge_and_pending_signal () =
       Alcotest.(check bool) "room-session edge exists" true
         (List.exists
            (fun row ->
-             Yojson.Safe.Util.(row |> member "source" |> to_string) = "room:default"
+             Yojson.Safe.Util.(row |> member "source" |> to_string) = "namespace:default"
              && Yojson.Safe.Util.(row |> member "target" |> to_string)
                 = "session:" ^ session_id)
            edges);
@@ -302,8 +384,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
           (`Assoc
             [
               ("actor", `String "operator");
-              ("action_type", `String "room_pause");
-              ("target_type", `String "room");
+               ("action_type", `String "namespace_pause");
+               ("target_type", `String "namespace");
             ])
       in
       (match action_json with Ok _ -> () | Error err -> Alcotest.fail err);
@@ -312,7 +394,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check string) "target_type" "room"
+      Alcotest.(check string) "target_type" "namespace"
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);

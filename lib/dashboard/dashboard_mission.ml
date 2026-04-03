@@ -7,7 +7,7 @@ type session_context = Dashboard_mission_assembly.session_context = {
   goal : string;
   created_by : string option;
   origin_kind : string;
-  room : string option;
+  namespace : string option;
   status : string;
   health : string;
   member_names : string list;
@@ -49,10 +49,7 @@ let active_or_recent_sessions config =
     ~limit:(Dashboard_http_helpers.dashboard_session_list_limit ()) config
   |> List.filter is_active_or_recent
 
-let room_scope_cache_segment (config : Room_utils.config) =
-  match config.scope with
-  | Room_utils_backend_setup.Default -> "default"
-  | Room_utils_backend_setup.Named room_id -> "room:" ^ room_id
+let room_scope_cache_segment (_config : Room_utils.config) = "default"
 
 let room_scoped_cache_key (config : Room_utils.config) prefix actor_name =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
@@ -241,7 +238,10 @@ let build_session_context session_json session_cards =
           |> Option.value ~default:session_id;
         created_by = trim_to_option (string_field "created_by" meta);
         origin_kind = session_origin_kind meta;
-        room = trim_to_option (string_field "room_id" meta);
+        namespace =
+          (match trim_to_option (string_field "namespace_id" meta) with
+           | Some _ as value -> value
+           | None -> trim_to_option (string_field "room_id" meta));
         status;
         health =
           (if is_terminal then
@@ -518,7 +518,7 @@ let build_session_briefs sessions attention_queue actions =
                ("session_id", `String session.session_id);
                ("goal", `String session.goal);
                ("created_by", json_string_option session.created_by);
-               ("room", json_string_option session.room);
+               ("namespace", json_string_option session.namespace);
                ("status", `String session.status);
                ("health", `String session.health);
                ("member_names", `List (List.map (fun value -> `String value) session.member_names));

@@ -12,15 +12,15 @@ let test_digest_room_prefers_fresh_operator_judgment () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
       ignore (Room.join config ~agent_name:"operator" ~capabilities:[] ());
-      record_operator_judgment config ~surface:"command.warroom"
+      record_operator_judgment config ~surface:"command.namespace"
         ~target_type:Operator_judgment.Room ~target_id:None
-        ~summary:"Pause the room before taking any destructive action."
+        ~summary:"Pause the namespace before taking any destructive action."
         ~recommended_action:
           (`Assoc
             [
               ("action_kind", `String "pause_room");
               ("resolved_tool", `String "masc_operator_confirm");
-              ("target_type", `String "room");
+              ("target_type", `String "namespace");
               ("target_id", `Null);
               ("reason", `String "operator judge requires manual gate");
               ("payload_preview", `Assoc [ ("reason", `String "manual review") ]);
@@ -29,7 +29,7 @@ let test_digest_room_prefers_fresh_operator_judgment () =
       Alcotest.(check int) "stored judgments" 1
         (List.length (Operator_judgment.load_all config));
       (match
-         Operator_judgment.latest_active config ~surface:"command.warroom"
+         Operator_judgment.latest_active config ~surface:"command.namespace"
            ~target_type:Operator_judgment.Room ~target_id:None
        with
       | Some _ -> ()
@@ -50,7 +50,7 @@ let test_digest_room_prefers_fresh_operator_judgment () =
       Alcotest.(check string) "active guidance layer" "judgment"
         Yojson.Safe.Util.(digest |> member "active_guidance_layer" |> to_string);
       Alcotest.(check string) "active summary from judgment"
-        "Pause the room before taking any destructive action."
+        "Pause the namespace before taking any destructive action."
         Yojson.Safe.Util.
           (digest |> member "active_summary" |> member "summary" |> to_string);
       Alcotest.(check string) "active recommendation source" "judgment"
@@ -69,7 +69,7 @@ let test_digest_room_ignores_stale_operator_judgment () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
       ignore (Room.join config ~agent_name:"operator" ~capabilities:[] ());
-      record_operator_judgment config ~surface:"command.warroom"
+      record_operator_judgment config ~surface:"command.namespace"
         ~target_type:Operator_judgment.Room ~target_id:None
         ~summary:"This judgment is stale." ~fresh_for_sec:(-5.0) ();
       let ctx = operator_ctx env sw config "operator" in
@@ -186,8 +186,8 @@ let test_operator_judgment_write_and_latest_roundtrip () =
           Operator_control.judgment_write_json ctx
             (`Assoc
               [
-                ("surface", `String "command.warroom");
-                ("target_type", `String "room");
+                ("surface", `String "command.namespace");
+                ("target_type", `String "namespace");
                 ("summary", `String "Operator judge requests a human checkpoint.");
                 ("confidence", `Float 0.88);
                 ("fresh_ttl_sec", `Int 90);
@@ -202,7 +202,7 @@ let test_operator_judgment_write_and_latest_roundtrip () =
       let latest =
         match
           Operator_control.judgment_latest_json ctx
-            (`Assoc [ ("surface", `String "command.warroom"); ("target_type", `String "room") ])
+            (`Assoc [ ("surface", `String "command.namespace"); ("target_type", `String "namespace") ])
         with
         | Ok json -> json
         | Error err -> Alcotest.fail err

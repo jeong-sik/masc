@@ -76,7 +76,6 @@ let () =
                   "masc_operator_snapshot";
                   "masc_operator_action";
                   "masc_operator_confirm";
-                  "masc_team_session_compare";
                   "masc_team_session_prove";
                   "masc_heartbeat_list";
                 ]
@@ -159,7 +158,6 @@ let () =
               let hidden_names =
                 [
                   "masc_operator_judgment_write";
-                  "masc_operator_judgment_latest";
                 ]
               in
               List.iter
@@ -172,7 +170,6 @@ let () =
               let hidden_names =
                 [
                   "masc_operator_judgment_write";
-                  "masc_operator_judgment_latest";
                 ]
               in
               List.iter

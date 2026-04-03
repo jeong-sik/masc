@@ -35,8 +35,8 @@ function truncateText(value: string | null | undefined, maxLength: number): stri
 
 export function orchestraNodeKindLabel(kind?: string | null): string {
   switch ((kind ?? '').trim().toLowerCase()) {
-    case 'room':
-      return '룸'
+    case 'namespace':
+      return '네임스페이스'
     case 'session':
       return '세션'
     case 'operation':
@@ -77,7 +77,7 @@ function jumpTo(tab: string, surface: CommandPlaneSurface | string | null | unde
 // ── Node rendering helpers ──────────────────────────────
 
 export function nodeSize(node: CommandPlaneOrchestraNode, density: 'balanced' | 'compact'): { width: number; height: number; radius: number } {
-  if (node.kind === 'room') {
+  if (node.kind === 'namespace') {
     return density === 'compact'
       ? { width: 138, height: 138, radius: 68 }
       : { width: 156, height: 156, radius: 76 }
@@ -186,7 +186,7 @@ export function orchestraBounds(
     const point = positions.get(node.id)
     if (!point) continue
     const size = nodeSize(node, density)
-    if (node.kind === 'room') {
+    if (node.kind === 'namespace') {
       minX = Math.min(minX, point.x - size.radius)
       maxX = Math.max(maxX, point.x + size.radius)
       minY = Math.min(minY, point.y - size.radius)
@@ -249,14 +249,14 @@ export function fitCamera(bounds: Bounds, viewport: { width: number; height: num
 
 export function OrchestraSignals({
   signalNodes,
-  roomPoint,
+  namespacePoint,
   onSelect,
 }: {
   signalNodes: SignalPoint[]
-  roomPoint: Point | null
+  namespacePoint: Point | null
   onSelect: (id: string) => void
 }) {
-  if (!roomPoint || signalNodes.length === 0) return null
+  if (!namespacePoint || signalNodes.length === 0) return null
   return html`
     ${signalNodes.map(({ signalNode, x, y }) => html`
       <g
@@ -266,7 +266,7 @@ export function OrchestraSignals({
         onClick=${() => onSelect(signalNode.id)}
       >
         <title>${signalNode.label}${signalNode.detail ? ` — ${signalNode.detail}` : ''}</title>
-        <line x1=${roomPoint.x} y1=${roomPoint.y} x2=${x} y2=${y} class="orchestra-signal-link" />
+        <line x1=${namespacePoint.x} y1=${namespacePoint.y} x2=${x} y2=${y} class="orchestra-signal-link" />
         <circle cx=${x} cy=${y} r="16" class="orchestra-signal-dot" />
         <text x=${x} y=${y + 4} text-anchor="middle" class="orchestra-signal-glyph">!</text>
       </g>
@@ -325,19 +325,19 @@ export function OrchestraNodeLayer({
       const label = nodeLabel(node, density)
       const subtitle = nodeSubtitle(node, density)
       const status = nodeStatus(node, density)
-      if (node.kind === 'room') {
+      if (node.kind === 'namespace') {
         return html`
           <g
             key=${node.id}
             data-orchestra-node="true"
-            class=${`orchestra-node room cursor-pointer ${toneClass(node.tone)} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
+            class=${`orchestra-node namespace cursor-pointer ${toneClass(node.tone)} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
             onClick=${() => onSelect(node.id)}
           >
             <title>${node.label}</title>
-            <circle cx=${point.x} cy=${point.y} r=${size.radius} class="orchestra-room-ring outer" />
-            <circle cx=${point.x} cy=${point.y} r=${size.radius - 16} class="orchestra-room-ring inner" />
-            <text x=${point.x} y=${point.y - 10} text-anchor="middle" class="orchestra-room-glyph">${node.glyph ?? '◎'}</text>
-            <text x=${point.x} y=${point.y + 22} text-anchor="middle" class="orchestra-room-label">${label}</text>
+            <circle cx=${point.x} cy=${point.y} r=${size.radius} class="orchestra-namespace-ring outer" />
+            <circle cx=${point.x} cy=${point.y} r=${size.radius - 16} class="orchestra-namespace-ring inner" />
+            <text x=${point.x} y=${point.y - 10} text-anchor="middle" class="orchestra-namespace-glyph">${node.glyph ?? '◎'}</text>
+            <text x=${point.x} y=${point.y + 22} text-anchor="middle" class="orchestra-namespace-label">${label}</text>
           </g>
         `
       }

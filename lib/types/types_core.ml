@@ -438,6 +438,7 @@ type message = {
   content: string;
   mention: string option; [@default None]
   timestamp: string;
+  trace_context: string option; [@default None]
 } [@@deriving yojson { strict = false }, show]
 
 (** Room state *)

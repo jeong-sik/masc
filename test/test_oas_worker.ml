@@ -244,22 +244,6 @@ let test_cascade_observation_json_includes_fallback_fields () =
   Alcotest.(check string) "attempt detail boundary preserved" "oas_metrics_callbacks"
     Yojson.Safe.Util.(json |> member "attempt_details_source" |> to_string)
 
-let test_model_catalog_status_includes_cascade_metrics () =
-  let result =
-    Tool_model_catalog.dispatch () ~name:"masc_model_catalog"
-      ~args:(`Assoc [ ("action", `String "status") ])
-  in
-  match result with
-  | None -> Alcotest.fail "expected masc_model_catalog dispatch result"
-  | Some (ok, body) ->
-      Alcotest.(check bool) "status ok" true ok;
-      let json = Yojson.Safe.from_string body in
-      let metrics =
-        Yojson.Safe.Util.(json |> member "result" |> member "cascade_metrics")
-      in
-      Alcotest.(check bool) "cascade_metrics is list" true
-        (match metrics with `List _ -> true | _ -> false)
-
 let make_worker_meta ?(effective_model = "local-qwen") () :
     Worker_container_types.worker_container_meta =
   {
@@ -383,6 +367,18 @@ let make_oas_checkpoint
     context = Agent_sdk.Context.create ();
     mcp_sessions = [];
     working_context;
+  }
+
+let tool_result_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
+  {
+    Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+    content =
+      [
+        Agent_sdk.Types.ToolResult
+          { tool_use_id = id; content = text; is_error = false };
+      ];
+    name = None;
+    tool_call_id = None;
   }
 
 let test_keeper_checkpoint_store_oas_roundtrip () =
@@ -642,6 +638,160 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
       Alcotest.(check bool) "handoff json absent" false
         (Option.is_some rollover.handoff_json))
 
+let test_overflow_retry_legacy_restore_failure_falls_back_to_oas () =
+  let base_dir = temp_dir "keeper_overflow_retry_legacy_fallback" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let meta = make_keeper_meta ~trace_id:"trace-overflow-legacy-fail" () in
+      let session =
+        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
+      in
+      let noisy_tool_output = String.make 4000 'x' in
+      let ctx =
+        Keeper_exec_context.create ~system_prompt:"legacy" ~max_tokens:4096
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "legacy")
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (tool_result_msg noisy_tool_output)
+        |> Keeper_exec_context.sync_oas_context
+      in
+      ignore
+        (Keeper_exec_context.save_oas_checkpoint ~session
+           ~agent_name:meta.agent_name
+           ~model:"llama:auto" ~ctx
+           ~generation:11);
+      let bad_legacy =
+        {
+          (Keeper_exec_context.create_checkpoint ctx ~generation:19) with
+          timestamp = Time_compat.now () +. 10.0;
+          serialized = "\"broken-context\"";
+        }
+      in
+      Keeper_exec_context.save_session_checkpoint session bad_legacy;
+      match
+        Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
+          ~base_dir ~meta ~model:"llama:auto"
+          ~primary_model_max_tokens:256
+      with
+      | None ->
+          Alcotest.fail
+            "expected overflow retry recovery to fall back to OAS checkpoint"
+      | Some recovery ->
+          let recovered_ctx =
+            Keeper_exec_context.context_of_oas_checkpoint recovery.checkpoint
+              ~primary_model_max_tokens:256
+          in
+          Alcotest.(check int) "fallback uses OAS generation" 11
+            recovery.turn_generation;
+          Alcotest.(check bool) "compacted from OAS fallback" true
+            (Keeper_exec_context.token_count recovered_ctx
+             < Keeper_exec_context.token_count ctx))
+
+let test_overflow_retry_legacy_restore_failure_returns_none_without_oas () =
+  let base_dir = temp_dir "keeper_overflow_retry_legacy_fail" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let meta = make_keeper_meta ~trace_id:"trace-overflow-legacy-only" () in
+      let session =
+        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
+      in
+      let ctx =
+        Keeper_exec_context.create ~system_prompt:"legacy" ~max_tokens:1024
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "legacy")
+      in
+      let bad_checkpoint =
+        {
+          (Keeper_exec_context.create_checkpoint ctx ~generation:7) with
+          serialized = "\"broken-context\"";
+        }
+      in
+      Keeper_exec_context.save_session_checkpoint session bad_checkpoint;
+      match
+        Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
+          ~base_dir ~meta ~model:"llama:auto"
+          ~primary_model_max_tokens:512
+      with
+      | None -> ()
+      | Some _ ->
+          Alcotest.fail
+            "expected overflow retry recovery to skip broken legacy checkpoint without OAS fallback")
+
+let test_overflow_retry_requires_meaningful_reduction () =
+  let base_dir = temp_dir "keeper_overflow_retry_noop" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let meta = make_keeper_meta ~trace_id:"trace-overflow-noop" () in
+      let session =
+        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
+      in
+      let ctx =
+        Keeper_exec_context.create ~system_prompt:"noop" ~max_tokens:4096
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "short")
+        |> Keeper_exec_context.sync_oas_context
+      in
+      ignore
+        (Keeper_exec_context.save_oas_checkpoint ~session
+           ~agent_name:meta.agent_name
+           ~model:"llama:auto" ~ctx
+           ~generation:meta.runtime.generation);
+      match
+        Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
+          ~base_dir ~meta ~model:"llama:auto"
+          ~primary_model_max_tokens:1024
+      with
+      | None -> ()
+      | Some _ ->
+          Alcotest.fail
+            "expected overflow retry recovery to skip no-op compaction")
+
+let test_overflow_retry_saves_compacted_checkpoint () =
+  let base_dir = temp_dir "keeper_overflow_retry_compacts" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let meta = make_keeper_meta ~trace_id:"trace-overflow-compacts" () in
+      let session =
+        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
+      in
+      let noisy_tool_output = String.make 4000 'x' in
+      let ctx =
+        Keeper_exec_context.create ~system_prompt:"overflow" ~max_tokens:4096
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "please summarize")
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (tool_result_msg noisy_tool_output)
+        |> Keeper_exec_context.sync_oas_context
+      in
+      let before_tokens = Keeper_exec_context.token_count ctx in
+      ignore
+        (Keeper_exec_context.save_oas_checkpoint ~session
+           ~agent_name:meta.agent_name
+           ~model:"llama:auto" ~ctx
+           ~generation:meta.runtime.generation);
+      match
+        Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
+          ~base_dir ~meta ~model:"llama:auto"
+          ~primary_model_max_tokens:256
+      with
+      | None -> Alcotest.fail "expected overflow retry recovery to compact"
+      | Some recovery ->
+          let recovered_ctx =
+            Keeper_exec_context.context_of_oas_checkpoint recovery.checkpoint
+              ~primary_model_max_tokens:256
+          in
+          Alcotest.(check bool) "token count reduced" true
+            (Keeper_exec_context.token_count recovered_ctx < before_tokens);
+          Alcotest.(check int) "max tokens clamped" 256 recovered_ctx.max_tokens)
+
 (* ================================================================ *)
 (* Same-trace checkpoint continuity regression (OAS #467)            *)
 (* ================================================================ *)
@@ -806,8 +956,6 @@ let () =
         test_cascade_names_produce_models;
       Alcotest.test_case "cascade observation json includes fallback fields" `Quick
         test_cascade_observation_json_includes_fallback_fields;
-      Alcotest.test_case "model catalog status includes cascade metrics" `Quick
-        test_model_catalog_status_includes_cascade_metrics;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick
@@ -824,6 +972,14 @@ let () =
         test_keeper_oas_handoff_rollover_increments_generation;
       Alcotest.test_case "OAS handoff rollover noops below threshold" `Quick
         test_keeper_oas_handoff_rollover_below_threshold_noop;
+      Alcotest.test_case "overflow retry falls back to OAS after broken legacy restore" `Quick
+        test_overflow_retry_legacy_restore_failure_falls_back_to_oas;
+      Alcotest.test_case "overflow retry skips broken legacy checkpoint without OAS" `Quick
+        test_overflow_retry_legacy_restore_failure_returns_none_without_oas;
+      Alcotest.test_case "overflow retry requires meaningful reduction" `Quick
+        test_overflow_retry_requires_meaningful_reduction;
+      Alcotest.test_case "overflow retry saves compacted checkpoint" `Quick
+        test_overflow_retry_saves_compacted_checkpoint;
     ];
     "keeper_checkpoint_store", [
       Alcotest.test_case "OAS store roundtrip" `Quick

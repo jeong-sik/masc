@@ -508,10 +508,6 @@ let dispatch (ctx : context) ~name ~args : result option =
   | "masc_autoresearch_stop" -> Some (wrap_result (handle_stop ctx args))
   | "masc_autoresearch_inject" -> Some (wrap_result (handle_inject ctx args))
   | "masc_autoresearch_cycle" -> Some (wrap_result (Tool_autoresearch_cycle.handle_cycle ctx args))
-  | "masc_autoresearch_record_finding" ->
-      Some (wrap_result (handle_record_finding ctx args))
-  | "masc_autoresearch_search_findings" ->
-      Some (wrap_result (handle_search_findings ctx args))
   | _ -> None
 
 (* ================================================================ *)

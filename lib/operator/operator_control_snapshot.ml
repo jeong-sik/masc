@@ -167,26 +167,35 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
         ( task.allowed_tools,
           result.tool_names,
           Some result.tool_call_count,
+          fallback_snapshot.latest_action_source,
           Some "heartbeat_task_pending_result",
           Some task.created_at )
       else
         ( task.allowed_tools,
           result.tool_names,
           Some result.tool_call_count,
+          fallback_snapshot.latest_action_source,
           Some "heartbeat_result",
           Some result.updated_at )
   | Some task, None ->
-      (task.allowed_tools, [], None, Some "heartbeat_task", Some task.created_at)
+      ( task.allowed_tools,
+        [],
+        None,
+        fallback_snapshot.latest_action_source,
+        Some "heartbeat_task",
+        Some task.created_at )
   | None, Some result ->
       ( fallback_allowed,
         result.tool_names,
         Some result.tool_call_count,
+        fallback_snapshot.latest_action_source,
         Some "heartbeat_result",
         Some result.updated_at )
   | None, None ->
       ( fallback_allowed,
         fallback_snapshot.latest_tool_names,
         fallback_snapshot.latest_tool_call_count,
+        fallback_snapshot.latest_action_source,
         fallback_snapshot.tool_audit_source,
         fallback_snapshot.tool_audit_at )
 
@@ -241,8 +250,8 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    ~meta ~keepalive_running ~keepalive_started_at ~now_ts
             in
             let allowed_tool_names, latest_tool_names, latest_tool_call_count,
-                tool_audit_source, tool_audit_at =
-              if lightweight then ([], [], None, None, None)
+                latest_action_source, tool_audit_source, tool_audit_at =
+              if lightweight then ([], [], None, None, None, None)
               else keeper_tool_audit_fields config meta
             in
             let agent_status =
@@ -297,6 +306,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                   ("latest_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
                   ("recent_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
                   ("latest_tool_call_count", option_to_json (fun value -> `Int value) latest_tool_call_count);
+                  ("latest_action_source", string_option_to_json latest_action_source);
                   ("tool_audit_source", string_option_to_json tool_audit_source);
                   ("tool_audit_at", string_option_to_json tool_audit_at);
                   ("updated_at", `String meta.updated_at);
@@ -373,6 +383,14 @@ let persistent_agents_json ?keeper_names config =
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
 let _session_recent_event_limit = 3
+let _snapshot_session_window_seconds () =
+  Dashboard_http_helpers.operator_snapshot_session_window_seconds ()
+
+let _snapshot_session_limit () =
+  Dashboard_http_helpers.operator_snapshot_session_limit ()
+
+let _snapshot_recent_completed_limit () =
+  Dashboard_http_helpers.operator_snapshot_recent_completed_limit ()
 
 let sessions_json ?(status_cache : (string, Yojson.Safe.t) Hashtbl.t option) config sessions =
   let ordered_sessions =
@@ -418,6 +436,9 @@ let room_json config =
       [
         ("initialized", `Bool false);
         ("project", `String (Filename.basename config.base_path));
+        ("namespace_id", `String "default");
+        ("namespace", `String "default");
+        ("namespace_mode", `String "flattened");
       ]
   else
     let state = Room.read_state config in
@@ -429,7 +450,9 @@ let room_json config =
         ("initialized", `Bool true);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("project", `String state.project);
-        ("current_room", string_option_to_json (Room.read_current_room config));
+        ("namespace_id", `String "default");
+        ("namespace", `String "default");
+        ("namespace_mode", `String "flattened");
         ("paused", `Bool state.paused);
         ("pause_reason", string_option_to_json state.pause_reason);
         ("paused_by", string_option_to_json state.paused_by);
@@ -465,10 +488,7 @@ let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
 
 let invalidate_snapshot_cache () = _snapshot_cache := None
 
-let room_scope_cache_segment (config : Room_utils.config) =
-  match config.scope with
-  | Room_utils_backend_setup.Default -> "default"
-  | Room_utils_backend_setup.Named room_id -> "room:" ^ room_id
+let namespace_scope_cache_segment (_config : Room_utils.config) = "default"
 
 let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
     ?(include_keepers = true) ?(include_summary_fields = true)
@@ -477,7 +497,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   let cache_key =
     Printf.sprintf "%s|%s|%s|%s|%b|%b|%b|%b|%b|%b"
       ctx.config.base_path
-      (room_scope_cache_segment ctx.config)
+      (namespace_scope_cache_segment ctx.config)
       (Option.value ~default:"" actor)
       (Option.value ~default:"" view)
       include_messages include_sessions include_keepers include_summary_fields
@@ -505,7 +525,11 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     match sessions with
     | Some s -> s
     | None ->
-        if initialized then Team_session_store.list_sessions config else []
+        if initialized then
+          let cutoff = Time_compat.now () -. _snapshot_session_window_seconds () in
+          Team_session_store.list_sessions ~since_unix:cutoff
+            ~limit:(_snapshot_session_limit ()) config
+        else []
   in
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -603,7 +627,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("judgment_owner", `String "fallback_read_model");
          ("authoritative_judgment_available", `Bool false);
          ("provenance_summary", operator_surface_contract_json);
-         ("room", room_json config);
+         ("namespace", room_json config);
        ]
       @ (
          (* Parallelize independent I/O: sessions, keepers, persistent_agents.
@@ -618,7 +642,23 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
              sessions_ref :=
                timed "sessions_json" (fun () ->
                  if initialized && include_sessions then
-                   sessions_json ~status_cache config tracked_sessions
+                   let capped =
+                     if lightweight_summary then
+                       (* Lightweight: only active/paused + last 5 recent.
+                          Full session_status_json is heavy (reads events per session). *)
+                       let active, rest =
+                         List.partition (fun (s : Team_session_types.session) ->
+                           s.status = Running || s.status = Paused) tracked_sessions
+                       in
+                       let recent =
+                         List.filteri
+                           (fun i _ -> i < _snapshot_recent_completed_limit ())
+                           rest
+                       in
+                       active @ recent
+                     else tracked_sessions
+                   in
+                   sessions_json ~status_cache config capped
                  else empty_section));
            (fun () ->
              keepers_ref :=

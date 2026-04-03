@@ -49,18 +49,25 @@ let timed (f : unit -> 'a) : 'a * int =
 (* UTF-8 Sanitization                                               *)
 (* ================================================================ *)
 
+let is_disallowed_control_char (c : char) : bool =
+  let code = Char.code c in
+  (code < 32 && c <> '\n' && c <> '\r' && c <> '\t') || code = 127
+
 let sanitize_text_utf8 (s : string) : string =
   let len = String.length s in
-  (* Fast path: scan for invalid UTF-8 without allocating *)
-  let rec has_invalid i =
+  (* Fast path: scan for invalid UTF-8 or prompt-breaking control chars
+     without allocating. Keep LF/CR/TAB because prompts rely on them. *)
+  let rec has_invalid_or_control i =
     if i >= len then false
     else
       let dec = String.get_utf_8_uchar s i in
       let dlen = Uchar.utf_decode_length dec in
-      if dlen > 0 && Uchar.utf_decode_is_valid dec then has_invalid (i + dlen)
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then
+        if dlen = 1 && is_disallowed_control_char s.[i] then true
+        else has_invalid_or_control (i + dlen)
       else true
   in
-  if not (has_invalid 0) then s
+  if not (has_invalid_or_control 0) then s
   else
     let buf = Buffer.create len in
     let rec loop i =
@@ -69,7 +76,10 @@ let sanitize_text_utf8 (s : string) : string =
         let dec = String.get_utf_8_uchar s i in
         let dlen = Uchar.utf_decode_length dec in
         if dlen > 0 && Uchar.utf_decode_is_valid dec then (
-          Buffer.add_substring buf s i dlen;
+          if dlen = 1 && is_disallowed_control_char s.[i] then
+            Buffer.add_char buf ' '
+          else
+            Buffer.add_substring buf s i dlen;
           loop (i + dlen))
         else (
           Buffer.add_string buf "\xEF\xBF\xBD";
@@ -78,22 +88,50 @@ let sanitize_text_utf8 (s : string) : string =
     loop 0;
     Buffer.contents buf
 
+let rec sanitize_content_blocks_utf8
+    (blocks : Agent_sdk.Types.content_block list)
+  : Agent_sdk.Types.content_block list =
+  match blocks with
+  | [] -> blocks
+  | block :: rest ->
+      let sanitized_block =
+        match block with
+        | Agent_sdk.Types.Text s ->
+            let sanitized = sanitize_text_utf8 s in
+            if sanitized == s then block else Agent_sdk.Types.Text sanitized
+        | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error } ->
+            let sanitized_tool_use_id = sanitize_text_utf8 tool_use_id in
+            let sanitized_content = sanitize_text_utf8 content in
+            if sanitized_tool_use_id == tool_use_id && sanitized_content == content
+            then block
+            else
+              Agent_sdk.Types.ToolResult {
+                tool_use_id = sanitized_tool_use_id;
+                content = sanitized_content;
+                is_error;
+              }
+        | _ -> block
+      in
+      let sanitized_rest = sanitize_content_blocks_utf8 rest in
+      if sanitized_block == block && sanitized_rest == rest then blocks
+      else sanitized_block :: sanitized_rest
+
 let sanitize_message_utf8 (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
-  { m with
-    content = List.map (fun block ->
-      match block with
-      | Agent_sdk.Types.Text s -> Agent_sdk.Types.Text (sanitize_text_utf8 s)
-      | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error } ->
-          Agent_sdk.Types.ToolResult {
-            tool_use_id = sanitize_text_utf8 tool_use_id;
-            content = sanitize_text_utf8 content;
-            is_error }
-      | other -> other
-    ) m.content;
-  }
+  let sanitized_content = sanitize_content_blocks_utf8 m.content in
+  if sanitized_content == m.content then m
+  else { m with content = sanitized_content }
 
 let sanitize_messages_utf8 (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
-  List.map sanitize_message_utf8 msgs
+  let rec loop messages =
+    match messages with
+    | [] -> messages
+    | msg :: rest ->
+        let sanitized_msg = sanitize_message_utf8 msg in
+        let sanitized_rest = loop rest in
+        if sanitized_msg == msg && sanitized_rest == rest then messages
+        else sanitized_msg :: sanitized_rest
+  in
+  loop msgs
 
 (* ================================================================ *)
 (* Concurrency diagnostics (observability only, no throttling)       *)

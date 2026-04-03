@@ -7,7 +7,6 @@
    tool_schemas_plan
    tool_schemas_portal
    tool_schemas_worktree
-   tool_schemas_fire_task
    tool_schemas_auth
    tool_schemas_agent
    tool_schemas_room

@@ -11,10 +11,8 @@
     Run with: dune exec test/test_a2a_distributed.exe -- [producer|consumer] <shared_dir>
 *)
 
-open Masc_mcp
-
 (* Initialize crypto RNG *)
-let () = Encryption.initialize ()
+let () = Mirage_crypto_rng_unix.use_default ()
 
 let shared_dir = ref "/tmp/masc_distributed_test"
 let role = ref "producer"

@@ -29,11 +29,11 @@ type record = {
 }
 
 let target_type_to_string = function
-  | Room -> "room"
+  | Room -> "namespace"
   | Team_session -> "team_session"
 
 let target_type_of_string = function
-  | "room" -> Some Room
+  | "room" | "namespace" -> Some Room
   | "team_session" -> Some Team_session
   | _ -> None
 

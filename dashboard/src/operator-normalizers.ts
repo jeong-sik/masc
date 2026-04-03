@@ -22,7 +22,7 @@ import type {
   OperatorSessionSnapshot,
   OperatorSessionCard,
   OperatorSnapshot,
-  OperatorRoomSnapshot,
+  OperatorNamespaceSnapshot,
   OperatorWorkerCard,
   PendingConfirmation,
 } from './types'
@@ -39,11 +39,11 @@ function normalizeMessage(raw: unknown): Message | null {
   }
 }
 
-function normalizeRoom(raw: unknown): OperatorRoomSnapshot {
+function normalizeNamespace(raw: unknown): OperatorNamespaceSnapshot {
   if (!isRecord(raw)) return {}
   return {
-    room_id: asString(raw.room_id),
-    current_room: asString(raw.current_room) ?? asString(raw.room),
+    namespace_id: asString(raw.namespace_id),
+    namespace: asString(raw.namespace),
     project: asString(raw.project),
     cluster: asString(raw.cluster),
     paused: asBoolean(raw.paused),
@@ -326,7 +326,7 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
       .map(normalizeRecommendedAction)
       .filter((item): item is OperatorRecommendedAction => item !== null),
     recommendation_summary: normalizeGuidanceSummary(root.recommendation_summary),
-    room: normalizeRoom(root.room),
+    namespace: normalizeNamespace(root.namespace),
     swarm_status: isRecord(root.swarm_status)
       ? (root.swarm_status as unknown as OperatorDigest['swarm_status'])
       : undefined,
@@ -417,7 +417,7 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
   const root = isRecord(raw) ? raw : {}
   const pendingConfirmEnvelope = normalizePendingConfirmEnvelope(root.pending_confirm_envelope)
   return {
-    room: normalizeRoom(root.room),
+    namespace: normalizeNamespace(root.namespace),
     sessions: extractArray(root.sessions, ['items', 'sessions'])
       .map(normalizeSession)
       .filter((item): item is OperatorSessionSnapshot => item !== null),

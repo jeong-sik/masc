@@ -37,8 +37,8 @@ OCaml Backend:
     |-- server_dashboard_http_core.ml (Executor_pool offload, batch API)
     |-- server_dashboard_http_runtime_info.ml (runtime/config resolution, tools)
     |-- server_dashboard_http_execution_surfaces.ml (execution/transport cache + refresh)
-    |-- server_dashboard_http_room_truth_support.ml (shared room-truth assembly)
-    |-- server_dashboard_http_room_truth.ml (room-truth read model + SSE snapshot)
+    |-- server_dashboard_http_namespace_truth_support.ml (shared namespace-truth assembly)
+    |-- server_dashboard_http_namespace_truth.ml (namespace-truth read model + SSE snapshot)
     |-- dashboard_http_monitoring.ml  (tool health, board/governance monitors)
     |-- dashboard_http_keeper.ml      (keeper dashboard rendering)
     |   |-- dashboard_http_keeper_detail.ml (metrics window computation)
@@ -483,7 +483,7 @@ Journal: 최대 200개 항목 보관. agent/text/kind/timestamp.
 - `keeper-state.ts`, `keeper-store-normalize.ts`: Keeper detail
 - `live-store.ts`: Live activity
 - `sse-store.ts`: SSE 상태
-- `room-truth-store.ts`: Room truth
+- `namespace-truth-store.ts`: Namespace truth
 - `operator-store.ts`: Operator actions/digest
 - `observatory-store.ts`: Observatory
 - `pending-confirm.ts`: Pending confirmations
@@ -518,7 +518,7 @@ Vite 설정:
 | `/api/v1/dashboard/planning` | GET | Planning surface |
 | `/api/v1/dashboard/governance` | GET | Governance surface |
 | `/api/v1/dashboard/board` | GET | Board monitoring |
-| `/api/v1/dashboard/room-truth` | GET | Room truth focus |
+| `/api/v1/dashboard/namespace-truth` | GET | Namespace truth focus |
 | `/api/v1/dashboard/tools` | GET | Tool inventory + usage |
 | `/api/v1/dashboard/logs` | GET | System logs |
 

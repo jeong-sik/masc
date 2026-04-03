@@ -60,10 +60,7 @@ let with_dashboard_timeout ~clock compute =
         ("generated_at", `String (Types.now_iso ()));
       ]
 
-let room_scope_cache_segment (config : Room.config) =
-  match config.scope with
-  | Room_utils_backend_setup.Default -> "default"
-  | Room_utils_backend_setup.Named room_id -> "room:" ^ room_id
+let room_scope_cache_segment (_config : Room.config) = "default"
 
 let room_scoped_cache_key (config : Room.config) prefix suffix =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
@@ -194,11 +191,11 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   in
   let status_json =
     `Assoc [
-      ( "room",
-        `String
-          (if Room.is_initialized config then Room.current_room_id config
-           else Filename.basename config.base_path) );
-      ("room_base_path", `String config.base_path);
+      ("namespace_id", `String "default");
+      ("namespace", `String "default");
+      ("namespace_mode", `String "flattened");
+      ("room", `Null);
+      ("room_base_path", `Null);
       ("coordination_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);
       ("workspace_differs", `Bool (config.workspace_path <> config.base_path));
@@ -835,9 +832,12 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let build = Build_identity.current () in
   `Assoc
     [
-      ("room", `String current_room);
+      ("namespace_id", `String "default");
+      ("namespace", `String "default");
+      ("namespace_mode", `String "flattened");
+      ("room", `Null);
       ("current_room", `String current_room);
-      ("room_base_path", `String config.base_path);
+      ("room_base_path", `Null);
       ("coordination_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);
       ("workspace_differs", `Bool (config.workspace_path <> config.base_path));

@@ -255,19 +255,22 @@ module FileSystem = struct
     | Error _ -> false
     | Ok _ ->
       ensure_key_index t;
-      if Hashtbl.mem t.key_index key then true
-      else
-        (* Fallback: file may have been written outside the backend
-           (e.g. Fs_compat.append_jsonl, raw write_text_file in tests).
-           Check the actual filesystem and update the index on hit. *)
-        match key_to_path t key with
-        | Error _ -> false
-        | Ok path ->
-            (try
-               ignore (Eio.Path.load path : string);
-               Hashtbl.replace t.key_index key ();
-               true
-             with _ -> false)
+      (* Verify the real filesystem even on index hits so raw rm_rf/reset
+         cannot leave stale positives in the in-memory key index. *)
+      match key_to_path t key with
+      | Error _ -> false
+      | Ok path ->
+          (try
+             match Eio.Path.kind ~follow:true path with
+             | `Regular_file ->
+                 Hashtbl.replace t.key_index key ();
+                 true
+             | _ ->
+                 Hashtbl.remove t.key_index key;
+                 false
+           with _ ->
+             Hashtbl.remove t.key_index key;
+             false)
 
   let list_keys t ~prefix =
     ensure_key_index t;

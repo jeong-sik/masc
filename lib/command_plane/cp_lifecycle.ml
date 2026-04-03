@@ -314,7 +314,11 @@ let check_blocked_intents config =
 
 let apply_operation_assignment config ~(actor : string) (operation : operation_record)
     ~target_unit_id ~note ~event_type =
-  match unit_guard_json config target_unit_id with
+  match
+    operation_assignment_guard_json config target_unit_id
+      ~workload_profile:(operation_workload_profile operation)
+      ~stage:operation.stage
+  with
   | Error message -> Error message
   | Ok _ ->
       let updated =
@@ -453,141 +457,143 @@ let start_operation config ~(actor : string) json =
     | Some value -> value
     | None -> invalid_arg "objective is required"
   in
-  match unit_guard_json config assigned_unit_id with
-  | Error message -> Error message
-  | Ok _ ->
-      let workload_template =
-        match get_string_opt json "workload_template" with
-        | Some value ->
-            let* validated = validate_workload_template value in
-            Ok (Some validated)
-        | None -> Ok None
-      in
-      let* workload_template = workload_template in
-      let inferred_workload_profile, inferred_stage =
-        match workload_template with
-        | Some template -> (
-            match workload_template_defaults template with
-            | Some defaults -> defaults
-            | None -> ("coding_task", None))
-        | None -> ("coding_task", None)
-      in
-      let explicit_workload_profile = get_string_opt json "workload_profile" in
-      let* () =
-        match workload_template, explicit_workload_profile with
-        | Some template, Some explicit_profile -> (
-            let expected_profile, _ =
-              match workload_template_defaults template with
-              | Some defaults -> defaults
-              | None -> ("coding_task", None)
-            in
-            let* normalized_explicit = validate_workload_profile explicit_profile in
-            if String.equal normalized_explicit expected_profile then
-              Ok ()
-            else
+  let workload_template =
+    match get_string_opt json "workload_template" with
+    | Some value ->
+        let* validated = validate_workload_template value in
+        Ok (Some validated)
+    | None -> Ok None
+  in
+  let* workload_template = workload_template in
+  let inferred_workload_profile, inferred_stage =
+    match workload_template with
+    | Some template -> (
+        match workload_template_defaults template with
+        | Some defaults -> defaults
+        | None -> ("coding_task", None))
+    | None -> ("coding_task", None)
+  in
+  let explicit_workload_profile = get_string_opt json "workload_profile" in
+  let* () =
+    match workload_template, explicit_workload_profile with
+    | Some template, Some explicit_profile -> (
+        let expected_profile, _ =
+          match workload_template_defaults template with
+          | Some defaults -> defaults
+          | None -> ("coding_task", None)
+        in
+        let* normalized_explicit = validate_workload_profile explicit_profile in
+        if String.equal normalized_explicit expected_profile then
+          Ok ()
+        else
+          Error
+            (Printf.sprintf
+               "workload_template %s requires workload_profile=%s"
+               template expected_profile))
+    | _ -> Ok ()
+  in
+  let workload_profile_raw =
+    match explicit_workload_profile with
+    | Some value -> value
+    | None -> inferred_workload_profile
+  in
+  let requested_stage =
+    match get_string_opt json "stage" with
+    | Some value -> Some value
+    | None -> inferred_stage
+  in
+  let search_strategy_raw =
+    get_string_default json "search_strategy" (room_search_strategy_default config)
+  in
+  let depends_on_operation_ids = get_string_list json "depends_on_operation_ids" in
+  let requested_intent_id = get_string_opt json "intent_id" in
+  let raw_artifact_scope = get_string_list json "artifact_scope" in
+  let* workload_profile = validate_workload_profile workload_profile_raw in
+  let* stage =
+    validate_stage_for_workload ~workload_profile requested_stage
+  in
+  let* () =
+    operation_assignment_guard_json config assigned_unit_id ~workload_profile
+      ~stage
+    |> Result.map ignore
+  in
+  let* search_strategy = validate_search_strategy search_strategy_raw in
+  let* intent_binding =
+    match requested_intent_id with
+    | None -> Ok None
+    | Some intent_id ->
+        with_intent config intent_id (fun _ intent ->
+            if not (String.equal intent.workload_profile workload_profile) then
               Error
                 (Printf.sprintf
-                   "workload_template %s requires workload_profile=%s"
-                   template expected_profile))
-        | _ -> Ok ()
-      in
-      let workload_profile_raw =
-        match explicit_workload_profile with
+                   "intent workload_profile mismatch: intent=%s operation=%s"
+                   intent.workload_profile workload_profile)
+            else
+              Ok (Some intent))
+  in
+  let artifact_scope =
+    match intent_binding with
+    | Some intent when raw_artifact_scope = [] -> intent.artifact_priors
+    | _ -> raw_artifact_scope
+  in
+  let* () =
+    match workload_profile, stage with
+    | "coding_task", Some ("verify" | "review" as stage_name) ->
+        validate_coding_dependency_requirement ~stage:stage_name
+          ~depends_on_operation_ids
+    | _ -> Ok ()
+  in
+  let checkpoint_ref =
+    option_first_some (get_string_opt json "checkpoint_ref")
+      (legacy_chain_run_id json)
+  in
+  let operation =
+    {
+      operation_id = next_operation_id ();
+      objective;
+      intent_id = Option.map (fun (intent : intent_record) -> intent.intent_id) intent_binding;
+      assigned_unit_id;
+      policy_class = get_string_default json "policy_class" "strict";
+      budget_class = get_string_default json "budget_class" "standard";
+      workload_template;
+      workload_profile;
+      stage;
+      artifact_scope;
+      depends_on_operation_ids;
+      search_strategy;
+      detachment_session_id = get_string_opt json "detachment_session_id";
+      trace_id = next_trace_id ();
+      checkpoint_ref;
+      active_goal_ids = get_string_list json "active_goal_ids";
+      note = get_string_opt json "note";
+      created_by = actor;
+      source = "managed";
+      status =
+        (match
+           (match get_string_opt json "status" with
+           | Some value -> operation_status_of_string value
+           | None -> None)
+         with
         | Some value -> value
-        | None -> inferred_workload_profile
-      in
-      let requested_stage =
-        match get_string_opt json "stage" with
-        | Some value -> Some value
-        | None -> inferred_stage
-      in
-      let search_strategy_raw =
-        get_string_default json "search_strategy" (room_search_strategy_default config)
-      in
-      let depends_on_operation_ids = get_string_list json "depends_on_operation_ids" in
-      let requested_intent_id = get_string_opt json "intent_id" in
-      let raw_artifact_scope = get_string_list json "artifact_scope" in
-      let* workload_profile = validate_workload_profile workload_profile_raw in
-      let* stage =
-        validate_stage_for_workload ~workload_profile requested_stage
-      in
-      let* search_strategy = validate_search_strategy search_strategy_raw in
-      let* intent_binding =
-        match requested_intent_id with
-        | None -> Ok None
-        | Some intent_id ->
-            with_intent config intent_id (fun _ intent ->
-                if not (String.equal intent.workload_profile workload_profile) then
-                  Error
-                    (Printf.sprintf
-                       "intent workload_profile mismatch: intent=%s operation=%s"
-                       intent.workload_profile workload_profile)
-                else
-                  Ok (Some intent))
-      in
-      let artifact_scope =
-        match intent_binding with
-        | Some intent when raw_artifact_scope = [] -> intent.artifact_priors
-        | _ -> raw_artifact_scope
-      in
-      let* () =
-        match workload_profile, stage with
-        | "coding_task", Some ("verify" | "review" as stage_name) ->
-            validate_coding_dependency_requirement ~stage:stage_name
-              ~depends_on_operation_ids
-        | _ -> Ok ()
-      in
-      let checkpoint_ref =
-        option_first_some (get_string_opt json "checkpoint_ref")
-          (legacy_chain_run_id json)
-      in
-      let operation =
-        {
-          operation_id = next_operation_id ();
-          objective;
-          intent_id = Option.map (fun (intent : intent_record) -> intent.intent_id) intent_binding;
-          assigned_unit_id;
-          policy_class = get_string_default json "policy_class" "strict";
-          budget_class = get_string_default json "budget_class" "standard";
-          workload_template;
-          workload_profile;
-          stage;
-          artifact_scope;
-          depends_on_operation_ids;
-          search_strategy;
-          detachment_session_id = get_string_opt json "detachment_session_id";
-          trace_id = next_trace_id ();
-          checkpoint_ref;
-          active_goal_ids = get_string_list json "active_goal_ids";
-          note = get_string_opt json "note";
-          created_by = actor;
-          source = "managed";
-          status =
-            (match
-               (match get_string_opt json "status" with
-               | Some value -> operation_status_of_string value
-               | None -> None)
-             with
-            | Some value -> value
-            | None -> Active);
-          created_at = Types.now_iso ();
-          updated_at = Types.now_iso ();
-        }
-      in
-      let operations = read_operations config in
-      write_operations config (operation :: operations);
-      let _, _, units, _ = topology_units config in
-      let _ =
-        match operation_search_strategy operation with
-        | Cp_search_fabric.Legacy -> sync_managed_detachments config units operation
-        | Cp_search_fabric.Best_first_v1 -> []
-      in
-      touch_intent_from_operation config ~actor operation ~state:Active_intent;
-      append_cp_event config ~trace_id:operation.trace_id ~event_type:"operation_started"
-        ~operation_id:operation.operation_id ~unit_id:operation.assigned_unit_id ~actor
-        (`Assoc
-          [
-            ("objective", `String operation.objective);
+        | None -> Active);
+      created_at = Types.now_iso ();
+      updated_at = Types.now_iso ();
+    }
+  in
+  let operations = read_operations config in
+  write_operations config (operation :: operations);
+  let _, _, units, _ = topology_units config in
+  let _ =
+    match operation_search_strategy operation with
+    | Cp_search_fabric.Legacy -> sync_managed_detachments config units operation
+    | Cp_search_fabric.Best_first_v1 -> []
+  in
+  touch_intent_from_operation config ~actor operation ~state:Active_intent;
+  append_cp_event config ~trace_id:operation.trace_id ~event_type:"operation_started"
+    ~operation_id:operation.operation_id ~unit_id:operation.assigned_unit_id ~actor
+    (`Assoc
+      [
+        ("objective", `String operation.objective);
             ("intent_id", Json_util.string_opt_to_json operation.intent_id);
             ("policy_class", `String operation.policy_class);
             ("workload_template", Json_util.string_opt_to_json operation.workload_template);
@@ -730,9 +736,22 @@ let dispatch_plan_json config json =
                  ("routing_reason", `String candidate.routing_reason);
                ])
     else
+      let workload_profile =
+        match operation with
+        | Some op -> operation_workload_profile op
+        | None -> "coding_task"
+      in
+      let stage =
+        match operation with
+        | Some op -> op.stage
+        | None -> None
+      in
       candidate_units_for_operation units operations current_unit_id
       |> List.filter_map (fun (unit : unit_record) ->
-             match unit_guard_json config unit.unit_id with
+             match
+               operation_assignment_guard_json config unit.unit_id
+                 ~workload_profile ~stage
+             with
              | Ok guard ->
                  Some
                    (`Assoc

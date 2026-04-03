@@ -242,6 +242,75 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
             (List.length loaded.messages > 0)
       | None -> fail "expected rollover checkpoint in new trace")
 
+let test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint () =
+  let base_dir = temp_dir "keeper_lifecycle_overflow_retry_oas" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta = make_keeper_meta ~trace_id:"trace-overflow-retry-oas" () in
+      let original_ctx =
+        build_dense_context ~turns:22 ~max_tokens:4096
+          ~state_reply:
+            "done\n\n[STATE]\nGoal: retry after overflow\nProgress: ready\n[/STATE]"
+      in
+      let original_message_count = List.length original_ctx.messages in
+      ignore (save_checkpoint ~base_dir ~meta ~ctx:original_ctx);
+      match
+        KEC.recover_latest_checkpoint_for_overflow_retry ~base_dir ~meta
+          ~model:"llama:auto" ~primary_model_max_tokens:256
+      with
+      | Some recovery ->
+          check bool "compaction applied" true recovery.compaction.applied;
+          check bool "saved tokens positive" true
+            (recovery.compaction.saved_tokens > 0);
+          (match
+             load_context ~base_dir ~trace_id:meta.runtime.trace_id
+               ~max_tokens:256
+           with
+          | Some loaded ->
+              check int "checkpoint max tokens clamped" 256 loaded.max_tokens;
+              check bool "message count reduced" true
+                (List.length loaded.messages < original_message_count)
+          | None -> fail "expected compacted OAS checkpoint")
+      | None -> fail "expected overflow retry recovery from OAS checkpoint")
+
+let test_recover_latest_checkpoint_for_overflow_retry_uses_legacy_checkpoint () =
+  let base_dir = temp_dir "keeper_lifecycle_overflow_retry_legacy" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta = make_keeper_meta ~trace_id:"trace-overflow-retry-legacy" () in
+      let session =
+        KEC.create_session ~session_id:meta.runtime.trace_id ~base_dir
+      in
+      let legacy_ctx =
+        build_dense_context ~turns:18 ~max_tokens:2048
+          ~state_reply:
+            "done\n\n[STATE]\nGoal: recover legacy checkpoint\nProgress: ready\n[/STATE]"
+      in
+      ignore (KEC.save_checkpoint session legacy_ctx ~generation:3);
+      match
+        KEC.recover_latest_checkpoint_for_overflow_retry ~base_dir ~meta
+          ~model:"llama:auto" ~primary_model_max_tokens:192
+      with
+      | Some recovery ->
+          check int "legacy generation preserved" 3 recovery.turn_generation;
+          check bool "legacy recovery compacts" true recovery.compaction.applied;
+          (match
+             load_context ~base_dir ~trace_id:meta.runtime.trace_id
+               ~max_tokens:192
+           with
+          | Some loaded ->
+              check int "legacy retry max tokens clamped" 192 loaded.max_tokens
+          | None -> fail "expected compacted checkpoint after legacy recovery")
+      | None -> fail "expected overflow retry recovery from legacy checkpoint")
+
 let () =
   run "keeper_lifecycle"
     [
@@ -253,5 +322,9 @@ let () =
             test_apply_post_turn_lifecycle_compacts_and_updates_continuity;
           test_case "handoff runs after compaction" `Quick
             test_apply_post_turn_lifecycle_handoffs_after_compaction;
+          test_case "overflow retry compacts OAS checkpoint" `Quick
+            test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint;
+          test_case "overflow retry falls back to legacy checkpoint" `Quick
+            test_recover_latest_checkpoint_for_overflow_retry_uses_legacy_checkpoint;
         ] );
     ]

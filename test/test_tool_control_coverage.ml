@@ -6,6 +6,10 @@ let () = Random.self_init ()
 
 let () = Printf.printf "\n=== Tool_control Coverage Tests ===\n"
 
+let parse_json s =
+  try Yojson.Safe.from_string s
+  with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
+
 let test name f =
   try
     f ();
@@ -61,7 +65,11 @@ let () =
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
       | Some (success, result) ->
           assert success;
-          assert (String.length result > 0)
+          let json = parse_json result in
+          assert (Yojson.Safe.Util.member "paused" json = `Bool true);
+          assert (Yojson.Safe.Util.member "namespace_id" json = `String "default");
+          assert (Yojson.Safe.Util.member "namespace" json = `String "default");
+          assert (Yojson.Safe.Util.member "namespace_mode" json = `String "flattened")
       | None -> failwith "dispatch returned None")
 
 let () =
@@ -83,7 +91,28 @@ let () =
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
       | Some (success, result) ->
           assert success;
-          assert (String.length result > 0)
+          let json = parse_json result in
+          assert (Yojson.Safe.Util.member "paused" json = `Bool false);
+          assert (Yojson.Safe.Util.member "namespace_id" json = `String "default");
+          assert (Yojson.Safe.Util.member "namespace" json = `String "default");
+          assert (Yojson.Safe.Util.member "namespace_mode" json = `String "flattened")
+      | None -> failwith "dispatch returned None")
+
+let () =
+  test "dispatch_pause_status_namespace_hint_normalizes_default" (fun () ->
+      with_ctx @@ fun ctx ->
+      match
+        Tool_control.dispatch ctx ~name:"masc_pause_status"
+          ~args:(`Assoc [ ("namespace_id", `String "focus-room") ])
+      with
+      | Some (success, result) ->
+          assert success;
+          let json = parse_json result in
+          assert (Yojson.Safe.Util.member "namespace_id" json = `String "default");
+          assert (Yojson.Safe.Util.member "namespace" json = `String "default");
+          assert
+            (Yojson.Safe.Util.member "requested_namespace_id" json
+             = `String "focus-room")
       | None -> failwith "dispatch returned None")
 
 let () =

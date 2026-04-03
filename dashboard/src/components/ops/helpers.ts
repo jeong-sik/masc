@@ -250,10 +250,12 @@ export function actionTypeLabel(value?: string | null): string {
   switch (value) {
     case 'broadcast':
       return '전체 공지'
+    case 'namespace_pause':
     case 'room_pause':
-      return '방 일시정지'
+      return '네임스페이스 일시정지'
+    case 'namespace_resume':
     case 'room_resume':
-      return '방 재개'
+      return '네임스페이스 재개'
     case 'team_turn':
       return '세션 업데이트'
     case 'team_note':
@@ -285,8 +287,10 @@ export function actionTypeLabel(value?: string | null): string {
 
 export function targetTypeLabel(value?: string | null): string {
   switch (value) {
+    case 'namespace':
+      return '네임스페이스'
     case 'room':
-      return '방'
+      return '네임스페이스'
     case 'team_session':
       return '세션'
     case 'keeper':
@@ -298,6 +302,10 @@ export function targetTypeLabel(value?: string | null): string {
     default:
       return value?.trim() || '대상'
   }
+}
+
+function isNamespaceTarget(value?: string | null): boolean {
+  return value === 'namespace' || value === 'room'
 }
 
 export function deliveryModeLabel(confirmRequired?: boolean): string {
@@ -377,7 +385,7 @@ function hydrateActionForm(input: {
   summary: string
 }): void {
   const payload = payloadRecord(input.payload)
-  if (input.target_type === 'room') {
+  if (isNamespaceTarget(input.target_type)) {
     if (input.action_type === 'broadcast') {
       broadcastMessage.value = workflowPayloadString(payload, 'message') ?? input.summary
       return
@@ -388,7 +396,7 @@ function hydrateActionForm(input: {
       taskPriority.value = workflowPayloadString(payload, 'priority') ?? taskPriority.value
       return
     }
-    if (input.action_type === 'room_pause') {
+    if (input.action_type === 'namespace_pause' || input.action_type === 'room_pause') {
       pauseReason.value = workflowPayloadString(payload, 'reason') ?? input.summary
     }
     return
@@ -455,7 +463,7 @@ export function workflowTargetReady(
   keepers: OperatorKeeperSnapshot[],
 ): boolean {
   if (!context) return true
-  if (!context.target_type || context.target_type === 'room') return true
+  if (!context.target_type || isNamespaceTarget(context.target_type)) return true
   if (context.target_type === 'team_session') {
     return !!context.target_id && sessions.some(session => session.session_id === context.target_id)
   }
@@ -466,8 +474,8 @@ export function workflowTargetReady(
 }
 
 export async function executeAction(input: {
-  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover' | 'review_resolve' | 'review_defer'
-  target_type: 'room' | 'team_session' | 'keeper' | 'review_item'
+  action_type: 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover' | 'review_resolve' | 'review_defer'
+  target_type: 'namespace' | 'room' | 'team_session' | 'keeper' | 'review_item'
   target_id?: string
   payload: Record<string, unknown>
   successMessage: string
@@ -527,8 +535,8 @@ export async function executeRecommendedAction(action: OperatorRecommendedAction
       ? action.suggested_payload as Record<string, unknown>
       : {}
   return executeAction({
-    action_type: action.action_type as 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover',
-    target_type: action.target_type as 'room' | 'team_session' | 'keeper',
+    action_type: action.action_type as 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover',
+    target_type: action.target_type as 'namespace' | 'room' | 'team_session' | 'keeper',
     target_id: action.target_id ?? undefined,
     payload,
     successMessage: `${actionTypeLabel(action.action_type)}을(를) 요청했습니다`,
@@ -537,10 +545,10 @@ export async function executeRecommendedAction(action: OperatorRecommendedAction
 
 export function primaryActionForReviewItem(item: OperatorReviewItem): OperatorRecommendedAction | null {
   if (item.recommended_action) return item.recommended_action
-  if (item.kind === 'room_gate') {
+  if (item.kind === 'namespace_gate' || item.kind === 'room_gate') {
     return {
-      action_type: 'room_resume',
-      target_type: 'room',
+      action_type: 'namespace_resume',
+      target_type: 'namespace',
       target_id: null,
       severity: item.severity,
       reason: item.why_now,
@@ -557,7 +565,7 @@ export function detailDigestForItem(
 ): OperatorDigest | null {
   if (!item) return null
   if (item.target_type === 'team_session' && sessionDigest?.target_id === item.target_id) return sessionDigest
-  if (item.target_type === 'room') return roomDigest
+  if (isNamespaceTarget(item.target_type)) return roomDigest
   return null
 }
 
@@ -578,7 +586,7 @@ export async function submitPause() {
     action_type: 'room_pause',
     target_type: 'room',
     payload: { reason: pauseReason.value.trim() || '운영 점검' },
-    successMessage: '방 일시정지를 요청했습니다',
+    successMessage: '네임스페이스 일시정지를 요청했습니다',
   })
 }
 
@@ -587,7 +595,7 @@ export async function submitResume() {
     action_type: 'room_resume',
     target_type: 'room',
     payload: {},
-    successMessage: '방 재개를 요청했습니다',
+    successMessage: '네임스페이스 재개를 요청했습니다',
   })
 }
 

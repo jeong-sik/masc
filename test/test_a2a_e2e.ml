@@ -12,7 +12,7 @@ open Alcotest
 open Masc_mcp
 
 (* Initialize crypto RNG for subscription ID generation *)
-let () = Encryption.initialize ()
+let () = Mirage_crypto_rng_unix.use_default ()
 
 (* Wire Room_hooks for subscribe — needed because Room module side-effects
    may not execute in test binaries that don't reference Room directly. *)

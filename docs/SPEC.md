@@ -220,14 +220,6 @@ Client Request
 | `masc_cache_clear` | Clear all cache |
 | `masc_cache_stats` | Cache statistics |
 
-#### Tempo (Adaptive Orchestration)
-| Tool | Description |
-|------|-------------|
-| `masc_tempo_get` | Get current tempo state |
-| `masc_tempo_set` | Set tempo manually |
-| `masc_tempo_adjust` | Auto-adjust based on tasks |
-| `masc_tempo_reset` | Reset to default |
-
 #### Relay & Handover
 | Tool | Description |
 |------|-------------|

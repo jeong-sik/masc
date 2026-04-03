@@ -23,7 +23,13 @@
 
 ### Deprecated
 - **Broken / dead tools** -- deprecate the missing `masc-cost` CLI and 11 dead-feature tools ahead of removal (#4733, #4732).
+## [2.217.1] - 2026-04-03
 
+### Changed
+- **Dashboard toast/icon refresh** -- replace raw toast glyphs with lucide icons, icon close affordance, and tighter toast presentation for dashboard notifications.
+
+### Deprecated
+- None.
 ## [2.217.0] - 2026-04-02
 
 ### Added

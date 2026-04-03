@@ -179,7 +179,7 @@ let execute_team_turn ~ctx ~request ~session_id ~turn_kind ~message ~target_agen
 let execute_room_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "broadcast" ->
-      let* () = validate_target_type "room" request in
+      let* () = validate_target_type "namespace" request in
       let* message =
         match get_string_opt request.payload "message" with
         | Some value -> Ok value
@@ -192,8 +192,8 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
             ("delegated_tool", `String "masc_broadcast");
             ("result", `String result);
           ])
-  | "room_pause" ->
-      let* () = validate_target_type "room" request in
+  | "namespace_pause" ->
+      let* () = validate_target_type "namespace" request in
       let reason =
         get_string request.payload "reason" "Paused by operator control plane"
       in
@@ -204,8 +204,8 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
             ("delegated_tool", `String "masc_pause");
             ("result", `Assoc [ ("paused", `Bool true); ("reason", `String reason) ]);
           ])
-  | "room_resume" ->
-      let* () = validate_target_type "room" request in
+  | "namespace_resume" ->
+      let* () = validate_target_type "namespace" request in
       let status =
         match Room.resume ctx.config ~by:request.actor with
         | `Resumed -> "resumed"
@@ -223,7 +223,7 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
         ("result", `Assoc [("status", `String "removed"); ("reason", `String "Social runtime removed. Keepers discover board events via proactive turns.")]);
       ])
   | "task_inject" ->
-      let* () = validate_target_type "room" request in
+      let* () = validate_target_type "namespace" request in
       let* title =
         match get_string_opt request.payload "title" with
         | Some value -> Ok value
@@ -240,7 +240,7 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
             ("delegated_tool", `String "masc_add_task");
             ("result", `String result);
           ])
-  | _ -> Error (Printf.sprintf "not a room action: %s" request.action_type)
+  | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
 
 let execute_team_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
@@ -568,7 +568,7 @@ let execute_review_action (ctx : 'a context) (request : action_request) =
 let execute_action (ctx : 'a context) (request : action_request) :
     (Yojson.Safe.t, string) result =
   match request.action_type with
-  | "broadcast" | "room_pause" | "room_resume" | "social_sweep" | "task_inject" ->
+  | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep" | "task_inject" ->
       execute_room_action ctx request
   | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject"
   | "team_worker_spawn_batch" | "team_stop" ->
@@ -582,7 +582,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
 
 let validate_request request =
   match request.action_type with
-  | "broadcast" | "room_pause" | "room_resume" | "social_sweep"
+  | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
   | "autonomy_tick" | "team_turn" | "team_note"
   | "team_broadcast" | "team_task_inject" | "team_worker_spawn_batch"
   | "team_stop"
@@ -597,6 +597,7 @@ let action_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
   let* request = action_request_of_args ?actor_hint ctx args in
   let* () = validate_request request in
+  let* request = normalize_request_target_type request in
   let delegated_tool = delegated_tool_for request.action_type in
   let trace_id = trace_id "ops" in
   let started_at = Unix.gettimeofday () in

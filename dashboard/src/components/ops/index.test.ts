@@ -83,7 +83,7 @@ describe('Ops intervene surface', () => {
     operatorDigestError.value = null
     operatorSessionDigest.value = null
     operatorSnapshot.value = {
-      room: { paused: false },
+      namespace: { paused: false, namespace: 'default' },
       sessions: [],
       keepers: [],
       recent_messages: [],
@@ -91,7 +91,7 @@ describe('Ops intervene surface', () => {
       available_actions: [],
     } as unknown as OperatorSnapshot
     operatorRoomDigest.value = {
-      target_type: 'room',
+      target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
       review_queue: [],
@@ -145,7 +145,7 @@ describe('Ops intervene surface', () => {
     expect(container.textContent).toContain('즉시 검토 0')
     expect(container.textContent).toContain('보류 1')
     expect(container.textContent).toContain('최근 처리 2')
-    expect(container.textContent).toContain('룸 진행 중')
+    expect(container.textContent).toContain('네임스페이스 진행 중')
     expect(container.textContent).not.toContain('Active Queue')
     expect(container.textContent).not.toContain('Healthy Console')
 
@@ -183,7 +183,7 @@ describe('Ops intervene surface', () => {
     operatorDigestError.value = null
     operatorSessionDigest.value = null
     operatorSnapshot.value = {
-      room: { paused: true },
+      namespace: { paused: true, namespace: 'default' },
       sessions: [],
       keepers: [],
       recent_messages: [],
@@ -191,14 +191,14 @@ describe('Ops intervene surface', () => {
       available_actions: [],
     } as unknown as OperatorSnapshot
     operatorRoomDigest.value = {
-      target_type: 'room',
+      target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
       review_queue: [
         {
           id: 'review-1',
           kind: 'room_gate',
-          target_type: 'room',
+          target_type: 'namespace',
           severity: 'warn',
           urgency: 'soon',
           summary: '방 제어 상태를 재확인하세요',
@@ -220,7 +220,7 @@ describe('Ops intervene surface', () => {
           actor: 'dashboard',
           reason: '방 상태 확인 완료',
           at: '2026-03-31T10:10:00Z',
-          target_type: 'room',
+          target_type: 'namespace',
         },
       ],
       session_cards: [],
@@ -232,7 +232,7 @@ describe('Ops intervene surface', () => {
     await flushUi()
 
     expect(container.textContent).toContain('즉시 검토 1')
-    expect(container.textContent).toContain('룸 일시정지')
+    expect(container.textContent).toContain('네임스페이스 일시정지')
     expect(container.textContent).toContain('실행 작업대')
     expect(container.textContent).toContain('현재 상태')
     expect(container.textContent).toContain('마찰 요인')

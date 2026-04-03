@@ -90,8 +90,14 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
     if rel_path = "" then source_name else Filename.concat source_name rel_path
   in
   let quarantine = Filename.concat masc_root "_quarantine" in
+  let quarantine_replaced_path ~source_name ~rel_path =
+    Filename.concat quarantine
+      (Filename.concat "_replaced"
+         (quarantine_rel_path ~source_name ~rel_path))
+  in
   let rec migrate_recursive ~source_name ~old_dir ~new_dir ~rel_path
-      ~prefer_root_keeper_meta_conflicts =
+      ~prefer_root_keeper_meta_conflicts
+      ~prefer_room_flatten_conflicts =
     if not (Sys.file_exists old_dir) then ()
     else begin
       Keeper_types.mkdir_p new_dir;
@@ -103,6 +109,7 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
           if Sys.file_exists new_path then
             migrate_recursive ~source_name ~old_dir:old_path ~new_dir:new_path ~rel_path:rel
               ~prefer_root_keeper_meta_conflicts
+              ~prefer_room_flatten_conflicts
           else
             Sys.rename old_path new_path
         end else begin
@@ -112,11 +119,12 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
                && should_promote_legacy_keeper_meta
                     ~legacy_path:old_path ~current_path:new_path
             then begin
-              let replaced_q_path =
-                Filename.concat quarantine
-                  (Filename.concat "_replaced"
-                     (quarantine_rel_path ~source_name ~rel_path:rel))
-              in
+              let replaced_q_path = quarantine_replaced_path ~source_name ~rel_path:rel in
+              Keeper_types.mkdir_p (Filename.dirname replaced_q_path);
+              Sys.rename new_path replaced_q_path;
+              Sys.rename old_path new_path
+            end else if prefer_room_flatten_conflicts then begin
+              let replaced_q_path = quarantine_replaced_path ~source_name ~rel_path:rel in
               Keeper_types.mkdir_p (Filename.dirname replaced_q_path);
               Sys.rename new_path replaced_q_path;
               Sys.rename old_path new_path
@@ -148,6 +156,7 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
         Log.Misc.info "migrate: %s -> %s" old_name new_name;
         migrate_recursive ~source_name:old_name ~old_dir ~new_dir ~rel_path:""
           ~prefer_root_keeper_meta_conflicts:(String.equal new_name "keepers")
+          ~prefer_room_flatten_conflicts:(String.starts_with ~prefix:"rooms/" old_name)
       end
     ) renames
   with
@@ -162,15 +171,106 @@ let migrate_legacy_dirs (state : Mcp_server.server_state) =
 let migrate_legacy_keeper_dirs_blocking (state : Mcp_server.server_state) =
   migrate_legacy_dirs_with_renames state [ ("resident-keepers", "keepers") ]
 
+let default_room_for_flat_migration = "focus-room"
+
+let legacy_room_candidates rooms_dir =
+  if not (Sys.file_exists rooms_dir) then
+    []
+  else
+    try
+      Sys.readdir rooms_dir
+      |> Array.to_list
+      |> List.filter_map (fun room_id ->
+           let room_path = Filename.concat rooms_dir room_id in
+           if Sys.is_directory room_path then
+             let trimmed_room_id = String.trim room_id in
+             if not (String.equal room_id trimmed_room_id) then begin
+               Log.Misc.warn
+                 "migrate: ignoring invalid legacy room dir %S (must not have leading/trailing whitespace)"
+                 room_id;
+               None
+             end else
+               match Room.validate_room_id room_id with
+               | Ok valid_room_id -> Some valid_room_id
+               | Error msg ->
+                 Log.Misc.warn
+                   "migrate: ignoring invalid legacy room dir %s (%s)" room_id
+                   msg;
+                   None
+           else
+             None)
+    with _ -> []
+
+let infer_current_room_from_legacy_dirs rooms_dir =
+  match legacy_room_candidates rooms_dir with
+  | [ room_id ] ->
+      Log.Misc.info
+        "migrate: current_room unavailable; using only legacy room %s" room_id;
+      Some room_id
+  | room_ids when List.mem default_room_for_flat_migration room_ids ->
+      Log.Misc.info
+        "migrate: current_room unavailable; using legacy room %s"
+        default_room_for_flat_migration;
+      Some default_room_for_flat_migration
+  | [] -> None
+  | room_ids ->
+      Log.Misc.warn
+        "migrate: current_room unavailable and multiple legacy rooms exist (%s); skipping room flatten"
+        (String.concat ", " room_ids);
+      None
+
+let load_current_room_or_default masc_root rooms_dir =
+  let path = Filename.concat masc_root "current_room" in
+  if not (Sys.file_exists path) then
+    infer_current_room_from_legacy_dirs rooms_dir
+  else
+    match Safe_ops.read_file_safe path with
+    | Error msg ->
+        Log.Misc.warn
+          "migrate: failed to read %s (%s); probing legacy room dirs instead"
+          path msg;
+        infer_current_room_from_legacy_dirs rooms_dir
+    | Ok raw -> (
+        match Room.validate_room_id (String.trim raw) with
+        | Ok room_id -> Some room_id
+        | Error msg ->
+            Log.Misc.warn
+              "migrate: ignoring invalid current_room in %s (%s); probing legacy room dirs instead"
+              path msg;
+            infer_current_room_from_legacy_dirs rooms_dir)
+
+let migrate_room_to_flat (state : Mcp_server.server_state) =
+  let masc_root = Room.masc_root_dir state.room_config in
+  let rooms_dir = Filename.concat masc_root "rooms" in
+  if not (Sys.file_exists rooms_dir) then ()
+  else begin
+    match load_current_room_or_default masc_root rooms_dir with
+    | Some current_room ->
+        let room_dir = Filename.concat rooms_dir current_room in
+        if Sys.file_exists room_dir && Sys.is_directory room_dir then begin
+          Log.Misc.info "migrate: flattening room %s to .masc/ root" current_room;
+          migrate_legacy_dirs_with_renames state
+            [ (Filename.concat "rooms" current_room, ".") ]
+        end else
+          Log.Misc.warn "migrate: rooms/ exists but active room %s not found" current_room
+    | None ->
+        Log.Misc.warn
+          "migrate: rooms/ exists but no safe current room could be inferred; leaving legacy room dirs untouched"
+  end
+
 let migrate_legacy_trace_dirs (state : Mcp_server.server_state) =
   migrate_legacy_dirs_with_renames state [ ("perpetual", "traces") ]
 
 let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
-  let (_init_msg : string) = Room.init state.room_config ~agent_name:None in
+  (* Promote legacy room/keeper state before Room.init seeds fresh root files.
+     Otherwise state.json/backlog.json can be created in the destination first
+     and valid legacy data gets quarantined as a conflict on upgrade. *)
+  migrate_room_to_flat state;
   (* Promote legacy keeper metadata before any startup readers scan .masc/keepers.
      Keeper autoboot and other bootstrap readers should see the canonical paths
      on their first pass, not rely on a later lazy migration task. *)
   migrate_legacy_keeper_dirs_blocking state;
+  let (_init_msg : string) = Room.init state.room_config ~agent_name:None in
   Mcp_server.set_sse_callback state Sse.broadcast
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =

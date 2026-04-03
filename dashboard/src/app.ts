@@ -6,7 +6,7 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { route, initRouter } from './router'
 import { connectSSE, disconnectSSE } from './sse'
-import { requestRoomTruthNow, disposeRoomTruthScheduler } from './room-truth-store'
+import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshForRoute } from './tab-refresh'
 import { refreshMissionSnapshot } from './mission-store'
@@ -21,8 +21,10 @@ import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { TaskDetailOverlay } from './components/goals/task-detail-overlay'
 import { ToastContainer } from './components/common/toast'
+import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
 import { AuthStatus, RemoteWarningBanner } from './components/auth-status'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
+import { Menu, X } from 'lucide-preact'
 
 export const sidebarCollapsed = signal(false)
 export const mobileMenuOpen = signal(false)
@@ -36,9 +38,9 @@ export function App() {
     connectSSE()
 
     // Prime the lightweight shell status first so build/version metadata lands
-    // while room-truth warms heavier execution/command projections.
+    // while namespace-truth warms heavier execution/command projections.
     void refreshShell()
-    requestRoomTruthNow()
+    requestNamespaceTruthNow()
 
     // Register mission refresh for periodic recovery from transient failures.
     // Uses registration pattern to avoid circular imports.
@@ -54,7 +56,7 @@ export function App() {
       disconnectSSE()
       unsubSSE()
       stopPeriodicRefresh()
-      disposeRoomTruthScheduler()
+      disposeNamespaceTruthScheduler()
     }
   }, [])
 
@@ -83,7 +85,7 @@ export function App() {
                 aria-controls="dashboard-side-rail"
                 onClick=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }}
               >
-                ${mobileMenuOpen.value ? '\u2715' : '\u2630'}
+                ${mobileMenuOpen.value ? html`<${X} size=${20} />` : html`<${Menu} size=${20} />`}
               </button>
               <div class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[rgba(71,184,255,0.3)] bg-[linear-gradient(135deg,rgba(71,184,255,0.2),rgba(10,28,58,0.8))] text-[15px] font-bold text-[#bfe7ff]">
                 ${currentView?.icon ?? 'M'}
@@ -93,7 +95,7 @@ export function App() {
                   <span class="text-[10px] font-bold uppercase tracking-[0.25em] text-[rgba(154,217,255,0.6)]">MASC Control Deck</span>
                 </div>
                 <h1 class="text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)] leading-none flex items-center gap-1.5">
-                  ${currentView?.label ?? 'Multi-Agent Room Console'}
+                  ${currentView?.label ?? 'Multi-Agent Namespace Console'}
                   ${currentSection && currentSection.label !== currentView?.label
                     ? html`<span class="text-[13px] font-medium text-[rgba(154,217,255,0.5)]">/</span><span class="text-[15px] font-medium text-[rgba(154,217,255,0.8)]">${currentSection.label}</span>`
                     : null}
@@ -130,6 +132,7 @@ export function App() {
       <${AgentDetailOverlay} />
       <${TaskDetailOverlay} />
       <${ToastContainer} />
+      <${ConfirmDialogOverlay} />
     </div>
   `
 }

@@ -1,7 +1,7 @@
 """Tests for Discord message formatting."""
 
 from src.formatters import chunk_text, compose_gate_content
-from src.masc_client import GateResponse
+from src.gate_client import GateResponse
 
 
 def test_chunk_text_short() -> None:

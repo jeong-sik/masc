@@ -1,4 +1,4 @@
-"""Configuration for MASC Discord Bot.
+"""Configuration for the Discord Gate bot.
 
 Loads and validates all required environment variables.
 Fails fast at startup if any required config is missing.
@@ -22,12 +22,22 @@ class BotConfig(BaseSettings):
     discord_bot_token: str = Field(
         validation_alias=AliasChoices("DISCORD_BOT_TOKEN", "discord_bot_token")
     )
-    masc_mcp_url: str = Field(
+    gate_base_url: str = Field(
         default="http://localhost:8935",
-        validation_alias=AliasChoices("MASC_MCP_URL", "masc_mcp_url"),
+        validation_alias=AliasChoices(
+            "GATE_BASE_URL",
+            "gate_base_url",
+            "MASC_MCP_URL",
+            "masc_mcp_url",
+        ),
     )
-    masc_api_token: str = Field(
-        validation_alias=AliasChoices("MASC_API_TOKEN", "masc_api_token")
+    gate_api_token: str = Field(
+        validation_alias=AliasChoices(
+            "GATE_API_TOKEN",
+            "gate_api_token",
+            "MASC_API_TOKEN",
+            "masc_api_token",
+        )
     )
 
     # Channel-to-keeper mapping: {"channel_id": "keeper_name"}
@@ -82,11 +92,11 @@ class BotConfig(BaseSettings):
             raise ValueError("DISCORD_BOT_TOKEN is required")
         return v.strip()
 
-    @field_validator("masc_api_token")
+    @field_validator("gate_api_token")
     @classmethod
     def api_token_not_empty(cls, v: str) -> str:
         if not v.strip():
-            raise ValueError("MASC_API_TOKEN is required")
+            raise ValueError("GATE_API_TOKEN is required")
         return v.strip()
 
     @field_validator("discord_keeper_map")
@@ -138,12 +148,22 @@ class BotConfig(BaseSettings):
         return {str(key): str(value) for key, value in typed_raw.items()}
 
     def gate_message_url(self) -> str:
-        base = self.masc_mcp_url.rstrip("/")
+        base = self.gate_base_url.rstrip("/")
         return f"{base}/api/v1/gate/message"
 
     def gate_health_url(self) -> str:
-        base = self.masc_mcp_url.rstrip("/")
+        base = self.gate_base_url.rstrip("/")
         return f"{base}/api/v1/gate/health"
+
+    @property
+    def masc_mcp_url(self) -> str:
+        """Compatibility alias for older local setups."""
+        return self.gate_base_url
+
+    @property
+    def masc_api_token(self) -> str:
+        """Compatibility alias for older local setups."""
+        return self.gate_api_token
 
 
 # Lazy singleton - instantiated on first get_config() call.

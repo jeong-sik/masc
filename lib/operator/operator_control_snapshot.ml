@@ -578,7 +578,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     else [])
   in
   let command_plane_json = timed "command_plane_json" (fun () ->
-    if initialized && include_command_plane then
+    if initialized && include_command_plane && not lightweight_summary then
       Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
     else
       `Null)
@@ -613,6 +613,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          let sessions_ref = ref empty_section in
          let keepers_ref = ref empty_section in
          let persistent_ref = ref empty_section in
+         let cp_ref = ref command_plane_json in
          Eio.Fiber.all [
            (fun () ->
              sessions_ref :=
@@ -638,7 +639,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
            ("sessions", !sessions_ref);
            ("keepers", !keepers_ref);
            ("persistent_agents", !persistent_ref);
-           ("command_plane", command_plane_json);
+           ("command_plane", !cp_ref);
          ]
       )
       @ [

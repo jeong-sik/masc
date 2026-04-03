@@ -117,6 +117,13 @@ let test_channel_yojson_backward_compat () =
     (match Agent_identity.channel_of_yojson (`String "Discord") with
      | Ok channel -> Ok (Agent_identity.string_of_channel channel)
      | Error err -> Error err);
+  check (result string string) "tagged external Discord decodes"
+    (Ok "discord")
+    (match Agent_identity.channel_of_yojson
+             (`List [ `String "External"; `String "discord" ])
+     with
+     | Ok channel -> Ok (Agent_identity.string_of_channel channel)
+     | Error err -> Error err);
   check string "known external serializes as tagged external"
     "[\"External\",\"discord\"]"
     (Yojson.Safe.to_string

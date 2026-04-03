@@ -164,39 +164,78 @@ let migrate_legacy_keeper_dirs_blocking (state : Mcp_server.server_state) =
 
 let default_room_for_flat_migration = "focus-room"
 
-let load_current_room_or_default masc_root =
+let legacy_room_candidates rooms_dir =
+  if not (Sys.file_exists rooms_dir) then
+    []
+  else
+    try
+      Sys.readdir rooms_dir
+      |> Array.to_list
+      |> List.filter_map (fun room_id ->
+           let room_path = Filename.concat rooms_dir room_id in
+           if Sys.is_directory room_path then
+             match Room.validate_room_id room_id with
+             | Ok valid_room_id -> Some valid_room_id
+             | Error _ -> None
+           else
+             None)
+    with _ -> []
+
+let infer_current_room_from_legacy_dirs rooms_dir =
+  match legacy_room_candidates rooms_dir with
+  | [ room_id ] ->
+      Log.Misc.info
+        "migrate: current_room unavailable; using only legacy room %s" room_id;
+      Some room_id
+  | room_ids when List.mem default_room_for_flat_migration room_ids ->
+      Log.Misc.info
+        "migrate: current_room unavailable; using legacy room %s"
+        default_room_for_flat_migration;
+      Some default_room_for_flat_migration
+  | [] -> None
+  | room_ids ->
+      Log.Misc.warn
+        "migrate: current_room unavailable and multiple legacy rooms exist (%s); skipping room flatten"
+        (String.concat ", " room_ids);
+      None
+
+let load_current_room_or_default masc_root rooms_dir =
   let path = Filename.concat masc_root "current_room" in
   if not (Sys.file_exists path) then
-    default_room_for_flat_migration
+    infer_current_room_from_legacy_dirs rooms_dir
   else
     match Safe_ops.read_file_safe path with
     | Error msg ->
         Log.Misc.warn
-          "migrate: failed to read %s (%s); falling back to %s"
-          path msg default_room_for_flat_migration;
-        default_room_for_flat_migration
+          "migrate: failed to read %s (%s); probing legacy room dirs instead"
+          path msg;
+        infer_current_room_from_legacy_dirs rooms_dir
     | Ok raw -> (
         match Room.validate_room_id (String.trim raw) with
-        | Ok room_id -> room_id
+        | Ok room_id -> Some room_id
         | Error msg ->
             Log.Misc.warn
-              "migrate: ignoring invalid current_room in %s (%s); falling back to %s"
-              path msg default_room_for_flat_migration;
-            default_room_for_flat_migration)
+              "migrate: ignoring invalid current_room in %s (%s); probing legacy room dirs instead"
+              path msg;
+            infer_current_room_from_legacy_dirs rooms_dir)
 
 let migrate_room_to_flat (state : Mcp_server.server_state) =
   let masc_root = Room.masc_root_dir state.room_config in
   let rooms_dir = Filename.concat masc_root "rooms" in
   if not (Sys.file_exists rooms_dir) then ()
   else begin
-    let current_room = load_current_room_or_default masc_root in
-    let room_dir = Filename.concat rooms_dir current_room in
-    if Sys.file_exists room_dir && Sys.is_directory room_dir then begin
-      Log.Misc.info "migrate: flattening room %s to .masc/ root" current_room;
-      migrate_legacy_dirs_with_renames state
-        [ (Filename.concat "rooms" current_room, ".") ]
-    end else
-      Log.Misc.warn "migrate: rooms/ exists but active room %s not found" current_room
+    match load_current_room_or_default masc_root rooms_dir with
+    | Some current_room ->
+        let room_dir = Filename.concat rooms_dir current_room in
+        if Sys.file_exists room_dir && Sys.is_directory room_dir then begin
+          Log.Misc.info "migrate: flattening room %s to .masc/ root" current_room;
+          migrate_legacy_dirs_with_renames state
+            [ (Filename.concat "rooms" current_room, ".") ]
+        end else
+          Log.Misc.warn "migrate: rooms/ exists but active room %s not found" current_room
+    | None ->
+        Log.Misc.warn
+          "migrate: rooms/ exists but no safe current room could be inferred; leaving legacy room dirs untouched"
   end
 
 let migrate_legacy_trace_dirs (state : Mcp_server.server_state) =

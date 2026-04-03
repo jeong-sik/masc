@@ -9,6 +9,11 @@ open Room_state
 
 let room_id_of_config (_config : Room_utils_backend_setup.config) = "default"
 
+let compat_room_id config room_id =
+  match validate_room_id room_id with
+  | Ok valid_room_id -> valid_room_id
+  | Error _ -> room_id_of_config config
+
 (** Join room - with auto-generated nickname and metadata *)
 let join config ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
@@ -161,11 +166,13 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
   end
 
 (** @deprecated Since #4638 storage is flattened to the default scope.
-    This compat helper still accepts [room_id] and preserves it in legacy
-    messages/log entries, but agent state is shared with [join]. *)
+    This compat helper still accepts [room_id], normalizes invalid values to
+    the default label for legacy messages/log entries, and shares state with
+    [join]. *)
 let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
   ensure_room_bootstrap config room_id;
+  let legacy_room_id = compat_room_id config room_id in
 
   let agent_type = match agent_type_override with
     | Some t -> t
@@ -213,15 +220,23 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
         { s with active_agents = agents }
       ) in
       let _ = broadcast config ~from_agent:nickname
-                ~content:(Printf.sprintf "👋 %s rejoined room %s" nickname room_id) in
-      log_event config (Printf.sprintf
-        "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
-        room_id nickname (now_iso ()));
-      !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname ~room_id
+                ~content:(Printf.sprintf "👋 %s rejoined room %s" nickname legacy_room_id) in
+      log_event config
+        (Yojson.Safe.to_string
+           (`Assoc
+             [
+               ("type", `String "agent_join");
+               ("room_id", `String legacy_room_id);
+               ("agent", `String nickname);
+               ("rejoin", `Bool true);
+               ("ts", `String (now_iso ()));
+             ]));
+      !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
+        ~room_id:legacy_room_id
         ~event_kind:"rejoin"
         ~details:(`Assoc [ ("rejoin", `Bool true) ]);
     end;
-    Printf.sprintf "✅ %s already in room %s (last_seen updated)" nickname room_id
+    Printf.sprintf "✅ %s already in room %s (last_seen updated)" nickname legacy_room_id
   end else begin
     let session_id = generate_session_id () in
     let meta : agent_meta = {
@@ -255,15 +270,21 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
       broadcast config ~from_agent:nickname
         ~content:(Printf.sprintf "👋 %s joined the room" nickname)
     in
-    log_event config (Printf.sprintf
-      "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"capabilities\":%s,\"ts\":\"%s\"}"
-      room_id
-      nickname
-      agent_type
-      session_id
-      (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
-      (now_iso ()));
-    !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname ~room_id
+    log_event config
+      (Yojson.Safe.to_string
+         (`Assoc
+           [
+             ("type", `String "agent_join");
+             ("room_id", `String legacy_room_id);
+             ("agent", `String nickname);
+             ("agent_type", `String agent_type);
+             ("session_id", `String session_id);
+             ( "capabilities",
+               `List (List.map (fun s -> `String s) capabilities) );
+             ("ts", `String (now_iso ()));
+           ]));
+    !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
+      ~room_id:legacy_room_id
       ~event_kind:"join"
       ~details:
         (`Assoc
@@ -273,7 +294,7 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
             ( "capabilities",
               `List (List.map (fun s -> `String s) capabilities) );
           ]);
-    Printf.sprintf "✅ %s joined room %s" nickname room_id
+    Printf.sprintf "✅ %s joined room %s" nickname legacy_room_id
   end
 
 (** Leave room *)

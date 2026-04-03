@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import type { ComponentChildren } from 'preact'
 import { CheckCircle2, AlertTriangle, XCircle, X } from 'lucide-preact'
 
 export type ToastType = 'success' | 'warning' | 'error'
@@ -31,7 +32,7 @@ const ICON_COLOR: Record<ToastType, string> = {
   error: 'text-[var(--bad)]'
 }
 
-const ICON: Record<ToastType, any> = {
+const ICON: Record<ToastType, ComponentChildren> = {
   success: html`<${CheckCircle2} size=${14} />`,
   warning: html`<${AlertTriangle} size=${14} />`,
   error: html`<${XCircle} size=${14} />`
@@ -64,9 +65,17 @@ export function ToastContainer() {
   if (items.length === 0) return null
 
   return html`
-    <div class="fixed top-5 right-5 z-[var(--z-overlay-toast)] flex flex-col gap-2 pointer-events-none">
+    <div
+      class="fixed top-5 right-5 z-[var(--z-overlay-toast,3070)] flex flex-col gap-2 pointer-events-none"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       ${items.map(t => html`
-        <div key=${t.id} class="pointer-events-auto flex items-center gap-2.5 py-2 px-3 min-w-[220px] max-w-[360px] rounded-md border-l-[3px] border-l-solid border border-solid border-[var(--card-border)] bg-[rgba(10,18,34,0.96)] shadow-lg animate-[slideInRight_0.2s_ease-out] ${BORDER_COLOR[t.type]}">
+        <div
+          key=${t.id}
+          role=${t.type === 'error' ? 'alert' : 'status'}
+          class="pointer-events-auto flex items-center gap-2.5 py-2 px-3 min-w-[220px] max-w-[360px] rounded-md border-l-[3px] border-l-solid border border-solid border-[var(--card-border)] bg-[rgba(10,18,34,0.96)] shadow-lg animate-[slideInRight_0.2s_ease-out] ${BORDER_COLOR[t.type]}"
+        >
           <span class="shrink-0 flex items-center ${ICON_COLOR[t.type]}">${ICON[t.type]}</span>
           <span class="flex-1 text-[13px] text-[var(--text-body)] leading-[1.4]">${t.message}</span>
           ${t.action ? html`

@@ -23,7 +23,7 @@ import { TaskDetailOverlay } from './components/goals/task-detail-overlay'
 import { ToastContainer } from './components/common/toast'
 import { AuthStatus, RemoteWarningBanner } from './components/auth-status'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
-import { Menu, X, ChevronLeft, ChevronRight } from 'lucide-preact'
+import { Menu, X } from 'lucide-preact'
 
 export const sidebarCollapsed = signal(false)
 export const mobileMenuOpen = signal(false)

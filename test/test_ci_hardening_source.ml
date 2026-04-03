@@ -249,10 +249,13 @@ let test_room_current_validation_contracts () =
 let test_root_redirect_contracts () =
   check bool "http root redirects to dashboard" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
-       {|Http.Router.get "/" (fun _req reqd -> redirect_to_dashboard reqd)|});
+       {|Http.Router.get "/"|});
+  check bool "http root keeps dashboard fallback redirect" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
+       {|redirect_to_dashboard reqd|});
   check bool "http redirect sets dashboard location" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
-       {|("location", "/dashboard")|});
+       {|respond_redirect ~location:"/dashboard"|});
   check bool "h2 root responds with server identity" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)"|})

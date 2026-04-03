@@ -68,13 +68,11 @@ let build_keeper_index () =
     "masc_code_git", "깃 커밋 브랜치 로그 이력";
     "masc_governance_status", "거버넌스 상태 규칙 정책";
     "masc_governance_feed", "거버넌스 피드 이벤트 로그";
-    "masc_governance_report", "거버넌스 보고서 리포트";
     "masc_governance_set", "거버넌스 설정 규칙 변경";
     "masc_autoresearch_start", "자동연구 리서치 시작";
     "masc_autoresearch_status", "자동연구 리서치 상태";
     "masc_autoresearch_stop", "자동연구 리서치 중지";
     "masc_autoresearch_cycle", "자동연구 리서치 사이클 실행";
-    "masc_autoresearch_search_findings", "자동연구 결과 검색 발견";
     "masc_plan_get", "계획 플랜 마일스톤 로드맵 프로젝트 전략";
     "masc_plan_update", "계획 플랜 수정 업데이트";
     "masc_plan_init", "계획 플랜 초기화 생성";

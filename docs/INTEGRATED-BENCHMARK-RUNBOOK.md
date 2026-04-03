@@ -23,7 +23,7 @@
 - `local64`
   - same-box shard-pool session / runtime census / operator visibility
   - harness: `./scripts/harness_team_session_local64_smoke.sh`
-  - `local64`는 target runtime profile 이름이다. 실제 capacity는 `masc_local_runtime_status`로 확인한다.
+  - `local64`는 target runtime profile 이름이다. 실제 capacity는 `masc_runtime_verify`로 확인한다.
 
 ## One-Shot Entrypoint
 
@@ -90,7 +90,7 @@ wrapper는 phase별 log와 summary JSON을 남긴다.
   - `depends_on_operation_ids`, readiness gating, assigned unit, detachment delta를 먼저 본다.
 - `local64` fail
   - runtime substrate 또는 session visibility 문제일 가능성이 높다.
-  - `masc_local_runtime_status`, `masc_team_session_status`, `masc_operator_digest`를 먼저 본다.
+  - `masc_runtime_verify`, `masc_team_session_status`, `masc_operator_digest`를 먼저 본다.
 
 빠른 전후 비교가 필요하면 integrated harness 전에 다음을 먼저 돌린다:
 

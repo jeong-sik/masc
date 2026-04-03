@@ -98,8 +98,8 @@
    server_dashboard_http_runtime_support
    server_dashboard_http_runtime_info
    server_dashboard_http_execution_surfaces
-   server_dashboard_http_room_truth_support
-   server_dashboard_http_room_truth
+   server_dashboard_http_namespace_truth_support
+   server_dashboard_http_namespace_truth
    server_meta_cognition_feedback
    server_dashboard_http
    server_dashboard_http_cache
@@ -154,13 +154,10 @@
 
    inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly
-   encryption
-   gcm_compat
    graphql_client
    graphql_endpoint
    graphql_api
    handover_eio
-   hat
    hebbian_eio
    http_server_eio
    http_server_h2
@@ -171,7 +168,6 @@
    local_runtime_pool
    retrieval_projection
    sdk_tool_contract
-   tool_schema_dsl
    worker_oas
    worker_execution_backend
    worker_execution_spec
@@ -186,7 +182,6 @@
    worker_dev_tools
    worker_tool_input
    worker_verification
-   safe_parse
    prompt_defaults
    prompt_composer
    oas_response
@@ -279,9 +274,7 @@
    tui_decode
    tools
    tool_args
-   tool_schema_dsl
    task_sandbox
-   tool_fire_task
    tool_improve_loop_schemas
    tool_improve_loop_types
    tool_improve_loop_gh
@@ -294,7 +287,6 @@
    tool_plan
    tool_run
    tool_bridge
-   tool_cache
    tool_access_policy
    tool_access_role
    tool_portal
@@ -303,7 +295,6 @@
    tool_handover
    tool_relay
    worktree_live_context
-   tool_goals
    tool_operator
    tool_team_session_support
    tool_team_session_handlers
@@ -318,10 +309,6 @@
    tool_team_session_schemas
    tool_heartbeat
    tool_auth
-   tool_housekeep
-   tool_audit
-   tool_rate_limit
-   tool_cost
    tool_agent
    tool_task
    task_dispatch
@@ -339,10 +326,8 @@
    tool_local_runtime_verify
    tool_local_runtime_bench
    tool_local_runtime_status
-   tool_model_catalog
    tool_board
    tool_command_plane
-   tool_schema_dsl
    tool_command_plane_support
    tool_command_plane_mutations
    tool_command_plane_operations
@@ -361,7 +346,6 @@
    tool_input_validation
    tool_tag_init
    tool_prefilter
-   tool_permissions
    tool_metrics
    tool_metrics_persist
    tool_inline_dispatch_types
@@ -375,10 +359,7 @@
    tool_registry
    tool_code
    tool_code_write
-   code_swarm_plan
-   tool_code_swarm
    tool_suspend
-   tool_notifications
    tool_voice
    mention_inbox
    agent_reputation

@@ -6,7 +6,7 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state_opt =
     if Room.is_initialized config then Some (Room.read_state config) else None
   in
-  let current_room = Room.current_room_id config in
+  let current_namespace = "default" in
   let project =
     match room_state_opt with
     | Some room_state -> room_state.project
@@ -20,21 +20,23 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
   let tempo = Tempo.get_tempo config in
   `Assoc
     [
-      ("room", `String current_room);
-      ("room_base_path", `String config.base_path);
+      ("namespace_id", `String current_namespace);
+      ("namespace_base_path", `String config.base_path);
       ("coordination_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);
       ("workspace_differs", `Bool (config.workspace_path <> config.base_path));
       ("cluster", `String (Env_config_core.cluster_name ()));
       ("project", `String project);
-      ("current_room", `String current_room);
+      ("namespace", `String current_namespace);
+      ("namespace_mode", `String "flattened");
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool paused);
       ("version", `String Version.version);
     ]
 
 let current_room_id config =
-  Room.current_room_id config
+  let _ = config in
+  "default"
 
 let tasks_safe config =
   if Room.is_initialized config then Room.get_tasks_raw_in_room config (current_room_id config)

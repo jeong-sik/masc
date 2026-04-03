@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
+import { requestConfirm } from '../common/confirm-dialog'
 import { SurfaceCard } from '../common/card'
 import { ActionButton } from '../common/button'
 import { TextInput } from '../common/input'
@@ -82,10 +83,16 @@ export function FlowControlPanel() {
         <summary class="cursor-pointer text-[13px] text-[var(--text-strong)] font-medium select-none py-1">유지보수</summary>
         <div class="mt-3 flex flex-wrap gap-2">
           <${ActionButton} variant="ghost" size="md" disabled=${maintenanceLoading.value}
-            onClick=${() => { if (confirm('GC를 실행합니까?')) void runGarbageCollection() }}>
+            onClick=${async () => {
+              const confirmed = await requestConfirm({ title: '유지보수', message: 'GC를 실행합니까?' })
+              if (confirmed) void runGarbageCollection()
+            }}>
             ${maintenanceLoading.value ? '...' : 'GC 실행'}<//>
           <${ActionButton} variant="danger" size="md" disabled=${maintenanceLoading.value}
-            onClick=${() => { if (confirm('좀비 에이전트를 정리합니까?')) void cleanupZombies() }}>
+            onClick=${async () => {
+              const confirmed = await requestConfirm({ title: '유지보수', message: '좀비 에이전트를 정리합니까?', tone: 'danger' })
+              if (confirmed) void cleanupZombies()
+            }}>
             ${maintenanceLoading.value ? '...' : '좀비 정리'}<//>
         </div>
         ${maintenanceResult.value ? html`

@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { missionError, missionLoading } from '../../mission-signals'
-import { roomTruthError } from '../../room-truth-signals'
+import { namespaceTruthError } from '../../namespace-truth-signals'
 import { synthesizeSituation } from './situation-banner'
 
 describe('synthesizeSituation', () => {
   afterEach(() => {
     missionError.value = null
     missionLoading.value = false
-    roomTruthError.value = null
+    namespaceTruthError.value = null
   })
 
   it('treats mission load failures as bad severity', () => {
@@ -19,8 +19,8 @@ describe('synthesizeSituation', () => {
     expect(result.text).toContain('mission projection offline')
   })
 
-  it('treats room truth refresh failures as bad severity even with a stale snapshot', () => {
-    roomTruthError.value = 'room truth offline'
+  it('treats namespace truth refresh failures as bad severity even with a stale snapshot', () => {
+    namespaceTruthError.value = 'namespace truth offline'
 
     const result = synthesizeSituation({
       sessions: [{ session_id: 'sess-1', goal: 'goal-1' }],
@@ -33,6 +33,6 @@ describe('synthesizeSituation', () => {
 
     expect(result.tone).toBe('bad')
     expect(result.text).toContain('데이터 일부 갱신 실패.')
-    expect(result.reasons.some(reason => reason.text.includes('room truth offline'))).toBe(true)
+    expect(result.reasons.some(reason => reason.text.includes('namespace truth offline'))).toBe(true)
   })
 })

@@ -7,7 +7,7 @@ import { ActionButton } from '../common/button'
 import { TimeAgo } from '../common/time-ago'
 import { missionLoading, missionSnapshot, refreshMissionSnapshot } from '../../mission-store'
 import { topActiveAgents } from '../../observatory-store'
-import { roomTruth, roomTruthLoading, refreshRoomTruth } from '../../room-truth-store'
+import { namespaceTruth, namespaceTruthLoading, refreshNamespaceTruth } from '../../namespace-truth-store'
 import { journal } from '../../sse'
 import { formatDuration, statusLabel } from '../mission-utils'
 import { SituationBanner } from './situation-banner'
@@ -48,11 +48,11 @@ function oldestTimestamp(...timestamps: Array<string | null | undefined>): strin
 function OverviewFreshnessStrip() {
   const generatedAt = oldestTimestamp(
     missionSnapshot.value?.generated_at ?? null,
-    roomTruth.value?.generated_at ?? null,
+    namespaceTruth.value?.generated_at ?? null,
   )
   const generatedMs = timestampToMs(generatedAt)
   const isStale = generatedMs != null && Date.now() - generatedMs > OVERVIEW_STALE_MS
-  const refreshing = missionLoading.value || roomTruthLoading.value
+  const refreshing = missionLoading.value || namespaceTruthLoading.value
 
   return html`
     <div class="rounded-xl border px-4 py-3 shadow-sm shadow-black/8 ${isStale ? 'border-warn/35 bg-warn/10' : 'border-card-border/40 bg-card/24'}">
@@ -71,7 +71,7 @@ function OverviewFreshnessStrip() {
               : html` <strong class="text-[var(--text-strong)]">아직 불러오지 않음</strong>`}
           </div>
           <div class="mt-1 text-[11px] text-[var(--text-muted)]">
-            기준: room truth와 mission snapshot 중 더 오래된 시각
+            기준: namespace truth와 mission snapshot 중 더 오래된 시각
           </div>
         </div>
         <${ActionButton}
@@ -80,7 +80,7 @@ function OverviewFreshnessStrip() {
           disabled=${refreshing}
           onClick=${() => {
             void Promise.all([
-              refreshRoomTruth({ force: true }),
+              refreshNamespaceTruth({ force: true }),
               refreshMissionSnapshot({ force: true }),
             ])
           }}
@@ -217,7 +217,7 @@ function desireActionabilityLabel(actionability?: string | null): string {
     case 'operator_or_scheduler':
       return '운영자/스케줄러 액션'
     case 'room_or_operator':
-      return 'room/운영자 액션'
+      return '네임스페이스/운영자 액션'
     default:
       return '추가 판독 필요'
   }
@@ -233,10 +233,10 @@ function MetaCognitionCard() {
   const tension = summary.top_tension
   const desire = summary.top_desire
   const hasNarrative = Boolean(belief || tension || desire)
-  const focus = roomTruth.value?.focus?.source === 'meta_cognition'
-    ? roomTruth.value.focus
+  const focus = namespaceTruth.value?.focus?.source === 'meta_cognition'
+    ? namespaceTruth.value.focus
     : null
-  const latestDigest = roomTruth.value?.meta_cognition?.latest_digest ?? null
+  const latestDigest = namespaceTruth.value?.meta_cognition?.latest_digest ?? null
 
   return html`
     <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
@@ -267,7 +267,7 @@ function MetaCognitionCard() {
       ${focus
         ? html`
             <div class="mb-3 rounded-xl border border-accent/20 bg-accent/8 px-3 py-2 text-[12px] text-[var(--text-body)]">
-              <span class="font-semibold text-[var(--text-strong)]">room-truth focus</span>
+              <span class="font-semibold text-[var(--text-strong)]">namespace-truth focus</span>
               <span class="ml-2">${focus.reason}</span>
             </div>
           `
@@ -341,7 +341,7 @@ function MetaCognitionCard() {
           `
         : html`
             <div class="rounded-xl border border-dashed border-card-border/50 bg-card/40 px-4 py-5 text-[12px] text-[var(--text-muted)]">
-              아직 room-level 서사를 만들 만큼 강한 social signal이 쌓이지 않았습니다.
+              아직 namespace-level 서사를 만들 만큼 강한 social signal이 쌓이지 않았습니다.
             </div>
           `}
     </div>

@@ -313,13 +313,15 @@ export function workflowTargetLabel(context?: DashboardWorkflowContext | null): 
 export function workflowActionLabel(actionType?: string | null): string {
   switch (actionType) {
     case 'broadcast':
-      return 'room 방송'
+      return 'namespace 방송'
+    case 'namespace_pause':
     case 'room_pause':
-      return 'room 일시정지'
+      return 'namespace 일시정지'
+    case 'namespace_resume':
     case 'room_resume':
-      return 'room 재개'
+      return 'namespace 재개'
     case 'task_inject':
-      return 'room 작업 주입'
+      return 'namespace 작업 주입'
     case 'team_turn':
       return 'session 업데이트'
     case 'team_note':

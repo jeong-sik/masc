@@ -520,5 +520,4 @@ let dispatch ctx ~name ~args : result option =
   | "masc_team_session_compare" -> Some (handle_compare ctx args)
   | "masc_team_session_events" -> Some (handle_events ctx args)
   | "masc_team_session_prove" -> Some (handle_prove ctx args)
-  | "masc_team_session_verify_trace" -> Some (handle_verify_trace ctx args)
   | _ -> None

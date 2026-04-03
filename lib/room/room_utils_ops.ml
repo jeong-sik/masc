@@ -129,6 +129,9 @@ let write_json_local path json =
 let read_json_root config path =
   match root_key_of_path config path with
   | Some key -> begin
+      match config.backend with
+      | FileSystem _ when Sys.file_exists path -> read_json_local path
+      | Memory _ | FileSystem _ | PostgresNative _ ->
       match backend_get config ~key with
       | Ok (Some content) ->
           (let trimmed = String.trim content in
@@ -164,12 +167,18 @@ let delete_path_root config path =
 
 let path_exists_root config path =
   match root_key_of_path config path with
-  | Some key -> backend_exists config ~key
+  | Some key ->
+      (match config.backend with
+       | FileSystem _ -> Sys.file_exists path || backend_exists config ~key
+       | Memory _ | PostgresNative _ -> backend_exists config ~key)
   | None -> Sys.file_exists path
 
 let read_json config path =
   match key_of_path config path with
   | Some key -> begin
+      match config.backend with
+      | FileSystem _ when Sys.file_exists path -> read_json_local path
+      | Memory _ | FileSystem _ | PostgresNative _ ->
       match backend_get config ~key with
       | Ok (Some content) ->
           (let trimmed = String.trim content in
@@ -243,7 +252,10 @@ let delete_path config path =
 
 let path_exists config path =
   match key_of_path config path with
-  | Some key -> backend_exists config ~key
+  | Some key ->
+      (match config.backend with
+       | FileSystem _ -> Sys.file_exists path || backend_exists config ~key
+       | Memory _ | PostgresNative _ -> backend_exists config ~key)
   | None -> Sys.file_exists path
 
 let append_text config path content =

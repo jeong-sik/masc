@@ -1,7 +1,7 @@
 (** Workflow Guidance — encodes Golden Path sequences.
 
     Three canonical paths are encoded:
-    1. Room/Task Hygiene (prerequisite for all work)
+    1. Namespace/Task Hygiene (prerequisite for all work)
     2. CPv2 Direct (benchmark / swarm)
     3. Team Session / Supervisor
 
@@ -30,7 +30,7 @@ let transition_action args =
   | Some action -> Some (String.lowercase_ascii (String.trim action))
   | None -> None
 
-(* ── Golden Path 1: Room/Task Hygiene ────────────────────────────── *)
+(* ── Golden Path 1: Namespace/Task Hygiene ──────────────────────── *)
 
 let after_start ~success =
   if success then
@@ -47,11 +47,25 @@ let after_start ~success =
       preconditions = [];
       common_mistakes = [] }
 
+let after_set_room ~success =
+  if success then
+    { next_steps =
+        [ s "masc_join" "Register your agent identity in the namespace";
+          s "masc_status" "Verify namespace state before proceeding" ];
+      preconditions = [];
+      common_mistakes =
+        [ "Starting work without masc_join — other agents cannot see you" ] }
+  else
+    { next_steps =
+        [ s "masc_init" "Initialize MASC if not yet set up";
+          s "masc_start" "Retry with the repo root path if you want the one-shot setup flow" ];
+      preconditions = [];
+      common_mistakes = [] }
 
 let after_join ~success =
   if success then
     { next_steps =
-        [ s "masc_status" "Check current room state and available tasks";
+        [ s "masc_status" "Check current namespace state and available tasks";
           s "masc_transition" "Claim an existing task if available (action=claim)";
           s "masc_add_task" "Create a new task if none exist" ];
       preconditions = [ "room_set" ];
@@ -59,7 +73,7 @@ let after_join ~success =
         [ "Skipping masc_status — you may duplicate work another agent claimed" ] }
   else
     { next_steps =
-        [ s "masc_start" "Set the room first";
+        [ s "masc_start" "Set the namespace first";
           s "masc_init" "Initialize MASC if not set up" ];
       preconditions = [];
       common_mistakes = [] }
@@ -74,8 +88,8 @@ let after_status ~success =
       common_mistakes = [] }
   else
     { next_steps =
-        [ s "masc_start" "Ensure room is configured";
-          s "masc_join" "Join the room first" ];
+        [ s "masc_start" "Ensure namespace is configured";
+          s "masc_join" "Join the namespace first" ];
       preconditions = [];
       common_mistakes = [] }
 
@@ -121,7 +135,7 @@ let after_transition_start ~success =
   else
     { next_steps =
         [ s "masc_status" "Check the task state before retrying the transition";
-          s "masc_workflow_guide" "Inspect your current room/task readiness" ];
+          s "masc_workflow_guide" "Inspect your current namespace/task readiness" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
 
@@ -136,14 +150,14 @@ let after_transition_release_or_cancel ~success =
   else
     { next_steps =
         [ s "masc_status" "Check task state and ownership before retrying";
-          s "masc_workflow_guide" "Inspect your current room/task readiness" ];
+          s "masc_workflow_guide" "Inspect your current namespace/task readiness" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
 
 let after_transition_generic ~success =
   if success then
     { next_steps =
-        [ s "masc_status" "Refresh room state after the transition";
+        [ s "masc_status" "Refresh namespace state after the transition";
           s "masc_workflow_guide" "Inspect the next recommended step for your current state" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes =
@@ -151,7 +165,7 @@ let after_transition_generic ~success =
   else
     { next_steps =
         [ s "masc_status" "Check task state before retrying the transition";
-          s "masc_workflow_guide" "Inspect your current room/task readiness" ];
+          s "masc_workflow_guide" "Inspect your current namespace/task readiness" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
 
@@ -165,7 +179,7 @@ let after_add_task ~success =
         [ "Creating a task without claiming it — another agent may take it" ] }
   else
     { next_steps =
-        [ s "masc_status" "Check room state for errors" ];
+        [ s "masc_status" "Check namespace state for errors" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
 
@@ -202,7 +216,7 @@ let after_done ~success =
     { next_steps =
         [ s "masc_status" "Check for remaining tasks";
           s "masc_transition" "Pick up the next task (action=claim)";
-          s "masc_leave" "Leave room if all work is complete" ];
+          s "masc_leave" "Leave the namespace if all work is complete" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
   else
@@ -224,7 +238,7 @@ let after_operation_start ~success =
   else
     { next_steps =
         [ s "masc_unit_define" "Define organizational unit first";
-          s "masc_status" "Check room prerequisites" ];
+          s "masc_status" "Check namespace prerequisites" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
 
@@ -254,8 +268,8 @@ let after_team_session_start ~success =
         [ "Not recording turns — the session has no audit trail" ] }
   else
     { next_steps =
-        [ s "masc_join" "Ensure you have joined the room";
-          s "masc_status" "Check room state" ];
+        [ s "masc_join" "Ensure you have joined the namespace";
+          s "masc_status" "Check namespace state" ];
       preconditions = [ "room_set" ];
       common_mistakes = [] }
 
@@ -297,7 +311,7 @@ let after_broadcast ~success =
       common_mistakes = [] }
   else
     { next_steps =
-        [ s "masc_join" "Ensure you are in the room" ];
+        [ s "masc_join" "Ensure you are in the namespace" ];
       preconditions = [ "room_set" ];
       common_mistakes = [] }
 
@@ -311,14 +325,14 @@ let after_worktree_create ~success =
   else
     { next_steps =
         [ s "masc_plan_set_task" "Ensure current_task is set";
-          s "masc_status" "Check room configuration" ];
+          s "masc_status" "Check namespace configuration" ];
       preconditions = [ "room_set"; "joined"; "task_claimed" ];
       common_mistakes = [] }
 
 let after_init ~success =
   if success then
     { next_steps =
-        [ s "masc_start" "Set the room to your project root and join it" ];
+        [ s "masc_start" "Set the namespace to your project root and join it" ];
       preconditions = [];
       common_mistakes = [] }
   else
@@ -338,7 +352,7 @@ let after_operator_digest ~success =
   else
     { next_steps =
         [ s "masc_operator_snapshot" "Get raw state instead";
-          s "masc_status" "Check basic room state" ];
+          s "masc_status" "Check basic namespace state" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
 
@@ -346,8 +360,9 @@ let after_operator_digest ~success =
 
 let next_steps ~tool_name ~success =
   match tool_name with
-  (* Golden Path 1: Room/Task Hygiene *)
+  (* Golden Path 1: Namespace/Task Hygiene *)
   | "masc_start" -> after_start ~success
+  | "masc_set_room" -> after_set_room ~success
   | "masc_join" -> after_join ~success
   | "masc_status" -> after_status ~success
   | "masc_claim_next" -> after_claim_auto_bound ~success
@@ -455,14 +470,14 @@ let current_state_guidance ~room_set ~joined ~task_claimed
     ~current_task_set ~worktree_active ~session_active =
   if not room_set then
     { next_steps =
-        [ s "masc_start" "Set the room to your project root (repo root)";
+        [ s "masc_start" "Set the namespace to your project root (repo root)";
           s "masc_init" "Initialize MASC if this is a fresh setup" ];
       preconditions = [];
       common_mistakes =
-        [ "Calling any MASC tool without setting a room first" ] }
+        [ "Calling any MASC tool without setting a namespace first" ] }
   else if not joined then
     { next_steps =
-        [ s "masc_join" "Register your agent identity in the room" ];
+        [ s "masc_join" "Register your agent identity in the namespace" ];
       preconditions = [ "room_set" ];
       common_mistakes =
         [ "Operating without joining — other agents cannot see or coordinate with you" ] }

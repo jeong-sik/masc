@@ -1,8 +1,8 @@
-import type { DashboardRoomTruthResponse, DashboardShellResponse } from './types'
+import type { DashboardNamespaceTruthResponse, DashboardShellResponse } from './types'
 
 export type RuntimeCountSource =
   | 'execution'
-  | 'room-truth'
+  | 'namespace-truth'
   | 'shell'
   | 'partial'
   | 'unknown'
@@ -20,7 +20,7 @@ interface ResolveRuntimeCountsOptions {
   agentsCount: number
   keepersCount: number
   tasksCount?: number
-  roomTruthCounts?: DashboardRoomTruthResponse['room']['counts']
+  namespaceTruthCounts?: DashboardNamespaceTruthResponse['namespace']['counts']
   shellCounts?: DashboardShellResponse['counts'] | null
 }
 
@@ -31,7 +31,7 @@ function normalizeCount(value: unknown): number {
 }
 
 function normalizeCounts(
-  raw: DashboardRoomTruthResponse['room']['counts'] | DashboardShellResponse['counts'] | null | undefined,
+  raw: DashboardNamespaceTruthResponse['namespace']['counts'] | DashboardShellResponse['counts'] | null | undefined,
 ) {
   if (!raw) return null
   return {
@@ -46,7 +46,7 @@ export function resolveRuntimeCounts({
   agentsCount,
   keepersCount,
   tasksCount = 0,
-  roomTruthCounts,
+  namespaceTruthCounts,
   shellCounts,
 }: ResolveRuntimeCountsOptions): RuntimeCounts {
   const live = {
@@ -54,13 +54,13 @@ export function resolveRuntimeCounts({
     keepers: normalizeCount(keepersCount),
     tasks: normalizeCount(tasksCount),
   }
-  const room = normalizeCounts(roomTruthCounts)
+  const namespace = normalizeCounts(namespaceTruthCounts)
   const shell = normalizeCounts(shellCounts)
   const liveTotalRuntimes = live.agents + live.keepers
-  const roomTotalRuntimes = (room?.agents ?? 0) + (room?.keepers ?? 0)
+  const namespaceTotalRuntimes = (namespace?.agents ?? 0) + (namespace?.keepers ?? 0)
   const shellTotalRuntimes = (shell?.agents ?? 0) + (shell?.keepers ?? 0)
 
-  if (executionLoaded && (liveTotalRuntimes > 0 || (roomTotalRuntimes === 0 && shellTotalRuntimes === 0))) {
+  if (executionLoaded && (liveTotalRuntimes > 0 || (namespaceTotalRuntimes === 0 && shellTotalRuntimes === 0))) {
     return {
       ...live,
       totalRuntimes: liveTotalRuntimes,
@@ -68,11 +68,11 @@ export function resolveRuntimeCounts({
     }
   }
 
-  if (roomTotalRuntimes > 0) {
+  if (namespaceTotalRuntimes > 0) {
     return {
-      ...room!,
-      totalRuntimes: roomTotalRuntimes,
-      source: 'room-truth',
+      ...namespace!,
+      totalRuntimes: namespaceTotalRuntimes,
+      source: 'namespace-truth',
     }
   }
 
@@ -103,8 +103,8 @@ export function runtimeCountSourceLabel(source: RuntimeCountSource): string {
   switch (source) {
     case 'execution':
       return 'execution 상세'
-    case 'room-truth':
-      return 'room-truth'
+    case 'namespace-truth':
+      return 'namespace-truth'
     case 'shell':
       return 'shell'
     case 'partial':

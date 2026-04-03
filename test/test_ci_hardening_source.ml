@@ -193,8 +193,8 @@ let test_dashboard_warm_hydration_contracts () =
   check bool "mission default route serves cached surface immediately" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "cached_surface_or_first_success_json _mission_cache");
-  check bool "room truth advertises initializing while execution warms" true
-    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
+  check bool "namespace truth advertises initializing while execution warms" true
+    (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        {|("status", `String "initializing")|});
   check bool "execution render timeout is env-configurable" true
     (file_contains_pattern "lib/dashboard/dashboard_execution.ml"
@@ -245,23 +245,34 @@ let test_input_validation_contracts () =
        "maybe_evict_expired config")
 
 let test_room_current_validation_contracts () =
-  (* Room.read_current_room and Room.ensure_room_bootstrap were removed from
-     h2_gateway. Room validation now happens at the MCP/tool dispatch layer.
-     Verify h2_gateway still serves room-truth API endpoint. *)
-  check bool "h2 gateway serves room-truth endpoint" true
+  (* H2 gateway serves canonical namespace routes and keeps temporary room
+     aliases so mixed dashboard/backend deployments do not break during rollout. *)
+  check bool "h2 gateway serves namespace-truth endpoint" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       "dashboard_room_truth_http_json")
+       {|"/api/v1/dashboard/namespace-truth"|});
+  check bool "h2 gateway keeps room-truth alias endpoint during rollout" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|"/api/v1/dashboard/room-truth"|});
+  check bool "h2 gateway serves namespace current endpoint" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|"/api/v1/namespace/current"|});
+  check bool "h2 gateway maps invalid namespace writes to 400" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|Invalid_argument msg|});
+  check bool "h2 gateway keeps room current alias endpoint during rollout" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|"/api/v1/room/current"|})
 
 let test_root_redirect_contracts () =
-  check bool "frontend canonicalizes loopback aliases" true
-    (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
-       "let with_canonical_loopback_host ~port handler request reqd =");
   check bool "http root redirects to dashboard" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
+       {|Http.Router.get "/"|});
+  check bool "http root keeps dashboard fallback redirect" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
        {|redirect_to_dashboard reqd|});
   check bool "http redirect sets dashboard location" true
     (file_contains_pattern "lib/server/server_routes_http_routes_frontend.ml"
-       {|~location:"/dashboard"|});
+       {|respond_redirect ~location:"/dashboard"|});
   check bool "h2 root responds with server identity" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)"|})
@@ -559,12 +570,15 @@ let test_dashboard_timeout_guard_contracts () =
     (file_contains_pattern "dashboard/src/components/transport-health.ts"
        "let inflightTransportHealthRefresh: Promise<void> | null = null")
 
-let test_room_truth_adaptive_timeout_contracts () =
+let test_namespace_truth_adaptive_timeout_contracts () =
   check bool "shell fiber uses adaptive timeout" true
-    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        "shell_timeout_s");
-  check bool "room-truth timeout configurable via env var" true
-    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
+  check bool "namespace-truth timeout configurable via canonical env var" true
+    (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
+       "MASC_DASHBOARD_NAMESPACE_TRUTH_TIMEOUT_S");
+  check bool "namespace-truth timeout still honors legacy env fallback" true
+    (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        "MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S");
   check bool "shell_warmed tracking exists" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
@@ -612,9 +626,21 @@ let test_command_plane_snapshot_review_contracts () =
   check bool "on-demand snapshot uses timeout guard" true
     (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
        "Eio.Time.with_timeout_exn (cp_snapshot_runtime_clock state)");
+  check bool "on-demand snapshot uses single-flight mutex" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "Eio.Mutex.use_rw ~protect:true _cp_snapshot_compute_mu");
+  check bool "snapshot cache ttl stays runtime-readable" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "command_plane_snapshot_cache_ttl_s ()");
+  check bool "snapshot refresh flag stays runtime-readable" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "command_plane_snapshot_refresh_enabled ()");
   check bool "on-demand snapshot timeout returns explicit timeout payload" true
     (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
        {|cp_snapshot_fallback_json ~status:"timeout"|});
+  check bool "timeout path does not serve stale cache unconditionally" true
+    (file_not_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "if !_cp_snapshot_cached_at > 0.0 then !_cp_snapshot_ref");
   let command_plane_pos =
     file_pattern_position "lib/config/feature_flag_registry.ml"
       "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED"
@@ -627,7 +653,6 @@ let test_command_plane_snapshot_review_contracts () =
     (match (command_plane_pos, fixtures_pos) with
      | Some command_plane, Some fixtures -> command_plane < fixtures
      | _ -> false)
-
 let () =
   run "ci_hardening_source"
     [
@@ -668,8 +693,8 @@ let () =
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
            test_case "http client fd safety contracts" `Quick
              test_http_client_fd_safety_contracts;
-           test_case "room-truth adaptive timeout contracts" `Quick
-             test_room_truth_adaptive_timeout_contracts;
+           test_case "namespace-truth adaptive timeout contracts" `Quick
+             test_namespace_truth_adaptive_timeout_contracts;
            test_case "command-plane snapshot review contracts" `Quick
              test_command_plane_snapshot_review_contracts;
            test_case "runtime precondition contracts" `Quick

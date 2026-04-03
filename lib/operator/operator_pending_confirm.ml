@@ -254,19 +254,19 @@ let pending_confirms_json ?actor config =
 
 let available_actions : available_action list =
   [
-    make_available_action ~action_type:"broadcast" ~target_type:"room"
-      ~description:"Use this when you need a room-wide operator broadcast.";
-    make_available_action ~action_type:"room_pause" ~target_type:"room"
-      ~description:"Use this when you need to pause room automation or spawning.";
-    make_available_action ~action_type:"room_resume" ~target_type:"room"
+    make_available_action ~action_type:"broadcast" ~target_type:"namespace"
+      ~description:"Use this when you need a namespace-wide operator broadcast.";
+    make_available_action ~action_type:"namespace_pause" ~target_type:"namespace"
+      ~description:"Use this when you need to pause namespace automation or spawning.";
+    make_available_action ~action_type:"namespace_resume" ~target_type:"namespace"
       ~description:
-        "Resume a paused MASC room, allowing the orchestrator to spawn agents again. Use when the pause reason is resolved (review done, incident cleared).";
-    make_available_action ~action_type:"social_sweep" ~target_type:"room"
+        "Resume a paused MASC namespace, allowing the orchestrator to spawn agents again. Use when the pause reason is resolved (review done, incident cleared).";
+    make_available_action ~action_type:"social_sweep" ~target_type:"namespace"
       ~description:
         "Use this when you need to run one immediate public-square social sweep and inspect which keepers acted, passed, or were system-skipped.";
-    make_available_action ~action_type:"task_inject" ~target_type:"room"
+    make_available_action ~action_type:"task_inject" ~target_type:"namespace"
       ~description:
-        "Use this when you need to inject a new backlog task into the room immediately.";
+        "Use this when you need to inject a new backlog task into the namespace immediately.";
     make_available_action ~action_type:"team_note" ~target_type:"team_session"
       ~description:
         "Use this when you need to append a non-broadcast operator note to a team session.";

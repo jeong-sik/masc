@@ -201,7 +201,7 @@ export interface CommandPlaneOrchestraFact {
 
 export interface CommandPlaneOrchestraNode {
   id: string
-  kind: 'room' | 'session' | 'operation' | 'detachment' | 'lane' | 'worker' | 'keeper' | string
+  kind: 'namespace' | 'session' | 'operation' | 'detachment' | 'lane' | 'worker' | 'keeper' | string
   label: string
   subtitle?: string | null
   status?: string | null
@@ -254,8 +254,9 @@ export interface CommandPlaneOrchestraFocus {
 export interface CommandPlaneOrchestraResponse {
   version?: string
   generated_at?: string
-  room: {
-    room_id?: string
+  namespace: {
+    namespace_id?: string
+    namespace?: string
     project?: string
     cluster?: string
     paused?: boolean

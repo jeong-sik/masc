@@ -25,7 +25,6 @@ module Dashboard_mission = Dashboard_mission
 module Dashboard_proof = Dashboard_proof
 module Dashboard_mission_briefing = Dashboard_mission_briefing
 module Build_identity = Build_identity
-module Tool_audit = Tool_audit
 module Graphql_api = Graphql_api
 module Tempo = Tempo
 module Auth = Auth

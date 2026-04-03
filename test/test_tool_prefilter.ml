@@ -24,13 +24,13 @@ let essential_tools = [
   make_schema "masc_broadcast"
     "Send a message visible to ALL agents via SSE push.";
   make_schema "masc_join"
-    "Join the MASC room to collaborate with other AI agents.";
+    "Join the MASC namespace to collaborate with other AI agents.";
   make_schema "masc_leave"
-    "Leave the MASC room and mark yourself as offline.";
+    "Leave the MASC namespace and mark yourself as offline.";
   make_schema "masc_status"
-    "Get current room status: active agents, task queue, recent broadcasts.";
+    "Get current namespace status: active agents, task queue, recent broadcasts.";
   make_schema "masc_dashboard"
-    "Render the MASC dashboard summarizing rooms, agents, and tasks.";
+    "Render the MASC dashboard summarizing namespaces, agents, and tasks.";
   make_schema "masc_agents"
     "Get detailed status of all agents: current tasks, capabilities.";
   make_schema "masc_who"
@@ -73,7 +73,7 @@ let test_broadcast_in_top3 () =
 
 let test_join_in_top3 () =
   let result = Tool_prefilter.filter
-    ~tools:essential_tools ~query:"join the room" ~k:3 in
+    ~tools:essential_tools ~query:"join the namespace" ~k:3 in
   check bool "masc_join in top-3" true
     (has_tool "masc_join" result)
 

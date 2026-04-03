@@ -1,12 +1,18 @@
 # MASC Multi-Room Design
 
 Status: historical/internal compatibility note
-Verification: implemented and exercised by `dune exec --root . test/test_multi_room.exe` on 2026-03-21
+Verification: do not treat the historical multi-room verification below as a current product contract
+
+This document is retained only to explain why room abstractions exist in parts of the codebase.
+
+- Canonical default: single default namespace under project-root `.masc/`
+- Current implementation: `masc_set_room` chooses project scope, `current_room` is compatibility-only, and public named-room tools remain retired
+- Operational SSOT: use the README and `docs/COMMAND-PLANE-RUNBOOK.md`, not this document
 
 This document predates the current implementation state. Named-room support exists, but it is not the canonical default public workflow.
 
-- Canonical default: repo-root room semantics via `masc_set_room`
-- Current implementation: named-room inventory/create/enter tools were removed; only `current_room` pointer compatibility and lazy per-room bootstrap remain
+- Canonical default: project-root default namespace semantics via `masc_set_room`
+- Current implementation: named-room inventory/create/enter tools were removed; only limited compatibility shims and lazy per-room bootstrap remain
 - Public surface intent: `masc_room_*` no longer exists on the MCP surface
 - Historical command references below are retained for implementation context only; they are not the recommended operator workflow.
 

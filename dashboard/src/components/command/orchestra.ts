@@ -53,7 +53,7 @@ function spreadX(count: number, min: number, max: number): number[] {
 function layoutConfig(density: 'balanced' | 'compact') {
   if (density === 'compact') {
     return {
-      room: { x: 660, y: 108 },
+      namespace: { x: 660, y: 108 },
       sessions: { y: 228, min: 220, max: 1110 },
       operations: { y: 338, min: 260, max: 1050 },
       detachments: { y: 430, min: 310, max: 1000 },
@@ -65,7 +65,7 @@ function layoutConfig(density: 'balanced' | 'compact') {
   }
 
   return {
-    room: { x: 700, y: 112 },
+    namespace: { x: 700, y: 112 },
     sessions: { y: 236, min: 240, max: 1140 },
     operations: { y: 356, min: 300, max: 1080 },
     detachments: { y: 454, min: 340, max: 1030 },
@@ -80,7 +80,7 @@ function layout(orchestra: CommandPlaneOrchestraResponse, density: 'balanced' | 
   const cfg = layoutConfig(density)
   const positions = new Map<string, Point>()
   const nodes = orchestra.nodes
-  const roomNode = nodes.find(node => node.kind === 'room') ?? null
+  const namespaceNode = nodes.find(node => node.kind === 'namespace') ?? null
   const sessions = nodes.filter(node => node.kind === 'session')
   const operations = nodes.filter(node => node.kind === 'operation')
   const detachments = nodes.filter(node => node.kind === 'detachment')
@@ -88,7 +88,7 @@ function layout(orchestra: CommandPlaneOrchestraResponse, density: 'balanced' | 
   const workers = nodes.filter(node => node.kind === 'worker')
   const keepers = nodes.filter(node => node.kind === 'keeper')
 
-  if (roomNode) positions.set(roomNode.id, { x: cfg.room.x, y: cfg.room.y })
+  if (namespaceNode) positions.set(namespaceNode.id, { x: cfg.namespace.x, y: cfg.namespace.y })
 
   spreadX(sessions.length, cfg.sessions.min, cfg.sessions.max).forEach((x, idx) => {
     const node = sessions[idx]
@@ -170,17 +170,17 @@ function layout(orchestra: CommandPlaneOrchestraResponse, density: 'balanced' | 
 
 function signalPoints(
   orchestra: CommandPlaneOrchestraResponse,
-  roomPoint: Point | null,
+  namespacePoint: Point | null,
   density: 'balanced' | 'compact',
 ): SignalPoint[] {
-  if (!roomPoint || orchestra.signals.length === 0) return []
+  if (!namespacePoint || orchestra.signals.length === 0) return []
   const cfg = layoutConfig(density)
   return orchestra.signals.slice(0, 6).map((signalNode, idx) => {
     const angle = (-130 + idx * 36) * (Math.PI / 180)
     return {
       signalNode,
-      x: Math.round(roomPoint.x + Math.cos(angle) * cfg.signalRadius),
-      y: Math.round(roomPoint.y + Math.sin(angle) * cfg.signalRadius),
+      x: Math.round(namespacePoint.x + Math.cos(angle) * cfg.signalRadius),
+      y: Math.round(namespacePoint.y + Math.sin(angle) * cfg.signalRadius),
     }
   })
 }
@@ -229,9 +229,9 @@ export function OrchestraSurface() {
 
   const density = orchestraDensity.value
   const positions = layout(orchestra, density)
-  const roomNode = orchestra.nodes.find(node => node.kind === 'room') ?? null
-  const roomPoint = roomNode ? positions.get(roomNode.id) ?? null : null
-  const signalNodes = signalPoints(orchestra, roomPoint, density)
+  const namespaceNode = orchestra.nodes.find(node => node.kind === 'namespace') ?? null
+  const namespacePoint = namespaceNode ? positions.get(namespaceNode.id) ?? null : null
+  const signalNodes = signalPoints(orchestra, namespacePoint, density)
   const bounds = orchestraBounds(orchestra, positions, signalNodes, density)
   const selected = selectedTarget(orchestra)
   const selectedId = selected?.value.id ?? null
@@ -336,7 +336,7 @@ export function OrchestraSurface() {
         <div class="card rounded-xl-title">오케스트라 맵</div>
       </div>
       <p class="cmd-card rounded-xl-sub">
-        룸 전체를 한 장의 작전판으로 읽는 시각화입니다. 확대/이동으로 밀집 구간을 읽고, 노드를 눌러 상세 신호와 연결 대상을 확인합니다.
+        네임스페이스 전체를 한 장의 작전판으로 읽는 시각화입니다. 확대/이동으로 밀집 구간을 읽고, 노드를 눌러 상세 신호와 연결 대상을 확인합니다.
       </p>
 
       <div class="orchestra-toolbar">
@@ -414,7 +414,7 @@ export function OrchestraSurface() {
             ></rect>
             <g transform=${`translate(${camera.panX} ${camera.panY}) scale(${camera.zoom})`}>
               <${OrchestraEdgeLayer} edges=${orchestra.edges} positions=${positions} selectedId=${selectedId} />
-              <${OrchestraSignals} signalNodes=${signalNodes} roomPoint=${roomPoint} onSelect=${(id: string) => { orchestraSelection.value = id }} />
+              <${OrchestraSignals} signalNodes=${signalNodes} namespacePoint=${namespacePoint} onSelect=${(id: string) => { orchestraSelection.value = id }} />
               <${OrchestraNodeLayer}
                 orchestra=${orchestra}
                 positions=${positions}

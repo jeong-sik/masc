@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals'
 import { showToast } from './common/toast'
+import { requestConfirm } from './common/confirm-dialog'
 import {
   boardPosts,
   boardSortMode,
@@ -305,7 +306,12 @@ export function togglePostSelection(postId: string, event: Event) {
 export async function bulkDeleteSelected() {
   const ids = Array.from(selectedPostIds.value)
   if (ids.length === 0) return
-  if (!confirm(`${ids.length}개의 글을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return
+  const confirmed = await requestConfirm({
+    title: '선택 삭제',
+    message: `${ids.length}개의 글을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`,
+    tone: 'danger'
+  })
+  if (!confirmed) return
   bulkDeleting.value = true
   const results = await Promise.allSettled(ids.map(id => deleteBoardPost(id)))
   const deleted = results.filter(r => r.status === 'fulfilled').length

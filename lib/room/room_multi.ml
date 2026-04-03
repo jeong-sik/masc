@@ -1,26 +1,38 @@
-(** Room current-room helpers.
+(** Room current-room compatibility helpers.
 
-    Since #4638 the multi-room abstraction has been removed.
-    All state lives under the root .masc/ directory.
-    These functions are kept for API compatibility. *)
+    The public operational model is now a single default namespace under
+    [.masc/]. The current-room file is kept only as a backward-compatible
+    marker for older tooling. *)
 
 open Room_utils
 
-(** Get current room file path (legacy) *)
+(** Get current room file path *)
 let current_room_path config = current_room_root_path config
 
-(** Delegate to the shared reader so legacy-state warnings still fire. *)
-let read_current_room config = Room_utils.read_current_room config
+(** Cache retained only so older code paths still have a stable shape. *)
+let current_room_cache : (string * float * string option) ref =
+  ref ("", 0.0, None)
 
-(** Persist the current-room label for dashboards and compat callers.
-    Storage stays flattened; this only updates the display pointer. *)
+let read_current_room config =
+  let path = current_room_path config in
+  let result = Room_utils.read_current_room config in
+  current_room_cache := (path, 0.0, result);
+  result
+
+(** Write the compatibility room marker.
+    Non-default inputs are accepted only for legacy callers, but the stored
+    operational namespace is always forced back to [default]. *)
 let write_current_room config room_id =
-  match Room_utils.validate_room_id room_id with
-  | Ok valid_room_id ->
-      Room_utils.mkdir_p (masc_root_dir config);
-      Room_utils.write_text config (current_room_root_path config)
-        (valid_room_id ^ "\n")
-  | Error _ -> ()
+  match validate_room_id room_id with
+  | Ok _requested_room_id ->
+      let write_to path =
+        Fs_compat.mkdir_p (Filename.dirname path);
+        Fs_compat.save_file path "default\n"
+      in
+      write_to (current_room_path config);
+      current_room_cache := ("", 0.0, Some "default")
+  | Error _ ->
+      current_room_cache := ("", 0.0, Some "default")
 
-(** Get path for a specific room -- always returns [masc_root_dir] since #4638. *)
-let room_path config _room_id = masc_root_dir config
+(** Get path for a specific room *)
+let room_path config room_id = room_dir_for config room_id

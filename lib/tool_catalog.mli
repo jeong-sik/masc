@@ -41,10 +41,6 @@ val deprecated :
   ?allow_direct_call_when_hidden:bool ->
   ?implementation_status:implementation_status -> string -> metadata
 
-val deprecated_default :
-  ?canonical_name:string -> ?replacement:string ->
-  ?implementation_status:implementation_status -> string -> metadata
-
 val hidden_active :
   ?canonical_name:string -> ?replacement:string ->
   ?allow_direct_call_when_hidden:bool ->
@@ -106,9 +102,6 @@ val explicit_metadata : (string * metadata) list
 
 val deprecated_tool_entries : (string * metadata) list
 (** Precomputed subset of [explicit_metadata] where lifecycle = Deprecated. *)
-
-val implementation_allows_public_visibility : implementation_status -> bool
-(** [true] when an implementation status permits public surface listing. *)
 
 (** {1 Tool Surface System}
 

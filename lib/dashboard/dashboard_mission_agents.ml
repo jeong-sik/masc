@@ -42,7 +42,7 @@ type session_context = {
   goal : string;
   created_by : string option;
   origin_kind : string;
-  room : string option;
+  namespace : string option;
   status : string;
   health : string;
   member_names : string list;
@@ -200,8 +200,8 @@ let archived_reason_for_session (session : session_context option) =
   | Some session ->
       Some
         (if List.mem session.status [ "completed"; "interrupted"; "cancelled" ]
-         then "not in current room state"
-         else "missing from current room state")
+         then "not in current namespace state"
+         else "missing from current namespace state")
   | None -> None
 
 let archived_agent_meta_map config agent_names =

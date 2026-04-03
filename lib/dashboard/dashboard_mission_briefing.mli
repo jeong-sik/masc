@@ -20,7 +20,7 @@ module For_test : sig
     Yojson.Safe.t ->
     unit
   val relevant_sessions_for_briefing :
-    current_room:string -> now_ts:float -> Yojson.Safe.t list -> Yojson.Safe.t list
+    current_namespace:string -> now_ts:float -> Yojson.Safe.t list -> Yojson.Safe.t list
   val collect_metadata_gaps :
     sessions:Yojson.Safe.t list ->
     keepers:Yojson.Safe.t list ->

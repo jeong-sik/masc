@@ -1,5 +1,3 @@
-module Oas = Agent_sdk
-
 type preflight_subject = {
   worker_name : string;
   model_label : string;

@@ -16,8 +16,6 @@
 open Printf
 open Result_syntax
 
-module Oas = Agent_sdk
-
 (* ================================================================ *)
 (* worker_container_meta -> OAS Types.model                          *)
 (* ================================================================ *)

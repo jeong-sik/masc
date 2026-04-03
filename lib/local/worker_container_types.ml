@@ -1,7 +1,5 @@
 open Printf
 
-module Oas = Agent_sdk
-
 type tool_exec_result = {
   text : string;
   is_error : bool;

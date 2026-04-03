@@ -119,19 +119,27 @@ let with_unix_capture ?env ?stdin_content (argv : string list)
              on_error ()
          | Some stdout_r ->
              stdout_r_ref := None;
-             Eio_guard.run_in_systhread (fun () ->
-               let ic = Unix.in_channel_of_descr stdout_r in
-               let output =
-                 Fun.protect
-                   ~finally:(fun () -> In_channel.close ic)
-                   (fun () -> In_channel.input_all ic)
-               in
-               let rec waitpid_retry () =
-                 try Unix.waitpid [] pid
-                 with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_retry ()
-               in
-               let (_pid, status) = waitpid_retry () in
-               on_success status output))
+             let rec waitpid_retry () =
+               try Unix.waitpid [] pid
+               with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_retry ()
+             in
+             let status, output =
+               Eio_guard.run_in_systhread (fun () ->
+                 let status_ref = ref None in
+                 let ic = Unix.in_channel_of_descr stdout_r in
+                 let output =
+                   Fun.protect
+                     ~finally:(fun () ->
+                       In_channel.close ic;
+                       let (_pid, status) = waitpid_retry () in
+                       status_ref := Some status)
+                     (fun () -> In_channel.input_all ic)
+                 in
+                 match !status_ref with
+                 | Some status -> (status, output)
+                 | None -> failwith "waitpid status missing after Unix fallback capture")
+             in
+             on_success status output)
        with
        | Eio.Cancel.Cancelled _ as exn ->
            Option.iter close_quietly !stdin_r_ref;

@@ -55,10 +55,11 @@
 
 ## Golden Path
 
-1. `masc_set_room`
-   - repo-root room semantics를 먼저 맞춘다.
-2. `masc_join`
-   - supervisor identity를 room에 등록한다.
+1. `masc_start`
+   - repo-root namespace semantics를 먼저 맞춘다.
+   - `task_title` 없이 호출하면 onboarding만 하고 task 쪽은 건드리지 않는다.
+2. `masc_status`
+   - supervisor identity와 namespace 상태를 확인한다.
 3. `masc_llama_models`
    - local `llama.cpp` inventory를 읽는다.
 4. explicit model 선택

@@ -179,6 +179,9 @@ let explicit_metadata : (string * metadata) list =
     ("masc_websocket_discovery", readonly_tool);
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
+    ( "masc_set_room",
+      hidden_active ~canonical_name:"masc_start" ~replacement:"masc_start"
+        "Compatibility alias that only selects the project coordination root. Prefer masc_start for truthful namespace onboarding." );
     (* masc_run_get, masc_run_list: migrated to Tool_spec.register (tool_run.ml) *)
     ("masc_execute_dry_run", readonly_tool);
     ( "masc_admin_cleanup",

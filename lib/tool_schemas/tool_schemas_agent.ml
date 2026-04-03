@@ -247,7 +247,7 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_meta_cognition_snapshot";
-    description = "Read a room-level meta-cognition snapshot derived from board, task, agent, and governance artifacts. Use this to inspect shared beliefs, tensions, desires, and discourse edges.";
+    description = "Read a namespace-level meta-cognition snapshot derived from board, task, agent, and governance artifacts. Use this to inspect shared beliefs, tensions, desires, and discourse edges.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

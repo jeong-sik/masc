@@ -547,6 +547,7 @@
           test_command_plane_v2_support
           test_command_plane_v2_policy_inputs
           test_command_plane_v2_traces
+          test_command_plane_v2_summary
           test_command_plane_v2_scheduler_core_a
           test_command_plane_v2_scheduler_core_b
           test_command_plane_v2_scheduler_policy

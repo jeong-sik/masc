@@ -82,6 +82,7 @@ masc_start(path="/your/project", task_title="My first task")
 
 ```text
 masc_start(path="/your/project")
+masc_join(agent_name="codex")
 masc_status()
 masc_add_task(title="My task")
 masc_claim_next()

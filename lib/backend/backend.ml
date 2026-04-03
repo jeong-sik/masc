@@ -34,6 +34,11 @@ module FileSystem = struct
     fs: Eio.Fs.dir_ty Eio.Path.t;
     mutex: Eio.Mutex.t;
     key_index: (string, unit) Hashtbl.t;
+    key_index_mu: Mutex.t;
+    (** Domain-safe mutex for [key_index].
+        Uses [Stdlib.Mutex] (not [Eio.Mutex]) so that
+        Executor_pool workers on non-Eio domains can safely
+        read/write the shared hashtable. *)
     mutable key_index_promise: unit Eio.Promise.or_exn option;
   }
 
@@ -52,8 +57,35 @@ module FileSystem = struct
       fs = path;
       mutex = Eio.Mutex.create ();
       key_index = Hashtbl.create 256;
+      key_index_mu = Mutex.create ();
       key_index_promise = None;
     }
+
+  (** {2 Domain-safe key_index helpers}
+
+      All access to [t.key_index] MUST go through these helpers so that
+      Executor_pool workers (which lack Eio context) can safely touch
+      the shared hashtable.  Uses [Stdlib.Mutex] + [Fun.protect]. *)
+
+  let ki_replace t k v =
+    Mutex.lock t.key_index_mu;
+    Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu)
+      (fun () -> Hashtbl.replace t.key_index k v)
+
+  let ki_remove t k =
+    Mutex.lock t.key_index_mu;
+    Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu)
+      (fun () -> Hashtbl.remove t.key_index k)
+
+  let ki_length t =
+    Mutex.lock t.key_index_mu;
+    Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu)
+      (fun () -> Hashtbl.length t.key_index)
+
+  let ki_iter t f =
+    Mutex.lock t.key_index_mu;
+    Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu)
+      (fun () -> Hashtbl.iter f t.key_index)
 
   (** {2 Key Validation} *)
 
@@ -182,7 +214,7 @@ module FileSystem = struct
             let compressed = _compress value in
             (* Write file *)
             Eio.Path.save ~create:(`Or_truncate 0o644) path compressed;
-            Hashtbl.replace t.key_index key ();
+            ki_replace t key ();
             Ok ()
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -198,7 +230,7 @@ module FileSystem = struct
       | Ok path ->
           try
             Eio.Path.unlink path;
-            Hashtbl.remove t.key_index key;
+            ki_remove t key;
             Ok ()
           with
           | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
@@ -237,7 +269,7 @@ module FileSystem = struct
     | _ -> acc
 
   let ensure_key_index t =
-    if Hashtbl.length t.key_index > 0 then ()
+    if ki_length t > 0 then ()
     else
       match t.key_index_promise with
       | Some p ->
@@ -253,10 +285,11 @@ module FileSystem = struct
            let keys =
              collect_keys_under ~requested_prefix:"" ~logical_prefix:"" t.fs []
            in
-           List.iter (fun k -> Hashtbl.replace t.key_index k ()) keys;
-           if Hashtbl.length t.key_index > 0 then
+           List.iter (fun k -> ki_replace t k ()) keys;
+           let len = ki_length t in
+           if len > 0 then
              Log.legacy_traceln ~level:Log.Info ~module_name:"Backend"
-               (Printf.sprintf "key_index populated: %d keys" (Hashtbl.length t.key_index));
+               (Printf.sprintf "key_index populated: %d keys" len);
            Eio.Promise.resolve_ok r ()
          with exn ->
            t.key_index_promise <- None;
@@ -281,22 +314,22 @@ module FileSystem = struct
           (try
              match Eio.Path.kind ~follow:true path with
              | `Regular_file ->
-                 Hashtbl.replace t.key_index key ();
+                 ki_replace t key ();
                  true
              | _ ->
-                 Hashtbl.remove t.key_index key;
+                 ki_remove t key;
                  false
            with _ ->
-             Hashtbl.remove t.key_index key;
+             ki_remove t key;
              false)
 
   let list_keys t ~prefix =
     ensure_key_index t;
     let result = ref [] in
-    Hashtbl.iter (fun k () ->
+    ki_iter t (fun k () ->
       if prefix = "" || starts_with ~prefix k then
         result := k :: !result
-    ) t.key_index;
+    );
     Ok (List.sort_uniq String.compare !result)
 
   (** Set if not exists (atomic, auto-compresses) *)
@@ -315,14 +348,14 @@ module FileSystem = struct
                 _ensure_parent_dir ~log_errors:true path;
                 (* Write with exclusive create *)
                 Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
-                Hashtbl.replace t.key_index key ();
+                ki_replace t key ();
                 Ok true
           with
           | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
               (* Parent doesn't exist, create it *)
               _ensure_parent_dir path;
               Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
-              Hashtbl.replace t.key_index key ();
+              ki_replace t key ();
               Ok true
           | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
               Error (AlreadyExists key)

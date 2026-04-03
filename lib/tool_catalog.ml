@@ -195,6 +195,32 @@ let explicit_metadata : (string * metadata) list =
     ("masc_tempo_reset",
      deprecated ~implementation_status:Real
        "No surface, no external callers. Tempo feature never integrated into workflows.");
+    (* Broken tools: shell out to CLI binaries unavailable at runtime.
+       masc-cost: buildable from bin/masc_cost.ml but not guaranteed to be
+       present in runtime images or on PATH.
+       masc-checkpoint: removed from codebase (refactor #102).
+       Deprecated 2026-04-03. See #4709, #4734. *)
+    ("masc_cost_log",
+     deprecated ~implementation_status:Real
+       "Shells out to masc-cost CLI which may be unavailable in the runtime environment or missing from PATH.");
+    ("masc_cost_report",
+     deprecated ~implementation_status:Real
+       "Shells out to masc-cost CLI which may be unavailable in the runtime environment or missing from PATH.");
+    ("masc_interrupt",
+     deprecated ~implementation_status:Real
+       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
+    ("masc_approve",
+     deprecated ~implementation_status:Real
+       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
+    ("masc_reject",
+     deprecated ~implementation_status:Real
+       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
+    ("masc_pending_interrupts",
+     deprecated ~implementation_status:Real
+       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
+    ("masc_branch",
+     deprecated ~implementation_status:Real
+       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
     (* Semantic annotations for governance risk classification. *)
     ("masc_status", readonly_tool);
     ("masc_tasks", readonly_tool);

@@ -11,10 +11,8 @@
     Run with: dune exec test/test_concurrent_distributed.exe -- <worker_id> <shared_dir>
 *)
 
-open Masc_mcp
-
 (* Initialize crypto RNG *)
-let () = Encryption.initialize ()
+let () = Mirage_crypto_rng_unix.use_default ()
 
 let worker_id = ref "worker-0"
 let shared_dir = ref "/tmp/masc_concurrent_test"

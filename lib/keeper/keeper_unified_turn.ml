@@ -201,6 +201,7 @@ let append_decision_record
     ~(outcome : string)
     ~(selected_mode : string)
     ?social_state
+    ?deliberation_execution
     ?(result : Keeper_agent_run.run_result option = None)
     ?error
     () : unit =
@@ -286,6 +287,17 @@ let append_decision_record
         ("tools_used", `List (List.map (fun s -> `String s) tools_used));
         ("claim_was_available", `Bool (observation.unclaimed_task_count > 0));
         ("claim_executed", `Bool claim_executed);
+        ( "action_source",
+          match deliberation_execution with
+          | Some execution ->
+              Keeper_deliberation.action_source_of_execution_result execution
+              |> Keeper_deliberation.action_source_to_json
+          | None -> `Null );
+        ( "deliberation_execution",
+          match deliberation_execution with
+          | Some execution ->
+              Keeper_deliberation.execution_result_to_json execution
+          | None -> `Null );
         ( "response_preview",
           match response_preview with
           | Some preview -> `String preview
@@ -449,7 +461,8 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     ~(context_max : int)
     ~(message_count : int)
     ~(compaction : Keeper_exec_context.compaction_event)
-    ~(handoff_json : Yojson.Safe.t option) () : unit =
+    ~(handoff_json : Yojson.Safe.t option)
+    ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
   let work_kind =
@@ -496,6 +509,17 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("work_kind", `String work_kind);
         ("tool_call_count", `Int result.tool_calls_made);
         ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
+        ( "action_source",
+          match deliberation_execution with
+          | Some execution ->
+              Keeper_deliberation.action_source_of_execution_result execution
+              |> Keeper_deliberation.action_source_to_json
+          | None -> `Null );
+        ( "deliberation_execution",
+          match deliberation_execution with
+          | Some execution ->
+              Keeper_deliberation.execution_result_to_json execution
+          | None -> `Null );
         ("cascade",
          match result.cascade_observation with
          | Some observation -> Oas_worker.cascade_observation_to_json observation

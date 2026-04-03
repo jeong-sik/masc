@@ -103,8 +103,8 @@ describe('Autoresearch surface refresh', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    confirmMock = vi.fn(() => true)
-    vi.stubGlobal('confirm', confirmMock)
+    confirmMock = vi.fn(() => Promise.resolve(true))
+    vi.doMock('./common/confirm-dialog', () => ({ requestConfirm: confirmMock }))
   })
 
   afterEach(async () => {
@@ -321,7 +321,7 @@ describe('Autoresearch surface refresh', () => {
   })
 
   it('does not delete when the confirmation is cancelled', async () => {
-    confirmMock.mockReturnValueOnce(false)
+    confirmMock.mockReturnValueOnce(Promise.resolve(false))
     const erroredLoop = loopSummary('loop-del1', {
       status: 'error',
       live: false,

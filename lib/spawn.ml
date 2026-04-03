@@ -365,13 +365,24 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
           ~working_dir ~config_working_dir:config.working_dir
       in
 
-      (* Read output (outside mutex — only this fiber reads this pipe) *)
-      let ic = Unix.in_channel_of_descr stdout_read in
-      let raw_output = In_channel.input_all ic in
-      In_channel.close ic;
-
-      (* Wait for process *)
-      let (_, status) = Unix.waitpid [] pid in
+      (* Read output + wait in systhread to avoid blocking the Eio event loop.
+         Without this, a long-running subprocess (e.g. fire_task) freezes the
+         entire server — health endpoint, SSE, all keeper fibers. *)
+      let (raw_output, status) =
+        Eio_guard.run_in_systhread (fun () ->
+          let ic = Unix.in_channel_of_descr stdout_read in
+          let output =
+            Fun.protect
+              ~finally:(fun () -> In_channel.close ic)
+              (fun () -> In_channel.input_all ic)
+          in
+          let rec waitpid_retry () =
+            try Unix.waitpid [] pid
+            with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_retry ()
+          in
+          let (_, status) = waitpid_retry () in
+          (output, status))
+      in
 
       (* CWD already restored inside fork_with_cwd *)
 

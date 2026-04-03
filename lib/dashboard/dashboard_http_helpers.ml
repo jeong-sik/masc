@@ -26,10 +26,6 @@ let int_of_env_default name ~default ~min_v ~max_v =
   in
   max min_v (min max_v v)
 
-let dashboard_session_list_limit () =
-  int_of_env_default "MASC_DASHBOARD_SESSION_LIST_LIMIT"
-    ~default:20 ~min_v:5 ~max_v:200
-
 let float_of_env_default name ~default ~min_v ~max_v =
   let v =
     match Sys.getenv_opt name with
@@ -38,6 +34,26 @@ let float_of_env_default name ~default ~min_v ~max_v =
         (try float_of_string (String.trim s) with Failure _ -> default)
   in
   max min_v (min max_v v)
+
+let dashboard_session_list_limit () =
+  int_of_env_default "MASC_DASHBOARD_SESSION_LIST_LIMIT"
+    ~default:20 ~min_v:5 ~max_v:200
+
+let operator_snapshot_session_window_seconds () =
+  float_of_env_default "MASC_OPERATOR_SNAPSHOT_SESSION_WINDOW_SECONDS"
+    ~default:86400.0 ~min_v:300.0 ~max_v:(7.0 *. 86400.0)
+
+let operator_snapshot_session_limit () =
+  int_of_env_default "MASC_OPERATOR_SNAPSHOT_SESSION_LIMIT"
+    ~default:20 ~min_v:5 ~max_v:200
+
+let operator_snapshot_recent_completed_limit () =
+  int_of_env_default "MASC_OPERATOR_SNAPSHOT_RECENT_COMPLETED_LIMIT"
+    ~default:5 ~min_v:1 ~max_v:50
+
+let operator_snapshot_status_event_limit () =
+  int_of_env_default "MASC_OPERATOR_SNAPSHOT_STATUS_EVENT_LIMIT"
+    ~default:200 ~min_v:20 ~max_v:2000
 
 let bool_of_tag_value (raw : string) : bool =
   let v = String.trim raw |> String.lowercase_ascii in

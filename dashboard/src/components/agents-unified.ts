@@ -10,7 +10,7 @@ import { agents, keepers, executionLoaded, shellCounts } from '../store'
 import { missionKeeperBriefs } from '../mission-signals'
 import { AgentRoster, countRuntimeKinds } from './agent-roster'
 import { AgentProfile } from './agent-profile'
-import { roomTruth } from '../room-truth-store'
+import { namespaceTruth } from '../namespace-truth-store'
 import { resolveRuntimeCounts } from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 
@@ -50,7 +50,7 @@ export function AgentsUnified() {
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
-    roomTruthCounts: roomTruth.value?.room.counts,
+    namespaceTruthCounts: namespaceTruth.value?.namespace.counts,
     shellCounts: shellCounts.value,
   })
   const totalCount = runtimeCounts.totalRuntimes

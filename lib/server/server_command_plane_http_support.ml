@@ -92,7 +92,7 @@ let start_cp_summary_refresh_loop ~state ~sw ~clock =
 let command_plane_summary_http_json ~state:_ =
   (* Always return the proactively cached ref.  Never compute synchronously —
      compute_cp_summary can hang when Swarm_status.build_json blocks on
-     filesystem I/O, causing room-truth and /command-plane/summary to time out.
+     filesystem I/O, causing namespace-truth and /command-plane/summary to time out.
      The background refresh loop populates the ref within one interval (120s). *)
   !_cp_summary_ref
 
@@ -102,13 +102,28 @@ let command_plane_summary_http_json ~state:_ =
    Use a slower cadence and larger timeout to avoid constant timeout/backoff
    churn while still keeping a warm cached snapshot available. *)
 
-let _cp_snapshot_ref : Yojson.Safe.t ref =
-  ref (`Assoc [("generated_at", `String (Types.now_iso ())); ("status", `String "initializing")])
+type cp_snapshot_cache = {
+  snapshot : Yojson.Safe.t;
+  cached_at : float;
+}
 
+let _cp_snapshot_cache : cp_snapshot_cache ref =
+  ref
+    {
+      snapshot =
+        `Assoc [("generated_at", `String (Types.now_iso ())); ("status", `String "initializing")];
+      cached_at = 0.0;
+    }
+
+let _cp_snapshot_compute_mu = Eio.Mutex.create ()
 let _cp_snapshot_refresh_interval_s =
   Dashboard_http_helpers.float_of_env_default
     "MASC_CP_SNAPSHOT_REFRESH_INTERVAL_S"
     ~default:120.0 ~min_v:30.0 ~max_v:600.0
+let _cp_snapshot_timeout_s =
+  Dashboard_http_helpers.float_of_env_default
+    "MASC_CP_SNAPSHOT_TIMEOUT_S"
+    ~default:60.0 ~min_v:10.0 ~max_v:120.0
 
 let compute_cp_snapshot ~state =
   let config = state.Mcp_server.room_config in
@@ -120,24 +135,107 @@ let compute_cp_snapshot ~state =
   in
   assoc_add "swarm_status" swarm_status snapshot
 
-let start_cp_snapshot_refresh_loop ~state ~sw ~clock =
-  Proactive_refresh.start ~sw ~clock
-    ~config:{ (Proactive_refresh.default_config
-                 ~label:"cp-snapshot"
-                 ~interval_s:_cp_snapshot_refresh_interval_s)
-              with timeout_s =
-                     Dashboard_http_helpers.float_of_env_default
-                       "MASC_CP_SNAPSHOT_TIMEOUT_S"
-                       ~default:60.0 ~min_v:10.0 ~max_v:120.0;
-                   warm_delay_s =
-                     Dashboard_http_helpers.float_of_env_default
-                       "MASC_WARM_DELAY_CP_SNAPSHOT_S"
-                       ~default:90.0 ~min_v:0.0 ~max_v:300.0 }
-    ~compute:(fun () -> compute_cp_snapshot ~state)
-    ~on_result:(fun snapshot -> _cp_snapshot_ref := snapshot)
+let current_cp_snapshot_cache () = !_cp_snapshot_cache
+let current_cp_snapshot () = (current_cp_snapshot_cache ()).snapshot
 
-let command_plane_snapshot_http_json ~state:_ =
-  !_cp_snapshot_ref
+let store_cp_snapshot snapshot =
+  _cp_snapshot_cache := { snapshot; cached_at = Time_compat.now () }
+
+let fresh_cp_snapshot_opt () =
+  let cache = current_cp_snapshot_cache () in
+  if cache.cached_at <= 0.0 then
+    None
+  else if
+    Time_compat.now () -. cache.cached_at
+    < Env_config_governance.Dashboard_config.command_plane_snapshot_cache_ttl_s ()
+  then
+    Some cache.snapshot
+  else
+    None
+
+let start_cp_snapshot_refresh_loop ~state ~sw ~clock =
+  if not (Env_config_governance.Dashboard_config.command_plane_snapshot_refresh_enabled ())
+  then
+    Log.CmdPlane.info
+      "cp-snapshot proactive refresh disabled (set MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED=1 to enable)"
+  else
+    Proactive_refresh.start ~sw ~clock
+      ~config:{ (Proactive_refresh.default_config
+                   ~label:"cp-snapshot"
+                   ~interval_s:_cp_snapshot_refresh_interval_s)
+                with timeout_s = _cp_snapshot_timeout_s;
+                     warm_delay_s =
+                       Dashboard_http_helpers.float_of_env_default
+                         "MASC_WARM_DELAY_CP_SNAPSHOT_S"
+                         ~default:90.0 ~min_v:0.0 ~max_v:300.0 }
+      ~compute:(fun () -> compute_cp_snapshot ~state)
+      ~on_result:store_cp_snapshot
+
+let cp_snapshot_runtime_clock state =
+  match state.Mcp_server.clock with
+  | Some clock -> clock
+  | None -> Eio_context.get_clock ()
+
+let cp_snapshot_fallback_json ~status ~error ~message =
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("status", `String status);
+      ("error", `String error);
+      ("message", `String message);
+    ]
+
+let command_plane_snapshot_http_json ~state =
+  if Env_config_governance.Dashboard_config.command_plane_snapshot_refresh_enabled ()
+  then
+    current_cp_snapshot ()
+  else
+    match fresh_cp_snapshot_opt () with
+    | Some snapshot -> snapshot
+    | None ->
+        Eio.Mutex.use_rw ~protect:true _cp_snapshot_compute_mu (fun () ->
+          if Env_config_governance.Dashboard_config.command_plane_snapshot_refresh_enabled ()
+          then
+            current_cp_snapshot ()
+          else
+            match fresh_cp_snapshot_opt () with
+            | Some snapshot -> snapshot
+            | None ->
+                let started_at = Time_compat.now () in
+                try
+                  let snapshot =
+                    Eio.Time.with_timeout_exn (cp_snapshot_runtime_clock state)
+                      _cp_snapshot_timeout_s (fun () -> compute_cp_snapshot ~state)
+                  in
+                  let elapsed = Time_compat.now () -. started_at in
+                  if elapsed >= 1.0 then
+                    Log.CmdPlane.info "cp-snapshot computed on demand (%.1fs)" elapsed;
+                  store_cp_snapshot snapshot;
+                  snapshot
+                with
+                | Eio.Time.Timeout ->
+                    let elapsed = Time_compat.now () -. started_at in
+                    Log.CmdPlane.warn
+                      "cp-snapshot on-demand compute timed out (%.1fs)" elapsed;
+                    (match fresh_cp_snapshot_opt () with
+                     | Some snapshot -> snapshot
+                     | None ->
+                         cp_snapshot_fallback_json ~status:"timeout"
+                           ~error:"command_plane_snapshot_timeout"
+                           ~message:
+                             "Command-plane snapshot timed out; enable proactive snapshot refresh or retry later.")
+                | exn ->
+                    let elapsed = Time_compat.now () -. started_at in
+                    Log.CmdPlane.warn
+                      "cp-snapshot on-demand compute failed (%.1fs): %s"
+                      elapsed (Printexc.to_string exn);
+                    (match fresh_cp_snapshot_opt () with
+                     | Some snapshot -> snapshot
+                     | None ->
+                         cp_snapshot_fallback_json ~status:"unavailable"
+                           ~error:"command_plane_snapshot_unavailable"
+                           ~message:
+                             "Command-plane snapshot is unavailable; enable proactive snapshot refresh or retry later."))
 
 let command_plane_topology_http_json ~state =
   Command_plane_v2.topology_json state.Mcp_server.room_config
@@ -237,4 +335,3 @@ let command_plane_unit_define_http_json ~deps ~state request ~args =
 let command_plane_operation_start_http_json ~deps ~state request ~args =
   tool_command_plane_http_json ~deps ~state request ~name:"masc_operation_start"
     ~args
-

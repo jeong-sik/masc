@@ -91,6 +91,42 @@ let rec rm_rf path =
     end else
       Sys.remove path
 
+let capture_stderr f =
+  let (pipe_read, pipe_write) = Unix.pipe () in
+  let saved_stderr = Unix.dup Unix.stderr in
+  let exn_opt = ref None in
+  let restored = ref false in
+  let restore_stderr () =
+    if not !restored then begin
+      flush stderr;
+      Unix.dup2 saved_stderr Unix.stderr;
+      restored := true
+    end
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_stderr ();
+      Unix.close saved_stderr;
+      Unix.close pipe_read)
+    (fun () ->
+      Unix.dup2 pipe_write Unix.stderr;
+      Unix.close pipe_write;
+      (try f () with e -> exn_opt := Some e);
+      restore_stderr ();
+      Unix.set_nonblock pipe_read;
+      let buf = Buffer.create 256 in
+      let tmp = Bytes.create 256 in
+      let rec read_all () =
+        match Unix.read pipe_read tmp 0 256 with
+        | 0 -> ()
+        | n -> Buffer.add_subbytes buf tmp 0 n; read_all ()
+        | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
+        | exception _ -> ()
+      in
+      read_all ();
+      (match !exn_opt with Some e -> raise e | None -> ());
+      Buffer.contents buf)
+
 let test_resolve_masc_base_path_keeps_git_root_resolution_when_env_ignored () =
   let scratch = Filename.temp_dir "room-utils-worktree" "" in
   let repo_root = Filename.concat scratch "repo" in
@@ -588,6 +624,51 @@ let test_rooms_root_dir_with_cluster () =
   let result = Room_utils.rooms_root_dir cfg in
   check string "rooms with cluster" "/home/user/.masc/clusters/staging/rooms" result
 
+let test_read_current_room_warns_once_for_legacy_state () =
+  let scratch = Filename.temp_dir "room-utils-legacy" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
+      let masc_dir = Room_utils.masc_root_dir cfg in
+      let rooms_dir = Room_utils.rooms_root_dir cfg in
+      Unix.mkdir masc_dir 0o755;
+      Unix.mkdir rooms_dir 0o755;
+      write_file (Filename.concat rooms_dir "state.json") "{}";
+      write_file (Room_utils.current_room_root_path cfg) "legacy-room\n";
+      let stderr_first =
+        capture_stderr (fun () ->
+            check (option string) "current room still defaults" (Some "default")
+              (Room_utils.read_current_room cfg))
+      in
+      check bool "legacy warning emitted"
+        true
+        (Room_utils.contains_substring stderr_first
+           "Legacy room-scoped state detected");
+      let stderr_second = capture_stderr (fun () -> ignore (Room_utils.read_current_room cfg)) in
+      check bool "warning logged once" false
+        (Room_utils.contains_substring stderr_second
+           "Legacy room-scoped state detected"))
+
+let test_read_current_room_keeps_default_after_legacy_rooms_cached () =
+  let scratch = Filename.temp_dir "room-utils-legacy-cache" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
+      let masc_dir = Room_utils.masc_root_dir cfg in
+      let rooms_dir = Room_utils.rooms_root_dir cfg in
+      Unix.mkdir masc_dir 0o755;
+      Unix.mkdir rooms_dir 0o755;
+      write_file (Filename.concat rooms_dir "state.json") "{}";
+      write_file (Room_utils.current_room_root_path cfg) "legacy-room\n";
+      check (option string) "legacy rooms force default once" (Some "default")
+        (Room_utils.read_current_room cfg);
+      Unix.unlink (Filename.concat rooms_dir "state.json");
+      Unix.rmdir rooms_dir;
+      check (option string) "cached legacy rooms keep default label" (Some "default")
+        (Room_utils.read_current_room cfg))
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -712,5 +793,9 @@ let () =
       test_case "current_room_root_path" `Quick test_current_room_root_path;
       test_case "masc_root_dir nested with cluster" `Quick test_masc_root_dir_with_cluster_nested;
       test_case "rooms_root_dir with cluster" `Quick test_rooms_root_dir_with_cluster;
+      test_case "read_current_room warns once for legacy state" `Quick
+        test_read_current_room_warns_once_for_legacy_state;
+      test_case "read_current_room caches legacy rooms" `Quick
+        test_read_current_room_keeps_default_after_legacy_rooms_cached;
     ];
   ]

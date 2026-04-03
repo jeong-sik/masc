@@ -71,6 +71,39 @@ type world_observation = {
 val empty_world_observation : keeper_name:string -> world_observation
 val world_observation_to_json : world_observation -> Yojson.Safe.t
 
+(** {1 Deterministic execution} *)
+
+type action_source =
+  | Baseline
+  | Structured_model
+  | Fallback_after_validation_failure
+
+val action_source_to_string : action_source -> string
+val action_source_to_json : action_source -> Yojson.Safe.t
+
+type legality_verdict =
+  | Legal
+  | Illegal of string
+
+type execution_result = {
+  proposed_action: deliberation_action;
+  selected_action: deliberation_action;
+  action_source: action_source;
+  fallback_used: bool;
+  fallback_reason: string option;
+  policy_labels: string list;
+  reasoning: string;
+  confidence: float;
+}
+
+val baseline_execution_result : world_observation -> execution_result
+val action_source_of_execution_result : execution_result -> action_source
+val execution_result_to_json : execution_result -> Yojson.Safe.t
+val policy_labels_of_action : deliberation_action -> string list
+val legality_verdict : world_observation -> deliberation_action -> legality_verdict
+val execute_structured_result :
+  world_observation -> structured_result -> execution_result
+
 (** {1 Triage} *)
 
 type triage_result =

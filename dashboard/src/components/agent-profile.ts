@@ -402,7 +402,7 @@ export function AgentProfile({ name }: { name: string }) {
           <${AgentLiveTimeline} name=${name} />
         <//>
 
-        <${Card} title="룸 활동" class="ff-card rounded-xl">
+        <${Card} title="네임스페이스 활동" class="ff-card rounded-xl">
           ${lines.length === 0
             ? html`<${EmptyState} message="관련 활동 없음" compact />`
             : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${lines.map((line: string, idx: number) =>

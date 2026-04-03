@@ -99,22 +99,6 @@ let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = fa
     required_permission = None;
   }
 
-let deprecated_default ?canonical_name ?replacement
-    ?(implementation_status = Adapter) reason =
-  {
-    visibility = Default;
-    lifecycle = Deprecated;
-    implementation_status;
-    canonical_name;
-    replacement;
-    reason = Some reason;
-    allow_direct_call_when_hidden = false;
-    readonly = None;
-    destructive = None;
-    idempotent = None;
-    required_permission = None;
-  }
-
 let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
     ?(implementation_status = Real) reason =
   {
@@ -157,50 +141,12 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_judgment_write",
       hidden_active
         "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    ( "masc_operator_judgment_latest",
-      hidden_active
-        "Internal operator-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    (* Dead features: no surface, no external callers. Deprecated 2026-04-03.
-       Physical removal after 4-week telemetry confirms 0 calls. See #4709. *)
-    (* masc_hat_wear and masc_hat_status physically removed. See #4709. *)
-    ("masc_encryption_enable",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_encryption_disable",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_encryption_status",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_generate_key",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_tempo",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_get",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_set",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_adjust",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_reset",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
+    (* Dead features physically removed in #4709 and #4757:
+       operator_judgment_latest, hat_wear, hat_status, encryption_*,
+       generate_key, tempo*, cost_log, cost_report. *)
     (* Broken tools: shell out to CLI binaries unavailable at runtime.
-       masc-cost: buildable from bin/masc_cost.ml but not guaranteed to be
-       present in runtime images or on PATH.
        masc-checkpoint: removed from codebase (refactor #102).
        Deprecated 2026-04-03. See #4709, #4734. *)
-    ("masc_cost_log",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-cost CLI which may be unavailable in the runtime environment or missing from PATH.");
-    ("masc_cost_report",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-cost CLI which may be unavailable in the runtime environment or missing from PATH.");
     ("masc_interrupt",
      deprecated ~implementation_status:Real
        "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
@@ -237,25 +183,25 @@ let explicit_metadata : (string * metadata) list =
     ("masc_execute_dry_run", readonly_tool);
     ( "masc_admin_cleanup",
       with_semantic_flags ~destructive:true
-        (hidden_active "Administrative cleanup mutates persisted room state and should be treated as destructive.") );
+        (hidden_active "Administrative cleanup mutates persisted namespace state and should be treated as destructive.") );
     ( "masc_admin_reset",
       with_semantic_flags ~destructive:true
-        (hidden_active "Administrative reset clears room state and should be treated as destructive.") );
+        (hidden_active "Administrative reset clears namespace state and should be treated as destructive.") );
     ( "masc_gc_force",
       with_semantic_flags ~destructive:true
         (hidden_active "Forced garbage collection removes persisted artifacts and should be treated as destructive.") );
     ( "masc_room_delete",
       with_semantic_flags ~destructive:true
-        (hidden_active "Room deletion removes persisted state and should be treated as destructive.") );
+        (hidden_active "Namespace deletion removes persisted state and should be treated as destructive.") );
     ( "masc_room_destroy",
       with_semantic_flags ~destructive:true
-        (hidden_active "Room destruction removes persisted state and should be treated as destructive.") );
+        (hidden_active "Namespace destruction removes persisted state and should be treated as destructive.") );
     ( "masc_force_leave",
       with_semantic_flags ~destructive:true
-        (hidden_active "Forced membership removal mutates room state and should be treated as destructive.") );
+        (hidden_active "Forced membership removal mutates namespace state and should be treated as destructive.") );
     ( "masc_force_remove_agent",
       with_semantic_flags ~destructive:true
-        (hidden_active "Forced agent removal mutates room state and should be treated as destructive.") );
+        (hidden_active "Forced agent removal mutates namespace state and should be treated as destructive.") );
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
         (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );

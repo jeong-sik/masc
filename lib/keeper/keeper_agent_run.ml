@@ -365,13 +365,11 @@ let run_turn
     "masc_code_git", "깃 커밋 브랜치 로그 이력";
     "masc_governance_status", "거버넌스 상태 규칙 정책";
     "masc_governance_feed", "거버넌스 피드 이벤트 로그";
-    "masc_governance_report", "거버넌스 보고서 리포트";
     "masc_governance_set", "거버넌스 설정 규칙 변경";
     "masc_autoresearch_start", "자동연구 리서치 시작";
     "masc_autoresearch_status", "자동연구 리서치 상태";
     "masc_autoresearch_stop", "자동연구 리서치 중지";
     "masc_autoresearch_cycle", "자동연구 리서치 사이클 실행";
-    "masc_autoresearch_search_findings", "자동연구 결과 검색 발견";
     "masc_plan_get", "계획 플랜 마일스톤 로드맵 프로젝트 전략";
     "masc_plan_update", "계획 플랜 수정 업데이트";
     "masc_plan_init", "계획 플랜 초기화 생성";
@@ -665,7 +663,10 @@ let run_turn
     Agent_sdk.Context_reducer.keep_last 30;
     Agent_sdk.Context_reducer.clear_tool_results ~keep_recent:2;
     Agent_sdk.Context_reducer.merge_contiguous;
-    Agent_sdk.Context_reducer.from_context_config ~max_tokens ();
+    (* max_context = model's input context window (e.g., 8192 for 8K models).
+       max_tokens = output generation limit (e.g., 2048).
+       The reducer needs the context window, not the output budget. *)
+    Agent_sdk.Context_reducer.from_context_config ~max_tokens:max_context ();
   ] in
   (* 8. Run Agent *)
   let contract =

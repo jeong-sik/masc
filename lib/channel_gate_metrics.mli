@@ -1,4 +1,4 @@
-(** Channel_gate_metrics -- per-channel message counters and status.
+(** Channel_gate_metrics -- connector diagnostics, outcomes, latency, and status.
 
     Thread-safe via [Eio_guard.with_mutex]. Call [record_attempt]
     for every gate ingress, including validation failures and duplicates,

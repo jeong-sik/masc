@@ -55,6 +55,7 @@ val append_metrics_snapshot :
   message_count:int ->
   compaction:Keeper_exec_context.compaction_event ->
   handoff_json:Yojson.Safe.t option ->
+  ?deliberation_execution:Keeper_deliberation.execution_result ->
   unit ->
   unit
 

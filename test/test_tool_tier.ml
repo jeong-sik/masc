@@ -24,7 +24,7 @@ let () =
           test_case "contains expected core tools" `Quick (fun () ->
               let essential =
                 [
-                  "masc_join"; "masc_leave"; "masc_status"; "masc_set_room";
+                  "masc_join"; "masc_leave"; "masc_status"; "masc_start";
                   "masc_add_task"; "masc_claim_next"; "masc_transition";
                   "masc_tasks"; "masc_broadcast"; "masc_heartbeat";
                   "masc_messages"; "masc_worktree_create";

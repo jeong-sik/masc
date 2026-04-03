@@ -18,8 +18,8 @@ let schema_properties entries = `Assoc entries
 let strict_action_enums =
   [
     `String "broadcast";
-    `String "room_pause";
-    `String "room_resume";
+    `String "namespace_pause";
+    `String "namespace_resume";
     `String "social_sweep";
     `String "team_note";
     `String "team_broadcast";
@@ -35,19 +35,20 @@ let strict_action_enums =
 
 let legacy_action_alias_enums =
   [ `String "team_turn"; `String "keeper_msg"; `String "task_inject";
+    `String "room_pause"; `String "room_resume";
     `String "autonomy_tick" ]
 
 let target_type_enums =
-  [ `String "room"; `String "team_session"; `String "keeper"; `String "review_item" ]
+  [ `String "namespace"; `String "team_session"; `String "keeper"; `String "review_item" ]
 
 let snapshot_schema ~remote =
   {
     name = "masc_operator_snapshot";
     description =
       if remote then
-        "Read the unified operator control-plane state. Use this when you need current room, session, keeper, message, and pending-confirm data before taking action."
+        "Read the unified operator control-plane state. Use this when you need current namespace, session, keeper, message, and pending-confirm data before taking action."
       else
-        "Read unified operator state for room, team sessions, keepers, recent messages, and pending confirmations. Use this before issuing control-plane actions.";
+        "Read unified operator state for the default namespace, team sessions, keepers, recent messages, and pending confirmations. Use this before issuing control-plane actions.";
     input_schema =
       `Assoc
         [
@@ -64,10 +65,10 @@ let snapshot_schema ~remote =
         ];
   }
 
-let digest_target_type_enums = [ `String "room"; `String "team_session" ]
+let digest_target_type_enums = [ `String "namespace"; `String "team_session" ]
 let judgment_surface_enums =
   [
-    `String "command.warroom";
+    `String "command.namespace";
     `String "command.swarm";
     `String "intervene";
   ]
@@ -77,9 +78,9 @@ let digest_schema ~remote =
     name = "masc_operator_digest";
     description =
       if remote then
-        "Read an intervention-oriented operator digest. Use this when you need room or team-session health, attention items, command-plane search or microarch signals, worker summaries, and recommended next actions before deciding how to intervene."
+        "Read an intervention-oriented operator digest. Use this when you need namespace or team-session health, attention items, command-plane search or microarch signals, worker summaries, and recommended next actions before deciding how to intervene."
       else
-        "Read a high-signal operator digest with intervention recommendations for the room or a specific team session. Use this when raw snapshot data is too low-level for fast supervision and you want translated command-plane search or microarch signals.";
+        "Read a high-signal operator digest with intervention recommendations for the default namespace or a specific team session. Use this when raw snapshot data is too low-level for fast supervision and you want translated command-plane search or microarch signals.";
     input_schema =
       `Assoc
         [
@@ -123,9 +124,9 @@ let collaboration_evidence_schema ~remote =
     name = "masc_collaboration_evidence";
     description =
       if remote then
-        "Read session or room collaboration evidence counts, proof verdict, and evidence refs. Use this to verify whether agents actually interacted."
+        "Read session or namespace collaboration evidence counts, proof verdict, and evidence refs. Use this to verify whether agents actually interacted."
       else
-        "Read session or room collaboration evidence counts, proof verdict, relation-backend state, and evidence refs. Use this instead of inferring collaboration from labels or relation graphs alone.";
+        "Read session or namespace collaboration evidence counts, proof verdict, relation-backend state, and evidence refs. Use this instead of inferring collaboration from labels or relation graphs alone.";
     input_schema =
       `Assoc
         [
@@ -147,9 +148,9 @@ let action_schema ~remote =
     name = "masc_operator_action";
     description =
       if remote then
-        "Preview or run a structured operator action. Use this when you need to broadcast, steer a team session, pause a room, or message a keeper through the remote operator surface. Use social_sweep for immediate public-square social processing."
+        "Preview or run a structured operator action. Use this when you need to broadcast, steer a team session, pause a namespace, or message a keeper through the remote operator surface. Use social_sweep for immediate public-square social processing."
       else
-        "Run a structured operator action against the room, a team session, or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions. Use social_sweep for immediate public-square social processing.";
+        "Run a structured operator action against the namespace, a team session, or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions. Use social_sweep for immediate public-square social processing.";
     input_schema =
       `Assoc
         [
@@ -206,7 +207,7 @@ let judgment_write_schema =
   {
     name = "masc_operator_judgment_write";
     description =
-      "Internal operator-judge write path. Use this to store a durable operator judgment for room or team-session supervision. Hidden from the default catalog and intended for keeper/automation experiments.";
+      "Internal operator-judge write path. Use this to store a durable operator judgment for namespace or team-session supervision. Hidden from the default catalog and intended for keeper/automation experiments.";
     input_schema =
       `Assoc
         [
@@ -251,7 +252,7 @@ let judgment_latest_schema =
   {
     name = "masc_operator_judgment_latest";
     description =
-      "Internal operator-judge read path. Returns the latest stored operator judgment for a room or team session. Hidden from the default catalog.";
+      "Internal operator-judge read path. Returns the latest stored operator judgment for a namespace or team session. Hidden from the default catalog.";
     input_schema =
       `Assoc
         [
@@ -277,7 +278,6 @@ let judgment_latest_schema =
           ("required", `List [ `String "surface"; `String "target_type" ]);
         ];
   }
-
 let json_string_of_result = function
   | Ok json -> (true, Yojson.Safe.to_string json)
   | Error message -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String message) ]))
@@ -333,10 +333,6 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
   | "masc_operator_judgment_write" ->
       Some
         (json_string_of_result (Operator_control.judgment_write_json control_ctx args))
-  | "masc_operator_judgment_latest" ->
-      Some
-        (json_string_of_result
-           (Operator_control.judgment_latest_json control_ctx args))
   | _ -> None
 
 let schemas : tool_schema list =
@@ -348,7 +344,6 @@ let schemas : tool_schema list =
     surface_audit_schema ~remote:false;
     collaboration_evidence_schema ~remote:false;
     judgment_write_schema;
-    judgment_latest_schema;
   ]
 
 let remote_schemas : tool_schema list =
@@ -372,7 +367,7 @@ let _tool_spec_read_only = [ "masc_operator_snapshot"; "masc_operator_digest"; "
 let _tool_spec_requires_join = [ "masc_operator_action"; "masc_operator_confirm" ]
 
 (* Tools with explicit catalog metadata that must be preserved. *)
-let _tool_spec_hidden = [ "masc_operator_judgment_write"; "masc_operator_judgment_latest" ]
+let _tool_spec_hidden = [ "masc_operator_judgment_write" ]
 let _tool_spec_hidden_destructive = [ "masc_operator_action" ]
 
 let () =

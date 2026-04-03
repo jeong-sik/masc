@@ -18,7 +18,7 @@ let test_task_inject_executes_immediately () =
             [
               ("actor", `String "operator");
               ("action_type", `String "task_inject");
-              ("target_type", `String "room");
+              ("target_type", `String "namespace");
               ( "payload",
                 `Assoc
                   [
@@ -340,8 +340,8 @@ let test_review_resolve_hides_matching_item () =
            (`Assoc
              [
                ("actor", `String "dashboard");
-               ("action_type", `String "room_pause");
-               ("target_type", `String "room");
+               ("action_type", `String "namespace_pause");
+               ("target_type", `String "namespace");
                ("payload", `Assoc [ ("reason", `String "queue test") ]);
              ])
        with
@@ -405,8 +405,8 @@ let test_review_defer_moves_item_to_deferred_queue () =
            (`Assoc
              [
                ("actor", `String "dashboard");
-               ("action_type", `String "room_pause");
-               ("target_type", `String "room");
+               ("action_type", `String "namespace_pause");
+               ("target_type", `String "namespace");
                ("payload", `Assoc [ ("reason", `String "queue defer test") ]);
              ])
        with

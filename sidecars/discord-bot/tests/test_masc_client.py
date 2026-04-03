@@ -143,3 +143,17 @@ def test_config_allows_zero_disable_values(monkeypatch: pytest.MonkeyPatch) -> N
     assert cfg.keeper_cache_ttl_sec == 0
     assert cfg.gate_breaker_failure_threshold == 0
     assert cfg.gate_breaker_reset_sec == 0
+
+
+def test_transport_failure_log_mentions_disabled_breaker(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = make_client(httpx.MockTransport(lambda request: httpx.Response(200, json={})))
+    client._breaker_failure_threshold = 0  # pyright: ignore[reportPrivateUsage]
+    client._breaker_reset_sec = 0  # pyright: ignore[reportPrivateUsage]
+
+    with caplog.at_level(logging.WARNING):
+        client._note_transport_failure("gate timeout")  # pyright: ignore[reportPrivateUsage]
+
+    assert "breaker disabled" in caplog.text
+    assert "1/0" not in caplog.text

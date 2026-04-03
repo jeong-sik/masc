@@ -14,18 +14,18 @@ export { AttentionCard } from './mission-attention-card'
 export function MissionContextBar({
   cluster,
   project,
-  room,
+  namespace,
   generatedAt,
 }: {
   cluster?: string
   project?: string
-  room?: string | null
+  namespace?: string | null
   generatedAt?: string
 }) {
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3">
       <${StatCell} label="프로젝트" value=${project ?? '확인 없음'} />
-      <${StatCell} label="방" value=${room ?? '기본 방'} />
+      <${StatCell} label="네임스페이스" value=${namespace ?? 'default'} />
       <${StatCell} label="갱신 시각" value=${generatedAt ? relativeTime(generatedAt) : '기록 없음'} />
       ${cluster && cluster !== 'unknown'
         ? html`<${StatCell} label="배포 메타" value=${cluster} />`

@@ -26,7 +26,7 @@ let test_nested_no_deadlock () =
     (`Assoc [("inner", `String "inner_ok")])
     result
 
-(* -- 2. Triple nesting (mirrors room-truth -> execution -> snapshot) -------- *)
+(* -- 2. Triple nesting (mirrors namespace-truth -> execution -> snapshot) --- *)
 
 let test_triple_nesting () =
   Dashboard_cache.invalidate_all ();

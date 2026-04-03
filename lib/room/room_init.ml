@@ -88,9 +88,12 @@ let init config ~agent_name =
     } in
     write_state config state;
 
-    (* Create empty backlog *)
-    let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
-    write_backlog config backlog;
+    (* Preserve a migrated backlog when blocking bootstrap has already
+       promoted legacy room state into the flattened root namespace. *)
+    if not (path_exists config (backlog_path config)) then begin
+      let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
+      write_backlog config backlog
+    end;
 
     let result = "✅ MASC room created!" in
 

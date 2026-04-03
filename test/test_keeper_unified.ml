@@ -6,6 +6,7 @@ module UT = Masc_mcp.Keeper_unified_turn
 module KAR = Masc_mcp.Keeper_agent_run
 module KEC = Masc_mcp.Keeper_exec_context
 module KSM = Masc_mcp.Keeper_social_model
+module KD = Masc_mcp.Keeper_deliberation
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
@@ -798,6 +799,10 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
               };
         }
       in
+      let deliberation_execution =
+        KD.baseline_execution_result
+          (KD.empty_world_observation ~keeper_name:minimal_meta.name)
+      in
       UT.append_metrics_snapshot
         ~config
         ~meta:minimal_meta
@@ -822,6 +827,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
             saved_tokens = 0;
           }
         ~handoff_json:None
+        ~deliberation_execution
         ();
       let metrics_store =
         Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
@@ -849,7 +855,13 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
           json |> member "cascade" |> member "attempt_details_available" |> to_bool);
       check string "attempt detail boundary persisted" "oas_metrics_callbacks"
         Yojson.Safe.Util.(
-          json |> member "cascade" |> member "attempt_details_source" |> to_string))
+          json |> member "cascade" |> member "attempt_details_source" |> to_string);
+      check string "action source persisted" "baseline"
+        Yojson.Safe.Util.(json |> member "action_source" |> to_string);
+      check string "nested deliberation execution source persisted" "baseline"
+        Yojson.Safe.Util.(
+          json |> member "deliberation_execution" |> member "action_source"
+          |> to_string))
 
 let test_context_overflow_limit_parses_common_oas_errors () =
   check (option int) "available context size extracted" (Some 159671)

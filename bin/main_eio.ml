@@ -29,7 +29,6 @@ module Dashboard_mission = Masc_mcp.Dashboard_mission
 module Dashboard_proof = Masc_mcp.Dashboard_proof
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Build_identity = Masc_mcp.Build_identity
-module Tool_audit = Masc_mcp.Tool_audit
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Types
 module Tempo = Masc_mcp.Tempo
@@ -281,6 +280,7 @@ let acquire_pid_lock port =
       exit 1
 
 let run_cmd host port base_path =
+  Printexc.record_backtrace true;
   acquire_pid_lock port;
   Log.init_from_env ();
   Unix.putenv "MASC_BASE_PATH" base_path;
@@ -346,17 +346,39 @@ let run_cmd host port base_path =
             Log.Server.info
               "[MASC] Sent shutdown notification to %d SSE clients"
               (Sse.client_count ());
-            Eio.Time.sleep clock 0.2;
-            Masc_mcp.Shutdown_hooks.run_all ();
-            (try Board_dispatch.flush ()
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | _ ->
-               Log.Server.warn
-                 "[Shutdown] Board flush skipped (not initialized)");
-            (* Return normally — Eio.Fiber.first will cancel run_server
-               cleanly via Eio.Cancel.Cancelled, avoiding "Multiple
-               exceptions" from raising Shutdown + Cancelled together. *)
+            Eio.Time.sleep clock shutdown_cfg.notify_delay_s;
+            (* Phase 2: Run shutdown hooks with cleanup timeout *)
+            Log.Server.info "[Shutdown] Phase: hooks (timeout=%.1fs)"
+              shutdown_cfg.cleanup_timeout_s;
+            (try
+              Eio.Time.with_timeout_exn clock shutdown_cfg.cleanup_timeout_s
+                (fun () -> Masc_mcp.Shutdown_hooks.run_all ())
+            with
+            | Eio.Time.Timeout ->
+                Log.Server.warn
+                  "[Shutdown] hooks timeout after %.1fs, proceeding"
+                  shutdown_cfg.cleanup_timeout_s
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Log.Server.warn
+                  "[Shutdown] hooks failed, proceeding: %s"
+                  (Printexc.to_string exn));
+            (* Phase 3: Board flush with 2s timeout *)
+            Log.Server.info "[Shutdown] Phase: board flush (timeout=2.0s)";
+            (try
+              Eio.Time.with_timeout_exn clock 2.0
+                (fun () -> Board_dispatch.flush ())
+            with
+            | Eio.Time.Timeout ->
+                Log.Server.warn "[Shutdown] Board flush timeout, skipping"
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Log.Server.warn
+                  "[Shutdown] Board flush skipped: %s"
+                  (Printexc.to_string exn));
+            (* Phase 4: Return normally — Eio.Fiber.first will cancel
+               run_server cleanly via Eio.Cancel.Cancelled. *)
+            Log.Server.info "[Shutdown] Phase: server cancel";
             ()
       in
       Eio.Fiber.first
@@ -383,6 +405,17 @@ let run_cmd host port base_path =
         exit 1
     | Unix.Unix_error (Unix.EACCES, _, _) ->
         Log.Server.error "[FATAL] Permission denied binding to port %d" port;
+        exit 1
+    | Out_of_memory ->
+        Printf.eprintf "[FATAL] Out_of_memory\n%!";
+        exit 1
+    | Stack_overflow ->
+        Printf.eprintf "[FATAL] Stack_overflow\n%!";
+        exit 1
+    | exn ->
+        let bt = Printexc.get_backtrace () in
+        Log.Server.error "[FATAL] Unhandled exception: %s" (Printexc.to_string exn);
+        if bt <> "" then Log.Server.error "[FATAL] Backtrace:\n%s" bt;
         exit 1)
   in
   try_start 0;

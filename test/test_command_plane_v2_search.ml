@@ -220,3 +220,114 @@ let test_invalid_search_strategy_is_rejected () =
           Alcotest.(check string) "validation error"
             "unsupported search_strategy: made_up_strategy" message)
 
+let test_best_first_search_skips_units_blocked_by_tool_allowlist () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let owner = "owner-root-node" in
+      let alpha_lead = "alpha-lead-node" in
+      let alpha_two = "alpha-two-node" in
+      let approved_lead = "approved-lead-node" in
+      let blocked_lead = "blocked-lead-node" in
+      with_eio_test base_dir @@ fun config ->
+      setup_company_and_platoon config ~owner ~alpha_lead ~alpha_two;
+      ignore (Room.join config ~agent_name:approved_lead ~capabilities:[] ());
+      ignore (Room.join config ~agent_name:blocked_lead ~capabilities:[] ());
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "platoon-alpha");
+            ("kind", `String "platoon");
+            ("label", `String "Alpha Platoon");
+            ("parent_unit_id", `String "company-main");
+            ("leader_id", `String alpha_lead);
+            ( "roster",
+              `List
+                [
+                  `String alpha_lead;
+                  `String alpha_two;
+                  `String approved_lead;
+                  `String blocked_lead;
+                ] );
+          ]);
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "squad-approved");
+            ("kind", `String "squad");
+            ("label", `String "Approved Squad");
+            ("parent_unit_id", `String "platoon-alpha");
+            ("leader_id", `String approved_lead);
+            ("roster", `List [ `String approved_lead ]);
+            ( "capability_profile",
+              `List
+                [
+                  `String "tool:approved_tool";
+                  `String "model:qwen";
+                  `String "runtime:codex";
+                ] );
+            ( "policy",
+              `Assoc
+                [ ("tool_allowlist", `List [ `String "approved_tool" ]) ] );
+          ]);
+      unit_update_exn config ~actor:"owner"
+        (`Assoc
+          [
+            ("unit_id", `String "squad-blocked");
+            ("kind", `String "squad");
+            ("label", `String "Blocked Squad");
+            ("parent_unit_id", `String "platoon-alpha");
+            ("leader_id", `String blocked_lead);
+            ("roster", `List [ `String blocked_lead ]);
+            ( "capability_profile",
+              `List
+                [
+                  `String "tool:code_write";
+                  `String "model:qwen";
+                  `String "runtime:codex";
+                ] );
+            ( "policy",
+              `Assoc
+                [ ("tool_allowlist", `List [ `String "approved_tool" ]) ] );
+          ]);
+      let op =
+        start_operation_exn config ~actor:"owner"
+          (`Assoc
+            [
+              ("assigned_unit_id", `String "platoon-alpha");
+              ("objective", `String "Implement approved tool change");
+              ("workload_profile", `String "coding_task");
+              ("stage", `String "implement");
+              ("search_strategy", `String "best_first_v1");
+            ])
+      in
+      let plan =
+        Command_plane_v2.dispatch_plan_json config
+          (`Assoc [ ("operation_id", `String op.operation_id) ])
+      in
+      let recommended =
+        plan |> Yojson.Safe.Util.member "recommended_units"
+        |> Yojson.Safe.Util.to_list
+      in
+      Alcotest.(check int) "only one recommended unit survives policy gate" 1
+        (List.length recommended);
+      Alcotest.(check string) "approved squad is recommended"
+        "squad-approved"
+        (recommended |> List.hd |> Yojson.Safe.Util.member "unit"
+       |> Yojson.Safe.Util.member "unit_id"
+       |> Yojson.Safe.Util.to_string);
+      ignore
+        (unwrap_ok
+           (Command_plane_v2.dispatch_tick_json config ~actor:"owner"
+              (`Assoc [ ("operation_id", `String op.operation_id) ])));
+      let op_json =
+        Command_plane_v2.operation_status_json config ~operation_id:op.operation_id
+          ()
+      in
+      Alcotest.(check string) "tick assigns approved squad" "squad-approved"
+        (op_json |> Yojson.Safe.Util.member "operations"
+       |> Yojson.Safe.Util.index 0
+       |> Yojson.Safe.Util.member "operation"
+       |> Yojson.Safe.Util.member "assigned_unit_id"
+       |> Yojson.Safe.Util.to_string))

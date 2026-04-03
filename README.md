@@ -4,7 +4,7 @@
 
 `masc-mcp` is an OCaml 5.x + Eio MCP server that keeps multiple coding agents coordinated inside one repository.
 
-It is built for repo-local, single-machine, trusted-network workflows where several AI agents need shared room state, task ownership, broadcasts, worktrees, and supervisor-visible proof instead of ad-hoc terminal coordination.
+It is built for repo-local, single-machine, trusted-network workflows where several AI agents need shared coordination state in the default project namespace, task ownership, broadcasts, worktrees, and supervisor-visible proof instead of ad-hoc terminal coordination.
 
 Current product posture:
 
@@ -134,7 +134,7 @@ The shortest reliable entry path is still:
 masc_start(path="/your/project", task_title="My first task")
 ```
 
-Canonical room/task hygiene:
+Canonical namespace/task hygiene:
 
 - `masc_set_room`
 - `masc_join`
@@ -188,9 +188,9 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - `POST /mcp` expects `Accept: application/json, text/event-stream`.
 - Legacy `/sse` and `/messages` endpoints are deprecated.
 - Binding to `0.0.0.0` or `::` enables strict auth on MCP routes.
-- Local `/mcp` is the full MCP surface and should be treated as local-first. On non-loopback bind it fails closed unless room auth is enabled with `require_token=true`.
+- Local `/mcp` is the full MCP surface and should be treated as local-first. On non-loopback bind it fails closed unless MASC auth is enabled with `require_token=true`.
 - `/mcp/operator` is bearer-token only and intentionally exposes a smaller remote-safe surface.
-- Remote-safe exposure means `/mcp/operator` only. Do not expose the full `/mcp` surface to external clients unless you intentionally want the full room tool inventory behind bearer auth.
+- Remote-safe exposure means `/mcp/operator` only. Do not expose the full `/mcp` surface to external clients unless you intentionally want the full coordination tool inventory behind bearer auth.
 
 ## Product and Planning Docs
 

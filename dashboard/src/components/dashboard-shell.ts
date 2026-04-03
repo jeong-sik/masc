@@ -5,7 +5,7 @@ import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-store'
-import { roomTruthInitializing } from '../room-truth-store'
+import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { Overview } from './overview/overview'
 import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
@@ -16,6 +16,7 @@ import {
   visibleSectionItemsForTab,
 } from '../config/navigation'
 import { RouteLink } from './common/route-link'
+import { ChevronRight, ChevronLeft } from 'lucide-preact'
 
 const buildIdentityOpen = signal(false)
 
@@ -181,7 +182,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
           onClick=${onToggle}
           title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
         >
-          ${collapsed ? '\u25B6' : '\u25C0'}
+          ${collapsed ? html`<${ChevronRight} size=${16} />` : html`<${ChevronLeft} size=${16} />`}
         </button>
       </div>
 
@@ -311,7 +312,7 @@ function SurfaceLead() {
 }
 
 export function DashboardMain() {
-  if (dashboardLoading.value && !connected.value && !roomTruthInitializing.value) {
+  if (dashboardLoading.value && !connected.value && !namespaceTruthInitializing.value) {
     return html`<div class="loading-state loading-pulse">대시보드 불러오는 중...</div>`
   }
 
@@ -325,7 +326,7 @@ export function DashboardMain() {
     .join(':')
 
   return html`
-    ${roomTruthInitializing.value ? html`
+    ${namespaceTruthInitializing.value ? html`
       <div class="mb-3 shrink-0 rounded-xl border border-solid border-[rgba(230,167,0,0.22)] bg-[rgba(230,167,0,0.1)] px-4 py-1.5 text-center text-[0.78rem] text-[#e6a700]">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
     ` : null}
     <${SurfaceLead} />

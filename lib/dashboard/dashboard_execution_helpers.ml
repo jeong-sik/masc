@@ -65,6 +65,7 @@ type tool_audit_snapshot = {
   allowed_tool_names : string list;
   latest_tool_names : string list;
   latest_tool_call_count : int option;
+  latest_action_source : string option;
   tool_audit_source : string option;
   tool_audit_at : string option;
 }
@@ -166,6 +167,7 @@ let tool_audit_snapshot agent_name =
         allowed_tool_names = task.allowed_tools;
         latest_tool_names = [];
         latest_tool_call_count = None;
+        latest_action_source = None;
         tool_audit_source = Some "heartbeat_task";
         tool_audit_at = Some task.created_at;
       }
@@ -174,6 +176,7 @@ let tool_audit_snapshot agent_name =
         allowed_tool_names = task.allowed_tools;
         latest_tool_names = result.tool_names;
         latest_tool_call_count = Some result.tool_call_count;
+        latest_action_source = None;
         tool_audit_source = Some "heartbeat_result";
         tool_audit_at = Some result.updated_at;
       }
@@ -182,6 +185,7 @@ let tool_audit_snapshot agent_name =
         allowed_tool_names = task.allowed_tools;
         latest_tool_names = [];
         latest_tool_call_count = None;
+        latest_action_source = None;
         tool_audit_source = Some "heartbeat_task";
         tool_audit_at = Some task.created_at;
       }
@@ -190,6 +194,7 @@ let tool_audit_snapshot agent_name =
         allowed_tool_names = [];
         latest_tool_names = result.tool_names;
         latest_tool_call_count = Some result.tool_call_count;
+        latest_action_source = None;
         tool_audit_source = Some "heartbeat_result";
         tool_audit_at = Some result.updated_at;
       }
@@ -198,6 +203,7 @@ let tool_audit_snapshot agent_name =
         allowed_tool_names = [];
         latest_tool_names = [];
         latest_tool_call_count = None;
+        latest_action_source = None;
         tool_audit_source = None;
         tool_audit_at = None;
       }

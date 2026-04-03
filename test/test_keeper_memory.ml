@@ -28,7 +28,7 @@ let room_message content =
     msg_type = "broadcast";
     content;
     mention = None;
-    timestamp = "2026-03-12T00:00:00Z";
+    timestamp = "2026-03-12T00:00:00Z"; trace_context = None;
   }
 
 let test_any_mentioned_exact_target () =

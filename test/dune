@@ -329,7 +329,8 @@
         test_fire_task
         test_task_sandbox
         test_governance_yojson_roundtrip
-        test_eval_calibration)
+        test_eval_calibration
+        test_otel_trace_context)
  (modules
         test_runtime_params
         test_config_dir_resolver
@@ -475,7 +476,8 @@
         test_fire_task
         test_task_sandbox
         test_governance_yojson_roundtrip
-        test_eval_calibration)
+        test_eval_calibration
+        test_otel_trace_context)
  (libraries masc_test_deps))
 
 ; ============================================================

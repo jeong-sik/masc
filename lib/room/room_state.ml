@@ -433,7 +433,7 @@ let ensure_room_bootstrap config room_id =
 (* Broadcast                                    *)
 (* ============================================ *)
 
-let broadcast config ~from_agent ~content =
+let broadcast ?trace_context config ~from_agent ~content =
   ensure_initialized config;
   let seq = next_seq config in
   let mention = Mention.extract content in
@@ -446,6 +446,7 @@ let broadcast config ~from_agent ~content =
     content = safe_content;
     mention;
     timestamp = now_iso ();
+    trace_context;
   } in
   let msg_file =
     Filename.concat (messages_dir config)

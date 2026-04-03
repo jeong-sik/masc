@@ -216,10 +216,6 @@ let check_safety ~content =
   let len = String.length content in
   if len > 20 && uppercase_ratio content > 0.8 then
     Warn "excessive capitalization (possible shouting)"
-  else if url_density content > 0.5 then
-    Fail "content is predominantly URLs (spam indicator)"
-  else if url_density content > 0.3 then
-    Warn "high URL density"
   else
     Pass
 

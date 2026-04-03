@@ -13,7 +13,7 @@ type drift_signal =
   | Cascade_length_change of { original : int; current : int }
 
 type unsafe_edit_signal =
-  | Destructive_tool of string
+  | Autonomous_execution_scope of string
   | Zero_repair_budget
   | High_risk_class
 
@@ -74,32 +74,6 @@ let compute_drift_risk (session : Team_session_types.session)
 
 (* --- Unsafe edit risk computation --- *)
 
-(** Known destructive tool name patterns. *)
-let destructive_patterns =
-  [
-    "git_push"; "git_reset"; "rm_"; "delete_"; "drop_"; "truncate_";
-    "force_"; "destroy_"; "remove_file"; "remove_dir";
-  ]
-
-let is_destructive_tool_name name =
-  let lower = String.lowercase_ascii name in
-  List.exists
-    (fun pattern -> try String.sub lower 0 (String.length pattern) = pattern with Invalid_argument _ -> false)
-    destructive_patterns
-  || List.exists
-       (fun pattern ->
-         try
-           let pat_len = String.length pattern in
-           let name_len = String.length lower in
-           let rec check i =
-             if i + pat_len > name_len then false
-             else if String.sub lower i pat_len = pattern then true
-             else check (i + 1)
-           in
-           check 0
-         with Invalid_argument _ -> false)
-       destructive_patterns
-
 let compute_unsafe_edit_risk (session : Team_session_types.session)
     (worker_cards : Operator_digest_types.worker_card list) : unsafe_edit_signal list =
   let signals = ref [] in
@@ -119,23 +93,20 @@ let compute_unsafe_edit_risk (session : Team_session_types.session)
             signals := High_risk_class :: !signals
       | _ -> ())
     worker_cards;
-  (* Check for destructive tool patterns via worker spawn_agent names.
-     Full tool_names are only available from spawn events, not planned_worker.
-     We use spawn_agent as a heuristic — agents with destructive names
-     are likely to have destructive tools. *)
+  (* Check for autonomous execution scope in planned workers instead of tool name heuristic *)
   List.iter
     (fun (pw : Team_session_types.planned_worker) ->
-      if is_destructive_tool_name pw.spawn_agent then
-        signals := Destructive_tool pw.spawn_agent :: !signals)
+      match pw.execution_scope with
+      | Some Team_session_types_enums.Autonomous ->
+          signals := Autonomous_execution_scope pw.spawn_agent :: !signals
+      | _ -> ())
     session.planned_workers;
   List.rev !signals
 
 (* --- Ambiguity computation --- *)
 
 let compute_ambiguity (session : Team_session_types.session) : string option =
-  let goal_len = String.length (String.trim session.goal) in
-  if goal_len < 10 then Some "Goal is very short — may lack specificity"
-  else if
+  if
     Option.is_none session.delivery_contract
     && List.length session.planned_workers > 2
   then
@@ -183,11 +154,11 @@ let drift_signal_to_yojson (signal : drift_signal) : Yojson.Safe.t =
 
 let unsafe_edit_signal_to_yojson (signal : unsafe_edit_signal) : Yojson.Safe.t =
   match signal with
-  | Destructive_tool name ->
+  | Autonomous_execution_scope name ->
       `Assoc
         [
-          ("type", `String "destructive_tool");
-          ("tool_name", `String name);
+          ("type", `String "autonomous_execution_scope");
+          ("worker_name", `String name);
         ]
   | Zero_repair_budget ->
       `Assoc [ ("type", `String "zero_repair_budget") ]

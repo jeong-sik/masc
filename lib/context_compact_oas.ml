@@ -192,20 +192,14 @@ let summarize_old_messages ~(keep_recent : int)
 
     The score is a weighted sum of 4 factors:
 
-    - recency (0.40): Quadratic decay from newest (1.0) to oldest (0.0).
+    - recency (0.50): Quadratic decay from newest (1.0) to oldest (0.0).
       Quadratic rather than linear because recent context is disproportionately
       important — the keeper's current task depends on the last few turns,
       while early context is often superseded.
 
-    - role_weight (0.25): System (1.0) > Tool (0.7) > User (0.6) > Assistant (0.4).
+    - role_weight (0.35): System (1.0) > Tool (0.7) > User (0.6) > Assistant (0.4).
       System prompts are never dropped. Tool results contain ground truth.
       User messages carry intent. Assistant messages are reproducible via re-inference.
-
-    - content_weight (0.20): Length-based heuristic for information density.
-      <20 chars (0.3): acknowledgements ("ok", "done") — low info.
-      <100 chars (0.6): short commands or status — medium.
-      <500 chars (0.8): substantive content — high.
-      500+ chars (0.7): diminishing returns, often verbose tool output.
 
     - tool_weight (0.15): Messages with ToolUse/ToolResult (0.8) vs plain text (0.5).
       Tool interactions represent actions taken and should be preserved for
@@ -229,18 +223,12 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
       | Agent_sdk.Types.Assistant -> 0.4
     in
     let msg_text = Agent_sdk.Types.text_of_message m in
-    let len = String.length msg_text in
-    let content_w = if len < 20 then 0.3
-      else if len < 100 then 0.6
-      else if len < 500 then 0.8
-      else 0.7
-    in
     let has_tool_content = List.exists (function
       | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
       | _ -> false) m.content
     in
     let tool_w = if has_tool_content then 0.8 else 0.5 in
-    let score = 0.4 *. recency +. 0.25 *. role_w +. 0.2 *. content_w +. 0.15 *. tool_w in
+    let score = 0.5 *. recency +. 0.35 *. role_w +. 0.15 *. tool_w in
     let score =
       if starts_with ~prefix:memory_summary_prefix msg_text
          || starts_with ~prefix:_legacy_memory_summary_prefix msg_text

@@ -14,6 +14,7 @@ let registry_root_path config = Filename.concat (masc_root_dir config) "rooms.js
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
 
 let warned_legacy_room_roots = Atomic.make []
+let cached_legacy_room_roots = Atomic.make []
 
 let rec mark_legacy_room_warning_emitted masc_root =
   let warned = Atomic.get warned_legacy_room_roots in
@@ -39,7 +40,16 @@ let read_legacy_current_room config =
   else
     None
 
-let legacy_room_dirs_exist config =
+let rec cache_legacy_room_root masc_root =
+  let cached = Atomic.get cached_legacy_room_roots in
+  if List.mem masc_root cached then
+    ()
+  else if Atomic.compare_and_set cached_legacy_room_roots cached (masc_root :: cached) then
+    ()
+  else
+    cache_legacy_room_root masc_root
+
+let legacy_room_dirs_exist_uncached config =
   let path = rooms_root_dir config in
   Sys.file_exists path
   &&
@@ -47,22 +57,29 @@ let legacy_room_dirs_exist config =
     Sys.is_directory path && Array.length (Sys.readdir path) > 0
   with _ -> false
 
+let legacy_room_dirs_exist config =
+  let masc_root = masc_root_dir config in
+  if List.mem masc_root (Atomic.get cached_legacy_room_roots) then
+    true
+  else
+    let exists = legacy_room_dirs_exist_uncached config in
+    if exists then cache_legacy_room_root masc_root;
+    exists
+
+(* Validation logic mirrors Room_utils_ops.validate_room_id but returns
+   Option instead of Result.  Cannot call validate_room_id directly due to
+   cyclic dependency (paths_backend <-> ops).  Keep in sync. *)
+let room_id_re =
+  Re.compile Re.(whole_string (rep1 (alt [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '.'; char '_'; char '-'])))
+
 let normalize_current_room_label room_id =
   let room_id = String.trim room_id in
   if room_id = "" then None
   else if room_id = "." || room_id = ".." then None
   else if String.contains room_id '/' || String.contains room_id '\\' then None
   else if String_util.contains_substring room_id ".." then None
-  else if
-    not
-      (Re.execp
-         (Re.compile
-            Re.(whole_string (rep1 (alt [ rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '.'; char '_'; char '-' ]))))
-         room_id)
-  then
-    None
-  else
-    Some room_id
+  else if not (Re.execp room_id_re room_id) then None
+  else Some room_id
 
 let warn_if_legacy_room_state_exists config =
   let legacy_current_room =

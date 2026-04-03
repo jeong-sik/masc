@@ -261,9 +261,13 @@ module FileSystem = struct
       | Error _ -> false
       | Ok path ->
           (try
-             ignore (Eio.Path.load path : string);
-             Hashtbl.replace t.key_index key ();
-             true
+             match Eio.Path.kind ~follow:true path with
+             | `Regular_file ->
+                 Hashtbl.replace t.key_index key ();
+                 true
+             | _ ->
+                 Hashtbl.remove t.key_index key;
+                 false
            with _ ->
              Hashtbl.remove t.key_index key;
              false)

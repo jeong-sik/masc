@@ -6,6 +6,7 @@ import { StatusBadge } from '../common/status-badge'
 import { TimeAgo } from '../common/time-ago'
 import { FilterChips } from '../common/filter-chips'
 import { showToast } from '../common/toast'
+import { requestConfirm } from '../common/confirm-dialog'
 import { goals, refreshGoals } from '../../store'
 import { deleteGoal } from '../../api/actions'
 import type { Goal } from '../../types'
@@ -28,7 +29,12 @@ export function GoalRow({ goal }: { goal: Goal }) {
 
   async function handleDelete(e: Event) {
     e.stopPropagation()
-    if (!confirm(`"${goal.title}" 목표를 삭제하시겠습니까?`)) return
+    const confirmed = await requestConfirm({
+      title: '목표 삭제',
+      message: `"${goal.title}" 목표를 삭제하시겠습니까?`,
+      tone: 'danger'
+    })
+    if (!confirmed) return
     deletingGoalId.value = goal.id
     try {
       await deleteGoal(goal.id)

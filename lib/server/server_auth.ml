@@ -430,6 +430,15 @@ let authorize_token_bound_permission_request ~base_path ~permission request :
                      action = Types.show_permission permission;
                    }))
 
+let is_dashboard_bootstrap_path path =
+  String.starts_with ~prefix:"/api/v1/dashboard/" path
+
+let not_initialized_response path =
+  if is_dashboard_bootstrap_path path then
+    {|{"status":"initializing","message":"Server is warming up"}|}
+  else
+    {|{"error":"not initialized"}|}
+
 let rec with_public_read handler request reqd =
   let strict = http_auth_strict_enabled () in
   let path = Http_server_eio.Request.path request in
@@ -437,7 +446,7 @@ let rec with_public_read handler request reqd =
     with_read_auth handler request reqd
   else
     match !server_state with
-    | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+    | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
     | Some state -> handler state request reqd
 
 and with_read_auth handler request reqd =

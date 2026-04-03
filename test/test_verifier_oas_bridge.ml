@@ -258,11 +258,9 @@ let test_hook_skips_on_verify_error () =
     hook
       (Oas.Hooks.PreToolUse {
          tool_name = "keeper_bash";
-         tool_use_id = "tu-test-001";
          input = `Assoc [ ("cmd", `String "echo hi") ];
          accumulated_cost_usd = 0.0;
          turn = 1;
-         schedule = { planned_index = 0; batch_index = 0; batch_size = 1; concurrency_class = "" };
        })
   in
   Alcotest.(check bool) "verify called" true !verify_called;
@@ -284,11 +282,9 @@ let test_hook_readonly_skips_verifier () =
     hook
       (Oas.Hooks.PreToolUse {
          tool_name = "read file";
-         tool_use_id = "tu-test-002";
          input = `Assoc [ ("path", `String "README.md") ];
          accumulated_cost_usd = 0.0;
          turn = 1;
-         schedule = { planned_index = 0; batch_index = 0; batch_size = 1; concurrency_class = "" };
        })
   in
   Alcotest.(check bool) "verify skipped" false !verify_called;

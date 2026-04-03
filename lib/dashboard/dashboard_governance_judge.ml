@@ -4,7 +4,9 @@ type runtime_snapshot = {
   judge_online : bool;
   refreshing : bool;
   generated_at : string option;
+  generated_at_unix : float option;
   expires_at : string option;
+  expires_at_unix : float option;
   model_used : string option;
   keeper_name : string;
   last_error : string option;
@@ -178,7 +180,9 @@ let runtime_status_at ~now_ts base_path =
           | None -> false);
         refreshing = st.refreshing;
         generated_at = st.generated_at;
+        generated_at_unix = st.generated_at_unix;
         expires_at = st.expires_at;
+        expires_at_unix = st.expires_at_unix;
         model_used = st.model_used;
         keeper_name;
         last_error = st.last_error;

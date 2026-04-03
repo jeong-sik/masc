@@ -15,13 +15,19 @@ let retired_case_tracking_fields =
 
 let string_option_json = option_to_yojson (fun value -> `String value)
 
+let timestamp_option_json value unix_value =
+  match value, unix_value with
+  | Some iso, _ -> `String iso
+  | None, Some ts -> `String (Types.iso8601_of_unix_seconds ts)
+  | None, None -> `Null
+
 let judge_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot) =
   `Assoc
     [
       ("judge_online", `Bool runtime.judge_online);
       ("refreshing", `Bool runtime.refreshing);
-      ("generated_at", string_option_json runtime.generated_at);
-      ("expires_at", string_option_json runtime.expires_at);
+      ("generated_at", timestamp_option_json runtime.generated_at runtime.generated_at_unix);
+      ("expires_at", timestamp_option_json runtime.expires_at runtime.expires_at_unix);
       ("model_used", string_option_json runtime.model_used);
       ("keeper_name", `String runtime.keeper_name);
       ("last_error", string_option_json runtime.last_error);
@@ -40,7 +46,7 @@ let summary_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapsh
       ("oldest_open_case_age_s", `Null);
       ("last_activity_age_s", `Null);
       ("judge_online", `Bool runtime.judge_online);
-      ("judge_last_seen_at", string_option_json runtime.generated_at);
+      ("judge_last_seen_at", timestamp_option_json runtime.generated_at runtime.generated_at_unix);
     ]
 
 let factual_snapshot_json ~base_path:_ =

@@ -194,7 +194,7 @@ function governanceEmptyMessage(): string {
   const judgments = data?.judgments ?? []
   const lastActivityAge = data?.summary?.last_activity_age_s
 
-  if (data?.case_tracking_available === false) {
+  if (governanceCaseTrackingRetired()) {
     if (judgments.length > 0) {
       return '거버넌스 케이스 추적은 중단되었고, 아래 AI Judge 판단만 유지됩니다.'
     }

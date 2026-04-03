@@ -40,13 +40,24 @@ let write_legacy_judgment ~base_path json =
       output_string oc (Yojson.Safe.to_string json);
       output_char oc '\n')
 
+let with_test_fs env f =
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_fs with
+      | Some fs -> Fs_compat.set_fs fs
+      | None -> Fs_compat.clear_fs ())
+    (fun () ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      f ())
+
 let test_empty_governance_structure () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_fs env @@ fun () ->
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
       let json =
@@ -108,7 +119,7 @@ let test_runtime_status_and_judgments_are_live () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_fs env @@ fun () ->
       let now = Unix.gettimeofday () in
       let generated_at = iso8601_of_unix now in
       let expires_at_unix = now +. 3600.0 in
@@ -175,13 +186,47 @@ let test_runtime_status_and_judgments_are_live () =
       check string "judgment tool" "masc_operator_confirm"
         (first |> member "recommended_action" |> member "resolved_tool" |> to_string))
 
+let test_runtime_timestamps_fallback_to_unix_values () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      let expires_at_unix = now +. 600.0 in
+      let generated_at = iso8601_of_unix now in
+      let expires_at = iso8601_of_unix expires_at_unix in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.judge_online <- true;
+        st.generated_at <- None;
+        st.generated_at_unix <- Some now;
+        st.expires_at <- None;
+        st.expires_at_unix <- Some expires_at_unix;
+        st.model_used <- Some "llama:qwen3.5";
+        st.last_error <- None);
+      let json =
+        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+          ~status_filter:None
+      in
+      let open Yojson.Safe.Util in
+      let summary = json |> member "summary" in
+      check string "summary falls back to generated_at_unix" generated_at
+        (summary |> member "judge_last_seen_at" |> to_string);
+      let judge = json |> member "judge" in
+      check string "judge generated_at falls back to unix" generated_at
+        (judge |> member "generated_at" |> to_string);
+      check string "judge expires_at falls back to unix" expires_at
+        (judge |> member "expires_at" |> to_string))
+
 let test_governance_monitoring_uses_live_runtime () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_fs env @@ fun () ->
       let st = Lib.Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
       Lib.Dashboard_governance_judge.with_lock st (fun () ->
@@ -221,7 +266,7 @@ let test_governance_dir_created_before_read () =
         (Sys.file_exists judgments && Sys.is_directory judgments);
       (* read_recent on empty dir returns [] — dashboard_json should still work *)
       Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_test_fs env @@ fun () ->
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
       let json =
@@ -243,6 +288,8 @@ let () =
             test_factual_snapshot_marks_surface_retired;
           test_case "runtime status and judgments are live" `Quick
             test_runtime_status_and_judgments_are_live;
+          test_case "runtime timestamps fallback to unix values" `Quick
+            test_runtime_timestamps_fallback_to_unix_values;
           test_case "monitoring uses live runtime" `Quick
             test_governance_monitoring_uses_live_runtime;
         ] );

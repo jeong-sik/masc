@@ -160,7 +160,7 @@ SERVER_LOG_FILE="${MASC_MEMORY_LEAK_SERVER_LOG:-$(harness_mktemp_file masc-memor
 VALGRIND_LOG_FILE="${MASC_MEMORY_LEAK_VALGRIND_LOG:-$(harness_mktemp_file masc-memory-leak-valgrind .log)}"
 
 TEMP_BASE_PATH_CREATED=0
-if [[ "${BASE_PATH}" == /tmp/masc-memory-leak-root.* ]]; then
+if [[ ${BASE_PATH} == /tmp/masc-memory-leak-root.* ]]; then
   TEMP_BASE_PATH_CREATED=1
 fi
 

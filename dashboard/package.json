@@ -17,6 +17,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@formkit/auto-animate": "^0.9.0",
     "@preact/signals": "^2.0.2",
     "dompurify": "^3.3.3",
     "downshift": "^9.3.2",

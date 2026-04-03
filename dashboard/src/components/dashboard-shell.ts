@@ -331,7 +331,9 @@ export function DashboardMain() {
     ` : null}
     <${SurfaceLead} />
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
-      <${TabContent} />
+      <div class="animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-both">
+        <${TabContent} />
+      </div>
     <//>
   `
 }

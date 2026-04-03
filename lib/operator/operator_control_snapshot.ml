@@ -167,26 +167,30 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
         ( task.allowed_tools,
           result.tool_names,
           Some result.tool_call_count,
+          None,
           Some "heartbeat_task_pending_result",
           Some task.created_at )
       else
         ( task.allowed_tools,
           result.tool_names,
           Some result.tool_call_count,
+          None,
           Some "heartbeat_result",
           Some result.updated_at )
   | Some task, None ->
-      (task.allowed_tools, [], None, Some "heartbeat_task", Some task.created_at)
+      (task.allowed_tools, [], None, None, Some "heartbeat_task", Some task.created_at)
   | None, Some result ->
       ( fallback_allowed,
         result.tool_names,
         Some result.tool_call_count,
+        None,
         Some "heartbeat_result",
         Some result.updated_at )
   | None, None ->
       ( fallback_allowed,
         fallback_snapshot.latest_tool_names,
         fallback_snapshot.latest_tool_call_count,
+        fallback_snapshot.latest_action_source,
         fallback_snapshot.tool_audit_source,
         fallback_snapshot.tool_audit_at )
 
@@ -241,8 +245,8 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    ~meta ~keepalive_running ~keepalive_started_at ~now_ts
             in
             let allowed_tool_names, latest_tool_names, latest_tool_call_count,
-                tool_audit_source, tool_audit_at =
-              if lightweight then ([], [], None, None, None)
+                latest_action_source, tool_audit_source, tool_audit_at =
+              if lightweight then ([], [], None, None, None, None)
               else keeper_tool_audit_fields config meta
             in
             let agent_status =
@@ -297,6 +301,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                   ("latest_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
                   ("recent_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
                   ("latest_tool_call_count", option_to_json (fun value -> `Int value) latest_tool_call_count);
+                  ("latest_action_source", string_option_to_json latest_action_source);
                   ("tool_audit_source", string_option_to_json tool_audit_source);
                   ("tool_audit_at", string_option_to_json tool_audit_at);
                   ("updated_at", `String meta.updated_at);

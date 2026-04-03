@@ -434,6 +434,7 @@ let test_snapshot_keeper_tool_audit_uses_decision_log () =
           [
             ("ts", `String (Types.now_iso ()));
             ("selected_mode", `String "text_response");
+            ("action_source", `String "fallback_after_validation_failure");
             ("tool_call_count", `Int 0);
             ("tools_used", `List []);
           ]);
@@ -459,6 +460,9 @@ let test_snapshot_keeper_tool_audit_uses_decision_log () =
       let keeper = load_keeper_snapshot 10 in
       Alcotest.(check string) "decision log source exposed" "keeper_decision_log"
         (keeper |> member "tool_audit_source" |> to_string);
+      Alcotest.(check string) "decision log action source exposed"
+        "fallback_after_validation_failure"
+        (keeper |> member "latest_action_source" |> to_string);
       Alcotest.(check int) "decision log zero tool count exposed" 0
         (keeper |> member "latest_tool_call_count" |> to_int);
       Alcotest.(check bool) "decision log names remain empty" true

@@ -21,7 +21,7 @@ import {
   selectedAgentName,
   loading,
   detailError,
-  roomActivity,
+  namespaceActivity,
   taskHistories,
   mentionText,
   sendingMention,
@@ -86,7 +86,7 @@ export function AgentDetailOverlay() {
   const continuityBrief = continuityBriefForAgent(agentName)
   const missionBrief = missionAgentBrief(agentName)
   const ownedTasks = assignedTasks(agentName)
-  const lines = roomActivity.value
+  const lines = namespaceActivity.value
   const displayName = missionBrief?.display_name ?? keeper?.name ?? agentName
   const secondaryLabel = displayName !== agentName ? agentName : null
   const unified = resolveUnifiedStatus(keeper?.status, agent?.status, missionBrief?.signal_truth)

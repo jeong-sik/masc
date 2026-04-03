@@ -32,7 +32,7 @@ export type TaskHistoryRow = {
 export const selectedAgentName = signal<string | null>(null)
 export const loading = signal(false)
 export const detailError = signal('')
-export const roomActivity = signal<string[]>([])
+export const namespaceActivity = signal<string[]>([])
 export const taskHistories = signal<TaskHistoryRow[]>([])
 export const agentTimeline = signal<AgentTimelineResponse | null>(null)
 export const mentionText = signal('')
@@ -124,7 +124,7 @@ export function openAgentDetail(agentName: string): void {
 export function closeAgentDetail(): void {
   selectedAgentName.value = null
   detailError.value = ''
-  roomActivity.value = []
+  namespaceActivity.value = []
   taskHistories.value = []
   agentTimeline.value = null
   mentionText.value = ''
@@ -140,13 +140,13 @@ export async function refreshAgentDetail(): Promise<void> {
 
   loading.value = true
   detailError.value = ''
-  roomActivity.value = []
+  namespaceActivity.value = []
   taskHistories.value = []
   agentTimeline.value = null
   agentFitness.value = null
 
   try {
-    // Fetch room messages, task histories, timeline, and fitness in parallel
+    // Fetch namespace messages, task histories, timeline, and fitness in parallel
     const [lines, timelineResult, fitnessResult] = await Promise.all([
       fetchRoomMessages(80),
       fetchAgentTimeline(agentName, 24, 50).catch(() => null),
@@ -157,7 +157,7 @@ export async function refreshAgentDetail(): Promise<void> {
 
     const matchNames = agentMatchNames(agentName)
 
-    roomActivity.value = lines
+    namespaceActivity.value = lines
       .filter(line => {
         const lower = line.toLowerCase()
         return matchNames.some(name => lower.includes(name))

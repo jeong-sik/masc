@@ -165,5 +165,6 @@ describe('TransportHealthPanel', () => {
     expect(container.textContent).toContain('shared_http')
     expect(container.innerHTML).toContain('signaling down')
     expect(container.innerHTML).not.toContain('2 ICE')
+    expect(container.textContent).toContain('namespace default')
   })
 })

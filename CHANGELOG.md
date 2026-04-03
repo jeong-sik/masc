@@ -1,6 +1,28 @@
 # Changelog
 
 
+## [2.218.0] - 2026-04-03
+
+### Added
+- **Connector operations surfaces** -- enrich channel gate status, keeper discovery/status endpoints, Discord admin flows, and connector health visibility (#4740).
+- **Worker runtime image** -- add Dockerfile and build script for `masc-worker-runtime` image builds (#4708).
+- **Agent web search tool** -- expose a web search tool on keeper and agent surfaces (#4683).
+- **Cascade attempt observability** -- add dedicated cascade attempt observability hooks (#4676).
+
+### Fixed
+- **Harness truth semantics** -- mark dry-run artifacts as simulated, distinguish skip from pass, and derive swarm summary signals independently (#4703, #4692, #4690).
+- **Dashboard provenance truth** -- preserve unknown and synthetic actor state instead of collapsing to `dashboard` (#4718, #4714).
+- **Task and command-plane robustness** -- make `done -> done` idempotent and use deterministic failover leader selection (#4730, #4721).
+- **Keeper/runtime access policy** -- tighten read-only auth mapping, tool allowlists, runtime-only tool filtering, board wrapper filtering, and transient retry behavior (#4712, #4680, #4675, #4731, #4697, #4696).
+- **Test honesty** -- replace vacuous assertions with behavioral checks and update follow-up routing coverage (#4717, #4681).
+
+### Changed
+- **Keeper/operator diagnostics** -- harden keeper detail contracts, surface worker run visibility, and improve exec / autoboot path diagnostics (#4672, #4663, #4673, #4664, #4674).
+- **Tool surface cleanup** -- remove superseded ghost/research/config/council tool paths and keep shadow schemas visible in tools/list (#4726, #4719, #4705, #4679, #4716, #4725).
+- **Release guard posture** -- warn instead of blocking version-neutral PRs when the base branch is ahead of the latest tag (#4685).
+
+### Deprecated
+- **Broken / dead tools** -- deprecate the missing `masc-cost` CLI and 11 dead-feature tools ahead of removal (#4733, #4732).
 ## [2.217.1] - 2026-04-03
 
 ### Changed
@@ -8,7 +30,6 @@
 
 ### Deprecated
 - None.
-
 ## [2.217.0] - 2026-04-02
 
 ### Added

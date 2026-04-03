@@ -236,7 +236,6 @@ let command_plane_snapshot_http_json ~state =
                            ~error:"command_plane_snapshot_unavailable"
                            ~message:
                              "Command-plane snapshot is unavailable; enable proactive snapshot refresh or retry later."))
-        )
 
 let command_plane_topology_http_json ~state =
   Command_plane_v2.topology_json state.Mcp_server.room_config

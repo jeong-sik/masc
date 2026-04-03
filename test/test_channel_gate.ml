@@ -121,6 +121,22 @@ let test_validation_error_to_string () =
     (Channel_gate.validation_error_to_string
        (Channel_gate.Duplicate_message "dup"))
 
+let test_inbound_of_json_normalizes_channel_label () =
+  let json =
+    `Assoc [
+      ("channel", `String "  DisCord  ");
+      ("channel_user_id", `String "user-1");
+      ("channel_user_name", `String "user");
+      ("channel_room_id", `String "room-1");
+      ("keeper_name", `String "luna");
+      ("content", `String "hello");
+      ("idempotency_key", `String (unique_key "json"));
+    ]
+  in
+  match Channel_gate.inbound_of_json json with
+  | Ok msg -> check string "channel normalized" "discord" msg.channel
+  | Error err -> fail ("expected inbound json to parse: " ^ err)
+
 let () =
   Alcotest.run "Channel_gate"
     [
@@ -142,5 +158,7 @@ let () =
             test_validate_serializes_duplicate_race_under_eio;
           test_case "stringifies validation errors" `Quick
             test_validation_error_to_string;
+          test_case "normalizes inbound channel labels" `Quick
+            test_inbound_of_json_normalizes_channel_label;
         ] );
     ]

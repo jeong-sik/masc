@@ -49,12 +49,14 @@ let generate_uuid ~agent_name =
 
 (** {1 Channel Parsing} *)
 
-let channel_of_string s =
+let normalize_channel_label s =
   let normalized = String.trim s |> String.lowercase_ascii in
-  match normalized with
+  if normalized = "" then "unknown" else normalized
+
+let channel_of_string s =
+  match normalize_channel_label s with
   | "api" -> Api
   | "internal" -> Internal
-  | "" -> External "unknown"
   | other -> External other
 
 let string_of_channel = function

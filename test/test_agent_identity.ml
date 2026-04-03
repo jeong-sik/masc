@@ -93,6 +93,15 @@ let test_channel_roundtrip () =
       (Agent_identity.string_of_channel back = str)
   ) channels
 
+let test_channel_normalization () =
+  check string "trim + lowercase external" "discord"
+    (Agent_identity.normalize_channel_label "  DisCord  ");
+  check string "blank becomes unknown" "unknown"
+    (Agent_identity.normalize_channel_label "   ");
+  match Agent_identity.channel_of_string "  DisCord  " with
+  | Agent_identity.External "discord" -> ()
+  | _ -> fail "expected normalized opaque external channel"
+
 let test_same_agent () =
   let id1 = Agent_identity.from_agent_name "agent-a" in
   let id2 = { id1 with Agent_identity.last_seen = Unix.gettimeofday () +. 100.0 } in
@@ -353,9 +362,10 @@ let () =
       test_case "from_mcp_params_blank_session_key" `Quick test_from_mcp_params_blank_session_key;
       test_case "from_mcp_params_short_session_key" `Quick test_from_mcp_params_short_session_key;
       test_case "from_mcp_params_long_session_key_prefix" `Quick test_from_mcp_params_long_session_key_prefix;
-      test_case "anonymous" `Quick test_anonymous;
-      test_case "channel_roundtrip" `Quick test_channel_roundtrip;
-      test_case "same_agent" `Quick test_same_agent;
+          test_case "anonymous" `Quick test_anonymous;
+          test_case "channel_roundtrip" `Quick test_channel_roundtrip;
+          test_case "channel_normalization" `Quick test_channel_normalization;
+          test_case "same_agent" `Quick test_same_agent;
       test_case "to_display_string" `Quick test_to_display_string;
       test_case "to_display_string_empty_session_key" `Quick test_to_display_string_empty_session_key;
     ];

@@ -99,10 +99,6 @@ let dedup_table_size () =
 (* Register dedup_table_size callback to break cycle *)
 let () = Channel_gate_metrics.register_dedup_size_fn dedup_table_size
 
-let normalize_channel_label channel =
-  let normalized = String.trim channel |> String.lowercase_ascii in
-  if normalized = "" then "unknown" else normalized
-
 (* ── Validation (pure) ──────────────────────────────────────── *)
 
 let validation_error_to_string = function
@@ -179,7 +175,7 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
   match validate msg with
   | Error e ->
       Channel_gate_metrics.record_attempt
-        ~channel:(normalize_channel_label msg.channel)
+        ~channel:(Agent_identity.normalize_channel_label msg.channel)
         ~room_id:msg.channel_room_id
         ~keeper:(String.trim msg.keeper_name)
         ~duration_ms:0
@@ -200,7 +196,7 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
         config;
         agent_name =
           Printf.sprintf "gate:%s:%s"
-            (normalize_channel_label msg.channel)
+            (Agent_identity.normalize_channel_label msg.channel)
             msg.channel_user_id;
         sw;
         clock;
@@ -213,7 +209,7 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
           let duration_ms =
             int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
           in
-          let ch = normalize_channel_label msg.channel in
+          let ch = Agent_identity.normalize_channel_label msg.channel in
           let keeper = String.trim msg.keeper_name in
           Channel_gate_metrics.record_attempt
             ~channel:ch
@@ -232,7 +228,7 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
             int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
           in
           Channel_gate_metrics.record_attempt
-            ~channel:(normalize_channel_label msg.channel)
+            ~channel:(Agent_identity.normalize_channel_label msg.channel)
             ~room_id:msg.channel_room_id
             ~keeper:(String.trim msg.keeper_name)
             ~duration_ms
@@ -240,7 +236,7 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
           Error (Keeper_error err)
       | None ->
           Channel_gate_metrics.record_attempt
-            ~channel:(normalize_channel_label msg.channel)
+            ~channel:(Agent_identity.normalize_channel_label msg.channel)
             ~room_id:msg.channel_room_id
             ~keeper:(String.trim msg.keeper_name)
             ~duration_ms:0
@@ -274,7 +270,7 @@ let inbound_of_json json =
   try
     let str key = json |> member key |> to_string_option
                   |> Option.value ~default:"" in
-    let channel = str "channel" |> normalize_channel_label in
+    let channel = str "channel" |> Agent_identity.normalize_channel_label in
     let metadata =
       match json |> member "metadata" with
       | `Assoc pairs ->

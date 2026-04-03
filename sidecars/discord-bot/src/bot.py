@@ -61,7 +61,7 @@ def channel_stats_for(status: dict[str, Any] | None, channel_name: str) -> dict[
     return None
 
 
-class MascBot(discord.Client):
+class GateBot(discord.Client):
     """Discord client that routes messages to gate-backed keepers."""
 
     def __init__(self) -> None:
@@ -299,7 +299,7 @@ async def keeper_name_autocomplete(
     current: str,
 ) -> list[app_commands.Choice[str]]:
     bot = interaction.client
-    assert isinstance(bot, MascBot)
+    assert isinstance(bot, GateBot)
     names = await bot.gate.list_keepers()
     needle = current.strip().lower()
     matches = [
@@ -325,7 +325,7 @@ async def keeper_ask(
     await interaction.response.defer(thinking=True)
 
     bot = interaction.client
-    assert isinstance(bot, MascBot)
+    assert isinstance(bot, GateBot)
 
     response = await bot.gate.send_message(
         keeper_name=keeper,
@@ -371,7 +371,7 @@ async def keeper_status(
     await interaction.response.defer(thinking=True, ephemeral=True)
 
     bot = interaction.client
-    assert isinstance(bot, MascBot)
+    assert isinstance(bot, GateBot)
 
     if keeper is not None and keeper.strip():
         data = await bot.gate.keeper_status(keeper)
@@ -416,7 +416,7 @@ async def keeper_bind(
 ) -> None:
     """Bind the current channel to a keeper in runtime memory."""
     bot = interaction.client
-    assert isinstance(bot, MascBot)
+    assert isinstance(bot, GateBot)
 
     if not bot.is_admin(interaction):
         await interaction.response.send_message(
@@ -463,7 +463,7 @@ async def keeper_bind_autocomplete(
 async def keeper_unbind(interaction: discord.Interaction) -> None:
     """Remove channel -> keeper binding from runtime memory."""
     bot = interaction.client
-    assert isinstance(bot, MascBot)
+    assert isinstance(bot, GateBot)
 
     if not bot.is_admin(interaction):
         await interaction.response.send_message(
@@ -498,7 +498,7 @@ async def keeper_unbind(interaction: discord.Interaction) -> None:
 async def keeper_map(interaction: discord.Interaction) -> None:
     """Show current runtime bindings."""
     bot = interaction.client
-    assert isinstance(bot, MascBot)
+    assert isinstance(bot, GateBot)
 
     binding = (
         bot.channel_binding_debug(interaction.channel)
@@ -523,7 +523,7 @@ async def keeper_map(interaction: discord.Interaction) -> None:
 def main() -> None:
     """Run the bot."""
     cfg = get_config()
-    bot = MascBot()
+    bot = GateBot()
 
     logger.info("Starting Discord Gate bot")
     logger.info("Gate URL: %s", cfg.gate_base_url)
@@ -537,3 +537,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+MascBot = GateBot

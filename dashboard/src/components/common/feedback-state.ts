@@ -12,7 +12,7 @@ interface EmptyStateProps {
 /** Empty state message — centered, muted text */
 export function EmptyState({ class: cx, children }: EmptyStateProps) {
   return html`
-    <div class="feedback-panel feedback-panel-empty text-center text-[13px] leading-relaxed ${cx ?? ''}">${children}</div>
+    <div class="feedback-panel feedback-panel-empty py-6 text-center text-[13px] leading-relaxed ${cx ?? ''}">${children}</div>
   `
 }
 
@@ -24,7 +24,7 @@ interface LoadingStateProps {
 /** Loading indicator with pulse animation */
 export function LoadingState({ class: cx, children }: LoadingStateProps) {
   return html`
-    <div class="feedback-panel feedback-panel-loading text-center text-[13px] animate-pulse ${cx ?? ''}">
+    <div class="feedback-panel feedback-panel-loading py-6 text-center text-[13px] animate-pulse ${cx ?? ''}">
       ${children ?? '불러오는 중...'}
     </div>
   `

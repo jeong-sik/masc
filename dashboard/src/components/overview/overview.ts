@@ -217,7 +217,7 @@ function desireActionabilityLabel(actionability?: string | null): string {
     case 'operator_or_scheduler':
       return '운영자/스케줄러 액션'
     case 'room_or_operator':
-      return 'room/운영자 액션'
+      return '네임스페이스/운영자 액션'
     default:
       return '추가 판독 필요'
   }
@@ -341,7 +341,7 @@ function MetaCognitionCard() {
           `
         : html`
             <div class="rounded-xl border border-dashed border-card-border/50 bg-card/40 px-4 py-5 text-[12px] text-[var(--text-muted)]">
-              아직 room-level 서사를 만들 만큼 강한 social signal이 쌓이지 않았습니다.
+              아직 namespace-level 서사를 만들 만큼 강한 social signal이 쌓이지 않았습니다.
             </div>
           `}
     </div>

@@ -328,6 +328,8 @@ let list_dir config path =
         Sys.readdir path |> Array.to_list
       else
         []
+  | Some _ when Sys.file_exists path && Sys.is_directory path ->
+      Sys.readdir path |> Array.to_list
   | Some key_prefix ->
       let prefix = key_prefix ^ ":" in
       (match backend_list_keys config ~prefix with

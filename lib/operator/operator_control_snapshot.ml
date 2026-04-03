@@ -507,7 +507,10 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     match sessions with
     | Some s -> s
     | None ->
-        if initialized then Team_session_store.list_sessions config else []
+        if initialized then
+          let cutoff = Time_compat.now () -. 86400.0 in
+          Team_session_store.list_sessions ~since_unix:cutoff ~limit:20 config
+        else []
   in
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -620,7 +623,25 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
              sessions_ref :=
                timed "sessions_json" (fun () ->
                  if initialized && include_sessions then
-                   sessions_json ~status_cache config tracked_sessions
+                   let capped =
+                     if lightweight_summary then
+                       (* Lightweight: only active/paused + last 5 recent.
+                          Full session_status_json is heavy (reads events per session). *)
+                       let active, rest =
+                         List.partition (fun (s : Team_session_types.session) ->
+                           s.status = Running || s.status = Paused) tracked_sessions
+                       in
+                       let recent = match rest with
+                         | [] -> []
+                         | _ ->
+                             List.sort (fun (a : Team_session_types.session) b ->
+                               compare b.started_at a.started_at) rest
+                             |> List.filteri (fun i _ -> i < 5)
+                       in
+                       active @ recent
+                     else tracked_sessions
+                   in
+                   sessions_json ~status_cache config capped
                  else empty_section));
            (fun () ->
              keepers_ref :=

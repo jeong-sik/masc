@@ -8,7 +8,7 @@
 | Dependencies | 02-types-and-invariants |
 | Modules | 30 (.ml) + 5 (.mli) |
 | LOC | ~7,856 |
-| MCP Tools | `tool_room`, `tool_task`, `tool_agent`, `tool_heartbeat`, `tool_worktree`, `tool_tempo`, `tool_control`, `tool_social` (vote) |
+| MCP Tools | `tool_room`, `tool_task`, `tool_agent`, `tool_heartbeat`, `tool_worktree`, `tool_control`, `tool_social` (vote) |
 
 ---
 
@@ -60,7 +60,6 @@ graph TB
     TA[tool_agent] --> RA
     TH[tool_heartbeat] --> HB
     TW[tool_worktree] --> RWT
-    TTE[tool_tempo] --> RTE
     TC[tool_control<br>pause/resume] --> RI
     TS[tool_social<br>vote] --> RV
   end
@@ -588,7 +587,7 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | `masc_resume` | Room 재개 |
 | `masc_pause_status` | 정지 상태 조회 |
 
-### 14.8 Social (`tool_social`, vote 부분)
+### 14.7 Social (`tool_social`, vote 부분)
 
 | Tool | 동작 |
 |------|------|

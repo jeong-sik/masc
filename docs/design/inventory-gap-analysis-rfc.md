@@ -232,7 +232,7 @@ grep -n "to_json" lib/config/env_config.ml | head -3
 grep "masc_tempo\|masc_encryption\|masc_notification\|masc_generate_key" lib/tool_dispatch.ml
 # 결과: 0건
 
-# handler 파일은 잔존
+# historical snapshot (2026-03-29): 당시 handler 파일은 잔존
 ls lib/tool_tempo.ml lib/tool_encryption.ml lib/tool_notifications.ml
 # 모두 존재
 ```
@@ -559,8 +559,8 @@ Wave 2 완료 조건: `find .masc/keepers -name "memory.jsonl" | wc -l` > 0 + co
 | `lib/keeper/keeper_hooks_oas.ml` | M1 | 12개 phantom tool deny list |
 | `lib/config/env_config.ml` | C2 | `to_json()` 래핑 필요 |
 | `lib/tool_voice.ml` | H2 | 유일한 `not_implemented` stub |
-| `lib/tool_tempo.ml` | H1 | dead handler (삭제 대상) |
-| `lib/tool_encryption.ml` | H1 | dead handler (삭제 대상) |
+| `lib/tool_tempo.ml` | H1 | dead handler (PR #4750에서 제거) |
+| `lib/tool_encryption.ml` | H1 | dead handler (PR #4750에서 제거) |
 | `lib/tool_notifications.ml` | H1 | dead handler (삭제 대상) |
 | `lib/tool_dispatch.ml` | H1, C2 | 도구 등록 중앙 |
 | `dune-project` | H4 | 버전 SSOT |

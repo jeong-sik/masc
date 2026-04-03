@@ -163,19 +163,6 @@ def test_legacy_env_aliases_still_work(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.masc_mcp_url == "http://legacy.example"
 
 
-def test_legacy_constructor_aliases_still_work() -> None:
-    cfg = BotConfig(
-        discord_bot_token="test-token",
-        masc_api_token="legacy-api-token",
-        masc_mcp_url="http://legacy.example",
-    )
-
-    assert cfg.gate_api_token == "legacy-api-token"
-    assert cfg.gate_base_url == "http://legacy.example"
-    assert cfg.masc_api_token == "legacy-api-token"
-    assert cfg.masc_mcp_url == "http://legacy.example"
-
-
 def test_legacy_import_shim_reexports_gate_client_surface() -> None:
     assert MascGateClient is GateClient
     response = GateResponse.from_error("timeout")

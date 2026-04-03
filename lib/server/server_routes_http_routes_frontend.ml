@@ -11,16 +11,36 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
-let redirect_to_dashboard reqd =
+let respond_redirect ~location reqd =
   let response =
     Httpun.Response.create
       ~headers:(Httpun.Headers.of_list [
-        ("location", "/dashboard");
+        ("location", location);
         ("content-length", "0");
       ])
       `Found
   in
   Httpun.Reqd.respond_with_string reqd response ""
+
+let canonical_loopback_location ~default_port request =
+  let (host, port) =
+    parse_host_port
+      (Httpun.Headers.get request.Httpun.Request.headers "host")
+      "127.0.0.1" default_port
+  in
+  let canonical_host = Transport_read_model.normalize_advertised_host host in
+  if String.equal canonical_host host then
+    None
+  else
+    Some (Printf.sprintf "http://%s:%d%s" canonical_host port request.target)
+
+let with_canonical_loopback_host ~port handler request reqd =
+  match canonical_loopback_location ~default_port:port request with
+  | Some location -> respond_redirect ~location reqd
+  | None -> handler request reqd
+
+let redirect_to_dashboard reqd =
+  respond_redirect ~location:"/dashboard" reqd
 
 let is_dashboard_observer_stream request =
   match Server_utils.query_param request "sse_kind" with
@@ -71,9 +91,12 @@ let add_routes ~port ~host router =
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
   (* Dashboard sub-routes: must come before the SPA catchall *)
   |> Http.Router.get "/dashboard/credits" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
-         Http.Response.html (Credits_dashboard.html ()) reqd
-       ) request reqd)
+       with_canonical_loopback_host ~port
+         (fun request reqd ->
+           with_public_read (fun _state _req reqd ->
+             Http.Response.html (Credits_dashboard.html ()) reqd
+           ) request reqd)
+         request reqd)
   |> Http.Router.get "/favicon.ico" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          serve_favicon req reqd
@@ -94,22 +117,31 @@ let add_routes ~port ~host router =
            Http.Response.not_found reqd)
   (* Dashboard SPA: index.html *)
   |> Http.Router.get "/dashboard" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         serve_dashboard_index req reqd
-       ) request reqd)
+       with_canonical_loopback_host ~port
+         (fun request reqd ->
+           with_public_read (fun _state req reqd ->
+             serve_dashboard_index req reqd
+           ) request reqd)
+         request reqd)
   |> Http.Router.get "/dashboard/" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         serve_dashboard_index req reqd
-       ) request reqd)
+       with_canonical_loopback_host ~port
+         (fun request reqd ->
+           with_public_read (fun _state req reqd ->
+             serve_dashboard_index req reqd
+           ) request reqd)
+         request reqd)
   |> Http.Router.prefix_get "/dashboard/"
        (fun request reqd ->
-         with_public_read (fun _state req reqd ->
-           let req_path = Http.Request.path req in
-           if is_dashboard_spa_deep_link req_path then
-             serve_dashboard_index req reqd
-           else
-             Http.Response.not_found reqd
-         ) request reqd)
+         with_canonical_loopback_host ~port
+           (fun request reqd ->
+             with_public_read (fun _state req reqd ->
+               let req_path = Http.Request.path req in
+               if is_dashboard_spa_deep_link req_path then
+                 serve_dashboard_index req reqd
+               else
+                 Http.Response.not_found reqd
+             ) request reqd)
+           request reqd)
   |> Http.Router.get "/api/v1/credits" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          Http.Response.json (Credits_dashboard.json_api ()) reqd
@@ -136,7 +168,10 @@ let add_routes ~port ~host router =
          in
          Http.Response.json ~status (Yojson.Safe.to_string json) reqd
        ) request reqd)
-  |> Http.Router.get "/" (fun _req reqd -> redirect_to_dashboard reqd)
+  |> Http.Router.get "/" (fun request reqd ->
+       with_canonical_loopback_host ~port
+         (fun _req reqd -> redirect_to_dashboard reqd)
+         request reqd)
   |> Http.Router.get "/static/css/middleware.css"
        (serve_playground_asset "static/css/middleware.css")
   |> Http.Router.get "/static/js/middleware.js"

@@ -26,13 +26,33 @@ let ipaddr_is_unspecified = function
   | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
   | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
 
+let ipaddr_is_loopback = function
+  | Ipaddr.V4 addr ->
+      let octets = Ipaddr.V4.to_octets addr in
+      String.length octets = 4 && Char.code octets.[0] = 127
+  | Ipaddr.V6 addr ->
+      Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
+
 let is_unspecified_host host =
   match Ipaddr.of_string (String.trim host) with
   | Ok ip -> ipaddr_is_unspecified ip
   | Error _ -> false
 
+let is_canonical_loopback_alias host =
+  let normalized = String.trim host |> String.lowercase_ascii in
+  match normalized with
+  | "localhost" -> true
+  | _ -> (
+      match Ipaddr.of_string normalized with
+      | Ok ip -> ipaddr_is_loopback ip && not (String.equal normalized "127.0.0.1")
+      | Error _ -> false)
+
 let normalize_advertised_host host =
-  if is_unspecified_host host then "127.0.0.1" else host
+  let trimmed = String.trim host in
+  if is_unspecified_host trimmed || is_canonical_loopback_alias trimmed then
+    "127.0.0.1"
+  else
+    trimmed
 
 let make_http_context ?(include_configured = false) ~base_url ~host
     ~allow_legacy_accept () =

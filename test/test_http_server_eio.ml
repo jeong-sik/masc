@@ -74,6 +74,38 @@ let test_frontend_transport_routes_present () =
   Alcotest.(check bool) "POST /webrtc/answer route" true
     (has_route `POST "/webrtc/answer")
 
+let test_frontend_canonical_loopback_location_localhost () =
+  let headers = Httpun.Headers.of_list [ ("host", "localhost:8935") ] in
+  let request =
+    Httpun.Request.create ~headers `GET "/dashboard?agent=codex"
+  in
+  let location =
+    Masc_mcp.Server_routes_http_routes_frontend.canonical_loopback_location
+      ~default_port:8935 request
+  in
+  Alcotest.(check (option string)) "localhost redirects to canonical loopback"
+    (Some "http://127.0.0.1:8935/dashboard?agent=codex") location
+
+let test_frontend_canonical_loopback_location_ipv6 () =
+  let headers = Httpun.Headers.of_list [ ("host", "[::1]:8935") ] in
+  let request = Httpun.Request.create ~headers `GET "/dashboard" in
+  let location =
+    Masc_mcp.Server_routes_http_routes_frontend.canonical_loopback_location
+      ~default_port:8935 request
+  in
+  Alcotest.(check (option string)) "::1 redirects to canonical loopback"
+    (Some "http://127.0.0.1:8935/dashboard") location
+
+let test_frontend_canonical_loopback_location_canonical_host () =
+  let headers = Httpun.Headers.of_list [ ("host", "127.0.0.1:8935") ] in
+  let request = Httpun.Request.create ~headers `GET "/dashboard" in
+  let location =
+    Masc_mcp.Server_routes_http_routes_frontend.canonical_loopback_location
+      ~default_port:8935 request
+  in
+  Alcotest.(check (option string)) "canonical loopback host does not redirect"
+    None location
+
 (* ===== Unit Tests for Config ===== *)
 
 let test_default_config () =
@@ -170,6 +202,12 @@ let router_tests = [
   "add multiple routes", `Quick, test_router_add_multiple;
   "prefix specificity", `Quick, test_router_prefix_specificity;
   "frontend transport routes present", `Quick, test_frontend_transport_routes_present;
+  "frontend canonical localhost redirect", `Quick,
+  test_frontend_canonical_loopback_location_localhost;
+  "frontend canonical ipv6 redirect", `Quick,
+  test_frontend_canonical_loopback_location_ipv6;
+  "frontend canonical host stays put", `Quick,
+  test_frontend_canonical_loopback_location_canonical_host;
 ]
 
 let config_tests = [

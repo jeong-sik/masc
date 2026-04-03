@@ -10,21 +10,22 @@ import pytest
 
 from src import config as config_module
 from src.config import BotConfig
-from src.masc_client import MascGateClient
+from src.gate_client import GateClient
+from src.masc_client import GateResponse, MascGateClient
 
 
 @pytest.fixture(autouse=True)
 def reset_config(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("MASC_API_TOKEN", "test-api-token")
-    monkeypatch.setenv("MASC_MCP_URL", "http://localhost:8935")
+    monkeypatch.setenv("GATE_API_TOKEN", "test-api-token")
+    monkeypatch.setenv("GATE_BASE_URL", "http://localhost:8935")
     config_module.reset_config_cache()
     yield
     config_module.reset_config_cache()
 
 
-def make_client(handler: httpx.MockTransport) -> MascGateClient:
-    client = MascGateClient()
+def make_client(handler: httpx.MockTransport) -> GateClient:
+    client = GateClient()
     client._client = httpx.AsyncClient(transport=handler, headers=client._headers)  # pyright: ignore[reportPrivateUsage]
     client._max_retries = 1  # pyright: ignore[reportPrivateUsage]
     client._breaker_failure_threshold = 2  # pyright: ignore[reportPrivateUsage]
@@ -131,7 +132,7 @@ def test_config_allows_zero_disable_values(monkeypatch: pytest.MonkeyPatch) -> N
 
     cfg = BotConfig(
         discord_bot_token="test-token",
-        masc_api_token="test-api-token",
+        gate_api_token="test-api-token",
         gate_max_retries=0,
         status_cache_ttl_sec=0,
         keeper_cache_ttl_sec=0,
@@ -144,6 +145,29 @@ def test_config_allows_zero_disable_values(monkeypatch: pytest.MonkeyPatch) -> N
     assert cfg.keeper_cache_ttl_sec == 0
     assert cfg.gate_breaker_failure_threshold == 0
     assert cfg.gate_breaker_reset_sec == 0
+
+
+def test_legacy_env_aliases_still_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GATE_API_TOKEN", raising=False)
+    monkeypatch.delenv("GATE_BASE_URL", raising=False)
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("MASC_API_TOKEN", "legacy-api-token")
+    monkeypatch.setenv("MASC_MCP_URL", "http://legacy.example")
+    config_module.reset_config_cache()
+
+    cfg = BotConfig()  # type: ignore[call-arg]
+
+    assert cfg.gate_api_token == "legacy-api-token"
+    assert cfg.gate_base_url == "http://legacy.example"
+    assert cfg.masc_api_token == "legacy-api-token"
+    assert cfg.masc_mcp_url == "http://legacy.example"
+
+
+def test_legacy_import_shim_reexports_gate_client_surface() -> None:
+    assert MascGateClient is GateClient
+    response = GateResponse.from_error("timeout")
+    assert response.ok is False
+    assert response.error == "timeout"
 
 
 def test_transport_failure_log_mentions_disabled_breaker(

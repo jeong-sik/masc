@@ -301,6 +301,7 @@ let ensure_joined fixture =
 let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock init_mode =
   let base_path = temp_dir "mcp-tool-matrix-" in
   let worktree_dir = setup_git_repo base_path in
+  Unix.putenv "MASC_BASE_PATH" base_path;
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
@@ -983,6 +984,7 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
   let saved_home = Sys.getenv_opt "HOME" in
   let saved_env =
     [
+      ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
       ("MASC_STORAGE_TYPE", Sys.getenv_opt "MASC_STORAGE_TYPE");
       ("MASC_POSTGRES_URL", Sys.getenv_opt "MASC_POSTGRES_URL");
       ("DATABASE_URL", Sys.getenv_opt "DATABASE_URL");

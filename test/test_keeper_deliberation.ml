@@ -314,7 +314,7 @@ let test_prompt_contains_triggers () =
     (try ignore (Str.search_forward (Str.regexp_string "idle_timeout") prompt 0); true
      with Not_found -> false)
 
-let test_prompt_contains_json_instruction () =
+let test_prompt_contains_tool_input_instruction () =
   let prompt =
     D.build_deliberation_prompt
       ~keeper_name:"test-k"
@@ -323,8 +323,10 @@ let test_prompt_contains_json_instruction () =
       ~triggers:[ D.DirectMention ]
       base_obs
   in
-  check bool "mentions JSON response format" true
-    (try ignore (Str.search_forward (Str.regexp_string "JSON") prompt 0); true
+  check bool "mentions tool input schema" true
+    (try ignore (Str.search_forward
+                   (Str.regexp_string "tool input object for schema `keeper_deliberation_decision`")
+                   prompt 0); true
      with Not_found -> false)
 
 let test_prompt_contains_action_list () =
@@ -403,27 +405,44 @@ let test_parse_valid_broadcast_json () =
           check string "message" "Status update" message
       | _ -> fail "expected Broadcast action"
 
-let test_parse_json_with_code_fences () =
+let test_structured_result_schema_metadata () =
+  check string "schema name" "keeper_deliberation_decision"
+    D.structured_result_schema.name;
+  check bool "schema requires action" true
+    (List.exists
+       (fun (param : Agent_sdk.Types.tool_param) ->
+          String.equal param.name "action" && param.required)
+       D.structured_result_schema.params)
+
+let test_structured_result_schema_parse_valid_json () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"action":"noop","params":{"reason":"quiet"},"reasoning":"nothing","confidence":0.9}|}
+  in
+  match D.structured_result_schema.parse json with
+  | Error msg -> fail ("expected schema parse Ok, got Error: " ^ msg)
+  | Ok result ->
+      (match result.action with
+       | D.Noop reason -> check string "noop reason" "quiet" reason
+       | _ -> fail "expected Noop action");
+      check string "reasoning" "nothing" result.reasoning;
+      check (float 0.01) "confidence" 0.9 result.confidence
+
+let test_parse_json_with_code_fences_rejected () =
   let raw =
     "```json\n{\"action\":\"noop\",\"params\":{\"reason\":\"quiet\"},\"reasoning\":\"nothing\",\"confidence\":0.9}\n```"
   in
   match D.parse_deliberation_response raw with
-  | Error msg -> fail ("expected Ok with code fences, got Error: " ^ msg)
-  | Ok (action, _reasoning, _confidence) ->
-      match action with
-      | D.Noop _ -> ()
-      | _ -> fail "expected Noop action from fenced JSON"
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for fenced JSON"
 
-let test_parse_json_with_surrounding_text () =
+let test_parse_json_with_surrounding_text_rejected () =
   let raw =
     "Here is my decision:\n{\"action\":\"noop\",\"params\":{\"reason\":\"quiet\"},\"reasoning\":\"nothing\",\"confidence\":0.5}\nThat's my answer."
   in
   match D.parse_deliberation_response raw with
-  | Error msg -> fail ("expected Ok with surrounding text, got Error: " ^ msg)
-  | Ok (action, _reasoning, _confidence) ->
-      match action with
-      | D.Noop _ -> ()
-      | _ -> fail "expected Noop action from embedded JSON"
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for embedded JSON in surrounding text"
 
 let test_parse_malformed_json () =
   let raw = "this is not json at all" in
@@ -846,12 +865,19 @@ let () =
             test_prompt_contains_keeper_name;
           test_case "prompt contains trigger strings" `Quick
             test_prompt_contains_triggers;
-          test_case "prompt mentions JSON format" `Quick
-            test_prompt_contains_json_instruction;
+          test_case "prompt mentions tool input schema" `Quick
+            test_prompt_contains_tool_input_instruction;
           test_case "prompt lists available actions" `Quick
             test_prompt_contains_action_list;
           test_case "prompt always includes multi_step" `Quick
             test_prompt_always_includes_multi_step;
+        ] );
+      ( "structured_result_schema",
+        [
+          test_case "schema metadata" `Quick
+            test_structured_result_schema_metadata;
+          test_case "schema parse valid json" `Quick
+            test_structured_result_schema_parse_valid_json;
         ] );
       ( "parse_deliberation_response",
         [
@@ -862,10 +888,10 @@ let () =
             test_parse_valid_task_claim_json;
           test_case "parse valid broadcast" `Quick
             test_parse_valid_broadcast_json;
-          test_case "parse JSON with code fences" `Quick
-            test_parse_json_with_code_fences;
-          test_case "parse JSON with surrounding text" `Quick
-            test_parse_json_with_surrounding_text;
+          test_case "parse JSON with code fences rejected" `Quick
+            test_parse_json_with_code_fences_rejected;
+          test_case "parse JSON with surrounding text rejected" `Quick
+            test_parse_json_with_surrounding_text_rejected;
           test_case "parse malformed JSON returns Error" `Quick
             test_parse_malformed_json;
           test_case "parse empty string returns Error" `Quick

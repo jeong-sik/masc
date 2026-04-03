@@ -586,7 +586,7 @@ export interface OperatorReviewDecision {
 
 export interface OperatorReviewItem {
   id: string
-  kind: 'pending_confirm' | 'room_gate' | 'session_risk' | 'keeper_pressure' | string
+  kind: 'pending_confirm' | 'namespace_gate' | 'room_gate' | 'session_risk' | 'keeper_pressure' | string
   target_type: 'namespace' | 'room' | 'team_session' | 'keeper' | string
   target_id?: string | null
   severity: string
@@ -674,6 +674,8 @@ export interface OperatorSnapshot {
 
 export type OperatorActionType =
   | 'broadcast'
+  | 'namespace_pause'
+  | 'namespace_resume'
   | 'room_pause'
   | 'room_resume'
   | 'social_sweep'

@@ -506,7 +506,12 @@ let namespace_gate_review_item ~room_json =
   let paused = json_bool_opt room_json "paused" |> Option.value ~default:false in
   if not paused then None
   else
-    let room_id = json_string_opt room_json "room_id" |> Option.value ~default:"default" in
+    let room_id =
+      (match json_string_opt room_json "namespace_id" with
+       | Some id -> Some id
+       | None -> json_string_opt room_json "room_id")
+      |> Option.value ~default:"default"
+    in
     let pause_reason =
       json_string_opt room_json "pause_reason" |> Option.value ~default:"운영 점검"
     in

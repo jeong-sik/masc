@@ -314,8 +314,10 @@ export function workflowActionLabel(actionType?: string | null): string {
   switch (actionType) {
     case 'broadcast':
       return 'namespace 방송'
+    case 'namespace_pause':
     case 'room_pause':
       return 'namespace 일시정지'
+    case 'namespace_resume':
     case 'room_resume':
       return 'namespace 재개'
     case 'task_inject':

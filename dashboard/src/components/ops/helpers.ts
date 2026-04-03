@@ -250,8 +250,10 @@ export function actionTypeLabel(value?: string | null): string {
   switch (value) {
     case 'broadcast':
       return '전체 공지'
+    case 'namespace_pause':
     case 'room_pause':
       return '네임스페이스 일시정지'
+    case 'namespace_resume':
     case 'room_resume':
       return '네임스페이스 재개'
     case 'team_turn':
@@ -394,7 +396,7 @@ function hydrateActionForm(input: {
       taskPriority.value = workflowPayloadString(payload, 'priority') ?? taskPriority.value
       return
     }
-    if (input.action_type === 'room_pause') {
+    if (input.action_type === 'namespace_pause' || input.action_type === 'room_pause') {
       pauseReason.value = workflowPayloadString(payload, 'reason') ?? input.summary
     }
     return
@@ -472,7 +474,7 @@ export function workflowTargetReady(
 }
 
 export async function executeAction(input: {
-  action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover' | 'review_resolve' | 'review_defer'
+  action_type: 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover' | 'review_resolve' | 'review_defer'
   target_type: 'namespace' | 'room' | 'team_session' | 'keeper' | 'review_item'
   target_id?: string
   payload: Record<string, unknown>
@@ -533,7 +535,7 @@ export async function executeRecommendedAction(action: OperatorRecommendedAction
       ? action.suggested_payload as Record<string, unknown>
       : {}
   return executeAction({
-    action_type: action.action_type as 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover',
+    action_type: action.action_type as 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover',
     target_type: action.target_type as 'namespace' | 'room' | 'team_session' | 'keeper',
     target_id: action.target_id ?? undefined,
     payload,
@@ -543,9 +545,9 @@ export async function executeRecommendedAction(action: OperatorRecommendedAction
 
 export function primaryActionForReviewItem(item: OperatorReviewItem): OperatorRecommendedAction | null {
   if (item.recommended_action) return item.recommended_action
-  if (item.kind === 'room_gate') {
+  if (item.kind === 'namespace_gate' || item.kind === 'room_gate') {
     return {
-      action_type: 'room_resume',
+      action_type: 'namespace_resume',
       target_type: 'namespace',
       target_id: null,
       severity: item.severity,

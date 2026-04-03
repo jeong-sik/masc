@@ -143,15 +143,15 @@ let all_flags : flag list = [
     lifecycle = Experimental; since = "2.207.0" };
 
   (* ── Dashboard & Governance ───────────────────────────────── *)
-  { env_name = "MASC_DASHBOARD_FIXTURES_ENABLED";
-    description = "Load dashboard fixture data for testing";
-    default = false; category = "dashboard";
-    lifecycle = Active; since = "2.140.0" };
-
   { env_name = "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED";
     description = "Proactive command-plane snapshot refresh loop";
     default = false; category = "dashboard";
     lifecycle = Active; since = "2.217.1" };
+
+  { env_name = "MASC_DASHBOARD_FIXTURES_ENABLED";
+    description = "Load dashboard fixture data for testing";
+    default = false; category = "dashboard";
+    lifecycle = Active; since = "2.140.0" };
 
   { env_name = "MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED";
     description = "Governance judgment background loop";

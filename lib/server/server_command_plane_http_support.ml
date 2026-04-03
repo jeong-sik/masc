@@ -110,6 +110,10 @@ let _cp_snapshot_refresh_interval_s =
   Dashboard_http_helpers.float_of_env_default
     "MASC_CP_SNAPSHOT_REFRESH_INTERVAL_S"
     ~default:120.0 ~min_v:30.0 ~max_v:600.0
+let _cp_snapshot_timeout_s =
+  Dashboard_http_helpers.float_of_env_default
+    "MASC_CP_SNAPSHOT_TIMEOUT_S"
+    ~default:60.0 ~min_v:10.0 ~max_v:120.0
 
 let compute_cp_snapshot ~state =
   let config = state.Mcp_server.room_config in
@@ -140,16 +144,27 @@ let start_cp_snapshot_refresh_loop ~state ~sw ~clock =
       ~config:{ (Proactive_refresh.default_config
                    ~label:"cp-snapshot"
                    ~interval_s:_cp_snapshot_refresh_interval_s)
-                with timeout_s =
-                       Dashboard_http_helpers.float_of_env_default
-                         "MASC_CP_SNAPSHOT_TIMEOUT_S"
-                         ~default:60.0 ~min_v:10.0 ~max_v:120.0;
+                with timeout_s = _cp_snapshot_timeout_s;
                      warm_delay_s =
                        Dashboard_http_helpers.float_of_env_default
                          "MASC_WARM_DELAY_CP_SNAPSHOT_S"
                          ~default:90.0 ~min_v:0.0 ~max_v:300.0 }
       ~compute:(fun () -> compute_cp_snapshot ~state)
       ~on_result:store_cp_snapshot
+
+let cp_snapshot_runtime_clock state =
+  match state.Mcp_server.clock with
+  | Some clock -> clock
+  | None -> Eio_context.get_clock ()
+
+let cp_snapshot_fallback_json ~status ~error ~message =
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ("status", `String status);
+      ("error", `String error);
+      ("message", `String message);
+    ]
 
 let command_plane_snapshot_http_json ~state =
   if Env_config_governance.Dashboard_config.command_plane_snapshot_refresh_enabled
@@ -159,27 +174,36 @@ let command_plane_snapshot_http_json ~state =
   else
     let started_at = Time_compat.now () in
     try
-      let snapshot = compute_cp_snapshot ~state in
+      let snapshot =
+        Eio.Time.with_timeout_exn (cp_snapshot_runtime_clock state)
+          _cp_snapshot_timeout_s (fun () -> compute_cp_snapshot ~state)
+      in
       let elapsed = Time_compat.now () -. started_at in
       if elapsed >= 1.0 then
         Log.CmdPlane.info "cp-snapshot computed on demand (%.1fs)" elapsed;
       store_cp_snapshot snapshot;
       snapshot
-    with exn ->
-      let elapsed = Time_compat.now () -. started_at in
-      Log.CmdPlane.warn "cp-snapshot on-demand compute failed (%.1fs): %s"
-        elapsed (Printexc.to_string exn);
-      if !_cp_snapshot_cached_at > 0.0 then !_cp_snapshot_ref
-      else
-        `Assoc
-          [
-            ("generated_at", `String (Types.now_iso ()));
-            ("status", `String "unavailable");
-            ("error", `String "command_plane_snapshot_unavailable");
-            ( "message",
-              `String
-                "Command-plane snapshot is unavailable; enable proactive snapshot refresh or retry later." );
-          ]
+    with
+    | Eio.Time.Timeout ->
+        let elapsed = Time_compat.now () -. started_at in
+        Log.CmdPlane.warn "cp-snapshot on-demand compute timed out (%.1fs)"
+          elapsed;
+        if !_cp_snapshot_cached_at > 0.0 then !_cp_snapshot_ref
+        else
+          cp_snapshot_fallback_json ~status:"timeout"
+            ~error:"command_plane_snapshot_timeout"
+            ~message:
+              "Command-plane snapshot timed out; enable proactive snapshot refresh or retry later."
+    | exn ->
+        let elapsed = Time_compat.now () -. started_at in
+        Log.CmdPlane.warn "cp-snapshot on-demand compute failed (%.1fs): %s"
+          elapsed (Printexc.to_string exn);
+        if !_cp_snapshot_cached_at > 0.0 then !_cp_snapshot_ref
+        else
+          cp_snapshot_fallback_json ~status:"unavailable"
+            ~error:"command_plane_snapshot_unavailable"
+            ~message:
+              "Command-plane snapshot is unavailable; enable proactive snapshot refresh or retry later."
 
 let command_plane_topology_http_json ~state =
   Command_plane_v2.topology_json state.Mcp_server.room_config

@@ -578,13 +578,13 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     else [])
   in
   let command_plane_json = timed "command_plane_json" (fun () ->
-    if initialized && include_command_plane then
+    if initialized && include_command_plane && not lightweight_summary then
       Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
     else
       `Null)
   in
   let swarm_status_json =
-    if initialized && include_command_plane then
+    if initialized && include_command_plane && not lightweight_summary then
       Swarm_status.build_json_from_snapshot config command_plane_json
     else
       `Null

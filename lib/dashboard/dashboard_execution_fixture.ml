@@ -39,6 +39,9 @@ let execution_smoke_fixture_json () =
       ( "status",
         `Assoc
           [
+            ("namespace_id", `String "default");
+            ("namespace", `String "default");
+            ("namespace_mode", `String "flattened");
             ("room", `String "default");
             ("room_base_path", `String "/tmp/masc-execution-fixture");
             ("cluster", `String "fixture");
@@ -116,6 +119,7 @@ let execution_smoke_fixture_json () =
               [
                 ("session_id", `String "ts-execution-fixture-001");
                 ("goal", `String "Validate local64 swarm role coverage, runtime visibility, and operator census");
+                ("namespace", `String "default");
                 ("room", `String "default");
                 ("status", `String "interrupted");
                 ("health", `String "bad");
@@ -140,6 +144,7 @@ let execution_smoke_fixture_json () =
               [
                 ("session_id", `String "ts-execution-fixture-002");
                 ("goal", `String "Monitor runtime pressure without intervention");
+                ("namespace", `String "default");
                 ("room", `String "default");
                 ("status", `String "running");
                 ("health", `String "ok");

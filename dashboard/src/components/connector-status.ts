@@ -179,7 +179,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
           <div class="font-mono text-[var(--text-body)]">${ch.duplicate_count}</div>
         </div>
         <div>
-          <div class="text-[var(--text-dim)]">rooms</div>
+          <div class="text-[var(--text-dim)]">namespaces</div>
           <div class="font-mono text-[var(--text-body)]">${ch.room_count}</div>
         </div>
         <div>
@@ -202,7 +202,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
           <span class="font-mono text-[var(--text-body)]"> ${ch.last_outcome}</span>
         </div>
         <div>
-          last room
+          last namespace
           <span class="font-mono text-[var(--text-body)]"> ${ch.last_room_id || '-'}</span>
         </div>
       </div>

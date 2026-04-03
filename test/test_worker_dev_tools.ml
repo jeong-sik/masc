@@ -38,6 +38,22 @@ let test_readonly_tool_names () =
   let expected = ["file_read"; "shell_exec"] in
   Alcotest.(check (list string)) "readonly tool names match" expected names
 
+let test_tool_descriptors_validate_without_concurrency_class () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tool = find_tool "file_read" tools in
+  match Tool.descriptor tool with
+  | None -> Alcotest.fail "expected file_read descriptor"
+  | Some descriptor ->
+      (match Tool.validate_descriptor descriptor with
+      | Ok () -> ()
+      | Error msg -> Alcotest.failf "descriptor should validate: %s" msg);
+      Alcotest.(check bool) "concurrency class defaults to none" true
+        (Option.is_none descriptor.concurrency_class)
+
 (* --- file_read tests --- *)
 
 let test_file_read_existing () =
@@ -438,6 +454,8 @@ let () =
       Alcotest.test_case "tool count" `Quick test_tool_count;
       Alcotest.test_case "tool names" `Quick test_tool_names;
       Alcotest.test_case "readonly tool names" `Quick test_readonly_tool_names;
+      Alcotest.test_case "descriptors validate without concurrency class" `Quick
+        test_tool_descriptors_validate_without_concurrency_class;
     ];
     "file_read", [
       Alcotest.test_case "read existing file" `Quick test_file_read_existing;

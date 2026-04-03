@@ -245,12 +245,27 @@ let selection_json ~requested_session_id ~requested_operation_id ~session ~opera
       ("available_session_count", `Int session_count);
     ]
 
+let namespace_json config =
+  let state = Room.read_state config in
+  `Assoc
+    [
+      ("project", `String state.project);
+      ("namespace_id", `String "default");
+      ("namespace", `String "default");
+      ("namespace_mode", `String "flattened");
+      ("paused", `Bool state.paused);
+      ("message_seq", `Int state.message_seq);
+    ]
+
 let room_json config =
   let state = Room.read_state config in
   `Assoc
     [
       ("project", `String state.project);
       ("current_room", Json_util.string_opt_to_json (Room.read_current_room config));
+      ("namespace_id", `String "default");
+      ("namespace", `String "default");
+      ("namespace_mode", `String "flattened");
       ("paused", `Bool state.paused);
       ("message_seq", `Int state.message_seq);
     ]

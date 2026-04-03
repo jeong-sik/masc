@@ -10,7 +10,7 @@ type queue_context = {
 type session_seed = {
   session_id : string;
   goal : string;
-  room : string option;
+  namespace : string option;
   status : string;
   health : string;
   member_names : string list;

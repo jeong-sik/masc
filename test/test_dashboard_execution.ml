@@ -114,6 +114,10 @@ let test_dashboard_execution_fixture () =
         check string "top queue handoff surface" "intervene"
           (execution_queue |> List.hd |> member "top_handoff" |> member "surface" |> to_string);
         check int "session briefs" 2 (List.length session_briefs);
+        check string "fixture session namespace" "default"
+          (session_briefs |> List.hd |> member "namespace" |> to_string);
+        check string "fixture session room alias kept" "default"
+          (session_briefs |> List.hd |> member "room" |> to_string);
         check int "fixture seen count" 3
           (session_briefs |> List.hd |> member "seen_count" |> to_int);
         check int "fixture planned count" 4

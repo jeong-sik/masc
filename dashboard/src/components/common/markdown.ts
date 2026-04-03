@@ -9,6 +9,23 @@ import { useRef, useEffect, useMemo } from 'preact/hooks'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 
+// ── Lazy shiki loader ────────────────────────────────────────
+import type { Highlighter } from 'shiki'
+
+let shikiPromise: Promise<Highlighter> | null = null
+
+function getShiki(): Promise<Highlighter> {
+  if (!shikiPromise) {
+    shikiPromise = import('shiki').then(async (shiki) => {
+      return shiki.createHighlighter({
+        themes: ['vitesse-dark'],
+        langs: ['javascript', 'typescript', 'python', 'bash', 'json', 'yaml', 'html', 'css', 'sql', 'go', 'rust']
+      })
+    })
+  }
+  return shikiPromise
+}
+
 // ── Lazy mermaid loader ──────────────────────────────────────
 type MermaidApi = typeof import('mermaid')['default']
 let mermaidPromise: Promise<MermaidApi> | null = null
@@ -139,6 +156,76 @@ export function Markdown({ text, class: className }: { text: string; class?: str
         }
       }
     })()
+    return () => { cancelled = true }
+  }, [htmlStr])
+
+  // Post-render: highlight code blocks with shiki
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const codeBlocks = el.querySelectorAll<HTMLElement>('pre > code:not(.language-mermaid)')
+    if (codeBlocks.length === 0) return
+
+    let cancelled = false
+    ;(async () => {
+      let highlighter: Highlighter | null = null
+      
+      for (const codeEl of codeBlocks) {
+        if (cancelled) break
+        if (codeEl.dataset.highlighted) continue
+        
+        const pre = codeEl.parentElement
+        if (!pre) continue
+        const code = codeEl.textContent ?? ''
+        
+        let lang = 'text'
+        for (const cls of codeEl.classList) {
+          if (cls.startsWith('language-')) {
+            lang = cls.replace('language-', '')
+            break
+          }
+        }
+        
+        if (!highlighter) {
+          highlighter = await getShiki()
+          if (cancelled) break
+        }
+        
+        try {
+          const loadedLangs = highlighter.getLoadedLanguages()
+          if (lang !== 'text' && !loadedLangs.includes(lang as any)) {
+            await highlighter.loadLanguage(lang as any)
+          }
+        } catch {
+          lang = 'text'
+        }
+        
+        if (cancelled) break
+
+        try {
+          const htmlStr = highlighter.codeToHtml(code, { lang, theme: 'vitesse-dark' })
+          
+          const div = document.createElement('div')
+          div.innerHTML = htmlStr
+          const shikiPre = div.firstElementChild as HTMLElement
+          
+          if (shikiPre && shikiPre.tagName === 'PRE') {
+            // Apply dashboard specific classes to match existing UI
+            shikiPre.classList.add('shiki-rendered', 'rounded-lg', 'my-3', 'text-[13px]', 'leading-relaxed')
+            
+            // To maintain security, we ensure the inner structure is just spans
+            // But since Shiki generates it from plain text, XSS vector is minimal.
+            pre.replaceWith(shikiPre)
+          }
+        } catch (e) {
+          // Keep original code block on error
+          console.warn('[shiki] highlight failed', e)
+        }
+        
+        codeEl.dataset.highlighted = 'true'
+      }
+    })()
+    
     return () => { cancelled = true }
   }, [htmlStr])
 

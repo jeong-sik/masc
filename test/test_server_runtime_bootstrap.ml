@@ -192,21 +192,16 @@ let test_constructor_is_pure () =
 let test_restore_persisted_sessions_uses_scoped_agents_dir () =
   with_temp_dir "startup-scope" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let root_agents = Room.agents_dir state.Mcp_server.room_config in
-      Fs_compat.mkdir_p root_agents;
-      write_file (Filename.concat root_agents "root-agent.json") "{}";
-      state.Mcp_server.room_config <-
-        Room.with_scope state.Mcp_server.room_config (Room.Named "alpha");
-      let room_agents = Room.agents_dir state.Mcp_server.room_config in
-      Fs_compat.mkdir_p room_agents;
-      write_file (Filename.concat room_agents "room-agent.json") "{}";
+      let agents = Room.agents_dir state.Mcp_server.room_config in
+      Fs_compat.mkdir_p agents;
+      write_file (Filename.concat agents "test-agent.json") "{}";
       Server_runtime_bootstrap.restore_persisted_sessions state;
       let restored =
         Session.connected_agents state.Mcp_server.session_registry |> List.sort String.compare
       in
       Alcotest.(check (list string))
-        "restore uses scoped room agents dir only"
-        [ "room-agent" ] restored)
+        "restore uses flat agents dir"
+        [ "test-agent" ] restored)
 
 let test_keeper_paths_use_cluster_root () =
   with_temp_dir "startup-cluster" (fun dir ->

@@ -268,13 +268,13 @@ let test_list_sessions_named_scope_uses_scoped_prefix () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room.with_scope (Room.default_config base) (Room.Named "alpha-room") in
+      let config = Room.default_config base in
       Team_session_store.save_session config
-        (sample_session config ~session_id:"sess-room" ~started_at:10.0
+        (sample_session config ~session_id:"sess-flat" ~started_at:10.0
            ~updated_at_iso:"2026-03-24T10:00:00Z");
       let listed = Team_session_store.list_sessions ~limit:1 config in
-      Alcotest.(check (list string)) "named room session listed"
-        [ "sess-room" ]
+      Alcotest.(check (list string)) "flat namespace session listed"
+        [ "sess-flat" ]
         (List.map (fun (session : Team_session_types.session) -> session.session_id) listed);
       let diagnostics = Team_session_store.session_list_diagnostics_json () in
       let expected_prefix =

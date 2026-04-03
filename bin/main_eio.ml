@@ -407,6 +407,12 @@ let run_cmd host port base_path =
     | Unix.Unix_error (Unix.EACCES, _, _) ->
         Log.Server.error "[FATAL] Permission denied binding to port %d" port;
         exit 1
+    | Out_of_memory ->
+        Printf.eprintf "[FATAL] Out_of_memory\n%!";
+        exit 1
+    | Stack_overflow ->
+        Printf.eprintf "[FATAL] Stack_overflow\n%!";
+        exit 1
     | exn ->
         let bt = Printexc.get_backtrace () in
         Log.Server.error "[FATAL] Unhandled exception: %s" (Printexc.to_string exn);

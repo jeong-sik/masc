@@ -452,6 +452,44 @@ let seed_procedures_as_oas ~(memory : Agent_sdk.Memory.t)
   ) procs;
   List.length procs
 
+let seed_all_procedures_as_oas ~(memory : Agent_sdk.Memory.t)
+    ~(agent_name : string) : int =
+  let procs = load_procedures_cached ~agent_name in
+  List.iter
+    (fun p ->
+      try Agent_sdk.Memory.store_procedure memory (oas_procedure_of_masc p)
+      with exn ->
+        Logs.warn (fun m ->
+          m "Failed to store procedure memory: %s" (Printexc.to_string exn)))
+    procs;
+  List.length procs
+
+let render_lesson_prompt_context ~(memory : Agent_sdk.Memory.t)
+    ~(pattern : string) ~(limit : int) =
+  Agent_sdk.Lesson_memory.retrieve_lessons memory ~pattern ~limit ()
+  |> Agent_sdk.Lesson_memory.render_prompt_context
+
+let record_failure_lesson ~(memory : Agent_sdk.Memory.t)
+    ~(pattern : string) ~(summary : string)
+    ?action ?stdout ?stderr ?diff_summary ?trace_summary ?metric_name
+    ?metric_error ~(participants : string list)
+    ~(metadata : (string * Yojson.Safe.t) list) () =
+  ignore
+    (Agent_sdk.Lesson_memory.record_failure memory
+       {
+         pattern;
+         summary;
+         action;
+         stdout;
+         stderr;
+         diff_summary;
+         trace_summary;
+         metric_name;
+         metric_error;
+         participants;
+         metadata;
+       })
+
 let dedupe_procedures_by_id (procs : Procedural_memory.procedure list) =
   let latest_by_id = Hashtbl.create (max 16 (List.length procs)) in
   List.iter (fun (p : Procedural_memory.procedure) ->

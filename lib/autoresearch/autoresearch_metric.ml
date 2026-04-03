@@ -7,6 +7,11 @@
 
 let contains_substring = String_util.contains_substring
 
+let default_metric_name = Agent_sdk.Metric_contract.default_metric_name
+
+let prompt_snippet ?metric_name () =
+  Agent_sdk.Metric_contract.prompt_snippet ?metric_name ()
+
 (** Shell metacharacters that indicate injection risk in metric_fn when they
     appear outside quotes. *)
 let dangerous_shell_chars =
@@ -118,7 +123,7 @@ let parse_metric_output output =
         (Printf.sprintf
            "metric_fn output not a float or metric tag: %S (%s). Expected contract: %s"
            (clip trimmed 240) tag_error
-           (Agent_sdk.Metric_contract.prompt_snippet ()))
+           (prompt_snippet ()))
 
 let run_metric_argv ~workdir ~timeout_s argv =
   let config =

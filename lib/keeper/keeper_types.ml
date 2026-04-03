@@ -946,25 +946,24 @@ let fallback_canonical_keeper_meta_key_names =
   ]
 
 let canonical_keeper_meta_key_names =
-  lazy
-    (let seed_json =
-       `Assoc
-         [
-           ("name", `String "__keeper-meta-key-seed__");
-           ("agent_name", `String "__keeper-meta-key-seed__");
-           ("trace_id", `String "__keeper-meta-key-seed__");
-         ]
-     in
-     match meta_of_json seed_json with
-     | Ok meta -> (
-         match meta_to_json meta with
-         | `Assoc fields -> fields |> List.map fst |> dedupe_keep_order
-         | _ -> fallback_canonical_keeper_meta_key_names)
-     | Error msg ->
-         Log.Keeper.warn
-           "canonical_keeper_meta_key_names seed failed: %s; falling back to static keys"
-           msg;
-         fallback_canonical_keeper_meta_key_names)
+  let seed_json =
+    `Assoc
+      [
+        ("name", `String "__keeper-meta-key-seed__");
+        ("agent_name", `String "__keeper-meta-key-seed__");
+        ("trace_id", `String "__keeper-meta-key-seed__");
+      ]
+  in
+  match meta_of_json seed_json with
+  | Ok meta -> (
+      match meta_to_json meta with
+      | `Assoc fields -> fields |> List.map fst |> dedupe_keep_order
+      | _ -> fallback_canonical_keeper_meta_key_names)
+  | Error msg ->
+      Log.Keeper.warn
+        "canonical_keeper_meta_key_names seed failed: %s; falling back to static keys"
+        msg;
+      fallback_canonical_keeper_meta_key_names
 
 let compatibility_keeper_meta_key_names =
   [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist"; "tool_allowlist" ]
@@ -973,7 +972,7 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
       let known_keeper_meta_key_names =
-        Lazy.force canonical_keeper_meta_key_names
+        canonical_keeper_meta_key_names
         @ compatibility_keeper_meta_key_names
       in
       let unknown =

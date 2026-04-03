@@ -1081,6 +1081,68 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
       in
       check string "detailed list skill route primary" "masc-heartbeat"
         Yojson.Safe.Util.(keeper_row |> member "skill_route" |> member "primary" |> to_string))
+
+let test_keeper_status_detailed_preserves_legacy_metrics_fallback () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive "legacy-detail-demo";
+      rm_rf base_dir)
+    (fun () ->
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let keeper_ctx : _ Masc_mcp.Tool_keeper.context =
+        { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None }
+      in
+      let dispatch name args =
+        match Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name ~args with
+        | Some result -> result
+        | None -> fail ("missing dispatch for " ^ name)
+      in
+      let ok, _ =
+        dispatch "masc_keeper_up"
+          (`Assoc
+            [
+              ("name", `String "legacy-detail-demo");
+              ("goal", `String "Inspect legacy status");
+              ("proactive_enabled", `Bool false);
+            ])
+      in
+      check bool "keeper up ok" true ok;
+      (match Masc_mcp.Keeper_registry.find_by_name "legacy-detail-demo" with
+       | Some entry -> Atomic.set entry.fiber_stop true
+       | None -> ());
+      let meta =
+        match Masc_mcp.Keeper_types.read_meta config "legacy-detail-demo" with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "missing keeper meta"
+        | Error e -> fail e
+      in
+      let metrics_store = Masc_mcp.Keeper_types.keeper_metrics_store config meta.name in
+      let legacy_metrics_json = Yojson.Safe.from_string
+          {|{"channel":"turn","generation":0,"trace_id":"trace-legacy","context_ratio":0.33,"context_tokens":80,"context_max":512,"message_count":2}|}
+      in
+      Dated_jsonl.append metrics_store legacy_metrics_json;
+      let ok, body =
+        dispatch "masc_keeper_status"
+          (`Assoc
+            [
+              ("name", `String "legacy-detail-demo");
+              ("fast", `Bool false);
+              ("include_context", `Bool false);
+              ("include_metrics_overview", `Bool true);
+            ])
+      in
+      check bool "status ok" true ok;
+      let json = Yojson.Safe.from_string body in
+      check string "tool audit source from legacy metrics fallback" "keeper_metrics"
+        Yojson.Safe.Util.(json |> member "tool_audit_source" |> to_string);
+      check bool "legacy metrics fallback keeps null action source" true
+        Yojson.Safe.Util.(json |> member "latest_action_source" = `Null);
+      check int "legacy metrics fallback keeps zero tool calls" 0
+        Yojson.Safe.Util.(json |> member "latest_tool_call_count" |> to_int))
 (* test_keeper_policy_tools_roundtrip: removed — keeper policy tools return stubs *)
 (* test_keeper_policy_set_rejects_invalid_mode: removed — keeper policy_mode system removed *)
 
@@ -2588,6 +2650,8 @@ let () =
            test_keeper_dispatch_auxiliary_surfaces_smoke;
          test_case "keeper status detailed reads metrics/history/memory" `Quick
            test_keeper_status_detailed_reads_metrics_history_and_memory;
+         test_case "keeper status detailed preserves legacy metrics fallback" `Quick
+           test_keeper_status_detailed_preserves_legacy_metrics_fallback;
          test_case "shell tool policy gates" `Quick
            test_keeper_shell_tool_policy_gates;
          test_case "shell readonly enforces allowed paths" `Quick

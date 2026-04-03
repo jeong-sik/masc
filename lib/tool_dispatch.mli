@@ -93,7 +93,7 @@ type module_tag =
   | Mod_a2a | Mod_handover
   | Mod_relay | Mod_heartbeat
   | Mod_auth | Mod_audit | Mod_cost | Mod_fire_task
-  | Mod_hat | Mod_cache | Mod_model_catalog | Mod_rate_limit | Mod_run
+  | Mod_cache | Mod_model_catalog | Mod_rate_limit | Mod_run
   | Mod_goals | Mod_compact
   | Mod_agent | Mod_task | Mod_room
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend

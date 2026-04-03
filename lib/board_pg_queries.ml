@@ -1,7 +1,24 @@
-(** Board_pg query definitions — row types, SQL queries, column defs. *)
+(** Board_pg query definitions — row types, SQL queries, column defs.
+
+    Also hosts the shared [t] connection pool type used by all Board_pg
+    sub-modules. *)
 
 open Board
 open Pg_infix
+
+(* ================================================================ *)
+(* Shared connection type                                            *)
+(* ================================================================ *)
+
+type t = {
+  pool: (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t;
+}
+
+(** Get pool for Board_listener pub/sub bridge *)
+let get_pool t = t.pool
+
+(** Convert Caqti errors to board_error *)
+let caqti_err e = Io_error (Caqti_error.show e)
 
 let ttl_where = "(expires_at = 0 OR expires_at > extract(epoch from now()))"
 let comment_ttl_where = "(c.expires_at = 0 OR c.expires_at > extract(epoch from now()))"

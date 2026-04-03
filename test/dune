@@ -678,6 +678,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_channel_gate_metrics)
+ (modules test_channel_gate_metrics)
+ (libraries masc_test_deps))
+
+(test
  (name test_local_review_script)
  (modules test_local_review_script)
  (libraries alcotest unix yojson))

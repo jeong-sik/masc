@@ -580,17 +580,7 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | `masc_worktree_remove` | worktree 삭제 |
 | `masc_worktree_list` | worktree 목록 |
 
-### 14.6 Tempo (`tool_tempo`)
-
-| Tool | 동작 |
-|------|------|
-| `masc_tempo` | 범용 tempo 조회/설정 |
-| `masc_tempo_get` | 현재 tempo 조회 |
-| `masc_tempo_set` | tempo 설정 (mode + reason) |
-| `masc_tempo_adjust` | tempo 미세 조정 |
-| `masc_tempo_reset` | 기본값 복원 |
-
-### 14.7 Control (`tool_control`)
+### 14.6 Control (`tool_control`)
 
 | Tool | 동작 |
 |------|------|

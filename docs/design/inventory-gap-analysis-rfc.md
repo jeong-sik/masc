@@ -221,8 +221,8 @@ grep -n "to_json" lib/config/env_config.ml | head -3
 
 | 카테고리 | 도구 | 개수 |
 |----------|------|------|
-| Tempo | `masc_tempo`, `masc_tempo_adjust`, `masc_tempo_get`, `masc_tempo_reset`, `masc_tempo_set` | 5 |
-| Encryption | `masc_encryption_enable`, `masc_encryption_disable`, `masc_encryption_status`, `masc_generate_key` | 4 |
+| ~~Tempo~~ | ~~`masc_tempo`, `masc_tempo_adjust`, `masc_tempo_get`, `masc_tempo_reset`, `masc_tempo_set`~~ | ~~5~~ (removed PR #4750) |
+| ~~Encryption~~ | ~~`masc_encryption_enable`, `masc_encryption_disable`, `masc_encryption_status`, `masc_generate_key`~~ | ~~4~~ (removed PR #4750) |
 | Notifications | `masc_notification_count`, `masc_check_notifications`, `masc_consume_notifications` | 3 |
 
 **증거**:

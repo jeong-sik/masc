@@ -193,9 +193,10 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
     `Assoc [
       ("namespace_id", `String "default");
       ("namespace", `String "default");
-      ("current_namespace", `String room_id);
+      ("current_namespace", `String "default");
       ("namespace_mode", `String "flattened");
       ("room", `Null);
+      ("current_room", `String room_id);
       ("room_base_path", `Null);
       ("coordination_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);

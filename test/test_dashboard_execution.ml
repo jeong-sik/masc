@@ -223,6 +223,12 @@ let test_dashboard_execution_namespace_status () =
           (status |> member "room" = `Null);
         check bool "legacy room base path removed" true
           (status |> member "room_base_path" = `Null);
+        let batch = Lib.Server_dashboard_http_core.dashboard_batch_json config in
+        let batch_status = batch |> member "status" in
+        check string "batch current_namespace exposed" "default"
+          (batch_status |> member "current_namespace" |> to_string);
+        check string "batch current_room legacy selector exposed" "default"
+          (batch_status |> member "current_room" |> to_string);
       ))
 
 let test_dashboard_shell_namespace_status () =

@@ -8,9 +8,11 @@
 let state_start_marker = "[STATE]"
 let state_end_marker = "[/STATE]"
 
+(* Hoisted to module level to avoid per-call recompilation *)
+let start_re = Re.str state_start_marker |> Re.compile
+let end_re = Re.str state_end_marker |> Re.compile
+
 let extract_state_block (text : string) : string option * string =
-  let start_re = Re.str state_start_marker |> Re.compile in
-  let end_re = Re.str state_end_marker |> Re.compile in
   match Re.exec_opt start_re text with
   | None -> None, String.trim text
   | Some g ->

@@ -21,6 +21,7 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
   `Assoc
     [
       ("namespace_id", `String current_namespace);
+      ("current_namespace", `String current_namespace);
       ("namespace_base_path", `String config.base_path);
       ("coordination_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);

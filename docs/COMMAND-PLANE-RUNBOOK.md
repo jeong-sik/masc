@@ -25,22 +25,21 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 
 일반 작업이든 benchmark든 먼저 이 순서를 맞춘다.
 
-**Quick path**: `masc_start(path="/repo", task_title="My task")` — 1~6번을 한 번에 처리.
+**Quick path**: `masc_start(path="/repo", task_title="My task")` — 1~5번을 한 번에 처리.
 
 **Step-by-step**:
 
-1. `masc_set_room`
-   - project root를 coordination root로 잡는다.
+1. `masc_start`
+   - project root를 coordination root로 잡고 default namespace join까지 처리한다.
+   - `task_title` 없이 호출하면 onboarding만 하고 task claim 단계는 건너뛴다.
    - worktree 경로를 줘도 runtime namespace는 project-root 기준 default namespace로 수렴한다.
-2. `masc_join`
-   - agent identity와 capabilities를 default namespace에 등록한다.
-3. `masc_status`
+2. `masc_status`
    - namespace 상태와 agent roster를 확인한다.
-4. `masc_transition(action="claim")` 또는 `masc_claim_next`
+3. `masc_transition(action="claim")` 또는 `masc_claim_next`
    - 작업을 claim한다. backlog가 비어 있으면 먼저 `masc_add_task`.
-5. 필요 시 `masc_plan_set_task`
+4. 필요 시 `masc_plan_set_task`
    - claim path가 planning `current_task`를 자동으로 맞추지 않았다면 세션 `current_task`를 claim한 task로 맞춘다.
-6. `masc_heartbeat`
+5. `masc_heartbeat`
    - 긴 작업 전/중에 liveness를 갱신한다.
 
 ### 왜 이렇게 하나
@@ -299,7 +298,7 @@ Content-Type: application/json
 
 ## Which Tool Now?
 
-- project namespace가 안 잡혔다: `masc_set_room`
+- project namespace가 안 잡혔다: `masc_start`
 - agent가 roster에 없다: `masc_join`
 - task는 claimed인데 current_task가 없다: `masc_plan_set_task`
 - agent가 stale/zombie처럼 보인다: `masc_heartbeat`
@@ -314,7 +313,7 @@ Content-Type: application/json
 ### 1. worktree를 namespace로 착각
 
 증상:
-- worktree path로 `masc_set_room` 했는데 기존 coordination state가 그대로 보임
+- worktree path로 `masc_start` 또는 `masc_set_room` 했는데 기존 coordination state가 그대로 보임
 
 정리:
 - runtime namespace는 project root 기준 default 하나다

@@ -20,16 +20,17 @@ Use `CPv2 command plane` as the single source of execution truth. Other orchestr
 
 ## Canonical golden paths
 
-### 1. Room / task hygiene
+### 1. Namespace / task hygiene
 
 Use this before any real work:
 
-1. `masc_set_room`
-2. `masc_join`
-3. `masc_status`
-4. `masc_transition(action=claim)` or `masc_claim_next` or `masc_add_task`
-5. `masc_plan_set_task` after `masc_transition(action=claim)`
-6. `masc_heartbeat`
+1. `masc_start`
+2. `masc_status`
+3. `masc_transition(action=claim)` or `masc_claim_next` or `masc_add_task`
+4. `masc_plan_set_task` after `masc_transition(action=claim)`
+5. `masc_heartbeat`
+
+`masc_set_room` remains callable as a compatibility alias, but it only selects project scope and should not be treated as the primary onboarding path.
 
 ### 2. Managed large-team orchestration
 

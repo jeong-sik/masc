@@ -136,7 +136,7 @@ let public_mcp_surface_tools =
     (* Phase 2: surface SSOT *)
     "masc_board_migrate"; "masc_board_reclassify"; "masc_bounded_run";
     "masc_episode_flush"; "masc_episode_list";
-    "masc_recall_search"; "masc_set_room";
+    "masc_recall_search";
     "masc_verify_auto"; "masc_verify_handoff"; "masc_verify_pending";
     "masc_verify_request"; "masc_verify_status"; "masc_verify_submit";
   ]
@@ -259,6 +259,8 @@ let system_internal_surface_tools =
     "masc_mcp_session"; "masc_suspend"; "masc_listen";
     (* Session lifecycle — auto-called *)
     "masc_init"; "masc_reset"; "masc_register_capabilities";
+    (* Namespace onboarding compatibility alias *)
+    "masc_set_room";
     (* Governance pipeline — auto-executed (active tools only;
        masc_approve/reject/branch/interrupt/pending_interrupts are Deprecated
        in Tool_catalog — they shell out to the removed masc-checkpoint CLI) *)

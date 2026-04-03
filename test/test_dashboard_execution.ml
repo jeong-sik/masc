@@ -215,6 +215,8 @@ let test_dashboard_execution_namespace_status () =
           (status |> member "namespace_id" |> to_string);
         check string "status namespace exposed" "default"
           (status |> member "namespace" |> to_string);
+        check string "status current_namespace exposed" "default"
+          (status |> member "current_namespace" |> to_string);
         check string "status namespace mode flattened" "flattened"
           (status |> member "namespace_mode" |> to_string);
         check bool "legacy room removed" true
@@ -241,6 +243,8 @@ let test_dashboard_shell_namespace_status () =
         (status |> member "namespace_id" |> to_string);
       check string "shell namespace exposed" "default"
         (status |> member "namespace" |> to_string);
+      check string "shell current_namespace exposed" "default"
+        (status |> member "current_namespace" |> to_string);
       check string "shell namespace mode flattened" "flattened"
         (status |> member "namespace_mode" |> to_string);
       check bool "shell legacy room removed" true
@@ -253,6 +257,9 @@ let test_dashboard_shell_namespace_status () =
         (status |> member "workspace_path" |> to_string);
       check bool "shell workspace differs false when same root" false
         (status |> member "workspace_differs" |> to_bool);
+      check string "shell diagnostics current_namespace surfaced" "default"
+        (json |> member "projection_diagnostics" |> member "current_namespace"
+        |> to_string);
       check string "shell diagnostics surface" "shell"
         (json |> member "projection_diagnostics" |> member "surface" |> to_string))
 

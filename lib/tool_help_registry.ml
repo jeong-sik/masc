@@ -239,7 +239,7 @@ let manual_help_entry name =
               "Command-plane tool/model allowlists now constrain unit routing and assignment via tagged capabilities, but they do not yet hard-stop every per-tool worker invocation.";
             ];
           details_markdown =
-            "Provides a room-scoped control snapshot: auth config and credentials, command-plane policy topology, and the full tool inventory with metadata and permission hints.";
+            "Provides a namespace-scoped control snapshot: auth config and credentials, command-plane policy topology, and the full tool inventory with metadata and permission hints.";
           doc_refs =
             [
               "docs/COMMAND-PLANE-RUNBOOK.md";

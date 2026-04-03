@@ -30,7 +30,6 @@ type config = {
   session_id : string option;
   description : string option;
   memory : Oas.Memory.t option;
-  tool_retry_policy : Oas.Tool_retry_policy.t option;
   named_cascade : Oas.Api.named_cascade option;
   initial_messages : Oas.Types.message list;
   raw_trace : Oas.Raw_trace.t option;
@@ -56,7 +55,6 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     session_id = None;
     description = None;
     memory = None;
-    tool_retry_policy = None;
     named_cascade = None;
     initial_messages = [];
     raw_trace = None;
@@ -189,10 +187,6 @@ let build
   in
   let builder = match config.memory with
     | Some m -> Oas.Builder.with_memory m builder
-    | None -> builder
-  in
-  let builder = match config.tool_retry_policy with
-    | Some policy -> Oas.Builder.with_tool_retry_policy policy builder
     | None -> builder
   in
   let builder = match config.raw_trace with

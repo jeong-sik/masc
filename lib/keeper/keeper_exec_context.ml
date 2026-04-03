@@ -1112,7 +1112,6 @@ let run_proactive_generation
           Oas_worker.run_named ~cascade_name:"keeper_turn"
             ~goal:prompt ~system_prompt:turn_system_prompt
             ~tools ~initial_messages:ctx_work.messages
-            ~tool_retry_policy:Agent_sdk.Tool_retry_policy.default_internal
             ~max_turns:(Keeper_config.keeper_unified_max_turns ())
             ~temperature ~max_tokens
             ()) in

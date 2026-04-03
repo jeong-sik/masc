@@ -358,7 +358,11 @@ let run_cmd host port base_path =
                 Log.Server.warn
                   "[Shutdown] hooks timeout after %.1fs, proceeding"
                   shutdown_cfg.cleanup_timeout_s
-            | Eio.Cancel.Cancelled _ as e -> raise e);
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Log.Server.warn
+                  "[Shutdown] hooks failed, proceeding: %s"
+                  (Printexc.to_string exn));
             (* Phase 3: Board flush with 2s timeout *)
             Log.Server.info "[Shutdown] Phase: board flush (timeout=2.0s)";
             (try
@@ -368,9 +372,10 @@ let run_cmd host port base_path =
             | Eio.Time.Timeout ->
                 Log.Server.warn "[Shutdown] Board flush timeout, skipping"
             | Eio.Cancel.Cancelled _ as e -> raise e
-            | _ ->
+            | exn ->
                 Log.Server.warn
-                  "[Shutdown] Board flush skipped (not initialized)");
+                  "[Shutdown] Board flush skipped: %s"
+                  (Printexc.to_string exn));
             (* Phase 4: Return normally — Eio.Fiber.first will cancel
                run_server cleanly via Eio.Cancel.Cancelled. *)
             Log.Server.info "[Shutdown] Phase: server cancel";

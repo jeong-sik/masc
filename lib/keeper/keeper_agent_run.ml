@@ -82,6 +82,44 @@ let normalize_response_text
           (Printf.sprintf "Completed without a textual reply. Tools used: %s."
              (String.concat ", " tool_names))
 
+let take n items =
+  if n <= 0 then
+    []
+  else
+    List.filteri (fun i _ -> i < n) items
+
+let prioritized_disclosed_tool_names
+    ~(max_tools : int)
+    ~(always_include_tools : string list)
+    ~(retrieved_names : string list)
+    ~(fallback_tools : string list)
+    ~(use_fallback : bool) : string list =
+  let always_include_tools =
+    Keeper_exec_tools.dedupe_tool_names always_include_tools
+  in
+  let retrieved_names =
+    Keeper_exec_tools.dedupe_tool_names retrieved_names
+  in
+  let fallback_tools =
+    Keeper_exec_tools.dedupe_tool_names fallback_tools
+  in
+  let add_with_budget acc names =
+    let remaining = max_tools - List.length acc in
+    if remaining <= 0 then
+      acc
+    else
+      let unseen =
+        List.filter (fun name -> not (List.mem name acc)) names
+      in
+      acc @ take remaining unseen
+  in
+  let acc = add_with_budget [] always_include_tools in
+  let acc = add_with_budget acc retrieved_names in
+  if use_fallback then
+    add_with_budget acc fallback_tools
+  else
+    acc
+
 let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
   match proof.result_status with
   | Agent_sdk.Cdal_proof.Completed ->
@@ -548,18 +586,39 @@ let run_turn
           | (_, s) :: _ -> s
           | [] -> 0.0
         in
-        let retrieved_names = List.map fst retrieved in
         let use_fallback = top_score < confidence_threshold in
+        let max_tools =
+          Keeper_config.int_of_env_default
+            "MASC_KEEPER_MAX_TOOLS_PER_TURN" ~default:40 ~min_v:5 ~max_v:200
+        in
+        let portal_ctx : Tool_portal.context = {
+          config;
+          agent_name = meta.name;
+        } in
+        let visible_always_include_tools =
+          Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
+        in
+        let retrieved_names =
+          List.map fst retrieved
+          |> Tool_portal.filter_visible_tool_names portal_ctx
+        in
+        let selected_tools =
+          prioritized_disclosed_tool_names
+            ~max_tools
+            ~always_include_tools:visible_always_include_tools
+            ~retrieved_names
+            ~fallback_tools:
+              (Tool_portal.filter_visible_tool_names portal_ctx fallback_tools)
+            ~use_fallback
+        in
         let all_allowed =
           Agent_sdk.Tool_op.apply
             (Agent_sdk.Tool_op.compose [
-              Agent_sdk.Tool_op.Replace_with always_include_tools;
-              Agent_sdk.Tool_op.Add retrieved_names;
-              (if use_fallback then Agent_sdk.Tool_op.Add fallback_tools
-               else Agent_sdk.Tool_op.Keep_all);
+              Agent_sdk.Tool_op.Replace_with selected_tools;
               !tool_overlay_ref;
             ])
             all_tool_names
+          |> Tool_portal.filter_visible_tool_names portal_ctx
         in
         if Keeper_types_profile.keeper_debug then
           Log.Keeper.info
@@ -619,19 +678,15 @@ let run_turn
            so 40 tools ≈ 4700 tokens — safe for 8K models.  Beyond 40,
            truncate to always_include_tools + top BM25 results by score.
            Configurable via MASC_KEEPER_MAX_TOOLS_PER_TURN. *)
-        let max_tools =
-          Keeper_config.int_of_env_default
-            "MASC_KEEPER_MAX_TOOLS_PER_TURN" ~default:40 ~min_v:5 ~max_v:200
-        in
         let all_allowed =
           if List.length all_allowed > max_tools then begin
             Log.Keeper.info
               "context overflow guard: %d tools > max %d, truncating"
               (List.length all_allowed) max_tools;
             let essential = List.filter
-              (fun name -> List.mem name always_include_tools) all_allowed in
+              (fun name -> List.mem name visible_always_include_tools) all_allowed in
             let non_essential = List.filter
-              (fun name -> not (List.mem name always_include_tools)) all_allowed in
+              (fun name -> not (List.mem name visible_always_include_tools)) all_allowed in
             let budget = max_tools - List.length essential in
             (* Sort non-essential by BM25 score descending so the most
                relevant tools survive truncation.  Tools not in the

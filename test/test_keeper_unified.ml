@@ -1175,6 +1175,58 @@ let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
     [ "keeper_voice_agent"; "keeper_voice_agent"; "keeper_board_post" ]
     merged
 
+let test_prioritized_disclosed_tool_names_caps_budget () =
+  let always =
+    [ "always-1"; "always-2"; "always-3"; "always-4"; "always-5" ]
+  in
+  let retrieved =
+    List.init 50 (fun i -> Printf.sprintf "retrieved-%02d" i)
+  in
+  let fallback =
+    List.init 50 (fun i -> Printf.sprintf "fallback-%02d" i)
+  in
+  let selected =
+    KAR.prioritized_disclosed_tool_names
+      ~max_tools:40
+      ~always_include_tools:always
+      ~retrieved_names:retrieved
+      ~fallback_tools:fallback
+      ~use_fallback:true
+  in
+  check int "caps at max_tools" 40 (List.length selected);
+  check (list string) "preserves always prefix" always
+    (List.filteri (fun i _ -> i < List.length always) selected);
+  check string "retrieval fills budget before fallback"
+    "retrieved-34" (List.hd (List.rev selected))
+
+let test_prioritized_disclosed_tool_names_uses_fallback_remaining_budget () =
+  let selected =
+    KAR.prioritized_disclosed_tool_names
+      ~max_tools:6
+      ~always_include_tools:[ "always-1"; "always-2" ]
+      ~retrieved_names:[ "retrieved-1"; "retrieved-2"; "retrieved-2" ]
+      ~fallback_tools:
+        [ "fallback-1"; "fallback-2"; "fallback-2"; "fallback-3"; "fallback-4" ]
+      ~use_fallback:true
+  in
+  check (list string) "fills remaining budget with deduped fallback"
+    [ "always-1"; "always-2"; "retrieved-1"; "retrieved-2";
+      "fallback-1"; "fallback-2" ]
+    selected
+
+let test_prioritized_disclosed_tool_names_skips_fallback_when_disabled () =
+  let selected =
+    KAR.prioritized_disclosed_tool_names
+      ~max_tools:6
+      ~always_include_tools:[ "always-1"; "always-2" ]
+      ~retrieved_names:[ "retrieved-1"; "retrieved-2" ]
+      ~fallback_tools:[ "fallback-1"; "fallback-2"; "fallback-3" ]
+      ~use_fallback:false
+  in
+  check (list string) "ignores fallback when disabled"
+    [ "always-1"; "always-2"; "retrieved-1"; "retrieved-2" ]
+    selected
+
 let test_social_model_silences_skip_only_turn () =
   let result =
     make_run_result
@@ -1433,6 +1485,12 @@ let () =
             test_tool_usage_delta_ignores_removed_tools;
           test_case "merge observed and synthetic tool names" `Quick
             test_merge_reported_and_observed_tool_names_preserves_synthetic_tools;
+          test_case "tool disclosure caps budget" `Quick
+            test_prioritized_disclosed_tool_names_caps_budget;
+          test_case "tool disclosure uses fallback remainder" `Quick
+            test_prioritized_disclosed_tool_names_uses_fallback_remaining_budget;
+          test_case "tool disclosure skips fallback when disabled" `Quick
+            test_prioritized_disclosed_tool_names_skips_fallback_when_disabled;
           test_case "social model silences skip-only turn" `Quick
             test_social_model_silences_skip_only_turn;
           test_case "social model requires explicit headers" `Quick

@@ -198,7 +198,8 @@ let make_hooks
           Option.is_some (Keeper_memory_policy.find_state_block text)
         in
         if not has_state_block && turn > 0 then
-          Log.Keeper.info "keeper:%s turn=%d state_block=absent"
+          Log.Keeper.debug
+            "keeper:%s turn=%d state_block=absent (awaiting post-run synthesis)"
             meta.name turn;
         (try
            Sse.broadcast

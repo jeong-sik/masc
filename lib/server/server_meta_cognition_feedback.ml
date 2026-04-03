@@ -25,7 +25,7 @@ let should_emit snapshot =
       let interpretation = Meta_cognition.interpret summary in
       interpretation.primary_salience <> Meta_cognition.Stable
   | Error err ->
-      Log.Dashboard.warn "meta-cognition digest parse failed in should_emit: %s" err;
+      Log.Dashboard.debug "meta-cognition digest parse skipped in should_emit: %s" err;
       false
 
 let post_digest_key = Meta_cognition.post_digest_key
@@ -174,8 +174,8 @@ let latest_digest_json ?summary () =
         match Meta_cognition.parse_summary json with
         | Ok parsed -> Some parsed
         | Error err ->
-            Log.Dashboard.warn
-              "meta-cognition latest digest summary parse failed: %s" err;
+            Log.Dashboard.debug
+              "meta-cognition latest digest summary parse skipped: %s" err;
             None)
     | None -> None
   in

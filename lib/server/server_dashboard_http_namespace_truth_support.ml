@@ -394,8 +394,8 @@ let compose_namespace_truth_snapshot ~(config : Room.config) ~initialized ~shell
     | Ok summary_input ->
         (Some summary_input, Some (Meta_cognition.interpret summary_input))
     | Error err ->
-        Log.Dashboard.warn
-          "namespace-truth meta-cognition summary parse failed: %s" err;
+        Log.Dashboard.debug
+          "namespace-truth meta-cognition summary parse skipped: %s" err;
         (None, None)
   in
   let meta_cognition_latest_digest =

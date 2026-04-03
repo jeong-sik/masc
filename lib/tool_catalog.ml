@@ -196,15 +196,16 @@ let explicit_metadata : (string * metadata) list =
      deprecated ~implementation_status:Real
        "No surface, no external callers. Tempo feature never integrated into workflows.");
     (* Broken tools: shell out to CLI binaries unavailable at runtime.
-       masc-cost: buildable from bin/masc_cost.ml but not deployed in container image.
+       masc-cost: buildable from bin/masc_cost.ml but not guaranteed to be
+       present in runtime images or on PATH.
        masc-checkpoint: removed from codebase (refactor #102).
        Deprecated 2026-04-03. See #4709, #4734. *)
     ("masc_cost_log",
      deprecated ~implementation_status:Real
-       "Shells out to masc-cost CLI which is not deployed in the runtime container image. Fails in containerized environments.");
+       "Shells out to masc-cost CLI which may be unavailable in the runtime environment or missing from PATH.");
     ("masc_cost_report",
      deprecated ~implementation_status:Real
-       "Shells out to masc-cost CLI which is not deployed in the runtime container image. Fails in containerized environments.");
+       "Shells out to masc-cost CLI which may be unavailable in the runtime environment or missing from PATH.");
     ("masc_interrupt",
      deprecated ~implementation_status:Real
        "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");

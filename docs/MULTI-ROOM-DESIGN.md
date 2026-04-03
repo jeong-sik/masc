@@ -1,6 +1,6 @@
 # MASC Multi-Room Design
 
-Status: retired design note
+Status: historical/internal compatibility note
 Verification: do not treat the historical multi-room verification below as a current product contract
 
 This document is retained only to explain why room abstractions exist in parts of the codebase.

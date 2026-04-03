@@ -42,7 +42,7 @@ let after_start ~success =
         [ "Forgetting masc_worktree_create — working on main branch directly" ] }
   else
     { next_steps =
-        [ s "masc_set_room" "Set the namespace manually if path was wrong";
+        [ s "masc_start" "Retry masc_start with the correct path if the path was wrong";
           s "masc_init" "Initialize MASC if not yet set up" ];
       preconditions = [];
       common_mistakes = [] }
@@ -73,7 +73,7 @@ let after_join ~success =
         [ "Skipping masc_status — you may duplicate work another agent claimed" ] }
   else
     { next_steps =
-        [ s "masc_set_room" "Set the namespace first";
+        [ s "masc_start" "Set the namespace first";
           s "masc_init" "Initialize MASC if not set up" ];
       preconditions = [];
       common_mistakes = [] }
@@ -88,7 +88,7 @@ let after_status ~success =
       common_mistakes = [] }
   else
     { next_steps =
-        [ s "masc_set_room" "Ensure namespace is configured";
+        [ s "masc_start" "Ensure namespace is configured";
           s "masc_join" "Join the namespace first" ];
       preconditions = [];
       common_mistakes = [] }
@@ -332,8 +332,7 @@ let after_worktree_create ~success =
 let after_init ~success =
   if success then
     { next_steps =
-        [ s "masc_set_room" "Set the namespace to your project root";
-          s "masc_join" "Join the namespace" ];
+        [ s "masc_start" "Set the namespace to your project root and join it" ];
       preconditions = [];
       common_mistakes = [] }
   else
@@ -428,8 +427,8 @@ let guidance_to_json g =
     Used by tool_help_registry to enrich help responses. *)
 let workflow_context ~tool_name =
   let before = match tool_name with
-    | "masc_join" -> [ "masc_set_room" ]
-    | "masc_status" -> [ "masc_set_room"; "masc_join" ]
+    | "masc_join" -> [ "masc_start" ]
+    | "masc_status" -> [ "masc_start"; "masc_join" ]
     | "masc_claim_next" ->
         [ "masc_join"; "masc_status" ]
     | "masc_plan_set_task" | "masc_set_current_task" ->
@@ -471,7 +470,7 @@ let current_state_guidance ~room_set ~joined ~task_claimed
     ~current_task_set ~worktree_active ~session_active =
   if not room_set then
     { next_steps =
-        [ s "masc_set_room" "Set the namespace to your project root (repo root)";
+        [ s "masc_start" "Set the namespace to your project root (repo root)";
           s "masc_init" "Initialize MASC if this is a fresh setup" ];
       preconditions = [];
       common_mistakes =

@@ -76,7 +76,6 @@ let strict_success_names =
     "masc_plan_init";
     "masc_plan_set_task";
     "masc_plan_update";
-    "masc_set_room";
     "masc_start";
     "masc_status";
     "masc_tool_help";

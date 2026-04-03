@@ -3,6 +3,8 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardGovernanceResponse, GovernanceCaseBundle } from '../types'
 
+void vi
+
 async function flushUi(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()

@@ -2,6 +2,8 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+void vi
+
 const missionSnapshot = { value: null as Record<string, unknown> | null }
 const missionLoading = { value: false }
 const refreshMissionSnapshot = vi.fn().mockResolvedValue(undefined)

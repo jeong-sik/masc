@@ -3,6 +3,8 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OperatorDigest, OperatorSnapshot, RouteState } from '../../types'
 
+void vi
+
 async function flushUi(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()

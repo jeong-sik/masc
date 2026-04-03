@@ -7,6 +7,8 @@ import type {
   OperatorSnapshot,
 } from '../types'
 
+void vi
+
 async function flushUi(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()

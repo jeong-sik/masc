@@ -8,10 +8,10 @@
 module Oas = Agent_sdk
 
 let high_risk_actions =
-  [ "room_pause"; "team_stop"; "team_task_inject"; "team_worker_spawn_batch" ]
+  [ "namespace_pause"; "room_pause"; "team_stop"; "team_task_inject"; "team_worker_spawn_batch" ]
 
 let allowed_actions =
-  [ "broadcast"; "room_pause"; "room_resume"; "social_sweep";
+  [ "broadcast"; "namespace_pause"; "room_pause"; "namespace_resume"; "room_resume"; "social_sweep";
     "autonomy_tick";
     "team_note"; "team_broadcast"; "team_task_inject";
     "team_worker_spawn_batch"; "team_stop";

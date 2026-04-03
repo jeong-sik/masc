@@ -90,8 +90,14 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
     if rel_path = "" then source_name else Filename.concat source_name rel_path
   in
   let quarantine = Filename.concat masc_root "_quarantine" in
+  let quarantine_replaced_path ~source_name ~rel_path =
+    Filename.concat quarantine
+      (Filename.concat "_replaced"
+         (quarantine_rel_path ~source_name ~rel_path))
+  in
   let rec migrate_recursive ~source_name ~old_dir ~new_dir ~rel_path
-      ~prefer_root_keeper_meta_conflicts =
+      ~prefer_root_keeper_meta_conflicts
+      ~prefer_room_flatten_conflicts =
     if not (Sys.file_exists old_dir) then ()
     else begin
       Keeper_types.mkdir_p new_dir;
@@ -103,6 +109,7 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
           if Sys.file_exists new_path then
             migrate_recursive ~source_name ~old_dir:old_path ~new_dir:new_path ~rel_path:rel
               ~prefer_root_keeper_meta_conflicts
+              ~prefer_room_flatten_conflicts
           else
             Sys.rename old_path new_path
         end else begin
@@ -112,11 +119,12 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
                && should_promote_legacy_keeper_meta
                     ~legacy_path:old_path ~current_path:new_path
             then begin
-              let replaced_q_path =
-                Filename.concat quarantine
-                  (Filename.concat "_replaced"
-                     (quarantine_rel_path ~source_name ~rel_path:rel))
-              in
+              let replaced_q_path = quarantine_replaced_path ~source_name ~rel_path:rel in
+              Keeper_types.mkdir_p (Filename.dirname replaced_q_path);
+              Sys.rename new_path replaced_q_path;
+              Sys.rename old_path new_path
+            end else if prefer_room_flatten_conflicts then begin
+              let replaced_q_path = quarantine_replaced_path ~source_name ~rel_path:rel in
               Keeper_types.mkdir_p (Filename.dirname replaced_q_path);
               Sys.rename new_path replaced_q_path;
               Sys.rename old_path new_path
@@ -148,6 +156,7 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
         Log.Misc.info "migrate: %s -> %s" old_name new_name;
         migrate_recursive ~source_name:old_name ~old_dir ~new_dir ~rel_path:""
           ~prefer_root_keeper_meta_conflicts:(String.equal new_name "keepers")
+          ~prefer_room_flatten_conflicts:(String.starts_with ~prefix:"rooms/" old_name)
       end
     ) renames
   with

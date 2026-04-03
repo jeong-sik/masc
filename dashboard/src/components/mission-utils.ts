@@ -58,8 +58,10 @@ export const selectedSessionId = signal<string | null>(null)
 
 export function missionTargetTypeLabel(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {
+    case 'namespace':
+      return '네임스페이스'
     case 'room':
-      return '방'
+      return '네임스페이스'
     case 'team_session':
     case 'session':
       return '세션'

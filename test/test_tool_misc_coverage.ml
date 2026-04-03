@@ -78,9 +78,8 @@ let () = test "dispatch_dashboard" (fun () ->
   | Some (success, result) ->
       assert success;
       assert (str_contains result "MASC Dashboard");
-      (* Header follows the current_room pointer. *)
-      assert (str_contains result "Room: second-room");
-      assert (not (str_contains result "2 room"));
+      assert (str_contains result "Namespace: default (flattened)");
+      assert (not (str_contains result "second-room"));
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
@@ -111,7 +110,8 @@ let () = test "dispatch_dashboard_current_scope" (fun () ->
   | Some (success, result) ->
       assert success;
       assert (str_contains result "MASC Dashboard");
-      assert (str_contains result "Room: focus-room")
+      assert (str_contains result "Namespace: default (flattened)");
+      assert (not (str_contains result "focus-room"))
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"

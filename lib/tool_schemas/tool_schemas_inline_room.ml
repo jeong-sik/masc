@@ -3,13 +3,13 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_start";
-    description = "One-step onboarding: sets room, joins as agent, and optionally creates+claims a task. Use this instead of calling masc_set_room, masc_join, masc_add_task, and a separate claim step manually.";
+    description = "One-step onboarding: sets the active project root, joins the default namespace as agent, and optionally creates+claims a task. Use this instead of calling masc_set_room, masc_join, masc_add_task, and a separate claim step manually.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("path", `Assoc [
           ("type", `String "string");
-          ("description", `String "Project directory path (absolute, relative, or ~/...). Omit if room is already set.");
+          ("description", `String "Project directory path (absolute, relative, or ~/...). Omit if the active project scope is already set.");
         ]);
         ("task_title", `Assoc [
           ("type", `String "string");
@@ -20,7 +20,7 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_set_room";
-    description = "Set the working directory for MASC operations. Use this to work with .masc/ in a different project.";
+    description = "Set the project root for MASC operations. Use this to point MASC at a different project's .masc/ directory; runtime coordination stays in the default flattened namespace.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -34,7 +34,7 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_join";
-    description = "Join the MASC room/cluster to collaborate with other AI agents. A 'room' is defined by shared .masc/ folder (FS mode) or same PostgreSQL + MASC_CLUSTER_NAME (distributed mode). Call at session start. Your presence will be visible to other agents (gemini, codex, etc). They can @mention you for help. Check masc_status after joining to see active agents and available tasks.";
+    description = "Join the active MASC project namespace to collaborate with other AI agents. Historical tool naming still says 'room', but current builds use the shared .masc/ root default namespace. Call at session start. Your presence will be visible to other agents (gemini, codex, etc). They can @mention you for help. Check masc_status after joining to see active agents and available tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -53,8 +53,8 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_leave";
-    description = "Leave the MASC room and mark yourself as offline. \
-Call when: (1) session ends, (2) switching rooms, (3) work complete. \
+    description = "Leave the active MASC project namespace and mark yourself as offline. \
+Call when: (1) session ends, (2) switching project scopes, (3) work complete. \
 Side effects: releases all your locks, sets presence to offline. \
 Other agents will see you've left via SSE. \
 Example: masc_leave({agent_name: 'claude-xyz'})";
@@ -132,7 +132,7 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
   {
     name = "masc_messages";
     description = "Get recent broadcast messages from all agents. \
-Use to: catch up after joining, check if someone @mentioned you, see room activity. \
+Use to: catch up after joining, check if someone @mentioned you, see namespace activity. \
 Returns chronological list with sender, timestamp, content. \
 Default: last 20 messages. Use limit param for more/less. \
 Tip: Search for '@your-name' in results to find mentions.";
@@ -173,7 +173,7 @@ Tip: Search for '@your-name' in results to find mentions.";
   };
   {
     name = "masc_who";
-    description = "List all agents currently in the room with their capabilities. \
+    description = "List all agents currently in the active namespace with their capabilities. \
 Shows: agent name, join time, capabilities (e.g., ['typescript', 'testing']). \
 Use to: find who can help, check if specific agent is online, see team composition. \
 Agents appear after masc_join, disappear after masc_leave. \

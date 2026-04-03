@@ -83,7 +83,7 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
   let positive_evidence =
     []
     |> evidence_add_if (recent_message_count > 0)
-         (Printf.sprintf "Recent room messages recorded: %d" recent_message_count)
+         (Printf.sprintf "Recent namespace messages recorded: %d" recent_message_count)
     |> evidence_add_if (broadcast_total > 0)
          (Printf.sprintf "Session broadcasts recorded: %d" broadcast_total)
     |> evidence_add_if (portal_total > 0)
@@ -117,7 +117,7 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
   else if Dashboard_utils.is_health_at_risk (String.lowercase_ascii (String.trim room_health))
           || incident_count > 0 || recommended_action_count > 0
   then
-    ("watch", "Live sessions exist without recorded communication activity while the room still has open operator attention.", evidence)
+    ("watch", "Live sessions exist without recorded communication activity while the namespace still has open operator attention.", evidence)
   else
     ("watch", "Live sessions exist, but no communication activity is recorded yet.", evidence)
 
@@ -191,7 +191,7 @@ let build_watch_section ~room_health ~incident_count ~recommended_action_count
   if risky_room then
     ( "risk",
       Printf.sprintf
-        "Room health is %s with %d incidents and %d recommended actions."
+        "Namespace health is %s with %d incidents and %d recommended actions."
         room_health incident_count recommended_action_count,
       evidence )
   else if incident_count > 0 || recommended_action_count > 0 then
@@ -201,7 +201,7 @@ let build_watch_section ~room_health ~incident_count ~recommended_action_count
         incident_count recommended_action_count,
       evidence )
   else
-    ("ok", "No immediate operator action is flagged by the room summary.", evidence)
+    ("ok", "No immediate operator action is flagged by the namespace summary.", evidence)
 
 let build_briefing_sections ~mission_summary_json ~sessions ~agents ~recent_messages
     ~metadata_gaps =

@@ -9,9 +9,6 @@ let masc_root_dir config =
       let seg = sanitize_namespace_segment other in
       Filename.concat (Filename.concat masc_root "clusters") seg
 
-(** @deprecated Since #4638. Still returns
-    [Filename.concat (masc_root_dir config) "rooms"] for migration code that
-    needs to locate legacy room directories. *)
 let rooms_root_dir config = Filename.concat (masc_root_dir config) "rooms"
 let registry_root_path config = Filename.concat (masc_root_dir config) "rooms.json"
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
@@ -87,8 +84,10 @@ let normalize_current_room_label room_id =
 let warn_if_legacy_room_state_exists config =
   let legacy_current_room =
     match read_legacy_current_room config with
-    | Some room_id when room_id <> "default" -> Some room_id
-    | _ -> None
+    | Some room_id when room_id <> "default" ->
+        normalize_current_room_label room_id
+    | Some _ -> None
+    | None -> None
   in
   let has_legacy_rooms = legacy_room_dirs_exist config in
   match legacy_current_room, has_legacy_rooms with
@@ -100,12 +99,15 @@ let warn_if_legacy_room_state_exists config =
           match legacy_current_room, has_legacy_rooms with
           | Some room_id, true ->
               Printf.sprintf
-                "legacy current_room=%S and room data under %S will be ignored"
+                "legacy current_room=%S is ignored for the public default namespace pointer; explicit compatibility paths may still read room data under %S"
                 room_id (rooms_root_dir config)
           | Some room_id, false ->
-              Printf.sprintf "legacy current_room=%S will be ignored" room_id
+              Printf.sprintf
+                "legacy current_room=%S is ignored for the public default namespace pointer"
+                room_id
           | None, true ->
-              Printf.sprintf "legacy room data under %S will be ignored"
+              Printf.sprintf
+                "legacy room data under %S remains available only to explicit compatibility paths"
                 (rooms_root_dir config)
           | None, false -> ""
         in
@@ -113,29 +115,27 @@ let warn_if_legacy_room_state_exists config =
           "Legacy room-scoped state detected; startup now always resolves to the default scope and %s."
           detail
 
+(** Read the compatibility current-room pointer.
+    Room flattening keeps the file for backward compatibility, but the
+    operational namespace is always the default root scope. *)
 let read_current_room config =
-  let has_legacy_rooms = legacy_room_dirs_exist config in
-  if has_legacy_rooms then (
-    warn_if_legacy_room_state_exists config;
-    Some "default")
+  warn_if_legacy_room_state_exists config;
+  Some "default"
+
+let room_dir_for config room_id =
+  if room_id = "default" then
+    masc_root_dir config
   else
-    match read_legacy_current_room config with
-    | Some room_id -> (
-        match normalize_current_room_label room_id with
-        | Some valid_room_id -> Some valid_room_id
-        | None -> Some "default")
-    | None -> Some "default"
+    Filename.concat (rooms_root_dir config) room_id
 
-(** @deprecated Since #4638 all rooms resolve to [masc_root_dir]. *)
-let room_dir_for config _room_id = masc_root_dir config
-
-(** Resolve the initial scope.
-    Since #4638 always returns [Default]. *)
+(** Resolve the initial scope from the current_room file.
+    Named-room pointer resolution is deprecated; new configs always boot into
+    the flat default namespace. *)
 let resolve_initial_scope _config = Default
 
 (** Scope-based directory resolution.
-    Since #4638 scope is always [Default], so this always returns
-    [masc_root_dir config]. *)
+    Since #4638 scope is always [Default], so this always resolves to the
+    root [.masc/] directory. *)
 let masc_dir config =
   match config.scope with
   | Default -> masc_root_dir config

@@ -50,7 +50,7 @@ let all_entries =
   [
     {
       id = "monitoring.sessions";
-      label = "세션 & 룸";
+      label = "세션 & 네임스페이스";
       exposure_status = "main";
       hidden_from_nav = false;
       meets_main_gate = true;
@@ -109,7 +109,7 @@ let all_entries =
       exposure_status = "main";
       hidden_from_nav = false;
       meets_main_gate = true;
-      rationale = "room/session/keeper 액션은 운영자 개입 surface로 메인에 유지합니다.";
+      rationale = "namespace/session/keeper 액션은 운영자 개입 surface로 메인에 유지합니다.";
       route_hash = Some "#command?section=intervene";
       refs =
         {
@@ -122,14 +122,14 @@ let all_entries =
         };
     };
     {
-      id = "command.warroom";
-      label = "관제면";
+      id = "command.namespace";
+      label = "네임스페이스 관제";
       exposure_status = "lab";
       hidden_from_nav = true;
       meets_main_gate = false;
       rationale =
         "오케스트라/스웜/체인/제어는 operator-facing session evidence bundle이 아직 약해 메인 탐색에서 숨기고 실험 surface로 유지합니다.";
-      route_hash = Some "#command?section=warroom";
+      route_hash = Some "#command?section=namespace";
       refs =
         {
           fixture_harness = Some "./scripts/harness_agent_swarm_live.sh";

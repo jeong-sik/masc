@@ -7,11 +7,11 @@ let find_surface surfaces target_id =
       Yojson.Safe.Util.(json |> member "id" |> to_string = target_id))
     surfaces
 
-let test_warroom_is_demoted_to_lab () =
+let test_namespace_surface_is_demoted_to_lab () =
   let json = Dashboard_surface_readiness.json () in
   let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
-  match find_surface surfaces "command.warroom" with
-  | None -> fail "command.warroom missing"
+  match find_surface surfaces "command.namespace" with
+  | None -> fail "command.namespace missing"
   | Some surface ->
       check string "exposure_status" "lab"
         Yojson.Safe.Util.(surface |> member "exposure_status" |> to_string);
@@ -36,8 +36,8 @@ let () =
     [
       ( "surface_readiness",
         [
-          test_case "warroom demoted to lab" `Quick test_warroom_is_demoted_to_lab;
+          test_case "namespace surface demoted to lab" `Quick
+            test_namespace_surface_is_demoted_to_lab;
           test_case "sessions stays main" `Quick test_sessions_surface_stays_main;
         ] );
     ]
-

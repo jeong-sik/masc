@@ -164,7 +164,7 @@ export function Mission() {
       <${MissionContextBar}
         cluster=${mission.summary.cluster}
         project=${mission.summary.project}
-        room=${mission.summary.current_room}
+        namespace=${mission.summary.namespace ?? mission.summary.namespace_id}
         generatedAt=${mission.generated_at}
       />
 
@@ -219,7 +219,7 @@ export function Mission() {
 
       <${CollaborationEvidencePanel}
         sessionId=${activeSessionId}
-        roomId=${focusSession?.room ?? mission.summary.current_room ?? null}
+        roomId=${focusSession?.namespace ?? mission.summary.namespace ?? mission.summary.namespace_id ?? null}
       />
 
       <${MissionBriefingCard} />

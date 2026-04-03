@@ -36,7 +36,7 @@ export function keeperDirectChatAccess(
   return {
     blocked: true,
     message: compactWhitespace(
-      `직접 통신 비활성화: ${reason}.${roleHint}${tokenHint} worker/admin 권한 토큰을 사용하거나 room 기본 권한을 올린 뒤 다시 시도하세요.`,
+      `직접 통신 비활성화: ${reason}.${roleHint}${tokenHint} worker/admin 권한 토큰을 사용하거나 namespace 기본 권한을 올린 뒤 다시 시도하세요.`,
     ),
   }
 }

@@ -24,14 +24,21 @@ let session_recent_enough ~now_ts session_json =
   | latest :: _ -> now_ts -. latest <= 3600.0
   | [] -> false
 
-let relevant_sessions_for_briefing ~current_room ~now_ts sessions =
+let relevant_sessions_for_briefing ~current_namespace ~now_ts sessions =
   let room_matches session_json =
-    match trim_to_option (Some current_room) with
+    match trim_to_option (Some current_namespace) with
     | None -> true
-    | Some room_id ->
+    | Some namespace_id ->
         let status_detail = member_assoc "status" session_json in
-        String.equal room_id
-          (string_field "room_id" (member_assoc "session" status_detail))
+        let session_json = member_assoc "session" status_detail in
+        let session_namespace =
+          match trim_to_option (Some (string_field "namespace_id" session_json)) with
+          | Some value -> value
+          | None ->
+              trim_to_option (Some (string_field "room_id" session_json))
+              |> Option.value ~default:""
+        in
+        String.equal namespace_id session_namespace
   in
   sessions
   |> List.filter (fun session_json ->
@@ -105,7 +112,10 @@ let compact_session_json session_json =
     [
       ("session_id", string_json ~default:"unknown-session" (member_assoc "session_id" session_json));
       ("goal", string_json ~default:"unassigned" ~max_len:160 (member_assoc "goal" session));
-      ("room_id", string_json ~default:"unknown-room" (member_assoc "room_id" session));
+      ( "namespace_id",
+        match member_assoc "namespace_id" session with
+        | `Null -> string_json ~default:"unknown-namespace" (member_assoc "room_id" session)
+        | value -> string_json ~default:"unknown-namespace" value );
       ("status", string_json ~default:"unknown" (member_assoc "status" session));
       ("agent_names", string_list_json (member_assoc "agent_names" session));
       ("elapsed_sec", int_json (member_assoc "elapsed_sec" summary));

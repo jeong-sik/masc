@@ -297,15 +297,15 @@ step_viewer_build() {
 }
 
 step_game_view_contract() {
-  local room_http_url room_json
-  room_http_url="${MCP_URL%/mcp}/api/v1/room/current"
-  if ! room_json="$(curl -fsS "$room_http_url")"; then
-    echo "GET $room_http_url failed"
+  local namespace_http_url namespace_json
+  namespace_http_url="${MCP_URL%/mcp}/api/v1/namespace/current"
+  if ! namespace_json="$(curl -fsS "$namespace_http_url")"; then
+    echo "GET $namespace_http_url failed"
     return 1
   fi
-  if ! printf '%s' "$room_json" | jq -e '.ok == true and (.room_id | type == "string")' >/dev/null; then
-    echo "/api/v1/room/current returned unexpected payload"
-    printf '%s\n' "$room_json"
+  if ! printf '%s' "$namespace_json" | jq -e '.ok == true and (.namespace_id | type == "string")' >/dev/null; then
+    echo "/api/v1/namespace/current returned unexpected payload"
+    printf '%s\n' "$namespace_json"
     return 1
   fi
 

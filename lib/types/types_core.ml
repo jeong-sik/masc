@@ -439,7 +439,6 @@ type message = {
   mention: string option; [@default None]
   timestamp: string;
   trace_context: string option; [@default None]
-  (** W3C traceparent for cross-agent trace propagation. @since 2.105.0 *)
 } [@@deriving yojson { strict = false }, show]
 
 (** Room state *)

@@ -8,11 +8,11 @@ import {
   normalizeShellMetaCognitionSummary,
 } from './store-normalizers'
 import type {
-  DashboardRoomTruthAttentionSummary,
-  DashboardRoomTruthFocus,
-  DashboardRoomTruthMetaCognitionDigest,
-  DashboardRoomTruthRecommendationSummary,
-  DashboardRoomTruthResponse,
+  DashboardNamespaceTruthAttentionSummary,
+  DashboardNamespaceTruthFocus,
+  DashboardNamespaceTruthMetaCognitionDigest,
+  DashboardNamespaceTruthRecommendationSummary,
+  DashboardNamespaceTruthResponse,
   PendingConfirmSummary,
   ServerStatus,
 } from './types'
@@ -20,8 +20,9 @@ import type {
 function normalizeServerStatus(raw: unknown): ServerStatus | null {
   if (!isRecord(raw)) return null
   return {
-    room: asString(raw.room) ?? asString(raw.current_room),
-    room_base_path: asString(raw.room_base_path),
+    namespace_id: asString(raw.namespace_id),
+    namespace: asString(raw.namespace),
+    namespace_base_path: asString(raw.namespace_base_path),
     coordination_root: asString(raw.coordination_root),
     workspace_path: asString(raw.workspace_path),
     workspace_differs: asBoolean(raw.workspace_differs),
@@ -59,7 +60,7 @@ function normalizePendingConfirmSummary(raw: unknown): PendingConfirmSummary | n
   }
 }
 
-function normalizeAttentionSummary(raw: unknown): DashboardRoomTruthAttentionSummary | null {
+function normalizeAttentionSummary(raw: unknown): DashboardNamespaceTruthAttentionSummary | null {
   if (!isRecord(raw)) return null
   return {
     count: asNumber(raw.count) ?? 0,
@@ -70,7 +71,7 @@ function normalizeAttentionSummary(raw: unknown): DashboardRoomTruthAttentionSum
   }
 }
 
-function normalizeRecommendationSummary(raw: unknown): DashboardRoomTruthRecommendationSummary | null {
+function normalizeRecommendationSummary(raw: unknown): DashboardNamespaceTruthRecommendationSummary | null {
   if (!isRecord(raw)) return null
   return {
     count: asNumber(raw.count) ?? 0,
@@ -79,7 +80,7 @@ function normalizeRecommendationSummary(raw: unknown): DashboardRoomTruthRecomme
   }
 }
 
-function normalizeMetaCognitionDigest(raw: unknown): DashboardRoomTruthMetaCognitionDigest | null {
+function normalizeMetaCognitionDigest(raw: unknown): DashboardNamespaceTruthMetaCognitionDigest | null {
   if (!isRecord(raw)) return null
   const postId = asString(raw.post_id)
   const title = asString(raw.title)
@@ -97,7 +98,7 @@ function normalizeMetaCognitionDigest(raw: unknown): DashboardRoomTruthMetaCogni
   }
 }
 
-function normalizeFocus(raw: unknown): DashboardRoomTruthFocus | null {
+function normalizeFocus(raw: unknown): DashboardNamespaceTruthFocus | null {
   if (!isRecord(raw)) return null
   const label = asString(raw.label)
   const reason = asString(raw.reason)
@@ -126,25 +127,25 @@ function normalizeFocus(raw: unknown): DashboardRoomTruthFocus | null {
   }
 }
 
-export function normalizeRoomTruth(raw: unknown): DashboardRoomTruthResponse {
+export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthResponse {
   const root = isRecord(raw) ? raw : {}
-  const roomBlock = isRecord(root.room) ? root.room : {}
+  const namespaceBlock = isRecord(root.namespace) ? root.namespace : {}
   const executionBlock = isRecord(root.execution) ? root.execution : {}
   const commandBlock = isRecord(root.command) ? root.command : {}
   const metaCognitionBlock = isRecord(root.meta_cognition) ? root.meta_cognition : {}
   const operatorBlock = isRecord(root.operator) ? root.operator : {}
   return {
     generated_at: asString(root.generated_at),
-    room: {
-      status: normalizeServerStatus(roomBlock.status),
-      counts: isRecord(roomBlock.counts)
+    namespace: {
+      status: normalizeServerStatus(namespaceBlock.status),
+      counts: isRecord(namespaceBlock.counts)
         ? {
-            agents: asNumber(roomBlock.counts.agents),
-            tasks: asNumber(roomBlock.counts.tasks),
-            keepers: asNumber(roomBlock.counts.keepers),
+            agents: asNumber(namespaceBlock.counts.agents),
+            tasks: asNumber(namespaceBlock.counts.tasks),
+            keepers: asNumber(namespaceBlock.counts.keepers),
           }
         : undefined,
-      provenance: asString(roomBlock.provenance) ?? null,
+      provenance: asString(namespaceBlock.provenance) ?? null,
     },
     execution: {
       summary: normalizeExecutionSummary(executionBlock.summary),

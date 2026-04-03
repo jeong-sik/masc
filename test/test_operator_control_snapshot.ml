@@ -15,13 +15,21 @@ let test_snapshot_has_expected_sections () =
       ignore (Room.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
       ignore (Room.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
-      let room = Yojson.Safe.Util.member "room" json in
-      Alcotest.(check bool) "room present" true
-        (Yojson.Safe.Util.member "room" json <> `Null);
-      Alcotest.(check bool) "room initialized" true
-        Yojson.Safe.Util.(room |> member "initialized" |> to_bool);
+      let namespace = Yojson.Safe.Util.member "namespace" json in
+      Alcotest.(check bool) "namespace present" true
+        (Yojson.Safe.Util.member "namespace" json <> `Null);
+      Alcotest.(check bool) "namespace initialized" true
+        Yojson.Safe.Util.(namespace |> member "initialized" |> to_bool);
       Alcotest.(check bool) "project nonempty" true
-        (String.trim Yojson.Safe.Util.(room |> member "project" |> to_string) <> "");
+        (String.trim Yojson.Safe.Util.(namespace |> member "project" |> to_string) <> "");
+      Alcotest.(check string) "namespace field flattened default" "default"
+        Yojson.Safe.Util.(namespace |> member "namespace" |> to_string);
+      Alcotest.(check string) "namespace_id flattened default" "default"
+        Yojson.Safe.Util.(namespace |> member "namespace_id" |> to_string);
+      Alcotest.(check string) "namespace exposed" "default"
+        Yojson.Safe.Util.(namespace |> member "namespace" |> to_string);
+      Alcotest.(check string) "namespace mode flattened" "flattened"
+        Yojson.Safe.Util.(namespace |> member "namespace_mode" |> to_string);
       Alcotest.(check bool) "sessions present" true
         (Yojson.Safe.Util.member "sessions" json <> `Null);
       Alcotest.(check bool) "keepers present" true
@@ -70,21 +78,21 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "owner"));
       let ctx = operator_ctx env sw config "owner" in
-      let request_room_pause actor =
+      let request_namespace_pause actor =
         match
           Operator_control.action_json ctx
             (`Assoc
               [
                 ("actor", `String actor);
-                ("action_type", `String "room_pause");
-                ("target_type", `String "room");
+                ("action_type", `String "namespace_pause");
+                ("target_type", `String "namespace");
               ])
         with
         | Ok _ -> ()
         | Error err -> Alcotest.fail err
       in
-      request_room_pause "operator-a";
-      request_room_pause "operator-b";
+      request_namespace_pause "operator-a";
+      request_namespace_pause "operator-b";
       let snapshot = Operator_control.snapshot_json ~actor:"operator-a" ctx in
       let summary = Yojson.Safe.Util.(snapshot |> member "pending_confirm_summary") in
       Alcotest.(check string) "actor filter" "operator-a"
@@ -103,10 +111,10 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
       let confirm_required_actions =
         Yojson.Safe.Util.(summary |> member "confirm_required_actions" |> to_list)
       in
-      Alcotest.(check bool) "room pause listed" true
+      Alcotest.(check bool) "namespace pause listed" true
         (List.exists
            (fun row ->
-             Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "room_pause")
+             Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "namespace_pause")
            confirm_required_actions);
       Alcotest.(check bool) "team stop listed" true
         (List.exists
@@ -231,10 +239,13 @@ let test_orchestra_room_core_shape () =
       ignore (Room.broadcast config ~from_agent:"owner" ~content:"orchestra seed");
       let json = Command_plane_orchestra.json (operator_ctx env sw config "owner") in
       let nodes = Yojson.Safe.Util.(json |> member "nodes" |> to_list) in
-      Alcotest.(check bool) "room node exists" true
+      Alcotest.(check bool) "namespace node exists" true
         (List.exists
-           (fun row -> Yojson.Safe.Util.(row |> member "kind" |> to_string) = "room")
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "kind" |> to_string) = "namespace")
            nodes);
+      Alcotest.(check bool) "namespace block present" true
+        (Yojson.Safe.Util.member "namespace" json <> `Null);
       Alcotest.(check int) "session count" 0
         Yojson.Safe.Util.(json |> member "summary" |> member "session_count" |> to_int);
       Alcotest.(check string) "focus kind" "node"
@@ -258,8 +269,8 @@ let test_orchestra_includes_session_edge_and_pending_signal () =
            (`Assoc
              [
                ("actor", `String "dashboard");
-               ("action_type", `String "room_pause");
-               ("target_type", `String "room");
+               ("action_type", `String "namespace_pause");
+               ("target_type", `String "namespace");
              ])
        with
       | Ok _ -> ()
@@ -276,7 +287,7 @@ let test_orchestra_includes_session_edge_and_pending_signal () =
       Alcotest.(check bool) "room-session edge exists" true
         (List.exists
            (fun row ->
-             Yojson.Safe.Util.(row |> member "source" |> to_string) = "room:default"
+             Yojson.Safe.Util.(row |> member "source" |> to_string) = "namespace:default"
              && Yojson.Safe.Util.(row |> member "target" |> to_string)
                 = "session:" ^ session_id)
            edges);
@@ -302,8 +313,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
           (`Assoc
             [
               ("actor", `String "operator");
-              ("action_type", `String "room_pause");
-              ("target_type", `String "room");
+               ("action_type", `String "namespace_pause");
+               ("target_type", `String "namespace");
             ])
       in
       (match action_json with Ok _ -> () | Error err -> Alcotest.fail err);
@@ -312,7 +323,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check string) "target_type" "room"
+      Alcotest.(check string) "target_type" "namespace"
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);

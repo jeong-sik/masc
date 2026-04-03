@@ -114,18 +114,18 @@ Board 외에도 의견 차이를 구조화할 수 있는 흔적은 남아 있다
 - 하지만 대부분 co-presence, external graph, success/failure learning 기반이다.
 - "누가 누구의 주장에 동조/반박/정정했는가" 같은 discourse-derived social edge는 아직 약하다.
 
-### 6. Collaboration evidence and room truth already exist
+### 6. Collaboration evidence and namespace truth already exist
 
 운영자 관점 read model도 부분적으로 있다.
 
 - collaboration evidence
-- room truth snapshot
+- namespace truth snapshot
 - operator digest / control plane
 
 관련 코드:
 
 - `lib/dashboard/dashboard_collaboration_evidence.ml`
-- `lib/server/server_dashboard_http_room_truth.ml`
+- `lib/server/server_dashboard_http_namespace_truth.ml`
 - `lib/operator/operator_control.ml`
 
 의미:

@@ -1,6 +1,6 @@
 import type { RouteState } from './types'
 import { refreshExecution, refreshBoard, refreshGoals, refreshShell } from './store'
-import { requestRoomTruth } from './room-truth-store'
+import { requestNamespaceTruth } from './namespace-truth-store'
 import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
 import { refreshMissionSnapshot } from './mission-store'
 
@@ -31,7 +31,7 @@ async function refreshGovernanceSurface(): Promise<void> {
 
 export type RefreshTask =
   | 'shell'
-  | 'roomTruth'
+  | 'namespaceTruth'
   | 'missionSnapshot'
   | 'execution'
   | 'activityGraph'
@@ -47,21 +47,21 @@ export type RefreshTask =
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
   switch (routeState.tab) {
     case 'overview':
-      return ['shell', 'roomTruth', 'missionSnapshot']
+      return ['shell', 'namespaceTruth', 'missionSnapshot']
     case 'monitoring':
       if (routeState.params.section === 'activity') {
         return ['execution', 'activityGraph']
       }
       if (routeState.params.section === 'agents') {
-        return ['roomTruth', 'execution', 'missionSnapshot']
+        return ['namespaceTruth', 'execution', 'missionSnapshot']
       }
-      return ['roomTruth', 'missionSnapshot']
+      return ['namespaceTruth', 'missionSnapshot']
     case 'command':
       if (routeState.params.section === 'intervene') {
-        return ['roomTruth', 'operatorSnapshot', 'operatorRoomDigest']
+        return ['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest']
       }
       if (routeState.params.section === 'governance') {
-        return ['roomTruth', 'governance']
+        return ['namespaceTruth', 'governance']
       }
       return []
     case 'workspace':
@@ -91,7 +91,7 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
 
 const REFRESHERS: Record<RefreshTask, () => void> = {
   shell: () => { void refreshShell({ force: true }) },
-  roomTruth: () => { requestRoomTruth() },
+  namespaceTruth: () => { requestNamespaceTruth() },
   missionSnapshot: () => { void refreshMissionSnapshot() },
   execution: () => { void refreshExecution({ force: true }) },
   activityGraph: () => { void refreshActivityGraphSurface() },

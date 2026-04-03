@@ -3,7 +3,7 @@
 include Server_dashboard_http_core
 include Server_dashboard_http_runtime_info
 include Server_dashboard_http_execution_surfaces
-include Server_dashboard_http_room_truth
+include Server_dashboard_http_namespace_truth
 open Types
 open Server_utils
 
@@ -12,8 +12,11 @@ open Server_utils
 let () =
   Room_hooks.on_task_mutation_fn := invalidate_execution_cache
 
-let dashboard_room_truth_focus_json =
-  Server_dashboard_http_room_truth_support.dashboard_room_truth_focus_json
+let dashboard_namespace_truth_focus_json =
+  Server_dashboard_http_namespace_truth_support.dashboard_namespace_truth_focus_json
+
+let dashboard_namespace_truth_http_json =
+  Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json
 
 let dashboard_memory_http_json request : Yojson.Safe.t =
   let hearth = query_param request "hearth" in

@@ -1,8 +1,8 @@
-(** Shared room-truth assembly helpers. *)
+(** Shared helpers for assembling namespace-truth payloads. *)
 
 open Dashboard_http_helpers
 
-let dashboard_room_truth_focus_json ~initialized ~runtime_count
+let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
     ~operator_digest_json ~top_queue =
   let recommendation_summary =
     json_assoc_field "recommendation_summary" operator_digest_json
@@ -33,9 +33,9 @@ let dashboard_room_truth_focus_json ~initialized ~runtime_count
   let focus_of_attention top_item provenance =
     let target_type = json_string_field_opt "target_type" top_item in
     let target_id = json_string_field_opt "target_id" top_item in
-    let source, target_kind, suggested_tab, suggested_surface, suggested_params =
+  let source, target_kind, suggested_tab, suggested_surface, suggested_params =
       match target_type with
-      | Some "room_meta_cognition" ->
+      | Some "room_meta_cognition" | Some "namespace_meta_cognition" ->
           ( "meta_cognition",
             "meta_cognition",
             "overview",
@@ -161,19 +161,19 @@ let dashboard_room_truth_focus_json ~initialized ~runtime_count
           | _ ->
               let label, reason, source, provenance =
                 if not initialized then
-                  ( "초기 room truth",
-                    "방이 아직 초기화되지 않았습니다. 기본 room 상태부터 확인하세요.",
+                  ( "초기 namespace truth",
+                    "조율 namespace가 아직 초기화되지 않았습니다. 기본 namespace 상태부터 확인하세요.",
                     "orchestra",
                     "derived" )
                 else if runtime_count = 0 then
                   ( "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.",
-                    "No agents or keepers joined yet; room is idle.",
-                    "room",
+                    "No agents or keepers joined yet; namespace is idle.",
+                    "namespace",
                     "fallback" )
                 else
-                  ( "지금은 방 전체가 비교적 안정적입니다",
-                    "Room-wide view is healthy enough; start from the command overview.",
-                    "room",
+                  ( "지금은 namespace 전체가 비교적 안정적입니다",
+                    "Namespace-wide view is healthy enough; start from the command overview.",
+                    "namespace",
                     "fallback" )
               in
               `Assoc
@@ -183,7 +183,7 @@ let dashboard_room_truth_focus_json ~initialized ~runtime_count
                   ("source", `String source);
                   ("provenance", `String provenance);
                   ("target_kind", `String "node");
-                  ("target_id", `String "room:default");
+                  ("target_id", `String "namespace:default");
                   ("suggested_tab", `String "command");
                   ("suggested_surface", `String "summary");
                   ("suggested_params", `Assoc []);
@@ -207,15 +207,15 @@ let derived_meta_attention_item ~meta_cognition_json
       Some
         (`Assoc
            [
-             ("kind", `String "room_meta_cognition");
+             ("kind", `String "namespace_meta_cognition");
              ("severity", `String (severity_of_meta_salience primary_salience));
              ("summary", `String interpretation.reason);
-             ("target_type", `String "room_meta_cognition");
+             ("target_type", `String "namespace_meta_cognition");
              ( "target_id",
                match interpretation.target_id with
                | Some value -> `String value
-               | None -> `String "room:default" );
-             ("actor", `String "room");
+               | None -> `String "namespace:default" );
+             ("actor", `String "namespace");
              ( "evidence",
                `Assoc
                  [
@@ -352,7 +352,7 @@ let execution_summary_json execution_json =
           ("keepers", `Int (List.length execution_keepers));
         ]
 
-let room_truth_command_summary_json command_summary_json =
+let namespace_truth_command_summary_json command_summary_json =
   let command_ops = json_assoc_field "operations" command_summary_json in
   let command_detachments = json_assoc_field "detachments" command_summary_json in
   let command_alerts = json_assoc_field "alerts" command_summary_json in
@@ -386,7 +386,7 @@ let room_truth_command_summary_json command_summary_json =
       ("provenance", `String "truth");
     ]
 
-let compose_room_truth_snapshot ~(config : Room.config) ~initialized ~shell_json
+let compose_namespace_truth_snapshot ~(config : Room.config) ~initialized ~shell_json
     ~execution_json ~command_summary_json =
   let meta_cognition_summary = json_assoc_field "meta_cognition" shell_json in
   let meta_summary_input, meta_interpretation =
@@ -395,7 +395,7 @@ let compose_room_truth_snapshot ~(config : Room.config) ~initialized ~shell_json
         (Some summary_input, Some (Meta_cognition.interpret summary_input))
     | Error err ->
         Log.Dashboard.warn
-          "room-truth meta-cognition summary parse failed: %s" err;
+          "namespace-truth meta-cognition summary parse failed: %s" err;
         (None, None)
   in
   let meta_cognition_latest_digest =
@@ -407,27 +407,29 @@ let compose_room_truth_snapshot ~(config : Room.config) ~initialized ~shell_json
   in
   let top_queue = execution_top_queue execution_json in
   let execution_summary = execution_summary_json execution_json in
-  let command_summary = room_truth_command_summary_json command_summary_json in
+  let command_summary = namespace_truth_command_summary_json command_summary_json in
   let shell_counts = json_assoc_field "counts" shell_json in
   let runtime_count =
     json_int_field "agents" shell_counts ~default:0
     + json_int_field "keepers" shell_counts ~default:0
   in
   let focus_json =
-    dashboard_room_truth_focus_json ~initialized ~runtime_count
+    dashboard_namespace_truth_focus_json ~initialized ~runtime_count
       ~operator_digest_json ~top_queue
   in
+  let namespace_block =
+    `Assoc
+      [
+        ("status", json_assoc_field "status" shell_json);
+        ("counts", json_assoc_field "counts" shell_json);
+        ("provenance", `String "truth");
+      ]
+  in
   `Assoc
-    [
-      ("generated_at", `String (Types.now_iso ()));
-      ( "room",
-        `Assoc
-          [
-            ("status", json_assoc_field "status" shell_json);
-            ("counts", json_assoc_field "counts" shell_json);
-            ("provenance", `String "truth");
-          ] );
-      ( "execution",
+      [
+        ("generated_at", `String (Types.now_iso ()));
+        ("namespace", namespace_block);
+        ( "execution",
         `Assoc
           [
             ("summary", execution_summary);

@@ -10,7 +10,7 @@ function sampleDetail(
     session: {
       session_id: 'ts-coding-001',
       goal: 'Implement session flow visibility',
-      room: 'default',
+      namespace: 'default',
       status: 'running',
       health: 'healthy',
       member_names: ['planner', 'implementer'],

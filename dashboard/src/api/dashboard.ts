@@ -9,7 +9,7 @@ import {
   normalizeGovernanceJudgment,
   normalizePendingConfirmation,
 } from './board'
-import { get, post, patch, withRetries, ROOM_TRUTH_GET_TIMEOUT_MS } from './core'
+import { get, post, patch, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
 import type {
   KeeperConfig,
   DashboardExecutionResponse,
@@ -20,7 +20,7 @@ import type {
   DashboardMissionSessionDetailResponse,
   DashboardProofResponse,
   DashboardPlanningResponse,
-  DashboardRoomTruthResponse,
+  DashboardNamespaceTruthResponse,
   DashboardShellResponse,
   BoardSortMode,
   GovernanceDecisionItem,
@@ -175,8 +175,8 @@ export function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
   return get('/api/v1/dashboard/config')
 }
 
-export function fetchDashboardRoomTruth(): Promise<DashboardRoomTruthResponse> {
-  return get('/api/v1/dashboard/room-truth', { timeoutMs: ROOM_TRUTH_GET_TIMEOUT_MS })
+export function fetchDashboardNamespaceTruth(): Promise<DashboardNamespaceTruthResponse> {
+  return get('/api/v1/dashboard/namespace-truth', { timeoutMs: NAMESPACE_TRUTH_GET_TIMEOUT_MS })
 }
 
 export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {

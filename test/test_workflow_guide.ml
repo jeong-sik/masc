@@ -22,12 +22,13 @@ let check_not_empty msg steps =
 
 let test_set_room_success () =
   let g = WG.next_steps ~tool_name:"masc_start" ~success:true in
-  check_not_empty "set_room success has next_steps" g.next_steps;
-  check_has_tool g.next_steps "masc_join"
+  check_not_empty "start success has next_steps" g.next_steps;
+  check_has_tool g.next_steps "masc_worktree_create"
 
 let test_set_room_failure () =
   let g = WG.next_steps ~tool_name:"masc_start" ~success:false in
-  check_not_empty "set_room failure has recovery steps" g.next_steps;
+  check_not_empty "start failure has recovery steps" g.next_steps;
+  check_has_tool g.next_steps "masc_start";
   check_has_tool g.next_steps "masc_init"
 
 let test_join_success () =
@@ -101,7 +102,7 @@ let test_guidance_to_json_has_next_steps () =
 let test_workflow_context_join () =
   match WG.workflow_context ~tool_name:"masc_join" with
   | Some (before, after, _mistakes) ->
-      check bool "join before includes set_room" true
+      check bool "join before includes start" true
         (List.mem "masc_start" before);
       check bool "join after is non-empty" true (List.length after > 0)
   | None -> fail "Expected workflow context for masc_join"
@@ -224,8 +225,8 @@ let test_next_steps_reference_real_tools () =
 let () =
   run "Workflow_guide" [
     "golden_path_1", [
-      test_case "set_room success" `Quick test_set_room_success;
-      test_case "set_room failure" `Quick test_set_room_failure;
+      test_case "start success" `Quick test_set_room_success;
+      test_case "start failure" `Quick test_set_room_failure;
       test_case "join success" `Quick test_join_success;
       test_case "join failure" `Quick test_join_failure;
       test_case "claim success" `Quick test_claim_success;

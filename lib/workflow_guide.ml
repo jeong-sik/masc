@@ -42,7 +42,7 @@ let after_start ~success =
         [ "Forgetting masc_worktree_create — working on main branch directly" ] }
   else
     { next_steps =
-        [ s "masc_start" "Set the room manually if path was wrong";
+        [ s "masc_start" "Retry masc_start with the correct path if the path was wrong";
           s "masc_init" "Initialize MASC if not yet set up" ];
       preconditions = [];
       common_mistakes = [] }
@@ -318,8 +318,7 @@ let after_worktree_create ~success =
 let after_init ~success =
   if success then
     { next_steps =
-        [ s "masc_start" "Set the room to your project root";
-          s "masc_join" "Join the room" ];
+        [ s "masc_start" "Set the room to your project root and join it" ];
       preconditions = [];
       common_mistakes = [] }
   else

@@ -3,16 +3,12 @@
     @since 0.5.0
 *)
 
-(** Channel/surface type *)
+(** Connection surface known to core.
+    External platform names stay opaque so core does not depend on connector vendors. *)
 type channel =
-  | Telegram
-  | Discord
-  | Slack
-  | Signal
-  | Webchat
   | Api
   | Internal
-  | Unknown of string
+  | External of string
 
 (** Agent identity record *)
 type t = {

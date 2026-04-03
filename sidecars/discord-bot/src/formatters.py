@@ -5,10 +5,12 @@ Converts GateResponse objects into Discord embeds and chunked messages.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import discord
 
 from .config import DISCORD_EMBED_LIMIT, DISCORD_MESSAGE_LIMIT
-from .masc_client import GateResponse
+from .gate_client import GateResponse
 
 
 def format_keeper_embed(response: GateResponse) -> discord.Embed:
@@ -46,6 +48,17 @@ def format_error_embed(error_msg: str) -> discord.Embed:
         description=error_msg,
         color=0xED4245,  # Discord red
     )
+
+
+def compose_gate_content(text: str, attachment_lines: Sequence[str]) -> str:
+    """Build deterministic gate content from text + Discord attachments."""
+    parts: list[str] = []
+    body = text.strip()
+    if body:
+        parts.append(body)
+    if attachment_lines:
+        parts.append("Attachments:\n" + "\n".join(attachment_lines))
+    return "\n\n".join(parts).strip()
 
 
 def chunk_text(text: str, limit: int = DISCORD_MESSAGE_LIMIT) -> list[str]:

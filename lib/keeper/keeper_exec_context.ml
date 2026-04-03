@@ -348,6 +348,12 @@ type post_turn_lifecycle = {
   message_count : int;
 }
 
+type overflow_retry_recovery = {
+  checkpoint : Agent_sdk.Checkpoint.t;
+  compaction : compaction_event;
+  turn_generation : int;
+}
+
 let maybe_rollover_oas_handoff
     ~(base_dir : string)
     ~(meta : keeper_meta)
@@ -764,6 +770,155 @@ let apply_post_turn_lifecycle
         message_count = rollover.message_count;
       }
 
+let clamp_context_max_tokens
+    (ctx : working_context)
+    ~(primary_model_max_tokens : int) : working_context =
+  let clamped =
+    if primary_model_max_tokens <= 0 then ctx.max_tokens
+    else min ctx.max_tokens primary_model_max_tokens
+  in
+  if clamped = ctx.max_tokens then ctx
+  else sync_oas_context { ctx with max_tokens = clamped }
+
+let forced_overflow_retry_meta
+    (meta : keeper_meta)
+    ~(turn_generation : int)
+    ~(now_ts : float) : keeper_meta =
+  let base_meta =
+    if turn_generation = meta.runtime.generation then meta
+    else
+      map_runtime
+        (fun rt -> { rt with generation = turn_generation })
+        meta
+  in
+  {
+    (map_runtime
+       (fun rt ->
+         let last_continuity_update_ts =
+           if rt.last_continuity_update_ts > 0.0
+           then rt.last_continuity_update_ts
+           else now_ts
+         in
+         let proactive_rt =
+           if rt.proactive_rt.last_ts > 0.0
+           then rt.proactive_rt
+           else { rt.proactive_rt with last_ts = now_ts }
+         in
+         { rt with last_continuity_update_ts; proactive_rt })
+       base_meta)
+    with
+    compaction =
+      {
+        base_meta.compaction with
+        ratio_gate = 0.0;
+        message_gate = 0;
+        token_gate = 0;
+        cooldown_sec = 0;
+      };
+  }
+
+let recover_latest_checkpoint_for_overflow_retry
+    ~(base_dir : string)
+    ~(meta : keeper_meta)
+    ~(model : string)
+    ~(primary_model_max_tokens : int) : overflow_retry_recovery option =
+  let session = create_session ~session_id:meta.runtime.trace_id ~base_dir in
+  let oas_checkpoint =
+    Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
+      ~session_id:meta.runtime.trace_id
+  in
+  let legacy_checkpoint =
+    try load_latest_checkpoint session
+    with exn ->
+      Log.Keeper.error "keeper:%s overflow retry checkpoint load failed: %s"
+        meta.runtime.trace_id (Printexc.to_string exn);
+      None
+  in
+  let prefer_legacy =
+    match oas_checkpoint, legacy_checkpoint with
+    | Some oas, Some legacy -> legacy.timestamp > oas.created_at
+    | _ -> false
+  in
+  let selected =
+    match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
+    | false, Some checkpoint, _ ->
+        let turn_generation =
+          checkpoint_generation checkpoint ~fallback:meta.runtime.generation
+        in
+        Some
+          ( context_of_oas_checkpoint checkpoint ~primary_model_max_tokens,
+            turn_generation )
+    | _, _, Some checkpoint ->
+        (try
+           Some
+             ( context_of_legacy_checkpoint checkpoint
+                 ~primary_model_max_tokens,
+               checkpoint.generation )
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+             Log.Keeper.error
+               "keeper:%s overflow retry legacy checkpoint restore failed: %s"
+               meta.runtime.trace_id (Printexc.to_string exn);
+             (match oas_checkpoint with
+              | Some checkpoint ->
+                  let turn_generation =
+                    checkpoint_generation checkpoint
+                      ~fallback:meta.runtime.generation
+                  in
+                  Some
+                    ( context_of_oas_checkpoint checkpoint
+                        ~primary_model_max_tokens,
+                      turn_generation )
+              | None -> None))
+    | _ -> None
+  in
+  match selected with
+  | None -> None
+  | Some (ctx, turn_generation) ->
+      let now_ts = Time_compat.now () in
+      let ctx =
+        clamp_context_max_tokens ctx ~primary_model_max_tokens
+      in
+      let before_tokens = token_count ctx in
+      let retry_meta =
+        forced_overflow_retry_meta meta ~turn_generation ~now_ts
+      in
+      let compacted_ctx, trigger, decision =
+        compact_if_needed ~meta:retry_meta ~now_ts ctx
+      in
+      let compaction_applied =
+        String.starts_with ~prefix:"applied:" decision
+      in
+      let after_tokens = token_count compacted_ctx in
+      let meaningful_reduction = after_tokens < before_tokens in
+      if not (compaction_applied && meaningful_reduction) then None
+      else
+        let compaction =
+          {
+            applied = true;
+            trigger;
+            decision;
+            before_tokens;
+            after_tokens;
+            saved_tokens = max 0 (before_tokens - after_tokens);
+          }
+        in
+        try
+          let checkpoint =
+            save_oas_checkpoint ~session
+              ~agent_name:retry_meta.agent_name
+              ~model ~ctx:compacted_ctx ~generation:turn_generation
+          in
+          Some { checkpoint; compaction; turn_generation }
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+            log_keeper_exn
+              ~label:"overflow retry checkpoint save failed"
+              exn;
+            None
+
 let generate_trace_id = Keeper_identity.generate_trace_id
 
 let keeper_board_write_tool_names =
@@ -818,10 +973,9 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
               (Room.is_agent_joined_in_room config ~room_id
                  ~agent_name:meta.agent_name)
           then begin
-            let scoped = Room.with_scope config (Room.Named room_id) in
-            Room.ensure_room_bootstrap scoped room_id;
+            Room.ensure_room_bootstrap config room_id;
             ignore
-              (Room.join scoped ~agent_name:meta.agent_name
+              (Room.join config ~agent_name:meta.agent_name
                  ~capabilities:[ "keeper" ] ())
           end;
           ignore

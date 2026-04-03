@@ -60,10 +60,7 @@ let with_dashboard_timeout ~clock compute =
         ("generated_at", `String (Types.now_iso ()));
       ]
 
-let room_scope_cache_segment (config : Room.config) =
-  match config.scope with
-  | Room_utils_backend_setup.Default -> "default"
-  | Room_utils_backend_setup.Named room_id -> "room:" ^ room_id
+let room_scope_cache_segment (_config : Room.config) = "default"
 
 let room_scoped_cache_key (config : Room.config) prefix suffix =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path

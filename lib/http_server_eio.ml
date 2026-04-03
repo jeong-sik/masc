@@ -580,12 +580,36 @@ let with_streamable_mcp_request_handler ~request_handler routes =
     Router.post "/mcp" (mcp_post_handler ~request_handler:request_handler) rewritten
 
 (** Create httpun request handler from router
-    Note: httpun-eio wraps reqd in Gluten.Reqd.t, extract with .reqd field *)
+    Note: httpun-eio wraps reqd in Gluten.Reqd.t, extract with .reqd field
+
+    W3C Trace Context: when MASC_OTEL_ENABLED=true and a valid [traceparent]
+    header is present, the request is dispatched inside an ambient scope
+    carrying the incoming trace_id. Downstream code (tool calls, broadcasts)
+    can read it via [Otel_trace_context.from_ambient()].
+    When disabled or absent, dispatch proceeds without overhead. *)
 let make_request_handler routes =
   fun _client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     let request = Httpun.Reqd.request reqd in
-    Router.dispatch routes request reqd
+    let dispatch () = Router.dispatch routes request reqd in
+    if Otel_config.enabled then
+      (* Use Headers.get for O(1) lookup instead of Headers.to_list which
+         allocates the full header list on every request. *)
+      match Httpun.Headers.get request.headers Otel_trace_context.header_name with
+      | Some value ->
+        (match Otel_trace_context.parse value with
+         | Some ctx ->
+           let scope =
+             Opentelemetry.Scope.make
+               ~trace_id:ctx.trace_id
+               ~span_id:ctx.parent_id
+               ()
+           in
+           Opentelemetry.Scope.with_ambient_scope scope dispatch
+         | None -> dispatch ())
+      | None -> dispatch ()
+    else
+      dispatch ()
 
 (** Create error handler *)
 let error_handler _client_addr ?request:_ error start_response =

@@ -57,16 +57,18 @@ let handle_broadcast (ctx : context) : result option =
   if not allowed then
     Some (false, Printf.sprintf "Rate limited. %d sec remaining." wait_secs)
   else begin
-    let result = Room.broadcast config ~from_agent:agent_name ~content:message in
+    let trace_context = Otel_trace_context.from_ambient () in
+    let result = Room.broadcast ?trace_context config ~from_agent:agent_name ~content:message in
     let mention = Mention.extract message in
     let _ = Session.push_message registry ~from_agent:agent_name ~content:message ~mention in
-    let notification = `Assoc [
+    let notification_fields = [
       ("type", `String "masc/broadcast");
       ("from", `String agent_name);
       ("content", `String message);
       ("mention", Json_util.string_opt_to_json mention);
       ("timestamp", `Float (Time_compat.now ()));
     ] in
+    let notification = `Assoc (Otel_trace_context.inject_json notification_fields trace_context) in
     Mcp_server.sse_broadcast state notification;
     Subscriptions.push_event_to_sessions notification;
     (match mention with

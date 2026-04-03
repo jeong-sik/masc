@@ -377,59 +377,188 @@ let build_deliberation_prompt
   | Ok value -> value
   | Error _ -> Prompt_registry.get_prompt "keeper.deliberation"
 
+type structured_result = {
+  action: deliberation_action;
+  reasoning: string;
+  confidence: float;
+}
+
+type action_source =
+  | Baseline
+  | Structured_model
+  | Fallback_after_validation_failure
+
+let action_source_to_string = function
+  | Baseline -> "baseline"
+  | Structured_model -> "structured_model"
+  | Fallback_after_validation_failure -> "fallback_after_validation_failure"
+
+let action_source_to_json source =
+  `String (action_source_to_string source)
+
+type legality_verdict =
+  | Legal
+  | Illegal of string
+
+type execution_result = {
+  proposed_action: deliberation_action;
+  selected_action: deliberation_action;
+  action_source: action_source;
+  fallback_used: bool;
+  fallback_reason: string option;
+  policy_labels: string list;
+  reasoning: string;
+  confidence: float;
+}
+
+let rec policy_labels_of_action = function
+  | MultiStep actions ->
+      List.concat_map policy_labels_of_action actions
+  | action ->
+      [ deliberation_action_to_policy_label action ]
+
+let has_board_signal (obs : world_observation) =
+  obs.board_new_post_count > 0 || obs.board_mention_count > 0
+
+let has_room_signal (obs : world_observation) =
+  obs.direct_mention || obs.has_question
+
+let has_operational_signal (obs : world_observation) =
+  has_room_signal obs
+  || obs.failed_task_count > 0
+  || obs.unclaimed_task_count > 0
+  || obs.agent_count_changed
+  || has_board_signal obs
+
+let rec legality_error (obs : world_observation) = function
+  | Noop _ -> None
+  | ReplyInRoom _ ->
+      if has_room_signal obs then None
+      else Some "reply_in_room requires direct mention or a question"
+  | BoardPost _ ->
+      if has_board_signal obs || obs.active_goal_count > 0 then None
+      else Some "board_post requires board activity or active goals"
+  | BoardComment _ ->
+      if has_board_signal obs then None
+      else Some "board_comment requires board activity"
+  | BoardVote _ ->
+      if has_board_signal obs then None
+      else Some "board_vote requires board activity"
+  | TaskClaim _ ->
+      if obs.unclaimed_task_count > 0 then None
+      else Some "task_claim requires unclaimed tasks"
+  | Broadcast _ ->
+      if has_operational_signal obs then None
+      else Some "broadcast requires an operational signal"
+  | ProposeSpawn _ ->
+      if obs.failed_task_count > 0 || obs.unclaimed_task_count > 0
+         || obs.active_goal_count > 0 then None
+      else Some "propose_spawn requires failed tasks, unclaimed tasks, or active goals"
+  | StartDiscussion _ ->
+      if has_board_signal obs || obs.active_goal_count > 0 then None
+      else Some "start_discussion requires board activity or active goals"
+  | ShareFinding _ ->
+      if has_board_signal obs || obs.active_goal_count > 0 then None
+      else Some "share_finding requires board activity or active goals"
+  | MultiStep actions -> (
+      match actions with
+      | [] -> Some "multi_step requires non-empty steps"
+      | _ ->
+          let rec loop index = function
+            | [] -> None
+            | MultiStep _ :: _ ->
+                Some
+                  (Printf.sprintf
+                     "multi_step step %d cannot contain nested multi_step"
+                     index)
+            | action :: rest -> (
+                match legality_error obs action with
+                | Some msg ->
+                    Some
+                      (Printf.sprintf "multi_step step %d illegal: %s" index
+                         msg)
+                | None -> loop (index + 1) rest)
+          in
+          loop 0 actions)
+
+let legality_verdict obs action =
+  match legality_error obs action with
+  | None -> Legal
+  | Some reason -> Illegal reason
+
+let baseline_execution_result (obs : world_observation) : execution_result =
+  let action = deterministic_baseline_action obs in
+  {
+    proposed_action = action;
+    selected_action = action;
+    action_source = Baseline;
+    fallback_used = false;
+    fallback_reason = None;
+    policy_labels = policy_labels_of_action action;
+    reasoning = "deterministic_baseline";
+    confidence = 1.0;
+  }
+
+let action_source_of_execution_result (result : execution_result) =
+  result.action_source
+
+let execution_result_to_json (result : execution_result) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("proposed_action", deliberation_action_to_json result.proposed_action);
+      ("selected_action", deliberation_action_to_json result.selected_action);
+      ("action_source", action_source_to_json result.action_source);
+      ("fallback_used", `Bool result.fallback_used);
+      ( "fallback_reason",
+        match result.fallback_reason with
+        | Some reason -> `String reason
+        | None -> `Null );
+      ("policy_labels", `List (List.map (fun label -> `String label) result.policy_labels));
+      ("reasoning", `String result.reasoning);
+      ("confidence", `Float result.confidence);
+    ]
+
+let execute_structured_result (obs : world_observation)
+    (result : structured_result) : execution_result =
+  match legality_verdict obs result.action with
+  | Legal ->
+      {
+        proposed_action = result.action;
+        selected_action = result.action;
+        action_source = Structured_model;
+        fallback_used = false;
+        fallback_reason = None;
+        policy_labels = policy_labels_of_action result.action;
+        reasoning = result.reasoning;
+        confidence = result.confidence;
+      }
+  | Illegal reason ->
+      let baseline = baseline_execution_result obs in
+      {
+        proposed_action = result.action;
+        selected_action = baseline.selected_action;
+        action_source = Fallback_after_validation_failure;
+        fallback_used = true;
+        fallback_reason = Some reason;
+        policy_labels = baseline.policy_labels;
+        reasoning = result.reasoning;
+        confidence = result.confidence;
+      }
+
 (* ---------- Response parser ---------- *)
 
-(** Extract a JSON object from a raw MODEL response string.
-    Handles cases where the MODEL wraps JSON in markdown code fences or
-    adds extra text before/after the JSON. *)
-let extract_json_from_response (raw : string) : (Yojson.Safe.t, string) result =
+let clamp_confidence raw_conf =
+  max 0.0 (min 1.0 raw_conf)
+
+let json_of_response (raw : string) : (Yojson.Safe.t, string) result =
   let trimmed = String.trim raw in
-  (* Try direct parse first *)
-  match Yojson.Safe.from_string trimmed with
-  | json -> Ok json
-  | exception Yojson.Json_error _ ->
-      (* Try to find JSON between code fences *)
-      let re_fenced = Re.Pcre.re {|```(json)?\n?(.*)\n?```|} |> Re.compile in
-      (match Re.exec_opt re_fenced trimmed with
-      | Some g ->
-        let inner = Re.Group.get g 2 in
-        (match Yojson.Safe.from_string (String.trim inner) with
-        | json -> Ok json
-        | exception Yojson.Json_error _ -> Error "JSON parse failed after fence extraction")
-      | None ->
-        (* Try to find first { ... } substring *)
-        let len = String.length trimmed in
-        let rec find_brace i =
-          if i >= len then Error "no JSON object found in response"
-          else if trimmed.[i] = '{' then
-            (* Find matching closing brace *)
-            let depth = ref 0 in
-            let in_string = ref false in
-            let escape = ref false in
-            let j = ref i in
-            let found = ref false in
-            while !j < len && not !found do
-              let c = trimmed.[!j] in
-              if !escape then escape := false
-              else if c = '\\' && !in_string then escape := true
-              else if c = '"' then in_string := not !in_string
-              else if not !in_string then (
-                if c = '{' then incr depth
-                else if c = '}' then (
-                  decr depth;
-                  if !depth = 0 then found := true));
-              if not !found then incr j
-            done;
-            if !found then
-              let substr = String.sub trimmed i (!j - i + 1) in
-              match Yojson.Safe.from_string substr with
-              | json -> Ok json
-              | exception Yojson.Json_error msg ->
-                  Error (Printf.sprintf "extracted JSON parse failed: %s" msg)
-            else Error "unmatched braces in response"
-          else find_brace (i + 1)
-        in
-        find_brace 0)
+  if trimmed = "" then
+    Error "empty response"
+  else
+    match Yojson.Safe.from_string trimmed with
+    | json -> Ok json
+    | exception Yojson.Json_error msg ->
+        Error (Printf.sprintf "strict JSON parse failed: %s" msg)
 
 (** Parse a deliberation action from the "action" and "params" fields of the
     MODEL response JSON. Returns the typed action or an error string. *)
@@ -540,21 +669,61 @@ let rec parse_action_from_json (json : Yojson.Safe.t)
   | "" -> Error "missing 'action' field in MODEL response"
   | unknown -> Error (Printf.sprintf "unknown action type: %s" unknown)
 
+let structured_result_of_json (json : Yojson.Safe.t)
+    : (structured_result, string) result =
+  match parse_action_from_json json with
+  | Error msg -> Error msg
+  | Ok action ->
+      let reasoning =
+        Safe_ops.json_string ~default:"" "reasoning" json
+      in
+      let confidence =
+        clamp_confidence (Safe_ops.json_float ~default:0.5 "confidence" json)
+      in
+      Ok { action; reasoning; confidence }
+
+let structured_result_schema : structured_result Agent_sdk.Structured.schema =
+  {
+    Agent_sdk.Structured.name = "keeper_deliberation_decision";
+    description =
+      "Choose exactly one typed keeper deliberation action and return only the tool input object.";
+    params =
+      [
+        {
+          Agent_sdk.Types.name = "action";
+          description = "One of: noop, reply_in_room, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, multi_step.";
+          param_type = Agent_sdk.Types.String;
+          required = true;
+        };
+        {
+          Agent_sdk.Types.name = "params";
+          description = "Action-specific parameters.";
+          param_type = Agent_sdk.Types.Object;
+          required = true;
+        };
+        {
+          Agent_sdk.Types.name = "reasoning";
+          description = "Optional short explanation for the chosen action.";
+          param_type = Agent_sdk.Types.String;
+          required = false;
+        };
+        {
+          Agent_sdk.Types.name = "confidence";
+          description = "Confidence score from 0.0 to 1.0.";
+          param_type = Agent_sdk.Types.Number;
+          required = false;
+        };
+      ];
+    parse = structured_result_of_json;
+  }
+
 (** Parse the MODEL's JSON response into a deliberation_action with reasoning
     and confidence. Returns [(action, reasoning, confidence)] or an error string. *)
 let parse_deliberation_response (raw : string)
     : (deliberation_action * string * float, string) result =
-  match extract_json_from_response raw with
-  | Error msg -> Error (Printf.sprintf "json extraction failed: %s" msg)
-  | Ok json -> (
-      match parse_action_from_json json with
-      | Error msg -> Error msg
-      | Ok action ->
-          let reasoning =
-            Safe_ops.json_string ~default:"" "reasoning" json
-          in
-          let confidence =
-            let raw_conf = Safe_ops.json_float ~default:0.5 "confidence" json in
-            max 0.0 (min 1.0 raw_conf)
-          in
-          Ok (action, reasoning, confidence))
+  match json_of_response raw with
+  | Error msg -> Error msg
+  | Ok json ->
+      structured_result_of_json json
+      |> Result.map (fun result ->
+             (result.action, result.reasoning, result.confidence))

@@ -113,6 +113,12 @@ type post_turn_lifecycle = {
   message_count : int;
 }
 
+type overflow_retry_recovery = {
+  checkpoint : Agent_sdk.Checkpoint.t;
+  compaction : compaction_event;
+  turn_generation : int;
+}
+
 val maybe_rollover_oas_handoff :
   base_dir:string ->
   meta:keeper_meta ->
@@ -149,6 +155,13 @@ val apply_post_turn_lifecycle :
   primary_model_max_tokens:int ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
+
+val recover_latest_checkpoint_for_overflow_retry :
+  base_dir:string ->
+  meta:keeper_meta ->
+  model:string ->
+  primary_model_max_tokens:int ->
+  overflow_retry_recovery option
 
 (** {1 Trace and Board Utilities} *)
 

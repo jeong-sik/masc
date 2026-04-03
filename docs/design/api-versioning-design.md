@@ -89,7 +89,7 @@ type tool_schema = {
 **Wire format** (JSON-RPC `tools/list` response):
 ```json
 {
-  "name": "masc_tempo_set",
+  "name": "masc_room_strategy_set",
   "description": "...",
   "inputSchema": { ... },
   "annotations": {

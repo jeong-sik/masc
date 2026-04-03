@@ -347,6 +347,21 @@ let test_path_allowed_paths_filter_strips_all_trailing_slashes () =
     check bool "lib path allowed with repeated trailing slash" true
       (Result.is_ok ok_result))
 
+let test_path_allowed_paths_single_trailing_slash () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    let exact_match = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:["lib/"] ~raw_path:"lib" in
+    check bool "exact dir match with single trailing slash" true
+      (Result.is_ok exact_match);
+    let subpath_match = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:["lib/"] ~raw_path:"lib/foo.ml" in
+    check bool "subpath match with single trailing slash" true
+      (Result.is_ok subpath_match))
+
 let test_path_empty_rejected () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
@@ -441,6 +456,8 @@ let () =
       test_case "allowed_paths filter" `Quick test_path_allowed_paths_filter;
       test_case "allowed_paths strip all trailing slashes" `Quick
         test_path_allowed_paths_filter_strips_all_trailing_slashes;
+      test_case "allowed_paths single trailing slash" `Quick
+        test_path_allowed_paths_single_trailing_slash;
       test_case "empty path rejected" `Quick test_path_empty_rejected;
       test_case "whitespace only rejected" `Quick test_path_whitespace_only_rejected;
       test_case "empty allowed permits all" `Quick test_path_empty_allowed_permits_all_within_root;

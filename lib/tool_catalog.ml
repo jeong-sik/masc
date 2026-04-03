@@ -160,8 +160,11 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_judgment_latest",
       hidden_active
         "Internal operator-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    (* Dead features removed: hat (2), encryption (4), tempo (5).
-       See #4709 for audit. Files deleted: tool_hat.ml, tool_encryption.ml, tool_tempo.ml. *)
+    (* Dead features: no surface, no external callers.
+       Removed on 2026-04-03 from grep/audit evidence in #4709 and PR #4757;
+       no 4-week telemetry window is claimed here.
+       masc_hat_wear, masc_hat_status, masc_encryption_*, masc_generate_key,
+       and masc_tempo* are now physically removed. *)
     (* Broken tools: shell out to CLI binaries unavailable at runtime.
        masc-cost: buildable from bin/masc_cost.ml but not guaranteed to be
        present in runtime images or on PATH.

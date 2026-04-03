@@ -1,5 +1,5 @@
-// Connector Status — Channel Gate per-channel metrics panel.
-// Shows connected channels, message counts, last activity, avg latency.
+// Connector Status — Channel Gate per-channel diagnostics panel.
+// Shows connector health, success rate, duplicates, and latest failure context.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -11,15 +11,37 @@ import { StatCard } from './common/stat-card'
 interface ChannelInfo {
   channel: string
   message_count: number
+  success_count: number
   error_count: number
+  duplicate_count: number
+  validation_error_count: number
+  keeper_error_count: number
+  dispatch_unavailable_count: number
+  internal_error_count: number
   last_activity: string
+  last_success: string
+  last_error_at: string
   last_keeper: string
+  last_room_id: string
+  last_error: string
+  last_error_kind: string
+  last_outcome: string
   avg_duration_ms: number
+  max_duration_ms: number
+  slow_count: number
+  slow_rate_pct: number
+  success_rate_pct: number
+  room_count: number
+  health: 'idle' | 'healthy' | 'degraded' | 'failing' | string
 }
 
 interface GateStatusData {
   channels: ChannelInfo[]
   total_messages: number
+  total_success: number
+  total_errors: number
+  total_duplicates: number
+  success_rate_pct: number
   dedup_table_size: number
   uptime_seconds: number
 }
@@ -49,17 +71,17 @@ async function refresh() {
 }
 
 const CHANNEL_ICONS: Record<string, string> = {
-  discord: '\u{1F3AE}',   // game controller
-  telegram: '\u{2708}',    // airplane (paper plane)
-  slack: '\u{1F4AC}',      // speech bubble
-  signal: '\u{1F512}',     // lock
-  webchat: '\u{1F310}',    // globe
-  api: '\u{26A1}',         // zap
-  internal: '\u{2699}',    // gear
+  discord: '\u{1F3AE}',
+  telegram: '\u{2708}',
+  slack: '\u{1F4AC}',
+  signal: '\u{1F512}',
+  webchat: '\u{1F310}',
+  api: '\u{26A1}',
+  internal: '\u{2699}',
 }
 
 function channelIcon(ch: string): string {
-  return CHANNEL_ICONS[ch] ?? '\u{1F517}' // link
+  return CHANNEL_ICONS[ch] ?? '\u{1F517}'
 }
 
 function formatUptime(seconds: number): string {
@@ -79,42 +101,122 @@ function timeAgo(iso: string): string {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
+function healthTone(health: string): { dot: string; badge: string; label: string } {
+  switch (health) {
+    case 'healthy':
+      return {
+        dot: 'var(--green)',
+        badge: 'border border-emerald-400/30 bg-emerald-500/12 text-emerald-100',
+        label: 'healthy',
+      }
+    case 'degraded':
+      return {
+        dot: 'var(--yellow)',
+        badge: 'border border-amber-400/30 bg-amber-500/12 text-amber-100',
+        label: 'degraded',
+      }
+    case 'failing':
+      return {
+        dot: 'var(--red)',
+        badge: 'border border-rose-400/35 bg-rose-500/12 text-rose-100',
+        label: 'failing',
+      }
+    default:
+      return {
+        dot: 'var(--text-dim)',
+        badge: 'border border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-dim)]',
+        label: health || 'idle',
+      }
+  }
+}
+
+function shortText(value: string, limit = 96): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (trimmed.length <= limit) return trimmed
+  return `${trimmed.slice(0, limit - 1)}…`
+}
+
 function ChannelCard({ ch }: { ch: ChannelInfo }) {
-  const errorRate = ch.message_count > 0
-    ? Math.round((ch.error_count / ch.message_count) * 100)
-    : 0
-  const statusColor = errorRate > 20 ? 'var(--red)' : errorRate > 5 ? 'var(--yellow)' : 'var(--green)'
+  const tone = healthTone(ch.health)
+  const lastError = shortText(ch.last_error)
 
   return html`
     <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-      <div class="flex items-center justify-between mb-2">
+      <div class="mb-3 flex items-start justify-between gap-3">
         <div class="flex items-center gap-2">
           <span class="text-lg">${channelIcon(ch.channel)}</span>
-          <span class="text-sm font-medium text-[var(--text-body)]">${ch.channel}</span>
+          <div>
+            <div class="text-sm font-medium text-[var(--text-body)]">${ch.channel}</div>
+            <div class="text-[10px] uppercase tracking-[0.18em] text-[var(--text-dim)]">
+              ${ch.last_keeper ? `keeper ${ch.last_keeper}` : 'no keeper yet'}
+            </div>
+          </div>
         </div>
-        <div class="w-2 h-2 rounded-full" style="background: ${statusColor}"></div>
+        <div class="flex items-center gap-2">
+          <div class="h-2 w-2 rounded-full" style="background: ${tone.dot}"></div>
+          <span class=${`rounded-full px-2 py-1 text-[10px] uppercase tracking-[0.16em] ${tone.badge}`}>
+            ${tone.label}
+          </span>
+        </div>
       </div>
-      <div class="grid grid-cols-2 gap-2 text-xs">
+
+      <div class="grid grid-cols-3 gap-2 text-xs">
         <div>
           <div class="text-[var(--text-dim)]">messages</div>
           <div class="font-mono text-[var(--text-body)]">${ch.message_count}</div>
         </div>
         <div>
-          <div class="text-[var(--text-dim)]">errors</div>
-          <div class="font-mono" style="color: ${ch.error_count > 0 ? 'var(--red)' : 'var(--text-body)'}">${ch.error_count}</div>
+          <div class="text-[var(--text-dim)]">success</div>
+          <div class="font-mono text-[var(--text-body)]">${ch.success_rate_pct}%</div>
         </div>
         <div>
-          <div class="text-[var(--text-dim)]">avg latency</div>
-          <div class="font-mono text-[var(--text-body)]">${ch.avg_duration_ms > 0 ? `${(ch.avg_duration_ms / 1000).toFixed(1)}s` : '-'}</div>
+          <div class="text-[var(--text-dim)]">errors</div>
+          <div class="font-mono text-[var(--text-body)]">${ch.error_count}</div>
+        </div>
+        <div>
+          <div class="text-[var(--text-dim)]">duplicates</div>
+          <div class="font-mono text-[var(--text-body)]">${ch.duplicate_count}</div>
+        </div>
+        <div>
+          <div class="text-[var(--text-dim)]">rooms</div>
+          <div class="font-mono text-[var(--text-body)]">${ch.room_count}</div>
         </div>
         <div>
           <div class="text-[var(--text-dim)]">last active</div>
           <div class="font-mono text-[var(--text-body)]">${timeAgo(ch.last_activity)}</div>
         </div>
       </div>
-      ${ch.last_keeper ? html`
-        <div class="mt-2 text-[10px] text-[var(--text-dim)]">keeper: ${ch.last_keeper}</div>
-      ` : null}
+
+      <div class="mt-3 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-dim)]">
+        <div>
+          avg ${(ch.avg_duration_ms / 1000).toFixed(1)}s
+          <span class="text-[var(--text-dim)]"> / max ${(ch.max_duration_ms / 1000).toFixed(1)}s</span>
+        </div>
+        <div>
+          slow ${ch.slow_count}
+          <span class="text-[var(--text-dim)]"> (${ch.slow_rate_pct}%)</span>
+        </div>
+        <div>
+          last outcome
+          <span class="font-mono text-[var(--text-body)]"> ${ch.last_outcome}</span>
+        </div>
+        <div>
+          last room
+          <span class="font-mono text-[var(--text-body)]"> ${ch.last_room_id || '-'}</span>
+        </div>
+      </div>
+
+      ${lastError
+        ? html`
+            <div class="mt-3 rounded-md border border-rose-400/20 bg-rose-500/8 px-3 py-2 text-[11px] text-rose-100">
+              <div class="mb-1 uppercase tracking-[0.16em] text-rose-200/80">
+                ${ch.last_error_kind || 'error'} · ${timeAgo(ch.last_error_at)}
+              </div>
+              <div>${lastError}</div>
+            </div>
+          `
+        : null}
     </div>
   `
 }
@@ -124,10 +226,9 @@ export function ConnectorStatusPanel() {
     refresh()
   }, [])
 
-  // Refresh on SSE events (debounced by sse-store)
   useEffect(() => {
-    const _event = lastEvent.value
-    if (_event && data.value) {
+    const event = lastEvent.value
+    if (event && data.value) {
       const timer = setTimeout(refresh, 2000)
       return () => clearTimeout(timer)
     }
@@ -147,21 +248,38 @@ export function ConnectorStatusPanel() {
 
   return html`
     <div>
-      <h3 class="text-sm font-semibold text-[var(--text-body)] mb-3">Channel Gate</h3>
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <h3 class="text-sm font-semibold text-[var(--text-body)]">Channel Gate</h3>
+        <div class="text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+          success ${d.success_rate_pct}% · uptime ${formatUptime(d.uptime_seconds)}
+        </div>
+      </div>
 
-      <div class="grid grid-cols-3 gap-2 mb-3">
+      <div class="mb-3 grid grid-cols-4 gap-2 max-[720px]:grid-cols-2">
         <${StatCard} label="Messages" value=${d.total_messages} />
+        <${StatCard} label="Success" value=${d.total_success} />
+        <${StatCard} label="Errors" value=${d.total_errors} />
         <${StatCard} label="Dedup Keys" value=${d.dedup_table_size} />
-        <${StatCard} label="Uptime" value=${formatUptime(d.uptime_seconds)} />
+      </div>
+
+      <div class="mb-4 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-dim)] max-[720px]:grid-cols-1">
+        <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+          duplicate suppressions
+          <span class="ml-2 font-mono text-[var(--text-body)]">${d.total_duplicates}</span>
+        </div>
+        <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+          active connectors
+          <span class="ml-2 font-mono text-[var(--text-body)]">${d.channels.length}</span>
+        </div>
       </div>
 
       ${d.channels.length === 0
-        ? html`<div class="text-xs text-[var(--text-dim)] text-center py-4">No active connectors</div>`
+        ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">No active connectors</div>`
         : html`
-          <div class="grid grid-cols-2 gap-2 max-[600px]:grid-cols-1">
-            ${d.channels.map(ch => html`<${ChannelCard} ch=${ch} />`)}
-          </div>
-        `}
+            <div class="grid grid-cols-2 gap-2 max-[900px]:grid-cols-1">
+              ${d.channels.map(ch => html`<${ChannelCard} ch=${ch} />`)}
+            </div>
+          `}
     </div>
   `
 }

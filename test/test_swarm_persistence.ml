@@ -263,18 +263,18 @@ let test_list_sessions_records_fallback_diagnostics () =
       Alcotest.(check int) "limit recorded" 1
         Yojson.Safe.Util.(diagnostics |> member "limit" |> to_int))
 
-let test_list_sessions_named_scope_uses_scoped_prefix () =
+let test_list_sessions_flat_namespace_uses_flat_prefix () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room.with_scope (Room.default_config base) (Room.Named "alpha-room") in
+      let config = Room.default_config base in
       Team_session_store.save_session config
-        (sample_session config ~session_id:"sess-room" ~started_at:10.0
+        (sample_session config ~session_id:"sess-flat" ~started_at:10.0
            ~updated_at_iso:"2026-03-24T10:00:00Z");
       let listed = Team_session_store.list_sessions ~limit:1 config in
-      Alcotest.(check (list string)) "named room session listed"
-        [ "sess-room" ]
+      Alcotest.(check (list string)) "flat namespace session listed"
+        [ "sess-flat" ]
         (List.map (fun (session : Team_session_types.session) -> session.session_id) listed);
       let diagnostics = Team_session_store.session_list_diagnostics_json () in
       let expected_prefix =
@@ -282,7 +282,7 @@ let test_list_sessions_named_scope_uses_scoped_prefix () =
         | Some key -> key ^ ":"
         | None -> Alcotest.fail "expected scoped backend key"
       in
-      Alcotest.(check string) "query prefix tracks scoped room path" expected_prefix
+      Alcotest.(check string) "query prefix tracks flat namespace path" expected_prefix
         Yojson.Safe.Util.(diagnostics |> member "query_prefix" |> to_string))
 
 let test_list_sessions_memory_backend_uses_project_prefix () =
@@ -339,8 +339,8 @@ let () =
             test_list_sessions_uses_recency_order_for_limit;
           Alcotest.test_case "list_sessions diagnostics record fallback"
             `Quick test_list_sessions_records_fallback_diagnostics;
-          Alcotest.test_case "list_sessions named scope uses scoped prefix"
-            `Quick test_list_sessions_named_scope_uses_scoped_prefix;
+          Alcotest.test_case "list_sessions flat namespace uses flat prefix"
+            `Quick test_list_sessions_flat_namespace_uses_flat_prefix;
           Alcotest.test_case "list_sessions memory backend uses project prefix"
             `Quick test_list_sessions_memory_backend_uses_project_prefix;
         ] );

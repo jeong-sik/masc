@@ -90,6 +90,8 @@ masc_claim_next()
 # masc_plan_set_task(task_id="task-001")  # only if current_task is still missing
 ```
 
+`masc_join(agent_name="codex")` 는 이미 열린 default namespace에 agent identity를 명시적으로 묶고 싶을 때 쓰는 가장 짧은 수동 join 예시다.
+
 `masc_set_room(path=...)` 는 여전히 호출 가능하지만 compatibility alias 이고, project scope 만 고른다. 기본 온보딩은 `masc_start(...)` 를 쓴다.
 
 ## 5. Tool Surface

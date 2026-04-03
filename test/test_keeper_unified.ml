@@ -56,6 +56,17 @@ let contains_substring haystack needle =
   in
   needle_len = 0 || loop 0
 
+let contains_disallowed_control_char s =
+  let rec loop i =
+    if i >= String.length s then false
+    else
+      let code = Char.code s.[i] in
+      if (code < 32 && s.[i] <> '\n' && s.[i] <> '\r' && s.[i] <> '\t') || code = 127
+      then true
+      else loop (i + 1)
+  in
+  loop 0
+
 (* ---------- World Observation type tests ---------- *)
 
 let base_observation : WO.world_observation =
@@ -926,6 +937,41 @@ let test_prompt_prefers_silence_guidance () =
      in
      found)
 
+let test_sanitize_text_utf8_replaces_control_chars () =
+  let raw = "alpha\000beta\001gamma\n\tomega" in
+  let sanitized = Masc_mcp.Inference_utils.sanitize_text_utf8 raw in
+  check bool "no disallowed control chars" false
+    (contains_disallowed_control_char sanitized);
+  check string "content preserved with spaces" "alpha beta gamma\n\tomega"
+    sanitized
+
+let test_prompt_sanitizes_control_chars () =
+  let meta =
+    { minimal_meta with
+      instructions = "watch\000this";
+    }
+  in
+  let obs =
+    { base_observation with
+      pending_mentions = [ ("alice", "ping\001pong") ];
+      pending_board_events =
+        [
+          { sample_board_event with
+            preview = "bad\127preview";
+          };
+        ];
+    }
+  in
+  let sys, user = UP.build_prompt ~meta ~observation:obs in
+  check bool "system prompt sanitized" false
+    (contains_disallowed_control_char sys);
+  check bool "user prompt sanitized" false
+    (contains_disallowed_control_char user);
+  check bool "mention text preserved" true
+    (contains_substring user "ping pong");
+  check bool "board preview preserved" true
+    (contains_substring user "bad preview")
+
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
@@ -1253,6 +1299,10 @@ let () =
             test_prompt_includes_room_signal_when_flag_enabled;
           test_case "prefers silence guidance" `Quick
             test_prompt_prefers_silence_guidance;
+          test_case "sanitize_text_utf8 replaces control chars" `Quick
+            test_sanitize_text_utf8_replaces_control_chars;
+          test_case "prompt sanitizes control chars" `Quick
+            test_prompt_sanitizes_control_chars;
         ] );
       ( "config",
         [

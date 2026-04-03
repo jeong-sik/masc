@@ -270,6 +270,10 @@ let run_turn
       ~base_system_prompt
       ~messages:ctx_work.messages
   in
+  let turn_system_prompt =
+    Inference_utils.sanitize_text_utf8 turn_system_prompt
+  in
+  let user_message = Inference_utils.sanitize_text_utf8 user_message in
   (* 6. Append user message and persist.
      On retry (is_retry=true), the user message was already persisted by the
      first attempt.  Checkpoint reload does not include it (checkpoint is
@@ -279,7 +283,7 @@ let run_turn
   (* Capture history BEFORE appending the current user_msg.
      OAS Agent.run appends user_msg from ~goal internally, so passing it
      in initial_messages would cause duplication. *)
-  let history_messages = ctx_work.messages in
+  let history_messages = Inference_utils.sanitize_messages_utf8 ctx_work.messages in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
   if not is_retry then
     Keeper_exec_context.persist_message ~source:history_user_source session user_msg;

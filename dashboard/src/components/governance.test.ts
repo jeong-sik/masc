@@ -135,7 +135,7 @@ describe('Governance surface', () => {
     expect(fetchGovernanceCaseStatus.mock.calls.filter(([caseId]) => caseId === 'gov-case-1').length)
       .toBeGreaterThanOrEqual(2)
     expect(container.textContent).toContain('command:governance 렌더링 오류')
-  }, 60000)
+  }, 45000)
 
   it('shows keeper guidance when governance feed is empty', async () => {
     const emptyResponse: DashboardGovernanceResponse = {

@@ -91,12 +91,16 @@ let test_empty_governance_structure () =
       check int "pending_actions empty" 0 (List.length pending))
 
 let test_factual_snapshot_marks_surface_retired () =
-  let json = Lib.Dashboard_governance.factual_snapshot_json ~base_path:"/tmp/unused" in
-  let open Yojson.Safe.Util in
-  check bool "factual snapshot marks case tracking retired" false
-    (json |> member "case_tracking_available" |> to_bool);
-  check bool "factual snapshot includes note" true
-    (json |> member "note" |> to_string |> String.length > 0)
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let json = Lib.Dashboard_governance.factual_snapshot_json ~base_path:dir in
+      let open Yojson.Safe.Util in
+      check bool "factual snapshot marks case tracking retired" false
+        (json |> member "case_tracking_available" |> to_bool);
+      check bool "factual snapshot includes note" true
+        (json |> member "note" |> to_string |> String.length > 0))
 
 let test_runtime_status_and_judgments_are_live () =
   let dir = test_dir () in

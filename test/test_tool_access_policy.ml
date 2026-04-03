@@ -607,11 +607,13 @@ let test_registered_inline_board_tool_survives_filter () =
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
   let base = make_gate_test_meta ~name:"test-board-inline" () in
   let meta = { base with
-    tool_access = Custom [ "masc_board_post"; "masc_who" ];
+    tool_access = Custom [ "keeper_board_post"; "masc_who" ];
     tool_denylist = [];
   } in
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "board handler tool survives" true
+  check bool "keeper board wrapper tool survives" true
+    (List.mem "keeper_board_post" allowed);
+  check bool "raw masc_board_post filtered out" false
     (List.mem "masc_board_post" allowed);
   check bool "unsupported inline tool removed" false
     (List.mem "masc_who" allowed)

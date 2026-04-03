@@ -140,6 +140,7 @@
 - `metrics`
 - `failure_taxonomy`
 - `artifacts`
+- `hardware_profile`
 
 `metrics` 최소 필드:
 
@@ -182,6 +183,13 @@ harness는 backend-neutral runner interface를 가진다.
 - `extract_text(raw_response) -> text`
 - `extract_usage(raw_response) -> usage`
 - `backend_metadata() -> backend info`
+- `build_retry_feedback(case, attempt_result, retry_policy) -> retry_messages`
+
+retry loop ownership은 runner가 아니라 harness controller에 둔다.
+
+- runner는 single-attempt execution primitive만 제공한다
+- convergence metric과 retry budget 집행은 harness controller가 담당한다
+- `final_exact_at_3`는 `retry disabled` baseline과 동일 case set에서 비교한다
 
 backend 종류는 두 개만 허용한다.
 
@@ -216,6 +224,12 @@ control-only retained model:
 - 60일 cutoff 밖이면 default matrix에서 제외
 - local memory/latency 예산을 명백히 초과하면 optional lane으로만 남긴다
 - 동일 base model의 중복 quant는 winner-takes-all로 줄인다
+
+60일 cutoff anchor는 다음으로 고정한다.
+
+- model source가 Hugging Face면 repo `initial commit` 또는 official publish timestamp를 사용한다
+- 로컬 다운로드 일시는 cutoff truth로 쓰지 않는다
+- benchmark report에는 `model_date_source`를 반드시 기록한다
 
 ## 7. Self-Healing Runtime Proposal
 
@@ -313,15 +327,24 @@ implementation은 다음 gate를 만족해야 한다.
 - same prompt version
 - same backend metadata
 - same model catalog revision
+- MLX result 비교는 `same hardware_profile` 조건에서만 latency gate에 넣는다
 
 ### 10.2 Runtime gate
 
-internal retry helper가 최소 한 개 non-anchor weak model에서:
+internal retry helper는 `retry disabled` baseline 대비 측정한다.
+
+`weak model` 정의:
+
+- same suite에서 `exact_first_try <= 70%`인 non-anchor model
+- 그런 모델이 없으면 lowest-scoring non-anchor model을 weak model로 간주
+
+gate:
 
 - `final_exact_at_3`를 baseline 대비 `+10pp` 이상 올려야 한다
 
 and `Gemma 4 E4B`에서:
 
+- retry disabled baseline에서 이미 first-try success인 case들만 기준으로
 - median total latency overhead가 `35%` 이하여야 한다
 
 ### 10.3 Boundary gate
@@ -338,6 +361,7 @@ Phase-1에서 점수 threshold는 두지 않는다.
 - label consistency documented
 - deterministic grading reproducible
 - artifact schema stable
+- `system_error`는 explicit bucket으로 허용하며 unlabeled bucket으로 보지 않는다
 
 ## 11. Test Plan
 
@@ -359,6 +383,7 @@ Harness:
 - `llama_cpp_openai` runner and `mlx_lm_local` runner produce same `benchmark_result_v2` shape
 - case validators reject missing required params and invalid labels
 - summary generator emits the canonical comparison table
+- pressure grader emits `system_error` explicitly for transport, decode, or runtime failures
 
 ## 12. Rollout
 

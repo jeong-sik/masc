@@ -20,12 +20,12 @@ let check_not_empty msg steps =
 
 (* ── Golden Path 1: Room/Task Hygiene ────────────────────────────── *)
 
-let test_set_room_success () =
+let test_start_success () =
   let g = WG.next_steps ~tool_name:"masc_start" ~success:true in
   check_not_empty "start success has next_steps" g.next_steps;
   check_has_tool g.next_steps "masc_worktree_create"
 
-let test_set_room_failure () =
+let test_start_failure () =
   let g = WG.next_steps ~tool_name:"masc_start" ~success:false in
   check_not_empty "start failure has recovery steps" g.next_steps;
   check_has_tool g.next_steps "masc_start";
@@ -225,8 +225,8 @@ let test_next_steps_reference_real_tools () =
 let () =
   run "Workflow_guide" [
     "golden_path_1", [
-      test_case "start success" `Quick test_set_room_success;
-      test_case "start failure" `Quick test_set_room_failure;
+      test_case "start success" `Quick test_start_success;
+      test_case "start failure" `Quick test_start_failure;
       test_case "join success" `Quick test_join_success;
       test_case "join failure" `Quick test_join_failure;
       test_case "claim success" `Quick test_claim_success;

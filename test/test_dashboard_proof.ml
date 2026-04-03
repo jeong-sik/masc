@@ -324,6 +324,14 @@ let test_dashboard_proof_projection () =
         (json |> U.member "session_id" |> U.to_string);
       check string "selection mode" "latest_auto_selected"
         (json |> U.member "selection" |> U.member "mode" |> U.to_string);
+      check string "namespace id" "default"
+        (json |> U.member "namespace" |> U.member "namespace_id" |> U.to_string);
+      check string "namespace name" "default"
+        (json |> U.member "namespace" |> U.member "namespace" |> U.to_string);
+      check string "namespace mode" "flattened"
+        (json |> U.member "namespace" |> U.member "namespace_mode" |> U.to_string);
+      check string "legacy room alias keeps namespace id" "default"
+        (json |> U.member "room" |> U.member "namespace_id" |> U.to_string);
       check bool "timeline present" true
         ((json |> U.member "timeline" |> U.to_list) <> []);
       check bool "actor contributions present" true

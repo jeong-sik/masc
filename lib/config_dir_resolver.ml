@@ -272,6 +272,45 @@ let personas_dir_opt () =
   let resolution = resolve () in
   if resolution.personas.exists then Some resolution.personas.path else None
 
+let dedupe_paths paths =
+  let seen = Hashtbl.create 8 in
+  List.filter (fun p ->
+      if Hashtbl.mem seen p then false
+      else (Hashtbl.add seen p (); true))
+    paths
+
+let personas_dirs_with inputs resolution =
+  let primary =
+    if resolution.personas.exists then [ resolution.personas.path ] else []
+  in
+  (* When MASC_PERSONAS_DIR is set (source = Env), it acts as the sole
+     override — do not append $HOME or $MASC_BASE_PATH dirs. *)
+  match resolution.personas.source with
+  | Env -> dedupe_paths primary
+  | _ ->
+    let extra_candidates =
+      (* $HOME/.masc/personas *)
+      (match trim_opt inputs.env_home with
+       | Some home ->
+           let p = Filename.concat home ".masc/personas" in
+           if existing_dir p then [ p ] else []
+       | None -> [])
+      @
+      (* $MASC_BASE_PATH/.masc/personas *)
+      (match trim_opt inputs.env_base_path with
+       | Some base ->
+           let base = absolute_path_from ~cwd:inputs.cwd base in
+           let p = Filename.concat (Filename.concat base ".masc") "personas" in
+           if existing_dir p then [ p ] else []
+       | None -> [])
+    in
+    dedupe_paths (primary @ extra_candidates)
+
+let personas_dirs () =
+  let resolution = resolve () in
+  let inputs = inputs_from_env () in
+  personas_dirs_with inputs resolution
+
 let keeper_toml_path_opt name =
   let path = Filename.concat (keepers_dir ()) (name ^ ".toml") in
   if existing_file path then Some path else None

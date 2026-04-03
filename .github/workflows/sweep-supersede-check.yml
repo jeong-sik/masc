@@ -24,14 +24,15 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const pr = context.payload.pull_request;
-            const body = pr.body || '';
+            const prBody = pr.body || '';
 
             // Extract issue references: Closes #N, Fixes #N, Resolves #N
             const issuePattern = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
             const linkedIssues = [];
             let match;
-            while ((match = issuePattern.exec(body)) !== null) {
-              linkedIssues.push(parseInt(match[1], 10));
+            while ((match = issuePattern.exec(prBody)) !== null) {
+              const num = parseInt(match[1], 10);
+              if (!linkedIssues.includes(num)) linkedIssues.push(num);
             }
 
             if (linkedIssues.length === 0) {
@@ -39,7 +40,7 @@ jobs:
               return;
             }
 
-            // Check each linked issue
+            // Check each linked issue (lightweight: issue.get only, no timeline)
             const superseded = [];
             for (const issueNumber of linkedIssues) {
               try {
@@ -47,21 +48,27 @@ jobs:
                   owner, repo, issue_number: issueNumber
                 });
                 if (issue.state === 'closed') {
-                  // Find which PR closed it
-                  const timeline = await github.paginate(
-                    github.rest.issues.listEventsForTimeline,
-                    { owner, repo, issue_number: issueNumber, per_page: 100 }
-                  );
-                  const closeEvent = timeline
-                    .filter(e => e.event === 'closed' && e.commit_id)
-                    .pop();
-                  const closedBy = closeEvent?.commit_id?.substring(0, 7) || 'unknown';
+                  // Try to find the closing PR via timeline (single page, not full paginate)
+                  let closedByPr = null;
+                  try {
+                    const { data: events } = await github.rest.issues.listEventsForTimeline({
+                      owner, repo, issue_number: issueNumber, per_page: 50
+                    });
+                    const closeEvent = events
+                      .filter(e => e.event === 'closed' && e.source?.issue?.pull_request)
+                      .pop();
+                    if (closeEvent) {
+                      closedByPr = closeEvent.source.issue.number;
+                    }
+                  } catch {
+                    // timeline API failure is non-fatal
+                  }
 
                   superseded.push({
                     issue: issueNumber,
                     title: issue.title,
                     closedAt: issue.closed_at,
-                    closedBy
+                    closedByPr
                   });
                 }
               } catch (err) {
@@ -110,9 +117,11 @@ jobs:
             const ratio = superseded.length / linkedIssues.length;
             const severity = ratio >= 0.5 ? 'may be fully superseded' : 'partially superseded';
 
-            const lines = superseded.map(s =>
-              `| #${s.issue} | ${s.title.substring(0, 60)} | ${new Date(s.closedAt).toISOString().split('T')[0]} | \`${s.closedBy}\` |`
-            );
+            const lines = superseded.map(s => {
+              const closedBy = s.closedByPr ? `#${s.closedByPr}` : 'unknown';
+              const date = new Date(s.closedAt).toISOString().split('T')[0];
+              return `| #${s.issue} | ${s.title.substring(0, 60)} | ${date} | ${closedBy} |`;
+            });
 
             const msg = [
               `**Sweep supersede warning** — ${superseded.length}/${linkedIssues.length} linked issue(s) are already closed. This PR ${severity}.`,

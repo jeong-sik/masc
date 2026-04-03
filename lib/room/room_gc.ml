@@ -14,19 +14,18 @@ open Room_state
 
 
 (** Update agent heartbeat - must be called periodically.
-    Uses scoped config for room-specific heartbeat. *)
+    Since #4638 rooms are flattened; delegates to root config. *)
 let heartbeat_in_room config ~room_id ~agent_name =
-  let scoped = with_scope config (Named room_id) in
-  ensure_room_bootstrap scoped room_id;
+  ensure_room_bootstrap config room_id;
   let actual_name = resolve_agent_name config agent_name in
   let filename = safe_filename actual_name ^ ".json" in
-  let agent_file = Filename.concat (agents_dir scoped) filename in
-  if path_exists scoped agent_file then begin
-    with_file_lock scoped agent_file (fun () ->
-      match read_agent_with_repair scoped agent_file with
+  let agent_file = Filename.concat (agents_dir config) filename in
+  if path_exists config agent_file then begin
+    with_file_lock config agent_file (fun () ->
+      match read_agent_with_repair config agent_file with
       | Ok agent ->
           let updated = { agent with last_seen = now_iso () } in
-          write_json scoped agent_file (agent_to_yojson updated);
+          write_json config agent_file (agent_to_yojson updated);
           Printf.sprintf "💓 %s heartbeat updated in %s" actual_name room_id
       | Error e ->
           Log.Room.debug "heartbeat_scoped: invalid agent JSON for %s in %s: %s"

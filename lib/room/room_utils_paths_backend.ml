@@ -9,50 +9,27 @@ let masc_root_dir config =
       let seg = sanitize_namespace_segment other in
       Filename.concat (Filename.concat masc_root "clusters") seg
 
+(** @deprecated Kept for backward-compat; always returns [masc_root_dir]. *)
 let rooms_root_dir config = Filename.concat (masc_root_dir config) "rooms"
 let registry_root_path config = Filename.concat (masc_root_dir config) "rooms.json"
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
 
-(** Read current room ID from .masc/current_room. *)
-let read_current_room config =
-  let read_from path =
-    match Safe_ops.read_file_safe path with
-    | Ok content ->
-      let trimmed = String.trim content in
-      if trimmed = "" then None
-      else
-        (match String.split_on_char '\n' trimmed with
-         | line :: _ -> Some (String.trim line)
-         | [] -> None)
-    | Error _ -> None
-  in
-  match read_from (current_room_root_path config) with
-  | Some room_id -> Some room_id
-  | None -> Some "default"
+(** Read current room ID.
+    Since #4638 rooms are removed; always returns [Some "default"]. *)
+let read_current_room _config = Some "default"
 
-let room_dir_for config room_id =
-  if room_id = "default" then
-    masc_root_dir config
-  else
-    Filename.concat (rooms_root_dir config) room_id
+(** @deprecated Since #4638 all rooms resolve to [masc_root_dir]. *)
+let room_dir_for config _room_id = masc_root_dir config
 
-(** Resolve the initial scope from the current_room file.
-    Called once at config creation time; the result is stored in config.scope
-    so that all subsequent path lookups are pure and deterministic. *)
-let resolve_initial_scope config =
-  match read_current_room config with
-  | Some "default" | None -> Default
-  | Some room_id -> Named room_id
+(** Resolve the initial scope.
+    Since #4638 always returns [Default]. *)
+let resolve_initial_scope _config = Default
 
 (** Scope-based directory resolution.
-    Both branches are pure — no filesystem reads.
-    Default scope resolves to the root .masc/ directory.
-    Named scope resolves to .masc/rooms/{id}/.
-    Callers that need the current_room file must call
-    [config_with_resolved_scope] at config creation time. *)
+    Since #4638 scope is always [Default], so this always returns
+    [masc_root_dir config]. *)
 let masc_dir config =
   match config.scope with
-  | Named id -> room_dir_for config id
   | Default -> masc_root_dir config
 
 let agents_dir config = Filename.concat (masc_dir config) "agents"

@@ -148,6 +148,11 @@ let all_flags : flag list = [
     default = false; category = "dashboard";
     lifecycle = Active; since = "2.140.0" };
 
+  { env_name = "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED";
+    description = "Proactive command-plane snapshot refresh loop";
+    default = false; category = "dashboard";
+    lifecycle = Active; since = "2.217.1" };
+
   { env_name = "MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED";
     description = "Governance judgment background loop";
     default = true; category = "dashboard";

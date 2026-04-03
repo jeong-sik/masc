@@ -909,6 +909,7 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0)
         else
           match transcribe_audio ~audio_file ?language_code () with
           | Ok (`Assoc fields) ->
+              (* Normalize arbitrary provider payloads to a single canonical agent_id. *)
               let fields =
                 List.filter (fun (key, _) -> key <> "agent_id") fields
               in

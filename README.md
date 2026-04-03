@@ -191,6 +191,8 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - Binding to `0.0.0.0` or `::` enables strict auth on MCP routes.
 - Local `/mcp` is the full MCP surface and should be treated as local-first. On non-loopback bind it fails closed unless MASC auth is enabled with `require_token=true`.
 - `/mcp/operator` is bearer-token only and intentionally exposes a smaller remote-safe surface.
+- When a bearer token is present, transient browser/session aliases do not outrank the token-bound credential owner during auth resolution.
+- Auth credentials are persisted under safe agent-id-derived filenames inside `.masc/auth/agents/`; do not rely on raw `agent_name.json` paths.
 - Remote-safe exposure means `/mcp/operator` only. Do not expose the full `/mcp` surface to external clients unless you intentionally want the full coordination tool inventory behind bearer auth.
 
 ## Product and Planning Docs

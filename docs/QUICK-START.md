@@ -98,6 +98,8 @@ masc_claim_next()
 
 `tools/list`는 기본 공개 surface만 보여준다. hidden/internal tool도 `tools/call`로는 호출 가능하다.
 
+인증을 켠 환경에서는 bearer token이 있으면 transient session alias보다 token-bound credential owner가 우선한다.
+
 ```bash
 # Add specific tools to the public surface
 MASC_PUBLIC_TOOLS_EXTRA=masc_board_search,masc_pause

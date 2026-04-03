@@ -878,7 +878,7 @@ let test_agent_json_route_served_on_canonical_path () =
   check string "agent card name present" "MASC-MCP" name
 
 let test_operator_mcp_supervises_team_session () =
-  Alcotest.skip ()
+  _test_operator_mcp_supervises_team_session_impl ()
 
 let () =
   run "operator_mcp_e2e"

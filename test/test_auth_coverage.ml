@@ -152,6 +152,29 @@ let test_auth_config_file_json () =
     (String.length path >= 5 &&
      String.sub path (String.length path - 5) 5 = ".json")
 
+let test_credential_file_uses_safe_filename () =
+  let path = Auth.credential_file "/tmp/test" "Agent:One" in
+  check bool "safe filename encodes raw agent name" true
+    (Filename.basename path = "agent_3aone.json")
+
+let test_private_auth_files_are_written_with_0600 () =
+  let dir = setup_test_room () in
+  let created =
+    match Auth.create_token dir ~agent_name:"Agent:One" ~role:Types.Worker with
+    | Ok _ -> true
+    | Error e -> fail (Types.masc_error_to_string e)
+  in
+  check bool "token created" true created;
+  let safe_path = Auth.credential_file dir "Agent:One" in
+  let auth_cfg = Auth.auth_config_file dir in
+  let secret_path = Auth.room_secret_file dir in
+  ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"Agent:One");
+  let mode path = (Unix.stat path).Unix.st_perm land 0o777 in
+  check int "credential mode" 0o600 (mode safe_path);
+  check int "auth config mode" 0o600 (mode auth_cfg);
+  check int "room secret mode" 0o600 (mode secret_path);
+  cleanup_test_room dir
+
 (* ============================================================
    permission_for_tool Tests
    ============================================================ *)
@@ -714,6 +737,11 @@ let () =
     "auth_config_file", [
       test_case "nonempty" `Quick test_auth_config_file_nonempty;
       test_case "json extension" `Quick test_auth_config_file_json;
+    ];
+    "credential_paths", [
+      test_case "safe filename" `Quick test_credential_file_uses_safe_filename;
+      test_case "private auth files use 0600" `Quick
+        test_private_auth_files_are_written_with_0600;
     ];
     "permission_for_tool", [
       test_case "init" `Quick test_permission_for_tool_init;

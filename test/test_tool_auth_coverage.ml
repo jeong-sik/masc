@@ -194,6 +194,27 @@ let () = test "handle_auth_refresh_rejects_other_agent" (fun () ->
   assert (contains_substring result "authenticated agent")
 )
 
+let () = test "handle_auth_create_token_rejects_invalid_agent_name" (fun () ->
+  let ctx = make_test_ctx () in
+  let args =
+    `Assoc [
+      ("agent_name", `String "../escape");
+      ("role", `String "worker");
+    ]
+  in
+  let (success, result) = Tool_auth.handle_auth_create_token ctx args in
+  assert (not success);
+  assert (contains_substring result "Invalid agent name")
+)
+
+let () = test "handle_auth_revoke_rejects_invalid_agent_name" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [("agent_name", `String "../escape")] in
+  let (success, result) = Tool_auth.handle_auth_revoke ctx args in
+  assert (not success);
+  assert (contains_substring result "Invalid agent name")
+)
+
 let () = test "handle_auth_revoke_respects_agent_name" (fun () ->
   let ctx = make_test_ctx () in
   let target = "dashboard-eager-manta" in

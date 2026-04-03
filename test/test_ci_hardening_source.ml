@@ -128,6 +128,10 @@ let test_route_auth_contracts () =
        {|Http.Router.get "/api/v1/gate/health"|})
 
 let test_http_write_auth_contracts () =
+  check bool "auth credential filenames use safe_filename" true
+    (file_contains_pattern "lib/auth.ml" "Room_utils.safe_filename agent_name");
+  check bool "auth token creation validates agent ids" true
+    (file_contains_pattern "lib/auth.ml" "Validation.Agent_id.validate agent_name");
   check bool "server auth no longer accepts query token fallback" true
     (not
        (file_contains_pattern "lib/server/server_auth.ml"

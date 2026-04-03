@@ -2,6 +2,57 @@
 
 open Types
 
+let auth_dir config = Filename.concat config ".masc/auth"
+let agents_dir config = Filename.concat (auth_dir config) "agents"
+let room_secret_file config = Filename.concat (auth_dir config) "room_secret.hash"
+let auth_config_file config = Filename.concat (auth_dir config) "config.json"
+let initial_admin_file config = Filename.concat (auth_dir config) "initial_admin"
+
+let private_dir_mode = 0o700
+let private_file_mode = 0o600
+
+let chmod_if_exists path mode =
+  try
+    if Sys.file_exists path then Unix.chmod path mode
+  with
+  | Sys_error _ | Unix.Unix_error _ -> ()
+
+let write_private_text_file path contents =
+  Out_channel.with_open_text path (fun oc -> output_string oc contents);
+  chmod_if_exists path private_file_mode
+
+let validate_agent_name_result agent_name : (string, masc_error) result =
+  match Validation.Agent_id.validate agent_name with
+  | Ok _ -> Ok agent_name
+  | Error msg -> Error (InvalidAgentName msg)
+
+let safe_credential_filename agent_name =
+  Room_utils.safe_filename agent_name ^ ".json"
+
+let legacy_credential_filename agent_name =
+  agent_name ^ ".json"
+
+let legacy_credential_file config agent_name =
+  Filename.concat (agents_dir config) (legacy_credential_filename agent_name)
+
+let distinct_legacy_credential_file config agent_name =
+  let safe_file = Filename.concat (agents_dir config) (safe_credential_filename agent_name) in
+  let legacy_file = legacy_credential_file config agent_name in
+  if String.equal safe_file legacy_file then None else Some legacy_file
+
+let load_credential_from_path file : agent_credential option =
+  if Sys.file_exists file then
+    try
+      let content = In_channel.with_open_text file In_channel.input_all in
+      let json = Yojson.Safe.from_string content in
+      match agent_credential_of_yojson json with
+      | Ok cred -> Some cred
+      | Error _ -> None
+    with
+    | Sys_error _ | Yojson.Json_error _ -> None
+  else
+    None
+
 (* ============================================ *)
 (* Crypto utilities                             *)
 (* ============================================ *)
@@ -21,27 +72,21 @@ let sha256_hash input =
 (* Auth directory management                    *)
 (* ============================================ *)
 
-let auth_dir config = Filename.concat config ".masc/auth"
-let agents_dir config = Filename.concat (auth_dir config) "agents"
-let room_secret_file config = Filename.concat (auth_dir config) "room_secret.hash"
-let auth_config_file config = Filename.concat (auth_dir config) "config.json"
-let initial_admin_file config = Filename.concat (auth_dir config) "initial_admin"
-
 (** Ensure auth directories exist *)
 let ensure_auth_dirs config =
   let auth = auth_dir config in
   let agents = agents_dir config in
   Fs_compat.mkdir_p auth;
-  Fs_compat.mkdir_p agents
+  Fs_compat.mkdir_p agents;
+  chmod_if_exists auth private_dir_mode;
+  chmod_if_exists agents private_dir_mode
 
 (** Write the initial admin agent name (bootstrap grace).
     The agent who enables auth is always granted full permission. *)
 let write_initial_admin config agent_name =
   ensure_auth_dirs config;
   let file = initial_admin_file config in
-  Out_channel.with_open_text file (fun oc ->
-    output_string oc (String.trim agent_name));
-  Unix.chmod file 0o600
+  write_private_text_file file (String.trim agent_name)
 
 (** Read the initial admin agent name, if set. *)
 let read_initial_admin config : string option =
@@ -77,9 +122,7 @@ let save_auth_config config (auth_cfg : auth_config) =
   ensure_auth_dirs config;
   let file = auth_config_file config in
   let json = auth_config_to_yojson auth_cfg in
-  Out_channel.with_open_text file (fun oc ->
-    output_string oc (Yojson.Safe.pretty_to_string json)
-  )
+  write_private_text_file file (Yojson.Safe.pretty_to_string json)
 
 (* ============================================ *)
 (* Credential management                        *)
@@ -87,47 +130,62 @@ let save_auth_config config (auth_cfg : auth_config) =
 
 (** Get credential file path for an agent *)
 let credential_file config agent_name =
-  Filename.concat (agents_dir config) (agent_name ^ ".json")
+  Filename.concat (agents_dir config) (safe_credential_filename agent_name)
 
 (** Load agent credential *)
 let load_credential config agent_name : agent_credential option =
-  let file = credential_file config agent_name in
-  if Sys.file_exists file then
-    try
-      let content = In_channel.with_open_text file In_channel.input_all in
-      let json = Yojson.Safe.from_string content in
-      match agent_credential_of_yojson json with
-      | Ok cred -> Some cred
-      | Error _ -> None
-    with Sys_error _ | Yojson.Json_error _ -> None
-  else
-    None
+  match validate_agent_name_result agent_name with
+  | Error _ -> None
+  | Ok _ ->
+      let file = credential_file config agent_name in
+      (match load_credential_from_path file with
+      | Some cred -> Some cred
+      | None -> (
+          match distinct_legacy_credential_file config agent_name with
+          | Some legacy_file -> load_credential_from_path legacy_file
+          | None -> None))
 
 (** Save agent credential *)
 let save_credential config (cred : agent_credential) =
-  ensure_auth_dirs config;
-  let file = credential_file config cred.agent_name in
-  let json = agent_credential_to_yojson cred in
-  Out_channel.with_open_text file (fun oc ->
-    output_string oc (Yojson.Safe.pretty_to_string json)
-  )
+  match validate_agent_name_result cred.agent_name with
+  | Error err -> invalid_arg (masc_error_to_string err)
+  | Ok _ ->
+      ensure_auth_dirs config;
+      let file = credential_file config cred.agent_name in
+      let json = agent_credential_to_yojson cred in
+      write_private_text_file file (Yojson.Safe.pretty_to_string json);
+      (match distinct_legacy_credential_file config cred.agent_name with
+      | Some legacy_file when Sys.file_exists legacy_file -> (
+          try Sys.remove legacy_file with Sys_error _ -> ())
+      | _ -> ())
 
 (** Delete agent credential *)
 let delete_credential config agent_name =
-  let file = credential_file config agent_name in
-  if Sys.file_exists file then Sys.remove file
+  match validate_agent_name_result agent_name with
+  | Error _ -> ()
+  | Ok _ ->
+      let remove_if_exists path =
+        if Sys.file_exists path then
+          try Sys.remove path with Sys_error _ -> ()
+      in
+      remove_if_exists (credential_file config agent_name);
+      Option.iter remove_if_exists (distinct_legacy_credential_file config agent_name)
 
 (** List all credentials *)
 let list_credentials config : agent_credential list =
   let dir = agents_dir config in
   if Sys.file_exists dir then
+    let seen = Hashtbl.create 16 in
     Sys.readdir dir
     |> Array.to_list
     |> List.filter (fun f -> Filename.check_suffix f ".json")
     |> List.filter_map (fun f ->
-        let name = Filename.chop_suffix f ".json" in
-        load_credential config name
-      )
+           let path = Filename.concat dir f in
+           match load_credential_from_path path with
+           | Some ({ agent_name; _ } as cred) when not (Hashtbl.mem seen agent_name) ->
+               Hashtbl.replace seen agent_name ();
+               Some cred
+           | _ -> None)
   else
     []
 
@@ -155,49 +213,55 @@ let resolve_agent_from_token config ~token : (string, masc_error) result =
 
 (** Create a new token for an agent *)
 let create_token config ~agent_name ~role : (string * agent_credential, masc_error) result =
-  let auth_cfg = load_auth_config config in
-  let raw_token = generate_token () in
-  let token_hash = sha256_hash raw_token in
-  let now = now_iso () in
-  let expires_at =
-    if auth_cfg.token_expiry_hours > 0 then
-      let expiry = Time_compat.now () +. (float_of_int auth_cfg.token_expiry_hours *. 3600.0) in
-      let tm = Unix.gmtime expiry in
-      Some (Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-        (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-        tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec)
-    else
-      None
-  in
-  let cred = {
-    agent_name;
-    token = token_hash;
-    role;
-    created_at = now;
-    expires_at;
-  } in
-  save_credential config cred;
-  Ok (raw_token, cred)  (* Return raw token to user, store hash *)
+  match validate_agent_name_result agent_name with
+  | Error _ as err -> err
+  | Ok agent_name ->
+      let auth_cfg = load_auth_config config in
+      let raw_token = generate_token () in
+      let token_hash = sha256_hash raw_token in
+      let now = now_iso () in
+      let expires_at =
+        if auth_cfg.token_expiry_hours > 0 then
+          let expiry = Time_compat.now () +. (float_of_int auth_cfg.token_expiry_hours *. 3600.0) in
+          let tm = Unix.gmtime expiry in
+          Some (Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+            (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+            tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec)
+        else
+          None
+      in
+      let cred = {
+        agent_name;
+        token = token_hash;
+        role;
+        created_at = now;
+        expires_at;
+      } in
+      save_credential config cred;
+      Ok (raw_token, cred)  (* Return raw token to user, store hash *)
 
 (** Verify a token *)
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
-  match load_credential config agent_name with
-  | None -> Error (Unauthorized ("No credential found for " ^ agent_name))
-  | Some cred ->
-      let token_hash = sha256_hash token in
-      if cred.token <> token_hash then
-        Error (InvalidToken "Token mismatch")
-      else
-        (* Check expiry *)
-        match cred.expires_at with
-        | None -> Ok cred
-        | Some exp_str ->
-            (* Simple ISO string comparison works for UTC *)
-            let now = now_iso () in
-            if now > exp_str then
-              Error (TokenExpired agent_name)
-            else
-              Ok cred
+  match validate_agent_name_result agent_name with
+  | Error _ as err -> err
+  | Ok agent_name ->
+      match load_credential config agent_name with
+      | None -> Error (Unauthorized ("No credential found for " ^ agent_name))
+      | Some cred ->
+          let token_hash = sha256_hash token in
+          if cred.token <> token_hash then
+            Error (InvalidToken "Token mismatch")
+          else
+            (* Check expiry *)
+            match cred.expires_at with
+            | None -> Ok cred
+            | Some exp_str ->
+                (* Simple ISO string comparison works for UTC *)
+                let now = now_iso () in
+                if now > exp_str then
+                  Error (TokenExpired agent_name)
+                else
+                  Ok cred
 
 (** Refresh a token (generate new one, update credential) *)
 let refresh_token config ~agent_name ~old_token : (string * agent_credential, masc_error) result =
@@ -458,9 +522,7 @@ let init_room_secret config : string =
   ensure_auth_dirs config;
   let secret = generate_token () in
   let hash = sha256_hash secret in
-  Out_channel.with_open_text (room_secret_file config) (fun oc ->
-    output_string oc hash
-  );
+  write_private_text_file (room_secret_file config) hash;
   (* Update auth config with hash *)
   let cfg = load_auth_config config in
   save_auth_config config { cfg with room_secret_hash = Some hash };

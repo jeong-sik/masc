@@ -386,13 +386,13 @@ let make_routes ~port ~host ~sw ~clock =
   initial_admin        -- 최초 admin agent 이름
   agents/
     claude.json        -- agent_credential (agent_name, token_hash, role, expires_at)
-    gemini.json
+    keeper_3atest.json -- safe agent-id-derived filename example
 ```
 
 ### 7.2 인증 흐름
 
-1. **토큰 생성**: `Auth.create_token ~agent_name ~role` -> (raw_token, credential). raw_token은 한 번만 반환, 서버는 SHA256 해시만 저장.
-2. **요청 인증**: `Authorization: Bearer <raw_token>` 헤더로 전달. 서버가 해시 비교.
+1. **토큰 생성**: `Auth.create_token ~agent_name ~role` -> (raw_token, credential). raw_token은 한 번만 반환, 서버는 SHA256 해시만 저장한다. credential 파일명은 raw `agent_name` 대신 safe agent-id 기반 이름을 사용한다.
+2. **요청 인증**: `Authorization: Bearer <raw_token>` 헤더로 전달. 서버가 해시 비교한다. 토큰이 있으면 transient browser/session alias보다 token-bound credential owner가 우선한다.
 3. **만료 검사**: `expires_at` ISO 문자열 비교 (`now > exp_str`).
 
 ### 7.3 인증 계층

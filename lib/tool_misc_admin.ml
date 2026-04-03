@@ -36,6 +36,11 @@ let int_arg_opt args key =
   | `Intlit raw -> Some (Safe_ops.int_of_string_with_default ~default:0 raw)
   | _ -> None
 
+let validate_actor_name_result agent_name =
+  match Room_utils.validate_agent_name_r agent_name with
+  | Ok valid_name -> Ok valid_name
+  | Error err -> Error ("❌ " ^ Types.masc_error_to_string err)
+
 (* ================================================================ *)
 (* JSON builders                                                    *)
 (* ================================================================ *)
@@ -285,41 +290,44 @@ let handle_tool_admin_update ctx args =
       in
       (match default_role_result, expiry_hours with
       | Error err, _ | _, Error err -> (false, "❌ " ^ err)
-      | Ok default_role, Ok token_expiry_hours ->
-          let room_secret =
-            match enabled_opt with
-            | Some true when not current.enabled ->
-                let (secret, _bootstrap) =
-                  Auth.enable_auth ctx.config.base_path ~require_token ~agent_name:ctx.agent_name
-                in
-                Some secret
-            | Some false when current.enabled ->
-                Auth.disable_auth ctx.config.base_path;
-                None
-            | _ -> None
-          in
-          let refreshed = Auth.load_auth_config ctx.config.base_path in
-          let updated =
-            {
-              refreshed with
-              require_token;
-              default_role;
-              token_expiry_hours;
-              enabled =
-                (match enabled_opt with Some value -> value | None -> refreshed.enabled);
-            }
-          in
-          Auth.save_auth_config ctx.config.base_path updated;
-          let payload =
-            `Assoc
-              [
-                ("status", `String "ok");
-                ("section", `String "auth");
-                ("room_secret", json_string_option room_secret);
-                ("result", auth_snapshot_json ctx);
-              ]
-          in
-          (true, Yojson.Safe.pretty_to_string payload))
+      | Ok default_role, Ok token_expiry_hours -> (
+          match validate_actor_name_result ctx.agent_name with
+          | Error err -> (false, err)
+          | Ok actor_name ->
+              let room_secret =
+                match enabled_opt with
+                | Some true when not current.enabled ->
+                    let (secret, _bootstrap) =
+                      Auth.enable_auth ctx.config.base_path ~require_token ~agent_name:actor_name
+                    in
+                    Some secret
+                | Some false when current.enabled ->
+                    Auth.disable_auth ctx.config.base_path;
+                    None
+                | _ -> None
+              in
+              let refreshed = Auth.load_auth_config ctx.config.base_path in
+              let updated =
+                {
+                  refreshed with
+                  require_token;
+                  default_role;
+                  token_expiry_hours;
+                  enabled =
+                    (match enabled_opt with Some value -> value | None -> refreshed.enabled);
+                }
+              in
+              Auth.save_auth_config ctx.config.base_path updated;
+              let payload =
+                `Assoc
+                  [
+                    ("status", `String "ok");
+                    ("section", `String "auth");
+                    ("room_secret", json_string_option room_secret);
+                    ("result", auth_snapshot_json ctx);
+                  ]
+              in
+              (true, Yojson.Safe.pretty_to_string payload)))
   | "unit_policy" ->
       (match Command_plane_v2.policy_update_json ctx.config ~actor:ctx.agent_name args with
       | Error err -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String err) ]))

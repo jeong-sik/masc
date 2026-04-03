@@ -27,6 +27,7 @@ Unlike the local `/mcp` endpoint, `/mcp/operator` does not expose the full room 
 - If auth is disabled, initialize fails.
 - If bearer token auth is not enabled, initialize fails.
 - Clients must send `Authorization: Bearer <token>`.
+- When a token is present, the server resolves operator identity from the token-bound credential and does not let transient MCP session aliases override it.
 
 ## Tool Model
 

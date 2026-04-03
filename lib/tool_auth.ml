@@ -14,17 +14,26 @@ let target_agent_name ctx args =
   | "" -> ctx.agent_name
   | name -> name
 
+let validated_target_agent_name_result ctx args =
+  let target_agent = target_agent_name ctx args in
+  match Room_utils.validate_agent_name_r target_agent with
+  | Ok agent_name -> Ok agent_name
+  | Error err -> Error (Types.masc_error_to_string err)
+
 let handle_auth_enable ctx args =
-  let require_token = get_bool args "require_token" false in
-  let (secret, bootstrap_token) =
-    Auth.enable_auth ctx.config.base_path ~require_token ~agent_name:ctx.agent_name
-  in
-  let token_msg = match bootstrap_token with
-    | Some token ->
-        Printf.sprintf "\nBootstrap Admin Token for `%s` (SAVE THIS):\n`%s`\n" ctx.agent_name token
-    | None -> ""
-  in
-  let msg = Printf.sprintf {|🔐 **Authentication Enabled**
+  match Room_utils.validate_agent_name_r ctx.agent_name with
+  | Error err -> (false, Types.masc_error_to_string err)
+  | Ok actor_name ->
+      let require_token = get_bool args "require_token" false in
+      let (secret, bootstrap_token) =
+        Auth.enable_auth ctx.config.base_path ~require_token ~agent_name:actor_name
+      in
+      let token_msg = match bootstrap_token with
+        | Some token ->
+            Printf.sprintf "\nBootstrap Admin Token for `%s` (SAVE THIS):\n`%s`\n" actor_name token
+        | None -> ""
+      in
+      let msg = Printf.sprintf {|🔐 **Authentication Enabled**
 
 Room Secret (SAVE THIS - shown only once):
 `%s`
@@ -34,7 +43,7 @@ Require token for actions: %b
 
 Use `masc_auth_create_token` to create agent tokens.
 |} secret token_msg require_token in
-  (true, msg)
+      (true, msg)
 
 let handle_auth_disable ctx _args =
   Auth.disable_auth ctx.config.base_path;
@@ -66,19 +75,21 @@ Bind Host: %s (%s)
   (true, msg)
 
 let handle_auth_create_token ctx args =
-  let target_agent = target_agent_name ctx args in
-  let role_str = get_string args "role" "worker" in
-  let role = match Types.agent_role_of_string role_str with
-    | Ok r -> r
-    | Error _ -> Types.Worker
-  in
-  match Auth.create_token ctx.config.base_path ~agent_name:target_agent ~role with
-  | Ok (raw_token, cred) ->
-      let expires = match cred.expires_at with
-        | Some exp -> exp
-        | None -> "never"
+  match validated_target_agent_name_result ctx args with
+  | Error err -> (false, err)
+  | Ok target_agent ->
+      let role_str = get_string args "role" "worker" in
+      let role = match Types.agent_role_of_string role_str with
+        | Ok r -> r
+        | Error _ -> Types.Worker
       in
-      let msg = Printf.sprintf {|🔑 **Token Created for %s**
+      match Auth.create_token ctx.config.base_path ~agent_name:target_agent ~role with
+      | Ok (raw_token, cred) ->
+          let expires = match cred.expires_at with
+            | Some exp -> exp
+            | None -> "never"
+          in
+          let msg = Printf.sprintf {|🔑 **Token Created for %s**
 
 Token (SAVE THIS - shown only once):
 `%s`
@@ -88,41 +99,45 @@ Expires: %s
 
 Pass this token in requests to authenticate.
 |} target_agent raw_token (Types.agent_role_to_string role) expires in
-      (true, msg)
-  | Error e ->
-      (false, Types.masc_error_to_string e)
+          (true, msg)
+      | Error e ->
+          (false, Types.masc_error_to_string e)
 
 let handle_auth_refresh ctx args =
-  let target_agent = target_agent_name ctx args in
-  if target_agent <> ctx.agent_name then
-    (false, "agent_name must match the authenticated agent for refresh")
-  else
-    let token = get_string args "token" "" in
-    match Auth.refresh_token ctx.config.base_path ~agent_name:target_agent ~old_token:token with
-    | Ok (new_token, cred) ->
-        let expires = match cred.expires_at with
-          | Some exp -> exp
-          | None -> "never"
-        in
-        let msg = Printf.sprintf {|🔄 **Token Refreshed for %s**
+  match validated_target_agent_name_result ctx args with
+  | Error err -> (false, err)
+  | Ok target_agent ->
+      if target_agent <> ctx.agent_name then
+        (false, "agent_name must match the authenticated agent for refresh")
+      else
+        let token = get_string args "token" "" in
+        match Auth.refresh_token ctx.config.base_path ~agent_name:target_agent ~old_token:token with
+        | Ok (new_token, cred) ->
+            let expires = match cred.expires_at with
+              | Some exp -> exp
+              | None -> "never"
+            in
+            let msg = Printf.sprintf {|🔄 **Token Refreshed for %s**
 
 New Token:
 `%s`
 
 Expires: %s
 |} target_agent new_token expires in
-        (true, msg)
-    | Error e ->
-        (false, Types.masc_error_to_string e)
+            (true, msg)
+        | Error e ->
+            (false, Types.masc_error_to_string e)
 
 let handle_auth_revoke ctx args =
-  let target_agent = target_agent_name ctx args in
-  match Auth.load_credential ctx.config.base_path target_agent with
-  | None ->
-      (false, Printf.sprintf "No credential found for %s" target_agent)
-  | Some _ ->
-      Auth.delete_credential ctx.config.base_path target_agent;
-      (true, Printf.sprintf "🗑️ Token revoked for %s" target_agent)
+  match validated_target_agent_name_result ctx args with
+  | Error err -> (false, err)
+  | Ok target_agent ->
+      match Auth.load_credential ctx.config.base_path target_agent with
+      | None ->
+          (false, Printf.sprintf "No credential found for %s" target_agent)
+      | Some _ ->
+          Auth.delete_credential ctx.config.base_path target_agent;
+          (true, Printf.sprintf "🗑️ Token revoked for %s" target_agent)
 
 let handle_auth_list ctx _args =
   let creds = Auth.list_credentials ctx.config.base_path in

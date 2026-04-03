@@ -101,6 +101,17 @@ let test_create_credential () =
   | Error _ ->
       fail "create_token should succeed"
 
+let test_create_credential_rejects_invalid_agent_name () =
+  let dir = setup_test_room () in
+  let result = Auth.create_token dir ~agent_name:"../escape" ~role:Types.Worker in
+  cleanup_test_room dir;
+  match result with
+  | Error (Types.InvalidAgentName _) -> ()
+  | Error e ->
+      fail (Printf.sprintf "wrong error type: %s" (Types.masc_error_to_string e))
+  | Ok _ ->
+      fail "create_token should reject invalid agent name"
+
 let test_verify_token () =
   let dir = setup_test_room () in
   let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Types.Admin in
@@ -166,6 +177,54 @@ let test_delete_credential () =
   let creds = Auth.list_credentials dir in
   cleanup_test_room dir;
   check int "0 credentials after delete" 0 (List.length creds)
+
+let test_load_credential_supports_legacy_filename_compat () =
+  let dir = setup_test_room () in
+  Auth.ensure_auth_dirs dir;
+  let agent_name = "Agent:One" in
+  let legacy_path = Filename.concat (Auth.agents_dir dir) (agent_name ^ ".json") in
+  let cred =
+    {
+      agent_name;
+      token = String.make 64 'a';
+      role = Types.Worker;
+      created_at = "2026-01-01T00:00:00Z";
+      expires_at = None;
+    }
+  in
+  Out_channel.with_open_text legacy_path (fun oc ->
+      output_string oc (Yojson.Safe.to_string (Types.agent_credential_to_yojson cred)));
+  let loaded = Auth.load_credential dir agent_name in
+  cleanup_test_room dir;
+  match loaded with
+  | Some loaded ->
+      check string "legacy credential agent_name preserved" agent_name loaded.agent_name
+  | None ->
+      fail "expected legacy credential to load"
+
+let test_save_credential_migrates_legacy_filename () =
+  let dir = setup_test_room () in
+  let agent_name = "Agent:One" in
+  Auth.ensure_auth_dirs dir;
+  let safe_path = Auth.credential_file dir agent_name in
+  let legacy_path = Filename.concat (Auth.agents_dir dir) (agent_name ^ ".json") in
+  let cred =
+    {
+      agent_name;
+      token = String.make 64 'b';
+      role = Types.Worker;
+      created_at = "2026-01-01T00:00:00Z";
+      expires_at = None;
+    }
+  in
+  Out_channel.with_open_text legacy_path (fun oc ->
+      output_string oc (Yojson.Safe.to_string (Types.agent_credential_to_yojson cred)));
+  Auth.save_credential dir cred;
+  check bool "safe credential path used" true
+    (Filename.basename safe_path <> agent_name ^ ".json");
+  check bool "safe credential file exists" true (Sys.file_exists safe_path);
+  check bool "legacy credential path removed after save" false (Sys.file_exists legacy_path);
+  cleanup_test_room dir
 
 (* ============================================ *)
 (* Permission tests                             *)
@@ -410,11 +469,17 @@ let () =
     ];
     "credentials", [
       test_case "create credential" `Quick test_create_credential;
+      test_case "create credential rejects invalid agent name" `Quick
+        test_create_credential_rejects_invalid_agent_name;
       test_case "verify token" `Quick test_verify_token;
       test_case "verify wrong token" `Quick test_verify_wrong_token;
       test_case "resolve agent from token" `Quick test_resolve_agent_from_token;
       test_case "list credentials" `Quick test_list_credentials;
       test_case "delete credential" `Quick test_delete_credential;
+      test_case "load credential supports legacy filename compat" `Quick
+        test_load_credential_supports_legacy_filename_compat;
+      test_case "save credential migrates legacy filename" `Quick
+        test_save_credential_migrates_legacy_filename;
     ];
     "permissions", [
       test_case "reader permissions" `Quick test_reader_permissions;

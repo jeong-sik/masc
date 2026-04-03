@@ -5,8 +5,6 @@
 
 let install_tooling ~governance_level (state : Mcp_server.server_state) =
   Governance_pipeline.install ~config:state.room_config ~governance_level
-  (* Tool_permissions pre-hook removed: admin check is now handled by
-     Tool_access_role.policy_for_role in Auth.authorize_tool_v2. *)
 
 let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =

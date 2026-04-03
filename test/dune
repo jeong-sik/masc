@@ -294,9 +294,7 @@
         test_tool_result
         test_tool_hooks
         test_governance_pipeline
-        test_tool_permissions
         test_keeper_agent_isolation
-        test_tool_permissions_exhaustive
         test_sse_external_sub
         test_ws_transport
         test_webrtc_signaling
@@ -436,9 +434,7 @@
         test_tool_result
         test_tool_hooks
         test_governance_pipeline
-        test_tool_permissions
         test_keeper_agent_isolation
-        test_tool_permissions_exhaustive
         test_sse_external_sub
         test_ws_transport
         test_webrtc_signaling

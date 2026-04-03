@@ -4,8 +4,7 @@
     Tool_access_policy.t that determines which tools the role can invoke.
 
     Replaces the legacy per-tool permission mapping (auth.ml
-    legacy_permission_for_tool) and the Tool_permissions admin pre-hook
-    with a single policy-based funnel.
+    legacy_permission_for_tool) with a single policy-based funnel.
 
     @since 2.204.0 — Phase 0 of Tool Gate architecture (#4381) *)
 

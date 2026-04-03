@@ -15,24 +15,25 @@ let force_jsonl_fallback_env () =
 let requested_backend_mode () =
   Env_config_core.storage_type ()
 
-(* Tune GC for server workload: dashboard refresh loops create large
-   transient allocations (2GB+ for execution snapshot) that cause the
-   major heap to grow permanently.  Aggressive space_overhead triggers
-   more frequent major collections, and custom_major_ratio forces
-   compaction to return memory to the OS. *)
+(* GC tuning for long-running server with bursty allocation.
+
+   Dashboard refresh loops create 2GB+ transient allocations per cycle.
+   With aggressive GC (space_overhead=40), major GC slices walk
+   MADV_FREE'd pages on macOS, triggering page faults that freeze the
+   Eio event loop — blocking /health and all HTTP endpoints.
+
+   Only apply defaults when OCAMLRUNPARAM is not set, so operators
+   can override at launch without code changes. *)
 let () =
-  let open Gc in
-  let ctrl = get () in
-  set { ctrl with
-    (* Trigger major GC sooner to limit peak heap size.
-       Default 120 means heap can be 2.2x live data before collection.
-       40 limits to 1.4x, reducing peak RSS. *)
-    space_overhead = 40;
-    (* Compact more aggressively: default 500 means compact only when
-       heap is 6x the live data.  80 compacts at 1.8x, returning
-       memory to the OS faster after transient allocation spikes. *)
-    max_overhead = 80;
-  }
+  if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
+    let open Gc in
+    let ctrl = get () in
+    set { ctrl with
+      minor_heap_size = 2 * 1024 * 1024;  (* 16MB; reduces minor->major promotion rate *)
+      space_overhead = 200;               (* default 120; less frequent major GC slices *)
+      max_overhead = 500;                 (* default 500; keep compaction enabled *)
+    }
+  end
 
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in

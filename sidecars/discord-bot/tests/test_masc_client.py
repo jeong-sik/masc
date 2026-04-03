@@ -10,6 +10,7 @@ import pytest
 from src import config as config_module
 from src.config import BotConfig
 from src.gate_client import GateClient
+from src.masc_client import GateResponse, MascGateClient
 
 
 @pytest.fixture(autouse=True)
@@ -157,3 +158,10 @@ def test_legacy_env_aliases_still_work(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.gate_base_url == "http://legacy.example"
     assert cfg.masc_api_token == "legacy-api-token"
     assert cfg.masc_mcp_url == "http://legacy.example"
+
+
+def test_legacy_import_shim_reexports_gate_client_surface() -> None:
+    assert MascGateClient is GateClient
+    response = GateResponse.from_error("timeout")
+    assert response.ok is False
+    assert response.error == "timeout"

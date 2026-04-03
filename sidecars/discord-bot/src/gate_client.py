@@ -372,6 +372,3 @@ class GateClient:
         self._keeper_status_cache[normalized] = (self._now(), data)
         return data
 
-
-MascGateClient = GateClient
-

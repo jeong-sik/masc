@@ -460,7 +460,6 @@ type server_state = {
   mutable room_config: Room.config;
   session_registry: Session.registry;
   on_sse_broadcast: (Yojson.Safe.t -> unit) option Atomic.t;  (* SSE push callback, Atomic for cross-fiber visibility *)
-  encryption_config: Encryption.config Atomic.t;  (* P3: Data encryption, Atomic for cross-fiber visibility *)
   sw: Eio.Switch.t option; (* Request/runtime fibers for HTTP/MCP handlers *)
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option; (* For agent spawning *)
   fs: Eio.Fs.dir_ty Eio.Path.t option; (* For filesystem access *)
@@ -484,7 +483,6 @@ let create_state ~base_path =
     room_config = config;
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
-    encryption_config = Atomic.make Encryption.default_config;
     sw = None;
     proc_mgr = None;
     fs = None;
@@ -533,7 +531,6 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     room_config = config;
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
-    encryption_config = Atomic.make Encryption.default_config;
     sw = Some sw;
     proc_mgr = Some proc_mgr;
     fs = Some fs;

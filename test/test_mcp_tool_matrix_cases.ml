@@ -1050,7 +1050,7 @@ let guard_fragments_for_name name =
   else if
     List.exists
       (fun prefix -> string_starts_with ~prefix name)
-      [ "masc_code_"; "masc_worktree_"; "masc_housekeep_" ]
+      [ "masc_code_"; "masc_worktree_" ]
   then
     git_guard_fragments @ state_guard_fragments
   else

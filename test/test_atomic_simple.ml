@@ -1,9 +1,7 @@
 (* Simple test for atomic_update *)
 
-open Masc_mcp
-
 (* Initialize crypto RNG *)
-let () = Encryption.initialize ()
+let () = Mirage_crypto_rng_unix.use_default ()
 
 let () =
   Eio_main.run @@ fun env ->

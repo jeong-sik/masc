@@ -154,13 +154,10 @@
 
    inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly
-   encryption
-   gcm_compat
    graphql_client
    graphql_endpoint
    graphql_api
    handover_eio
-   hat
    hebbian_eio
    http_server_eio
    http_server_h2
@@ -314,7 +311,6 @@
    tool_team_session_schemas
    tool_heartbeat
    tool_auth
-   tool_housekeep
    tool_agent
    tool_task
    task_dispatch
@@ -367,7 +363,6 @@
    tool_registry
    tool_code
    tool_code_write
-   code_swarm_plan
    tool_suspend
    tool_voice
    mention_inbox

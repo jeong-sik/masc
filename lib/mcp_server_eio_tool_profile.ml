@@ -56,7 +56,7 @@ WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_ve
 WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isolation) → work → masc_transition(done). \
 Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work. \
-TIERS: 202 tools in 3 tiers (each tool has x-tier annotation). \
+TIERS: tools in 3 tiers (each tool has x-tier annotation). \
 Essential (~20): join, leave, status, add_task, transition, broadcast, heartbeat, plan_init/get/set_task/update, who, dashboard, worktree_create. \
 Standard (~55): + board_*, team_session_*, governance, decision_*, handover_*, spawn, agents. \
 Full: all tools. Use masc_tool_help to discover tools beyond essential tier. \

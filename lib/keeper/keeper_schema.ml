@@ -430,8 +430,6 @@ let keeper_schemas : tool_schema list = [
 
 ]
 
-let housekeep_schemas : tool_schema list = []
-
 let voice_schemas : tool_schema list = [
   {
     name = "masc_voice_ping_pong";
@@ -457,4 +455,4 @@ let voice_schemas : tool_schema list = [
 ]
 
 let schemas : tool_schema list =
-  keeper_schemas @ housekeep_schemas @ voice_schemas
+  keeper_schemas @ voice_schemas

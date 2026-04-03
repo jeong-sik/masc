@@ -185,6 +185,17 @@ let test_unauthorized_session_access () =
   in
   Alcotest.(check int) "unauthorized list empty" 0 (List.length listed_sessions);
 
+  let compare_ok, _ =
+    dispatch_exn intruder_ctx ~name:"masc_team_session_compare"
+      ~args:
+        (`Assoc
+          [
+            ("base_session_id", `String session_id);
+            ("target_session_id", `String session_id);
+          ])
+  in
+  Alcotest.(check bool) "unauthorized compare denied" false compare_ok;
+
   let turn_ok, _ =
     dispatch_exn intruder_ctx ~name:"masc_team_session_step"
       ~args:

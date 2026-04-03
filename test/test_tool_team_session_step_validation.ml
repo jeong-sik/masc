@@ -26,6 +26,10 @@ let test_missing_required_args () =
     dispatch_exn ctx ~name:"masc_team_session_report"
       ~args:(`Assoc [ ("session_id", `String "bad-id") ])
   in
+  let ok8, _ =
+    dispatch_exn ctx ~name:"masc_team_session_compare"
+      ~args:(`Assoc [ ("base_session_id", `String "bad-id") ])
+  in
   let ok9, _ =
     dispatch_exn ctx ~name:"masc_team_session_list"
       ~args:(`Assoc [ ("status", `String "not-a-status") ])
@@ -52,6 +56,7 @@ let test_missing_required_args () =
   Alcotest.(check bool) "status traversal invalid" false ok5;
   Alcotest.(check bool) "stop traversal invalid" false ok6;
   Alcotest.(check bool) "report format invalid" false ok7;
+  Alcotest.(check bool) "compare invalid" false ok8;
   Alcotest.(check bool) "list invalid status" false ok9;
   Alcotest.(check bool) "turn invalid" false ok10;
   Alcotest.(check bool) "events invalid" false ok11;

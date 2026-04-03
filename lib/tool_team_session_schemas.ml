@@ -624,6 +624,25 @@ Pair with masc_team_session_compare to diff two sessions.";
           ];
     };
     {
+      name = "masc_team_session_compare";
+      description =
+        "Compare two team sessions side by side, returning throughput, policy, and communication deltas. \
+Use when evaluating whether a configuration change improved session outcomes. \
+After masc_team_session_list identifies the two session IDs.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              `Assoc
+                [
+                  ("base_session_id", `Assoc [ ("type", `String "string") ]);
+                  ("target_session_id", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ("required", `List [ `String "base_session_id"; `String "target_session_id" ]);
+          ];
+    };
+    {
       name = "masc_team_session_events";
       description =
         "Read the team session event timeline with optional event type and timestamp filters. \

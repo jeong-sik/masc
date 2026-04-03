@@ -517,6 +517,7 @@ let dispatch ctx ~name ~args : result option =
   | "masc_team_session_stop" -> Some (handle_stop ctx args)
   | "masc_team_session_report" -> Some (handle_report ctx args)
   | "masc_team_session_list" -> Some (handle_list ctx args)
+  | "masc_team_session_compare" -> Some (handle_compare ctx args)
   | "masc_team_session_events" -> Some (handle_events ctx args)
   | "masc_team_session_prove" -> Some (handle_prove ctx args)
   | _ -> None

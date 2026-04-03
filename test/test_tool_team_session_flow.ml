@@ -191,6 +191,24 @@ let test_list_and_compare () =
   in
   Alcotest.(check bool) "list has sessions" true (List.length sessions >= 2);
 
+  let cmp_ok, cmp_body =
+    dispatch_exn ctx ~name:"masc_team_session_compare"
+      ~args:
+        (`Assoc
+          [
+            ("base_session_id", `String s1);
+            ("target_session_id", `String s2);
+          ])
+  in
+  Alcotest.(check bool) "compare ok" true cmp_ok;
+  let cmp_json = parse_json_exn cmp_body |> result_field in
+  Alcotest.(check string) "compare base" s1
+    (Yojson.Safe.Util.member "base_session_id" cmp_json
+    |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string) "compare target" s2
+    (Yojson.Safe.Util.member "target_session_id" cmp_json
+    |> Yojson.Safe.Util.to_string);
+
   ignore
     (dispatch_exn ctx ~name:"masc_team_session_stop"
        ~args:

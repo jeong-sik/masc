@@ -158,7 +158,7 @@ let command_plane_help_http_json () =
                     ~success_signals:
                       [ "agent visible in masc_status"; "namespace agent roster includes your agent" ]
                     ~pitfalls:
-                      [ "without join you are invisible to scheduling" ];
+                      [ "if you only called masc_set_room, or masc_start did not complete successfully, your agent may not be joined and will not appear for scheduling" ];
                   step ~id:"claim" ~title:"Claim or create work" ~tool:"masc_transition"
                     ~summary:
                       "Claim a specific task with masc_transition(action=claim), or use masc_claim_next when any queued task is acceptable."

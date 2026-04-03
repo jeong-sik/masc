@@ -32,6 +32,8 @@
    channel_gate_metrics
    command_plane_v2
    command_plane_orchestra
+   cp_orchestra_helpers
+   cp_orchestra_nodes
    cp_types
    cp_paths
    cp_serde
@@ -640,7 +642,10 @@
   ;; godsplit-oas-worker: oas_worker decomposition
   oas_worker_cascade
   oas_worker_exec
-  oas_worker_named)
+  oas_worker_named
+  ;; godsplit-cp-orchestra: command_plane_orchestra decomposition
+  cp_orchestra_helpers
+  cp_orchestra_nodes)
  (libraries
    mcp_protocol
    mcp_protocol.eio

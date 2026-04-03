@@ -25,6 +25,23 @@ let file_contains_pattern file_rel pattern =
 let file_not_contains_pattern file_rel pattern =
   not (file_contains_pattern file_rel pattern)
 
+let file_pattern_position file_rel pattern =
+  let source_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> Sys.getcwd ()
+  in
+  let path = Filename.concat source_root file_rel in
+  if not (Sys.file_exists path) then None
+  else
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let content = In_channel.input_all ic in
+        let re = Str.regexp_string pattern in
+        try Some (Str.search_forward re content 0) with Not_found -> None)
+
 let test_ci_sync_and_asset_contracts () =
   check bool "pr sync script added" true
     (file_contains_pattern "scripts/check-pr-sync.sh" "workflow payload head");
@@ -605,6 +622,37 @@ let test_runtime_precondition_contracts () =
   (* Executor contract check removed with governance tool retirement *)
   ()
 
+let test_command_plane_snapshot_review_contracts () =
+  check bool "on-demand snapshot uses timeout guard" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "Eio.Time.with_timeout_exn (cp_snapshot_runtime_clock state)");
+  check bool "on-demand snapshot uses single-flight mutex" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "Eio.Mutex.use_rw ~protect:true _cp_snapshot_compute_mu");
+  check bool "snapshot cache ttl stays runtime-readable" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "command_plane_snapshot_cache_ttl_s ()");
+  check bool "snapshot refresh flag stays runtime-readable" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "command_plane_snapshot_refresh_enabled ()");
+  check bool "on-demand snapshot timeout returns explicit timeout payload" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       {|cp_snapshot_fallback_json ~status:"timeout"|});
+  check bool "timeout path does not serve stale cache unconditionally" true
+    (file_not_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "if !_cp_snapshot_cached_at > 0.0 then !_cp_snapshot_ref");
+  let command_plane_pos =
+    file_pattern_position "lib/config/feature_flag_registry.ml"
+      "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED"
+  in
+  let fixtures_pos =
+    file_pattern_position "lib/config/feature_flag_registry.ml"
+      "MASC_DASHBOARD_FIXTURES_ENABLED"
+  in
+  check bool "dashboard feature flags stay alphabetically ordered" true
+    (match (command_plane_pos, fixtures_pos) with
+     | Some command_plane, Some fixtures -> command_plane < fixtures
+     | _ -> false)
 let () =
   run "ci_hardening_source"
     [
@@ -647,6 +695,8 @@ let () =
              test_http_client_fd_safety_contracts;
            test_case "namespace-truth adaptive timeout contracts" `Quick
              test_namespace_truth_adaptive_timeout_contracts;
+           test_case "command-plane snapshot review contracts" `Quick
+             test_command_plane_snapshot_review_contracts;
            test_case "runtime precondition contracts" `Quick
              test_runtime_precondition_contracts;
            test_case "router contract alignment" `Quick

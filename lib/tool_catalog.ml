@@ -161,7 +161,7 @@ let explicit_metadata : (string * metadata) list =
       hidden_active
         "Internal operator-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
     (* Dead features: no surface, no external callers.
-       Removed on 2026-04-03 from grep/audit evidence in #4709 and PR #4750;
+       Removed on 2026-04-03 from grep/audit evidence in #4709 and PR #4757;
        no 4-week telemetry window is claimed here.
        masc_hat_wear, masc_hat_status, masc_encryption_*, masc_generate_key,
        and masc_tempo* are now physically removed. *)

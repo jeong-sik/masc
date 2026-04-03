@@ -250,7 +250,7 @@ function SectionQuickNav({
   if (sections.length === 0) return null
 
   return html`
-    <nav class="mt-4 flex flex-wrap gap-2" aria-label="현재 화면 섹션 빠른 이동">
+    <nav class="mt-4 flex flex-wrap gap-2" aria-label="Quick navigation between current sections / 현재 화면 섹션 빠른 이동">
       ${sections.map(item => html`
         <${RouteLink}
           tab=${tab}

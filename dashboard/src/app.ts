@@ -82,7 +82,7 @@ export function App() {
               <button type="button"
                 class="hidden max-[768px]:flex size-10 items-center justify-center rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] text-[var(--text-body)] cursor-pointer transition-colors hover:bg-[rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
                 aria-expanded=${mobileMenuOpen.value}
-                aria-label=${mobileMenuOpen.value ? '탐색 메뉴 닫기' : '탐색 메뉴 열기'}
+                aria-label=${mobileMenuOpen.value ? 'Close navigation menu / 탐색 메뉴 닫기' : 'Open navigation menu / 탐색 메뉴 열기'}
                 aria-controls="dashboard-side-rail"
                 onClick=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }}
               >
@@ -122,7 +122,7 @@ export function App() {
           <button
             type="button"
             class="fixed inset-0 z-20 hidden bg-[rgba(5,10,18,0.72)] backdrop-blur-sm max-[768px]:block"
-            aria-label="탐색 메뉴 닫기"
+            aria-label="Close navigation menu / 탐색 메뉴 닫기"
             onClick=${() => { mobileMenuOpen.value = false }}
           ></button>
         ` : null}

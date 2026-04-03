@@ -146,7 +146,7 @@ export async function refreshAgentDetail(): Promise<void> {
   agentFitness.value = null
 
   try {
-    // Fetch namespace messages, task histories, timeline, and fitness in parallel
+    // Fetch namespace (room) messages, task histories, timeline, and fitness in parallel
     const [lines, timelineResult, fitnessResult] = await Promise.all([
       fetchRoomMessages(80),
       fetchAgentTimeline(agentName, 24, 50).catch(() => null),

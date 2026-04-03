@@ -104,7 +104,7 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('Channel Gate')
     expect(text).toContain('success 91%')
     expect(text).toContain('duplicates')
-    expect(text).toContain('namespaces2')
+    expect(text).toMatch(/namespaces\s*2/)
     expect(text).toContain('last namespace 123456')
     expect(text).toContain('upstream timeout')
     expect(container.innerHTML).toContain('degraded')

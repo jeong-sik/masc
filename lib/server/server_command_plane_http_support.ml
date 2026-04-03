@@ -58,7 +58,10 @@ let tool_command_plane_http_json ~deps ~state request ~name ~args =
 let _cp_summary_ref : Yojson.Safe.t ref =
   ref (`Assoc [("generated_at", `String (Types.now_iso ())); ("status", `String "initializing")])
 
-let _cp_summary_refresh_interval_s = 120.0
+let _cp_summary_refresh_interval_s =
+  Dashboard_http_helpers.float_of_env_default
+    "MASC_CP_SUMMARY_REFRESH_INTERVAL_S"
+    ~default:120.0 ~min_v:30.0 ~max_v:600.0
 
 let compute_cp_summary ~state =
   let config = state.Mcp_server.room_config in
@@ -71,22 +74,20 @@ let compute_cp_summary ~state =
   assoc_add "swarm_status" swarm_status summary
 
 let start_cp_summary_refresh_loop ~state ~sw ~clock =
-  Eio.Fiber.fork ~sw (fun () ->
-    Log.CmdPlane.info "starting cp-summary proactive refresh loop";
-    let rec loop () =
-      let t0 = Time_compat.now () in
-      (try
-        _cp_summary_ref := compute_cp_summary ~state;
-        let dt = Time_compat.now () -. t0 in
-        Log.CmdPlane.info "cp-summary refreshed (%.1fs)" dt
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        let dt = Time_compat.now () -. t0 in
-        Log.CmdPlane.warn "cp-summary refresh failed (%.1fs): %s"
-          dt (Printexc.to_string exn));
-      Eio.Time.sleep clock _cp_summary_refresh_interval_s;
-      loop ()
-    in
-    loop ())
+  Proactive_refresh.start ~sw ~clock
+    ~config:{ (Proactive_refresh.default_config
+                 ~label:"cp-summary"
+                 ~interval_s:_cp_summary_refresh_interval_s)
+              with timeout_s =
+                     Dashboard_http_helpers.float_of_env_default
+                       "MASC_CP_SUMMARY_TIMEOUT_S"
+                       ~default:60.0 ~min_v:10.0 ~max_v:120.0;
+                   warm_delay_s =
+                     Dashboard_http_helpers.float_of_env_default
+                       "MASC_WARM_DELAY_CP_SUMMARY_S"
+                       ~default:30.0 ~min_v:0.0 ~max_v:300.0 }
+    ~compute:(fun () -> compute_cp_summary ~state)
+    ~on_result:(fun json -> _cp_summary_ref := json)
 
 let command_plane_summary_http_json ~state:_ =
   (* Always return the proactively cached ref.  Never compute synchronously —
@@ -105,7 +106,10 @@ let _cp_snapshot_ref : Yojson.Safe.t ref =
   ref (`Assoc [("generated_at", `String (Types.now_iso ())); ("status", `String "initializing")])
 
 let _cp_snapshot_cached_at = ref 0.0
-let _cp_snapshot_refresh_interval_s = 30.0
+let _cp_snapshot_refresh_interval_s =
+  Dashboard_http_helpers.float_of_env_default
+    "MASC_CP_SNAPSHOT_REFRESH_INTERVAL_S"
+    ~default:120.0 ~min_v:30.0 ~max_v:600.0
 
 let compute_cp_snapshot ~state =
   let config = state.Mcp_server.room_config in
@@ -136,11 +140,14 @@ let start_cp_snapshot_refresh_loop ~state ~sw ~clock =
       ~config:{ (Proactive_refresh.default_config
                    ~label:"cp-snapshot"
                    ~interval_s:_cp_snapshot_refresh_interval_s)
-                with timeout_s = 30.0;
+                with timeout_s =
+                       Dashboard_http_helpers.float_of_env_default
+                         "MASC_CP_SNAPSHOT_TIMEOUT_S"
+                         ~default:60.0 ~min_v:10.0 ~max_v:120.0;
                      warm_delay_s =
                        Dashboard_http_helpers.float_of_env_default
                          "MASC_WARM_DELAY_CP_SNAPSHOT_S"
-                         ~default:60.0 ~min_v:0.0 ~max_v:300.0 }
+                         ~default:90.0 ~min_v:0.0 ~max_v:300.0 }
       ~compute:(fun () -> compute_cp_snapshot ~state)
       ~on_result:store_cp_snapshot
 

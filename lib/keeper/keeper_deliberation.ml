@@ -383,6 +383,120 @@ type structured_result = {
   confidence: float;
 }
 
+type legality_verdict =
+  | Legal
+  | Illegal of string
+
+type execution_result = {
+  proposed_action: deliberation_action;
+  selected_action: deliberation_action;
+  fallback_used: bool;
+  fallback_reason: string option;
+  policy_labels: string list;
+  reasoning: string;
+  confidence: float;
+}
+
+let rec policy_labels_of_action = function
+  | MultiStep actions ->
+      List.concat_map policy_labels_of_action actions
+  | action ->
+      [ deliberation_action_to_policy_label action ]
+
+let has_board_signal (obs : world_observation) =
+  obs.board_new_post_count > 0 || obs.board_mention_count > 0
+
+let has_room_signal (obs : world_observation) =
+  obs.direct_mention || obs.has_question
+
+let has_operational_signal (obs : world_observation) =
+  has_room_signal obs
+  || obs.failed_task_count > 0
+  || obs.unclaimed_task_count > 0
+  || obs.agent_count_changed
+  || has_board_signal obs
+
+let rec legality_error (obs : world_observation) = function
+  | Noop _ -> None
+  | ReplyInRoom _ ->
+      if has_room_signal obs then None
+      else Some "reply_in_room requires direct mention or a question"
+  | BoardPost _ ->
+      if has_board_signal obs || obs.active_goal_count > 0 then None
+      else Some "board_post requires board activity or active goals"
+  | BoardComment _ ->
+      if has_board_signal obs then None
+      else Some "board_comment requires board activity"
+  | BoardVote _ ->
+      if has_board_signal obs then None
+      else Some "board_vote requires board activity"
+  | TaskClaim _ ->
+      if obs.unclaimed_task_count > 0 then None
+      else Some "task_claim requires unclaimed tasks"
+  | Broadcast _ ->
+      if has_operational_signal obs then None
+      else Some "broadcast requires an operational signal"
+  | ProposeSpawn _ ->
+      if obs.failed_task_count > 0 || obs.unclaimed_task_count > 0
+         || obs.active_goal_count > 0 then None
+      else Some "propose_spawn requires failed tasks, unclaimed tasks, or active goals"
+  | StartDiscussion _ ->
+      if has_board_signal obs || obs.active_goal_count > 0 then None
+      else Some "start_discussion requires board activity or active goals"
+  | ShareFinding _ ->
+      if has_board_signal obs || obs.active_goal_count > 0 then None
+      else Some "share_finding requires board activity or active goals"
+  | MultiStep actions -> (
+      match actions with
+      | [] -> Some "multi_step requires non-empty steps"
+      | _ ->
+          let rec loop index = function
+            | [] -> None
+            | MultiStep _ :: _ ->
+                Some
+                  (Printf.sprintf
+                     "multi_step step %d cannot contain nested multi_step"
+                     index)
+            | action :: rest -> (
+                match legality_error obs action with
+                | Some msg ->
+                    Some
+                      (Printf.sprintf "multi_step step %d illegal: %s" index
+                         msg)
+                | None -> loop (index + 1) rest)
+          in
+          loop 0 actions)
+
+let legality_verdict obs action =
+  match legality_error obs action with
+  | None -> Legal
+  | Some reason -> Illegal reason
+
+let execute_structured_result (obs : world_observation)
+    (result : structured_result) : execution_result =
+  let baseline_action = deterministic_baseline_action obs in
+  match legality_verdict obs result.action with
+  | Legal ->
+      {
+        proposed_action = result.action;
+        selected_action = result.action;
+        fallback_used = false;
+        fallback_reason = None;
+        policy_labels = policy_labels_of_action result.action;
+        reasoning = result.reasoning;
+        confidence = result.confidence;
+      }
+  | Illegal reason ->
+      {
+        proposed_action = result.action;
+        selected_action = baseline_action;
+        fallback_used = true;
+        fallback_reason = Some reason;
+        policy_labels = policy_labels_of_action baseline_action;
+        reasoning = result.reasoning;
+        confidence = result.confidence;
+      }
+
 (* ---------- Response parser ---------- *)
 
 let clamp_confidence raw_conf =

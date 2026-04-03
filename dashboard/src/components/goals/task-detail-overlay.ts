@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
+import { Check, X, ArrowRight, Dot, UserPlus } from 'lucide-preact'
 import { DialogOverlay } from '../common/dialog'
 import { StatusBadge } from '../common/status-badge'
 import { EmptyState } from '../common/empty-state'
@@ -30,16 +31,16 @@ import { goalById, priorityLabel } from './goal-helpers'
 
 // -- Event timeline (inline, NormalizedTaskEvent shape) --------------
 
-function eventBadge(label: string): { icon: string; color: string } {
+function eventBadge(label: string): { icon: any; color: string } {
   switch (label) {
     case 'claim':
-    case 'claimed': return { icon: 'C', color: 'text-accent' }
+    case 'claimed': return { icon: html`<${UserPlus} size=${14} />`, color: 'text-accent' }
     case 'done':
-    case 'completed': return { icon: '\u2713', color: 'text-ok' }
+    case 'completed': return { icon: html`<${Check} size=${14} />`, color: 'text-ok' }
     case 'cancel':
-    case 'cancelled': return { icon: '\u2715', color: 'text-bad' }
-    case 'transition': return { icon: '\u2192', color: 'text-warn' }
-    default: return { icon: '\u00B7', color: 'text-text-muted' }
+    case 'cancelled': return { icon: html`<${X} size=${14} />`, color: 'text-bad' }
+    case 'transition': return { icon: html`<${ArrowRight} size=${14} />`, color: 'text-warn' }
+    default: return { icon: html`<${Dot} size=${14} />`, color: 'text-text-muted' }
   }
 }
 
@@ -135,7 +136,7 @@ export function TaskDetailOverlay() {
           class="shrink-0 size-8 flex items-center justify-center rounded-lg border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted cursor-pointer transition-colors hover:bg-[var(--white-10)] hover:text-text-strong"
           onClick=${closeTaskDetail}
           aria-label="닫기"
-        >\u2715</button>
+        ><${X} size=${16} /></button>
       </div>
 
       ${'' /* Tab bar */}

@@ -10,7 +10,7 @@ include Room_state
 let get_agents_status config =
   ensure_initialized config;
 
-  let agents_path = agents_dir (with_scope config (Named (current_room_id config))) in
+  let agents_path = agents_dir config in
   if not (Sys.file_exists agents_path) then
     `Assoc [("agents", `List []); ("count", `Int 0)]
   else begin
@@ -74,8 +74,7 @@ let register_capabilities config ~agent_name ~capabilities =
     Printf.sprintf "⚠ Agent %s not found. Join first!" agent_name
 
 (** Update agent metadata (status/capabilities).
-    BUG-1600 FIX: Check both room-scoped and root agent directories,
-    matching the lookup logic used by is_agent_joined. *)
+    Since #4638 agent metadata always lives under the root agents_dir. *)
 let update_agent_r config ~agent_name ?status ?capabilities () : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else match validate_agent_name_r agent_name with
@@ -83,15 +82,8 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Types.ma
     | Ok _ ->
         let actual_name = resolve_agent_name config agent_name in
         let filename = safe_filename actual_name ^ ".json" in
-        (* Check room-scoped agents first, then root-scoped.
-           masc_join writes to room-scoped dir, but this function
-           previously only looked in root agents_dir. *)
-        let room_file = Filename.concat (agents_dir (with_scope config (Named (current_room_id config)))) filename in
-        let root_file = Filename.concat (agents_dir config) filename in
-        let agent_file =
-          if Sys.file_exists room_file then room_file
-          else root_file
-        in
+        (* Since #4638 rooms are flattened; agents always in root agents_dir *)
+        let agent_file = Filename.concat (agents_dir config) filename in
         if not (Sys.file_exists agent_file) then
           Error (Types.AgentNotFound actual_name)
         else

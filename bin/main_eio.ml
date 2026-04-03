@@ -346,17 +346,39 @@ let run_cmd host port base_path =
             Log.Server.info
               "[MASC] Sent shutdown notification to %d SSE clients"
               (Sse.client_count ());
-            Eio.Time.sleep clock 0.2;
-            Masc_mcp.Shutdown_hooks.run_all ();
-            (try Board_dispatch.flush ()
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | _ ->
-               Log.Server.warn
-                 "[Shutdown] Board flush skipped (not initialized)");
-            (* Return normally — Eio.Fiber.first will cancel run_server
-               cleanly via Eio.Cancel.Cancelled, avoiding "Multiple
-               exceptions" from raising Shutdown + Cancelled together. *)
+            Eio.Time.sleep clock shutdown_cfg.notify_delay_s;
+            (* Phase 2: Run shutdown hooks with cleanup timeout *)
+            Log.Server.info "[Shutdown] Phase: hooks (timeout=%.1fs)"
+              shutdown_cfg.cleanup_timeout_s;
+            (try
+              Eio.Time.with_timeout_exn clock shutdown_cfg.cleanup_timeout_s
+                (fun () -> Masc_mcp.Shutdown_hooks.run_all ())
+            with
+            | Eio.Time.Timeout ->
+                Log.Server.warn
+                  "[Shutdown] hooks timeout after %.1fs, proceeding"
+                  shutdown_cfg.cleanup_timeout_s
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Log.Server.warn
+                  "[Shutdown] hooks failed, proceeding: %s"
+                  (Printexc.to_string exn));
+            (* Phase 3: Board flush with 2s timeout *)
+            Log.Server.info "[Shutdown] Phase: board flush (timeout=2.0s)";
+            (try
+              Eio.Time.with_timeout_exn clock 2.0
+                (fun () -> Board_dispatch.flush ())
+            with
+            | Eio.Time.Timeout ->
+                Log.Server.warn "[Shutdown] Board flush timeout, skipping"
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Log.Server.warn
+                  "[Shutdown] Board flush skipped: %s"
+                  (Printexc.to_string exn));
+            (* Phase 4: Return normally — Eio.Fiber.first will cancel
+               run_server cleanly via Eio.Cancel.Cancelled. *)
+            Log.Server.info "[Shutdown] Phase: server cancel";
             ()
       in
       Eio.Fiber.first

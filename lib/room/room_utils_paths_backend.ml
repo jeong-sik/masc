@@ -9,50 +9,118 @@ let masc_root_dir config =
       let seg = sanitize_namespace_segment other in
       Filename.concat (Filename.concat masc_root "clusters") seg
 
+(** @deprecated Since #4638. Still returns
+    [Filename.concat (masc_root_dir config) "rooms"] for migration code that
+    needs to locate legacy room directories. *)
 let rooms_root_dir config = Filename.concat (masc_root_dir config) "rooms"
 let registry_root_path config = Filename.concat (masc_root_dir config) "rooms.json"
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
 
-(** Read current room ID from .masc/current_room. *)
-let read_current_room config =
-  let read_from path =
-    match Safe_ops.read_file_safe path with
-    | Ok content ->
-      let trimmed = String.trim content in
-      if trimmed = "" then None
-      else
-        (match String.split_on_char '\n' trimmed with
-         | line :: _ -> Some (String.trim line)
-         | [] -> None)
-    | Error _ -> None
-  in
-  match read_from (current_room_root_path config) with
-  | Some room_id -> Some room_id
-  | None -> Some "default"
+let warned_legacy_room_roots = Atomic.make []
 
-let room_dir_for config room_id =
-  if room_id = "default" then
-    masc_root_dir config
+let rec mark_legacy_room_warning_emitted masc_root =
+  let warned = Atomic.get warned_legacy_room_roots in
+  if List.mem masc_root warned then
+    false
+  else if Atomic.compare_and_set warned_legacy_room_roots warned (masc_root :: warned) then
+    true
   else
-    Filename.concat (rooms_root_dir config) room_id
+    mark_legacy_room_warning_emitted masc_root
 
-(** Resolve the initial scope from the current_room file.
-    Called once at config creation time; the result is stored in config.scope
-    so that all subsequent path lookups are pure and deterministic. *)
-let resolve_initial_scope config =
-  match read_current_room config with
-  | Some "default" | None -> Default
-  | Some room_id -> Named room_id
+let read_legacy_current_room config =
+  let path = current_room_root_path config in
+  if Sys.file_exists path then
+    try
+      let ic = open_in path in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+          match String.trim (input_line ic) with
+          | "" -> None
+          | room_id -> Some room_id)
+    with _ -> None
+  else
+    None
+
+let legacy_room_dirs_exist config =
+  let path = rooms_root_dir config in
+  Sys.file_exists path
+  &&
+  try
+    Sys.is_directory path && Array.length (Sys.readdir path) > 0
+  with _ -> false
+
+let normalize_current_room_label room_id =
+  let room_id = String.trim room_id in
+  if room_id = "" then None
+  else if room_id = "." || room_id = ".." then None
+  else if String.contains room_id '/' || String.contains room_id '\\' then None
+  else if String_util.contains_substring room_id ".." then None
+  else if
+    not
+      (Re.execp
+         (Re.compile
+            Re.(whole_string (rep1 (alt [ rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '.'; char '_'; char '-' ]))))
+         room_id)
+  then
+    None
+  else
+    Some room_id
+
+let warn_if_legacy_room_state_exists config =
+  let legacy_current_room =
+    match read_legacy_current_room config with
+    | Some room_id when room_id <> "default" -> Some room_id
+    | _ -> None
+  in
+  let has_legacy_rooms = legacy_room_dirs_exist config in
+  match legacy_current_room, has_legacy_rooms with
+  | None, false -> ()
+  | _ ->
+      let masc_root = masc_root_dir config in
+      if mark_legacy_room_warning_emitted masc_root then
+        let detail =
+          match legacy_current_room, has_legacy_rooms with
+          | Some room_id, true ->
+              Printf.sprintf
+                "legacy current_room=%S and room data under %S will be ignored"
+                room_id (rooms_root_dir config)
+          | Some room_id, false ->
+              Printf.sprintf "legacy current_room=%S will be ignored" room_id
+          | None, true ->
+              Printf.sprintf "legacy room data under %S will be ignored"
+                (rooms_root_dir config)
+          | None, false -> ""
+        in
+        Log.Room.warn
+          "Legacy room-scoped state detected; startup now always resolves to the default scope and %s."
+          detail
+
+let read_current_room config =
+  let has_legacy_rooms = legacy_room_dirs_exist config in
+  if has_legacy_rooms then (
+    warn_if_legacy_room_state_exists config;
+    Some "default")
+  else
+    match read_legacy_current_room config with
+    | Some room_id -> (
+        match normalize_current_room_label room_id with
+        | Some valid_room_id -> Some valid_room_id
+        | None -> Some "default")
+    | None -> Some "default"
+
+(** @deprecated Since #4638 all rooms resolve to [masc_root_dir]. *)
+let room_dir_for config _room_id = masc_root_dir config
+
+(** Resolve the initial scope.
+    Since #4638 always returns [Default]. *)
+let resolve_initial_scope _config = Default
 
 (** Scope-based directory resolution.
-    Both branches are pure — no filesystem reads.
-    Default scope resolves to the root .masc/ directory.
-    Named scope resolves to .masc/rooms/{id}/.
-    Callers that need the current_room file must call
-    [config_with_resolved_scope] at config creation time. *)
+    Since #4638 scope is always [Default], so this always returns
+    [masc_root_dir config]. *)
 let masc_dir config =
   match config.scope with
-  | Named id -> room_dir_for config id
   | Default -> masc_root_dir config
 
 let agents_dir config = Filename.concat (masc_dir config) "agents"

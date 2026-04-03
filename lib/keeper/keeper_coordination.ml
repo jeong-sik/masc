@@ -55,10 +55,9 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
               (Room.is_agent_joined_in_room config ~room_id
                  ~agent_name:meta.agent_name)
           then begin
-            let scoped = Room.with_scope config (Room.Named room_id) in
-            Room.ensure_room_bootstrap scoped room_id;
+            Room.ensure_room_bootstrap config room_id;
             ignore
-              (Room.join scoped ~agent_name:meta.agent_name
+              (Room.join config ~agent_name:meta.agent_name
                  ~capabilities:[ "keeper" ] ())
           end;
           ignore

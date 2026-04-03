@@ -4,10 +4,7 @@ open Types
 include Room_utils
 include Room_state
 
-let activity_room_id (config : Room_utils.config) =
-  match config.scope with
-  | Default -> "default"
-  | Named id -> id
+let activity_room_id _config = "default"
 
 let emit_task_activity config ~agent_name ~task_id ~kind ~payload =
   try

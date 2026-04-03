@@ -91,24 +91,22 @@ let load_agents_from_dir config dir ~include_inactive =
 (** Get raw agent list (for orchestrator) *)
 let get_agents_raw config =
   ensure_initialized config;
-  let agents_path =
-    agents_dir (with_scope config (Named (current_room_id config)))
-  in
+  let agents_path = agents_dir config in
   load_agents_from_dir config agents_path ~include_inactive:true
 
-let get_agents_raw_in_room config room_id =
+let get_agents_raw_in_room config _room_id =
   if not (root_is_initialized config) then []
   else
-    let agents_path = agents_dir (with_scope config (Named room_id)) in
+    let agents_path = agents_dir config in
     load_agents_from_dir config agents_path ~include_inactive:false
 
 (** Like [get_agents_raw_in_room] but includes Inactive agents.
     Useful for keeper backlog-triage enrollment where inactive agents
     should still participate as a fallback. *)
-let get_all_agents_in_room config room_id =
+let get_all_agents_in_room config _room_id =
   if not (root_is_initialized config) then []
   else
-    let agents_path = agents_dir (with_scope config (Named room_id)) in
+    let agents_path = agents_dir config in
     load_agents_from_dir config agents_path ~include_inactive:true
 
 (** Audit tasks: find claimed/in_progress tasks whose assignees are not active agents.
@@ -149,20 +147,14 @@ let is_agent_active_at_path config path =
        | Ok agent -> agent.status <> Inactive
        | Error _ -> false)
 
-let is_agent_joined_in_room config ~room_id ~agent_name =
+let is_agent_joined_in_room config ~room_id:_ ~agent_name =
   if not (root_is_initialized config) then false
   else
-    let actual_name = resolve_agent_name (with_scope config (Named room_id)) agent_name in
+    let actual_name = resolve_agent_name config agent_name in
     let filename = safe_filename actual_name ^ ".json" in
-    (* Check room-scoped path first *)
-    let room_agents = agents_dir (with_scope config (Named room_id)) in
-    let room_path = Filename.concat room_agents filename in
-    if is_agent_active_at_path config room_path then true
-    else
-      (* Fallback: check root agents_dir (where default join writes) *)
-      let root_agents = agents_dir config in
-      let root_path = Filename.concat root_agents filename in
-      is_agent_active_at_path config root_path
+    let agents_path = agents_dir config in
+    let agent_path = Filename.concat agents_path filename in
+    is_agent_active_at_path config agent_path
 
 (** Check if an agent has joined the room *)
 let is_agent_joined config ~agent_name =

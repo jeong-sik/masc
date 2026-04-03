@@ -81,7 +81,7 @@ graceful_stop() {
 
 run_mcp_smoke() {
   local port="$1"
-  local headers_file init_body tools_body session_id
+  local headers_file init_body tools_body mcp_session_id
   headers_file="$(harness_mktemp_file masc-memory-leak-init .headers)"
   init_body="$(harness_mktemp_file masc-memory-leak-init-body .json)"
   tools_body="$(harness_mktemp_file masc-memory-leak-tools-body .json)"
@@ -92,8 +92,8 @@ run_mcp_smoke() {
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"memory-leak-check","version":"0.1"}}}' \
     > "${init_body}"
 
-  session_id="$(awk -F': ' 'tolower($1)=="mcp-session-id"{gsub("\r", "", $2); print $2}' "${headers_file}" | tail -n 1)"
-  if [[ -z "${session_id}" ]]; then
+  mcp_session_id="$(awk -F': ' 'tolower($1)=="mcp-session-id"{gsub("\r", "", $2); print $2}' "${headers_file}" | tail -n 1)"
+  if [[ -z "${mcp_session_id}" ]]; then
     echo "failed to capture Mcp-Session-Id from initialize response" >&2
     rm -f "${headers_file}" "${init_body}" "${tools_body}"
     return 1
@@ -102,7 +102,7 @@ run_mcp_smoke() {
   curl -fsS "http://127.0.0.1:${port}/mcp" \
     -H "Accept: application/json, text/event-stream" \
     -H "Content-Type: application/json" \
-    -H "Mcp-Session-Id: ${session_id}" \
+    -H "Mcp-Session-Id: ${mcp_session_id}" \
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
     > "${tools_body}"
 
@@ -206,11 +206,15 @@ echo "[memory-leak] base_path=${BASE_PATH}" >&2
   export MASC_TRANSPORT_AUTOSTART="0"
   export MASC_TOOL_TIMEOUT_DEFAULT_SEC="${MASC_TOOL_TIMEOUT_DEFAULT_SEC:-90}"
   export GRAPHQL_API_KEY=""
+  # Force any optional GraphQL path to fail fast locally instead of drifting
+  # to a real service during the leak-check smoke run.
   export GRAPHQL_URL="http://127.0.0.1:9/graphql"
   exec "${VALGRIND_BIN}" \
     --tool=memcheck \
     --leak-check=full \
     --show-leak-kinds=definite,indirect,possible \
+    # Keep "possible" in the failure set so startup/MCP smoke regressions do
+    # not get hidden behind a narrower default leak threshold.
     --errors-for-leak-kinds=definite,indirect,possible \
     --error-exitcode=101 \
     --log-file="${VALGRIND_LOG_FILE}" \

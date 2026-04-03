@@ -613,7 +613,6 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          let sessions_ref = ref empty_section in
          let keepers_ref = ref empty_section in
          let persistent_ref = ref empty_section in
-         let cp_ref = ref command_plane_json in
          Eio.Fiber.all [
            (fun () ->
              sessions_ref :=
@@ -639,7 +638,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
            ("sessions", !sessions_ref);
            ("keepers", !keepers_ref);
            ("persistent_agents", !persistent_ref);
-           ("command_plane", !cp_ref);
+           ("command_plane", command_plane_json);
          ]
       )
       @ [

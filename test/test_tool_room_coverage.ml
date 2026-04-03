@@ -194,6 +194,8 @@ let () = test "dispatch_room_strategy_get" (fun () ->
   match Tool_room.dispatch ctx ~name:"masc_room_strategy_get" ~args:(`Assoc []) with
   | Some (success, result) ->
       assert success;
+      assert (str_contains result "\"namespace_id\": \"default\"");
+      assert (str_contains result "\"room_id\": \"default\"");
       assert (str_contains result "\"search_strategy_default\"");
       assert (str_contains result "\"speculation_enabled\"")
   | None -> failwith "dispatch returned None"

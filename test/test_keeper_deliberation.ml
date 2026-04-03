@@ -28,6 +28,12 @@ let () =
 let base_obs =
   D.empty_world_observation ~keeper_name:"test-keeper"
 
+let contains_substring text needle =
+  try
+    ignore (Str.search_forward (Str.regexp_string needle) text 0);
+    true
+  with Not_found -> false
+
 let test_triage_skip_on_empty_observation () =
   let result = D.triage base_obs in
   match result with
@@ -427,6 +433,76 @@ let test_structured_result_schema_parse_valid_json () =
        | _ -> fail "expected Noop action");
       check string "reasoning" "nothing" result.reasoning;
       check (float 0.01) "confidence" 0.9 result.confidence
+
+let test_legality_verdict_rejects_illegal_task_claim () =
+  let obs =
+    D.{ base_obs with unclaimed_task_count = 0 }
+  in
+  match
+    D.legality_verdict obs
+      (D.TaskClaim { task_id = "task-1"; reason = "urgent" })
+  with
+  | D.Illegal msg ->
+      check bool "mentions unclaimed tasks" true
+        (contains_substring msg "unclaimed tasks")
+  | D.Legal -> fail "expected illegal task_claim without unclaimed tasks"
+
+let test_legality_verdict_rejects_nested_multistep () =
+  let obs =
+    D.{ base_obs with unclaimed_task_count = 1 }
+  in
+  let action =
+    D.MultiStep
+      [
+        D.TaskClaim { task_id = "task-1"; reason = "urgent" };
+        D.MultiStep [ D.Broadcast { message = "claimed" } ];
+      ]
+  in
+  match D.legality_verdict obs action with
+  | D.Illegal msg ->
+      check bool "mentions nested multi_step" true
+        (contains_substring msg "nested multi_step")
+  | D.Legal -> fail "expected nested multi_step to be illegal"
+
+let test_execute_structured_result_keeps_legal_action () =
+  let obs =
+    D.{ base_obs with unclaimed_task_count = 1 }
+  in
+  let structured =
+    D.
+      {
+        action = TaskClaim { task_id = "task-1"; reason = "urgent" };
+        reasoning = "claim the waiting task";
+        confidence = 0.8;
+      }
+  in
+  let result = D.execute_structured_result obs structured in
+  check bool "fallback not used" false result.fallback_used;
+  check (option string) "no fallback reason" None result.fallback_reason;
+  check (list string) "policy labels" [ "task_claim" ] result.policy_labels;
+  match result.selected_action with
+  | D.TaskClaim { task_id; _ } ->
+      check string "selected task" "task-1" task_id
+  | _ -> fail "expected selected task_claim action"
+
+let test_execute_structured_result_falls_back_to_baseline () =
+  let obs = base_obs in
+  let structured =
+    D.
+      {
+        action = TaskClaim { task_id = "task-1"; reason = "urgent" };
+        reasoning = "claim the waiting task";
+        confidence = 0.8;
+      }
+  in
+  let result = D.execute_structured_result obs structured in
+  check bool "fallback used" true result.fallback_used;
+  check bool "fallback reason present" true (Option.is_some result.fallback_reason);
+  check (list string) "policy labels" [ "noop" ] result.policy_labels;
+  match result.selected_action with
+  | D.Noop reason ->
+      check string "fallback noop" "no_trigger" reason
+  | _ -> fail "expected fallback noop action"
 
 let test_parse_json_with_code_fences_rejected () =
   let raw =
@@ -878,6 +954,17 @@ let () =
             test_structured_result_schema_metadata;
           test_case "schema parse valid json" `Quick
             test_structured_result_schema_parse_valid_json;
+        ] );
+      ( "deterministic_execution",
+        [
+          test_case "rejects illegal task_claim" `Quick
+            test_legality_verdict_rejects_illegal_task_claim;
+          test_case "rejects nested multi_step" `Quick
+            test_legality_verdict_rejects_nested_multistep;
+          test_case "keeps legal action" `Quick
+            test_execute_structured_result_keeps_legal_action;
+          test_case "falls back to baseline" `Quick
+            test_execute_structured_result_falls_back_to_baseline;
         ] );
       ( "parse_deliberation_response",
         [

@@ -94,22 +94,34 @@ let parse_line (line : string) : (string * Yojson.Safe.t option * float) option 
       | _ -> None
     with Yojson.Json_error _ -> None
 
-(** Read all lines from a session file.
-    Returns empty list if file does not exist.
-    Logs a warning if file exceeds [max_file_size]. *)
-let read_lines ~path : (string * Yojson.Safe.t option * float) list =
-  if not (Fs_compat.file_exists path) then []
+let warn_if_large path =
+  try
+    let stat = Unix.stat path in
+    let size = stat.Unix.st_size in
+    if size > max_file_size then
+      Log.Memory.warn "memory_jsonl: file %s is %d bytes (>50MB)" path size
+  with Unix.Unix_error _ -> ()
+
+let fold_entries ~path ~init f =
+  if not (Fs_compat.file_exists path) then init
   else begin
-    (* Size guard *)
-    (try
-       let stat = Unix.stat path in
-       let size = stat.Unix.st_size in
-       if size > max_file_size then
-         Log.Memory.warn "memory_jsonl: file %s is %d bytes (>50MB)" path size
-     with Unix.Unix_error _ -> ());
-    let content = Fs_compat.load_file path in
-    let lines = String.split_on_char '\n' content in
-    List.filter_map parse_line lines
+    warn_if_large path;
+    let read_all () =
+      In_channel.with_open_bin path (fun ic ->
+        let rec loop acc =
+          match input_line ic with
+          | line ->
+              let acc =
+                match parse_line line with
+                | Some entry -> f acc entry
+                | None -> acc
+              in
+              loop acc
+          | exception End_of_file -> acc
+        in
+        loop init)
+    in
+    Eio_guard.run_in_systhread read_all
   end
 
 (** Create a session-based JSONL [long_term_backend].
@@ -136,11 +148,9 @@ let make_backend ~base_dir ~agent_name ~session_id
 
   let retrieve ~key =
     try
-      let entries = read_lines ~path in
-      (* Fold over all entries; last match wins (file is oldest-first) *)
-      let last_value = List.fold_left (fun acc (k, v, _ts) ->
-          if k = key then Some v else acc
-        ) None entries
+      let last_value =
+        fold_entries ~path ~init:None (fun acc (k, v, _ts) ->
+            if k = key then Some v else acc)
       in
       (* Some (Some v) = value, Some None = tombstone, None = not found *)
       match last_value with
@@ -185,14 +195,15 @@ let make_backend ~base_dir ~agent_name ~session_id
 
   let query ~prefix ~limit =
     try
-      let entries = read_lines ~path in
       (* De-duplicate by key (latest wins), skip tombstones *)
       let tbl = Hashtbl.create 32 in
-      List.iter (fun (key, value, ts) ->
-        if String.length key >= String.length prefix
-           && String.sub key 0 (String.length prefix) = prefix then
-          Hashtbl.replace tbl key (value, ts)
-      ) entries;
+      let () =
+        fold_entries ~path ~init:() (fun () (key, value, ts) ->
+            if String.length key >= String.length prefix
+               && String.sub key 0 (String.length prefix) = prefix
+            then
+              Hashtbl.replace tbl key (value, ts))
+      in
       (* Collect non-tombstone entries *)
       let results = Hashtbl.fold (fun key (value, ts) acc ->
         match value with

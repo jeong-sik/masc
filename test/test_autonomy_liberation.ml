@@ -209,6 +209,35 @@ let test_finding_accumulation () =
   (try Sys.rmdir masc_dir with Sys_error _ -> ());
   (try Sys.rmdir base_path with Sys_error _ -> ())
 
+let test_finding_load_is_bounded_to_recent_entries () =
+  let base_path =
+    Filename.concat (Filename.get_temp_dir_name ()) "test_findings_recent_al"
+  in
+  let masc_dir = Filename.concat base_path ".masc" in
+  let session_dir = Filename.concat masc_dir "session_test_recent_al" in
+  (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
+  (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+  (try Sys.mkdir session_dir 0o755 with Sys_error _ -> ());
+  let sid = "test_recent_al" in
+  for i = 1 to 7 do
+    Team_context.add_finding ~base_path ~team_session_id:sid
+      ~worker_name:(Printf.sprintf "w%d" i)
+      ~finding:(Printf.sprintf "finding-%d" i)
+  done;
+  let findings = Team_context.load_findings ~base_path ~team_session_id:sid in
+  Alcotest.(check int) "bounded to 5 recent findings" 5 (List.length findings);
+  Alcotest.(check bool) "drops oldest finding" false
+    (List.exists (fun f -> contains_s f "finding-1") findings);
+  Alcotest.(check bool) "keeps newest finding" true
+    (List.exists (fun f -> contains_s f "finding-7") findings);
+  let findings_file =
+    Filename.concat session_dir "shared_findings.jsonl"
+  in
+  (try Sys.remove findings_file with Sys_error _ -> ());
+  (try Sys.rmdir session_dir with Sys_error _ -> ());
+  (try Sys.rmdir masc_dir with Sys_error _ -> ());
+  (try Sys.rmdir base_path with Sys_error _ -> ())
+
 let test_scope_default_unchanged () =
   (* Limited_code_change is still the default for unknown strings *)
   let scope = Team_session_types.execution_scope_of_string "whatever" in
@@ -249,6 +278,8 @@ let () =
           Alcotest.test_case "empty context" `Quick test_team_context_empty;
           Alcotest.test_case "prompt section" `Quick
             test_team_context_prompt_section;
+          Alcotest.test_case "finding load bounded" `Quick
+            test_finding_load_is_bounded_to_recent_entries;
         ] );
       ( "phase4_prompt_composer",
         [

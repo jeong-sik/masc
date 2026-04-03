@@ -58,11 +58,11 @@ let load_state config loop_id =
   | Ok loop_id ->
       let path = state_file config loop_id in
       if Sys.file_exists path then
-        try Ok (Yojson.Safe.from_file path |> state_of_json)
-        with exn ->
-          Error
-            (Printf.sprintf "repair loop state load failed for %s: %s" loop_id
-               (Printexc.to_string exn))
+        (try Ok (Safe_ops.read_json_eio path |> state_of_json)
+         with exn ->
+           Error
+             (Printf.sprintf "repair loop state load failed for %s: %s" loop_id
+                (Printexc.to_string exn)))
       else
         Error (Printf.sprintf "repair loop not found: %s" loop_id)
 

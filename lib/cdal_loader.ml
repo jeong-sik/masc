@@ -40,10 +40,11 @@ let load_error_to_string = function
 type read_error = File_not_found | Parse_error of string
 
 let read_json_file path =
-  try Ok (Yojson.Safe.from_file path)
-  with
-  | Sys_error _ -> Error File_not_found
-  | exn -> Error (Parse_error (Printexc.to_string exn))
+  match Safe_ops.read_json_file_safe path with
+  | Ok json -> Ok json
+  | Error msg when String.starts_with ~prefix:"File not found:" msg ->
+      Error File_not_found
+  | Error msg -> Error (Parse_error msg)
 
 (* ================================================================ *)
 (* Load pipeline                                                     *)

@@ -19,17 +19,17 @@ val parse_json_safe : context:string -> string -> (Yojson.Safe.t, string) result
 
 (** {1 File I/O} *)
 
-val read_file_safe : string -> (string, string) result
+val read_file_safe : ?max_bytes:int -> string -> (string, string) result
 (** Read file contents with error handling.
-    Uses Eio-native I/O via Fs_compat when available (after set_fs),
-    falls back to blocking I/O in non-Eio contexts. *)
+     Uses Eio-native I/O via Fs_compat when available (after set_fs),
+     falls back to blocking I/O in non-Eio contexts. *)
 
-val read_json_file_safe : string -> (Yojson.Safe.t, string) result
+val read_json_file_safe : ?max_bytes:int -> string -> (Yojson.Safe.t, string) result
 (** Read JSON file safely. *)
 
-val read_json_eio : string -> Yojson.Safe.t
+val read_json_eio : ?max_bytes:int -> string -> Yojson.Safe.t
 (** Read JSON file via Eio-native I/O (Fs_compat).
-    Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts. *)
+     Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts. *)
 
 val list_dir_safe : string -> (string list, string) result
 (** List files in directory safely. *)

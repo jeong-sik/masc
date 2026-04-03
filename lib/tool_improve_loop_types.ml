@@ -392,7 +392,7 @@ let save_state config (state : state) =
 let load_state config =
   let path = state_file config in
   if Sys.file_exists path then
-    try Yojson.Safe.from_file path |> state_of_json
+    try Safe_ops.read_json_eio path |> state_of_json
     with exn ->
       Log.warn ~ctx:"ImproveLoop" "state load failed (%s), resetting: %s"
         path (Printexc.to_string exn);

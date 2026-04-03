@@ -399,8 +399,9 @@ let load_benchmark_rows path =
 
 let load_benchmark_meta path =
   if Sys.file_exists path then
-    try Some (Yojson.Safe.from_file path)
-    with Yojson.Json_error _ | Sys_error _ -> None
+    match Safe_ops.read_json_file_safe path with
+    | Ok json -> Some json
+    | Error _ -> None
   else None
 
 let note_tags_json notes =

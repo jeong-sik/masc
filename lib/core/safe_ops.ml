@@ -35,15 +35,37 @@ let parse_json_safe ~context str : (Yojson.Safe.t, string) result =
 (** Read file contents with error handling.
     Uses Eio-native I/O via Fs_compat when available (after set_fs),
     falls back to blocking I/O in non-Eio contexts. *)
-let read_file_safe path : (string, string) result =
+let default_max_file_read_bytes = 8 * 1024 * 1024
+
+let check_file_size ?max_bytes path : (unit, string) result =
+  match max_bytes with
+  | None -> Ok ()
+  | Some limit ->
+      if limit < 0 then invalid_arg "Safe_ops.check_file_size: max_bytes must be >= 0"
+      else
+        try
+          let size = (Unix.stat path).Unix.st_size in
+          if size > limit then
+            Error
+              (Printf.sprintf "File too large: %s (%d bytes > %d byte limit)" path
+                 size limit)
+          else
+            Ok ()
+        with
+        | Unix.Unix_error _ | Sys_error _ -> Ok ()
+
+let read_file_safe ?max_bytes path : (string, string) result =
   if not (Sys.file_exists path) then
     Error (Printf.sprintf "File not found: %s" path)
   else
-    try Ok (Fs_compat.load_file path)
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-      Error (Printf.sprintf "Failed to read %s: %s" path (Printexc.to_string e))
+    match check_file_size ?max_bytes path with
+    | Error _ as e -> e
+    | Ok () ->
+        try Ok (Fs_compat.load_file path)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | e ->
+          Error (Printf.sprintf "Failed to read %s: %s" path (Printexc.to_string e))
 
 (** Safe integer parsing *)
 let int_of_string_safe str =
@@ -68,16 +90,30 @@ let float_of_string_with_default ~default str =
   | None -> default
 
 (** Read JSON file safely *)
-let read_json_file_safe path : (Yojson.Safe.t, string) result =
-  match read_file_safe path with
+let read_json_file_safe ?max_bytes path : (Yojson.Safe.t, string) result =
+  let max_bytes =
+    match max_bytes with
+    | Some _ -> max_bytes
+    | None -> Some default_max_file_read_bytes
+  in
+  match read_file_safe ?max_bytes path with
   | Error e -> Error e
   | Ok content -> parse_json_safe ~context:path content
 
 (** Read JSON file via Eio-native I/O (Fs_compat).
     Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts.
     Falls back to blocking I/O when Eio fs is not set. *)
-let read_json_eio (path : string) : Yojson.Safe.t =
-  let content = Fs_compat.load_file path in
+let read_json_eio ?max_bytes (path : string) : Yojson.Safe.t =
+  let max_bytes =
+    match max_bytes with
+    | Some _ -> max_bytes
+    | None -> Some default_max_file_read_bytes
+  in
+  let content =
+    match read_file_safe ?max_bytes path with
+    | Ok content -> content
+    | Error msg -> raise (Sys_error msg)
+  in
   Yojson.Safe.from_string content
 
 (** List files in directory safely *)

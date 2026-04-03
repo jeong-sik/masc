@@ -46,7 +46,7 @@ val add_finding :
   finding:string ->
   unit
 
-(** Load shared findings recorded by prior workers in a session.
+(** Load recent shared findings recorded by prior workers in a session.
     Returns a list of formatted strings: "[worker_name] finding". *)
 val load_findings :
   base_path:string -> team_session_id:string -> string list

@@ -149,6 +149,26 @@ let test_read_json_file_safe_invalid_json () =
   Sys.remove path;
   check bool "Error on invalid json" true (Result.is_error result)
 
+let test_read_file_safe_too_large () =
+  let open Safe_ops in
+  let path = Filename.temp_file "test_safe_ops_" ".txt" in
+  let oc = open_out path in
+  output_string oc "1234567890";
+  close_out oc;
+  let result = read_file_safe ~max_bytes:4 path in
+  Sys.remove path;
+  check bool "Error on oversized file" true (Result.is_error result)
+
+let test_read_json_file_safe_too_large () =
+  let open Safe_ops in
+  let path = Filename.temp_file "test_safe_ops_" ".json" in
+  let oc = open_out path in
+  output_string oc {|{"key":"value"}|};
+  close_out oc;
+  let result = read_json_file_safe ~max_bytes:4 path in
+  Sys.remove path;
+  check bool "Error on oversized json file" true (Result.is_error result)
+
 (* read_file_safe with existing file *)
 let test_read_file_safe_valid () =
   let open Safe_ops in
@@ -341,11 +361,13 @@ let () =
     "read_file_safe", [
       test_case "not found" `Quick test_read_file_safe_not_found;
       test_case "valid file" `Quick test_read_file_safe_valid;
+      test_case "too large" `Quick test_read_file_safe_too_large;
     ];
     "read_json_file_safe", [
       test_case "nonexistent" `Quick test_read_json_file_safe_nonexistent;
       test_case "valid json file" `Quick test_read_json_file_safe_valid;
       test_case "invalid json file" `Quick test_read_json_file_safe_invalid_json;
+      test_case "too large" `Quick test_read_json_file_safe_too_large;
     ];
     "list_dir_safe", [
       test_case "nonexistent" `Quick test_list_dir_safe_nonexistent;

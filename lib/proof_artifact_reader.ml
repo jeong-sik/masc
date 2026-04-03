@@ -31,8 +31,7 @@ let read_json (config : Agent_sdk.Proof_store.config)
   | Error e -> Error e
   | Ok path ->
     if Sys.file_exists path then
-      (try Ok (Yojson.Safe.from_file path)
-       with exn -> Error (Printf.sprintf "JSON parse error in %s: %s"
-                            path (Printexc.to_string exn)))
+      Safe_ops.read_json_file_safe path
+      |> Result.map_error (fun e -> Printf.sprintf "JSON parse error in %s: %s" path e)
     else
       Error (Printf.sprintf "artifact not found: %s" path)

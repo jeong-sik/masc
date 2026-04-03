@@ -29,6 +29,12 @@ let empty =
 let max_decisions = 3
 let max_findings = 5
 let max_tasks = 10
+let findings_tail_max_bytes = 256 * 1024
+
+let take_last n items =
+  let len = List.length items in
+  if len <= n then items
+  else List.filteri (fun i _ -> i >= len - n) items
 
 (** Shared findings file within the session directory. *)
 let findings_path ~base_path ~team_session_id =
@@ -54,25 +60,62 @@ let load_findings ~base_path ~team_session_id : string list =
   let path = findings_path ~base_path ~team_session_id in
   if not (Sys.file_exists path) then []
   else
-    try
-      let content = Fs_compat.load_file path in
-      let lines = String.split_on_char '\n' content in
-      List.filter_map (fun line ->
-        if String.trim line = "" then None
-        else
-          try
-            let json = Yojson.Safe.from_string line in
-            let open Yojson.Safe.Util in
-            let worker = json |> member "worker" |> to_string_option
-                         |> Option.value ~default:"unknown" in
-            let finding = json |> member "finding" |> to_string_option
-                          |> Option.value ~default:"" in
-            if finding <> "" then
-              Some (Printf.sprintf "[%s] %s" worker finding)
-            else None
-          with Yojson.Json_error _ -> None
-      ) lines
-    with Sys_error _ -> []
+    let read_tail_lines () =
+      try
+        let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
+        Fun.protect
+          ~finally:(fun () -> Unix.close fd)
+          (fun () ->
+            let stats = Unix.fstat fd in
+            let file_size = stats.Unix.st_size in
+            if file_size <= 0 then []
+            else
+              let bytes_to_read = min file_size findings_tail_max_bytes in
+              let start_pos = max 0 (file_size - bytes_to_read) in
+              ignore (Unix.lseek fd start_pos Unix.SEEK_SET);
+              let buf = Bytes.create bytes_to_read in
+              let rec read_loop offset remaining =
+                if remaining <= 0 then offset
+                else
+                  match Unix.read fd buf offset remaining with
+                  | 0 -> offset
+                  | n -> read_loop (offset + n) (remaining - n)
+              in
+              let read_len = read_loop 0 bytes_to_read in
+              if read_len <= 0 then []
+              else
+                let chunk = Bytes.sub_string buf 0 read_len in
+                let normalized =
+                  if start_pos = 0 then chunk
+                  else
+                    match String.index_opt chunk '\n' with
+                    | Some idx ->
+                        String.sub chunk (idx + 1) (String.length chunk - idx - 1)
+                    | None -> ""
+                in
+                normalized
+                |> String.split_on_char '\n'
+                |> List.filter (fun line -> String.trim line <> ""))
+      with
+      | Unix.Unix_error _ | Sys_error _ -> []
+    in
+    Eio_guard.run_in_systhread read_tail_lines
+    |> List.filter_map (fun line ->
+           match Safe_ops.parse_json_safe ~context:"team_context.findings" line with
+           | Error _ -> None
+           | Ok json ->
+               let open Yojson.Safe.Util in
+               let worker =
+                 json |> member "worker" |> to_string_option
+                 |> Option.value ~default:"unknown"
+               in
+               let finding =
+                 json |> member "finding" |> to_string_option
+                 |> Option.value ~default:""
+               in
+               if finding <> "" then Some (Printf.sprintf "[%s] %s" worker finding)
+               else None)
+    |> take_last max_findings
 
 let build ~base_path ~team_session_id =
   let room_config = Room.default_config base_path |> Room.config_with_resolved_scope in

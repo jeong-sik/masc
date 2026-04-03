@@ -35,15 +35,15 @@ let findings_tail_max_bytes = 256 * 1024
 let take_last n items =
   if n <= 0 then []
   else
-    let rec advance lead lag distance =
-      match lead with
-      | [] -> lag
-      | _ :: lead_tail when distance > 0 ->
-          advance lead_tail lag (distance - 1)
-      | _ :: lead_tail -> (
-          match lag with
+    let rec advance ahead behind gap =
+      match ahead with
+      | [] -> behind
+      | _ :: ahead_tail when gap > 0 ->
+          advance ahead_tail behind (gap - 1)
+      | _ :: ahead_tail -> (
+          match behind with
           | [] -> []
-          | _ :: lag_tail -> advance lead_tail lag_tail 0)
+          | _ :: behind_tail -> advance ahead_tail behind_tail 0)
     in
     advance items items n
 
@@ -109,8 +109,9 @@ let load_findings ~base_path ~team_session_id : string list =
                     | None ->
                         Log.Misc.warn
                           "team_context.findings tail read dropped partial data for %s \
-                           (increase findings_tail_max_bytes if this is expected)"
-                          path;
+                           (%d/%d bytes read; increase findings_tail_max_bytes if \
+                           this is expected)"
+                          path read_len file_size;
                         ""
                 in
                 line_aligned_chunk

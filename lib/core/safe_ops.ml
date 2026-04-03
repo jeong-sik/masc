@@ -43,7 +43,10 @@ let check_file_size ?max_bytes path : (unit, string) result =
     | Some limit -> limit
     | None -> default_max_file_read_bytes
   in
-  if limit < 0 then invalid_arg "check_file_size: max_bytes must not be negative"
+  if limit < 0 then
+    invalid_arg
+      (Printf.sprintf "check_file_size: max_bytes must not be negative (got %d)"
+         limit)
   else
     try
       let size = (Unix.stat path).Unix.st_size in

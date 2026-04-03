@@ -649,6 +649,10 @@ let run_turn
             all_allowed
         in
         let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
+        (* Yield after CPU-bound tool filtering to let HTTP handlers run.
+           Without this, N concurrent keeper fibers starve the Eio scheduler
+           during turn setup (tool list construction + prompt building). *)
+        Eio.Fiber.yield ();
         Agent_sdk.Hooks.AdjustParams
           { current_params with
             extra_system_context = ctx;

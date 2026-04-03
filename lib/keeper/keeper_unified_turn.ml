@@ -662,10 +662,14 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       let primary_max_context =
         Oas_model_resolve.resolve_primary_max_context model_labels
       in
+      (* Yield before CPU-bound prompt construction so the Eio scheduler
+         can service HTTP handlers between keeper turn setups. *)
+      Eio.Fiber.yield ();
       (* 2. Build unified prompt *)
       let system_prompt, user_message =
         Keeper_unified_prompt.build_prompt ~meta ~observation
       in
+      Eio.Fiber.yield ();
       let base_dir = session_base_dir config in
       (* Ensure session dir tree for filesystem fallback (issue #3019) *)
       Keeper_types.mkdir_p (Filename.concat base_dir meta.runtime.trace_id);

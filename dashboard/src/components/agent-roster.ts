@@ -176,6 +176,7 @@ function synthesizeAgentFromKeeper(source: Keeper | DashboardMissionKeeperBrief)
     traits: typed.traits,
     activityLevel: typed.activityLevel,
     primaryValue: typed.primaryValue,
+    synthetic: true,
   }
 }
 
@@ -476,6 +477,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   <div class="flex items-center gap-1.5 flex-wrap mt-1">
                     <span class="roster-badge ${statusBadgeClass(agent.status)}" title=${statusDescription(agent.status)}>${statusLabel(agent.status)}</span>
                     <span class="text-[11px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-2 py-0.5 rounded-full">${isKeeper ? '키퍼 런타임' : '일반 에이전트'}</span>
+                    ${agent.synthetic ? html`<span class="text-[10px] text-[var(--text-muted)] bg-[var(--white-6)] border border-dashed border-[var(--card-border)] px-1.5 py-px rounded italic" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">파생</span>` : null}
                     ${keeper?.model ? html`<span class="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-1.5 py-px rounded">${keeper.model}</span>` : null}
                     ${keeper?.generation != null ? html`<span class="text-[11px] text-[var(--accent)] font-medium bg-[var(--accent-10)] px-1.5 py-px rounded border border-[rgba(71,184,255,0.15)]" title="키퍼 핸드오프가 일어날 때 올라가는 런타임 세대입니다.">세대 ${keeper.generation}</span>` : null}
                   </div>

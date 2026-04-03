@@ -275,7 +275,7 @@ export function MissionBriefingCard() {
                 <strong class="text-[var(--text-strong)]">실제 판단 대상</strong>
                 <div class="flex gap-2 flex-wrap">
                   <${StatusChip}
-                    label=${liveJudge.source === 'judge_runtime' ? 'judge runtime' : 'live keeper'}
+                    label=${liveJudge.source === 'judge_runtime' ? 'judge runtime' : 'live keeper (fallback)'}
                     tone=${liveJudgeTone}
                   />
                   <${StatusChip}

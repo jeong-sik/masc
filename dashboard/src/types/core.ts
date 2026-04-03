@@ -21,6 +21,7 @@ export interface Agent {
   peakHour?: number
   primaryValue?: string
   personalityHint?: string
+  synthetic?: boolean
 }
 
 export interface Task {

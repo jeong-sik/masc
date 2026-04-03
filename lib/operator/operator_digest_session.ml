@@ -564,7 +564,7 @@ let build_session_digest ?status_json:cached_status config (session : Team_sessi
   in
   let summary = U.member "summary" status_json in
   let team_health = U.member "team_health" status_json in
-  let events = Team_session_store.read_events ~max_events:2000 config session.session_id in
+  let events = Team_session_store.read_events ~max_events:200 config session.session_id in
   let worker_cards = build_worker_cards ~session ~events ~now in
   let attention_items = session_attention_items ~session ~events ~worker_cards ~now in
   let recommended_actions =

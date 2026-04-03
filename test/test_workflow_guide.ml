@@ -21,12 +21,12 @@ let check_not_empty msg steps =
 (* ── Golden Path 1: Room/Task Hygiene ────────────────────────────── *)
 
 let test_set_room_success () =
-  let g = WG.next_steps ~tool_name:"masc_set_room" ~success:true in
+  let g = WG.next_steps ~tool_name:"masc_start" ~success:true in
   check_not_empty "set_room success has next_steps" g.next_steps;
   check_has_tool g.next_steps "masc_join"
 
 let test_set_room_failure () =
-  let g = WG.next_steps ~tool_name:"masc_set_room" ~success:false in
+  let g = WG.next_steps ~tool_name:"masc_start" ~success:false in
   check_not_empty "set_room failure has recovery steps" g.next_steps;
   check_has_tool g.next_steps "masc_init"
 
@@ -38,7 +38,7 @@ let test_join_success () =
 
 let test_join_failure () =
   let g = WG.next_steps ~tool_name:"masc_join" ~success:false in
-  check_has_tool g.next_steps "masc_set_room"
+  check_has_tool g.next_steps "masc_start"
 
 let test_claim_success () =
   let g = WG.next_steps ~tool_name:"masc_claim_next" ~success:true in
@@ -102,7 +102,7 @@ let test_workflow_context_join () =
   match WG.workflow_context ~tool_name:"masc_join" with
   | Some (before, after, _mistakes) ->
       check bool "join before includes set_room" true
-        (List.mem "masc_set_room" before);
+        (List.mem "masc_start" before);
       check bool "join after is non-empty" true (List.length after > 0)
   | None -> fail "Expected workflow context for masc_join"
 
@@ -117,7 +117,7 @@ let test_state_not_room_set () =
     ~room_set:false ~joined:false ~task_claimed:false
     ~current_task_set:false ~worktree_active:false ~session_active:false
   in
-  check_has_tool g.next_steps "masc_set_room"
+  check_has_tool g.next_steps "masc_start"
 
 let test_state_room_set_not_joined () =
   let g = WG.current_state_guidance
@@ -203,7 +203,7 @@ let check_tool_exists_in_schemas name =
 
 let test_next_steps_reference_real_tools () =
   let tools_to_check = [
-    "masc_set_room"; "masc_join"; "masc_status";
+    "masc_start"; "masc_join"; "masc_status";
     "masc_claim"; "masc_claim_next";
     "masc_done"; "masc_transition";
     "masc_add_task"; "masc_batch_add_tasks";

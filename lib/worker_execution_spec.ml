@@ -1,5 +1,3 @@
-module Oas = Agent_sdk
-
 let ( let* ) = Result.bind
 
 type t = {

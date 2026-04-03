@@ -7,9 +7,6 @@
 
     @since 2.124.0 *)
 
-module Swarm = Agent_sdk_swarm
-module Oas = Agent_sdk
-
 let supported_local_worker_tool_names =
   Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 

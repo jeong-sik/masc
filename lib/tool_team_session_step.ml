@@ -90,7 +90,7 @@ let execute_delegate_pipeline
                 Team_session_engine_status.worker_delegate_readiness
                   ctx.config session worker_name
               in
-              let contract =
+              let contract : Oas.Risk_contract.t option =
                 let delivery_contract =
                   Tool_team_session_step_exec.delivery_contract_for_session
                     ctx.config session_id

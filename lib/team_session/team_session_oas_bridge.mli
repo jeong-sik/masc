@@ -33,8 +33,6 @@
     Phase C-1 of MASC->OAS migration.
     @since 2.124.0 *)
 
-module Swarm = Agent_sdk_swarm
-
 val supported_local_worker_tool_names : string list
 (** Canonical list of tool names supported by local workers in team sessions.
     Exposed for parity testing against [Tool_catalog.tools_for_surface Local_worker]. *)

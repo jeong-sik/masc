@@ -1,6 +1,6 @@
 (** Tool_catalog_tiers — 3-tier tool filtering system.
 
-    Essential (~20) < Standard (~75) < Full (all).
+    Essential < Standard < Full (all).
     Tier is an additive overlay on the existing mode/category system.
 
     This module is a leaf dependency — it depends only on string lists.

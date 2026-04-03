@@ -620,7 +620,7 @@ Vite 설정:
 | `MASC_DASHBOARD_PROXY_TARGET` | (필수, dev only) | Vite dev server API proxy 대상 |
 | `MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED` | `true` | Governance judge daemon 활성화 |
 | `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | `60` | Judge 갱신 간격 (최소 15s) |
-| `MASC_DASHBOARD_KEEPER_SNAPSHOT_MAX_CONCURRENCY` | `2` | lightweight keeper snapshot 재계산 시 동시 keeper projection 수 제한 (1~16) |
+| `MASC_DASHBOARD_KEEPER_SNAPSHOT_MAX_CONCURRENCY` | `2` | lightweight keeper snapshot 재계산 시 동시 keeper projection 수 제한. 정수 `1~16`으로 clamp되며, 비정수 값은 기본값 `2`를 사용한다. |
 | `MASC_DASHBOARD_TOOL_CALL_WINDOW_HOURS` | `1.0` | Tool call health window (0.1~168h) |
 | `MASC_DASHBOARD_INCLUDE_GOALS` | `false` | Keeper dashboard에 goal 포함 여부 |
 | `MASC_KEEPER_HISTORY_FRAGMENT_FILTER` | `true` | Keeper 이력 fragment 필터 활성화 |

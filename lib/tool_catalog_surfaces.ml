@@ -179,6 +179,9 @@ let spawned_agent_surface_tools =
     "masc_code_shell"; "masc_code_write";
     "masc_deliver"; "masc_error_add"; "masc_error_resolve";
     "masc_find_by_capability";
+    (* Keep internal diagnostics/proof tools off the spawned-agent contract.
+       Agents still have workflow_guide/tool_help for guidance, while
+       keeper catalogs and final session proof stay on operator/admin paths. *)
     "masc_plan_clear_task"; "masc_plan_get_task";
     "masc_portal_close";
     "masc_room_strategy_get"; "masc_room_strategy_set";

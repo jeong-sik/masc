@@ -3,7 +3,7 @@
     Central registry for tool access control:
     - Visibility: Default (public) vs Hidden (internal-only)
     - Lifecycle: Active, Deprecated, Placeholder
-    - Tier: Essential (~20) < Standard (~75) < Full (all)
+    - Tier: Essential < Standard < Full (all)
     - Surface: Canonical per-surface tool name membership SSOT
 
     Sub-modules (private):

@@ -97,9 +97,9 @@ let with_registry f =
       cleanup_dir dir)
     (fun () ->
       Prompt_registry.clear ();
-       Prompt_registry.set_markdown_dir prompts_dir;
-       Lib.Prompt_defaults.init ();
-       f ~dir ~prompts_dir)
+      Prompt_registry.set_markdown_dir prompts_dir;
+      Lib.Prompt_defaults.init ();
+      f ~dir ~prompts_dir)
 
 let with_clean_registry f =
   let dir = test_dir () in
@@ -164,9 +164,9 @@ let () =
               check bool "missing file found" true
                 (List.mem_assoc "dashboard.governance_judge" missing));
         ] );
-       ( "rendering",
-         [
-           test_case "render_prompt_template uses markdown template" `Quick
+      ( "rendering",
+        [
+          test_case "render_prompt_template uses markdown template" `Quick
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               match
@@ -233,7 +233,7 @@ let () =
                        true
                      with Not_found -> false)
                | Ok () -> fail "should reject unknown template variable");
-         ] );
+        ] );
       ( "versioned_registry",
         [
           test_case "version selection, counts, and explicit unregister work"
@@ -398,14 +398,14 @@ let () =
               check (option bool) "required_file"
                 (Some true)
                 (get_bool_field "required_file" keeper_capabilities);
-              match keeper_capabilities with
-              | `Assoc fields ->
-                  check int "template_variables field exists" 0
-                    (match List.assoc_opt "template_variables" fields with
-                 | Some (`List items) -> List.length items
-                      | _ -> -1)
+               match keeper_capabilities with
+               | `Assoc fields ->
+                   check int "template_variables field exists" 0
+                     (match List.assoc_opt "template_variables" fields with
+                     | Some (`List items) -> List.length items
+                     | _ -> -1)
                | _ -> fail "unexpected prompt JSON");
-         ] );
+        ] );
       ( "validation_and_restore",
         [
           test_case "validate_prompt_templates reports unexpected variables"

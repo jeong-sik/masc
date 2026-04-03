@@ -488,8 +488,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_fire_task.dispatch { Tool_fire_task.config; agent_name; sw } ~name ~args:arguments
     | Mod_cache ->
         Tool_cache.dispatch { Tool_cache.config } ~name ~args:arguments
-    | Mod_hat ->
-        Tool_hat.dispatch { Tool_hat.config; agent_name } ~name ~args:arguments
     | Mod_model_catalog ->
         Tool_model_catalog.dispatch () ~name ~args:arguments
     | Mod_rate_limit ->

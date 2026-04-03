@@ -320,7 +320,6 @@
    tool_heartbeat
    tool_encryption
    tool_auth
-   tool_hat
    tool_housekeep
    tool_audit
    tool_rate_limit

@@ -150,6 +150,7 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
 const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
   '/api/v1/dashboard/shell',
   '/api/v1/dashboard/namespace-truth',
+  '/api/v1/dashboard/room-truth',
   '/api/v1/dashboard/execution',
   '/api/v1/dashboard/planning',
   '/api/v1/dashboard/mission',
@@ -186,6 +187,7 @@ function bootstrapInitializingPayload(path: string): unknown | null {
         auth: null,
       }
     case '/api/v1/dashboard/namespace-truth':
+    case '/api/v1/dashboard/room-truth':
       return {
         status: 'initializing',
         generated_at: generatedAt,
@@ -293,7 +295,13 @@ export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
       statusText: res.statusText,
     })
   }
-  return res.json() as Promise<T>
+  const data = await res.json()
+  // Server may return 200 OK with {"error":"not initialized"} during startup
+  if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
+    const payload = bootstrapInitializingPayload(path)
+    if (payload !== null) return payload as T
+  }
+  return data as T
 }
 
 export function sleep(ms: number): Promise<void> {

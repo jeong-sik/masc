@@ -90,7 +90,7 @@ describe('get bootstrap warm-up mapping', () => {
     })
   })
 
-  it('does not remap non-5xx bootstrap responses', async () => {
+  it('does not remap 4xx bootstrap responses', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"error":"not initialized"}', {
         status: 401,
@@ -104,5 +104,50 @@ describe('get bootstrap warm-up mapping', () => {
       status: 401,
       path: '/api/v1/dashboard/namespace-truth',
     })
+  })
+
+  it('remaps 2xx not-initialized responses on bootstrap paths', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"error":"not initialized"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/namespace-truth')
+
+    expect(data.status).toBe('initializing')
+    expect(data.message).toContain('warming up')
+  })
+
+  it('remaps room-truth alias the same as namespace-truth', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"error":"not initialized"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/room-truth')
+
+    expect(data.status).toBe('initializing')
+    expect(data.message).toContain('warming up')
+  })
+
+  it('passes through valid 2xx responses on bootstrap paths', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"status":"ok","agents":5}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const data = await get<{ status?: string; agents?: number }>('/api/v1/dashboard/namespace-truth')
+
+    expect(data.status).toBe('ok')
+    expect(data.agents).toBe(5)
   })
 })

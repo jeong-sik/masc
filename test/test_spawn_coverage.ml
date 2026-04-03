@@ -175,7 +175,7 @@ let test_masc_mcp_tools_has_tool_admin_snapshot () =
     (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_keeper_tool_catalog () =
-  check bool "omits keeper_tool_catalog" false
+  check bool "includes keeper_tool_catalog" true
     (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_tool_list () =
@@ -735,7 +735,7 @@ let () =
       test_case "has tool_help" `Quick test_masc_mcp_tools_has_tool_help;
       test_case "omits tool_admin_snapshot" `Quick
         test_masc_mcp_tools_has_tool_admin_snapshot;
-      test_case "omits keeper_tool_catalog" `Quick
+      test_case "includes keeper_tool_catalog" `Quick
         test_masc_mcp_tools_has_keeper_tool_catalog;
       test_case "has tool_list" `Quick test_masc_mcp_tools_has_tool_list;
       test_case "has tool_grant" `Quick test_masc_mcp_tools_has_tool_grant;

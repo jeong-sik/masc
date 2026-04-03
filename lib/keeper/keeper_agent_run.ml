@@ -617,7 +617,7 @@ let run_turn
         (* Context overflow guard: cap tool count to prevent exceeding
            small model context windows (e.g. 8K).  ~118 tokens/tool schema,
            so 40 tools ≈ 4700 tokens — safe for 8K models.  Beyond 40,
-           truncate to always_include_tools + top BM25 results.
+           truncate to always_include_tools + top BM25 results by score.
            Configurable via MASC_KEEPER_MAX_TOOLS_PER_TURN. *)
         let max_tools =
           Keeper_config.int_of_env_default
@@ -633,7 +633,18 @@ let run_turn
             let non_essential = List.filter
               (fun name -> not (List.mem name always_include_tools)) all_allowed in
             let budget = max_tools - List.length essential in
-            essential @ (List.filteri (fun i _ -> i < budget) non_essential)
+            (* Sort non-essential by BM25 score descending so the most
+               relevant tools survive truncation.  Tools not in the
+               retrieved set (e.g. fallback) get score 0.0. *)
+            let score_of name =
+              match List.assoc_opt name retrieved with
+              | Some s -> s
+              | None -> 0.0
+            in
+            let sorted = List.sort
+              (fun a b -> compare (score_of b) (score_of a))
+              non_essential in
+            essential @ (List.filteri (fun i _ -> i < budget) sorted)
           end else
             all_allowed
         in

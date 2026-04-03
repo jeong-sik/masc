@@ -68,6 +68,18 @@ val broadcast_lifecycle_events :
 (** Detect transient TCP/TLS errors eligible for retry. Exposed for testing. *)
 val is_transient_network_error : string -> bool
 
+type overflow_retry_plan = {
+  retry_max_context : int;
+  retry_generation : int;
+}
+
+val recover_context_overflow_retry :
+  meta:Keeper_types.keeper_meta ->
+  base_dir:string ->
+  primary_max_context:int ->
+  error:string ->
+  overflow_retry_plan option
+
 val run_unified_turn :
   config:Room.config ->
   meta:Keeper_types.keeper_meta ->

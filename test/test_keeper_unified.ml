@@ -4,6 +4,7 @@ module WO = Masc_mcp.Keeper_world_observation
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
 module KAR = Masc_mcp.Keeper_agent_run
+module KEC = Masc_mcp.Keeper_exec_context
 module KSM = Masc_mcp.Keeper_social_model
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
@@ -55,6 +56,39 @@ let contains_substring haystack needle =
     else loop (i + 1)
   in
   needle_len = 0 || loop 0
+
+let contains_disallowed_control_char s =
+  let rec loop i =
+    if i >= String.length s then false
+    else
+      let code = Char.code s.[i] in
+      if (code < 32 && s.[i] <> '\n' && s.[i] <> '\r' && s.[i] <> '\t') || code = 127
+      then true
+      else loop (i + 1)
+  in
+  loop 0
+
+let append_dense_turn ctx idx =
+  let payload = String.make 160 'x' in
+  KEC.append ctx
+    (Agent_sdk.Types.user_msg
+       (Printf.sprintf "turn %02d user %s" idx payload))
+  |> fun next ->
+  KEC.append next
+    (Agent_sdk.Types.assistant_msg
+       (Printf.sprintf "turn %02d assistant %s" idx payload))
+
+let build_dense_retry_context ~turns ~max_tokens =
+  let rec loop idx ctx =
+    if idx > turns then ctx else loop (idx + 1) (append_dense_turn ctx idx)
+  in
+  let ctx =
+    loop 1 (KEC.create ~system_prompt:"keeper unified" ~max_tokens)
+  in
+  KEC.append ctx
+    (Agent_sdk.Types.assistant_msg
+       "done\n\n[STATE]\nGoal: retry after overflow\nProgress: ready\n[/STATE]")
+  |> KEC.sync_oas_context
 
 (* ---------- World Observation type tests ---------- *)
 
@@ -926,6 +960,132 @@ let test_prompt_prefers_silence_guidance () =
      in
      found)
 
+let test_sanitize_text_utf8_replaces_control_chars () =
+  let raw = "alpha\000beta\001gamma\127delta\n\tomega" in
+  let sanitized = Masc_mcp.Inference_utils.sanitize_text_utf8 raw in
+  check bool "no disallowed control chars" false
+    (contains_disallowed_control_char sanitized);
+  check string "content preserved with spaces"
+    "alpha beta gamma delta\n\tomega"
+    sanitized
+
+let test_prompt_sanitizes_control_chars () =
+  let meta =
+    { minimal_meta with
+      instructions = "watch\000this";
+    }
+  in
+  let obs =
+    { base_observation with
+      pending_mentions = [ ("alice", "ping\001pong") ];
+      pending_board_events =
+        [
+          { sample_board_event with
+            preview = "bad\127preview";
+          };
+        ];
+    }
+  in
+  let sys, user = UP.build_prompt ~meta ~observation:obs in
+  check bool "system prompt sanitized" false
+    (contains_disallowed_control_char sys);
+  check bool "user prompt sanitized" false
+    (contains_disallowed_control_char user);
+  check bool "mention text preserved" true
+    (contains_substring user "ping pong");
+  check bool "board preview preserved" true
+    (contains_substring user "bad preview")
+
+let test_sanitize_messages_utf8_cleans_history_path () =
+  let user_msg =
+    Agent_sdk.Types.
+      {
+        role = User;
+        content = [ Text "hist\000ory\127entry" ];
+        name = None;
+        tool_call_id = None;
+      }
+  in
+  let tool_msg =
+    Agent_sdk.Types.
+      {
+        role = Tool;
+        content =
+          [
+            ToolResult
+              {
+                tool_use_id = "tool\001id";
+                content = "result\127payload";
+                is_error = false;
+              };
+          ];
+        name = None;
+        tool_call_id = None;
+      }
+  in
+  let sanitized =
+    Masc_mcp.Inference_utils.sanitize_messages_utf8 [ user_msg; tool_msg ]
+  in
+  match sanitized with
+  | [ user_msg; tool_msg ] ->
+      check string "user history content sanitized" "hist ory entry"
+        (Agent_sdk.Types.text_of_message user_msg);
+      (match tool_msg.Agent_sdk.Types.content with
+       | [ Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ] ->
+           check string "tool id sanitized" "tool id" tool_use_id;
+           check string "tool payload sanitized" "result payload" content
+       | _ -> fail "expected sanitized tool result")
+  | _ -> fail "expected two sanitized messages"
+
+let test_sanitize_messages_utf8_reuses_clean_history_list () =
+  let msgs =
+    [
+      Agent_sdk.Types.user_msg "already clean";
+      Agent_sdk.Types.assistant_msg "still clean";
+    ]
+  in
+  let sanitized = Masc_mcp.Inference_utils.sanitize_messages_utf8 msgs in
+  check bool "same list reused" true (sanitized == msgs)
+
+let test_overflow_retry_plan_preserves_recovered_generation () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta =
+        {
+          minimal_meta with
+          runtime =
+            {
+              minimal_meta.runtime with
+              trace_id = "trace-overflow-plan";
+              generation = 0;
+            };
+        }
+      in
+      let session =
+        KEC.create_session ~session_id:meta.runtime.trace_id ~base_dir
+      in
+      let legacy_ctx =
+        build_dense_retry_context ~turns:18 ~max_tokens:2048
+      in
+      ignore (KEC.save_checkpoint session legacy_ctx ~generation:3);
+      match
+        UT.recover_context_overflow_retry ~meta ~base_dir
+          ~primary_max_context:192
+          ~error:
+            "HTTP 400: prompt exceeds available context size (192) for this model"
+      with
+      | Some retry_plan ->
+          check int "retry generation preserved" 3
+            retry_plan.UT.retry_generation;
+          check int "retry max_context clamped" 192
+            retry_plan.retry_max_context
+      | None -> fail "expected overflow retry plan")
+
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
@@ -1253,6 +1413,14 @@ let () =
             test_prompt_includes_room_signal_when_flag_enabled;
           test_case "prefers silence guidance" `Quick
             test_prompt_prefers_silence_guidance;
+          test_case "sanitize_text_utf8 replaces control chars" `Quick
+            test_sanitize_text_utf8_replaces_control_chars;
+          test_case "prompt sanitizes control chars" `Quick
+            test_prompt_sanitizes_control_chars;
+          test_case "sanitize_messages_utf8 cleans history path" `Quick
+            test_sanitize_messages_utf8_cleans_history_path;
+          test_case "sanitize_messages_utf8 reuses clean history list" `Quick
+            test_sanitize_messages_utf8_reuses_clean_history_list;
         ] );
       ( "config",
         [
@@ -1336,5 +1504,7 @@ let () =
           test_case "empty string not transient" `Quick (fun () ->
             check bool "empty" false
               (UT.is_transient_network_error ""));
+          test_case "overflow retry plan preserves generation" `Quick
+            test_overflow_retry_plan_preserves_recovered_generation;
         ] );
     ]

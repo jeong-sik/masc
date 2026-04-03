@@ -147,11 +147,11 @@ module Dashboard_config = struct
   (** Whether the proactive command-plane snapshot cache should run.
       Default: false because large roots can make the full snapshot too heavy
       for always-on background refresh. *)
-  let command_plane_snapshot_refresh_enabled =
+  let command_plane_snapshot_refresh_enabled () =
     get_bool ~default:false "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED"
 
   (** Max age for an on-demand command-plane snapshot cache hit. *)
-  let command_plane_snapshot_cache_ttl_s =
+  let command_plane_snapshot_cache_ttl_s () =
     Float.max 5.0
       (get_float ~default:30.0 "MASC_COMMAND_PLANE_SNAPSHOT_CACHE_TTL_S")
 

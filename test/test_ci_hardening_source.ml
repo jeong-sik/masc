@@ -612,9 +612,21 @@ let test_command_plane_snapshot_review_contracts () =
   check bool "on-demand snapshot uses timeout guard" true
     (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
        "Eio.Time.with_timeout_exn (cp_snapshot_runtime_clock state)");
+  check bool "on-demand snapshot uses single-flight mutex" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "Eio.Mutex.use_rw ~protect:true _cp_snapshot_compute_mu");
+  check bool "snapshot cache ttl stays runtime-readable" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "command_plane_snapshot_cache_ttl_s ()");
+  check bool "snapshot refresh flag stays runtime-readable" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "command_plane_snapshot_refresh_enabled ()");
   check bool "on-demand snapshot timeout returns explicit timeout payload" true
     (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
        {|cp_snapshot_fallback_json ~status:"timeout"|});
+  check bool "timeout path does not serve stale cache unconditionally" true
+    (file_not_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "if !_cp_snapshot_cached_at > 0.0 then !_cp_snapshot_ref");
   let command_plane_pos =
     file_pattern_position "lib/config/feature_flag_registry.ml"
       "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED"

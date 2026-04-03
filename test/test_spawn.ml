@@ -126,11 +126,11 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_tool_help" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits tool_admin_snapshot" false
     (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "omits keeper_tool_catalog" false
+  Alcotest.(check bool) "includes keeper_tool_catalog" true
     (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits operator_snapshot" false
     (List.mem "mcp__masc__masc_operator_snapshot" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "omits team_session_prove" false
+  Alcotest.(check bool) "includes team_session_prove" true
     (List.mem "mcp__masc__masc_team_session_prove" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits tool_list (no schema)" false
     (List.mem "mcp__masc__masc_tool_list" Spawn.masc_mcp_tools);

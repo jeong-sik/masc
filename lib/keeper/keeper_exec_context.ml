@@ -849,16 +849,37 @@ let recover_latest_checkpoint_for_overflow_retry
           ( context_of_oas_checkpoint checkpoint ~primary_model_max_tokens,
             turn_generation )
     | _, _, Some checkpoint ->
-        Some
-          ( context_of_legacy_checkpoint checkpoint ~primary_model_max_tokens,
-            checkpoint.generation )
+        (try
+           Some
+             ( context_of_legacy_checkpoint checkpoint
+                 ~primary_model_max_tokens,
+               checkpoint.generation )
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+             Log.Keeper.error
+               "keeper:%s overflow retry legacy checkpoint restore failed: %s"
+               meta.runtime.trace_id (Printexc.to_string exn);
+             (match oas_checkpoint with
+              | Some checkpoint ->
+                  let turn_generation =
+                    checkpoint_generation checkpoint
+                      ~fallback:meta.runtime.generation
+                  in
+                  Some
+                    ( context_of_oas_checkpoint checkpoint
+                        ~primary_model_max_tokens,
+                      turn_generation )
+              | None -> None))
     | _ -> None
   in
   match selected with
   | None -> None
   | Some (ctx, turn_generation) ->
       let now_ts = Time_compat.now () in
-      let ctx = clamp_context_max_tokens ctx ~primary_model_max_tokens in
+      let ctx =
+        clamp_context_max_tokens ctx ~primary_model_max_tokens
+      in
       let before_tokens = token_count ctx in
       let retry_meta =
         forced_overflow_retry_meta meta ~turn_generation ~now_ts
@@ -869,9 +890,10 @@ let recover_latest_checkpoint_for_overflow_retry
       let compaction_applied =
         String.starts_with ~prefix:"applied:" decision
       in
-      if not compaction_applied then None
+      let after_tokens = token_count compacted_ctx in
+      let meaningful_reduction = after_tokens < before_tokens in
+      if not (compaction_applied && meaningful_reduction) then None
       else
-        let after_tokens = token_count compacted_ctx in
         let compaction =
           {
             applied = true;

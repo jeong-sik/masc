@@ -300,7 +300,6 @@ let ensure_joined fixture =
 
 let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let worktree_dir = setup_git_repo base_path in
-  Unix.putenv "MASC_BASE_PATH" base_path;
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;

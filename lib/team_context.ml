@@ -84,16 +84,17 @@ let load_findings ~base_path ~team_session_id : string list =
               let read_len = read_loop 0 bytes_to_read in
               if read_len <= 0 then []
               else
-                let chunk = Bytes.sub_string buf 0 read_len in
-                let normalized =
-                  if start_pos = 0 then chunk
+                let tail_chunk = Bytes.sub_string buf 0 read_len in
+                let line_aligned_chunk =
+                  if start_pos = 0 then tail_chunk
                   else
-                    match String.index_opt chunk '\n' with
+                    match String.index_opt tail_chunk '\n' with
                     | Some idx ->
-                        String.sub chunk (idx + 1) (String.length chunk - idx - 1)
+                        String.sub tail_chunk (idx + 1)
+                          (String.length tail_chunk - idx - 1)
                     | None -> ""
                 in
-                normalized
+                line_aligned_chunk
                 |> String.split_on_char '\n'
                 |> List.filter (fun line -> String.trim line <> ""))
       with

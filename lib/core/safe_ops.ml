@@ -41,7 +41,7 @@ let check_file_size ?max_bytes path : (unit, string) result =
   match max_bytes with
   | None -> Ok ()
   | Some limit ->
-      if limit < 0 then invalid_arg "Safe_ops.check_file_size: max_bytes must be >= 0"
+      if limit < 0 then invalid_arg "check_file_size: max_bytes must be >= 0"
       else
         try
           let size = (Unix.stat path).Unix.st_size in

@@ -21,6 +21,9 @@ function getShiki(): Promise<Highlighter> {
         themes: ['vitesse-dark'],
         langs: ['javascript', 'typescript', 'python', 'bash', 'json', 'yaml', 'html', 'css', 'sql', 'go', 'rust']
       })
+    }).catch((err) => {
+      shikiPromise = null  // allow retry on next call
+      throw err
     })
   }
   return shikiPromise
@@ -76,6 +79,17 @@ const PURIFY_CONFIG = {
 
 function sanitize(raw: string): string {
   return DOMPurify.sanitize(raw, PURIFY_CONFIG)
+}
+
+// Shiki generates <span style="color: ..."> for syntax tokens.
+// Allow `style` only when sanitizing trusted Shiki output.
+const SHIKI_PURIFY_CONFIG = {
+  ALLOWED_TAGS: ['pre', 'code', 'span'],
+  ALLOWED_ATTR: ['class', 'style'],
+}
+
+function sanitizeShikiHtml(raw: string): string {
+  return DOMPurify.sanitize(raw, SHIKI_PURIFY_CONFIG)
 }
 
 function sanitizeMermaidSvg(raw: string): SVGElement | null {
@@ -203,26 +217,24 @@ export function Markdown({ text, class: className }: { text: string; class?: str
         if (cancelled) break
 
         try {
-          const htmlStr = highlighter.codeToHtml(code, { lang, theme: 'vitesse-dark' })
-          
+          const rawHtml = highlighter.codeToHtml(code, { lang, theme: 'vitesse-dark' })
+          const safeHtml = sanitizeShikiHtml(rawHtml)
+
           const div = document.createElement('div')
-          div.innerHTML = htmlStr
+          div.innerHTML = safeHtml
           const shikiPre = div.firstElementChild as HTMLElement
-          
+
           if (shikiPre && shikiPre.tagName === 'PRE') {
             // Apply dashboard specific classes to match existing UI
             shikiPre.classList.add('shiki-rendered', 'rounded-lg', 'my-3', 'text-[13px]', 'leading-relaxed')
-            
-            // To maintain security, we ensure the inner structure is just spans
-            // But since Shiki generates it from plain text, XSS vector is minimal.
+
             pre.replaceWith(shikiPre)
           }
+          codeEl.dataset.highlighted = 'true'
         } catch (e) {
-          // Keep original code block on error
+          // Keep original code block on error — do not mark as highlighted
           console.warn('[shiki] highlight failed', e)
         }
-        
-        codeEl.dataset.highlighted = 'true'
       }
     })()
     

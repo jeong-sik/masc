@@ -587,7 +587,7 @@ export interface OperatorReviewDecision {
 export interface OperatorReviewItem {
   id: string
   kind: 'pending_confirm' | 'room_gate' | 'session_risk' | 'keeper_pressure' | string
-  target_type: 'room' | 'team_session' | 'keeper' | string
+  target_type: 'namespace' | 'room' | 'team_session' | 'keeper' | string
   target_id?: string | null
   severity: string
   urgency: 'now' | 'soon' | string
@@ -617,7 +617,7 @@ export interface OperatorReviewSummary {
 
 export interface OperatorDigest {
   trace_id?: string
-  target_type: 'room' | 'team_session' | string
+  target_type: 'namespace' | 'room' | 'team_session' | string
   target_id?: string | null
   health?: string
   judgment_owner?: string | null
@@ -689,7 +689,7 @@ export type OperatorActionType =
   | 'review_resolve'
   | 'review_defer'
 
-export type OperatorTargetType = 'room' | 'team_session' | 'keeper' | 'review_item'
+export type OperatorTargetType = 'namespace' | 'room' | 'team_session' | 'keeper' | 'review_item'
 
 export interface OperatorActionRequest {
   actor: string

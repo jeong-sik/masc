@@ -285,6 +285,8 @@ export function actionTypeLabel(value?: string | null): string {
 
 export function targetTypeLabel(value?: string | null): string {
   switch (value) {
+    case 'namespace':
+      return '네임스페이스'
     case 'room':
       return '방'
     case 'team_session':
@@ -298,6 +300,10 @@ export function targetTypeLabel(value?: string | null): string {
     default:
       return value?.trim() || '대상'
   }
+}
+
+function isNamespaceTarget(value?: string | null): boolean {
+  return value === 'namespace' || value === 'room'
 }
 
 export function deliveryModeLabel(confirmRequired?: boolean): string {
@@ -377,7 +383,7 @@ function hydrateActionForm(input: {
   summary: string
 }): void {
   const payload = payloadRecord(input.payload)
-  if (input.target_type === 'room') {
+  if (isNamespaceTarget(input.target_type)) {
     if (input.action_type === 'broadcast') {
       broadcastMessage.value = workflowPayloadString(payload, 'message') ?? input.summary
       return
@@ -455,7 +461,7 @@ export function workflowTargetReady(
   keepers: OperatorKeeperSnapshot[],
 ): boolean {
   if (!context) return true
-  if (!context.target_type || context.target_type === 'room') return true
+  if (!context.target_type || isNamespaceTarget(context.target_type)) return true
   if (context.target_type === 'team_session') {
     return !!context.target_id && sessions.some(session => session.session_id === context.target_id)
   }
@@ -467,7 +473,7 @@ export function workflowTargetReady(
 
 export async function executeAction(input: {
   action_type: 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover' | 'review_resolve' | 'review_defer'
-  target_type: 'room' | 'team_session' | 'keeper' | 'review_item'
+  target_type: 'namespace' | 'room' | 'team_session' | 'keeper' | 'review_item'
   target_id?: string
   payload: Record<string, unknown>
   successMessage: string
@@ -528,7 +534,7 @@ export async function executeRecommendedAction(action: OperatorRecommendedAction
       : {}
   return executeAction({
     action_type: action.action_type as 'broadcast' | 'room_pause' | 'room_resume' | 'task_inject' | 'team_note' | 'team_broadcast' | 'team_task_inject' | 'team_worker_spawn_batch' | 'team_stop' | 'keeper_message' | 'keeper_probe' | 'keeper_recover',
-    target_type: action.target_type as 'room' | 'team_session' | 'keeper',
+    target_type: action.target_type as 'namespace' | 'room' | 'team_session' | 'keeper',
     target_id: action.target_id ?? undefined,
     payload,
     successMessage: `${actionTypeLabel(action.action_type)}을(를) 요청했습니다`,
@@ -540,7 +546,7 @@ export function primaryActionForReviewItem(item: OperatorReviewItem): OperatorRe
   if (item.kind === 'room_gate') {
     return {
       action_type: 'room_resume',
-      target_type: 'room',
+      target_type: 'namespace',
       target_id: null,
       severity: item.severity,
       reason: item.why_now,
@@ -557,7 +563,7 @@ export function detailDigestForItem(
 ): OperatorDigest | null {
   if (!item) return null
   if (item.target_type === 'team_session' && sessionDigest?.target_id === item.target_id) return sessionDigest
-  if (item.target_type === 'room') return roomDigest
+  if (isNamespaceTarget(item.target_type)) return roomDigest
   return null
 }
 

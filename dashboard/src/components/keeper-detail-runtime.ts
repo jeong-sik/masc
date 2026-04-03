@@ -259,7 +259,12 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const configLoadStatus = peekKeeperConfigLoadStatus(keeper.name)
   const room = operatorSnapshot.value?.namespace ?? {}
   const actions = (operatorSnapshot.value?.available_actions ?? [])
-    .filter(action => action.target_type === 'keeper' || action.target_type === 'room')
+    .filter(
+      action =>
+        action.target_type === 'keeper'
+        || action.target_type === 'namespace'
+        || action.target_type === 'room',
+    )
     .slice(0, 8)
   const recentTools = keeperRecentTools(keeper)
   const topTools = keeperTopTools(keeper)

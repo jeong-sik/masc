@@ -83,7 +83,7 @@ describe('Ops intervene surface', () => {
     operatorDigestError.value = null
     operatorSessionDigest.value = null
     operatorSnapshot.value = {
-      room: { paused: false },
+      namespace: { paused: false, namespace: 'default' },
       sessions: [],
       keepers: [],
       recent_messages: [],
@@ -91,7 +91,7 @@ describe('Ops intervene surface', () => {
       available_actions: [],
     } as unknown as OperatorSnapshot
     operatorRoomDigest.value = {
-      target_type: 'room',
+      target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
       review_queue: [],
@@ -183,7 +183,7 @@ describe('Ops intervene surface', () => {
     operatorDigestError.value = null
     operatorSessionDigest.value = null
     operatorSnapshot.value = {
-      room: { paused: true },
+      namespace: { paused: true, namespace: 'default' },
       sessions: [],
       keepers: [],
       recent_messages: [],
@@ -191,14 +191,14 @@ describe('Ops intervene surface', () => {
       available_actions: [],
     } as unknown as OperatorSnapshot
     operatorRoomDigest.value = {
-      target_type: 'room',
+      target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
       review_queue: [
         {
           id: 'review-1',
           kind: 'room_gate',
-          target_type: 'room',
+          target_type: 'namespace',
           severity: 'warn',
           urgency: 'soon',
           summary: '방 제어 상태를 재확인하세요',
@@ -220,7 +220,7 @@ describe('Ops intervene surface', () => {
           actor: 'dashboard',
           reason: '방 상태 확인 완료',
           at: '2026-03-31T10:10:00Z',
-          target_type: 'room',
+          target_type: 'namespace',
         },
       ],
       session_cards: [],

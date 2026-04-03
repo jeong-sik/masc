@@ -358,6 +358,7 @@ echo "session_id=$SESSION_ID"
 echo "[3/8] verify local runtime"
 runtime_raw="$(mcp_call_tool 91004 "masc_runtime_verify" '{}')"
 mcp_require_tool_ok "$runtime_raw"
+require_result_condition "$runtime_raw" '.pass == true' "runtime verify did not pass"
 
 echo "[4/8] spawn local64 workers (spawn_timeout=${SPAWN_TIMEOUT_SEC}s http_timeout=${HTTP_TIMEOUT_SEC}s workers=${WORKER_COUNT})"
 if [ "$LOCAL64_ROUTER_MODE" = "hybrid" ] && [ "$WORKER_COUNT" -ge 16 ]; then
@@ -432,6 +433,7 @@ require_json_condition "$digest_json" "$digest_expr" "operator digest did not ex
 echo "[8/8] verify runtime pool"
 bench_raw="$(mcp_call_tool 91008 "masc_runtime_verify" '{}')"
 mcp_require_tool_ok "$bench_raw"
+require_result_condition "$bench_raw" '.pass == true' "runtime pool verify did not pass"
 
 spawn_success_count="$(printf '%s' "$final_events_json" | jq -r '[.events[] | select(.event_type == "team_step_spawn" and .detail.success == true)] | length')"
 spawn_failure_count="$(printf '%s' "$final_events_json" | jq -r '[.events[] | select(.event_type == "team_step_spawn" and .detail.success != true)] | length')"

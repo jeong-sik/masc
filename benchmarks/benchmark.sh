@@ -463,7 +463,7 @@ bench_runtime() {
     bench_call_tool "masc_runtime_verify" '{}' >/dev/null
     runtime_status_samples+=("$BENCH_LAST_MS")
   done
-  append_row "oas_runtime_verify" "" "${runtime_status_samples[@]}"
+  append_row "oas_runtime_status" "runtime_verify" "${runtime_status_samples[@]}"
 }
 
 ensure_session_ready() {

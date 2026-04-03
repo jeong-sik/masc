@@ -32,7 +32,7 @@
 해석 규칙:
 
 - 두 스크립트 모두 `initialize -> notifications/initialized -> Mcp-Session-Id 재사용` 흐름으로 측정한다.
-- `quick-bench.sh`는 `mcp_session_init`, 주요 MCP read/write path, `masc_runtime_verify`, `masc_runtime_verify`를 한 번에 보여준다.
+- `quick-bench.sh`는 `mcp_session_init`, 주요 MCP read/write path, `masc_runtime_verify`를 한 번에 보여준다.
 - `quick-bench.sh`는 `BENCH_ITERATIONS`, `BENCH_WARMUP_ITERATIONS`로 반복 수와 warmup 제외 횟수를 조정할 수 있다.
 - `benchmark.sh`는 `session`, `read`, `coordination`, `runtime`, `a2a`, `lock` lane을 분리하고 `avg/p50/p95/max`를 CSV로 남긴다.
 - `benchmark.sh`는 기본적으로 tool lane당 warmup 1회를 제외하고, 결과 CSV 옆에 metadata와 baseline diff를 같이 남긴다.

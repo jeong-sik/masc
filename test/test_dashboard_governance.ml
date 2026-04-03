@@ -21,14 +21,11 @@ let cleanup_dir dir =
   in
   rm dir
 
-let ensure_dir path =
-  if not (Sys.file_exists path) then Unix.mkdir path 0o755
-
 let write_legacy_judgment ~base_path json =
   let masc = Filename.concat base_path ".masc" in
   let governance = Filename.concat masc "governance" in
-  ensure_dir masc;
-  ensure_dir governance;
+  Fs_compat.mkdir_p masc;
+  Fs_compat.mkdir_p governance;
   let path = Filename.concat governance "judgments.jsonl" in
   let oc = open_out path in
   output_string oc (Yojson.Safe.to_string json);
@@ -98,9 +95,11 @@ let test_runtime_status_and_judgments_are_live () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
       let now = Unix.gettimeofday () in
       let generated_at = "2026-04-04T12:00:00Z" in
-      let expires_at = Dashboard_utils.iso_of_unix (now +. 3600.0) in
+      let expires_at = "2099-01-01T00:00:00Z" in
       let legacy_judgment =
         `Assoc
           [
@@ -167,6 +166,8 @@ let test_governance_monitoring_uses_live_runtime () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
       let st = Lib.Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
       st.judge_online <- true;

@@ -69,7 +69,6 @@ let dashboard_json ~base_path ~limit ~offset:_ ~status_filter:_ =
     @ retired_case_tracking_fields)
 
 let cases_json ~base_path:_ ~limit ~offset ~status_filter:_ ~include_test:_ =
-  ignore (limit, offset);
   `Assoc
     ([
        ("cases", `List []);

@@ -25,7 +25,9 @@ export function CommandPalette() {
       .then(() => {
         if (!cancelled) setReady(true)
       })
-      .catch(() => {})
+      .catch((error) => {
+        console.error('Failed to load ninja-keys', error)
+      })
 
     return () => {
       cancelled = true
@@ -34,7 +36,9 @@ export function CommandPalette() {
 
   useEffect(() => {
     if (!ready || !ref.current) return
-    ref.current.data = [
+    const frameId = window.requestAnimationFrame(() => {
+      if (!ref.current) return
+      ref.current.data = [
       {
         id: 'nav-overview',
         title: '상황판으로 이동 (Overview)',
@@ -81,7 +85,12 @@ export function CommandPalette() {
           if (confirmed) void cleanupZombies()
         }
       }
-    ]
+      ]
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+    }
   }, [ready])
 
   if (!ready) return null

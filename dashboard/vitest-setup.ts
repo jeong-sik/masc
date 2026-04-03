@@ -47,5 +47,13 @@ vi.mock('shiki', () => {
 
 // Mock ninja-keys Web Component to avoid Happy DOM parsing errors
 vi.mock('ninja-keys', () => {
+  if (!customElements.get('ninja-keys')) {
+    class NinjaKeysStub extends HTMLElement {
+      data: unknown[] = []
+    }
+
+    customElements.define('ninja-keys', NinjaKeysStub)
+  }
+
   return {}
 })

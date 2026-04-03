@@ -44,3 +44,8 @@ vi.mock('shiki', () => {
     })
   }
 })
+
+// Mock ninja-keys Web Component to avoid Happy DOM parsing errors
+vi.mock('ninja-keys', () => {
+  return {}
+})

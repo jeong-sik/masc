@@ -27,7 +27,7 @@ const LazyOperations = lazy(async () => ({ default: (await import('./control')).
 const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab }))
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
-export function lazyTabFallback(label: string) {
+function lazyTabFallback(label: string) {
   return html`<${LoadingState}>${label} 불러오는 중...<//>`
 }
 

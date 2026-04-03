@@ -27,6 +27,7 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            const stickyMarker = '<!-- phantom-fix-check -->';
 
             // Determine PR number
             let pullNumber;
@@ -36,7 +37,7 @@ jobs:
               pullNumber = context.payload.issue.number;
             }
 
-            // Get PR details for head SHA and ref
+            // Get PR details for head ref
             const { data: pr } = await github.rest.pulls.get({
               owner, repo, pull_number: pullNumber
             });
@@ -45,11 +46,15 @@ jobs:
             // SHA pattern: 7-40 hex chars, optionally wrapped in backticks
             const shaPattern = /(?:addressed|fixed|resolved|pushed|applied|corrected)\s+(?:in|at|as|via)\s+(?:commit\s+)?`?([0-9a-f]{7,40})`?/gi;
 
-            // For issue_comment events, only check the new comment
-            // For synchronize events, check all comments
+            // Collect comments to scan (skip bot-authored)
             let comments;
             if (context.eventName === 'issue_comment') {
-              comments = [context.payload.comment];
+              const c = context.payload.comment;
+              if (c.user?.type === 'Bot') {
+                core.info('Skipping bot comment.');
+                return;
+              }
+              comments = [c];
             } else {
               const allComments = await github.paginate(
                 github.rest.issues.listComments,
@@ -59,45 +64,37 @@ jobs:
                 github.rest.pulls.listReviewComments,
                 { owner, repo, pull_number: pullNumber, per_page: 100 }
               );
-              comments = [...allComments, ...reviewComments];
+              comments = [...allComments, ...reviewComments]
+                .filter(c => c.user?.type !== 'Bot');
             }
 
-            // Extract SHA references from comments
+            // Extract unique SHA references (dedup by SHA)
+            const seenShas = new Set();
             const phantoms = [];
             for (const comment of comments) {
-              const body = comment.body || '';
+              const commentBody = comment.body || '';
               let match;
               shaPattern.lastIndex = 0;
-              while ((match = shaPattern.exec(body)) !== null) {
+              while ((match = shaPattern.exec(commentBody)) !== null) {
                 const sha = match[1];
-                // Check if this SHA exists on the PR branch
+                if (seenShas.has(sha)) continue;
+                seenShas.add(sha);
+
                 try {
-                  const { data: commitData } = await github.rest.repos.getCommit({
-                    owner, repo, ref: sha
-                  });
-                  // Commit exists in repo — check if it's on the PR branch
+                  await github.rest.repos.getCommit({ owner, repo, ref: sha });
                   const { data: comparison } = await github.rest.repos.compareCommits({
-                    owner, repo,
-                    base: headRef,
-                    head: sha
+                    owner, repo, base: headRef, head: sha
                   });
-                  // If behind_by > 0 and ahead_by == 0, the commit is an ancestor (OK)
-                  // If the commit is not reachable from head, it's a phantom
                   if (comparison.status === 'diverged' || comparison.status === 'ahead') {
                     phantoms.push({
-                      sha,
-                      commentId: comment.id,
-                      commentUrl: comment.html_url,
+                      sha, commentUrl: comment.html_url,
                       author: comment.user?.login || 'unknown'
                     });
                   }
                 } catch (err) {
-                  // Commit doesn't exist at all — definite phantom
                   if (err.status === 404 || err.status === 422) {
                     phantoms.push({
-                      sha,
-                      commentId: comment.id,
-                      commentUrl: comment.html_url,
+                      sha, commentUrl: comment.html_url,
                       author: comment.user?.login || 'unknown'
                     });
                   }
@@ -105,18 +102,50 @@ jobs:
               }
             }
 
+            // Upsert or delete sticky comment
+            async function upsertPhantomComment(message) {
+              const allComments = await github.paginate(
+                github.rest.issues.listComments,
+                { owner, repo, issue_number: pullNumber, per_page: 100 }
+              );
+              const prior = allComments.find(c =>
+                c.body?.includes(stickyMarker) &&
+                c.user?.login === 'github-actions[bot]'
+              );
+
+              if (!message) {
+                if (prior) {
+                  await github.rest.issues.deleteComment({
+                    owner, repo, comment_id: prior.id
+                  });
+                  core.info('Phantom fix warning cleared (all references resolved).');
+                }
+                return;
+              }
+
+              if (prior) {
+                await github.rest.issues.updateComment({
+                  owner, repo, comment_id: prior.id, body: message
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: pullNumber, body: message
+                });
+              }
+            }
+
             if (phantoms.length === 0) {
+              await upsertPhantomComment(null);
               core.info('No phantom fix references detected.');
               return;
             }
 
-            // Post warning comment
             const lines = phantoms.map(p =>
               `- \`${p.sha}\` referenced by @${p.author} ([comment](${p.commentUrl})) — not found on branch \`${headRef}\``
             );
 
-            const body = [
-              '<!-- phantom-fix-check -->',
+            const warningBody = [
+              stickyMarker,
               '**Phantom fix detected** — the following commits are referenced in review replies but not found on this branch:',
               '',
               ...lines,
@@ -125,30 +154,5 @@ jobs:
               'Otherwise, the referenced fixes may not have been pushed yet.'
             ].join('\n');
 
-            // Check if we already posted a phantom-fix comment to avoid duplicates
-            const existing = await github.paginate(
-              github.rest.issues.listComments,
-              { owner, repo, issue_number: pullNumber, per_page: 100 }
-            );
-            const prior = existing.find(c =>
-              c.body?.includes('<!-- phantom-fix-check -->') &&
-              c.user?.login === 'github-actions[bot]'
-            );
-
-            if (prior) {
-              // Update existing comment
-              await github.rest.issues.updateComment({
-                owner, repo,
-                comment_id: prior.id,
-                body
-              });
-              core.warning(`Updated phantom fix warning (${phantoms.length} reference(s)).`);
-            } else {
-              // Create new comment
-              await github.rest.issues.createComment({
-                owner, repo,
-                issue_number: pullNumber,
-                body
-              });
-              core.warning(`Posted phantom fix warning (${phantoms.length} reference(s)).`);
-            }
+            await upsertPhantomComment(warningBody);
+            core.warning(`Phantom fix warning: ${phantoms.length} reference(s).`);

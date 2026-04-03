@@ -455,34 +455,15 @@ bench_a2a() {
 }
 
 bench_runtime() {
-  local runtime_notes
   local i
   local runtime_status_samples=()
 
-  warmup_tool_calls "masc_local_runtime_status" '{}' "$BENCH_WARMUP_ITERATIONS"
+  warmup_tool_calls "masc_runtime_verify" '{}' "$BENCH_WARMUP_ITERATIONS"
   for ((i = 0; i < ITERATIONS; i += 1)); do
-    bench_call_tool "masc_local_runtime_status" '{}' >/dev/null
-    runtime_notes="$(
-      printf '%s' "$BENCH_LAST_PAYLOAD" | mcp_extract_result |
-        jq -r '"configured_capacity=" + ((.configured_capacity // 0) | tostring) + ";healthy_runtime_count=" + ((.healthy_runtime_count // 0) | tostring)'
-    )"
+    bench_call_tool "masc_runtime_verify" '{}' >/dev/null
     runtime_status_samples+=("$BENCH_LAST_MS")
   done
-  append_row "oas_runtime_status" "$runtime_notes" "${runtime_status_samples[@]}"
-
-  local runtime_samples=()
-  for ((i = 0; i < BENCH_WARMUP_ITERATIONS; i += 1)); do
-    bench_call_tool "masc_local_runtime_bench" '{"parallelism":1,"rounds":1,"prompt":"Reply with OK only.","max_tokens":16,"timeout_sec":10}' >/dev/null
-  done
-  for ((i = 0; i < ITERATIONS; i += 1)); do
-    bench_call_tool "masc_local_runtime_bench" '{"parallelism":1,"rounds":1,"prompt":"Reply with OK only.","max_tokens":16,"timeout_sec":10}' >/dev/null
-    runtime_notes="$(
-      printf '%s' "$BENCH_LAST_PAYLOAD" | mcp_extract_result |
-        jq -r '"configured_capacity=" + ((.configured_capacity // 0) | tostring) + ";measured_ceiling=" + ((.measured_ceiling // "null") | tostring)'
-    )"
-    runtime_samples+=("$BENCH_LAST_MS")
-  done
-  append_row "oas_runtime_single" "$runtime_notes" "${runtime_samples[@]}"
+  append_row "oas_runtime_verify" "" "${runtime_status_samples[@]}"
 }
 
 ensure_session_ready() {

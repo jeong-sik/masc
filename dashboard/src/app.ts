@@ -21,6 +21,7 @@ import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { TaskDetailOverlay } from './components/goals/task-detail-overlay'
 import { ToastContainer } from './components/common/toast'
+import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
 import { AuthStatus, RemoteWarningBanner } from './components/auth-status'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
 import { Menu, X } from 'lucide-preact'
@@ -131,6 +132,7 @@ export function App() {
       <${AgentDetailOverlay} />
       <${TaskDetailOverlay} />
       <${ToastContainer} />
+      <${ConfirmDialogOverlay} />
     </div>
   `
 }

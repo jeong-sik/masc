@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { isOfflineStatus } from '../lib/status-utils'
 import { signal } from '@preact/signals'
 import { useRef } from 'preact/hooks'
+import { requestConfirm } from './common/confirm-dialog'
 import { currentDashboardActor, runOperatorAction } from '../api'
 import { bootKeeper, shutdownKeeper } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
@@ -373,8 +374,13 @@ export function KeeperDetailOverlay() {
                 <button type="button"
                   class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
                   onClick=${() => {
-                    if (confirm(keeper.name + ' 키퍼를 종료합니까?')) {
-                      void (async () => {
+                    void (async () => {
+                      const confirmed = await requestConfirm({
+                        title: '키퍼 종료',
+                        message: keeper.name + ' 키퍼를 종료합니까?',
+                        tone: 'danger'
+                      })
+                      if (confirmed) {
                         try {
                           const res = await shutdownKeeper(keeper.name)
                           if (res.ok) {
@@ -386,8 +392,8 @@ export function KeeperDetailOverlay() {
                         } catch {
                           showToast('종료 실패', 'error')
                         }
-                      })()
-                    }
+                      }
+                    })()
                   }}
                 >종료</button>`
               return null

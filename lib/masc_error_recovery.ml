@@ -23,7 +23,7 @@ let recovery_hint (message : string) : string option =
   else if contains msg "rate limit" || contains msg "too many" then
     Some "Wait briefly and retry. This is a transient error."
   else if contains msg "room" && contains msg "set" then
-    Some "Call masc_set_room(path=...) or masc_start(path=...) first."
+    Some "Call masc_start(path=...) to initialize."
   else if contains msg "current_task" || contains msg "no current task" then
     Some "Call masc_plan_set_task(task_id=...) after claiming a task."
   else if contains msg "path is required" then

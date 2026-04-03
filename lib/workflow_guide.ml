@@ -42,25 +42,11 @@ let after_start ~success =
         [ "Forgetting masc_worktree_create — working on main branch directly" ] }
   else
     { next_steps =
-        [ s "masc_set_room" "Set the room manually if path was wrong";
+        [ s "masc_start" "Set the room manually if path was wrong";
           s "masc_init" "Initialize MASC if not yet set up" ];
       preconditions = [];
       common_mistakes = [] }
 
-let after_set_room ~success =
-  if success then
-    { next_steps =
-        [ s "masc_join" "Register your agent identity in the room";
-          s "masc_status" "Verify room state before proceeding" ];
-      preconditions = [];
-      common_mistakes =
-        [ "Starting work without masc_join — other agents cannot see you" ] }
-  else
-    { next_steps =
-        [ s "masc_init" "Initialize MASC if not yet set up";
-          s "masc_start" "Retry with the repo root path if you want the one-shot setup flow" ];
-      preconditions = [];
-      common_mistakes = [] }
 
 let after_join ~success =
   if success then
@@ -73,7 +59,7 @@ let after_join ~success =
         [ "Skipping masc_status — you may duplicate work another agent claimed" ] }
   else
     { next_steps =
-        [ s "masc_set_room" "Set the room first";
+        [ s "masc_start" "Set the room first";
           s "masc_init" "Initialize MASC if not set up" ];
       preconditions = [];
       common_mistakes = [] }
@@ -88,7 +74,7 @@ let after_status ~success =
       common_mistakes = [] }
   else
     { next_steps =
-        [ s "masc_set_room" "Ensure room is configured";
+        [ s "masc_start" "Ensure room is configured";
           s "masc_join" "Join the room first" ];
       preconditions = [];
       common_mistakes = [] }
@@ -332,7 +318,7 @@ let after_worktree_create ~success =
 let after_init ~success =
   if success then
     { next_steps =
-        [ s "masc_set_room" "Set the room to your project root";
+        [ s "masc_start" "Set the room to your project root";
           s "masc_join" "Join the room" ];
       preconditions = [];
       common_mistakes = [] }
@@ -363,7 +349,6 @@ let next_steps ~tool_name ~success =
   match tool_name with
   (* Golden Path 1: Room/Task Hygiene *)
   | "masc_start" -> after_start ~success
-  | "masc_set_room" -> after_set_room ~success
   | "masc_join" -> after_join ~success
   | "masc_status" -> after_status ~success
   | "masc_claim_next" -> after_claim_auto_bound ~success
@@ -428,8 +413,8 @@ let guidance_to_json g =
     Used by tool_help_registry to enrich help responses. *)
 let workflow_context ~tool_name =
   let before = match tool_name with
-    | "masc_join" -> [ "masc_set_room" ]
-    | "masc_status" -> [ "masc_set_room"; "masc_join" ]
+    | "masc_join" -> [ "masc_start" ]
+    | "masc_status" -> [ "masc_start"; "masc_join" ]
     | "masc_claim_next" ->
         [ "masc_join"; "masc_status" ]
     | "masc_plan_set_task" | "masc_set_current_task" ->
@@ -471,7 +456,7 @@ let current_state_guidance ~room_set ~joined ~task_claimed
     ~current_task_set ~worktree_active ~session_active =
   if not room_set then
     { next_steps =
-        [ s "masc_set_room" "Set the room to your project root (repo root)";
+        [ s "masc_start" "Set the room to your project root (repo root)";
           s "masc_init" "Initialize MASC if this is a fresh setup" ];
       preconditions = [];
       common_mistakes =

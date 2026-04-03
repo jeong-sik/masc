@@ -249,7 +249,6 @@ let make_file_read ?workdir ?on_exec () =
     ~name:"file_read"
     ~descriptor:{ kind = None;
                   shell = None; mutation_class = None;
-                  concurrency_class = None;
                   notes = []; examples = [] }
     ~description:"Read file contents by absolute path. Returns file text. \
       Use shell_exec with 'ls' instead if you need directory listing. \
@@ -365,7 +364,6 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
     ~name:"shell_exec"
     ~descriptor:{ kind = None;
                   shell = None; mutation_class = None;
-                  concurrency_class = None;
                   notes = []; examples = [] }
     ~description
     ~parameters:[

@@ -789,5 +789,5 @@
 
 (rule
  (targets test_mcp_tool_matrix_names_gen.ml)
- (deps (:gen tool_inventory_gen.exe))
- (action (with-stdout-to %{targets} (run %{gen}))))
+ (deps tool_inventory_gen.exe)
+ (action (with-stdout-to %{targets} (run ./tool_inventory_gen.exe))))

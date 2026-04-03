@@ -189,24 +189,19 @@ let test_constructor_is_pure () =
       Alcotest.(check int) "constructor does not restore persisted sessions" 0
         (List.length (Session.connected_agents state.Mcp_server.session_registry)))
 
-let test_restore_persisted_sessions_uses_scoped_agents_dir () =
+let test_restore_persisted_sessions_uses_flat_agents_dir () =
   with_temp_dir "startup-scope" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let root_agents = Room.agents_dir state.Mcp_server.room_config in
-      Fs_compat.mkdir_p root_agents;
-      write_file (Filename.concat root_agents "root-agent.json") "{}";
-      state.Mcp_server.room_config <-
-        Room.with_scope state.Mcp_server.room_config (Room.Named "alpha");
-      let room_agents = Room.agents_dir state.Mcp_server.room_config in
-      Fs_compat.mkdir_p room_agents;
-      write_file (Filename.concat room_agents "room-agent.json") "{}";
+      let agents = Room.agents_dir state.Mcp_server.room_config in
+      Fs_compat.mkdir_p agents;
+      write_file (Filename.concat agents "test-agent.json") "{}";
       Server_runtime_bootstrap.restore_persisted_sessions state;
       let restored =
         Session.connected_agents state.Mcp_server.session_registry |> List.sort String.compare
       in
       Alcotest.(check (list string))
-        "restore uses scoped room agents dir only"
-        [ "room-agent" ] restored)
+        "restore uses flat agents dir"
+        [ "test-agent" ] restored)
 
 let test_keeper_paths_use_cluster_root () =
   with_temp_dir "startup-cluster" (fun dir ->
@@ -385,6 +380,116 @@ let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
         [ "sangsu" ]
         (Keeper_types.keepalive_keeper_names state.Mcp_server.room_config))
 
+let test_blocking_bootstrap_flattens_room_with_safe_current_room_fallback () =
+  with_temp_dir "startup-blocking-room-flatten" (fun dir ->
+      let state = Mcp_server.create_state ~base_path:dir in
+      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let legacy_tasks = Filename.concat masc_root "rooms/focus-room/tasks" in
+      Fs_compat.mkdir_p legacy_tasks;
+      write_file (Filename.concat masc_root "current_room") "../escape\n";
+      write_file
+        (Filename.concat legacy_tasks "backlog.json")
+        (Yojson.Safe.to_string
+           (Types.backlog_to_yojson
+              { tasks = []; last_updated = Types.now_iso (); version = 7 }));
+      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+      let root_backlog =
+        Yojson.Safe.from_string
+          (read_file (Filename.concat masc_root "tasks/backlog.json"))
+      in
+      Alcotest.(check int) "legacy backlog promoted before init seeds defaults" 7
+        Yojson.Safe.Util.(root_backlog |> member "version" |> to_int);
+      Alcotest.(check bool) "legacy backlog not quarantined" false
+        (Sys.file_exists
+           (Filename.concat masc_root
+              "_quarantine/rooms/focus-room/tasks/backlog.json")))
+
+let test_blocking_bootstrap_flattens_single_legacy_room_without_current_room () =
+  with_temp_dir "startup-blocking-room-single-fallback" (fun dir ->
+      let state = Mcp_server.create_state ~base_path:dir in
+      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let legacy_tasks = Filename.concat masc_root "rooms/team-room/tasks" in
+      Fs_compat.mkdir_p legacy_tasks;
+      write_file
+        (Filename.concat legacy_tasks "backlog.json")
+        (Yojson.Safe.to_string
+           (Types.backlog_to_yojson
+              { tasks = []; last_updated = Types.now_iso (); version = 11 }));
+      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+      let root_backlog =
+        Yojson.Safe.from_string
+          (read_file (Filename.concat masc_root "tasks/backlog.json"))
+      in
+      Alcotest.(check int) "single legacy room promoted without current_room" 11
+        Yojson.Safe.Util.(root_backlog |> member "version" |> to_int);
+      Alcotest.(check bool) "single legacy backlog not quarantined" false
+        (Sys.file_exists
+           (Filename.concat masc_root
+              "_quarantine/rooms/team-room/tasks/backlog.json")))
+
+let test_blocking_bootstrap_skips_flatten_with_multiple_legacy_rooms () =
+  with_temp_dir "startup-blocking-room-multi-fallback" (fun dir ->
+      let state = Mcp_server.create_state ~base_path:dir in
+      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let alpha_tasks = Filename.concat masc_root "rooms/alpha-room/tasks" in
+      let beta_tasks = Filename.concat masc_root "rooms/beta-room/tasks" in
+      Fs_compat.mkdir_p alpha_tasks;
+      Fs_compat.mkdir_p beta_tasks;
+      write_file
+        (Filename.concat alpha_tasks "backlog.json")
+        (Yojson.Safe.to_string
+           (Types.backlog_to_yojson
+              { tasks = []; last_updated = Types.now_iso (); version = 7 }));
+      write_file
+        (Filename.concat beta_tasks "backlog.json")
+        (Yojson.Safe.to_string
+           (Types.backlog_to_yojson
+              { tasks = []; last_updated = Types.now_iso (); version = 11 }));
+      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+      let root_backlog_path = Filename.concat masc_root "tasks/backlog.json" in
+      let root_backlog_promoted =
+        if Sys.file_exists root_backlog_path then
+          let root_backlog = Yojson.Safe.from_string (read_file root_backlog_path) in
+          let version = Yojson.Safe.Util.(root_backlog |> member "version" |> to_int) in
+          version = 7 || version = 11
+        else
+          false
+      in
+      Alcotest.(check bool)
+        "multiple legacy rooms do not promote a legacy backlog into root"
+        false root_backlog_promoted;
+      Alcotest.(check bool) "alpha-room backlog stays in legacy dir" true
+        (Sys.file_exists (Filename.concat alpha_tasks "backlog.json"));
+      Alcotest.(check bool) "beta-room backlog stays in legacy dir" true
+        (Sys.file_exists (Filename.concat beta_tasks "backlog.json")))
+
+let test_blocking_bootstrap_ignores_whitespace_legacy_room_dirs () =
+  with_temp_dir "startup-blocking-room-whitespace" (fun dir ->
+      let state = Mcp_server.create_state ~base_path:dir in
+      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let spaced_tasks = Filename.concat masc_root "rooms/focus-room /tasks" in
+      Fs_compat.mkdir_p spaced_tasks;
+      write_file
+        (Filename.concat spaced_tasks "backlog.json")
+        (Yojson.Safe.to_string
+           (Types.backlog_to_yojson
+              { tasks = []; last_updated = Types.now_iso (); version = 13 }));
+      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+      let root_backlog_path = Filename.concat masc_root "tasks/backlog.json" in
+      let root_backlog_promoted =
+        if Sys.file_exists root_backlog_path then
+          let root_backlog = Yojson.Safe.from_string (read_file root_backlog_path) in
+          let version = Yojson.Safe.Util.(root_backlog |> member "version" |> to_int) in
+          version = 13
+        else
+          false
+      in
+      Alcotest.(check bool) "whitespace room backlog stays in legacy dir" true
+        (Sys.file_exists (Filename.concat spaced_tasks "backlog.json"));
+      Alcotest.(check bool)
+        "whitespace room backlog does not promote into root" false
+        root_backlog_promoted)
+
 let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();
   Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
@@ -533,8 +638,8 @@ let () =
             test_force_jsonl_fallback_env;
           Alcotest.test_case "constructors stay pure" `Quick
             test_constructor_is_pure;
-          Alcotest.test_case "restore_persisted_sessions uses scoped agents dir"
-            `Quick test_restore_persisted_sessions_uses_scoped_agents_dir;
+          Alcotest.test_case "restore_persisted_sessions uses flat agents dir"
+            `Quick test_restore_persisted_sessions_uses_flat_agents_dir;
           Alcotest.test_case "keeper paths use cluster root" `Quick
             test_keeper_paths_use_cluster_root;
           Alcotest.test_case "room init bootstraps keeper runtime dirs" `Quick
@@ -555,6 +660,22 @@ let () =
             "blocking bootstrap promotes legacy keeper meta"
             `Quick
             test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot;
+          Alcotest.test_case
+            "blocking bootstrap flattens room with safe current_room fallback"
+            `Quick
+            test_blocking_bootstrap_flattens_room_with_safe_current_room_fallback;
+          Alcotest.test_case
+            "blocking bootstrap flattens single legacy room without current_room"
+            `Quick
+            test_blocking_bootstrap_flattens_single_legacy_room_without_current_room;
+          Alcotest.test_case
+            "blocking bootstrap skips flatten with multiple legacy rooms"
+            `Quick
+            test_blocking_bootstrap_skips_flatten_with_multiple_legacy_rooms;
+          Alcotest.test_case
+            "blocking bootstrap ignores whitespace legacy room dirs"
+            `Quick
+            test_blocking_bootstrap_ignores_whitespace_legacy_room_dirs;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case "liveness probe is always true" `Quick

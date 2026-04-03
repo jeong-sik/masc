@@ -141,9 +141,9 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_judgment_write",
       hidden_active
         "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    (* Dead features (hat, encryption, tempo, cost, generate_key,
-       operator_judgment_latest) physically removed 2026-04-03.
-       See #4709. *)
+    (* Dead features physically removed in #4709 and #4757:
+       operator_judgment_latest, hat_wear, hat_status, encryption_*,
+       generate_key, tempo*, cost_log, cost_report. *)
     (* Broken tools: shell out to CLI binaries unavailable at runtime.
        masc-checkpoint: removed from codebase (refactor #102).
        Deprecated 2026-04-03. See #4709, #4734. *)

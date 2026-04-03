@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { AlertTriangle } from 'lucide-preact'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
 import { KpiCard } from './common/stat-row'
@@ -50,7 +51,7 @@ function GovernanceSummaryStrip() {
   return html`
     ${isStale ? html`
       <div class="mb-3.5 flex items-center gap-3 rounded-xl border border-warn/30 bg-warn/10 p-3.5 text-[13px] font-medium text-warn shadow-sm">
-        <span class="text-lg">⚠️</span>
+        <div class="shrink-0"><${AlertTriangle} size=${18} /></div>
         <div>
           모든 열린 케이스가 ${formatAgeSummary(oldestAge)} 이상 경과됨.
           ${lastActivityAge != null ? html` 마지막 활동: ${formatAgeSummary(lastActivityAge)} 전.` : null}

@@ -2,6 +2,7 @@
 // Clean alert bar: icon + text hierarchy + severity indicator.
 
 import { html } from 'htm/preact'
+import { AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-preact'
 import { missionError, missionLoading } from '../../mission-store'
 import { roomTruthError } from '../../room-truth-store'
 import type {
@@ -148,10 +149,10 @@ const CATEGORY_LABELS: Record<string, string> = {
   incident: '인시던트',
 }
 
-function toneIcon(tone: SituationTone): string {
-  if (tone === 'bad') return '\u26A0'
-  if (tone === 'warn') return '\u25C9'
-  return '\u2713'
+function toneIcon(tone: SituationTone) {
+  if (tone === 'bad') return html`<${AlertCircle} size=${20} />`
+  if (tone === 'warn') return html`<${AlertTriangle} size=${20} />`
+  return html`<${CheckCircle2} size=${20} />`
 }
 
 function toneBorderClass(tone: SituationTone): string {

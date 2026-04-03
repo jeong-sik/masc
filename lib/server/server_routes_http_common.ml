@@ -268,16 +268,44 @@ let command_plane_help_http_json () =
 
 let command_plane_error_json message =
   Server_command_plane_http.command_plane_error_json message
+
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop idx =
+    if idx + needle_len > haystack_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  needle_len > 0 && loop 0
+
+let host_header_has_forbidden_authority_chars value =
+  let has_forbidden_char =
+    String.exists
+      (function
+        | '/' | '@' | '?' | '#' | '%' | ' ' | '\t' -> true
+        | _ -> false)
+      value
+  in
+  has_forbidden_char || contains_substring ~needle:"://" value
+
 let parse_host_port host_header default_host default_port =
   match host_header with
   | None -> (default_host, default_port)
-  | Some host_value ->
-      (match String.split_on_char ':' host_value with
-       | [host] -> (host, default_port)
-       | host :: port_str :: _ ->
-           let port = try int_of_string port_str with Failure _ -> default_port in
-           (host, port)
-       | _ -> (default_host, default_port))
+  | Some host_value -> (
+      let trimmed = String.trim host_value in
+      if trimmed = "" || host_header_has_forbidden_authority_chars trimmed then
+        (default_host, default_port)
+      else
+        try
+          let uri = Uri.of_string ("http://" ^ trimmed) in
+          let host = Uri.host uri |> Option.value ~default:default_host in
+          let port = Uri.port uri |> Option.value ~default:default_port in
+          (host, port)
+        with _ -> (default_host, default_port))
 
 (** Utility: string prefix check *)
 let starts_with ~prefix s =

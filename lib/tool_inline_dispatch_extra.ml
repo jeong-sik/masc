@@ -3,10 +3,7 @@
     (recall, board, conversation).
     Returns [Some (success, message)] if handled, [None] otherwise. *)
 
-let activity_room_id (config : Room_utils.config) =
-  match config.scope with
-  | Default -> "default"
-  | Named id -> id
+let activity_room_id (_config : Room_utils.config) = "default"
 
 let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
   try

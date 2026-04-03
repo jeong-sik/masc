@@ -24,7 +24,6 @@ let init config ~agent_name =
       root_perpetual_dir;
       root_tasks_dir;
       root_messages_dir;
-      rooms_root_dir config;
     ];
   if not (path_exists_root config (root_state_path config)) then begin
     let root_state = {
@@ -71,26 +70,28 @@ let init config ~agent_name =
       messages_dir config;
     ];
 
-    (* Create initial state *)
-    let state = {
-      protocol_version = "0.1.0";
-      project = Filename.basename config.base_path;
-      started_at = now_iso ();
-      message_seq = 0;
-      active_agents = [];
-      paused = false;
-      pause_reason = None;
-      paused_by = None;
-      paused_at = None;
-      search_strategy_default = Some "best_first_v1";
-      speculation_enabled = false;
-      speculation_budget = None;
-    } in
-    write_state config state;
+    if not (path_exists config (state_path config)) then begin
+      let state = {
+        protocol_version = "0.1.0";
+        project = Filename.basename config.base_path;
+        started_at = now_iso ();
+        message_seq = 0;
+        active_agents = [];
+        paused = false;
+        pause_reason = None;
+        paused_by = None;
+        paused_at = None;
+        search_strategy_default = Some "best_first_v1";
+        speculation_enabled = false;
+        speculation_budget = None;
+      } in
+      write_state config state
+    end;
 
-    (* Create empty backlog *)
-    let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
-    write_backlog config backlog;
+    if not (path_exists config (backlog_path config)) then begin
+      let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
+      write_backlog config backlog
+    end;
 
     let result = "✅ MASC room created!" in
 

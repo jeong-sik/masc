@@ -7,10 +7,11 @@ type storage_backend =
   | PostgresNative of Backend.Postgres.t
 
 (** Room scope — determines which directory tree is active.
-    Resolved once at config creation time, never re-read from filesystem. *)
+    Resolved once at config creation time, never re-read from filesystem.
+    Since #4638 the Named variant has been removed; all state lives under
+    the root .masc/ directory directly. *)
 type scope =
   | Default          (** Root .masc/ directory *)
-  | Named of string  (** .masc/rooms/{id}/ directory *)
 
 (** Room configuration *)
 type config = {

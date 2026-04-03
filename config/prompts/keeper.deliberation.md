@@ -24,7 +24,7 @@ Available actions (pick exactly one):
 - board_vote: Vote on a board post. Requires post_id and direction (up/down).
 - propose_spawn: Propose spawning a new agent. Requires topic and reason.{{multi_step_line}}
 
-Respond with ONLY a JSON object in this exact format:
+Respond with ONLY the tool input object for schema `keeper_deliberation_decision` in this exact shape:
 {"action":"<action_name>","params":{<action_specific_params>},"reasoning":"<brief_explanation>","confidence":<0.0_to_1.0>}
 
 Examples:

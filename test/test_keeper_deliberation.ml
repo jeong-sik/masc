@@ -28,6 +28,12 @@ let () =
 let base_obs =
   D.empty_world_observation ~keeper_name:"test-keeper"
 
+let contains_substring text needle =
+  try
+    ignore (Str.search_forward (Str.regexp_string needle) text 0);
+    true
+  with Not_found -> false
+
 let test_triage_skip_on_empty_observation () =
   let result = D.triage base_obs in
   match result with
@@ -176,6 +182,12 @@ let test_baseline_no_mention_returns_noop () =
   | D.Noop _ -> ()
   | _ -> fail "expected Noop for no mention"
 
+let test_baseline_execution_result_emits_baseline_source () =
+  let result = D.baseline_execution_result base_obs in
+  check string "baseline source" "baseline"
+    (D.action_source_to_string result.action_source);
+  check bool "baseline fallback not used" false result.fallback_used
+
 (* ---------- Deliberation meta tests ---------- *)
 
 let test_deliberation_meta_json_roundtrip () =
@@ -314,7 +326,7 @@ let test_prompt_contains_triggers () =
     (try ignore (Str.search_forward (Str.regexp_string "idle_timeout") prompt 0); true
      with Not_found -> false)
 
-let test_prompt_contains_json_instruction () =
+let test_prompt_contains_tool_input_instruction () =
   let prompt =
     D.build_deliberation_prompt
       ~keeper_name:"test-k"
@@ -323,8 +335,10 @@ let test_prompt_contains_json_instruction () =
       ~triggers:[ D.DirectMention ]
       base_obs
   in
-  check bool "mentions JSON response format" true
-    (try ignore (Str.search_forward (Str.regexp_string "JSON") prompt 0); true
+  check bool "mentions tool input schema" true
+    (try ignore (Str.search_forward
+                   (Str.regexp_string "tool input object for schema `keeper_deliberation_decision`")
+                   prompt 0); true
      with Not_found -> false)
 
 let test_prompt_contains_action_list () =
@@ -403,27 +417,118 @@ let test_parse_valid_broadcast_json () =
           check string "message" "Status update" message
       | _ -> fail "expected Broadcast action"
 
-let test_parse_json_with_code_fences () =
+let test_structured_result_schema_metadata () =
+  check string "schema name" "keeper_deliberation_decision"
+    D.structured_result_schema.name;
+  check bool "schema requires action" true
+    (List.exists
+       (fun (param : Agent_sdk.Types.tool_param) ->
+          String.equal param.name "action" && param.required)
+       D.structured_result_schema.params)
+
+let test_structured_result_schema_parse_valid_json () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"action":"noop","params":{"reason":"quiet"},"reasoning":"nothing","confidence":0.9}|}
+  in
+  match D.structured_result_schema.parse json with
+  | Error msg -> fail ("expected schema parse Ok, got Error: " ^ msg)
+  | Ok result ->
+      (match result.action with
+       | D.Noop reason -> check string "noop reason" "quiet" reason
+       | _ -> fail "expected Noop action");
+      check string "reasoning" "nothing" result.reasoning;
+      check (float 0.01) "confidence" 0.9 result.confidence
+
+let test_legality_verdict_rejects_illegal_task_claim () =
+  let obs =
+    D.{ base_obs with unclaimed_task_count = 0 }
+  in
+  match
+    D.legality_verdict obs
+      (D.TaskClaim { task_id = "task-1"; reason = "urgent" })
+  with
+  | D.Illegal msg ->
+      check bool "mentions unclaimed tasks" true
+        (contains_substring msg "unclaimed tasks")
+  | D.Legal -> fail "expected illegal task_claim without unclaimed tasks"
+
+let test_legality_verdict_rejects_nested_multistep () =
+  let obs =
+    D.{ base_obs with unclaimed_task_count = 1 }
+  in
+  let action =
+    D.MultiStep
+      [
+        D.TaskClaim { task_id = "task-1"; reason = "urgent" };
+        D.MultiStep [ D.Broadcast { message = "claimed" } ];
+      ]
+  in
+  match D.legality_verdict obs action with
+  | D.Illegal msg ->
+      check bool "mentions nested multi_step" true
+        (contains_substring msg "nested multi_step")
+  | D.Legal -> fail "expected nested multi_step to be illegal"
+
+let test_execute_structured_result_keeps_legal_action () =
+  let obs =
+    D.{ base_obs with unclaimed_task_count = 1 }
+  in
+  let structured =
+    D.
+      {
+        action = TaskClaim { task_id = "task-1"; reason = "urgent" };
+        reasoning = "claim the waiting task";
+        confidence = 0.8;
+      }
+  in
+  let result = D.execute_structured_result obs structured in
+  check string "legal action source" "structured_model"
+    (D.action_source_to_string result.action_source);
+  check bool "fallback not used" false result.fallback_used;
+  check (option string) "no fallback reason" None result.fallback_reason;
+  check (list string) "policy labels" [ "task_claim" ] result.policy_labels;
+  match result.selected_action with
+  | D.TaskClaim { task_id; _ } ->
+      check string "selected task" "task-1" task_id
+  | _ -> fail "expected selected task_claim action"
+
+let test_execute_structured_result_falls_back_to_baseline () =
+  let obs = base_obs in
+  let structured =
+    D.
+      {
+        action = TaskClaim { task_id = "task-1"; reason = "urgent" };
+        reasoning = "claim the waiting task";
+        confidence = 0.8;
+      }
+  in
+  let result = D.execute_structured_result obs structured in
+  check string "fallback action source" "fallback_after_validation_failure"
+    (D.action_source_to_string result.action_source);
+  check bool "fallback used" true result.fallback_used;
+  check bool "fallback reason present" true (Option.is_some result.fallback_reason);
+  check (list string) "policy labels" [ "noop" ] result.policy_labels;
+  match result.selected_action with
+  | D.Noop reason ->
+      check string "fallback noop" "no_trigger" reason
+  | _ -> fail "expected fallback noop action"
+
+let test_parse_json_with_code_fences_rejected () =
   let raw =
     "```json\n{\"action\":\"noop\",\"params\":{\"reason\":\"quiet\"},\"reasoning\":\"nothing\",\"confidence\":0.9}\n```"
   in
   match D.parse_deliberation_response raw with
-  | Error msg -> fail ("expected Ok with code fences, got Error: " ^ msg)
-  | Ok (action, _reasoning, _confidence) ->
-      match action with
-      | D.Noop _ -> ()
-      | _ -> fail "expected Noop action from fenced JSON"
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for fenced JSON"
 
-let test_parse_json_with_surrounding_text () =
+let test_parse_json_with_surrounding_text_rejected () =
   let raw =
     "Here is my decision:\n{\"action\":\"noop\",\"params\":{\"reason\":\"quiet\"},\"reasoning\":\"nothing\",\"confidence\":0.5}\nThat's my answer."
   in
   match D.parse_deliberation_response raw with
-  | Error msg -> fail ("expected Ok with surrounding text, got Error: " ^ msg)
-  | Ok (action, _reasoning, _confidence) ->
-      match action with
-      | D.Noop _ -> ()
-      | _ -> fail "expected Noop action from embedded JSON"
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for embedded JSON in surrounding text"
 
 let test_parse_malformed_json () =
   let raw = "this is not json at all" in
@@ -816,6 +921,8 @@ let () =
             test_baseline_mention_returns_reply;
           test_case "no mention returns Noop" `Quick
             test_baseline_no_mention_returns_noop;
+          test_case "baseline execution emits baseline source" `Quick
+            test_baseline_execution_result_emits_baseline_source;
         ] );
       ( "deliberation_meta",
         [
@@ -846,12 +953,30 @@ let () =
             test_prompt_contains_keeper_name;
           test_case "prompt contains trigger strings" `Quick
             test_prompt_contains_triggers;
-          test_case "prompt mentions JSON format" `Quick
-            test_prompt_contains_json_instruction;
+          test_case "prompt mentions tool input schema" `Quick
+            test_prompt_contains_tool_input_instruction;
           test_case "prompt lists available actions" `Quick
             test_prompt_contains_action_list;
           test_case "prompt always includes multi_step" `Quick
             test_prompt_always_includes_multi_step;
+        ] );
+      ( "structured_result_schema",
+        [
+          test_case "schema metadata" `Quick
+            test_structured_result_schema_metadata;
+          test_case "schema parse valid json" `Quick
+            test_structured_result_schema_parse_valid_json;
+        ] );
+      ( "deterministic_execution",
+        [
+          test_case "rejects illegal task_claim" `Quick
+            test_legality_verdict_rejects_illegal_task_claim;
+          test_case "rejects nested multi_step" `Quick
+            test_legality_verdict_rejects_nested_multistep;
+          test_case "keeps legal action" `Quick
+            test_execute_structured_result_keeps_legal_action;
+          test_case "falls back to baseline" `Quick
+            test_execute_structured_result_falls_back_to_baseline;
         ] );
       ( "parse_deliberation_response",
         [
@@ -862,10 +987,10 @@ let () =
             test_parse_valid_task_claim_json;
           test_case "parse valid broadcast" `Quick
             test_parse_valid_broadcast_json;
-          test_case "parse JSON with code fences" `Quick
-            test_parse_json_with_code_fences;
-          test_case "parse JSON with surrounding text" `Quick
-            test_parse_json_with_surrounding_text;
+          test_case "parse JSON with code fences rejected" `Quick
+            test_parse_json_with_code_fences_rejected;
+          test_case "parse JSON with surrounding text rejected" `Quick
+            test_parse_json_with_surrounding_text_rejected;
           test_case "parse malformed JSON returns Error" `Quick
             test_parse_malformed_json;
           test_case "parse empty string returns Error" `Quick

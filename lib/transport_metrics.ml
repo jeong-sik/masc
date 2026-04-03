@@ -159,10 +159,7 @@ let int_field key json =
   | Some (`Intlit raw) -> Safe_ops.int_of_string_with_default ~default:0 raw
   | _ -> 0
 
-let room_id_from_config (config : Room.config) =
-  match config.scope with
-  | Room_utils_backend_setup.Named room_id -> room_id
-  | _ -> "default"
+let room_id_from_config (_config : Room.config) = "default"
 
 let cluster_summary_json (_config : Room.config) =
   (* Transport health should stay metrics-only and avoid command-plane/Room I/O. *)

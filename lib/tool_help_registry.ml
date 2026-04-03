@@ -236,7 +236,7 @@ let manual_help_entry name =
           key_constraints =
             [
               "Tool catalog visibility metadata is read-only in this snapshot.";
-              "Command-plane tool/model allowlists are reported as advisory until runtime enforcement is wired.";
+              "Command-plane tool/model allowlists now constrain unit routing and assignment via tagged capabilities, but they do not yet hard-stop every per-tool worker invocation.";
             ];
           details_markdown =
             "Provides a room-scoped control snapshot: auth config and credentials, command-plane policy topology, and the full tool inventory with metadata and permission hints.";
@@ -261,10 +261,10 @@ let manual_help_entry name =
           key_constraints =
             [
               "Section must be one of: auth | unit_policy.";
-              "Unit tool/model allowlists are stored and surfaced, but remain advisory until runtime enforcement is added.";
+              "Unit tool/model allowlists now affect command-plane routing and assignment when capability tags are present; worker-runtime per-tool enforcement is still a follow-up slice.";
             ];
           details_markdown =
-            "Delegates to the existing truthful write paths: Config mode updates, Auth config persistence, CPv2 unit policy updates, and keeper meta policy updates. Returns warnings for advisory-only fields.";
+            "Delegates to the existing truthful write paths: Config mode updates, Auth config persistence, CPv2 unit policy updates, and keeper meta policy updates. Command-plane unit policy now feeds routing/assignment gates; deeper worker-runtime enforcement remains a separate step.";
           doc_refs =
             [
               "docs/COMMAND-PLANE-RUNBOOK.md";

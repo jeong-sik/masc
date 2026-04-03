@@ -94,7 +94,7 @@ let test_display_string () =
   let identity = Agent_identity.({
     uuid = "agent-test123456"; session_key = "12345678-abcd-efgh-ijkl-123456789abc";
     agent_name = "test-display-agent";
-    channel = Some Telegram;
+    channel = Some (Agent_identity.External "telegram");
     user_id = Some "tg-user-99";
     room_id = Some "work-room";
     capabilities = ["code"; "search"];

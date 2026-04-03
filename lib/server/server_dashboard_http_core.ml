@@ -189,11 +189,12 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
       ~min_v:10
       ~max_v:86400
   in
+  let canonical_namespace = Room.default_namespace_id in
   let status_json =
     `Assoc [
-      ("namespace_id", `String "default");
-      ("namespace", `String "default");
-      ("current_namespace", `String "default");
+      ("namespace_id", `String canonical_namespace);
+      ("namespace", `String canonical_namespace);
+      ("current_namespace", `String canonical_namespace);
       ("namespace_mode", `String "flattened");
       ("room", `Null);
       ("current_room", `String room_id);
@@ -828,14 +829,15 @@ let dashboard_proof_http_json ~state request =
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let current_room =
-    Room.read_current_room config |> Option.value ~default:"default"
+    Room.read_current_room config |> Option.value ~default:Room.default_namespace_id
   in
+  let canonical_namespace = Room.default_namespace_id in
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in
   `Assoc
     [
-      ("namespace_id", `String "default");
-      ("namespace", `String "default");
+      ("namespace_id", `String canonical_namespace);
+      ("namespace", `String canonical_namespace);
       ("current_namespace", `String current_room);
       ("namespace_mode", `String "flattened");
       ("room", `Null);

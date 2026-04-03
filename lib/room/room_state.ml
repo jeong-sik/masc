@@ -28,6 +28,8 @@ let default_room_state config = {
   speculation_budget = None;
 }
 
+let default_namespace_id = "default"
+
 let non_empty_string_opt = function
   | Some value ->
       let value = String.trim value in
@@ -186,9 +188,9 @@ let write_backlog config backlog =
   write_json config (backlog_path config) (backlog_to_yojson backlog)
 
 let current_room_id config =
-  read_current_room config |> Option.value ~default:"default"
+  read_current_room config |> Option.value ~default:default_namespace_id
 
-let activity_room_id _config = "default"
+let activity_room_id _config = default_namespace_id
 
 let emit_message_activity config ~from_agent ~content ~mention
     ?session_id ?operation_id ?worker_run_id ?(evidence_refs = []) () =

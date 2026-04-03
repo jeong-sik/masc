@@ -593,16 +593,20 @@ let make_request_handler routes =
     let request = Httpun.Reqd.request reqd in
     let dispatch () = Router.dispatch routes request reqd in
     if Otel_config.enabled then
-      let headers = Httpun.Headers.to_list request.headers in
-      match Otel_trace_context.of_headers headers with
-      | Some ctx ->
-        let scope =
-          Opentelemetry.Scope.make
-            ~trace_id:ctx.trace_id
-            ~span_id:ctx.parent_id
-            ()
-        in
-        Opentelemetry.Scope.with_ambient_scope scope dispatch
+      (* Use Headers.get for O(1) lookup instead of Headers.to_list which
+         allocates the full header list on every request. *)
+      match Httpun.Headers.get request.headers Otel_trace_context.header_name with
+      | Some value ->
+        (match Otel_trace_context.parse value with
+         | Some ctx ->
+           let scope =
+             Opentelemetry.Scope.make
+               ~trace_id:ctx.trace_id
+               ~span_id:ctx.parent_id
+               ()
+           in
+           Opentelemetry.Scope.with_ambient_scope scope dispatch
+         | None -> dispatch ())
       | None -> dispatch ()
     else
       dispatch ()

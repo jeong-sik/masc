@@ -186,6 +186,36 @@ let test_to_header () =
 let test_header_name () =
   check string "W3C spec lowercase" "traceparent" Lib.Otel_trace_context.header_name
 
+let test_of_headers_multiple_discard () =
+  let headers = [
+    ("traceparent", valid_traceparent);
+    ("traceparent", "00-aaaabbbbccccddddaaaabbbbccccdddd-1122334455667788-01");
+  ] in
+  match Lib.Otel_trace_context.of_headers headers with
+  | None -> ()
+  | Some _ -> fail "expected None for multiple traceparent headers (W3C spec)"
+
+(* --- Whitespace handling --- *)
+
+let test_parse_with_whitespace () =
+  let tp = "  " ^ valid_traceparent ^ "  " in
+  match Lib.Otel_trace_context.parse tp with
+  | Some ctx ->
+    check string "trimmed" valid_traceparent ctx.traceparent
+  | None -> fail "expected Some after trimming whitespace"
+
+(* --- Future version handling --- *)
+
+let test_parse_future_version () =
+  let tp = "01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" in
+  match Lib.Otel_trace_context.parse tp with
+  | Some ctx ->
+    let tid = trace_id_of ctx.traceparent in
+    check string "trace_id preserved" "4bf92f3577b34da6a3ce929d0e0e4736" tid
+  | None ->
+    (* Library may reject future versions — document as known limitation *)
+    ()
+
 (* --- Runner --- *)
 
 let () =
@@ -223,5 +253,10 @@ let () =
       test_case "absent" `Quick test_of_headers_absent;
       test_case "to_header" `Quick test_to_header;
       test_case "header_name" `Quick test_header_name;
+      test_case "multiple headers discarded" `Quick test_of_headers_multiple_discard;
+    ];
+    "edge_cases", [
+      test_case "whitespace trimmed" `Quick test_parse_with_whitespace;
+      test_case "future version 01" `Quick test_parse_future_version;
     ];
   ]

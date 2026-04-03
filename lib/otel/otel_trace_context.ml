@@ -36,7 +36,10 @@ type t = {
     - parent_id: 16 hex chars (8 bytes), all-zero is invalid
     - trace_flags: 2 hex chars, bit 0 = sampled *)
 let parse (s : string) : t option =
-  match OT.Span_ctx.of_w3c_trace_context (Bytes.of_string s) with
+  let trimmed = String.trim s in
+  if String.length trimmed < 55 then None
+  else
+  match OT.Span_ctx.of_w3c_trace_context (Bytes.of_string trimmed) with
   | Ok span_ctx ->
     let trace_id = OT.Span_ctx.trace_id span_ctx in
     let parent_id = OT.Span_ctx.parent_id span_ctx in
@@ -45,7 +48,7 @@ let parse (s : string) : t option =
     else if not (OT.Span_id.is_valid parent_id) then None
     else
       let sampled = OT.Span_ctx.sampled span_ctx in
-      Some { traceparent = s; trace_id; parent_id; sampled }
+      Some { traceparent = trimmed; trace_id; parent_id; sampled }
   | Error _ -> None
 
 (** {2 Generation — from MASC ambient context to external format} *)
@@ -112,16 +115,19 @@ let inject_json (fields : (string * Yojson.Safe.t) list)
 (** Header name per W3C spec (lowercase). *)
 let header_name = "traceparent"
 
-(** Extract traceparent from HTTP headers (case-insensitive lookup). *)
+(** Extract traceparent from HTTP headers (case-insensitive lookup).
+    W3C spec: if multiple traceparent headers exist, discard all. *)
 let of_headers (headers : (string * string) list) : t option =
   let lower_name = header_name in
-  match
-    List.find_opt
-      (fun (k, _) -> String.lowercase_ascii k = lower_name)
+  let matches =
+    List.filter_map
+      (fun (k, v) ->
+         if String.lowercase_ascii k = lower_name then Some v else None)
       headers
-  with
-  | Some (_, v) -> parse v
-  | None -> None
+  in
+  match matches with
+  | [single] -> parse single
+  | _ -> None  (* absent or multiple → invalid per W3C spec *)
 
 (** Build a traceparent header pair for outbound HTTP requests. *)
 let to_header (ctx : t) : string * string =

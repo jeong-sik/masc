@@ -251,9 +251,9 @@ export function actionTypeLabel(value?: string | null): string {
     case 'broadcast':
       return '전체 공지'
     case 'room_pause':
-      return '방 일시정지'
+      return '네임스페이스 일시정지'
     case 'room_resume':
-      return '방 재개'
+      return '네임스페이스 재개'
     case 'team_turn':
       return '세션 업데이트'
     case 'team_note':
@@ -288,7 +288,7 @@ export function targetTypeLabel(value?: string | null): string {
     case 'namespace':
       return '네임스페이스'
     case 'room':
-      return '방'
+      return '네임스페이스'
     case 'team_session':
       return '세션'
     case 'keeper':
@@ -584,7 +584,7 @@ export async function submitPause() {
     action_type: 'room_pause',
     target_type: 'room',
     payload: { reason: pauseReason.value.trim() || '운영 점검' },
-    successMessage: '방 일시정지를 요청했습니다',
+    successMessage: '네임스페이스 일시정지를 요청했습니다',
   })
 }
 
@@ -593,7 +593,7 @@ export async function submitResume() {
     action_type: 'room_resume',
     target_type: 'room',
     payload: {},
-    successMessage: '방 재개를 요청했습니다',
+    successMessage: '네임스페이스 재개를 요청했습니다',
   })
 }
 

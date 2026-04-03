@@ -133,7 +133,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'intervene',
       label: '실시간 개입',
-      description: '룸 일시정지, 세션 중단, 키퍼 재시작 등 운영 개입.',
+      description: '네임스페이스 일시정지, 세션 중단, 키퍼 재시작 등 운영 개입.',
       params: { section: 'intervene' },
     },
     {

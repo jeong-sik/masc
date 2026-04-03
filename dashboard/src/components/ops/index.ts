@@ -189,8 +189,8 @@ function renderSummaryBadges(activeCount: number, deferredCount: number, recentC
   const roomPaused = operatorSnapshot.value?.namespace?.paused
   const roomLabel =
     typeof roomPaused === 'boolean'
-      ? roomPaused ? '룸 일시정지' : '룸 진행 중'
-      : '룸 확인 필요'
+      ? roomPaused ? '네임스페이스 일시정지' : '네임스페이스 진행 중'
+      : '네임스페이스 확인 필요'
   const roomTone: ActivityTone =
     typeof roomPaused !== 'boolean'
       ? 'default'
@@ -249,7 +249,7 @@ function renderTruth(item: OperatorReviewItem | null) {
     return html`
       <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Room</div>
+          <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Namespace</div>
           <strong>${room.namespace ?? room.namespace_id ?? 'default'}</strong>
           <div class="text-[12px] text-[var(--text-muted)]">${room.project ?? 'project'} · ${room.cluster ?? 'cluster'}</div>
         </div>

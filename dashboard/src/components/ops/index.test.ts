@@ -145,7 +145,7 @@ describe('Ops intervene surface', () => {
     expect(container.textContent).toContain('즉시 검토 0')
     expect(container.textContent).toContain('보류 1')
     expect(container.textContent).toContain('최근 처리 2')
-    expect(container.textContent).toContain('룸 진행 중')
+    expect(container.textContent).toContain('네임스페이스 진행 중')
     expect(container.textContent).not.toContain('Active Queue')
     expect(container.textContent).not.toContain('Healthy Console')
 
@@ -232,7 +232,7 @@ describe('Ops intervene surface', () => {
     await flushUi()
 
     expect(container.textContent).toContain('즉시 검토 1')
-    expect(container.textContent).toContain('룸 일시정지')
+    expect(container.textContent).toContain('네임스페이스 일시정지')
     expect(container.textContent).toContain('실행 작업대')
     expect(container.textContent).toContain('현재 상태')
     expect(container.textContent).toContain('마찰 요인')

@@ -114,6 +114,10 @@ let test_dashboard_execution_fixture () =
         check string "top queue handoff surface" "intervene"
           (execution_queue |> List.hd |> member "top_handoff" |> member "surface" |> to_string);
         check int "session briefs" 2 (List.length session_briefs);
+        check string "fixture session namespace" "default"
+          (session_briefs |> List.hd |> member "namespace" |> to_string);
+        check string "fixture session room alias kept" "default"
+          (session_briefs |> List.hd |> member "room" |> to_string);
         check int "fixture seen count" 3
           (session_briefs |> List.hd |> member "seen_count" |> to_int);
         check int "fixture planned count" 4
@@ -211,6 +215,8 @@ let test_dashboard_execution_namespace_status () =
           (status |> member "namespace_id" |> to_string);
         check string "status namespace exposed" "default"
           (status |> member "namespace" |> to_string);
+        check string "status current_namespace exposed" "default"
+          (status |> member "current_namespace" |> to_string);
         check string "status namespace mode flattened" "flattened"
           (status |> member "namespace_mode" |> to_string);
         check bool "legacy room removed" true
@@ -237,6 +243,8 @@ let test_dashboard_shell_namespace_status () =
         (status |> member "namespace_id" |> to_string);
       check string "shell namespace exposed" "default"
         (status |> member "namespace" |> to_string);
+      check string "shell current_namespace exposed" "default"
+        (status |> member "current_namespace" |> to_string);
       check string "shell namespace mode flattened" "flattened"
         (status |> member "namespace_mode" |> to_string);
       check bool "shell legacy room removed" true
@@ -249,6 +257,9 @@ let test_dashboard_shell_namespace_status () =
         (status |> member "workspace_path" |> to_string);
       check bool "shell workspace differs false when same root" false
         (status |> member "workspace_differs" |> to_bool);
+      check string "shell diagnostics current_namespace surfaced" "default"
+        (json |> member "projection_diagnostics" |> member "current_namespace"
+        |> to_string);
       check string "shell diagnostics surface" "shell"
         (json |> member "projection_diagnostics" |> member "surface" |> to_string))
 

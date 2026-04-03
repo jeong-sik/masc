@@ -207,10 +207,13 @@ Pair with masc_heartbeat_stop to cancel or masc_cleanup_zombies to reap dead age
 (* ================================================================ *)
 
 let _tool_spec_requires_join = [ "masc_heartbeat" ]
+let _tool_spec_system_internal =
+  [ "masc_heartbeat_start"; "masc_heartbeat_stop"; "masc_heartbeat_list" ]
 
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
+      let is_system = List.mem s.name _tool_spec_system_internal in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -218,5 +221,7 @@ let () =
            ~module_tag:Tool_dispatch.Mod_heartbeat
            ~input_schema:s.input_schema
            ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
+           ~allow_direct_call_when_hidden:is_system
            ()))
     schemas

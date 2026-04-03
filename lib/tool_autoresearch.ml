@@ -514,14 +514,19 @@ let dispatch (ctx : context) ~name ~args : result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
+let _tool_spec_system_internal = [ "masc_autoresearch_status" ]
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
+      let is_system = List.mem s.name _tool_spec_system_internal in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_autoresearch
            ~input_schema:s.input_schema
+           ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
+           ~allow_direct_call_when_hidden:is_system
            ()))
     schemas

@@ -136,12 +136,13 @@ masc_start(path="/your/project", task_title="My first task")
 
 Canonical namespace/task hygiene:
 
-- `masc_set_room`
-- `masc_join`
+- `masc_start`
 - `masc_status`
 - `masc_transition(action="claim")` or `masc_claim_next`
 - `masc_plan_set_task` when needed
 - `masc_heartbeat`
+
+`masc_set_room` is still callable as a compatibility alias, but it only selects the project coordination root. It is no longer the front-door onboarding path.
 
 ### 2. Supervised Delivery Swarm
 

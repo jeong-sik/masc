@@ -310,8 +310,22 @@ let json ?session_id ?room_id ~(config : Room.config) () =
           [ "session has no attached operation_id" ]
       | _ -> []))
   in
+  let strong_runtime_signal_count =
+    team_turn_count + session_broadcast_count + portal_count
+    + board_interaction_count
+  in
+  let proof_supports_strong =
+    proof_available
+    && unlinked_activity_count = 0
+    &&
+    (strong_runtime_signal_count > 0
+    ||
+    match proof_verdict with
+    | Some "proven" -> true
+    | _ -> false)
+  in
   let evidence_status, headline, detail =
-    if proof_available && interaction_event_count > 0 then
+    if proof_supports_strong && interaction_event_count > 0 then
       ( "strong",
         "세션 기준 협업 근거가 있습니다.",
         "team_turn, broadcast/portal, activity 이벤트, proof 경로를 함께 확인할 수 있습니다." )

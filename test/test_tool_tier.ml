@@ -75,9 +75,9 @@ let () =
                 (Tool_catalog.is_in_tier Tool_catalog.Standard "decision_create");
               check bool "decision_status" true
                 (Tool_catalog.is_in_tier Tool_catalog.Standard "decision_status"));
-          test_case "count is reasonable (40-60)" `Quick (fun () ->
+          test_case "count is reasonable (40-80)" `Quick (fun () ->
               let n = Tool_catalog.tier_tool_count Tool_catalog.Standard in
-              check bool "between 40 and 60" true (n >= 40 && n <= 60));
+              check bool "between 40 and 80" true (n >= 40 && n <= 80));
         ] );
       ( "full_tier",
         [

@@ -21,9 +21,9 @@ let create () =
     mutex = Eio.Mutex.create ();
   }
 
-let default_state : t Lazy.t = lazy (create ())
+let default_state : t = create ()
 
-let default () = Lazy.force default_state
+let default () = default_state
 
 let with_lock state f =
   Eio_guard.with_mutex state.mutex f

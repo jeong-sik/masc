@@ -190,6 +190,10 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
   let rec loop () =
     if Atomic.get stop then ()
     else (
+            (* Yield before each heartbeat cycle to prevent N keeper fibers
+               from monopolizing the Eio scheduler during CPU-bound phases
+               (tool filtering, snapshot construction, prompt building). *)
+            Eio.Fiber.yield ();
             (* Phase 0: timing markers *)
             let t_presence_start = Time_compat.now () in
             let meta_current =

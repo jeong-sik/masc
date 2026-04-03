@@ -144,6 +144,73 @@ let test_legacy_me_root_fallback () =
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
   check bool "warning present" true (resolution.warnings <> [])
 
+(* ================================================================ *)
+(* personas_dirs tests                                              *)
+(* ================================================================ *)
+
+let test_personas_dirs_default_repo_only () =
+  with_temp_dir "pd-default" @@ fun root ->
+  let config = make_config_root root in
+  let inputs = make_inputs ~env_config_dir:config () in
+  let resolution = Lib.Config_dir_resolver.resolve_with inputs in
+  let dirs = Lib.Config_dir_resolver.personas_dirs_with inputs resolution in
+  check (list string) "repo personas only"
+    [ Filename.concat config "personas" ] dirs
+
+let test_personas_dirs_includes_home () =
+  with_temp_dir "pd-home" @@ fun root ->
+  let config = make_config_root root in
+  let home = Filename.concat root "home" in
+  let home_personas = Filename.concat home ".masc/personas" in
+  mkdir_p home_personas;
+  let inputs = make_inputs ~env_config_dir:config ~env_home:home () in
+  let resolution = Lib.Config_dir_resolver.resolve_with inputs in
+  let dirs = Lib.Config_dir_resolver.personas_dirs_with inputs resolution in
+  check (list string) "repo + home personas"
+    [ Filename.concat config "personas"; home_personas ] dirs
+
+let test_personas_dirs_env_override_is_sole_source () =
+  with_temp_dir "pd-env" @@ fun root ->
+  let env_personas = Filename.concat root "env-personas" in
+  mkdir_p env_personas;
+  let home = Filename.concat root "home" in
+  let home_personas = Filename.concat home ".masc/personas" in
+  mkdir_p home_personas;
+  let inputs = make_inputs ~env_personas_dir:env_personas ~env_home:home () in
+  let resolution = Lib.Config_dir_resolver.resolve_with inputs in
+  let dirs = Lib.Config_dir_resolver.personas_dirs_with inputs resolution in
+  (* MASC_PERSONAS_DIR overrides: only the env dir, no home dir *)
+  check (list string) "env override only" [ env_personas ] dirs
+
+let test_personas_dirs_dedup_overlapping () =
+  with_temp_dir "pd-dedup" @@ fun root ->
+  let config_root = Filename.concat root "config" in
+  mkdir_p (Filename.concat config_root "prompts");
+  mkdir_p (Filename.concat config_root "keepers");
+  mkdir_p (Filename.concat config_root "personas");
+  write_file (Filename.concat config_root "cascade.json") "{}";
+  (* Set HOME so that $HOME/.masc/personas points to the same config dir.
+     config_root = root/config, so home = root means
+     $HOME/.masc/personas does NOT exist (different path).
+     Instead, make them overlap by pointing MASC_BASE_PATH so that
+     $MASC_BASE_PATH/.masc/personas == config/personas *)
+  let base = Filename.dirname config_root in
+  (* base/.masc/personas must exist for overlap *)
+  let base_personas = Filename.concat (Filename.concat base ".masc") "personas" in
+  mkdir_p base_personas;
+  (* Make config/personas and base/.masc/personas the same via symlink *)
+  let config_personas = Filename.concat config_root "personas" in
+  let inputs = make_inputs ~env_config_dir:config_root ~env_base_path:base
+      ~cwd:root () in
+  let resolution = Lib.Config_dir_resolver.resolve_with inputs in
+  let dirs = Lib.Config_dir_resolver.personas_dirs_with inputs resolution in
+  (* Both config_personas and base_personas are different paths, so both appear *)
+  check bool "no exact duplicates"
+    (List.length dirs = List.length (List.sort_uniq String.compare dirs))
+    true;
+  check bool "config personas present"
+    (List.mem config_personas dirs) true
+
 let () =
   run "config_dir_resolver"
     [
@@ -158,5 +225,16 @@ let () =
           test_case "home masc fallback" `Quick test_home_masc_fallback;
           test_case "legacy me_root fallback" `Quick
             test_legacy_me_root_fallback;
+        ] );
+      ( "personas_dirs",
+        [
+          test_case "default returns repo personas only" `Quick
+            test_personas_dirs_default_repo_only;
+          test_case "includes HOME .masc/personas" `Quick
+            test_personas_dirs_includes_home;
+          test_case "MASC_PERSONAS_DIR overrides as sole source" `Quick
+            test_personas_dirs_env_override_is_sole_source;
+          test_case "dedup overlapping paths" `Quick
+            test_personas_dirs_dedup_overlapping;
         ] );
     ]

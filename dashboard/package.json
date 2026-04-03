@@ -17,6 +17,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@formkit/auto-animate": "^0.9.0",
     "@preact/signals": "^2.0.2",
     "dompurify": "^3.3.3",
     "downshift": "^9.3.2",
@@ -24,7 +25,9 @@
     "lucide-preact": "^1.7.0",
     "marked": "^17.0.5",
     "mermaid": "^11.12.0",
+    "ninja-keys": "^1.2.2",
     "preact": "^10.25.4",
+    "shiki": "^4.0.2",
     "vis-data": "^8.0.3",
     "vis-network": "^10.0.2",
     "vis-timeline": "^8.5.0"

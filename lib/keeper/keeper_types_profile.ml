@@ -273,11 +273,23 @@ let personas_root_opt () =
       None
 
 let persona_profile_path_opt name =
-  match personas_root_opt () with
-  | None -> None
-  | Some root ->
-      let path = Filename.concat (Filename.concat root name) "profile.json" in
-      if Sys.file_exists path then Some path else None
+  let dirs =
+    try
+      Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
+      Config_dir_resolver.personas_dirs ()
+    with
+    | Sys_error _ -> []
+    | exn ->
+        Log.Keeper.warn "personas_dirs unexpected: %s" (Printexc.to_string exn);
+        []
+  in
+  (* Search all persona dirs; later dirs (local) override earlier (repo).
+     We reverse so local ~/.masc/personas wins over config/personas. *)
+  dirs
+  |> List.rev
+  |> List.find_map (fun root ->
+         let path = Filename.concat (Filename.concat root name) "profile.json" in
+         if Sys.file_exists path then Some path else None)
 
 (* ================================================================ *)
 (* TOML -> keeper_profile_defaults conversion                        *)
@@ -539,19 +551,29 @@ let keeper_default_source_snapshot name : keeper_default_source_snapshot =
 (** Load extended persona description from AGENT.md if present.
     Truncated to [max_chars] to avoid bloating the system prompt. *)
 let load_persona_extended ?(max_chars = 4000) name : string option =
-  match personas_root_opt () with
-  | None -> None
-  | Some root ->
-    let path = Filename.concat (Filename.concat root name) "AGENT.md" in
-    if Sys.file_exists path then
-      match Safe_ops.read_file_safe path with
-      | Error _ -> None
-      | Ok content ->
-        let trimmed = String.trim content in
-        if String.length trimmed = 0 then None
-        else if String.length trimmed <= max_chars then Some trimmed
-        else Some (String.sub trimmed 0 max_chars ^ "\n[truncated]")
-    else None
+  let dirs =
+    try Config_dir_resolver.personas_dirs ()
+    with
+    | Sys_error _ -> []
+    | exn ->
+        Log.Keeper.warn "load_persona_extended personas_dirs unexpected: %s"
+          (Printexc.to_string exn);
+        []
+  in
+  (* Later dirs (local) override earlier (repo) *)
+  dirs
+  |> List.rev
+  |> List.find_map (fun root ->
+      let path = Filename.concat (Filename.concat root name) "AGENT.md" in
+      if Sys.file_exists path then
+        match Safe_ops.read_file_safe path with
+        | Error _ -> None
+        | Ok content ->
+          let trimmed = String.trim content in
+          if String.length trimmed = 0 then None
+          else if String.length trimmed <= max_chars then Some trimmed
+          else Some (String.sub trimmed 0 max_chars ^ "\n[truncated]")
+      else None)
 
 let load_persona_summary name : persona_summary option =
   match persona_profile_path_opt name with
@@ -580,16 +602,66 @@ let load_persona_summary name : persona_summary option =
               has_keeper_defaults;
             })
 
+let load_persona_summary_from_path name profile_path : persona_summary option =
+  match Safe_ops.read_json_file_safe profile_path with
+  | Error _ -> None
+  | Ok json ->
+      let display_name =
+        Safe_ops.json_string_opt "name" json |> Option.value ~default:name
+      in
+      let role = Safe_ops.json_string_opt "role" json in
+      let trait = Safe_ops.json_string_opt "trait" json in
+      let has_keeper_defaults =
+        match Yojson.Safe.Util.member "keeper" json with
+        | `Assoc _ -> true
+        | _ -> false
+      in
+      Some
+        {
+          persona_name = name;
+          display_name;
+          role;
+          trait;
+          profile_path;
+          has_keeper_defaults;
+        }
+
 let list_persona_summaries () : persona_summary list =
-  match personas_root_opt () with
-  | None -> []
-  | Some root ->
+  let dirs =
+    try Config_dir_resolver.personas_dirs ()
+    with
+    | Sys_error _ -> []
+    | exn ->
+        Log.Keeper.warn "list_persona_summaries personas_dirs unexpected: %s"
+          (Printexc.to_string exn);
+        []
+  in
+  let entries_from_dir root =
+    try
       root
       |> Sys.readdir
       |> Array.to_list
       |> List.filter validate_name
-      |> List.filter_map load_persona_summary
-      |> List.sort (fun a b -> String.compare a.persona_name b.persona_name)
+      |> List.filter_map (fun name ->
+             let profile_path =
+               Filename.concat (Filename.concat root name) "profile.json"
+             in
+             if Sys.file_exists profile_path then Some (name, profile_path)
+             else None)
+    with Sys_error _ -> []
+  in
+  (* Collect all persona (name, path) from all dirs; later dirs override *)
+  let seen = Hashtbl.create 32 in
+  let all_entries =
+    dirs
+    |> List.concat_map entries_from_dir
+    |> List.filter (fun (name, _) ->
+           if Hashtbl.mem seen name then false
+           else (Hashtbl.add seen name (); true))
+  in
+  all_entries
+  |> List.filter_map (fun (name, path) -> load_persona_summary_from_path name path)
+  |> List.sort (fun a b -> String.compare a.persona_name b.persona_name)
 
 let keeper_dir (config : Room.config) =
   let d = Filename.concat (Room.masc_root_dir config) "keepers" in

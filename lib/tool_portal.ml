@@ -10,6 +10,19 @@ type context = {
 
 type result = bool * string
 
+let filter_visible_tool_names ctx tool_names =
+  let portal_open =
+    Option.is_some (Room.get_portal_target ctx.config ~agent_name:ctx.agent_name)
+  in
+  List.filter
+    (fun name ->
+      match name with
+      | "masc_portal_status" -> true
+      | "masc_portal_open" -> not portal_open
+      | "masc_portal_send" | "masc_portal_close" -> portal_open
+      | _ -> true)
+    tool_names
+
 (* Individual handlers *)
 let handle_portal_open ctx args =
   let target_agent = get_string args "target_agent" "" in

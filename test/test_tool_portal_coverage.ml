@@ -7,6 +7,24 @@ let () = Random.self_init ()
 
 module Tool_portal = Masc_mcp.Tool_portal
 
+let temp_dir () =
+  let dir = Filename.temp_file "test_tool_portal_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  try rm dir with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+
 (* ============================================================
    Argument Helper Tests
    ============================================================ *)
@@ -92,6 +110,48 @@ let test_dispatch_unknown_tool () =
   | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
+let test_filter_visible_tool_names_without_portal () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "test-agent"));
+      let ctx : Tool_portal.context = { config; agent_name = "test-agent" } in
+      let visible =
+        Tool_portal.filter_visible_tool_names ctx
+          [ "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
+            "masc_portal_status"; "keeper_tasks_list" ]
+      in
+      check (list string) "closed portal keeps open+status"
+        [ "masc_portal_open"; "masc_portal_status"; "keeper_tasks_list" ]
+        visible)
+
+let test_filter_visible_tool_names_with_portal () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (Masc_mcp.Room.init config ~agent_name:(Some "test-agent"));
+      ignore
+        (Masc_mcp.Room.portal_open_r config ~agent_name:"test-agent"
+           ~target_agent:"claude-002" ~initial_message:None);
+      let ctx : Tool_portal.context = { config; agent_name = "test-agent" } in
+      let visible =
+        Tool_portal.filter_visible_tool_names ctx
+          [ "masc_portal_open"; "masc_portal_send"; "masc_portal_close";
+            "masc_portal_status"; "keeper_tasks_list" ]
+      in
+      check (list string) "open portal keeps send+close+status"
+        [ "masc_portal_send"; "masc_portal_close"; "masc_portal_status";
+          "keeper_tasks_list" ]
+        visible)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -116,5 +176,9 @@ let () =
       test_case "portal_close" `Quick test_dispatch_portal_close;
       test_case "portal_status" `Quick test_dispatch_portal_status;
       test_case "unknown" `Quick test_dispatch_unknown_tool;
+      test_case "filter visible without portal" `Quick
+        test_filter_visible_tool_names_without_portal;
+      test_case "filter visible with portal" `Quick
+        test_filter_visible_tool_names_with_portal;
     ];
   ]

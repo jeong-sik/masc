@@ -219,7 +219,23 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       Log.Keeper.info
         "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"
         config.base_path masc_root keeper_dir all_count;
-      let names = Keeper_types.keepalive_keeper_names config in
+      let all_names = Keeper_types.keepalive_keeper_names config in
+    (* Cap concurrent keepers to prevent Eio event loop starvation.
+       Each keeper heartbeat cycle does CPU-bound snapshot construction +
+       LLM API calls.  With 9+ concurrent keepers, the single-domain Eio
+       scheduler cannot service HTTP handlers between keeper fibers.
+       Configurable via MASC_KEEPER_AUTOBOOT_MAX (default 3). *)
+    let max_boot =
+      Keeper_config.int_of_env_default
+        "MASC_KEEPER_AUTOBOOT_MAX" ~default:3 ~min_v:1 ~max_v:20
+    in
+    let names =
+      if List.length all_names > max_boot then begin
+        Log.Keeper.warn "autoboot: capping %d keepers to max %d (MASC_KEEPER_AUTOBOOT_MAX)"
+          (List.length all_names) max_boot;
+        List.filteri (fun i _ -> i < max_boot) all_names
+      end else all_names
+    in
     Log.Keeper.info "autoboot: %d keeper(s) to boot: [%s]"
       (List.length names) (String.concat ", " names);
     let booted = ref 0 in

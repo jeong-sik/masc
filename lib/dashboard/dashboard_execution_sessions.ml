@@ -175,7 +175,10 @@ let build_session_seed session_json session_cards =
         goal =
           trim_to_option (string_field "goal" meta)
           |> Option.value ~default:session_id;
-        room = trim_to_option (string_field "room_id" meta);
+        namespace =
+          (match trim_to_option (string_field "namespace_id" meta) with
+          | Some _ as value -> value
+          | None -> trim_to_option (string_field "room_id" meta));
         status = session_status_string session_json;
         health =
           (match session_card with
@@ -285,7 +288,9 @@ let build_session_contexts seeds operation_contexts : session_context list =
                [
                  ("session_id", `String seed.session_id);
                  ("goal", `String seed.goal);
-                 ("room", json_string_option seed.room);
+                 ("namespace", json_string_option seed.namespace);
+                 (* Legacy room alias now mirrors the flattened namespace. *)
+                 ("room", json_string_option seed.namespace);
                  ("status", `String seed.status);
                  ("health", `String seed.health);
                  ( "member_names",

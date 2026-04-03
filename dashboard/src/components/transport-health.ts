@@ -412,6 +412,10 @@ export function TransportHealthPanel() {
   const managedUnitsSub = data.cluster.topology_available
     ? `${formatMetricValue(data.cluster.total_units)} 전체`
     : `topology ${data.cluster.topology_source}`
+  const namespaceChip =
+    data.cluster.cluster && data.cluster.cluster !== 'unknown' && data.cluster.cluster !== 'default'
+      ? `${data.cluster.cluster} / namespace ${data.cluster.room_id}`
+      : `namespace ${data.cluster.room_id}`
 
   return html`
     <div class="space-y-4">
@@ -419,7 +423,7 @@ export function TransportHealthPanel() {
         <div>
           <div class="flex items-center gap-2">
             <span class="text-base text-text-strong">트랜스포트</span>
-            <span class="text-[10px] uppercase tracking-wider text-text-muted">${data.cluster.cluster && data.cluster.cluster !== 'unknown' && data.cluster.cluster !== 'default' ? `${data.cluster.cluster} / ` : ''}${data.cluster.room_id}</span>
+            <span class="text-[10px] uppercase tracking-wider text-text-muted">${namespaceChip}</span>
           </div>
           <div class="mt-1 text-sm text-text-body">
             primary path: <span class="font-mono text-text-strong">${data.summary.primary_path}</span>

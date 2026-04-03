@@ -24,9 +24,9 @@ let create () =
     shared_sessions_at = 0.0;
   }
 
-let default_state : t Lazy.t = lazy (create ())
+let default_state : t = create ()
 
-let default () = Lazy.force default_state
+let default () = default_state
 
 let set_executor_pool pool = Executor_pool_ref.set pool
 

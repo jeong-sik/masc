@@ -373,6 +373,7 @@ export interface DashboardProofBackingEvidence {
 export interface DashboardProofResponse {
   schema_version?: string
   generated_at?: string
+  namespace?: Record<string, unknown>
   room?: Record<string, unknown>
   selection?: DashboardProofSelection
   session_id?: string | null

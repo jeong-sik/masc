@@ -79,6 +79,7 @@ let room_strategy_json config =
   let state = Room.read_state config in
   `Assoc
     [
+      ("namespace_id", `String (Room.current_room_id config));
       ("room_id", `String (Room.current_room_id config));
       ("search_strategy_default",
        Json_util.string_opt_to_json state.search_strategy_default);
@@ -269,7 +270,7 @@ let status_summary_string (ctx : context) =
     []
     |> fun items ->
     if not joined then
-      items @ [ "You are not joined in this room. Call masc_join." ]
+      items @ [ "You are not joined in the project namespace. Call masc_join." ]
     else
       items
     |> fun items ->
@@ -281,7 +282,7 @@ let status_summary_string (ctx : context) =
     |> fun items ->
     if zombie_count > 0 then
       items
-      @ [ Printf.sprintf "%d stale agent(s) are still visible in the room."
+      @ [ Printf.sprintf "%d stale agent(s) are still visible in the namespace."
             zombie_count ]
     else
       items
@@ -485,6 +486,7 @@ let inspect_state ctx =
 
 let state_to_json st =
   `Assoc [
+    ("namespace_ready", `Bool st.room_set);
     ("room_set", `Bool st.room_set);
     ("joined", `Bool st.joined);
     ("task_claimed", `Bool st.task_claimed);
@@ -515,15 +517,15 @@ let handle_workflow_guide ctx _args =
 
 let check_assertion st assertion =
   let (passed, fix_hint) = match assertion with
-    | "room_set" ->
+    | "namespace_ready" | "room_set" ->
         (st.room_set,
-         "Call masc_set_room with your project root path")
+         "Call masc_start with your project root path. masc_set_room remains only as a compatibility alias.")
     | "joined" ->
         (st.joined,
-         "Call masc_join to register your agent in the room")
+         "Call masc_join to register your agent in the project namespace")
     | "task_claimed" ->
         (st.task_claimed,
-         "Call masc_claim to get a task")
+         "Claim a task with masc_transition(action=claim) or masc_claim_next")
     | "current_task_set" ->
         (st.current_task_set,
          "Call masc_plan_set_task after claim paths that did not auto-bind current_task (for example masc_transition(action=claim))")
@@ -593,10 +595,12 @@ let schemas = Tool_schemas_room.schemas
 (* ================================================================ *)
 
 let _tool_spec_read_only = [ "masc_status" ]
+let _tool_spec_system_internal = [ "masc_init"; "masc_reset" ]
 
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
+      let is_system = List.mem s.name _tool_spec_system_internal in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -605,5 +609,7 @@ let () =
            ~input_schema:s.input_schema
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
+           ~allow_direct_call_when_hidden:is_system
            ()))
     schemas

@@ -624,6 +624,21 @@ let test_rooms_root_dir_with_cluster () =
   let result = Room_utils.rooms_root_dir cfg in
   check string "rooms with cluster" "/home/user/.masc/clusters/staging/rooms" result
 
+let test_list_dir_prefers_backend_for_memory_keys () =
+  let scratch = Filename.temp_dir "room-utils-list-dir-memory" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
+      let workers_dir = Filename.concat (Room_utils.masc_root_dir cfg) "workers" in
+      Room_utils.write_json cfg
+        (Filename.concat workers_dir "backend.json")
+        (`Assoc [ ("ok", `Bool true) ]);
+      write_file (Filename.concat workers_dir "rogue.json") "{}";
+      let listed = Room_utils.list_dir cfg workers_dir |> List.sort String.compare in
+      check (list string) "memory backend ignores local-only stale files"
+        [ "backend.json" ] listed)
+
 let test_read_current_room_warns_once_for_legacy_state () =
   let scratch = Filename.temp_dir "room-utils-legacy" "" in
   Fun.protect
@@ -793,6 +808,8 @@ let () =
       test_case "current_room_root_path" `Quick test_current_room_root_path;
       test_case "masc_root_dir nested with cluster" `Quick test_masc_root_dir_with_cluster_nested;
       test_case "rooms_root_dir with cluster" `Quick test_rooms_root_dir_with_cluster;
+      test_case "list_dir prefers backend for memory keys" `Quick
+        test_list_dir_prefers_backend_for_memory_keys;
       test_case "read_current_room warns once for legacy state" `Quick
         test_read_current_room_warns_once_for_legacy_state;
       test_case "read_current_room caches legacy rooms" `Quick

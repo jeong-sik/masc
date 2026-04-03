@@ -547,6 +547,7 @@
           test_command_plane_v2_support
           test_command_plane_v2_policy_inputs
           test_command_plane_v2_traces
+          test_command_plane_v2_summary
           test_command_plane_v2_scheduler_core_a
           test_command_plane_v2_scheduler_core_b
           test_command_plane_v2_scheduler_policy
@@ -585,7 +586,19 @@
  (modules test_dashboard_collaboration_evidence test_tool_team_session_support)
  (libraries masc_test_deps))
 
-; MCP Tool Matrix (2 modules + runner dep)
+; Normalized actor (operator_pending_confirm)
+(test
+ (name test_normalized_actor)
+ (modules test_normalized_actor)
+ (libraries masc_test_deps))
+
+; Failover leader deterministic selection
+(test
+ (name test_failover_leader)
+ (modules test_failover_leader)
+ (libraries masc_test_deps))
+
+; MCP Tool Matrix (2 modules + generated names + runner dep)
 (test
  (name test_mcp_tool_matrix)
  (modules test_mcp_tool_matrix test_mcp_tool_matrix_cases)

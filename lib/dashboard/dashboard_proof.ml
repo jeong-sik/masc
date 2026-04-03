@@ -239,6 +239,7 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
     [
       ("schema_version", `String "1.0.0");
       ("generated_at", `String (Types.now_iso ()));
+      ("namespace", Dashboard_proof_verdict.namespace_json config);
       ("room", Dashboard_proof_verdict.room_json config);
       ( "selection",
         Dashboard_proof_verdict.selection_json ~requested_session_id

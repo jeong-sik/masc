@@ -174,7 +174,8 @@ export function normalizeExecutionSessionBrief(raw: unknown): DashboardExecution
   return {
     session_id: sessionId,
     goal,
-    room: asString(raw.room) ?? null,
+    namespace: asString(raw.namespace) ?? asString(raw.room) ?? null,
+    room: asString(raw.room) ?? asString(raw.namespace) ?? null,
     status: asString(raw.status),
     health: asString(raw.health),
     member_names: asStringArray(raw.member_names),

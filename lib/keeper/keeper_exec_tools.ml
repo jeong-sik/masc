@@ -848,14 +848,23 @@ let execute_keeper_tool_call
         | Some (false, msg) ->
             Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
         | None ->
-            (* Phase 2: Handler returned None — try tag-based dispatch.
+            (* Phase 2: Block MCP-session-only tools early — keepers lack
+               MCP session context so these always fail. #4775 *)
+            if Tool_dispatch.is_mcp_context_required name then
+              Yojson.Safe.to_string
+                (`Assoc [ ("error",
+                           `String (Printf.sprintf
+                              "tool '%s' requires MCP session (use keeper_* equivalent)" name)) ])
+            else
+            (* Phase 3: Handler returned None — try tag-based dispatch.
                Most masc_* tools are only in tag_registry, not handler_registry.
                tag_dispatch_fn is set to Keeper_tag_dispatch.dispatch at server
                init (mcp_server_eio.ml) to break the dependency cycle. #4579 *)
             (match Tool_dispatch.lookup_tag name with
              | Some tag ->
+                 let keeper_agent = Printf.sprintf "keeper-%s" meta.name in
                  (match !tag_dispatch_fn
-                          ~config ~agent_name:meta.name ~tag ~name ~args with
+                          ~config ~agent_name:keeper_agent ~tag ~name ~args with
                   | Some (true, msg) -> msg
                   | Some (false, msg) ->
                       Yojson.Safe.to_string

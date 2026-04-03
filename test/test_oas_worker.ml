@@ -654,13 +654,64 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
       Alcotest.(check bool) "handoff json absent" false
         (Option.is_some rollover.handoff_json))
 
-let test_overflow_retry_legacy_restore_failure_returns_none () =
-  let base_dir = temp_dir "keeper_overflow_retry_legacy_fail" in
+let test_overflow_retry_legacy_restore_failure_falls_back_to_oas () =
+  let base_dir = temp_dir "keeper_overflow_retry_legacy_fallback" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       Fs_compat.clear_fs ();
       let meta = make_keeper_meta ~trace_id:"trace-overflow-legacy-fail" () in
+      let session =
+        Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
+      in
+      let noisy_tool_output = String.make 4000 'x' in
+      let ctx =
+        Keeper_exec_context.create ~system_prompt:"legacy" ~max_tokens:4096
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "legacy")
+        |> fun ctx ->
+        Keeper_exec_context.append ctx (tool_result_msg noisy_tool_output)
+        |> Keeper_exec_context.sync_oas_context
+      in
+      ignore
+        (Keeper_exec_context.save_oas_checkpoint ~session
+           ~agent_name:meta.agent_name
+           ~model:"llama:auto" ~ctx
+           ~generation:11);
+      let bad_legacy =
+        {
+          (Keeper_exec_context.create_checkpoint ctx ~generation:19) with
+          timestamp = Time_compat.now () +. 10.0;
+          serialized = "\"broken-context\"";
+        }
+      in
+      Keeper_exec_context.save_session_checkpoint session bad_legacy;
+      match
+        Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
+          ~base_dir ~meta ~model:"llama:auto"
+          ~primary_model_max_tokens:256
+      with
+      | None ->
+          Alcotest.fail
+            "expected overflow retry recovery to fall back to OAS checkpoint"
+      | Some recovery ->
+          let recovered_ctx =
+            Keeper_exec_context.context_of_oas_checkpoint recovery.checkpoint
+              ~primary_model_max_tokens:256
+          in
+          Alcotest.(check int) "fallback uses OAS generation" 11
+            recovery.turn_generation;
+          Alcotest.(check bool) "compacted from OAS fallback" true
+            (Keeper_exec_context.token_count recovered_ctx
+             < Keeper_exec_context.token_count ctx))
+
+let test_overflow_retry_legacy_restore_failure_returns_none_without_oas () =
+  let base_dir = temp_dir "keeper_overflow_retry_legacy_fail" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let meta = make_keeper_meta ~trace_id:"trace-overflow-legacy-only" () in
       let session =
         Keeper_exec_context.create_session ~session_id:meta.runtime.trace_id ~base_dir
       in
@@ -684,7 +735,7 @@ let test_overflow_retry_legacy_restore_failure_returns_none () =
       | None -> ()
       | Some _ ->
           Alcotest.fail
-            "expected overflow retry recovery to skip broken legacy checkpoint")
+            "expected overflow retry recovery to skip broken legacy checkpoint without OAS fallback")
 
 let test_overflow_retry_requires_meaningful_reduction () =
   let base_dir = temp_dir "keeper_overflow_retry_noop" in
@@ -939,8 +990,10 @@ let () =
         test_keeper_oas_handoff_rollover_increments_generation;
       Alcotest.test_case "OAS handoff rollover noops below threshold" `Quick
         test_keeper_oas_handoff_rollover_below_threshold_noop;
-      Alcotest.test_case "overflow retry skips broken legacy checkpoint" `Quick
-        test_overflow_retry_legacy_restore_failure_returns_none;
+      Alcotest.test_case "overflow retry falls back to OAS after broken legacy restore" `Quick
+        test_overflow_retry_legacy_restore_failure_falls_back_to_oas;
+      Alcotest.test_case "overflow retry skips broken legacy checkpoint without OAS" `Quick
+        test_overflow_retry_legacy_restore_failure_returns_none_without_oas;
       Alcotest.test_case "overflow retry requires meaningful reduction" `Quick
         test_overflow_retry_requires_meaningful_reduction;
       Alcotest.test_case "overflow retry saves compacted checkpoint" `Quick

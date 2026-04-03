@@ -860,7 +860,17 @@ let recover_latest_checkpoint_for_overflow_retry
              Log.Keeper.error
                "keeper:%s overflow retry legacy checkpoint restore failed: %s"
                meta.runtime.trace_id (Printexc.to_string exn);
-             None)
+             (match oas_checkpoint with
+              | Some checkpoint ->
+                  let turn_generation =
+                    checkpoint_generation checkpoint
+                      ~fallback:meta.runtime.generation
+                  in
+                  Some
+                    ( context_of_oas_checkpoint checkpoint
+                        ~primary_model_max_tokens,
+                      turn_generation )
+              | None -> None))
     | _ -> None
   in
   match selected with

@@ -10,6 +10,15 @@ open Keeper_types
 open Keeper_exec_context
 module Social = Keeper_social_model
 
+let substring_matches_at ~(needle : string) (haystack : string) start_idx =
+  let needle_len = String.length needle in
+  let rec loop offset =
+    if offset = needle_len then true
+    else if haystack.[start_idx + offset] <> needle.[offset] then false
+    else loop (offset + 1)
+  in
+  loop 0
+
 let string_contains_substring ~(needle : string) (haystack : string) : bool =
   let needle_len = String.length needle in
   let hay_len = String.length haystack in
@@ -18,7 +27,7 @@ let string_contains_substring ~(needle : string) (haystack : string) : bool =
   else
     let rec loop i =
       if i + needle_len > hay_len then false
-      else if String.sub haystack i needle_len = needle then true
+      else if substring_matches_at ~needle haystack i then true
       else loop (i + 1)
     in
     loop 0
@@ -34,7 +43,7 @@ let find_substring ~(needle : string) (haystack : string) : int option =
   let rec loop i =
     if needle_len = 0 then Some 0
     else if i + needle_len > hay_len then None
-    else if String.sub haystack i needle_len = needle then Some i
+    else if substring_matches_at ~needle haystack i then Some i
     else loop (i + 1)
   in
   loop 0
@@ -85,11 +94,16 @@ let context_overflow_limit (msg : string) : int option =
 let should_attempt_context_overflow_retry (msg : string) : bool =
   Option.is_some (context_overflow_limit msg)
 
+type overflow_retry_plan = {
+  retry_max_context : int;
+  retry_generation : int;
+}
+
 let recover_context_overflow_retry
     ~(meta : keeper_meta)
     ~(base_dir : string)
     ~(primary_max_context : int)
-    ~(error : string) : int option =
+    ~(error : string) : overflow_retry_plan option =
   match context_overflow_limit error with
   | None -> None
   | Some actual_limit ->
@@ -109,7 +123,11 @@ let recover_context_overflow_retry
             meta.name recovery.compaction.before_tokens
             recovery.compaction.after_tokens
             retry_max_context recovery.turn_generation;
-          Some retry_max_context
+          Some
+            {
+              retry_max_context;
+              retry_generation = recovery.turn_generation;
+            }
       | None ->
           Log.Keeper.warn
             "%s: context overflow detected but checkpoint recovery was unavailable: %s"
@@ -651,11 +669,11 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       (* 5. Run via OAS Agent.run() with transient-error retry *)
       let run_result, latency_ms =
         Keeper_exec_context.timed (fun () ->
-          let do_run ~max_context ~is_retry =
-            Keeper_agent_run.run_turn ~config ~meta ~base_dir
+          let do_run ~run_meta ~max_context ~run_generation ~is_retry =
+            Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:"keeper_unified"
-              ~generation ~max_turns
+              ~generation:run_generation ~max_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
@@ -663,9 +681,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_retry
               ()
           in
-          let rec retry_loop ~max_context ~attempt ~is_retry
+          let rec retry_loop ~run_meta ~max_context ~run_generation
+              ~attempt ~is_retry
               ~overflow_retry_used =
-            match do_run ~max_context ~is_retry with
+            match do_run ~run_meta ~max_context ~run_generation ~is_retry with
             | Ok _ as ok -> ok
             | Error e when is_transient_network_error e
                            && attempt <= max_transient_retries ->
@@ -675,7 +694,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   meta.name attempt max_transient_retries delay
                   (short_preview e);
                 Eio.Time.sleep (Eio_context.get_clock ()) delay;
-                retry_loop ~max_context ~attempt:(attempt + 1)
+                retry_loop ~run_meta ~max_context ~run_generation
+                  ~attempt:(attempt + 1)
                   ~is_retry:true ~overflow_retry_used
             | Error e when (not overflow_retry_used)
                            && should_attempt_context_overflow_retry e -> (
@@ -683,14 +703,26 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   recover_context_overflow_retry ~meta ~base_dir
                     ~primary_max_context ~error:e
                 with
-                | Some retry_max_context ->
+                | Some retry_plan ->
+                    let retry_meta =
+                      if retry_plan.retry_generation = run_meta.runtime.generation
+                      then run_meta
+                      else
+                        map_runtime
+                          (fun rt ->
+                            { rt with generation = retry_plan.retry_generation })
+                          run_meta
+                    in
                     Eio.Fiber.yield ();
-                    retry_loop ~max_context:retry_max_context ~attempt:1
+                    retry_loop ~run_meta:retry_meta
+                      ~max_context:retry_plan.retry_max_context
+                      ~run_generation:retry_plan.retry_generation ~attempt:1
                       ~is_retry:true ~overflow_retry_used:true
                 | None -> Error e)
             | Error e -> Error e
           in
-          retry_loop ~max_context:primary_max_context ~attempt:1
+          retry_loop ~run_meta:meta ~max_context:primary_max_context
+            ~run_generation:generation ~attempt:1
             ~is_retry:false ~overflow_retry_used:false)
       in
       match run_result with

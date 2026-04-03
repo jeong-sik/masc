@@ -482,8 +482,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_audit.dispatch { Tool_audit.config } ~name ~args:arguments
     | Mod_cost ->
         Tool_cost.dispatch { Tool_cost.agent_name = agent_name } ~name ~args:arguments
-    | Mod_encryption ->
-        Tool_encryption.dispatch { Tool_encryption.state } ~name ~args:arguments
     | Mod_fire_task ->
         Tool_fire_task.dispatch { Tool_fire_task.config; agent_name; sw } ~name ~args:arguments
     | Mod_cache ->
@@ -494,8 +492,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_rate_limit.dispatch { Tool_rate_limit.config; agent_name; registry } ~name ~args:arguments
     | Mod_run ->
         Tool_run.dispatch { Tool_run.config } ~name ~args:arguments
-    | Mod_tempo ->
-        Tool_tempo.dispatch { Tool_tempo.config; agent_name } ~name ~args:arguments
     | Mod_goals ->
         Tool_goals.dispatch { Tool_goals.config; agent_name; call_keeper_msg = None } ~name ~args:arguments
     | Mod_compact ->

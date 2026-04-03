@@ -607,18 +607,18 @@ let test_room_bootstrap_preserves_backend_state () =
     Alcotest.(check int) "backlog preserved" 7 saved_backlog.version
   )
 
-let test_room_bootstrap_rejects_invalid_room_id () =
+let test_room_bootstrap_ignores_invalid_room_id_in_flat_mode () =
   with_memory_test_env (fun config ->
-    Alcotest.check_raises "invalid room id rejected"
-      (Invalid_argument "invalid room_id: Room id cannot contain path separators")
-      (fun () -> Room.ensure_room_bootstrap config "../escape")
+    Room.ensure_room_bootstrap config "../escape";
+    Alcotest.(check bool) "root state initialized" true
+      (Room.is_initialized config)
   )
 
-let test_write_current_room_rejects_invalid_room_id () =
+let test_write_current_room_ignores_invalid_room_id_in_flat_mode () =
   with_memory_test_env (fun config ->
-    Alcotest.check_raises "invalid current room id rejected"
-      (Invalid_argument "invalid room_id: Room id cannot contain path separators")
-      (fun () -> Room.write_current_room config "../escape")
+    Room.write_current_room config "../escape";
+    Alcotest.(check (option string)) "current room stays default" (Some "default")
+      (Room.read_current_room config)
   )
 
 let test_heartbeat_nonexistent_agent () =
@@ -1589,8 +1589,8 @@ let () =
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
       Alcotest.test_case "backend bootstrap preserves room state" `Quick test_room_bootstrap_preserves_backend_state;
-      Alcotest.test_case "bootstrap rejects invalid room id" `Quick test_room_bootstrap_rejects_invalid_room_id;
-      Alcotest.test_case "write current room rejects invalid room id" `Quick test_write_current_room_rejects_invalid_room_id;
+      Alcotest.test_case "bootstrap ignores invalid room id in flat mode" `Quick test_room_bootstrap_ignores_invalid_room_id_in_flat_mode;
+      Alcotest.test_case "write current room ignores invalid room id in flat mode" `Quick test_write_current_room_ignores_invalid_room_id_in_flat_mode;
       Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
       Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
       Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;

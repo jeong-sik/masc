@@ -465,10 +465,7 @@ let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
 
 let invalidate_snapshot_cache () = _snapshot_cache := None
 
-let room_scope_cache_segment (config : Room_utils.config) =
-  match config.scope with
-  | Room_utils_backend_setup.Default -> "default"
-  | Room_utils_backend_setup.Named room_id -> "room:" ^ room_id
+let room_scope_cache_segment (_config : Room_utils.config) = "default"
 
 let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
     ?(include_keepers = true) ?(include_summary_fields = true)

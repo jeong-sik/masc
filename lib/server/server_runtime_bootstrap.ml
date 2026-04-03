@@ -162,15 +162,56 @@ let migrate_legacy_dirs (state : Mcp_server.server_state) =
 let migrate_legacy_keeper_dirs_blocking (state : Mcp_server.server_state) =
   migrate_legacy_dirs_with_renames state [ ("resident-keepers", "keepers") ]
 
+let default_room_for_flat_migration = "focus-room"
+
+let load_current_room_or_default masc_root =
+  let path = Filename.concat masc_root "current_room" in
+  if not (Sys.file_exists path) then
+    default_room_for_flat_migration
+  else
+    match Safe_ops.read_file_safe path with
+    | Error msg ->
+        Log.Misc.warn
+          "migrate: failed to read %s (%s); falling back to %s"
+          path msg default_room_for_flat_migration;
+        default_room_for_flat_migration
+    | Ok raw -> (
+        match Room.validate_room_id (String.trim raw) with
+        | Ok room_id -> room_id
+        | Error msg ->
+            Log.Misc.warn
+              "migrate: ignoring invalid current_room in %s (%s); falling back to %s"
+              path msg default_room_for_flat_migration;
+            default_room_for_flat_migration)
+
+let migrate_room_to_flat (state : Mcp_server.server_state) =
+  let masc_root = Room.masc_root_dir state.room_config in
+  let rooms_dir = Filename.concat masc_root "rooms" in
+  if not (Sys.file_exists rooms_dir) then ()
+  else begin
+    let current_room = load_current_room_or_default masc_root in
+    let room_dir = Filename.concat rooms_dir current_room in
+    if Sys.file_exists room_dir && Sys.is_directory room_dir then begin
+      Log.Misc.info "migrate: flattening room %s to .masc/ root" current_room;
+      migrate_legacy_dirs_with_renames state
+        [ (Filename.concat "rooms" current_room, ".") ]
+    end else
+      Log.Misc.warn "migrate: rooms/ exists but active room %s not found" current_room
+  end
+
 let migrate_legacy_trace_dirs (state : Mcp_server.server_state) =
   migrate_legacy_dirs_with_renames state [ ("perpetual", "traces") ]
 
 let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
-  let (_init_msg : string) = Room.init state.room_config ~agent_name:None in
+  (* Promote legacy room/keeper state before Room.init seeds fresh root files.
+     Otherwise state.json/backlog.json can be created in the destination first
+     and valid legacy data gets quarantined as a conflict on upgrade. *)
+  migrate_room_to_flat state;
   (* Promote legacy keeper metadata before any startup readers scan .masc/keepers.
      Keeper autoboot and other bootstrap readers should see the canonical paths
      on their first pass, not rely on a later lazy migration task. *)
   migrate_legacy_keeper_dirs_blocking state;
+  let (_init_msg : string) = Room.init state.room_config ~agent_name:None in
   Mcp_server.set_sse_callback state Sse.broadcast
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =

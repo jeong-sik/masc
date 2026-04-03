@@ -31,6 +31,7 @@ let max_findings = 5
 let max_tasks = 10
 let findings_tail_max_bytes = 256 * 1024
 
+(** Return the last [n] items without reversing the full list. *)
 let take_last n items =
   if n <= 0 then []
   else
@@ -102,6 +103,9 @@ let load_findings ~base_path ~team_session_id : string list =
                     | Some idx ->
                         String.sub tail_chunk (idx + 1)
                           (String.length tail_chunk - idx - 1)
+                    (* If the bounded tail does not contain a full line boundary,
+                       the remaining bytes are only a partial JSONL record and
+                       must be dropped. *)
                     | None -> ""
                 in
                 line_aligned_chunk

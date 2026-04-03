@@ -43,7 +43,7 @@ let check_file_size ?max_bytes path : (unit, string) result =
     | Some limit -> limit
     | None -> default_max_file_read_bytes
   in
-  if limit < 0 then invalid_arg "check_file_size: max_bytes must be >= 0"
+  if limit < 0 then invalid_arg "check_file_size: max_bytes must not be negative"
   else
     try
       let size = (Unix.stat path).Unix.st_size in

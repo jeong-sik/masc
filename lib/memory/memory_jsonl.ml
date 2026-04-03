@@ -102,6 +102,7 @@ let warn_if_large path =
       Log.Memory.warn "memory_jsonl: file %s is %d bytes (>50MB)" path size
   with Unix.Unix_error _ -> ()
 
+(** Fold parsed JSONL entries from disk without loading the whole file. *)
 let fold_entries ~path ~init f =
   if not (Fs_compat.file_exists path) then init
   else begin

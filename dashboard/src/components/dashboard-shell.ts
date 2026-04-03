@@ -429,7 +429,7 @@ function SurfaceLead() {
               ${currentSection?.label ?? currentView?.label ?? '홈'}
             </h2>
             ${sections.length > 0
-              ? html`<span class="text-[12px] text-[var(--text-muted)]">${sections.length}개 section</span>`
+              ? html`<span class="text-[12px] text-[var(--text-muted)]">${sections.length}개 섹션</span>`
               : null}
           </div>
 

@@ -665,7 +665,10 @@ let run_turn
     Agent_sdk.Context_reducer.keep_last 30;
     Agent_sdk.Context_reducer.clear_tool_results ~keep_recent:2;
     Agent_sdk.Context_reducer.merge_contiguous;
-    Agent_sdk.Context_reducer.from_context_config ~max_tokens ();
+    (* max_context = model's input context window (e.g., 8192 for 8K models).
+       max_tokens = output generation limit (e.g., 2048).
+       The reducer needs the context window, not the output budget. *)
+    Agent_sdk.Context_reducer.from_context_config ~max_tokens:max_context ();
   ] in
   (* 8. Run Agent *)
   let contract =

@@ -103,6 +103,31 @@ let strict_guard_cases =
     ("masc_reset", [ "confirm" ]);
   ]
 
+let endpoint_unavailable_guard_names =
+  [
+    "masc_approve";
+    "masc_branch";
+    "masc_interrupt";
+    "masc_pending_interrupts";
+    "masc_reject";
+  ]
+
+let endpoint_unavailable_guard_fragments =
+  [
+    "not available on this MCP endpoint";
+  ]
+
+let generic_matrix_excluded_names =
+  [
+    "masc_keeper_msg";
+    "masc_observe_topology";
+    "masc_operator_snapshot";
+    "masc_policy_status";
+    "masc_repo_synthesis_swarm_start";
+    "masc_tool_admin_snapshot";
+    "masc_unit_define";
+  ]
+
 let string_starts_with ~prefix s =
   let plen = String.length prefix in
   let slen = String.length s in
@@ -273,8 +298,7 @@ let ensure_joined fixture =
   | false, body when contains_substring body "already joined" -> ()
   | false, body -> failwith ("masc_join failed: " ^ body)
 
-let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock init_mode =
-  let base_path = temp_dir "mcp-tool-matrix-" in
+let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let worktree_dir = setup_git_repo base_path in
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
@@ -839,6 +863,8 @@ let case_for_name name =
     | None ->
         if List.mem name strict_success_names then
           Expect_success
+        else if List.mem name endpoint_unavailable_guard_names then
+          Expect_guard endpoint_unavailable_guard_fragments
         else if List.mem name all_known_tool_names then
           Expect_success_or_guard (guard_fragments_for_name name)
         else
@@ -956,6 +982,7 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
   let saved_home = Sys.getenv_opt "HOME" in
   let saved_env =
     [
+      ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
       ("MASC_STORAGE_TYPE", Sys.getenv_opt "MASC_STORAGE_TYPE");
       ("MASC_POSTGRES_URL", Sys.getenv_opt "MASC_POSTGRES_URL");
       ("DATABASE_URL", Sys.getenv_opt "DATABASE_URL");
@@ -968,8 +995,10 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
   Unix.putenv "DATABASE_URL" "";
   Unix.putenv "SUPABASE_DB_URL" "";
   Unix.putenv "SB_PG_URL" "";
+  let base_path = temp_dir "mcp-tool-matrix-" in
+  Unix.putenv "MASC_BASE_PATH" base_path;
   let fixture =
-    make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock
+    make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path
       (case_for_name schema.Types.name).init_mode
   in
   let result =

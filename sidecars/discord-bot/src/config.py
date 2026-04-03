@@ -24,10 +24,20 @@ class BotConfig(BaseSettings):
     )
     masc_mcp_url: str = Field(
         default="http://localhost:8935",
-        validation_alias=AliasChoices("MASC_MCP_URL", "masc_mcp_url"),
+        validation_alias=AliasChoices(
+            "MASC_MCP_URL",
+            "masc_mcp_url",
+            "GATE_BASE_URL",
+            "gate_base_url",
+        ),
     )
     masc_api_token: str = Field(
-        validation_alias=AliasChoices("MASC_API_TOKEN", "masc_api_token")
+        validation_alias=AliasChoices(
+            "MASC_API_TOKEN",
+            "masc_api_token",
+            "GATE_API_TOKEN",
+            "gate_api_token",
+        )
     )
 
     # Channel-to-keeper mapping: {"channel_id": "keeper_name"}
@@ -86,7 +96,9 @@ class BotConfig(BaseSettings):
     @classmethod
     def api_token_not_empty(cls, v: str) -> str:
         if not v.strip():
-            raise ValueError("MASC_API_TOKEN is required")
+            raise ValueError(
+                "MASC_API_TOKEN is required (GATE_API_TOKEN is also accepted as a legacy alias)"
+            )
         return v.strip()
 
     @field_validator("discord_keeper_map")
@@ -144,6 +156,14 @@ class BotConfig(BaseSettings):
     def gate_health_url(self) -> str:
         base = self.masc_mcp_url.rstrip("/")
         return f"{base}/api/v1/gate/health"
+
+    @property
+    def gate_base_url(self) -> str:
+        return self.masc_mcp_url
+
+    @property
+    def gate_api_token(self) -> str:
+        return self.masc_api_token
 
 
 # Lazy singleton - instantiated on first get_config() call.

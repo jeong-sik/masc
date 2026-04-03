@@ -48,6 +48,30 @@ let write_valid_worker_checkpoint (config : Room.config) session_id worker_name 
       Alcotest.failf "failed to save worker checkpoint for %s: %s"
         worker_name err
 
+let wait_for_background_delegate_settle
+    (ctx : _ Tool_team_session.context) config session_id worker_run_id =
+  let meta_path =
+    Team_session_store.worker_run_meta_path config session_id worker_run_id
+  in
+  let rec loop attempts =
+    if attempts <= 0 then
+      Alcotest.fail
+        "background delegate did not settle before cleanup"
+    else if Room_utils.path_exists config meta_path then ()
+    else
+      let delegate_events =
+        Team_session_store.read_events config session_id
+        |> List.filter (fun json ->
+               Yojson.Safe.Util.member "event_type" json
+               = `String "team_step_delegate")
+      in
+      if delegate_events <> [] then ()
+      else (
+        Eio.Time.sleep ctx.clock 0.01;
+        loop (attempts - 1))
+  in
+  loop 200
+
 let test_prove_strong_requires_additional_evidence () =
   with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -480,6 +504,9 @@ let test_delegate_ready_worker_accepts_background () =
     Yojson.Safe.Util.(delegate_json |> member "status" |> to_string);
   Alcotest.(check string) "accepted wait mode" "background"
     Yojson.Safe.Util.(delegate_json |> member "wait_mode" |> to_string);
+  let worker_run_id =
+    Yojson.Safe.Util.(delegate_json |> member "worker_run_id" |> to_string)
+  in
   let denied_events =
     Team_session_store.read_events config session_id
     |> List.filter (fun json ->
@@ -496,6 +523,7 @@ let test_delegate_ready_worker_accepts_background () =
   in
   Alcotest.(check int) "delegate requested event recorded" 1
     (List.length requested_events);
+  wait_for_background_delegate_settle ctx config session_id worker_run_id;
   cleanup_dir base_dir
 
 let test_delegate_rejects_corrupt_checkpoint_worker () =

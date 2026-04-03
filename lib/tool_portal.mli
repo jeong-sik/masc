@@ -7,6 +7,8 @@ type context = {
 
 type result = bool * string
 
+val filter_visible_tool_names : context -> string list -> string list
+
 val handle_portal_open : context -> Yojson.Safe.t -> result
 val handle_portal_send : context -> Yojson.Safe.t -> result
 val handle_portal_close : context -> Yojson.Safe.t -> result

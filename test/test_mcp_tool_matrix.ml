@@ -56,6 +56,17 @@ let source_root () =
           | Some root -> root
           | None -> Filename.current_dir_name))
 
+let path_is_within ~parent ~child =
+  try
+    let parent = Unix.realpath parent in
+    let child = Unix.realpath child in
+    let prefix =
+      if String.ends_with ~suffix:"/" parent then parent else parent ^ "/"
+    in
+    String.starts_with ~prefix child
+  with _ ->
+    false
+
 let quote = Filename.quote
 
 let read_file path =
@@ -81,7 +92,9 @@ let runner_path () =
   let candidate =
     Filename.concat (Filename.dirname Sys.executable_name) "tool_matrix_case_runner.exe"
   in
-  if Sys.file_exists candidate then
+  if Sys.file_exists candidate
+     && path_is_within ~parent:(source_root ()) ~child:candidate
+  then
     candidate
   else
     Filename.concat (source_root ()) "_build/default/test/tool_matrix_case_runner.exe"

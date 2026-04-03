@@ -22,7 +22,8 @@ let cleanup_dir dir =
       else
         Unix.unlink path
   in
-  try rm dir with _ -> ()
+  try rm dir with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 (* ============================================================
    Argument Helper Tests

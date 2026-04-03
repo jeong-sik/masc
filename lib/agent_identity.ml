@@ -43,14 +43,8 @@ let string_of_channel = function
 let channel_to_yojson = function
   | Api -> `String "Api"
   | Internal -> `String "Internal"
-  | External s -> (
-      match normalize_channel_label s with
-      | "telegram" -> `String "Telegram"
-      | "discord" -> `String "Discord"
-      | "slack" -> `String "Slack"
-      | "signal" -> `String "Signal"
-      | "webchat" -> `String "Webchat"
-      | other -> `List [ `String "External"; `String other ] )
+  | External s ->
+      `List [ `String "External"; `String (normalize_channel_label s) ]
 
 let channel_of_yojson = function
   | `String "Api" | `String "api" -> Ok Api

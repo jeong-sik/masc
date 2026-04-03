@@ -901,10 +901,20 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0)
         in
         if not file_exists then
           Ok (`Assoc [
+            ("agent_id", `String agent_id);
             ("status", `String "no_audio");
             ("text", `String "");
             ("message", `String "no speech detected or recording too short");
           ])
         else
-          transcribe_audio ~audio_file ?language_code ()
+          match transcribe_audio ~audio_file ?language_code () with
+          | Ok (`Assoc fields) -> Ok (`Assoc (("agent_id", `String agent_id) :: fields))
+          | Ok json ->
+              Ok
+                (`Assoc
+                  [ ("agent_id", `String agent_id);
+                    ("status", `String "transcribed");
+                    ("result", json);
+                  ])
+          | Error err -> Error err
   )

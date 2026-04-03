@@ -26,6 +26,8 @@ let test_public_visible_surface_includes_voice_tools () =
     (List.mem "masc_voice_agent" names);
   check bool "public contains masc_voice_speak" true
     (List.mem "masc_voice_speak" names);
+  check bool "public contains masc_voice_transcript" true
+    (List.mem "masc_voice_transcript" names);
   check bool "public contains masc_voice_ping_pong" true
     (List.mem "masc_voice_ping_pong" names)
 
@@ -83,6 +85,8 @@ let test_spawned_agent_surface_stays_curated () =
     (List.mem "mcp__masc__masc_voice_agent" names);
   check bool "contains voice speak" true
     (List.mem "mcp__masc__masc_voice_speak" names);
+  check bool "contains voice transcript" true
+    (List.mem "mcp__masc__masc_voice_transcript" names);
   check bool "contains voice ping pong" true
     (List.mem "mcp__masc__masc_voice_ping_pong" names)
 

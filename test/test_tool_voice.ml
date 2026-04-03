@@ -124,6 +124,7 @@ let test_dispatch_known_tools () =
           "masc_voice_session_end";
           "masc_voice_sessions";
           "masc_voice_agent";
+          "masc_voice_transcript";
           "masc_voice_conference_start";
           "masc_voice_conference_end";
         ]
@@ -605,6 +606,14 @@ let test_voice_speak_without_net_errors () =
       check bool "fails" false ok;
       check bool "mentions net" true (contains body "net"))
 
+let test_voice_transcript_requires_agent_id () =
+  with_ctx_no_net (fun ctx ->
+      let ok, body =
+        dispatch_exn ctx ~name:"masc_voice_transcript" ~args:(`Assoc [])
+      in
+      check bool "fails without agent_id" false ok;
+      check bool "mentions agent_id" true (contains body "agent_id"))
+
 (* Voice tools now use local session manager — no network required.
    session_start, sessions, conference_end succeed without net. *)
 let test_voice_session_start_without_net_errors () =
@@ -814,6 +823,7 @@ let voice_tools =
     "masc_voice_session_end";
     "masc_voice_sessions";
     "masc_voice_agent";
+    "masc_voice_transcript";
     "masc_voice_conference_start";
     "masc_voice_conference_end";
   ]
@@ -1015,9 +1025,11 @@ let () =
             test_voice_session_urls_default_to_builtin_http_defaults;
           test_case "voice session urls use legacy voice env fallback" `Quick
             test_voice_session_urls_use_legacy_voice_env_fallback;
-          test_case "speak without net errors" `Quick
-            test_voice_speak_without_net_errors;
-          test_case "session start no net" `Quick test_voice_session_start_without_net_errors;
+           test_case "speak without net errors" `Quick
+             test_voice_speak_without_net_errors;
+           test_case "transcript requires agent_id" `Quick
+             test_voice_transcript_requires_agent_id;
+           test_case "session start no net" `Quick test_voice_session_start_without_net_errors;
           test_case "sessions no net errors" `Quick
             test_voice_sessions_without_net_errors;
           test_case "conference end no net errors" `Quick

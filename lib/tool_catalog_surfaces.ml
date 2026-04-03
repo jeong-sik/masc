@@ -121,6 +121,7 @@ let public_mcp_surface_tools =
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
     (* Voice *)
     "masc_voice_agent"; "masc_voice_sessions"; "masc_voice_speak";
+    "masc_voice_transcript";
     "masc_voice_session_start"; "masc_voice_session_end";
     "masc_voice_conference_start"; "masc_voice_conference_end";
     "masc_voice_ping_pong";
@@ -154,6 +155,7 @@ let spawned_agent_surface_tools =
     "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
     "masc_messages";
     "masc_voice_agent"; "masc_voice_sessions"; "masc_voice_speak";
+    "masc_voice_transcript";
     "masc_voice_session_start"; "masc_voice_session_end";
     "masc_voice_conference_start"; "masc_voice_conference_end";
     "masc_voice_ping_pong";

@@ -92,6 +92,24 @@ let schemas : tool_schema list =
           ];
     };
     {
+      name = "masc_voice_transcript";
+      description =
+        "Record microphone input and transcribe it with the configured STT endpoint. Requires a configured STT endpoint and local recording tools.";
+      input_schema =
+        `Assoc
+          [
+            ("type", `String "object");
+            ( "properties",
+              schema_properties
+                [
+                  ("agent_id", `Assoc [ ("type", `String "string") ]);
+                  ("timeout_seconds", `Assoc [ ("type", `String "number") ]);
+                  ("language_code", `Assoc [ ("type", `String "string") ]);
+                ] );
+            ("required", `List [ `String "agent_id" ]);
+          ];
+    };
+    {
       name = "masc_voice_conference_start";
       description =
         "Start a multi-agent voice conference. All agent_ids should have active voice sessions first (call masc_voice_session_start for each).";
@@ -146,7 +164,8 @@ let require_net_or_error (ctx : 'a context) =
    Category A (net required): speak, agent — call Voice_bridge over HTTP.
    Category B (local only):   session_start/end, sessions, conference_start/end
                                — use Keeper_voice_local / Voice_session_manager.
-   Category C (stub):         transcript — STT service not yet integrated. *)
+   Category C (record + STT): transcript — records microphone input and
+                               transcribes via configured STT endpoint. *)
 
 (* Category A: requires network for TTS endpoint *)
 let handle_voice_speak (ctx : 'a context) args : result =
@@ -217,6 +236,20 @@ let handle_voice_agent _ctx args : result =
   else
     json_string_of_result (Voice_bridge.get_agent_voice ~agent_id)
 
+let handle_voice_transcript (_ctx : 'a context) args : result =
+  let agent_id = get_string args "agent_id" "" |> String.trim in
+  let timeout_sec = max 1.0 (get_float args "timeout_seconds" 15.0) in
+  let language_code =
+    get_string_opt args "language_code"
+    |> Option.map String.trim
+    |> Option.filter (fun value -> value <> "")
+  in
+  if agent_id = "" then
+    (false, "Error: agent_id is required")
+  else
+    json_string_of_result
+      (Voice_bridge.record_and_transcribe ~agent_id ~timeout_sec ?language_code ())
+
 (* Category B: conference = batch start of local sessions for multiple agents.
    Each agent_id gets its own Voice_session_manager session; the "conference"
    is a convenience grouping, not a shared audio channel. *)
@@ -269,6 +302,7 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
   | "masc_voice_session_end" -> Some (handle_voice_session_end ctx args)
   | "masc_voice_sessions" -> Some (handle_voice_sessions ctx args)
   | "masc_voice_agent" -> Some (handle_voice_agent ctx args)
+  | "masc_voice_transcript" -> Some (handle_voice_transcript ctx args)
   | "masc_voice_conference_start" -> Some (handle_voice_conference_start ctx args)
   | "masc_voice_conference_end" -> Some (handle_voice_conference_end ctx args)
   | _ -> None

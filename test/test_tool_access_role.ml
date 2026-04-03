@@ -189,9 +189,9 @@ let test_admin_only_count () =
 let test_worker_only_count () =
   check bool "worker_only_tools is non-empty" true
     (List.length Tool_access_role.worker_only_tools > 0);
-  check bool "worker_only_tools has expected size (53)"
+  check bool "worker_only_tools has expected size (54)"
     true
-    (List.length Tool_access_role.worker_only_tools = 53)
+    (List.length Tool_access_role.worker_only_tools = 54)
 
 let test_no_overlap_admin_worker () =
   List.iter (fun tool_name ->

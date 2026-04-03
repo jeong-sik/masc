@@ -98,6 +98,8 @@ masc_claim_next()
 
 `tools/list`는 기본 공개 surface만 보여준다. hidden/internal tool도 `tools/call`로는 호출 가능하다.
 
+기본 공개 voice surface에는 `masc_voice_transcript`도 포함된다. 로컬 마이크 녹음 도구와 STT endpoint가 준비되어 있으면 one-shot transcription을 수행한다.
+
 ```bash
 # Add specific tools to the public surface
 MASC_PUBLIC_TOOLS_EXTRA=masc_board_search,masc_pause

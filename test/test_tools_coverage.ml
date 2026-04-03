@@ -84,11 +84,12 @@ let test_find_tool_existing () =
                "masc_team_session_list";
                "masc_team_session_events";
                "masc_team_session_prove";
-               "masc_runtime_verify"; "masc_observe_swarm";
-               "masc_operator_snapshot"; "masc_operator_digest";
-               "masc_operator_action"; "masc_operator_confirm";
-               "masc_voice_speak"; "masc_voice_agent";
-               "masc_voice_sessions"; "masc_voice_conference_start"] in
+                "masc_runtime_verify"; "masc_observe_swarm";
+                "masc_operator_snapshot"; "masc_operator_digest";
+                "masc_operator_action"; "masc_operator_confirm";
+                "masc_voice_speak"; "masc_voice_agent";
+               "masc_voice_sessions"; "masc_voice_transcript";
+               "masc_voice_conference_start"] in
   List.iter (fun name ->
     match find_tool name with
     | Some schema -> Alcotest.(check string) "found correct tool" name schema.name

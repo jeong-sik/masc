@@ -90,6 +90,7 @@ let worker_only_tools =
     "masc_keeper_create_from_persona";
     (* CanBroadcast — voice *)
     "masc_voice_speak";
+    "masc_voice_transcript";
     "masc_voice_session_start";
     "masc_voice_session_end";
     "masc_voice_conference_start";

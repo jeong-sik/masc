@@ -18,22 +18,22 @@ let requested_backend_mode () =
 (* GC tuning for long-running server with bursty allocation.
 
    Dashboard refresh loops create 2GB+ transient allocations per cycle.
-   With aggressive GC settings (space_overhead=40), the major GC runs
-   frequently.  Each major GC slice walks the entire heap including
+   With aggressive GC (space_overhead=40), major GC slices walk
    MADV_FREE'd pages on macOS, triggering page faults that freeze the
-   Eio event loop for seconds — blocking /health and all HTTP endpoints.
+   Eio event loop — blocking /health and all HTTP endpoints.
 
-   Fix: enlarge minor heap to reduce promotion rate, and relax major GC
-   pressure so slices are less frequent.  Verified: OCAMLRUNPARAM="s=16M,o=200"
-   keeps /health responsive under load.  Overridable via OCAMLRUNPARAM. *)
+   Only apply defaults when OCAMLRUNPARAM is not set, so operators
+   can override at launch without code changes. *)
 let () =
-  let open Gc in
-  let ctrl = get () in
-  set { ctrl with
-    minor_heap_size = 2 * 1024 * 1024;  (* 2M words = 16MB; default 256K words *)
-    space_overhead = 200;               (* default 120; higher = less frequent major GC *)
-    max_overhead = 1_000_000;           (* disable auto-compaction; MADV_FREE is sufficient *)
-  }
+  if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
+    let open Gc in
+    let ctrl = get () in
+    set { ctrl with
+      minor_heap_size = 2 * 1024 * 1024;  (* 16MB; reduces minor->major promotion rate *)
+      space_overhead = 200;               (* default 120; less frequent major GC slices *)
+      max_overhead = 500;                 (* default 500; keep compaction enabled *)
+    }
+  end
 
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in

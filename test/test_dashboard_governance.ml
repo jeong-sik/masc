@@ -181,7 +181,7 @@ let test_dashboard_uses_stored_judgments () =
       let (status, detail) =
         Lib.Dashboard_governance.case_detail_json ~base_path:dir ~case_id:"task-123"
       in
-      check bool "case detail found" true (match status with `OK -> true | `Not_found -> false);
+      check bool "case detail found" true (status = `OK);
       check string "case detail id" "task-123"
         (detail |> member "case" |> member "id" |> to_string);
       check string "execution order status" "needs_human_gate"

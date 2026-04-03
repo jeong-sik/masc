@@ -256,9 +256,13 @@ let event_json ~index judgment =
 let sort_judgments judgments =
   List.sort
     (fun a b ->
-      let at = string_member a "generated_at" |> parse_iso_opt |> Option.value ~default:0.0 in
-      let bt = string_member b "generated_at" |> parse_iso_opt |> Option.value ~default:0.0 in
-      Float.compare bt at)
+      let a_timestamp =
+        string_member a "generated_at" |> parse_iso_opt |> Option.value ~default:0.0
+      in
+      let b_timestamp =
+        string_member b "generated_at" |> parse_iso_opt |> Option.value ~default:0.0
+      in
+      Float.compare b_timestamp a_timestamp)
     judgments
 
 let all_judgments ~base_path =

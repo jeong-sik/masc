@@ -173,15 +173,15 @@ let host_port_of_request request =
         None)
 
 let allow_anonymous_mutations =
-  lazy (match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
-    | Some ("1" | "true") -> true
-    | _ -> false)
+  match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
+  | Some ("1" | "true") -> true
+  | _ -> false
 
 let ensure_same_origin_browser_request request :
     (unit, Types.masc_error) result =
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
   | None ->
-    if Lazy.force allow_anonymous_mutations then Ok ()
+    if allow_anonymous_mutations then Ok ()
     else
       Error (Types.Unauthorized
         "Authentication required: provide a bearer token or Origin header. \

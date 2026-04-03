@@ -77,16 +77,15 @@ let friction_of_outcome = function
 (* JSONL persistence                                                *)
 (* ================================================================ *)
 
-let default_base_path = lazy (
+let default_base_path =
   let root = try Sys.getenv "MASC_DATA_DIR"
     with Not_found ->
       try Filename.concat (Sys.getenv "ME_ROOT") "data"
       with Not_found -> "data"
   in
   Filename.concat root "cdal_verdicts"
-)
 
-let persist ?(base_dir = Lazy.force default_base_path)
+let persist ?(base_dir = default_base_path)
     (verdict : Cdal_types.contract_verdict) : unit =
   let store = Dated_jsonl.create ~base_dir () in
   Dated_jsonl.append store (Cdal_types.contract_verdict_to_json verdict)

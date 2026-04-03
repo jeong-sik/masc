@@ -107,6 +107,12 @@ class MascGateClient:
     def _breaker_is_open(self) -> bool:
         return self._breaker_open_until > self._now()
 
+    def _breaker_enabled(self) -> bool:
+        return self._breaker_failure_threshold > 0 and self._breaker_reset_sec > 0
+
+    def _max_attempts(self) -> int:
+        return max(1, self._max_retries)
+
     def _breaker_error(self) -> str:
         remaining = max(1, int(round(self._breaker_open_until - self._now())))
         if self._last_failure:
@@ -124,7 +130,7 @@ class MascGateClient:
     def _note_transport_failure(self, reason: str) -> None:
         self._consecutive_failures += 1
         self._last_failure = reason
-        if self._consecutive_failures >= self._breaker_failure_threshold:
+        if self._breaker_enabled() and self._consecutive_failures >= self._breaker_failure_threshold:
             self._breaker_open_until = self._now() + self._breaker_reset_sec
         logger.warning(
             "Gate transport failure %d/%d: %s",
@@ -231,7 +237,8 @@ class MascGateClient:
         }
 
         client = self._get_client()
-        for attempt in range(1, self._max_retries + 1):
+        max_attempts = self._max_attempts()
+        for attempt in range(1, max_attempts + 1):
             try:
                 resp = await client.post(self._url, json=payload)
                 if resp.status_code == 409:
@@ -240,7 +247,7 @@ class MascGateClient:
                     return GateResponse.from_error("duplicate message")
 
                 if resp.status_code >= 500:
-                    if attempt < self._max_retries:
+                    if attempt < max_attempts:
                         await asyncio.sleep(min(0.25 * attempt, 1.0))
                         continue
                     self._note_transport_failure(f"gate returned {resp.status_code}")
@@ -256,7 +263,7 @@ class MascGateClient:
                 return GateResponse.from_json(data)
 
             except httpx.TimeoutException:
-                if attempt < self._max_retries:
+                if attempt < max_attempts:
                     await asyncio.sleep(min(0.25 * attempt, 1.0))
                     continue
                 self._note_transport_failure(f"gate timeout after {self._timeout}s")

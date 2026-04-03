@@ -50,6 +50,15 @@ val record_attempt :
   unit
 (** Record one gate attempt. Thread-safe. *)
 
+val record_internal_error_exn :
+  channel:string ->
+  room_id:string ->
+  keeper:string ->
+  duration_ms:int ->
+  exn ->
+  unit
+(** Record an unexpected gate exception with the same channel metadata. *)
+
 val snapshot : unit -> channel_stats list
 (** Return a list of per-channel stats, sorted by message_count desc. *)
 

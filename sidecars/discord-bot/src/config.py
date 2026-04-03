@@ -104,8 +104,14 @@ class BotConfig(BaseSettings):
             raise ValueError(f"DISCORD_KEEPER_MAP is not valid JSON: {e}") from e
         return v
 
+    @field_validator("gate_timeout_sec")
+    @classmethod
+    def validate_positive_timeout(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("gate_timeout_sec must be positive")
+        return v
+
     @field_validator(
-        "gate_timeout_sec",
         "gate_max_retries",
         "status_cache_ttl_sec",
         "keeper_cache_ttl_sec",
@@ -113,9 +119,9 @@ class BotConfig(BaseSettings):
         "gate_breaker_reset_sec",
     )
     @classmethod
-    def validate_positive_ints(cls, v: int) -> int:
-        if v <= 0:
-            raise ValueError("connector timing values must be positive")
+    def validate_non_negative_ints(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("connector timing values must be non-negative")
         return v
 
     def keeper_map(self) -> dict[str, str]:

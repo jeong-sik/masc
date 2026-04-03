@@ -121,12 +121,15 @@ let update_error_fields acc ~now ~kind ~message =
 
 let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
   Eio_guard.with_mutex mu (fun () ->
-      let acc = get_or_create_acc channel in
+      let trimmed_channel = String.trim channel in
+      let channel_key = if trimmed_channel = "" then "unknown" else trimmed_channel in
+      let acc = get_or_create_acc channel_key in
       let now = Unix.gettimeofday () in
+      let trimmed_keeper = String.trim keeper in
       acc.msg_count <- acc.msg_count + 1;
       acc.last_ts <- now;
       acc.last_outcome <- outcome_name outcome;
-      if String.trim keeper <> "" then acc.last_keeper <- keeper;
+      if trimmed_keeper <> "" then acc.last_keeper <- trimmed_keeper;
       let trimmed_room = String.trim room_id in
       if trimmed_room <> "" then begin
         acc.last_room_id <- trimmed_room;
@@ -158,6 +161,10 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
       | Internal_error message ->
           acc.internal_error_count <- acc.internal_error_count + 1;
           update_error_fields acc ~now ~kind:"internal" ~message)
+
+let record_internal_error_exn ~channel ~room_id ~keeper ~duration_ms exn =
+  record_attempt ~channel ~room_id ~keeper ~duration_ms
+    (Internal_error (Printexc.to_string exn))
 
 let snapshot () =
   Eio_guard.with_mutex_ro mu (fun () ->

@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from src import config as config_module
+from src.config import BotConfig
 from src.masc_client import MascGateClient
 
 
@@ -90,3 +91,27 @@ async def test_list_keepers_uses_cached_names_when_breaker_is_open() -> None:
     assert cached == ["luna", "sangsu"]
 
     await client.aclose()
+
+
+def test_config_allows_zero_disable_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GATE_MAX_RETRIES", raising=False)
+    monkeypatch.delenv("STATUS_CACHE_TTL_SEC", raising=False)
+    monkeypatch.delenv("KEEPER_CACHE_TTL_SEC", raising=False)
+    monkeypatch.delenv("GATE_BREAKER_FAILURE_THRESHOLD", raising=False)
+    monkeypatch.delenv("GATE_BREAKER_RESET_SEC", raising=False)
+
+    cfg = BotConfig(
+        discord_bot_token="test-token",
+        masc_api_token="test-api-token",
+        gate_max_retries=0,
+        status_cache_ttl_sec=0,
+        keeper_cache_ttl_sec=0,
+        gate_breaker_failure_threshold=0,
+        gate_breaker_reset_sec=0,
+    )
+
+    assert cfg.gate_max_retries == 0
+    assert cfg.status_cache_ttl_sec == 0
+    assert cfg.keeper_cache_ttl_sec == 0
+    assert cfg.gate_breaker_failure_threshold == 0
+    assert cfg.gate_breaker_reset_sec == 0

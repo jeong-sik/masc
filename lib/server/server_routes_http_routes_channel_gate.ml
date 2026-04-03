@@ -53,8 +53,30 @@ let http_status_of_gate_error : Channel_gate.gate_error -> Httpun.Status.t = fun
   | Dispatch_unavailable -> `Service_unavailable
   | Internal _ -> `Internal_server_error
 
+let record_internal_error_metric ~duration_ms body_str exn =
+  let fallback () =
+    Channel_gate_metrics.record_internal_error_exn
+      ~channel:"unknown"
+      ~room_id:""
+      ~keeper:""
+      ~duration_ms exn
+  in
+  try
+    let json = Yojson.Safe.from_string body_str in
+    match Channel_gate.inbound_of_json json with
+    | Ok msg ->
+        Channel_gate_metrics.record_internal_error_exn
+          ~channel:(Agent_identity.string_of_channel msg.channel)
+          ~room_id:msg.channel_room_id
+          ~keeper:msg.keeper_name
+          ~duration_ms exn
+    | Error _ -> fallback ()
+  with
+  | Yojson.Json_error _ -> fallback ()
+
 let handle_gate_message ~sw ~clock state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
+    let request_started = Unix.gettimeofday () in
     let result =
       try
         let json = Yojson.Safe.from_string body_str in
@@ -77,6 +99,10 @@ let handle_gate_message ~sw ~clock state request reqd =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           (* Log details server-side, return generic message to client *)
+          let duration_ms =
+            int_of_float ((Unix.gettimeofday () -. request_started) *. 1000.0)
+          in
+          record_internal_error_metric ~duration_ms body_str exn;
           Log.Misc.error "channel_gate internal error: %s" (Printexc.to_string exn);
           Error (Channel_gate.Internal "", "internal error")
     in

@@ -296,7 +296,6 @@
    tool_cache
    tool_access_policy
    tool_access_role
-   tool_tempo
    tool_portal
    tool_worktree
    tool_a2a
@@ -317,9 +316,7 @@
    team_session_plan
    tool_team_session_schemas
    tool_heartbeat
-   tool_encryption
    tool_auth
-   tool_hat
    tool_housekeep
    tool_audit
    tool_rate_limit

@@ -585,7 +585,7 @@
  (modules test_dashboard_collaboration_evidence test_tool_team_session_support)
  (libraries masc_test_deps))
 
-; MCP Tool Matrix (2 modules + generated names + runner dep)
+; MCP Tool Matrix (3 modules: test driver + cases + runtime-derived names + runner dep)
 (test
  (name test_mcp_tool_matrix)
  (modules test_mcp_tool_matrix test_mcp_tool_matrix_cases test_mcp_tool_matrix_names_gen)

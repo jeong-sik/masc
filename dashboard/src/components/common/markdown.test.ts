@@ -1,7 +1,9 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Markdown } from './markdown'
+
+void vi
 
 describe('Markdown', () => {
   let container: HTMLDivElement

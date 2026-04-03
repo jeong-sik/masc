@@ -38,7 +38,7 @@ end)
 include (Tool_catalog_surfaces : sig
   type surface = Tool_catalog_surfaces.surface =
     | Public_mcp | Spawned_agent | Local_worker | Session_min
-    | Admin | Keeper_internal | Keeper_denied
+    | Admin | Keeper_internal | Keeper_denied | System_internal
 end)
 
 type metadata = {
@@ -301,6 +301,11 @@ let metadata name =
     if is_public_mcp name then default_metadata
     else if Hashtbl.mem keeper_internal_set name then
       keeper_internal_metadata name
+    else if Tool_catalog_surfaces.is_on_surface System_internal name then
+      { default_metadata with
+        visibility = Hidden;
+        allow_direct_call_when_hidden = true;
+        reason = Some "System-internal tool; callable but not listed in tools/list." }
     else
       (* Non-public, non-explicit tools are internal: hidden from tools/list
          but callable via tools/call (tool_allowed_in_profile uses include_hidden). *)

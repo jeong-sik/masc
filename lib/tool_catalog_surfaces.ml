@@ -98,6 +98,7 @@ type surface =
   | Admin
   | Keeper_internal
   | Keeper_denied
+  | System_internal
 
 let public_mcp_surface_tools =
   [
@@ -208,6 +209,37 @@ let keeper_denied_surface_tools =
     "masc_neo4j_query"; "masc_pg_query";
   ]
 
+let system_internal_surface_tools =
+  [
+    (* MCP protocol internals *)
+    "masc_mcp_session"; "masc_suspend"; "masc_listen"; "masc_pending_interrupts";
+    (* Session lifecycle — auto-called *)
+    "masc_init"; "masc_reset"; "masc_register_capabilities";
+    (* Governance pipeline — auto-executed *)
+    "masc_governance_set"; "masc_approve"; "masc_reject";
+    "masc_branch"; "masc_interrupt";
+    (* Concurrency control *)
+    "masc_lock"; "masc_unlock";
+    (* Heartbeat system loop *)
+    "masc_heartbeat_start"; "masc_heartbeat_stop";
+    "masc_heartbeat_list"; "masc_heartbeat_result";
+    (* Task lifecycle — SDK internal *)
+    "masc_cancel_task"; "masc_claim_task"; "masc_complete_task";
+    "masc_release_task"; "masc_set_current_task";
+    (* Agent evaluation — system loop *)
+    "masc_agent_fitness"; "masc_agent_relations";
+    "masc_meta_cognition_snapshot"; "masc_consolidate_learning";
+    "masc_select_agent";
+    (* Maintenance *)
+    "masc_cleanup_zombies"; "masc_gc";
+    (* Infrastructure control *)
+    "masc_cancellation"; "masc_subscription";
+    "masc_feature_flags"; "masc_compact_context";
+    (* Internal monitoring *)
+    "masc_autoresearch_status"; "masc_pause_status";
+    "masc_tool_stats"; "masc_surface_audit";
+  ]
+
 (* ================================================================ *)
 (* Surface query functions                                          *)
 (* ================================================================ *)
@@ -220,10 +252,11 @@ let tools_for_surface = function
   | Admin -> admin_surface_tools
   | Keeper_internal -> keeper_internal_surface_tools
   | Keeper_denied -> keeper_denied_surface_tools
+  | System_internal -> system_internal_surface_tools
 
 let all_surfaces =
   [Public_mcp; Spawned_agent; Local_worker; Session_min;
-   Admin; Keeper_internal; Keeper_denied]
+   Admin; Keeper_internal; Keeper_denied; System_internal]
 
 let surface_sets : (surface * (string, unit) Hashtbl.t) list =
   List.map (fun surface ->
@@ -246,3 +279,4 @@ let surface_to_string = function
   | Admin -> "admin"
   | Keeper_internal -> "keeper_internal"
   | Keeper_denied -> "keeper_denied"
+  | System_internal -> "system_internal"

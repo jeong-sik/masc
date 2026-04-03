@@ -221,12 +221,11 @@ let triage_result_to_json = function
             `List (List.map deliberation_trigger_to_json triggers) );
         ]
 
-(* ---------- Triage function: cheap gate before MODEL deliberation ---------- *)
+(* ---------- Triage function: cheap gate before deliberation ---------- *)
 
-(** Evaluate a world observation and return triggers that warrant deliberation.
-    This is a pure heuristic — no MODEL calls, no I/O.
+(** Evaluate a world observation and return triggers that warrant action.
     Returns [Skip _] when nothing interesting happened,
-    [Triggered triggers] when the keeper should deliberate. *)
+    [Triggered triggers] when the keeper should evaluate further. *)
 let triage (obs : world_observation) : triage_result =
   let triggers = ref [] in
   let add t = triggers := t :: !triggers in
@@ -300,6 +299,23 @@ let deterministic_baseline_action (obs : world_observation) : deliberation_actio
   else
     Noop "no_trigger"
 
+(* ================================================================ *)
+(* Phase 2: Deliberation Evaluation (L1 Reactive)                    *)
+(* ================================================================ *)
+
+(* ---------- Budget check ---------- *)
+
+(** Read the daily budget from env, returning the default if absent or invalid. *)
+let daily_budget_usd_from_env () : float =
+  Env_config.KeeperRuntime.deliberation_daily_budget_usd ()
+
+(** Check whether the keeper has remaining budget for another deliberation call.
+    Returns [true] if [cost_today_usd < daily_budget_usd]. *)
+let deliberation_budget_check ~daily_budget_usd ~cost_today_usd : bool =
+  cost_today_usd < daily_budget_usd
+
+(* ---------- Prompt builder ---------- *)
+
 let triggers_to_prompt_list (triggers : deliberation_trigger list) : string =
   triggers
   |> List.mapi (fun i t ->
@@ -333,6 +349,33 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
 (** Build a prompt for the MODEL to decide the keeper's next action.
     The prompt describes the keeper's identity, current state, detected triggers,
     and available actions. The MODEL is asked to respond with JSON. *)
+let build_deliberation_prompt
+    ~keeper_name ~soul_profile ~goal
+    ~(triggers : deliberation_trigger list)
+    (obs : world_observation) : string =
+  let multi_step_line =
+    "\n- multi_step: Execute multiple actions sequentially (max 5). \
+     Requires steps array of action objects."
+  in
+  let multi_step_example =
+    {|
+{"action":"multi_step","params":{"steps":[{"action":"task_claim","params":{"task_id":"task-1","reason":"urgent"}},{"action":"broadcast","params":{"message":"Claimed task-1"}}]},"reasoning":"Claim and announce","confidence":0.7}|}
+  in
+  match
+    Prompt_registry.render_prompt_template "keeper.deliberation"
+      [
+        ("keeper_name", keeper_name);
+        ("soul_profile", soul_profile);
+        ("goal", goal);
+        ("triggers", triggers_to_prompt_list triggers);
+        ("world_state", world_observation_to_prompt_section obs);
+        ("multi_step_line", multi_step_line);
+        ("multi_step_example", multi_step_example);
+      ]
+  with
+  | Ok value -> value
+  | Error _ -> Prompt_registry.get_prompt "keeper.deliberation"
+
 type structured_result = {
   action: deliberation_action;
   reasoning: string;
@@ -501,3 +544,185 @@ let execute_structured_result (obs : world_observation)
         confidence = result.confidence;
       }
 
+(* ---------- Response parser ---------- *)
+
+let clamp_confidence raw_conf =
+  max 0.0 (min 1.0 raw_conf)
+
+let json_of_response (raw : string) : (Yojson.Safe.t, string) result =
+  let trimmed = String.trim raw in
+  if trimmed = "" then
+    Error "empty response"
+  else
+    match Yojson.Safe.from_string trimmed with
+    | json -> Ok json
+    | exception Yojson.Json_error msg ->
+        Error (Printf.sprintf "strict JSON parse failed: %s" msg)
+
+(** Parse a deliberation action from the "action" and "params" fields of the
+    MODEL response JSON. Returns the typed action or an error string. *)
+let rec parse_action_from_json (json : Yojson.Safe.t)
+    : (deliberation_action, string) result =
+  let action_str = Safe_ops.json_string ~default:"" "action" json in
+  let params =
+    match json with
+    | `Assoc fields -> (
+        match List.assoc_opt "params" fields with
+        | Some p -> p
+        | None -> `Assoc [])
+    | _ -> `Assoc []
+  in
+  match action_str with
+  | "noop" ->
+      let reason = Safe_ops.json_string ~default:"no reason" "reason" params in
+      Ok (Noop reason)
+  | "reply_in_room" ->
+      let room_id = Safe_ops.json_string ~default:"default" "room_id" params in
+      let content = Safe_ops.json_string ~default:"" "content" params in
+      if content = "" then Error "reply_in_room requires non-empty content"
+      else Ok (ReplyInRoom { room_id; content })
+  | "task_claim" ->
+      let task_id = Safe_ops.json_string ~default:"" "task_id" params in
+      let reason = Safe_ops.json_string ~default:"" "reason" params in
+      if task_id = "" then Error "task_claim requires non-empty task_id"
+      else Ok (TaskClaim { task_id; reason })
+  | "broadcast" ->
+      let message = Safe_ops.json_string ~default:"" "message" params in
+      if message = "" then Error "broadcast requires non-empty message"
+      else Ok (Broadcast { message })
+  | "board_post" ->
+      let content = Safe_ops.json_string ~default:"" "content" params in
+      let hearth = Safe_ops.json_string_opt "hearth" params in
+      if content = "" then Error "board_post requires non-empty content"
+      else Ok (BoardPost { content; hearth })
+  | "board_comment" ->
+      let post_id = Safe_ops.json_string ~default:"" "post_id" params in
+      let content = Safe_ops.json_string ~default:"" "content" params in
+      if post_id = "" || content = "" then
+        Error "board_comment requires non-empty post_id and content"
+      else Ok (BoardComment { post_id; content })
+  | "board_vote" ->
+      let post_id = Safe_ops.json_string ~default:"" "post_id" params in
+      let direction = Safe_ops.json_string ~default:"" "direction" params in
+      if post_id = "" || direction = "" then
+        Error "board_vote requires non-empty post_id and direction"
+      else Ok (BoardVote { post_id; direction })
+  | "propose_spawn" ->
+      let topic = Safe_ops.json_string ~default:"" "topic" params in
+      let reason = Safe_ops.json_string ~default:"" "reason" params in
+      if topic = "" then Error "propose_spawn requires non-empty topic"
+      else Ok (ProposeSpawn { topic; reason })
+  | "multi_step" -> (
+      let steps_json =
+        match params with
+        | `Assoc fields -> (
+            match List.assoc_opt "steps" fields with
+            | Some (`List items) -> items
+            | _ -> [])
+        | _ -> []
+      in
+      match steps_json with
+      | [] -> Error "multi_step requires non-empty steps array"
+      | items ->
+          let max_steps = 5 in
+          let truncated =
+            if List.length items > max_steps then
+              let rec take n acc = function
+                | _ when n <= 0 -> List.rev acc
+                | [] -> List.rev acc
+                | x :: xs -> take (n - 1) (x :: acc) xs
+              in
+              take max_steps [] items
+            else items
+          in
+          let results =
+            List.map
+              (fun step_json ->
+                parse_action_from_json step_json)
+              truncated
+          in
+          let errors =
+            List.filter_map
+              (function Error e -> Some e | Ok _ -> None)
+              results
+          in
+          if errors <> [] then
+            Error
+              (Printf.sprintf "multi_step contains invalid actions: %s"
+                 (String.concat "; " errors))
+          else
+            let actions =
+              List.filter_map
+                (function Ok a -> Some a | Error _ -> None)
+                results
+            in
+            (* Reject nested multi_step *)
+            let has_nested =
+              List.exists
+                (function MultiStep _ -> true | _ -> false)
+                actions
+            in
+            if has_nested then
+              Error "multi_step cannot contain nested multi_step actions"
+            else Ok (MultiStep actions))
+  | "" -> Error "missing 'action' field in MODEL response"
+  | unknown -> Error (Printf.sprintf "unknown action type: %s" unknown)
+
+let structured_result_of_json (json : Yojson.Safe.t)
+    : (structured_result, string) result =
+  match parse_action_from_json json with
+  | Error msg -> Error msg
+  | Ok action ->
+      let reasoning =
+        Safe_ops.json_string ~default:"" "reasoning" json
+      in
+      let confidence =
+        clamp_confidence (Safe_ops.json_float ~default:0.5 "confidence" json)
+      in
+      Ok { action; reasoning; confidence }
+
+let structured_result_schema : structured_result Agent_sdk.Structured.schema =
+  {
+    Agent_sdk.Structured.name = "keeper_deliberation_decision";
+    description =
+      "Choose exactly one typed keeper deliberation action and return only the tool input object.";
+    params =
+      [
+        {
+          Agent_sdk.Types.name = "action";
+          description = "One of: noop, reply_in_room, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, multi_step.";
+          param_type = Agent_sdk.Types.String;
+          required = true;
+        };
+        {
+          Agent_sdk.Types.name = "params";
+          description = "Action-specific parameters.";
+          param_type = Agent_sdk.Types.Object;
+          required = true;
+        };
+        {
+          Agent_sdk.Types.name = "reasoning";
+          description = "Optional short explanation for the chosen action.";
+          param_type = Agent_sdk.Types.String;
+          required = false;
+        };
+        {
+          Agent_sdk.Types.name = "confidence";
+          description = "Confidence score from 0.0 to 1.0.";
+          param_type = Agent_sdk.Types.Number;
+          required = false;
+        };
+      ];
+    parse = structured_result_of_json;
+  }
+
+(** Parse the MODEL's JSON response into a deliberation_action with reasoning
+    and confidence. Returns [(action, reasoning, confidence)] or an error string. *)
+let parse_deliberation_response (raw : string)
+    : (deliberation_action * string * float, string) result =
+  match json_of_response raw with
+  | Error msg -> Error msg
+  | Ok json ->
+      structured_result_of_json json
+      |> Result.map (fun result ->
+             (result.action, result.reasoning, result.confidence))

@@ -135,3 +135,31 @@ val deliberation_meta_of_json : Yojson.Safe.t -> deliberation_meta
     Equivalent to the old [if direct_mention then "reply_in_room" else "noop"]. *)
 val deterministic_baseline_action : world_observation -> deliberation_action
 
+(** {1 Phase 2: Deliberation Evaluation} *)
+
+(** Read the daily budget from [MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD]
+    env var (default: 0.10). *)
+val daily_budget_usd_from_env : unit -> float
+
+(** Check whether the keeper has remaining budget for deliberation.
+    Returns [true] when [cost_today_usd < daily_budget_usd]. *)
+val deliberation_budget_check :
+  daily_budget_usd:float -> cost_today_usd:float -> bool
+
+(** Build a prompt for the MODEL to decide the keeper's next action.
+    Describes the keeper's identity, current state, detected triggers,
+    and available actions. Asks the MODEL to return only the schema-matching
+    tool input object. *)
+val build_deliberation_prompt :
+  keeper_name:string ->
+  soul_profile:string ->
+  goal:string ->
+  triggers:deliberation_trigger list ->
+  world_observation ->
+  string
+
+(** Parse a strict JSON tool-input object into a typed deliberation action.
+    Returns [(action, reasoning, confidence)] or an [Error] message.
+    This parser does not recover fenced or embedded JSON from free-form text. *)
+val parse_deliberation_response :
+  string -> (deliberation_action * string * float, string) result

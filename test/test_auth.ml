@@ -45,6 +45,16 @@ let with_env name value f =
      | None -> Unix.putenv name "");
     raise exn
 
+let with_eio_runtime f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_guard.disable ();
+      Fs_compat.clear_fs ())
+    f
+
 (* ============================================ *)
 (* Token generation tests                       *)
 (* ============================================ *)
@@ -83,6 +93,18 @@ let test_save_load_auth_config () =
   check bool "enabled persisted" true loaded.enabled;
   check bool "require_token persisted" true loaded.require_token;
   cleanup_test_room dir
+
+let test_save_load_auth_config_in_eio_runtime () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let cfg = { Types.default_auth_config with enabled = true; require_token = true } in
+        Auth.save_auth_config dir cfg;
+        let loaded = Auth.load_auth_config dir in
+        check bool "enabled persisted in eio" true loaded.enabled;
+        check bool "require_token persisted in eio" true loaded.require_token))
 
 (* ============================================ *)
 (* Credential management tests                  *)
@@ -407,6 +429,8 @@ let () =
     "config", [
       test_case "default config" `Quick test_default_auth_config;
       test_case "save/load config" `Quick test_save_load_auth_config;
+      test_case "save/load config in Eio runtime" `Quick
+        test_save_load_auth_config_in_eio_runtime;
     ];
     "credentials", [
       test_case "create credential" `Quick test_create_credential;

@@ -27,6 +27,15 @@ let room_secret_file config = Filename.concat (auth_dir config) "room_secret.has
 let auth_config_file config = Filename.concat (auth_dir config) "config.json"
 let initial_admin_file config = Filename.concat (auth_dir config) "initial_admin"
 
+let run_blocking_io f = Eio_guard.run_in_systhread f
+let file_exists path = run_blocking_io (fun () -> Sys.file_exists path)
+let read_text_file path = Fs_compat.load_file path
+let write_text_file path content = Fs_compat.save_file path content
+
+let chmod path perm = run_blocking_io (fun () -> Unix.chmod path perm)
+let read_dir path = run_blocking_io (fun () -> Sys.readdir path)
+let remove_file path = run_blocking_io (fun () -> Sys.remove path)
+
 (** Ensure auth directories exist *)
 let ensure_auth_dirs config =
   let auth = auth_dir config in
@@ -39,16 +48,15 @@ let ensure_auth_dirs config =
 let write_initial_admin config agent_name =
   ensure_auth_dirs config;
   let file = initial_admin_file config in
-  Out_channel.with_open_text file (fun oc ->
-    output_string oc (String.trim agent_name));
-  Unix.chmod file 0o600
+  write_text_file file (String.trim agent_name);
+  chmod file 0o600
 
 (** Read the initial admin agent name, if set. *)
 let read_initial_admin config : string option =
   let file = initial_admin_file config in
-  if Sys.file_exists file then
+  if file_exists file then
     try
-      let name = String.trim (In_channel.with_open_text file In_channel.input_all) in
+      let name = String.trim (read_text_file file) in
       if name = "" then None else Some name
     with Sys_error _ -> None
   else
@@ -61,9 +69,9 @@ let read_initial_admin config : string option =
 (** Load auth config *)
 let load_auth_config config : auth_config =
   let file = auth_config_file config in
-  if Sys.file_exists file then
+  if file_exists file then
     try
-      let content = In_channel.with_open_text file In_channel.input_all in
+      let content = read_text_file file in
       let json = Yojson.Safe.from_string content in
       match auth_config_of_yojson json with
       | Ok cfg -> cfg
@@ -77,9 +85,7 @@ let save_auth_config config (auth_cfg : auth_config) =
   ensure_auth_dirs config;
   let file = auth_config_file config in
   let json = auth_config_to_yojson auth_cfg in
-  Out_channel.with_open_text file (fun oc ->
-    output_string oc (Yojson.Safe.pretty_to_string json)
-  )
+  write_text_file file (Yojson.Safe.pretty_to_string json)
 
 (* ============================================ *)
 (* Credential management                        *)
@@ -92,9 +98,9 @@ let credential_file config agent_name =
 (** Load agent credential *)
 let load_credential config agent_name : agent_credential option =
   let file = credential_file config agent_name in
-  if Sys.file_exists file then
+  if file_exists file then
     try
-      let content = In_channel.with_open_text file In_channel.input_all in
+      let content = read_text_file file in
       let json = Yojson.Safe.from_string content in
       match agent_credential_of_yojson json with
       | Ok cred -> Some cred
@@ -108,20 +114,18 @@ let save_credential config (cred : agent_credential) =
   ensure_auth_dirs config;
   let file = credential_file config cred.agent_name in
   let json = agent_credential_to_yojson cred in
-  Out_channel.with_open_text file (fun oc ->
-    output_string oc (Yojson.Safe.pretty_to_string json)
-  )
+  write_text_file file (Yojson.Safe.pretty_to_string json)
 
 (** Delete agent credential *)
 let delete_credential config agent_name =
   let file = credential_file config agent_name in
-  if Sys.file_exists file then Sys.remove file
+  if file_exists file then remove_file file
 
 (** List all credentials *)
 let list_credentials config : agent_credential list =
   let dir = agents_dir config in
-  if Sys.file_exists dir then
-    Sys.readdir dir
+  if file_exists dir then
+    read_dir dir
     |> Array.to_list
     |> List.filter (fun f -> Filename.check_suffix f ".json")
     |> List.filter_map (fun f ->

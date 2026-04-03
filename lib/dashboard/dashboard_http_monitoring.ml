@@ -128,6 +128,7 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
     ("slo_breached", `Bool false);
     ("judge_online", `Bool runtime.judge_online);
     ("case_tracking_available", `Bool false);
+    ("note", `String Dashboard_governance.case_tracking_note);
   ], true)
 
 let slot_monitoring_json () : Yojson.Safe.t =

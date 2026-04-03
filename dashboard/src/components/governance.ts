@@ -65,13 +65,13 @@ function GovernanceSummaryStrip() {
   return html`
     ${caseTrackingRetired ? html`
       <div class="mb-3.5 flex items-center gap-3 rounded-xl border border-accent/25 bg-accent/10 p-3.5 text-[13px] font-medium text-text-strong shadow-sm" data-testid="governance-retired-banner">
-        <div class="shrink-0"><${AlertTriangle} size=${18} /></div>
+        <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
         <div>${governanceRetiredMessage()}</div>
       </div>
     ` : null}
     ${isStale ? html`
       <div class="mb-3.5 flex items-center gap-3 rounded-xl border border-warn/30 bg-warn/10 p-3.5 text-[13px] font-medium text-warn shadow-sm">
-        <div class="shrink-0"><${AlertTriangle} size=${18} /></div>
+        <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
         <div>
           모든 열린 케이스가 ${formatAgeSummary(oldestAge)} 이상 경과됨.
           ${lastActivityAge != null ? html` 마지막 활동: ${formatAgeSummary(lastActivityAge)} 전.` : null}

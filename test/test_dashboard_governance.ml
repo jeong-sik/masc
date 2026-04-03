@@ -21,6 +21,12 @@ let cleanup_dir dir =
   in
   rm dir
 
+let iso8601_of_unix ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
 let write_legacy_judgment ~base_path json =
   let masc = Filename.concat base_path ".masc" in
   let governance = Filename.concat masc "governance" in
@@ -100,8 +106,9 @@ let test_runtime_status_and_judgments_are_live () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let now = Unix.gettimeofday () in
-      let generated_at = "2026-04-04T12:00:00Z" in
-      let expires_at = "2099-01-01T00:00:00Z" in
+      let generated_at = iso8601_of_unix now in
+      let expires_at_unix = now +. 3600.0 in
+      let expires_at = iso8601_of_unix expires_at_unix in
       let legacy_judgment =
         `Assoc
           [
@@ -138,7 +145,7 @@ let test_runtime_status_and_judgments_are_live () =
         st.generated_at <- Some generated_at;
         st.generated_at_unix <- Some now;
         st.expires_at <- Some expires_at;
-        st.expires_at_unix <- Some (now +. 3600.0);
+        st.expires_at_unix <- Some expires_at_unix;
         st.model_used <- Some "llama:qwen3.5";
         st.last_error <- None);
       let json =
@@ -185,6 +192,9 @@ let test_governance_monitoring_uses_live_runtime () =
       check bool "monitoring call succeeds" true ok;
       check bool "monitoring marks case tracking retired" false
         (json |> member "case_tracking_available" |> to_bool);
+      check string "monitoring includes retirement note"
+        Lib.Dashboard_governance.case_tracking_note
+        (json |> member "note" |> to_string);
       check bool "monitoring exposes live judge_online" true
         (json |> member "judge_online" |> to_bool))
 

@@ -69,22 +69,20 @@ let legacy_room_dirs_exist config =
     if exists then cache_legacy_room_root masc_root;
     exists
 
+(* Validation logic mirrors Room_utils_ops.validate_room_id but returns
+   Option instead of Result.  Cannot call validate_room_id directly due to
+   cyclic dependency (paths_backend <-> ops).  Keep in sync. *)
+let room_id_re =
+  Re.compile Re.(whole_string (rep1 (alt [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '.'; char '_'; char '-'])))
+
 let normalize_current_room_label room_id =
   let room_id = String.trim room_id in
   if room_id = "" then None
   else if room_id = "." || room_id = ".." then None
   else if String.contains room_id '/' || String.contains room_id '\\' then None
   else if String_util.contains_substring room_id ".." then None
-  else if
-    not
-      (Re.execp
-         (Re.compile
-            Re.(whole_string (rep1 (alt [ rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '.'; char '_'; char '-' ]))))
-         room_id)
-  then
-    None
-  else
-    Some room_id
+  else if not (Re.execp room_id_re room_id) then None
+  else Some room_id
 
 let warn_if_legacy_room_state_exists config =
   let legacy_current_room =

@@ -94,25 +94,38 @@ let rec rm_rf path =
 let capture_stderr f =
   let (pipe_read, pipe_write) = Unix.pipe () in
   let saved_stderr = Unix.dup Unix.stderr in
-  Unix.dup2 pipe_write Unix.stderr;
-  Unix.close pipe_write;
-  (try f () with _ -> ());
-  flush stderr;
-  Unix.dup2 saved_stderr Unix.stderr;
-  Unix.close saved_stderr;
-  Unix.set_nonblock pipe_read;
-  let buf = Buffer.create 256 in
-  let tmp = Bytes.create 256 in
-  let rec read_all () =
-    match Unix.read pipe_read tmp 0 256 with
-    | 0 -> ()
-    | n -> Buffer.add_subbytes buf tmp 0 n; read_all ()
-    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
-    | exception _ -> ()
+  let exn_opt = ref None in
+  let restored = ref false in
+  let restore_stderr () =
+    if not !restored then begin
+      flush stderr;
+      Unix.dup2 saved_stderr Unix.stderr;
+      restored := true
+    end
   in
-  read_all ();
-  Unix.close pipe_read;
-  Buffer.contents buf
+  Fun.protect
+    ~finally:(fun () ->
+      restore_stderr ();
+      Unix.close saved_stderr;
+      Unix.close pipe_read)
+    (fun () ->
+      Unix.dup2 pipe_write Unix.stderr;
+      Unix.close pipe_write;
+      (try f () with e -> exn_opt := Some e);
+      restore_stderr ();
+      Unix.set_nonblock pipe_read;
+      let buf = Buffer.create 256 in
+      let tmp = Bytes.create 256 in
+      let rec read_all () =
+        match Unix.read pipe_read tmp 0 256 with
+        | 0 -> ()
+        | n -> Buffer.add_subbytes buf tmp 0 n; read_all ()
+        | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
+        | exception _ -> ()
+      in
+      read_all ();
+      (match !exn_opt with Some e -> raise e | None -> ());
+      Buffer.contents buf)
 
 let test_resolve_masc_base_path_keeps_git_root_resolution_when_env_ignored () =
   let scratch = Filename.temp_dir "room-utils-worktree" "" in

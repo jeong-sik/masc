@@ -28,7 +28,10 @@ let source_root () =
   | None -> (
       try Sys.getcwd () with
       | Sys_error _ ->
+          (* Executable is at _build/default/test/xxx.exe — need 4 dirname
+             calls to reach the repo root, not 3 (which stops at _build/). *)
           Sys.executable_name
+          |> Filename.dirname
           |> Filename.dirname
           |> Filename.dirname
           |> Filename.dirname)

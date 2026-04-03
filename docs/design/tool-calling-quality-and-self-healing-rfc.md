@@ -1,6 +1,6 @@
 # Tool Calling Quality and Self-Healing RFC
 
-**Status**: Design-complete for benchmark and internal-runtime scope; implementation not started
+**Status**: Internal-runtime scope implemented in local worktrees; benchmark/program work remains partially unimplemented
 **Date**: 2026-04-03
 **Scope**: `masc-mcp` + `oas` + local benchmark harness
 **One sentence**: tool calling 품질을 `first-pass selection`에서 `bounded convergence under validation pressure`로 재정의하고, public MCP와 internal OAS 자율 경로의 경계를 유지한 채 self-healing helper와 공통 benchmark contract를 도입한다.
@@ -21,6 +21,19 @@
   - `/Users/dancer/me/.worktrees/exp-gemma4-tool-bench/docs/gemma4-tool-benchmark-20260403.md`
   - `/Users/dancer/me/.worktrees/exp-gemma4-tool-bench/docs/strict-v2-quality-summary-20260403.md`
   - `/Users/dancer/me/.worktrees/exp-gemma4-tool-bench/docs/samchon-runtime-audit-20260403.md`
+
+## Implementation Update (2026-04-04)
+
+Runtime scope has moved since the original draft.
+
+- `oas` now has a generic internal helper `Tool_retry_policy` and uses it in both the generic agent tool loop and `Structured.extract_with_retry`.
+- `masc-mcp` now opts in to that helper only on internal OAS-backed autonomous paths:
+  - keeper turn path
+  - proactive keeper generation path
+  - OAS worker builder path
+  - local worker resume path
+- `masc-mcp` public MCP path remains one-shot and deterministic. No model-facing retry loop was added there.
+- Benchmark runner abstraction, MLX harness lane, and the broader program phases below are still proposal-level unless explicitly marked otherwise.
 
 ## 1. Problem Statement
 
@@ -73,21 +86,22 @@
 
 ### 3.2 Runtime truth
 
-`samchon` parity는 현재 surface별로 다르다.
+`samchon` parity는 여전히 surface별로 다르지만, internal runtime scope에서는 helper boundary가 이제 명시적이다.
 
 - `masc-mcp` public MCP path:
   - deterministic validation 있음
   - model-facing retry loop 없음
 - `masc-mcp` internal keeper/OAS path:
   - validation 있음
-  - same-run correction 가능
+  - bounded same-run correction 가능
+  - OAS `Tool_retry_policy.default_internal`로 opt-in
 - `oas` generic tool loop:
-  - invalid input을 structured error `ToolResult`로 되돌림
-  - same-run next turn correction 가능
+  - invalid input / recoverable tool error를 typed retry decision으로 평가
+  - policy-enabled agent에서 same-run next turn correction 가능
 - `oas` structured path:
-  - `Structured.extract_with_retry`가 explicit bounded retry를 제공
+  - `Structured.extract_with_retry`가 같은 helper core를 사용해 explicit bounded retry를 제공
 
-이 상태는 useful하지만 uneven하다. reusable helper와 adoption boundary가 필요하다.
+이 상태는 여전히 uneven하지만, reusable helper와 adoption boundary 자체는 이제 코드로 존재한다.
 
 ### 3.3 Backend truth
 
@@ -237,6 +251,13 @@ control-only retained model:
 
 OAS에 generic internal helper `tool_retry_policy`를 추가한다.
 
+Implementation status:
+
+- done in local worktrees
+- core module exists
+- generic pipeline adoption exists
+- structured-path adoption exists
+
 typed fields:
 
 - `max_retries : int`
@@ -255,6 +276,11 @@ adoption target:
 
 - internal OAS-backed autonomous path: retry policy 사용 가능
 - public MCP path: retry policy 금지, current deterministic validation 유지
+
+Implementation status:
+
+- internal keeper / worker OAS-backed paths: adopted
+- public MCP path: unchanged
 
 이 boundary는 red line이다.
 
@@ -392,26 +418,36 @@ Phase 0:
 - RFC + execution program doc
 - model catalog draft
 
+Status: pending
+
 Phase 1:
 
 - runner abstraction
 - `benchmark_result_v2`
 - MLX local runner
 
+Status: pending
+
 Phase 2:
 
 - `pressure_behavior_v1`
 - updated summaries and tables
+
+Status: pending
 
 Phase 3:
 
 - OAS `tool_retry_policy`
 - internal-path-only integration in `masc-mcp`
 
+Status: completed in local worktrees on 2026-04-04
+
 Phase 4:
 
 - compare `first-pass` vs `final convergence`
 - decide default serving profile for local model path
+
+Status: pending
 
 ## 13. Risks
 

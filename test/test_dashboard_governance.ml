@@ -28,9 +28,11 @@ let write_legacy_judgment ~base_path json =
   Fs_compat.mkdir_p governance;
   let path = Filename.concat governance "judgments.jsonl" in
   let oc = open_out path in
-  output_string oc (Yojson.Safe.to_string json);
-  output_char oc '\n';
-  close_out oc
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc (Yojson.Safe.to_string json);
+      output_char oc '\n')
 
 let test_empty_governance_structure () =
   let dir = test_dir () in
@@ -131,13 +133,14 @@ let test_runtime_status_and_judgments_are_live () =
       in
       write_legacy_judgment ~base_path:dir legacy_judgment;
       let st = Lib.Dashboard_governance_judge.get_state dir in
-      st.judge_online <- true;
-      st.generated_at <- Some generated_at;
-      st.generated_at_unix <- Some now;
-      st.expires_at <- Some expires_at;
-      st.expires_at_unix <- Some (now +. 3600.0);
-      st.model_used <- Some "llama:qwen3.5";
-      st.last_error <- None;
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.judge_online <- true;
+        st.generated_at <- Some generated_at;
+        st.generated_at_unix <- Some now;
+        st.expires_at <- Some expires_at;
+        st.expires_at_unix <- Some (now +. 3600.0);
+        st.model_used <- Some "llama:qwen3.5";
+        st.last_error <- None);
       let json =
         Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
@@ -170,9 +173,10 @@ let test_governance_monitoring_uses_live_runtime () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let st = Lib.Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
-      st.judge_online <- true;
-      st.generated_at_unix <- Some now;
-      st.expires_at_unix <- Some (now +. 300.0);
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.judge_online <- true;
+        st.generated_at_unix <- Some now;
+        st.expires_at_unix <- Some (now +. 300.0));
       let (json, ok) =
         Lib.Dashboard_http_monitoring.governance_monitoring_json ~now_ts:now
           ~base_path:dir

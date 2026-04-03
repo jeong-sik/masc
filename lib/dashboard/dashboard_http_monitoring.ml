@@ -112,8 +112,7 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
 
 let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
   : Yojson.Safe.t * bool =
-  ignore now_ts;
-  let runtime = Dashboard_governance_judge.runtime_status base_path in
+  let runtime = Dashboard_governance_judge.runtime_status_at ~now_ts base_path in
   (* Governance case tracking is retired, but judge runtime status is still live. *)
   (`Assoc [
     ("alert_level", `String "ok");

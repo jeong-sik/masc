@@ -54,7 +54,7 @@ function GovernanceSummaryStrip() {
   const summary = data?.summary
   const oldestAge = summary?.oldest_open_case_age_s
   const lastActivityAge = summary?.last_activity_age_s
-  const caseTrackingRetired = data?.case_tracking_available === false
+  const caseTrackingRetired = governanceCaseTrackingRetired()
   const isStale = (oldestAge != null && oldestAge > 86400) || (lastActivityAge != null && lastActivityAge > 86400)
   const itemCount = data?.items?.length ?? 0
   const activityCount = data?.activity?.length ?? 0

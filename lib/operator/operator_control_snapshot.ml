@@ -378,6 +378,14 @@ let persistent_agents_json ?keeper_names config =
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
 let _session_recent_event_limit = 3
+let _snapshot_session_window_seconds () =
+  Dashboard_http_helpers.operator_snapshot_session_window_seconds ()
+
+let _snapshot_session_limit () =
+  Dashboard_http_helpers.operator_snapshot_session_limit ()
+
+let _snapshot_recent_completed_limit () =
+  Dashboard_http_helpers.operator_snapshot_recent_completed_limit ()
 
 let sessions_json ?(status_cache : (string, Yojson.Safe.t) Hashtbl.t option) config sessions =
   let ordered_sessions =
@@ -508,8 +516,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     | Some s -> s
     | None ->
         if initialized then
-          let cutoff = Time_compat.now () -. 86400.0 in
-          Team_session_store.list_sessions ~since_unix:cutoff ~limit:20 config
+          let cutoff = Time_compat.now () -. _snapshot_session_window_seconds () in
+          Team_session_store.list_sessions ~since_unix:cutoff
+            ~limit:(_snapshot_session_limit ()) config
         else []
   in
   let trace_id = trace_id "ops" in
@@ -631,12 +640,10 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
                          List.partition (fun (s : Team_session_types.session) ->
                            s.status = Running || s.status = Paused) tracked_sessions
                        in
-                       let recent = match rest with
-                         | [] -> []
-                         | _ ->
-                             List.sort (fun (a : Team_session_types.session) b ->
-                               compare b.started_at a.started_at) rest
-                             |> List.filteri (fun i _ -> i < 5)
+                       let recent =
+                         List.filteri
+                           (fun i _ -> i < _snapshot_recent_completed_limit ())
+                           rest
                        in
                        active @ recent
                      else tracked_sessions

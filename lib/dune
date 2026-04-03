@@ -168,7 +168,6 @@
    local_runtime_pool
    retrieval_projection
    sdk_tool_contract
-   tool_schema_dsl
    worker_oas
    worker_execution_backend
    worker_execution_spec
@@ -183,7 +182,6 @@
    worker_dev_tools
    worker_tool_input
    worker_verification
-   safe_parse
    prompt_defaults
    prompt_composer
    oas_response
@@ -275,7 +273,6 @@
    tui_decode
    tools
    tool_args
-   tool_schema_dsl
    task_sandbox
    tool_improve_loop_schemas
    tool_improve_loop_types
@@ -330,7 +327,6 @@
    tool_local_runtime_status
    tool_board
    tool_command_plane
-   tool_schema_dsl
    tool_command_plane_support
    tool_command_plane_mutations
    tool_command_plane_operations

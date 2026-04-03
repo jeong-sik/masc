@@ -54,7 +54,7 @@ export function normalizeSessionBrief(raw: unknown): DashboardMissionSessionBrie
     goal,
     created_by: asString(raw.created_by) ?? null,
     origin_kind: asString(raw.origin_kind) === 'system' ? 'system' : 'human',
-    room: asString(raw.room) ?? null,
+    namespace: asString(raw.namespace) ?? null,
     status: asString(raw.status),
     health: asString(raw.health),
     member_names: extractArray(raw.member_names)

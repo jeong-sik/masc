@@ -167,23 +167,28 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
         ( task.allowed_tools,
           result.tool_names,
           Some result.tool_call_count,
-          None,
+          fallback_snapshot.latest_action_source,
           Some "heartbeat_task_pending_result",
           Some task.created_at )
       else
         ( task.allowed_tools,
           result.tool_names,
           Some result.tool_call_count,
-          None,
+          fallback_snapshot.latest_action_source,
           Some "heartbeat_result",
           Some result.updated_at )
   | Some task, None ->
-      (task.allowed_tools, [], None, None, Some "heartbeat_task", Some task.created_at)
+      ( task.allowed_tools,
+        [],
+        None,
+        fallback_snapshot.latest_action_source,
+        Some "heartbeat_task",
+        Some task.created_at )
   | None, Some result ->
       ( fallback_allowed,
         result.tool_names,
         Some result.tool_call_count,
-        None,
+        fallback_snapshot.latest_action_source,
         Some "heartbeat_result",
         Some result.updated_at )
   | None, None ->
@@ -423,6 +428,9 @@ let room_json config =
       [
         ("initialized", `Bool false);
         ("project", `String (Filename.basename config.base_path));
+        ("namespace_id", `String "default");
+        ("namespace", `String "default");
+        ("namespace_mode", `String "flattened");
       ]
   else
     let state = Room.read_state config in
@@ -434,7 +442,9 @@ let room_json config =
         ("initialized", `Bool true);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("project", `String state.project);
-        ("current_room", string_option_to_json (Room.read_current_room config));
+        ("namespace_id", `String "default");
+        ("namespace", `String "default");
+        ("namespace_mode", `String "flattened");
         ("paused", `Bool state.paused);
         ("pause_reason", string_option_to_json state.pause_reason);
         ("paused_by", string_option_to_json state.paused_by);
@@ -470,7 +480,7 @@ let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
 
 let invalidate_snapshot_cache () = _snapshot_cache := None
 
-let room_scope_cache_segment (_config : Room_utils.config) = "default"
+let namespace_scope_cache_segment (_config : Room_utils.config) = "default"
 
 let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
     ?(include_keepers = true) ?(include_summary_fields = true)
@@ -479,7 +489,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   let cache_key =
     Printf.sprintf "%s|%s|%s|%s|%b|%b|%b|%b|%b|%b"
       ctx.config.base_path
-      (room_scope_cache_segment ctx.config)
+      (namespace_scope_cache_segment ctx.config)
       (Option.value ~default:"" actor)
       (Option.value ~default:"" view)
       include_messages include_sessions include_keepers include_summary_fields
@@ -580,13 +590,13 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     else [])
   in
   let command_plane_json = timed "command_plane_json" (fun () ->
-    if initialized && include_command_plane && not lightweight_summary then
+    if initialized && include_command_plane then
       Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
     else
       `Null)
   in
   let swarm_status_json =
-    if initialized && include_command_plane && not lightweight_summary then
+    if initialized && include_command_plane then
       Swarm_status.build_json_from_snapshot config command_plane_json
     else
       `Null
@@ -605,7 +615,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("judgment_owner", `String "fallback_read_model");
          ("authoritative_judgment_available", `Bool false);
          ("provenance_summary", operator_surface_contract_json);
-         ("room", room_json config);
+         ("namespace", room_json config);
        ]
       @ (
          (* Parallelize independent I/O: sessions, keepers, persistent_agents.

@@ -52,32 +52,32 @@
   stroke-width: 1.5;
 }
 
-@utility orchestra-room-ring {
+@utility orchestra-namespace-ring {
   fill: rgba(15,23,42,0.88);
   stroke: rgba(148,163,184,0.26);
   stroke-width: 1.5;
 }
 
 .orchestra-node.ok .orchestra-node-body,
-.orchestra-node.ok .orchestra-room-ring { stroke: rgba(74,222,128,0.45); }
+.orchestra-node.ok .orchestra-namespace-ring { stroke: rgba(74,222,128,0.45); }
 .orchestra-node.warn .orchestra-node-body,
-.orchestra-node.warn .orchestra-room-ring { stroke: rgba(251,191,36,0.48); }
+.orchestra-node.warn .orchestra-namespace-ring { stroke: rgba(251,191,36,0.48); }
 .orchestra-node.bad .orchestra-node-body,
-.orchestra-node.bad .orchestra-room-ring { stroke: rgba(248,113,113,0.56); }
+.orchestra-node.bad .orchestra-namespace-ring { stroke: rgba(248,113,113,0.56); }
 
 .orchestra-node.focused .orchestra-node-body,
-.orchestra-node.focused .orchestra-room-ring,
+.orchestra-node.focused .orchestra-namespace-ring,
 .orchestra-node.selected .orchestra-node-body,
-.orchestra-node.selected .orchestra-room-ring {
+.orchestra-node.selected .orchestra-namespace-ring {
   stroke-width: 2.6;
   filter: drop-shadow(0 0 10px rgba(34,211,238,0.25));
 }
 
-/* orchestra-room-ring variants and orchestra node styles: these need raw CSS for compound selectors */
-.orchestra-room-ring.outer { fill: rgba(15,23,42,0.9); }
-.orchestra-room-ring.inner { fill: rgba(14,116,144,0.12); }
-@utility orchestra-room-glyph { font-size: 30px; fill: #67e8f9; font-weight: 700; }
-@utility orchestra-room-label { fill: var(--text-near-white); font-size: var(--fs-base); font-weight: 600; }
+/* orchestra-namespace-ring variants and orchestra node styles: these need raw CSS for compound selectors */
+.orchestra-namespace-ring.outer { fill: rgba(15,23,42,0.9); }
+.orchestra-namespace-ring.inner { fill: rgba(14,116,144,0.12); }
+@utility orchestra-namespace-glyph { font-size: 30px; fill: #67e8f9; font-weight: 700; }
+@utility orchestra-namespace-label { fill: var(--text-near-white); font-size: var(--fs-base); font-weight: 600; }
 @utility orchestra-node-label { fill: var(--text-near-white); font-size: var(--fs-base); font-weight: 600; }
 @utility orchestra-node-subtitle { fill: rgba(226,232,240,0.62); font-size: var(--fs-2xs); }
 @utility orchestra-node-status { fill: rgba(226,232,240,0.62); font-size: var(--fs-2xs); }
@@ -146,4 +146,3 @@
   &.warn { background: var(--warn); }
   &.bad { background: var(--bad); }
 }
-

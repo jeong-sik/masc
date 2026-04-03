@@ -1,6 +1,6 @@
 // Unified tone classification utilities.
 // Consolidates toneClass, chainStatusTone, sessionStatusTone, expiryTone
-// from helpers.ts, mission-utils.ts, agents.ts, room-truth-strip.ts, etc.
+// from helpers.ts, mission-utils.ts, agents.ts, namespace-truth-strip.ts, etc.
 
 /** General tone classification — maps status/health values to 'ok' | 'warn' | 'bad'. */
 export function toneClass(tone?: string | null): string {

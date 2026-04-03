@@ -38,6 +38,7 @@ export type SSEEventType =
   | 'oas:masc:harness:handoff'
   // Server-push snapshot events (proactive cache broadcasts)
   | 'room_truth_snapshot'
+  | 'namespace_truth_snapshot'
   | 'execution_snapshot'
   | 'operator_snapshot'
   | 'operator_digest'

@@ -14,7 +14,7 @@ let arg_get_string ctx key default =
 let arg_get_string_list ctx key =
   Safe_ops.json_string_list key ctx.arguments
 
-(** masc_start — compound onboarding (set_room + join + optional task) *)
+(** masc_start — compound onboarding (set project root + join + optional task) *)
 let handle_start (ctx : context) : result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
@@ -24,14 +24,14 @@ let handle_start (ctx : context) : result option =
     if p = "" then arg_get_string ctx "room" "" else p
   in
   let task_title = arg_get_string ctx "task_title" "" in
-  (* Step 1: set_room *)
+  (* Step 1: set project root / coordination namespace *)
   let room_result =
     if path = "" then begin
-      (* Use current room if already set *)
+      (* Use current project namespace if already set *)
       if Room.is_initialized state.Mcp_server.room_config then
         Ok config
       else
-        Error "path is required when no room is set. Provide the project directory path."
+        Error "path is required when no project namespace is set. Provide the project directory path."
     end else begin
       let expanded =
         if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
@@ -60,7 +60,10 @@ let handle_start (ctx : context) : result option =
     end
   in
   match room_result with
-  | Error e -> Some (false, Printf.sprintf "masc_start failed at set_room: %s" e)
+  | Error e ->
+      Some
+        (false,
+         Printf.sprintf "masc_start failed while setting project scope: %s" e)
   | Ok active_config ->
     (* Step 2: join (idempotent — skip if already joined) *)
     let join_result =
@@ -76,7 +79,11 @@ let handle_start (ctx : context) : result option =
     | Ok () ->
       (* Step 3: add_task + claim + plan_set_task (if task_title provided) *)
       if task_title = "" then
-        Some (true, Printf.sprintf "masc_start complete (room set + joined as %s). No task created — use masc_add_task to create one." agent_name)
+        Some
+          (true,
+           Printf.sprintf
+             "masc_start complete (project scope set + joined as %s). No task created — use masc_add_task to create one."
+             agent_name)
       else begin
         let add_result = Room_task.add_task active_config ~title:task_title ~priority:3 ~description:"" in
         (* Extract task ID from result like "Added task-001: title" *)
@@ -94,11 +101,19 @@ let handle_start (ctx : context) : result option =
           with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
         in
         if task_id = "" then
-          Some (true, Printf.sprintf "masc_start partial: joined as %s, but task creation failed: %s" agent_name add_result)
+          Some
+            (true,
+             Printf.sprintf
+               "masc_start partial: joined as %s, but task creation failed: %s"
+               agent_name add_result)
         else begin
           let _claim_msg = Room_task.claim_task active_config ~agent_name ~task_id in
           Planning_eio.set_current_task active_config ~task_id;
-          Some (true, Printf.sprintf "masc_start complete: room set, joined as %s, task %s created+claimed+set as current." agent_name task_id)
+          Some
+            (true,
+             Printf.sprintf
+               "masc_start complete: project scope set, joined as %s, task %s created+claimed+set as current."
+               agent_name task_id)
         end
       end
 
@@ -181,7 +196,7 @@ let handle_unlock (ctx : context) : result option =
              Some (false, Printf.sprintf "Lock release error: %s" (Backend_types.show_error e)))
   end
 
-(** masc_set_room — set the active MASC room *)
+(** masc_set_room — set the active MASC project root *)
 let handle_set_room (ctx : context) : result option =
   let state = ctx.state in
   let path =
@@ -189,7 +204,9 @@ let handle_set_room (ctx : context) : result option =
     if p = "" then arg_get_string ctx "room" "" else p
   in
   if path = "" then
-    Some (false, "path is required: provide the absolute or relative path to your project directory")
+    Some
+      (false,
+       "path is required: provide the absolute or relative path to your project directory")
   else
   let expanded =
     if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
@@ -222,16 +239,17 @@ let handle_set_room (ctx : context) : result option =
       let root_note =
         if rc.workspace_path <> rc.base_path then
           Printf.sprintf
-            "MASC room set.\n   coordination root: %s\n   workspace: %s\n   .masc/ status: %s"
+            "MASC project scope set.\n   coordination root: %s\n   workspace: %s\n   namespace: default (flattened)\n   .masc/ status: %s"
             rc.base_path rc.workspace_path status
         else
-          Printf.sprintf "MASC room set to: %s\n   .masc/ status: %s"
+          Printf.sprintf
+            "MASC project scope set to: %s\n   namespace: default (flattened)\n   .masc/ status: %s"
             rc.base_path status
       in
       Some (true, root_note)
     end
 
-(** masc_join — join a MASC room *)
+(** masc_join — join the active MASC project namespace *)
 let handle_join (ctx : context) : result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in

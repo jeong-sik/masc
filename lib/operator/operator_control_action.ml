@@ -4,23 +4,25 @@ include Operator_control_snapshot
 open Result_syntax
 
 let judgment_surface_enums =
-  [ "command.warroom"; "command.swarm"; "intervene" ]
+  [ "command.namespace"; "command.swarm"; "intervene" ]
 
 let normalize_judgment_surface value =
   let normalized = String.trim value |> String.lowercase_ascii in
-  if List.mem normalized judgment_surface_enums then Ok normalized
-  else Error "surface must be one of command.warroom, command.swarm, intervene"
+  match normalized with
+  | "command.namespace" -> Ok "command.namespace"
+  | "command.swarm" | "intervene" -> Ok normalized
+  | _ -> Error "surface must be one of command.namespace, command.swarm, intervene"
 
 let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
   match normalized with
-  | "room" -> Ok ("room", Operator_judgment.Room)
+  | "room" | "namespace" -> Ok ("namespace", Operator_judgment.Room)
   | "team_session" -> Ok ("team_session", Operator_judgment.Team_session)
-  | _ -> Error "target_type must be room or team_session"
+  | _ -> Error "target_type must be namespace or team_session"
 
 let default_fresh_ttl_sec surface =
   match surface with
-  | "command.warroom" -> 60
+  | "command.namespace" -> 60
   | "command.swarm" | "intervene" -> 300
   | _ -> 120
 
@@ -122,6 +124,8 @@ type action_request = {
 let canonical_action_type action_type =
   match action_type with
   | "autonomy_tick" -> "social_sweep"
+  | "room_pause" | "namespace_pause" -> "namespace_pause"
+  | "room_resume" | "namespace_resume" -> "namespace_resume"
   | "social_sweep" -> "social_sweep"
   | "team_turn" -> "team_turn"
   | "team_note" -> "team_note"
@@ -136,9 +140,16 @@ let canonical_action_type action_type =
   | "review_defer" -> "review_defer"
   | other -> other
 
+let normalize_action_target_type target_type =
+  match String.trim target_type |> String.lowercase_ascii with
+  | "room" | "namespace" -> Ok "namespace"
+  | "team_session" | "keeper" | "review_item" as value -> Ok value
+  | "" -> Ok ""
+  | _ -> Error "target_type must be namespace, team_session, keeper, or review_item"
+
 let default_target_type_for action_type =
   match action_type with
-  | "broadcast" | "room_pause" | "room_resume" | "task_inject" | "social_sweep" -> "room"
+  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep" -> "namespace"
   | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject"
   | "team_worker_spawn_batch" | "team_stop" ->
       "team_session"
@@ -204,11 +215,18 @@ let action_request_of_args ?actor_hint ctx args =
       payload = get_payload args;
     }
 
+let normalize_request_target_type (request : action_request) =
+  let* target_type =
+    if request.target_type <> "" then normalize_action_target_type request.target_type
+    else Ok (default_target_type_for request.action_type)
+  in
+  Ok { request with target_type }
+
 let delegated_tool_for action_type =
   match action_type with
   | "broadcast" -> "masc_broadcast"
-  | "room_pause" -> "masc_pause"
-  | "room_resume" -> "masc_resume"
+  | "namespace_pause" -> "masc_pause"
+  | "namespace_resume" -> "masc_resume"
   | "social_sweep" -> "social_sweep"
   | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject" ->
       "masc_team_session_step"
@@ -266,5 +284,3 @@ let parse_turn_kind payload =
   | None ->
       Error
         "payload.turn_kind must be one of: note, broadcast, portal, task, checkpoint"
-
-

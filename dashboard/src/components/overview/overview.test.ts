@@ -6,9 +6,9 @@ const missionSnapshot = { value: null as Record<string, unknown> | null }
 const missionLoading = { value: false }
 const refreshMissionSnapshot = vi.fn().mockResolvedValue(undefined)
 
-const roomTruth = { value: null as Record<string, unknown> | null }
-const roomTruthLoading = { value: false }
-const refreshRoomTruth = vi.fn().mockResolvedValue(undefined)
+const namespaceTruth = { value: null as Record<string, unknown> | null }
+const namespaceTruthLoading = { value: false }
+const refreshNamespaceTruth = vi.fn().mockResolvedValue(undefined)
 
 const topActiveAgents = { value: [] as unknown[] }
 const shellMetaCognition = { value: null as Record<string, unknown> | null }
@@ -30,10 +30,10 @@ async function loadOverview() {
     missionLoading,
     refreshMissionSnapshot,
   }))
-  vi.doMock('../../room-truth-store', () => ({
-    roomTruth,
-    roomTruthLoading,
-    refreshRoomTruth,
+  vi.doMock('../../namespace-truth-store', () => ({
+    namespaceTruth,
+    namespaceTruthLoading,
+    refreshNamespaceTruth,
   }))
   vi.doMock('../../observatory-store', () => ({
     topActiveAgents,
@@ -80,7 +80,7 @@ describe('Overview freshness strip', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     missionLoading.value = false
-    roomTruthLoading.value = false
+    namespaceTruthLoading.value = false
     topActiveAgents.value = []
     shellMetaCognition.value = null
     connected.value = true
@@ -93,7 +93,7 @@ describe('Overview freshness strip', () => {
       session_briefs: [],
       attention_queue: [],
     }
-    roomTruth.value = {
+    namespaceTruth.value = {
       generated_at: '2026-03-26T12:08:00Z',
     }
   })
@@ -105,7 +105,7 @@ describe('Overview freshness strip', () => {
     vi.restoreAllMocks()
     vi.resetModules()
     vi.doUnmock('../../mission-store')
-    vi.doUnmock('../../room-truth-store')
+    vi.doUnmock('../../namespace-truth-store')
     vi.doUnmock('../../observatory-store')
     vi.doUnmock('../../store')
     vi.doUnmock('../../sse')
@@ -119,7 +119,7 @@ describe('Overview freshness strip', () => {
   })
 
   it('shows a stale warning when the oldest overview snapshot is over 5 minutes old', async () => {
-    roomTruth.value = {
+    namespaceTruth.value = {
       generated_at: '2026-03-26T12:03:00Z',
     }
 
@@ -145,12 +145,12 @@ describe('Overview freshness strip', () => {
     button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()
 
-    expect(refreshRoomTruth).toHaveBeenCalledWith({ force: true })
+    expect(refreshNamespaceTruth).toHaveBeenCalledWith({ force: true })
     expect(refreshMissionSnapshot).toHaveBeenCalledWith({ force: true })
   }, 15000)
 
   it('renders the meta-cognition summary card when shell data is available', async () => {
-    roomTruth.value = {
+    namespaceTruth.value = {
       generated_at: '2026-03-26T12:08:00Z',
       meta_cognition: {
         latest_digest: {
@@ -204,7 +204,7 @@ describe('Overview freshness strip', () => {
     expect(container.textContent).toContain('공감대')
     expect(container.textContent).toContain('긴장')
     expect(container.textContent).toContain('욕구')
-    expect(container.textContent).toContain('room-truth focus')
+    expect(container.textContent).toContain('namespace-truth focus')
     expect(container.textContent).toContain('집단 인식에 이견이 있습니다')
     expect(container.textContent).toContain('운영자 개입 필요')
 

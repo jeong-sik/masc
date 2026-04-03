@@ -182,7 +182,7 @@ let test_compact_session_json_normalizes_missing_fields () =
         ( "status",
           `Assoc
             [
-              ("session", `Assoc [ ("goal", `Null); ("room_id", `Null); ("status", `Null) ]);
+              ("session", `Assoc [ ("goal", `Null); ("namespace_id", `Null); ("status", `Null) ]);
               ("summary", `Assoc []);
               ("team_health", `Assoc []);
               ("communication_metrics", `Assoc []);
@@ -192,7 +192,7 @@ let test_compact_session_json_normalizes_missing_fields () =
   in
   let compact = Briefing.compact_session_json json in
   check_string_field compact "goal" "unassigned";
-  check_string_field compact "room_id" "unknown-room";
+  check_string_field compact "namespace_id" "unknown-namespace";
   check_string_field compact "status" "unknown";
   check_list_field compact "agent_names" 0;
   check_int_field compact "active_agents_count" 0;
@@ -246,7 +246,7 @@ let test_relevant_sessions_for_briefing_filters_stale_terminal_sessions () =
         ( "status",
           `Assoc
             [
-              ("session", `Assoc [ ("room_id", `String "default"); ("status", `String "interrupted") ]);
+              ("session", `Assoc [ ("namespace_id", `String "default"); ("status", `String "interrupted") ]);
               ("summary", `Assoc []);
             ] );
         ("recent_events", `List []);
@@ -259,7 +259,7 @@ let test_relevant_sessions_for_briefing_filters_stale_terminal_sessions () =
         ( "status",
           `Assoc
             [
-              ("session", `Assoc [ ("room_id", `String "default"); ("status", `String "running") ]);
+              ("session", `Assoc [ ("namespace_id", `String "default"); ("status", `String "running") ]);
               ("summary", `Assoc []);
             ] );
         ( "recent_events",
@@ -270,7 +270,7 @@ let test_relevant_sessions_for_briefing_filters_stale_terminal_sessions () =
       ]
   in
   let relevant =
-    Briefing.relevant_sessions_for_briefing ~current_room:"default" ~now_ts
+    Briefing.relevant_sessions_for_briefing ~current_namespace:"default" ~now_ts
       [ stale_terminal; active_session ]
   in
   check int "relevant session count" 1 (List.length relevant);
@@ -288,7 +288,7 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
             ( "status",
               `Assoc
                 [
-                  ("session", `Assoc [ ("goal", `Null); ("room_id", `String "default") ]);
+                  ("session", `Assoc [ ("goal", `Null); ("namespace_id", `String "default") ]);
                   ("summary", `Assoc []);
                   ("team_health", `Assoc []);
                   ("communication_metrics", `Assoc []);
@@ -386,7 +386,7 @@ let test_build_briefing_sections_demotes_metadata_only_communication () =
   in
   let communication = find_section sections "communication" in
   let watch = find_section sections "watch" in
-  check string "watch summary" "No immediate operator action is flagged by the room summary."
+  check string "watch summary" "No immediate operator action is flagged by the namespace summary."
     watch_summary;
   check_string_field communication "status" "unclear";
   check_string_field communication "signal_class" "metadata_gap";
@@ -408,7 +408,7 @@ let test_build_briefing_sections_keeps_metadata_evidence_visible () =
       [
         ("session_id", `String "sess-live");
         ("goal", `String "goal-a");
-        ("room_id", `String "default");
+        ("namespace_id", `String "default");
         ("status", `String "running");
         ("agent_names", `List []);
         ("elapsed_sec", `Int 10);

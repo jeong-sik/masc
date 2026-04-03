@@ -108,7 +108,7 @@ let meta_summary ?(stagnation = 0.72) ?(contested = 1)
           ] );
     ]
 
-let room_truth_snapshot ?(focus_reason = "집단 인식에 이견이 있습니다")
+let namespace_truth_snapshot ?(focus_reason = "집단 인식에 이견이 있습니다")
     ?(focus_source = "meta_cognition") summary =
   `Assoc
     [
@@ -123,7 +123,7 @@ let room_truth_snapshot ?(focus_reason = "집단 인식에 이견이 있습니�
             ("source", `String focus_source);
             ("provenance", `String "derived");
             ("target_kind", `String "meta_cognition");
-            ("target_id", `String "room:default");
+            ("target_id", `String "namespace:default");
             ("suggested_tab", `String "overview");
             ("suggested_params", `Assoc []);
           ] );
@@ -136,7 +136,7 @@ let list_digest_posts () =
 
 let test_posts_digest_once_for_same_snapshot () =
   with_ctx @@ fun config ->
-  let snapshot = room_truth_snapshot (meta_summary ()) in
+  let snapshot = namespace_truth_snapshot (meta_summary ()) in
   let first = Feedback.maybe_post_digest ~config snapshot in
   let second = Feedback.maybe_post_digest ~config snapshot in
   let posts = list_digest_posts () in
@@ -159,9 +159,9 @@ let test_posts_digest_once_for_same_snapshot () =
 
 let test_posts_new_digest_when_signal_changes () =
   with_ctx @@ fun config ->
-  let first_snapshot = room_truth_snapshot (meta_summary ()) in
+  let first_snapshot = namespace_truth_snapshot (meta_summary ()) in
   let second_snapshot =
-    room_truth_snapshot
+    namespace_truth_snapshot
       (meta_summary ~contested:0 ~belief_status:"corroborated"
          ~tension_id:"tension:idle_backlog_empty"
          ~tension_topic:"idle room with empty backlog"
@@ -175,7 +175,7 @@ let test_posts_new_digest_when_signal_changes () =
 let test_exposes_latest_digest_reference () =
   with_ctx @@ fun config ->
   let summary = meta_summary () in
-  let snapshot = room_truth_snapshot summary in
+  let snapshot = namespace_truth_snapshot summary in
   let posted_id =
     match Feedback.maybe_post_digest ~config snapshot with
     | Feedback.Posted post_id -> post_id
@@ -194,7 +194,7 @@ let test_exposes_latest_digest_reference () =
 
 let test_digest_body_keeps_secondary_signals () =
   with_ctx @@ fun config ->
-  let snapshot = room_truth_snapshot (meta_summary ()) in
+  let snapshot = namespace_truth_snapshot (meta_summary ()) in
   (match Feedback.maybe_post_digest ~config snapshot with
    | Feedback.Posted _ -> ()
    | Feedback.Deduped -> Alcotest.fail "expected fresh digest post"

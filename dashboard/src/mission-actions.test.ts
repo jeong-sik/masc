@@ -12,7 +12,7 @@ const missionPayload = {
   generated_at: '2026-03-25T09:00:00Z',
   summary: {
     room_health: 'ok',
-    current_room: 'default',
+    namespace: 'default',
   },
   incidents: [],
   recommended_actions: [],

@@ -501,10 +501,11 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let json = Env_config_introspect.to_json () in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/dashboard/namespace-truth"
       | `GET, "/api/v1/dashboard/room-truth" ->
           let state = get_server_state () in
           let json =
-            dashboard_room_truth_http_json ~state ~sw ~clock httpun_request
+            dashboard_namespace_truth_http_json ~state ~sw ~clock httpun_request
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
@@ -779,13 +780,22 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd json ~extra_headers:cors
 
+      | `GET, "/api/v1/namespace/current"
       | `GET, "/api/v1/room/current" ->
           let state = get_server_state () in
-          let config = state.Mcp_server.room_config in
-          let room_id = Option.value ~default:"default" (Room.read_current_room config) in
-          let json = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
+          let _config = state.Mcp_server.room_config in
+          let json =
+            `Assoc
+              [
+                ("ok", `Bool true);
+                ("namespace_id", `String "default");
+                ("namespace", `String "default");
+                ("namespace_mode", `String "flattened");
+              ]
+          in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `POST, "/api/v1/namespace/current"
       | `POST, "/api/v1/room/current" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in
@@ -793,22 +803,37 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             let error_json msg = `Assoc [("error", `String msg)] in
             try
               let json = Yojson.Safe.from_string body_str in
-              let room_id_opt = match Yojson.Safe.Util.member "room_id" json with
+              let namespace_id_opt =
+                match Yojson.Safe.Util.member "namespace_id" json with
                 | `String s when String.trim s <> "" -> Some (String.trim s)
                 | `String _ -> None
                 | _ -> None
               in
-              (match room_id_opt with
+              (match namespace_id_opt with
                | None ->
                    h2_respond_json h2_reqd
-                     (Yojson.Safe.to_string (error_json "room_id is required and cannot be empty"))
+                     (Yojson.Safe.to_string
+                        (error_json
+                           "namespace_id is required and cannot be empty"))
                       ~status:`Bad_request ~extra_headers:cors
-               | Some room_id ->
-                     Room.write_current_room config room_id;
-                     Room.ensure_room_bootstrap config room_id;
-                     let response = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
+               | Some namespace_id ->
+                     Room.write_current_room config namespace_id;
+                     let response =
+                       `Assoc
+                         [
+                           ("ok", `Bool true);
+                           ("namespace_id", `String "default");
+                           ("namespace", `String "default");
+                           ("namespace_mode", `String "flattened");
+                           ("requested_namespace_id", `String namespace_id);
+                         ]
+                     in
                      h2_respond_json h2_reqd (Yojson.Safe.to_string response) ~extra_headers:cors)
             with
+            | Invalid_argument msg ->
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (error_json msg))
+                  ~status:`Bad_request ~extra_headers:cors
             | Yojson.Json_error msg ->
                 h2_respond_json h2_reqd
                   (Yojson.Safe.to_string (error_json (Printf.sprintf "invalid json: %s" msg)))

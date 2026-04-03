@@ -5,7 +5,7 @@ open Server_utils
 open Server_dashboard_http_core
 
 (** Track whether shell cache has been populated at least once.
-    Used for adaptive timeout in room-truth: cold path gets more time. *)
+    Used for adaptive timeout in namespace-truth: cold path gets more time. *)
 let _shell_warmed = ref false
 
 let warm_shell_cache (state : Mcp_server.server_state) =
@@ -95,7 +95,7 @@ let invalidate_execution_cache () =
        (Printexc.to_string exn))
 
 (** Bypass the proactive warm-up guard so tests that call
-    [dashboard_room_truth_http_json] get the full response instead of
+    [dashboard_namespace_truth_http_json] get the full response instead of
     the "initializing" short-circuit. *)
 let seed_execution_cache_for_test () =
   mark_cached_surface_success _execution_cache
@@ -207,9 +207,9 @@ let patch_keeper_dependent_caches ~keeper_name ~event =
       patch_execution_cache_for_keeper ~keeper_name ~keepalive_running;
       patch_operator_snapshot_cache_for_keeper ~keeper_name ~keepalive_running
 
-(** Late-bound broadcast hook. Set after [broadcast_room_truth_snapshot]
-    is defined in [Server_dashboard_http_room_truth]. *)
-let _broadcast_room_truth_ref : (Mcp_server.server_state -> unit) ref =
+(** Late-bound broadcast hook. Set after [broadcast_namespace_truth_snapshot]
+    is defined in [Server_dashboard_http_namespace_truth]. *)
+let _broadcast_namespace_truth_ref : (Mcp_server.server_state -> unit) ref =
   ref (fun (_state : Mcp_server.server_state) -> ())
 
 (** Start the proactive execution refresh loop. When an Executor_pool is
@@ -255,7 +255,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~on_result:(fun json ->
       mark_cached_surface_success _execution_cache json;
       broadcast_cached_surface ~event_type:"execution_snapshot" json;
-      !_broadcast_room_truth_ref state)
+      !_broadcast_namespace_truth_ref state)
 
 let start_transport_health_refresh_loop ~state ~sw ~clock =
   let timeout_s =

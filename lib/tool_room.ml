@@ -177,9 +177,7 @@ let agent_focus_label ~is_zombie (agent : Types.agent) =
 let status_summary_string (ctx : context) =
   Room.ensure_initialized ctx.config;
   let state = Room.read_state ctx.config in
-  let current_room =
-    Room.read_current_room ctx.config |> Option.value ~default:"default"
-  in
+  let current_room = "default" in
   let backlog = Room.read_backlog_in_room ctx.config current_room in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
@@ -299,7 +297,8 @@ let status_summary_string (ctx : context) =
   Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" cluster_name);
   if cluster_name <> state.project then
     Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
-  Buffer.add_string buf (Printf.sprintf "📍 Room: %s\n" current_room);
+  Buffer.add_string buf
+    (Printf.sprintf "📍 Namespace: %s (flattened)\n" current_room);
   Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" ctx.config.base_path);
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf

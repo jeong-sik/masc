@@ -63,7 +63,10 @@ let metric_context_of_json json =
   let channel =
     match field "channel" with
     | "" -> "unknown"
-    | value -> value
+    | value ->
+        value
+        |> Agent_identity.channel_of_string
+        |> Agent_identity.string_of_channel
   in
   (channel, field "channel_room_id", field "keeper_name")
 

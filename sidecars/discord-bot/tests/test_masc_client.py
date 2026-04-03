@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import httpx
+import logging
 import pytest
 
 from src import config as config_module

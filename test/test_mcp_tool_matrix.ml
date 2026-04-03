@@ -25,7 +25,13 @@ let requested_tool_names () =
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
   | Some root -> root
-  | None -> Sys.getcwd ()
+  | None -> (
+      try Sys.getcwd () with
+      | Sys_error _ ->
+          Sys.executable_name
+          |> Filename.dirname
+          |> Filename.dirname
+          |> Filename.dirname)
 
 let quote = Filename.quote
 

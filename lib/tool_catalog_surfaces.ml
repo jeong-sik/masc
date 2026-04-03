@@ -52,6 +52,8 @@ let keeper_internal_tools =
     "keeper_voice_sessions";
     "keeper_voice_session_start";
     "keeper_voice_session_end";
+    (* Phase 2: surface SSOT *)
+    "keeper_deliberation_decision"; "keeper_unified";
   ]
 
 let keeper_internal_set : (string, unit) Hashtbl.t =
@@ -98,6 +100,7 @@ type surface =
   | Admin
   | Keeper_internal
   | Keeper_denied
+  | System_internal
 
 let public_mcp_surface_tools =
   [
@@ -130,6 +133,12 @@ let public_mcp_surface_tools =
     "masc_webrtc_offer"; "masc_webrtc_answer";
     (* Utility *)
     "masc_tool_help"; "masc_web_search"; "masc_check";
+    (* Phase 2: surface SSOT *)
+    "masc_board_migrate"; "masc_board_reclassify"; "masc_bounded_run";
+    "masc_episode_flush"; "masc_episode_list";
+    "masc_recall_search"; "masc_set_room";
+    "masc_verify_auto"; "masc_verify_handoff"; "masc_verify_pending";
+    "masc_verify_request"; "masc_verify_status"; "masc_verify_submit";
   ]
 
 let spawned_agent_surface_tools =
@@ -156,6 +165,19 @@ let spawned_agent_surface_tools =
     "masc_team_session_report"; "masc_team_session_list";
     "masc_a2a_delegate"; "masc_a2a_subscribe";
     "masc_poll_events"; "masc_spawn";
+    (* Phase 2: surface SSOT *)
+    "masc_archive_view";
+    "masc_code_delete"; "masc_code_edit"; "masc_code_git";
+    "masc_code_shell"; "masc_code_write";
+    "masc_deliver"; "masc_error_add"; "masc_error_resolve";
+    "masc_find_by_capability";
+    "masc_keeper_tool_catalog";
+    "masc_plan_clear_task"; "masc_plan_get_task";
+    "masc_portal_close";
+    "masc_room_strategy_get"; "masc_room_strategy_set";
+    "masc_team_session_compare"; "masc_team_session_prove";
+    "masc_update_priority";
+    "masc_verify_handoff"; "masc_workflow_guide";
   ]
 
 let local_worker_surface_tools =
@@ -170,6 +192,12 @@ let local_worker_surface_tools =
     "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
     "masc_repair_loop_start"; "masc_repair_loop_status";
     "masc_repair_loop_iterate"; "masc_repair_loop_stop";
+    (* Phase 2: surface SSOT *)
+    "masc_improve_loop_pause"; "masc_improve_loop_resume";
+    "masc_improve_loop_start"; "masc_improve_loop_status"; "masc_improve_loop_tick";
+    "masc_library_add"; "masc_library_list"; "masc_library_promote";
+    "masc_library_read"; "masc_library_search";
+    "masc_relay_now"; "masc_relay_smart_check";
   ]
 
 let session_min_surface_tools =
@@ -190,6 +218,23 @@ let admin_surface_tools =
     "masc_tool_admin_update"; "masc_tool_grant"; "masc_tool_revoke";
     "masc_operator_action"; "masc_operator_confirm"; "masc_operator_snapshot";
     "masc_team_session_finalize"; "masc_tool_admin_snapshot";
+    (* Phase 2: surface SSOT *)
+    "masc_auth_disable"; "masc_auth_enable"; "masc_auth_list";
+    "masc_auth_refresh"; "masc_auth_revoke"; "masc_auth_status";
+    "masc_collaboration_evidence"; "masc_collaboration_graph";
+    "masc_detachment_list"; "masc_detachment_status";
+    "masc_dispatch_assign"; "masc_dispatch_escalate"; "masc_dispatch_plan";
+    "masc_dispatch_rebalance"; "masc_dispatch_recall"; "masc_dispatch_tick";
+    "masc_keeper_create_from_persona";
+    "masc_observe_alerts"; "masc_observe_capacity"; "masc_observe_operations";
+    "masc_observe_swarm"; "masc_observe_topology"; "masc_observe_traces";
+    "masc_operation_checkpoint"; "masc_operation_finalize"; "masc_operation_pause";
+    "masc_operation_resume"; "masc_operation_start"; "masc_operation_status";
+    "masc_operation_stop"; "masc_operator_digest"; "masc_operator_judgment_latest";
+    "masc_pause"; "masc_resume";
+    "masc_policy_approve"; "masc_policy_deny"; "masc_policy_status"; "masc_policy_update";
+    "masc_runtime_verify"; "masc_tool_list";
+    "masc_unit_define"; "masc_unit_list"; "masc_unit_reassign"; "masc_unit_reparent";
   ]
 
 let keeper_internal_surface_tools = keeper_internal_tools
@@ -208,6 +253,40 @@ let keeper_denied_surface_tools =
     "masc_neo4j_query"; "masc_pg_query";
   ]
 
+let system_internal_surface_tools =
+  [
+    (* MCP protocol internals *)
+    "masc_mcp_session"; "masc_suspend"; "masc_listen";
+    (* Session lifecycle — auto-called *)
+    "masc_init"; "masc_reset"; "masc_register_capabilities";
+    (* Governance pipeline — auto-executed (active tools only;
+       masc_approve/reject/branch/interrupt/pending_interrupts are Deprecated
+       in Tool_catalog — they shell out to the removed masc-checkpoint CLI) *)
+    "masc_governance_set";
+    (* Concurrency control *)
+    "masc_lock"; "masc_unlock";
+    (* Heartbeat system loop *)
+    "masc_heartbeat_start"; "masc_heartbeat_stop";
+    "masc_heartbeat_list"; "masc_heartbeat_result";
+    (* Task lifecycle — SDK internal *)
+    "masc_cancel_task"; "masc_claim_task"; "masc_complete_task";
+    "masc_release_task"; "masc_set_current_task";
+    (* Agent evaluation — system loop *)
+    "masc_agent_fitness"; "masc_agent_relations";
+    "masc_meta_cognition_snapshot"; "masc_consolidate_learning";
+    "masc_select_agent";
+    (* Maintenance *)
+    "masc_cleanup_zombies"; "masc_gc";
+    (* Infrastructure control *)
+    "masc_cancellation"; "masc_subscription";
+    "masc_feature_flags"; "masc_compact_context";
+    (* Internal monitoring *)
+    "masc_autoresearch_status"; "masc_pause_status";
+    "masc_tool_stats"; "masc_surface_audit";
+    (* Phase 2 addition *)
+    "masc_get_metrics";
+  ]
+
 (* ================================================================ *)
 (* Surface query functions                                          *)
 (* ================================================================ *)
@@ -220,10 +299,11 @@ let tools_for_surface = function
   | Admin -> admin_surface_tools
   | Keeper_internal -> keeper_internal_surface_tools
   | Keeper_denied -> keeper_denied_surface_tools
+  | System_internal -> system_internal_surface_tools
 
 let all_surfaces =
   [Public_mcp; Spawned_agent; Local_worker; Session_min;
-   Admin; Keeper_internal; Keeper_denied]
+   Admin; Keeper_internal; Keeper_denied; System_internal]
 
 let surface_sets : (surface * (string, unit) Hashtbl.t) list =
   List.map (fun surface ->
@@ -246,3 +326,4 @@ let surface_to_string = function
   | Admin -> "admin"
   | Keeper_internal -> "keeper_internal"
   | Keeper_denied -> "keeper_denied"
+  | System_internal -> "system_internal"

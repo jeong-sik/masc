@@ -53,6 +53,14 @@ let standard_tools =
     "masc_note_add"; "masc_batch_add_tasks";
     (* Config introspection *)
     "masc_config";
+    (* Phase 2 surface SSOT — worker-facing tools *)
+    "masc_code_edit"; "masc_code_write"; "masc_code_read";
+    "masc_code_git"; "masc_code_shell";
+    "masc_deliver"; "masc_plan_clear_task"; "masc_plan_get_task";
+    "masc_verify_request"; "masc_verify_status"; "masc_verify_submit";
+    "masc_improve_loop_start"; "masc_improve_loop_status";
+    "masc_library_search"; "masc_library_read";
+    "masc_workflow_guide";
   ]
 
 (** Pre-built Hashtbl sets for O(1) tier lookups.

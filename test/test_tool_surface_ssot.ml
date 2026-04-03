@@ -168,6 +168,63 @@ let test_keeper_internal_tools_have_schemas () =
   Alcotest.(check bool) "all internal tools have schemas" true
     (SS.is_empty missing)
 
+(* {1 SSOT Validation — Phase 4: no orphans, surface constraints} *)
+
+let test_no_orphaned_tools () =
+  (* Every registered tool schema must belong to at least one surface,
+     except Deprecated tools which are intentionally removed from all surfaces. *)
+  let on_any_surface name =
+    List.exists (fun surface ->
+      Tool_catalog.is_on_surface surface name
+    ) Tool_catalog.all_surfaces
+  in
+  let is_deprecated name =
+    List.exists (fun (n, _) -> String.equal n name) Tool_catalog.deprecated_tool_entries
+  in
+  let orphaned =
+    Config.raw_all_tool_schemas
+    |> List.filter (fun (schema : Types.tool_schema) ->
+         not (on_any_surface schema.name) && not (is_deprecated schema.name))
+    |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  in
+  if orphaned <> [] then
+    Alcotest.failf "Orphaned tools (no surface): {%s}"
+      (String.concat ", " orphaned);
+  Alcotest.(check bool) "zero orphans" true (orphaned = [])
+
+let test_public_mcp_count_cap () =
+  (* Public_mcp surface should not exceed 80 tools to control LLM token cost. *)
+  let count = List.length (Tool_catalog.tools_for_surface Tool_catalog.Public_mcp) in
+  if count > 80 then
+    Alcotest.failf "Public_mcp has %d tools (cap: 80)" count;
+  Alcotest.(check bool) "public_mcp <= 80" true (count <= 80)
+
+let test_system_internal_not_visible () =
+  (* System_internal tools must be hidden from tools/list. *)
+  let system_tools = Tool_catalog.tools_for_surface Tool_catalog.System_internal in
+  let visible =
+    List.filter (fun name ->
+      Tool_catalog.is_visible name
+    ) system_tools
+  in
+  if visible <> [] then
+    Alcotest.failf "System_internal tools visible in tools/list: {%s}"
+      (String.concat ", " visible);
+  Alcotest.(check bool) "all system_internal hidden" true (visible = [])
+
+let test_system_internal_callable () =
+  (* System_internal tools must be callable via tools/call. *)
+  let system_tools = Tool_catalog.tools_for_surface Tool_catalog.System_internal in
+  let uncallable =
+    List.filter (fun name ->
+      not (Tool_catalog.allow_direct_call name)
+    ) system_tools
+  in
+  if uncallable <> [] then
+    Alcotest.failf "System_internal tools not callable: {%s}"
+      (String.concat ", " uncallable);
+  Alcotest.(check bool) "all system_internal callable" true (uncallable = [])
+
 let test_workspace_mutating_canonical_used () =
   (* workspace_mutating_tool_names in tool_catalog_surfaces is the canonical list.
      Verify no empty or phantom entries. *)
@@ -214,5 +271,16 @@ let () =
             test_keeper_internal_tools_have_schemas;
           Alcotest.test_case "workspace_mutating canonical used" `Quick
             test_workspace_mutating_canonical_used;
+        ] );
+      ( "ssot_validation",
+        [
+          Alcotest.test_case "no orphaned tools" `Quick
+            test_no_orphaned_tools;
+          Alcotest.test_case "Public_mcp count cap <= 80" `Quick
+            test_public_mcp_count_cap;
+          Alcotest.test_case "System_internal not visible" `Quick
+            test_system_internal_not_visible;
+          Alcotest.test_case "System_internal callable" `Quick
+            test_system_internal_callable;
         ] );
     ]

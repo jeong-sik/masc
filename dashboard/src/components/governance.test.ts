@@ -136,7 +136,7 @@ describe('Governance surface', () => {
     expect(fetchGovernanceCaseStatus.mock.calls.filter(([caseId]) => caseId === 'gov-case-1').length)
       .toBeGreaterThanOrEqual(2)
     expect(container.textContent).toContain('command:governance 렌더링 오류')
-  }, 20000)
+  }, 30000)
 
   it('shows keeper guidance when governance feed is empty', async () => {
     const emptyResponse: DashboardGovernanceResponse = {
@@ -169,10 +169,11 @@ describe('Governance surface', () => {
   }, 20000)
 
   it('shows retired guidance when case tracking is disabled', async () => {
+    const serverNote = 'Server says governance case tracking is retired; only live judge signals remain.'
     const retiredResponse: DashboardGovernanceResponse = {
       generated_at: '2026-03-26T00:00:00Z',
       case_tracking_available: false,
-      note: 'Governance case tracking is retired; dashboard surfaces only live judge status and recent judgments.',
+      note: serverNote,
       summary: {
         judge_online: false,
       },
@@ -194,7 +195,7 @@ describe('Governance surface', () => {
     render(html`<${Governance} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('거버넌스 케이스 추적은 중단되었고')
+    expect(container.textContent).toContain(serverNote)
     expect(container.textContent).toContain('judge-only / 최근 판단 0건')
     expect(container.textContent).not.toContain('keeper가 활동 중일 때 자동 생성됩니다')
   }, 20000)

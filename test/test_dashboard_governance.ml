@@ -85,6 +85,14 @@ let test_empty_governance_structure () =
       let pending = json |> member "pending_actions" |> to_list in
       check int "pending_actions empty" 0 (List.length pending))
 
+let test_factual_snapshot_marks_surface_retired () =
+  let json = Lib.Dashboard_governance.factual_snapshot_json ~base_path:"/tmp/unused" in
+  let open Yojson.Safe.Util in
+  check bool "factual snapshot marks case tracking retired" false
+    (json |> member "case_tracking_available" |> to_bool);
+  check bool "factual snapshot includes note" true
+    (json |> member "note" |> to_string |> String.length > 0)
+
 let test_runtime_status_and_judgments_are_live () =
   let dir = test_dir () in
   Fun.protect
@@ -154,6 +162,27 @@ let test_runtime_status_and_judgments_are_live () =
       check string "judgment tool" "masc_operator_confirm"
         (first |> member "recommended_action" |> member "resolved_tool" |> to_string))
 
+let test_governance_monitoring_uses_live_runtime () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      st.judge_online <- true;
+      st.generated_at_unix <- Some now;
+      st.expires_at_unix <- Some (now +. 300.0);
+      let (json, ok) =
+        Lib.Dashboard_http_monitoring.governance_monitoring_json ~now_ts:now
+          ~base_path:dir
+      in
+      let open Yojson.Safe.Util in
+      check bool "monitoring call succeeds" true ok;
+      check bool "monitoring marks case tracking retired" false
+        (json |> member "case_tracking_available" |> to_bool);
+      check bool "monitoring exposes live judge_online" true
+        (json |> member "judge_online" |> to_bool))
+
 let test_governance_dir_created_before_read () =
   let dir = test_dir () in
   Fun.protect
@@ -191,8 +220,12 @@ let () =
         [
           test_case "empty governance structure" `Quick
             test_empty_governance_structure;
+          test_case "factual snapshot marks retired surface" `Quick
+            test_factual_snapshot_marks_surface_retired;
           test_case "runtime status and judgments are live" `Quick
             test_runtime_status_and_judgments_are_live;
+          test_case "monitoring uses live runtime" `Quick
+            test_governance_monitoring_uses_live_runtime;
         ] );
       ( "init",
         [

@@ -44,6 +44,8 @@ function governanceCaseTrackingRetired(): boolean {
 }
 
 function governanceRetiredMessage(): string {
+  const note = governanceData.value?.note?.trim()
+  if (note) return note
   return '거버넌스 케이스 추적은 중단되었고, 이 화면은 live judge 상태와 최근 판단만 표시합니다.'
 }
 

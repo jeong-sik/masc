@@ -538,5 +538,5 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-
+# Backward-compatible import name for external callers still importing MascBot.
 MascBot = GateBot

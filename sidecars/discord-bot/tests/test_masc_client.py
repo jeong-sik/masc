@@ -143,3 +143,17 @@ def test_config_allows_zero_disable_values(monkeypatch: pytest.MonkeyPatch) -> N
     assert cfg.keeper_cache_ttl_sec == 0
     assert cfg.gate_breaker_failure_threshold == 0
     assert cfg.gate_breaker_reset_sec == 0
+
+
+def test_legacy_env_aliases_still_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("MASC_API_TOKEN", "legacy-api-token")
+    monkeypatch.setenv("MASC_MCP_URL", "http://legacy.example")
+    config_module.reset_config_cache()
+
+    cfg = BotConfig()  # type: ignore[call-arg]
+
+    assert cfg.gate_api_token == "legacy-api-token"
+    assert cfg.gate_base_url == "http://legacy.example"
+    assert cfg.masc_api_token == "legacy-api-token"
+    assert cfg.masc_mcp_url == "http://legacy.example"

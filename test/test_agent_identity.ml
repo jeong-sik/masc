@@ -94,13 +94,38 @@ let test_channel_roundtrip () =
   ) channels
 
 let test_channel_normalization () =
+  let normalize channel =
+    Agent_identity.channel_of_string channel |> Agent_identity.string_of_channel
+  in
   check string "trim + lowercase external" "discord"
-    (Agent_identity.normalize_channel_label "  DisCord  ");
+    (normalize "  DisCord  ");
   check string "blank becomes unknown" "unknown"
-    (Agent_identity.normalize_channel_label "   ");
+    (normalize "   ");
+  check string "api normalized" "api"
+    (normalize "  API  ");
+  check string "internal normalized" "internal"
+    (normalize "  INTERNAL  ");
+  check string "external stringified as normalized label" "slack"
+    (Agent_identity.string_of_channel (Agent_identity.External "  SlAck "));
   match Agent_identity.channel_of_string "  DisCord  " with
   | Agent_identity.External "discord" -> ()
   | _ -> fail "expected normalized opaque external channel"
+
+let test_channel_yojson_backward_compat () =
+  check (result string string) "legacy Discord string decodes"
+    (Ok "discord")
+    (match Agent_identity.channel_of_yojson (`String "Discord") with
+     | Ok channel -> Ok (Agent_identity.string_of_channel channel)
+     | Error err -> Error err);
+  check string "known external serializes like legacy constructor"
+    "\"Discord\""
+    (Yojson.Safe.to_string
+       (Agent_identity.channel_to_yojson (Agent_identity.External "DisCord")));
+  check string "unknown external serializes as tagged external"
+    "[\"External\",\"custom-edge\"]"
+    (Yojson.Safe.to_string
+       (Agent_identity.channel_to_yojson
+          (Agent_identity.External "  Custom-Edge  ")))
 
 let test_same_agent () =
   let id1 = Agent_identity.from_agent_name "agent-a" in
@@ -362,10 +387,12 @@ let () =
       test_case "from_mcp_params_blank_session_key" `Quick test_from_mcp_params_blank_session_key;
       test_case "from_mcp_params_short_session_key" `Quick test_from_mcp_params_short_session_key;
       test_case "from_mcp_params_long_session_key_prefix" `Quick test_from_mcp_params_long_session_key_prefix;
-          test_case "anonymous" `Quick test_anonymous;
-          test_case "channel_roundtrip" `Quick test_channel_roundtrip;
-          test_case "channel_normalization" `Quick test_channel_normalization;
-          test_case "same_agent" `Quick test_same_agent;
+      test_case "anonymous" `Quick test_anonymous;
+      test_case "channel_roundtrip" `Quick test_channel_roundtrip;
+      test_case "channel_normalization" `Quick test_channel_normalization;
+      test_case "channel_yojson_backward_compat" `Quick
+        test_channel_yojson_backward_compat;
+      test_case "same_agent" `Quick test_same_agent;
       test_case "to_display_string" `Quick test_to_display_string;
       test_case "to_display_string_empty_session_key" `Quick test_to_display_string_empty_session_key;
     ];

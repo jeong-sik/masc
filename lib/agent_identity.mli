@@ -28,7 +28,6 @@ type t = {
 
 val channel_of_string : string -> channel
 val string_of_channel : channel -> string
-val normalize_channel_label : string -> string
 
 (** {1 Identity Creation} *)
 

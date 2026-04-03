@@ -21,7 +21,54 @@ type channel =
   | Api
   | Internal
   | External of string
-[@@deriving yojson]
+
+(** {1 Channel Parsing} *)
+
+let normalize_channel_label s =
+  let normalized = String.trim s |> String.lowercase_ascii in
+  if normalized = "" then "unknown" else normalized
+
+let channel_of_string s =
+  match normalize_channel_label s with
+  | "api" -> Api
+  | "internal" -> Internal
+  | "unknown" -> External "unknown"
+  | other -> External other
+
+let string_of_channel = function
+  | Api -> "api"
+  | Internal -> "internal"
+  | External s -> normalize_channel_label s
+
+let channel_to_yojson = function
+  | Api -> `String "Api"
+  | Internal -> `String "Internal"
+  | External s -> (
+      match normalize_channel_label s with
+      | "telegram" -> `String "Telegram"
+      | "discord" -> `String "Discord"
+      | "slack" -> `String "Slack"
+      | "signal" -> `String "Signal"
+      | "webchat" -> `String "Webchat"
+      | other -> `List [ `String "External"; `String other ] )
+
+let channel_of_yojson = function
+  | `String "Api" | `String "api" -> Ok Api
+  | `String "Internal" | `String "internal" -> Ok Internal
+  | `String "Telegram" | `String "telegram" ->
+      Ok (External "telegram")
+  | `String "Discord" | `String "discord" ->
+      Ok (External "discord")
+  | `String "Slack" | `String "slack" -> Ok (External "slack")
+  | `String "Signal" | `String "signal" -> Ok (External "signal")
+  | `String "Webchat" | `String "webchat" ->
+      Ok (External "webchat")
+  | `String s -> Ok (channel_of_string s)
+  | `List [ `String "External"; `String s ] ->
+      Ok (External (normalize_channel_label s))
+  | `List [ `String "Unknown"; `String s ] ->
+      Ok (External (normalize_channel_label s))
+  | _ -> Error "channel_of_yojson: expected string or tagged external variant"
 
 (** Agent identity - extracted from session/request context *)
 type t = {
@@ -46,23 +93,6 @@ let generate_uuid ~agent_name =
   (* Simple hash-based UUID: first 8 chars of hex digest *)
   let hash = Digest.string input |> Digest.to_hex in
   Printf.sprintf "agent-%s" (String.sub hash 0 12)
-
-(** {1 Channel Parsing} *)
-
-let normalize_channel_label s =
-  let normalized = String.trim s |> String.lowercase_ascii in
-  if normalized = "" then "unknown" else normalized
-
-let channel_of_string s =
-  match normalize_channel_label s with
-  | "api" -> Api
-  | "internal" -> Internal
-  | other -> External other
-
-let string_of_channel = function
-  | Api -> "api"
-  | Internal -> "internal"
-  | External s -> s
 
 (** {1 Identity Creation} *)
 

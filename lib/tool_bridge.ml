@@ -96,7 +96,6 @@ let oas_tool_of_masc ~name ~description ~input_schema
     { kind = None;
       shell = None;
       mutation_class = None;
-      concurrency_class = None;
       notes = [];
       examples = [] }
   in

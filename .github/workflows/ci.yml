@@ -187,6 +187,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.22'
+          cache: false
 
       - name: Install grpcurl
         run: |

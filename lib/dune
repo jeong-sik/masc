@@ -190,6 +190,12 @@
    memory_jsonl
    memory_oas_bridge
    meta_cognition
+   meta_cognition_types
+   meta_cognition_rules
+   meta_cognition_snapshot
+   meta_cognition_parse
+   meta_cognition_interpret
+   meta_cognition_digest
    relation_materializer
    prometheus
    rate_limit
@@ -640,7 +646,14 @@
   ;; godsplit-oas-worker: oas_worker decomposition
   oas_worker_cascade
   oas_worker_exec
-  oas_worker_named)
+  oas_worker_named
+  ;; godsplit-meta-cognition: meta_cognition decomposition
+  meta_cognition_types
+  meta_cognition_rules
+  meta_cognition_snapshot
+  meta_cognition_parse
+  meta_cognition_interpret
+  meta_cognition_digest)
  (libraries
    mcp_protocol
    mcp_protocol.eio

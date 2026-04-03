@@ -102,39 +102,38 @@ let unit_guard_json_with ~agents ~units config unit_id =
              unit.budget.active_operation_cap)
       else
         Ok
-          (`Assoc
-            [
-              ("unit_id", `String unit.unit_id);
-              ("live_roster", `Int live_count);
-              ("active_operations", `Int active_count);
-              ("active_operation_cap", `Int unit.budget.active_operation_cap);
-            ])
+          ( unit,
+            `Assoc
+              [
+                ("unit_id", `String unit.unit_id);
+                ("live_roster", `Int live_count);
+                ("active_operations", `Int active_count);
+                ("active_operation_cap", `Int unit.budget.active_operation_cap);
+              ] )
 
 let unit_guard_json config unit_id =
   let agents, _, units, _ = topology_units config in
   unit_guard_json_with ~agents ~units config unit_id
+  |> Result.map snd
 
 let operation_assignment_guard_json config unit_id ~workload_profile ~stage =
   let agents, _, units, _ = topology_units config in
   match unit_guard_json_with ~agents ~units config unit_id with
   | Error _ as error -> error
-  | Ok guard -> (
-      match lookup_unit units unit_id with
-      | None -> Error (Printf.sprintf "assigned unit not found: %s" unit_id)
-      | Some unit -> (
-          match unit_policy_blocker unit ~workload_profile ~stage with
-          | Some message -> Error message
-          | None -> (
-              match guard with
-              | `Assoc fields ->
-                  Ok
-                    (`Assoc
-                      ( fields
-                      @ [
-                          ( "effective_capability_profile",
-                            json_list_of_strings (effective_capability_profile unit) );
-                        ] ))
-              | _ -> Ok guard)))
+  | Ok (unit, guard) -> (
+      match unit_policy_blocker unit ~workload_profile ~stage with
+      | Some message -> Error message
+      | None -> (
+          match guard with
+          | `Assoc fields ->
+              Ok
+                (`Assoc
+                  ( fields
+                  @ [
+                      ( "effective_capability_profile",
+                        json_list_of_strings (effective_capability_profile unit) );
+                    ] ))
+          | _ -> Ok guard))
 
 let replace_operation operations (updated : operation_record) =
   updated

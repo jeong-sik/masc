@@ -13,7 +13,7 @@ include Tool_team_session_schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_team_session_status"; "masc_team_session_report"; "masc_team_session_list"; "masc_team_session_compare"; "masc_team_session_events"; "masc_team_session_prove" ]
+let _tool_spec_read_only = [ "masc_team_session_status"; "masc_team_session_report"; "masc_team_session_list"; "masc_team_session_events"; "masc_team_session_prove" ]
 
 let () =
   List.iter

@@ -3,7 +3,7 @@
     Tests for MASC Suspension & Circuit Breaker tools:
     - get_string / get_string_opt / get_float: argument parsing helpers
     - Blacklist CRUD: add / check (with auto-expiry) / remove
-    - dispatch: routing "masc_suspend" / "masc_circuit_status"
+    - dispatch: routing "masc_suspend"
     - handle_suspend: validation, blacklist, circuit breaker, audit
     - handle_circuit_status: status query, blacklist info
     - check_can_join: combined blacklist + circuit breaker gate
@@ -189,15 +189,6 @@ let test_dispatch_suspend () =
       check bool "returns response" true (String.length msg > 0)
   | None ->
       fail "expected Some for masc_suspend"
-
-let test_dispatch_circuit_status () =
-  let ctx = make_ctx ~caller:"viewer" () in
-  let args = `Assoc [("agent_id", `String "any-agent")] in
-  match Tool_suspend.dispatch ctx ~name:"masc_circuit_status" ~args with
-  | Some (_success, msg) ->
-      check bool "returns response" true (String.length msg > 0)
-  | None ->
-      fail "expected Some for masc_circuit_status"
 
 let test_dispatch_unknown () =
   let ctx = make_ctx () in
@@ -420,7 +411,6 @@ let () =
     ];
     "dispatch", [
       test_case "masc_suspend" `Quick test_dispatch_suspend;
-      test_case "masc_circuit_status" `Quick test_dispatch_circuit_status;
       test_case "unknown" `Quick test_dispatch_unknown;
     ];
     "handle_suspend", [

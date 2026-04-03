@@ -157,55 +157,12 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_judgment_write",
       hidden_active
         "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    ( "masc_operator_judgment_latest",
-      hidden_active
-        "Internal operator-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    (* Dead features: no surface, no external callers. Deprecated 2026-04-03.
-       Physical removal after 4-week telemetry confirms 0 calls. See #4709. *)
-    ("masc_hat_wear",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Role-hat feature unused since introduction.");
-    ("masc_hat_status",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Role-hat feature unused since introduction.");
-    ("masc_encryption_enable",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_encryption_disable",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_encryption_status",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_generate_key",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_tempo",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_get",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_set",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_adjust",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_reset",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
+    (* Dead features (hat, encryption, tempo, cost, generate_key,
+       operator_judgment_latest) physically removed 2026-04-03.
+       See #4709. *)
     (* Broken tools: shell out to CLI binaries unavailable at runtime.
-       masc-cost: buildable from bin/masc_cost.ml but not guaranteed to be
-       present in runtime images or on PATH.
        masc-checkpoint: removed from codebase (refactor #102).
        Deprecated 2026-04-03. See #4709, #4734. *)
-    ("masc_cost_log",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-cost CLI which may be unavailable in the runtime environment or missing from PATH.");
-    ("masc_cost_report",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-cost CLI which may be unavailable in the runtime environment or missing from PATH.");
     ("masc_interrupt",
      deprecated ~implementation_status:Real
        "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");

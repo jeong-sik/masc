@@ -13,7 +13,7 @@
     Use [error_response] and [ok_response] below for all new tool handlers.
 
     TODO(M-2): Unify the 6 existing error response formats across tool modules:
-    1. [Tool_goals.error_result_json] — [\{"status":"error","message":...\}]
+    1. [error_response] below — [\{"status":"error","message":...\}]
     2. [Tool_command_plane_support.json_error] — [\{"status":"error","message":...\}]
     3. Plain string returns — some tools return bare error strings
     4. [isError: true] — MCP protocol-level error flag (correct for transport)

@@ -190,11 +190,4 @@ let handle_housekeep_prune config args =
       (true, Yojson.Safe.to_string json)
     end
 
-(* ── Dispatch ─────────────────────────────────────────── *)
-
-let dispatch config ~name ~args : (bool * string) option =
-  match name with
-  | "masc_housekeep_scan" -> Some (handle_housekeep_scan config args)
-  | "masc_housekeep_delete" -> Some (handle_housekeep_delete config args)
-  | "masc_housekeep_prune" -> Some (handle_housekeep_prune config args)
-  | _ -> None
+(* Dispatch removed: housekeep tools purged (zero callers). *)

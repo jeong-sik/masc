@@ -54,7 +54,6 @@ let risk_overrides : (string * risk_level) list = [
   (* False positives from pattern matching *)
   ("masc_a2a_query_skill", Low);       (* "skill" contains "kill" substring *)
   ("masc_keeper_tool_catalog", Low);   (* "catalog" is read-only *)
-  ("masc_model_catalog", Low);         (* read-only *)
   (* Explicit claim surfaces. *)
   ("masc_claim_next", Medium);
   ("masc_claim_task", Medium);

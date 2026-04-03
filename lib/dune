@@ -280,7 +280,6 @@
    tool_args
    tool_schema_dsl
    task_sandbox
-   tool_fire_task
    tool_improve_loop_schemas
    tool_improve_loop_types
    tool_improve_loop_gh
@@ -293,17 +292,14 @@
    tool_plan
    tool_run
    tool_bridge
-   tool_cache
    tool_access_policy
    tool_access_role
-   tool_tempo
    tool_portal
    tool_worktree
    tool_a2a
    tool_handover
    tool_relay
    worktree_live_context
-   tool_goals
    tool_operator
    tool_team_session_support
    tool_team_session_handlers
@@ -317,13 +313,8 @@
    team_session_plan
    tool_team_session_schemas
    tool_heartbeat
-   tool_encryption
    tool_auth
-   tool_hat
    tool_housekeep
-   tool_audit
-   tool_rate_limit
-   tool_cost
    tool_agent
    tool_task
    task_dispatch
@@ -341,7 +332,6 @@
    tool_local_runtime_verify
    tool_local_runtime_bench
    tool_local_runtime_status
-   tool_model_catalog
    tool_board
    tool_command_plane
    tool_schema_dsl
@@ -378,9 +368,7 @@
    tool_code
    tool_code_write
    code_swarm_plan
-   tool_code_swarm
    tool_suspend
-   tool_notifications
    tool_voice
    mention_inbox
    agent_reputation

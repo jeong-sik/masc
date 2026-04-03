@@ -60,7 +60,6 @@
         test_tool_token
         test_tool_budget
         test_tool_exposure
-        test_code_swarm
         test_autonomy_liberation
         test_keeper_unified
         test_keeper_toml
@@ -119,7 +118,6 @@
           test_tool_token
           test_tool_budget
           test_tool_exposure
-          test_code_swarm
           test_autonomy_liberation
           test_keeper_unified
           test_keeper_toml
@@ -189,7 +187,6 @@
         test_config_dir_resolver
         test_room_coverage
         test_streamable_http
-        test_notifications
         test_dashboard_mission
         test_dashboard_mission_briefing
         test_command_plane_help
@@ -240,7 +237,6 @@
         test_common
         test_room_messages_raw
         test_room_messages_pg
-        test_tool_goals
         test_cp_cleanup
         test_cp_search_fabric
         test_cp_section_cache
@@ -289,7 +285,6 @@
         test_eval_gate
         test_eval_harness
         test_tool_board_coverage
-        test_tool_goals_coverage
         test_proof_criteria
         test_tool_registration_consistency
         test_tree_index
@@ -326,7 +321,6 @@
         test_cdal_judge
         test_cdal_eval_v1
         test_cdal_friction_projection
-        test_fire_task
         test_task_sandbox
         test_governance_yojson_roundtrip
         test_eval_calibration)
@@ -335,7 +329,6 @@
         test_config_dir_resolver
         test_room_coverage
         test_streamable_http
-        test_notifications
         test_dashboard_mission
         test_dashboard_mission_briefing
         test_command_plane_help
@@ -386,7 +379,6 @@
         test_common
         test_room_messages_raw
         test_room_messages_pg
-        test_tool_goals
         test_cp_cleanup
         test_cp_search_fabric
         test_cp_section_cache
@@ -435,7 +427,6 @@
         test_eval_gate
         test_eval_harness
         test_tool_board_coverage
-        test_tool_goals_coverage
         test_proof_criteria
         test_tool_registration_consistency
         test_tree_index
@@ -472,7 +463,6 @@
         test_cdal_judge
         test_cdal_eval_v1
         test_cdal_friction_projection
-        test_fire_task
         test_task_sandbox
         test_governance_yojson_roundtrip
         test_eval_calibration)

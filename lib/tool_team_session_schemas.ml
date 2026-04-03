@@ -624,25 +624,6 @@ Pair with masc_team_session_compare to diff two sessions.";
           ];
     };
     {
-      name = "masc_team_session_compare";
-      description =
-        "Compare two team sessions side by side, returning throughput, policy, and communication deltas. \
-Use when evaluating whether a configuration change improved session outcomes. \
-After masc_team_session_list identifies the two session IDs.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("base_session_id", `Assoc [ ("type", `String "string") ]);
-                  ("target_session_id", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "base_session_id"; `String "target_session_id" ]);
-          ];
-    };
-    {
       name = "masc_team_session_events";
       description =
         "Read the team session event timeline with optional event type and timestamp filters. \
@@ -690,25 +671,6 @@ After masc_team_session_stop or masc_team_session_report.";
                         ("type", `String "string");
                         ("enum", `List [ `String "standard"; `String "strong" ]);
                       ] );
-                ] );
-            ("required", `List [ `String "session_id" ]);
-          ];
-    };
-    {
-      name = "masc_team_session_verify_trace";
-      description =
-        "Verify worker-run trace evidence for a team session using stored worker run snapshots. \
-Use when validating that spawned workers actually ran and produced the claimed results. \
-After masc_team_session_prove; the final verification step in the proof chain.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("session_id", `Assoc [ ("type", `String "string") ]);
-                  ("worker_run_id", `Assoc [ ("type", `String "string") ]);
                 ] );
             ("required", `List [ `String "session_id" ]);
           ];

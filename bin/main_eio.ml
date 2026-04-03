@@ -29,7 +29,6 @@ module Dashboard_mission = Masc_mcp.Dashboard_mission
 module Dashboard_proof = Masc_mcp.Dashboard_proof
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Build_identity = Masc_mcp.Build_identity
-module Tool_audit = Masc_mcp.Tool_audit
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Types
 module Tempo = Masc_mcp.Tempo

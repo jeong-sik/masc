@@ -81,9 +81,9 @@ let test_find_tool_existing () =
   let tools = ["masc_init"; "masc_join"; "masc_leave"; "masc_status";
                "masc_broadcast"; "masc_transition";
                "masc_team_session_step"; "masc_team_session_finalize";
-               "masc_team_session_list"; "masc_team_session_compare";
+               "masc_team_session_list";
                "masc_team_session_events";
-               "masc_team_session_prove"; "masc_local_runtime_models";
+               "masc_team_session_prove";
                "masc_runtime_verify"; "masc_observe_swarm";
                "masc_operator_snapshot"; "masc_operator_digest";
                "masc_operator_action"; "masc_operator_confirm";
@@ -366,21 +366,15 @@ let test_masc_operator_confirm_schema () =
       | None -> Alcotest.fail "masc_operator_confirm missing required field"
 
 let test_hidden_operator_judgment_schemas_are_local_only () =
-  match find_tool "masc_operator_judgment_write", find_tool "masc_operator_judgment_latest" with
-  | Some write_schema, Some latest_schema ->
+  match find_tool "masc_operator_judgment_write" with
+  | Some write_schema ->
       Alcotest.(check bool) "write description present" true
         (String.length write_schema.description > 20);
-      Alcotest.(check bool) "latest description present" true
-        (String.length latest_schema.description > 20);
       Alcotest.(check bool) "remote excludes judgment write" false
         (List.exists
            (fun schema -> schema.name = "masc_operator_judgment_write")
-           Masc_mcp.Tool_operator.remote_schemas);
-      Alcotest.(check bool) "remote excludes judgment latest" false
-        (List.exists
-           (fun schema -> schema.name = "masc_operator_judgment_latest")
            Masc_mcp.Tool_operator.remote_schemas)
-  | _ -> Alcotest.fail "hidden operator judgment schemas not found"
+  | None -> Alcotest.fail "hidden operator judgment write schema not found"
 
 let test_masc_room_strategy_get_schema () =
   match find_tool "masc_room_strategy_get" with
@@ -609,17 +603,6 @@ let test_masc_spawn_schema () =
           Alcotest.(check bool) "has model" true (List.mem_assoc "model" props);
           Alcotest.(check bool) "has prompt" true (List.mem_assoc "prompt" props)
       | None -> Alcotest.fail "masc_spawn missing properties"
-
-let test_masc_local_runtime_models_schema () =
-  match find_tool "masc_local_runtime_models" with
-  | None -> Alcotest.fail "masc_local_runtime_models not found"
-  | Some schema ->
-      Alcotest.(check bool) "has description" true
-        (String.length schema.description > 20);
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check int) "no required params" 0 (List.length props)
-      | None -> Alcotest.fail "masc_local_runtime_models missing properties"
 
 let test_masc_runtime_verify_schema () =
   match find_tool "masc_runtime_verify" with
@@ -1093,7 +1076,6 @@ let () =
         test_masc_tool_admin_update_schema;
     ];
     "runtime_verify_tools", [
-      Alcotest.test_case "local-runtime-models" `Quick test_masc_local_runtime_models_schema;
       Alcotest.test_case "runtime-verify" `Quick
         test_masc_runtime_verify_schema;
       Alcotest.test_case "llama-runtime-verify" `Quick

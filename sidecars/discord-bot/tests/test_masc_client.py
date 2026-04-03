@@ -147,6 +147,8 @@ def test_config_allows_zero_disable_values(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_legacy_env_aliases_still_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GATE_API_TOKEN", raising=False)
+    monkeypatch.delenv("GATE_BASE_URL", raising=False)
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
     monkeypatch.setenv("MASC_API_TOKEN", "legacy-api-token")
     monkeypatch.setenv("MASC_MCP_URL", "http://legacy.example")

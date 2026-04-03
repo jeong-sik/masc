@@ -53,6 +53,41 @@ let http_status_of_gate_error : Channel_gate.gate_error -> Httpun.Status.t = fun
   | Dispatch_unavailable -> `Service_unavailable
   | Internal _ -> `Internal_server_error
 
+let metric_context_of_json json =
+  let open Yojson.Safe.Util in
+  let field key =
+    json |> member key |> to_string_option
+    |> Option.value ~default:""
+    |> String.trim
+  in
+  let channel =
+    match field "channel" with
+    | "" -> "unknown"
+    | value -> value
+  in
+  (channel, field "channel_room_id", field "keeper_name")
+
+let record_validation_error_metric ~duration_ms body_str message =
+  let fallback () =
+    Channel_gate_metrics.record_attempt
+      ~channel:"unknown"
+      ~room_id:""
+      ~keeper:""
+      ~duration_ms
+      (Channel_gate_metrics.Validation_error message)
+  in
+  try
+    let json = Yojson.Safe.from_string body_str in
+    let channel, room_id, keeper = metric_context_of_json json in
+    Channel_gate_metrics.record_attempt
+      ~channel
+      ~room_id
+      ~keeper
+      ~duration_ms
+      (Channel_gate_metrics.Validation_error message)
+  with
+  | Yojson.Json_error _ -> fallback ()
+
 let record_internal_error_metric ~duration_ms body_str exn =
   let fallback () =
     Channel_gate_metrics.record_internal_error_exn
@@ -66,7 +101,7 @@ let record_internal_error_metric ~duration_ms body_str exn =
     match Channel_gate.inbound_of_json json with
     | Ok msg ->
         Channel_gate_metrics.record_internal_error_exn
-          ~channel:msg.channel
+          ~channel:(Agent_identity.string_of_channel msg.channel)
           ~room_id:msg.channel_room_id
           ~keeper:msg.keeper_name
           ~duration_ms exn
@@ -81,7 +116,12 @@ let handle_gate_message ~sw ~clock state request reqd =
       try
         let json = Yojson.Safe.from_string body_str in
         match Channel_gate.inbound_of_json json with
-        | Error e -> Error (Channel_gate.Validation Channel_gate.Empty_content, e)
+        | Error e ->
+            let duration_ms =
+              int_of_float ((Unix.gettimeofday () -. request_started) *. 1000.0)
+            in
+            record_validation_error_metric ~duration_ms body_str e;
+            Error (Channel_gate.Validation Channel_gate.Empty_content, e)
         | Ok msg ->
             (match Channel_gate.handle_inbound
               ~sw ~clock
@@ -95,6 +135,10 @@ let handle_gate_message ~sw ~clock state request reqd =
                 Error (gate_err, Channel_gate.gate_error_to_string gate_err))
       with
       | Yojson.Json_error _e ->
+          let duration_ms =
+            int_of_float ((Unix.gettimeofday () -. request_started) *. 1000.0)
+          in
+          record_validation_error_metric ~duration_ms body_str "invalid json";
           Error (Channel_gate.Validation Channel_gate.Empty_content, "invalid json")
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->

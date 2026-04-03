@@ -10,7 +10,7 @@ from collections.abc import Sequence
 import discord
 
 from .config import DISCORD_EMBED_LIMIT, DISCORD_MESSAGE_LIMIT
-from .gate_client import GateResponse
+from .masc_client import GateResponse
 
 
 def format_keeper_embed(response: GateResponse) -> discord.Embed:

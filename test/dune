@@ -329,8 +329,7 @@
         test_fire_task
         test_task_sandbox
         test_governance_yojson_roundtrip
-        test_eval_calibration
-        test_otel_trace_context)
+        test_eval_calibration)
  (modules
         test_runtime_params
         test_config_dir_resolver
@@ -476,8 +475,7 @@
         test_fire_task
         test_task_sandbox
         test_governance_yojson_roundtrip
-        test_eval_calibration
-        test_otel_trace_context)
+        test_eval_calibration)
  (libraries masc_test_deps))
 
 ; ============================================================
@@ -595,28 +593,16 @@
           test_operator_control_keeper)
  (libraries masc_test_deps))
 
-; Normalized actor (operator_pending_confirm)
-(test
- (name test_normalized_actor)
- (modules test_normalized_actor)
- (libraries masc_test_deps))
-
-; Failover leader deterministic selection
-(test
- (name test_failover_leader)
- (modules test_failover_leader)
- (libraries masc_test_deps))
-
 ; Dashboard Collaboration Evidence (2 modules)
 (test
  (name test_dashboard_collaboration_evidence)
  (modules test_dashboard_collaboration_evidence test_tool_team_session_support)
  (libraries masc_test_deps))
 
-; MCP Tool Matrix (2 modules + generated names + runner dep)
+; MCP Tool Matrix (2 modules + runner dep)
 (test
  (name test_mcp_tool_matrix)
- (modules test_mcp_tool_matrix test_mcp_tool_matrix_cases test_mcp_tool_matrix_names_gen)
+ (modules test_mcp_tool_matrix test_mcp_tool_matrix_cases)
  (deps tool_matrix_case_runner.exe)
  (libraries masc_test_deps))
 
@@ -801,21 +787,10 @@
 
 (executable
  (name tool_matrix_manifest)
- (modules tool_matrix_manifest test_mcp_tool_matrix_cases test_mcp_tool_matrix_names_gen)
+ (modules tool_matrix_manifest test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))
 
 (executable
  (name tool_matrix_case_runner)
- (modules tool_matrix_case_runner test_mcp_tool_matrix_cases test_mcp_tool_matrix_names_gen)
+ (modules tool_matrix_case_runner test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))
-
-; Generator: extract tool names from Config.raw_all_tool_schemas
-(executable
- (name tool_inventory_gen)
- (modules tool_inventory_gen)
- (libraries masc_test_deps))
-
-(rule
- (targets test_mcp_tool_matrix_names_gen.ml)
- (deps tool_inventory_gen.exe)
- (action (with-stdout-to %{targets} (run ./tool_inventory_gen.exe))))

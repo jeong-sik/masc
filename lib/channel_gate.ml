@@ -4,7 +4,7 @@
 (* ── Types ──────────────────────────────────────────────────── *)
 
 type inbound_message = {
-  channel : string;
+  channel : Agent_identity.channel;
   channel_user_id : string;
   channel_user_name : string;
   channel_room_id : string;
@@ -99,9 +99,6 @@ let dedup_table_size () =
 (* Register dedup_table_size callback to break cycle *)
 let () = Channel_gate_metrics.register_dedup_size_fn dedup_table_size
 
-let normalize_channel_label channel =
-  Agent_identity.channel_of_string channel |> Agent_identity.string_of_channel
-
 (* ── Validation (pure) ──────────────────────────────────────── *)
 
 let validation_error_to_string = function
@@ -175,11 +172,10 @@ let extract_reply_text (body : string) : string =
   with _ -> body
 
 let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
-  let channel = normalize_channel_label msg.channel in
   match validate msg with
   | Error e ->
       Channel_gate_metrics.record_attempt
-        ~channel
+        ~channel:(Agent_identity.string_of_channel msg.channel)
         ~room_id:msg.channel_room_id
         ~keeper:(String.trim msg.keeper_name)
         ~duration_ms:0
@@ -199,7 +195,9 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
       let keeper_ctx : _ Tool_keeper.context = {
         config;
         agent_name =
-          Printf.sprintf "gate:%s:%s" channel msg.channel_user_id;
+          Printf.sprintf "gate:%s:%s"
+            (Agent_identity.string_of_channel msg.channel)
+            msg.channel_user_id;
         sw;
         clock;
         proc_mgr;
@@ -211,9 +209,10 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
           let duration_ms =
             int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
           in
+          let ch = Agent_identity.string_of_channel msg.channel in
           let keeper = String.trim msg.keeper_name in
           Channel_gate_metrics.record_attempt
-            ~channel
+            ~channel:ch
             ~room_id:msg.channel_room_id
             ~keeper
             ~duration_ms
@@ -229,7 +228,7 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
             int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
           in
           Channel_gate_metrics.record_attempt
-            ~channel
+            ~channel:(Agent_identity.string_of_channel msg.channel)
             ~room_id:msg.channel_room_id
             ~keeper:(String.trim msg.keeper_name)
             ~duration_ms
@@ -237,7 +236,7 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
           Error (Keeper_error err)
       | None ->
           Channel_gate_metrics.record_attempt
-            ~channel
+            ~channel:(Agent_identity.string_of_channel msg.channel)
             ~room_id:msg.channel_room_id
             ~keeper:(String.trim msg.keeper_name)
             ~duration_ms:0
@@ -271,7 +270,8 @@ let inbound_of_json json =
   try
     let str key = json |> member key |> to_string_option
                   |> Option.value ~default:"" in
-    let channel = str "channel" |> normalize_channel_label in
+    let channel_str = str "channel" in
+    let channel = Agent_identity.channel_of_string channel_str in
     let metadata =
       match json |> member "metadata" with
       | `Assoc pairs ->

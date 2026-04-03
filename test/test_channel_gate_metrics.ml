@@ -1,6 +1,7 @@
 open Alcotest
 
 module Metrics = Masc_mcp.Channel_gate_metrics
+module Gate_routes = Masc_mcp.Server_routes_http_routes_channel_gate
 module U = Yojson.Safe.Util
 
 let unique_channel prefix =
@@ -67,6 +68,54 @@ let test_record_internal_error_exn_tracks_internal_failures () =
       check string "last_error_kind" "internal" stats.last_error_kind;
       check string "last_outcome" "internal_error" stats.last_outcome)
 
+let test_record_validation_error_metric_tracks_request_metadata () =
+  with_eio (fun () ->
+      let channel = unique_channel "discord-route" in
+      let body =
+        Yojson.Safe.to_string
+          (`Assoc
+            [
+              ("channel", `String channel);
+              ("channel_room_id", `String "room-route");
+              ("keeper_name", `String "luna");
+            ])
+      in
+      Gate_routes.record_validation_error_metric ~duration_ms:7 body "invalid payload";
+      let stats =
+        Metrics.snapshot ()
+        |> List.find (fun (row : Metrics.channel_stats) ->
+               String.equal row.channel channel)
+      in
+      check int "message_count" 1 stats.message_count;
+      check int "validation_error_count" 1 stats.validation_error_count;
+      check string "last_room_id" "room-route" stats.last_room_id;
+      check string "last_keeper" "luna" stats.last_keeper;
+      check string "last_error" "invalid payload" stats.last_error)
+
+let test_record_validation_error_metric_falls_back_for_invalid_json () =
+  with_eio (fun () ->
+      let before_messages, before_validation =
+        match
+          Metrics.snapshot ()
+          |> List.find_opt (fun (row : Metrics.channel_stats) ->
+                 String.equal row.channel "unknown")
+        with
+        | Some row -> (row.message_count, row.validation_error_count)
+        | None -> (0, 0)
+      in
+      Gate_routes.record_validation_error_metric ~duration_ms:0 "{invalid"
+        "invalid json";
+      let stats =
+        Metrics.snapshot ()
+        |> List.find (fun (row : Metrics.channel_stats) ->
+               String.equal row.channel "unknown")
+      in
+      check int "message_count incremented" (before_messages + 1)
+        stats.message_count;
+      check int "validation count incremented" (before_validation + 1)
+        stats.validation_error_count;
+      check string "last_error" "invalid json" stats.last_error)
+
 let test_snapshot_json_reports_health_and_latency () =
   with_eio (fun () ->
       let channel = unique_channel "discord-json" in
@@ -117,6 +166,10 @@ let () =
             test_record_attempt_tracks_connector_diagnostics;
           test_case "records internal exception diagnostics" `Quick
             test_record_internal_error_exn_tracks_internal_failures;
+          test_case "records validation diagnostics with request metadata" `Quick
+            test_record_validation_error_metric_tracks_request_metadata;
+          test_case "records validation diagnostics for invalid json" `Quick
+            test_record_validation_error_metric_falls_back_for_invalid_json;
           test_case "serializes health and latency" `Quick
             test_snapshot_json_reports_health_and_latency;
           test_case "bounds tracked rooms" `Quick

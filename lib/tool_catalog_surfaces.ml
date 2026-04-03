@@ -52,8 +52,9 @@ let keeper_internal_tools =
     "keeper_voice_sessions";
     "keeper_voice_session_start";
     "keeper_voice_session_end";
-    (* Phase 2: surface SSOT *)
-    "keeper_deliberation_decision"; "keeper_unified";
+    (* keeper_deliberation_decision: Agent_sdk.Structured result schema, not
+       a regular tool — does not need a keeper shard entry.
+       keeper_unified: cascade name, not a tool. *)
   ]
 
 let keeper_internal_set : (string, unit) Hashtbl.t =
@@ -133,6 +134,11 @@ let public_mcp_surface_tools =
     "masc_webrtc_offer"; "masc_webrtc_answer";
     (* Utility *)
     "masc_tool_help"; "masc_web_search"; "masc_check";
+    (* Board extended *)
+    "masc_board_stats"; "masc_board_comment_vote";
+    "masc_board_profile"; "masc_board_hearths";
+    (* Agent discovery *)
+    "masc_agent_timeline";
     (* Phase 2: surface SSOT *)
     "masc_board_migrate"; "masc_board_reclassify"; "masc_bounded_run";
     "masc_episode_flush"; "masc_episode_list";
@@ -164,7 +170,9 @@ let spawned_agent_surface_tools =
     "masc_team_session_finalize"; "masc_team_session_stop";
     "masc_team_session_report"; "masc_team_session_list";
     "masc_a2a_delegate"; "masc_a2a_subscribe";
+    "masc_a2a_discover"; "masc_a2a_query_skill"; "masc_a2a_unsubscribe";
     "masc_poll_events"; "masc_spawn";
+    "masc_note_add";
     (* Phase 2: surface SSOT *)
     "masc_archive_view";
     "masc_code_delete"; "masc_code_edit"; "masc_code_git";
@@ -218,6 +226,7 @@ let admin_surface_tools =
     "masc_tool_admin_update"; "masc_tool_grant"; "masc_tool_revoke";
     "masc_operator_action"; "masc_operator_confirm"; "masc_operator_snapshot";
     "masc_team_session_finalize"; "masc_tool_admin_snapshot";
+    "masc_config";
     (* Phase 2: surface SSOT *)
     "masc_auth_disable"; "masc_auth_enable"; "masc_auth_list";
     "masc_auth_refresh"; "masc_auth_revoke"; "masc_auth_status";
@@ -280,7 +289,7 @@ let system_internal_surface_tools =
     (* Maintenance *)
     "masc_cleanup_zombies"; "masc_gc";
     (* Infrastructure control *)
-    "masc_cancellation"; "masc_subscription";
+    "masc_cancellation"; "masc_subscription"; "masc_progress";
     "masc_feature_flags"; "masc_compact_context";
     (* Internal monitoring *)
     "masc_autoresearch_status"; "masc_pause_status";

@@ -595,10 +595,12 @@ let schemas = Tool_schemas_room.schemas
 (* ================================================================ *)
 
 let _tool_spec_read_only = [ "masc_status" ]
+let _tool_spec_system_internal = [ "masc_init"; "masc_reset" ]
 
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
+      let is_system = List.mem s.name _tool_spec_system_internal in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -607,5 +609,7 @@ let () =
            ~input_schema:s.input_schema
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
+           ~allow_direct_call_when_hidden:is_system
            ()))
     schemas

@@ -16,6 +16,7 @@ import {
   visibleSectionItemsForTab,
 } from '../config/navigation'
 import { RouteLink } from './common/route-link'
+import { ChevronRight, ChevronLeft } from 'lucide-preact'
 
 const buildIdentityOpen = signal(false)
 
@@ -181,7 +182,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
           onClick=${onToggle}
           title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
         >
-          ${collapsed ? '\u25B6' : '\u25C0'}
+          ${collapsed ? html`<${ChevronRight} size=${16} />` : html`<${ChevronLeft} size=${16} />`}
         </button>
       </div>
 

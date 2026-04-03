@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
+import { Loader2 } from 'lucide-preact'
 
 interface EmptyStateProps {
   class?: string
@@ -21,11 +22,12 @@ interface LoadingStateProps {
   children?: ComponentChildren
 }
 
-/** Loading indicator with pulse animation */
+/** Loading indicator with spin animation */
 export function LoadingState({ class: cx, children }: LoadingStateProps) {
   return html`
-    <div class="text-center py-6 text-[13px] text-[var(--text-muted)] animate-pulse ${cx ?? ''}">
-      ${children ?? '불러오는 중...'}
+    <div class="flex flex-col items-center justify-center py-8 text-[13px] text-[var(--text-muted)] ${cx ?? ''}">
+      <${Loader2} size=${24} class="animate-spin mb-3 opacity-60 text-accent" />
+      <span class="animate-pulse">${children ?? '불러오는 중...'}</span>
     </div>
   `
 }

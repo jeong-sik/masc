@@ -5,6 +5,7 @@ import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import { requestConfirm } from './common/confirm-dialog'
 import { EmptyState } from './common/empty-state'
+import { LoadingState } from './common/feedback-state'
 import { Markdown } from './common/markdown'
 import { TextInput, TextArea } from './common/input'
 import { stripStateBlocks } from '../keeper-message'
@@ -408,7 +409,7 @@ export function Memory() {
               onClick=${() => navigate('workspace', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
-              ? html`<div class="loading-state loading-pulse">글 불러오는 중...</div>`
+              ? html`<${LoadingState}>글 불러오는 중...<//>`
               : html`<${EmptyState} message="글을 찾지 못했습니다" compact />`}
           </div>
         `
@@ -427,7 +428,7 @@ export function Memory() {
         <${NewPostForm} />
       </div>
       ${boardLoading.value
-        ? html`<div class="loading-state loading-pulse">메모리 피드 불러오는 중...</div>`
+        ? html`<${LoadingState}>메모리 피드 불러오는 중...<//>`
         : posts.length === 0
           ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
           : html`

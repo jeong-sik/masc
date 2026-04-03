@@ -17,6 +17,7 @@ import {
 } from '../config/navigation'
 import { RouteLink } from './common/route-link'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
+import { LoadingState } from './common/feedback-state'
 
 const buildIdentityOpen = signal(false)
 
@@ -26,8 +27,8 @@ const LazyOperations = lazy(async () => ({ default: (await import('./control')).
 const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab }))
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
-function lazyTabFallback(label: string) {
-  return html`<div class="loading-state loading-pulse">${label} 불러오는 중...</div>`
+export function lazyTabFallback(label: string) {
+  return html`<${LoadingState}>${label} 불러오는 중...<//>`
 }
 
 function formatDisconnectDuration(): string {
@@ -313,7 +314,7 @@ function SurfaceLead() {
 
 export function DashboardMain() {
   if (dashboardLoading.value && !connected.value && !namespaceTruthInitializing.value) {
-    return html`<div class="loading-state loading-pulse">대시보드 불러오는 중...</div>`
+    return html`<${LoadingState}>대시보드 불러오는 중...<//>`
   }
 
   const routeLabel = [

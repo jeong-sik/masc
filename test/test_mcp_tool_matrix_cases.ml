@@ -37,10 +37,10 @@ type contract_case = {
   expectation : expectation;
 }
 
-(* Tool inventory derived directly from Config.raw_all_tool_schemas at link time.
-   No code generation step needed — the library is already linked. *)
+(* Tool inventory derived from Config.raw_all_tool_schemas at test
+   initialization (runtime, not link-time). No code generation step needed. *)
 let all_known_tool_names =
-  Masc_mcp.Config.raw_all_tool_schemas
+  Config.raw_all_tool_schemas
   |> List.map (fun (schema : Types.tool_schema) -> schema.name)
   |> List.sort_uniq String.compare
 

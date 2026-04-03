@@ -736,18 +736,18 @@ let dispatch_plan_json config json =
                  ("routing_reason", `String candidate.routing_reason);
                ])
     else
+      let workload_profile =
+        match operation with
+        | Some op -> operation_workload_profile op
+        | None -> "coding_task"
+      in
+      let stage =
+        match operation with
+        | Some op -> op.stage
+        | None -> None
+      in
       candidate_units_for_operation units operations current_unit_id
       |> List.filter_map (fun (unit : unit_record) ->
-             let workload_profile =
-               match operation with
-               | Some op -> operation_workload_profile op
-               | None -> "coding_task"
-             in
-             let stage =
-               match operation with
-               | Some op -> op.stage
-               | None -> None
-             in
              match
                operation_assignment_guard_json config unit.unit_id
                  ~workload_profile ~stage

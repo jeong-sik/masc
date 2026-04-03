@@ -3,12 +3,13 @@ include Cp_snapshot
 let normalized_allowlist_value raw =
   String.trim raw |> String.lowercase_ascii
 
+let normalize_allowlist raw =
+  raw
+  |> List.map normalized_allowlist_value
+  |> List.filter (fun item -> item <> "")
+
 let allowlist_allows_value allowlist value =
-  let allowlist =
-    allowlist
-    |> List.map normalized_allowlist_value
-    |> List.filter (fun item -> item <> "")
-  in
+  let allowlist = normalize_allowlist allowlist in
   allowlist = []
   || List.mem (normalized_allowlist_value value) allowlist
 
@@ -52,7 +53,7 @@ let unit_policy_blocker (unit : unit_record) ~workload_profile ~stage =
   in
   if
     operation_requires_allowed_tools ~workload_profile ~stage
-    && unit.policy.tool_allowlist <> []
+    && normalize_allowlist unit.policy.tool_allowlist <> []
     && effective_tool_tags = []
   then
     Some
@@ -61,7 +62,7 @@ let unit_policy_blocker (unit : unit_record) ~workload_profile ~stage =
          scope unit.unit_id)
   else if
     operation_requires_allowed_models ~workload_profile ~stage
-    && unit.policy.model_allowlist <> []
+    && normalize_allowlist unit.policy.model_allowlist <> []
     && effective_model_tags = []
   then
     Some
@@ -71,8 +72,7 @@ let unit_policy_blocker (unit : unit_record) ~workload_profile ~stage =
   else
     None
 
-let unit_guard_json config unit_id =
-  let agents, _, units, _ = topology_units config in
+let unit_guard_json_with ~agents ~units config unit_id =
   match lookup_unit units unit_id with
   | None -> Error (Printf.sprintf "assigned unit not found: %s" unit_id)
   | Some unit ->
@@ -110,9 +110,13 @@ let unit_guard_json config unit_id =
               ("active_operation_cap", `Int unit.budget.active_operation_cap);
             ])
 
+let unit_guard_json config unit_id =
+  let agents, _, units, _ = topology_units config in
+  unit_guard_json_with ~agents ~units config unit_id
+
 let operation_assignment_guard_json config unit_id ~workload_profile ~stage =
-  let _, _, units, _ = topology_units config in
-  match unit_guard_json config unit_id with
+  let agents, _, units, _ = topology_units config in
+  match unit_guard_json_with ~agents ~units config unit_id with
   | Error _ as error -> error
   | Ok guard -> (
       match lookup_unit units unit_id with

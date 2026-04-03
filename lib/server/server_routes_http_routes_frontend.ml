@@ -34,6 +34,18 @@ let canonical_loopback_location ~default_port request =
   else
     Some (Printf.sprintf "http://%s:%d%s" canonical_host port request.target)
 
+let canonical_root_dashboard_location ~default_port request =
+  let (host, port) =
+    parse_host_port
+      (Httpun.Headers.get request.Httpun.Request.headers "host")
+      "127.0.0.1" default_port
+  in
+  let canonical_host = Transport_read_model.normalize_advertised_host host in
+  if String.equal canonical_host host then
+    None
+  else
+    Some (Printf.sprintf "http://%s:%d/dashboard" canonical_host port)
+
 let with_canonical_loopback_host ~port handler request reqd =
   match canonical_loopback_location ~default_port:port request with
   | Some location -> respond_redirect ~location reqd
@@ -169,9 +181,9 @@ let add_routes ~port ~host router =
          Http.Response.json ~status (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/" (fun request reqd ->
-       with_canonical_loopback_host ~port
-         (fun _req reqd -> redirect_to_dashboard reqd)
-         request reqd)
+       match canonical_root_dashboard_location ~default_port:port request with
+       | Some location -> respond_redirect ~location reqd
+       | None -> redirect_to_dashboard reqd)
   |> Http.Router.get "/static/css/middleware.css"
        (serve_playground_asset "static/css/middleware.css")
   |> Http.Router.get "/static/js/middleware.js"

@@ -44,7 +44,8 @@ let is_canonical_loopback_alias host =
   | "localhost" -> true
   | _ -> (
       match Ipaddr.of_string normalized with
-      | Ok ip -> ipaddr_is_loopback ip && not (String.equal normalized "127.0.0.1")
+      | Ok (Ipaddr.V6 addr) -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
+      | Ok (Ipaddr.V4 _) -> false
       | Error _ -> false)
 
 let normalize_advertised_host host =
@@ -54,10 +55,23 @@ let normalize_advertised_host host =
   else
     trimmed
 
+let normalize_loopback_base_url base_url =
+  let trimmed = trim_trailing_slashes base_url in
+  let uri = Uri.of_string trimmed in
+  match Uri.host uri with
+  | Some host ->
+      let normalized_host = normalize_advertised_host host in
+      if String.equal normalized_host host then
+        trimmed
+      else
+        Uri.with_host uri (Some normalized_host) |> Uri.to_string
+        |> trim_trailing_slashes
+  | None -> trimmed
+
 let make_http_context ?(include_configured = false) ~base_url ~host
     ~allow_legacy_accept () =
   {
-    base_url = trim_trailing_slashes base_url;
+    base_url = normalize_loopback_base_url base_url;
     host = normalize_advertised_host host;
     allow_legacy_accept;
     include_configured;
@@ -72,7 +86,7 @@ let context_from_env ?(include_configured = false) ~allow_legacy_accept () =
     match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
     | Some raw -> (
         match trim_nonempty raw with
-        | Some value -> trim_trailing_slashes value
+        | Some value -> normalize_loopback_base_url value
         | None -> default_base_url)
     | None -> default_base_url
   in

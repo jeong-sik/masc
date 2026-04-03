@@ -106,6 +106,32 @@ let test_frontend_canonical_loopback_location_canonical_host () =
   Alcotest.(check (option string)) "canonical loopback host does not redirect"
     None location
 
+let test_frontend_canonical_root_dashboard_location_localhost () =
+  let headers = Httpun.Headers.of_list [ ("host", "localhost:8935") ] in
+  let request = Httpun.Request.create ~headers `GET "/" in
+  let location =
+    Masc_mcp.Server_routes_http_routes_frontend.canonical_root_dashboard_location
+      ~default_port:8935 request
+  in
+  Alcotest.(check (option string)) "localhost root redirects directly to dashboard"
+    (Some "http://127.0.0.1:8935/dashboard") location
+
+let test_parse_host_port_rejects_scheme_in_host_header () =
+  let parsed =
+    Masc_mcp.Server_routes_http_common.parse_host_port
+      (Some "http://localhost:8935") "127.0.0.1" 8935
+  in
+  Alcotest.(check (pair string int)) "scheme-bearing host header falls back"
+    ("127.0.0.1", 8935) parsed
+
+let test_parse_host_port_rejects_userinfo_in_host_header () =
+  let parsed =
+    Masc_mcp.Server_routes_http_common.parse_host_port
+      (Some "user@localhost:8935") "127.0.0.1" 8935
+  in
+  Alcotest.(check (pair string int)) "userinfo-bearing host header falls back"
+    ("127.0.0.1", 8935) parsed
+
 (* ===== Unit Tests for Config ===== *)
 
 let test_default_config () =
@@ -208,6 +234,12 @@ let router_tests = [
   test_frontend_canonical_loopback_location_ipv6;
   "frontend canonical host stays put", `Quick,
   test_frontend_canonical_loopback_location_canonical_host;
+  "frontend canonical root goes direct to dashboard", `Quick,
+  test_frontend_canonical_root_dashboard_location_localhost;
+  "parse_host_port rejects scheme host header", `Quick,
+  test_parse_host_port_rejects_scheme_in_host_header;
+  "parse_host_port rejects userinfo host header", `Quick,
+  test_parse_host_port_rejects_userinfo_in_host_header;
 ]
 
 let config_tests = [

@@ -89,6 +89,13 @@ let test_context_from_env_trims_explicit_base_url () =
       check string "base_url trimmed" "https://example.com/root" ctx.base_url;
       check bool "allow_legacy_accept carried" true ctx.allow_legacy_accept)
 
+let test_context_from_env_normalizes_loopback_alias_base_url () =
+  with_env "MASC_HTTP_BASE_URL" (Some "http://localhost:8935/root/") (fun () ->
+      let ctx = TRM.context_from_env ~allow_legacy_accept:false () in
+      check string "loopback alias host canonicalized" "127.0.0.1" ctx.host;
+      check string "loopback alias base_url canonicalized"
+        "http://127.0.0.1:8935/root" ctx.base_url)
+
 let test_normalize_advertised_host_canonicalizes_localhost () =
   check string "localhost normalizes to loopback" "127.0.0.1"
     (TRM.normalize_advertised_host "localhost")
@@ -96,6 +103,10 @@ let test_normalize_advertised_host_canonicalizes_localhost () =
 let test_normalize_advertised_host_canonicalizes_ipv6_loopback () =
   check string "::1 normalizes to IPv4 loopback" "127.0.0.1"
     (TRM.normalize_advertised_host "::1")
+
+let test_normalize_advertised_host_preserves_noncanonical_127_alias () =
+  check string "127.0.1.1 stays explicit" "127.0.1.1"
+    (TRM.normalize_advertised_host "127.0.1.1")
 
 let () =
   run "Transport_read_model"
@@ -113,9 +124,13 @@ let () =
             test_context_from_env_uses_default_loopback_base_url;
           test_case "trim explicit base url" `Quick
             test_context_from_env_trims_explicit_base_url;
+          test_case "normalize loopback alias base url" `Quick
+            test_context_from_env_normalizes_loopback_alias_base_url;
           test_case "normalize localhost" `Quick
             test_normalize_advertised_host_canonicalizes_localhost;
           test_case "normalize ipv6 loopback" `Quick
             test_normalize_advertised_host_canonicalizes_ipv6_loopback;
+          test_case "preserve noncanonical 127 alias" `Quick
+            test_normalize_advertised_host_preserves_noncanonical_127_alias;
         ] );
     ]

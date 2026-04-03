@@ -62,7 +62,10 @@ describe('TaskActivityList', () => {
     })
     const blocks = screen.getAllByTestId('markdown')
     expect(blocks).toHaveLength(1)
-    const text = blocks[0].textContent ?? ''
+    const firstBlock = blocks[0]
+    expect(firstBlock).toBeDefined()
+    if (!firstBlock) return
+    const text = firstBlock.textContent ?? ''
     expect(text.startsWith('```')).toBe(true)
     expect(text).toContain('*literal* `ticks`')
     expect(text.endsWith('```')).toBe(true)

@@ -298,10 +298,8 @@ let ensure_joined fixture =
   | false, body when contains_substring body "already joined" -> ()
   | false, body -> failwith ("masc_join failed: " ^ body)
 
-let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock init_mode =
-  let base_path = temp_dir "mcp-tool-matrix-" in
+let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let worktree_dir = setup_git_repo base_path in
-  Unix.putenv "MASC_BASE_PATH" base_path;
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
@@ -997,8 +995,10 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
   Unix.putenv "DATABASE_URL" "";
   Unix.putenv "SUPABASE_DB_URL" "";
   Unix.putenv "SB_PG_URL" "";
+  let base_path = temp_dir "mcp-tool-matrix-" in
+  Unix.putenv "MASC_BASE_PATH" base_path;
   let fixture =
-    make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock
+    make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path
       (case_for_name schema.Types.name).init_mode
   in
   let result =

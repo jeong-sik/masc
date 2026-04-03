@@ -179,11 +179,10 @@ let spawned_agent_surface_tools =
     "masc_code_shell"; "masc_code_write";
     "masc_deliver"; "masc_error_add"; "masc_error_resolve";
     "masc_find_by_capability";
-    "masc_keeper_tool_catalog";
     "masc_plan_clear_task"; "masc_plan_get_task";
     "masc_portal_close";
     "masc_room_strategy_get"; "masc_room_strategy_set";
-    "masc_team_session_compare"; "masc_team_session_prove";
+    "masc_team_session_compare";
     "masc_update_priority";
     "masc_verify_handoff"; "masc_workflow_guide";
     (* Moved from Local_worker: schemas exist but local_worker_tool_schemas

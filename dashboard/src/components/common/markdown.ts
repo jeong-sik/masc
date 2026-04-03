@@ -9,6 +9,26 @@ import { useRef, useEffect, useMemo } from 'preact/hooks'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 
+// ── Lazy shiki loader ────────────────────────────────────────
+import type { Highlighter } from 'shiki'
+
+let shikiPromise: Promise<Highlighter> | null = null
+
+function getShiki(): Promise<Highlighter> {
+  if (!shikiPromise) {
+    shikiPromise = import('shiki').then(async (shiki) => {
+      return shiki.createHighlighter({
+        themes: ['vitesse-dark'],
+        langs: ['javascript', 'typescript', 'python', 'bash', 'json', 'yaml', 'html', 'css', 'sql', 'go', 'rust']
+      })
+    }).catch((err) => {
+      shikiPromise = null  // allow retry on next call
+      throw err
+    })
+  }
+  return shikiPromise
+}
+
 // ── Lazy mermaid loader ──────────────────────────────────────
 type MermaidApi = typeof import('mermaid')['default']
 let mermaidPromise: Promise<MermaidApi> | null = null
@@ -59,6 +79,17 @@ const PURIFY_CONFIG = {
 
 function sanitize(raw: string): string {
   return DOMPurify.sanitize(raw, PURIFY_CONFIG)
+}
+
+// Shiki generates <span style="color: ..."> for syntax tokens.
+// Allow `style` only when sanitizing trusted Shiki output.
+const SHIKI_PURIFY_CONFIG = {
+  ALLOWED_TAGS: ['pre', 'code', 'span'],
+  ALLOWED_ATTR: ['class', 'style'],
+}
+
+function sanitizeShikiHtml(raw: string): string {
+  return DOMPurify.sanitize(raw, SHIKI_PURIFY_CONFIG)
 }
 
 function sanitizeMermaidSvg(raw: string): SVGElement | null {
@@ -139,6 +170,74 @@ export function Markdown({ text, class: className }: { text: string; class?: str
         }
       }
     })()
+    return () => { cancelled = true }
+  }, [htmlStr])
+
+  // Post-render: highlight code blocks with shiki
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const codeBlocks = el.querySelectorAll<HTMLElement>('pre > code:not(.language-mermaid)')
+    if (codeBlocks.length === 0) return
+
+    let cancelled = false
+    ;(async () => {
+      let highlighter: Highlighter | null = null
+      
+      for (const codeEl of codeBlocks) {
+        if (cancelled) break
+        if (codeEl.dataset.highlighted) continue
+        
+        const pre = codeEl.parentElement
+        if (!pre) continue
+        const code = codeEl.textContent ?? ''
+        
+        let lang = 'text'
+        for (const cls of codeEl.classList) {
+          if (cls.startsWith('language-')) {
+            lang = cls.replace('language-', '')
+            break
+          }
+        }
+        
+        if (!highlighter) {
+          highlighter = await getShiki()
+          if (cancelled) break
+        }
+        
+        try {
+          const loadedLangs = highlighter.getLoadedLanguages()
+          if (lang !== 'text' && !loadedLangs.includes(lang as any)) {
+            await highlighter.loadLanguage(lang as any)
+          }
+        } catch {
+          lang = 'text'
+        }
+        
+        if (cancelled) break
+
+        try {
+          const rawHtml = highlighter.codeToHtml(code, { lang, theme: 'vitesse-dark' })
+          const safeHtml = sanitizeShikiHtml(rawHtml)
+
+          const div = document.createElement('div')
+          div.innerHTML = safeHtml
+          const shikiPre = div.firstElementChild as HTMLElement
+
+          if (shikiPre && shikiPre.tagName === 'PRE') {
+            // Apply dashboard specific classes to match existing UI
+            shikiPre.classList.add('shiki-rendered', 'rounded-lg', 'my-3', 'text-[13px]', 'leading-relaxed')
+
+            pre.replaceWith(shikiPre)
+          }
+          codeEl.dataset.highlighted = 'true'
+        } catch (e) {
+          // Keep original code block on error — do not mark as highlighted
+          console.warn('[shiki] highlight failed', e)
+        }
+      }
+    })()
+    
     return () => { cancelled = true }
   }, [htmlStr])
 

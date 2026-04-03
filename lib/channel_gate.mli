@@ -14,7 +14,7 @@
 
 (** Message arriving from an external channel consumer. *)
 type inbound_message = {
-  channel : string;
+  channel : Agent_identity.channel;
   channel_user_id : string;
   channel_user_name : string;
   channel_room_id : string;

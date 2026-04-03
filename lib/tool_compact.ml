@@ -206,5 +206,7 @@ let () =
            ~description:s.description
            ~module_tag:Tool_dispatch.Mod_compact
            ~input_schema:s.input_schema
+           ~visibility:Tool_catalog.Hidden
+           ~allow_direct_call_when_hidden:true
            ()))
     schemas

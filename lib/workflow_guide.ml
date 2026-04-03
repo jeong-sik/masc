@@ -50,15 +50,17 @@ let after_start ~success =
 let after_set_room ~success =
   if success then
     { next_steps =
-        [ s "masc_join" "Register your agent identity in the namespace";
-          s "masc_status" "Verify namespace state before proceeding" ];
+        [ s "masc_join" "Compatibility path: register your agent identity in the project namespace";
+          s "masc_status" "Verify namespace state before proceeding";
+          s "masc_start" "Prefer masc_start for future one-step namespace onboarding" ];
       preconditions = [];
       common_mistakes =
-        [ "Starting work without masc_join — other agents cannot see you" ] }
+        [ "Treating masc_set_room like full onboarding — it only selects the project coordination root";
+          "Starting work without masc_join — other agents cannot see you" ] }
   else
     { next_steps =
-        [ s "masc_init" "Initialize MASC if not yet set up";
-          s "masc_start" "Retry with the repo root path if you want the one-shot setup flow" ];
+        [ s "masc_start" "Retry with the repo root path if you want the truthful one-shot onboarding flow";
+          s "masc_init" "Initialize MASC if not yet set up" ];
       preconditions = [];
       common_mistakes = [] }
 
@@ -470,14 +472,14 @@ let current_state_guidance ~room_set ~joined ~task_claimed
     ~current_task_set ~worktree_active ~session_active =
   if not room_set then
     { next_steps =
-        [ s "masc_start" "Set the namespace to your project root (repo root)";
+        [ s "masc_start" "Set the project coordination root and join the default namespace";
           s "masc_init" "Initialize MASC if this is a fresh setup" ];
       preconditions = [];
       common_mistakes =
-        [ "Calling any MASC tool without setting a namespace first" ] }
+        [ "Calling coordination tools before project scope is initialized" ] }
   else if not joined then
     { next_steps =
-        [ s "masc_join" "Register your agent identity in the namespace" ];
+        [ s "masc_join" "Register your agent identity in the project namespace" ];
       preconditions = [ "room_set" ];
       common_mistakes =
         [ "Operating without joining — other agents cannot see or coordinate with you" ] }

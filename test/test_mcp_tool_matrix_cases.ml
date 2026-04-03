@@ -37,10 +37,12 @@ type contract_case = {
   expectation : expectation;
 }
 
-(* Tool inventory auto-generated from Config.raw_all_tool_schemas at build time.
-   See tool_inventory_gen.ml and the dune rule that produces
-   test_mcp_tool_matrix_names_gen.ml. *)
-let all_known_tool_names = Test_mcp_tool_matrix_names_gen.names
+(* Tool inventory derived from Config.raw_all_tool_schemas at test
+   initialization (runtime, not link-time). No code generation step needed. *)
+let all_known_tool_names =
+  Config.raw_all_tool_schemas
+  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> List.sort_uniq String.compare
 
 let strict_success_names =
   [
@@ -99,6 +101,31 @@ let strict_success_names =
 let strict_guard_cases =
   [
     ("masc_reset", [ "confirm" ]);
+  ]
+
+let endpoint_unavailable_guard_names =
+  [
+    "masc_approve";
+    "masc_branch";
+    "masc_interrupt";
+    "masc_pending_interrupts";
+    "masc_reject";
+  ]
+
+let endpoint_unavailable_guard_fragments =
+  [
+    "not available on this MCP endpoint";
+  ]
+
+let generic_matrix_excluded_names =
+  [
+    "masc_keeper_msg";
+    "masc_observe_topology";
+    "masc_operator_snapshot";
+    "masc_policy_status";
+    "masc_repo_synthesis_swarm_start";
+    "masc_tool_admin_snapshot";
+    "masc_unit_define";
   ]
 
 let string_starts_with ~prefix s =
@@ -271,8 +298,7 @@ let ensure_joined fixture =
   | false, body when contains_substring body "already joined" -> ()
   | false, body -> failwith ("masc_join failed: " ^ body)
 
-let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock init_mode =
-  let base_path = temp_dir "mcp-tool-matrix-" in
+let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let worktree_dir = setup_git_repo base_path in
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
@@ -837,6 +863,8 @@ let case_for_name name =
     | None ->
         if List.mem name strict_success_names then
           Expect_success
+        else if List.mem name endpoint_unavailable_guard_names then
+          Expect_guard endpoint_unavailable_guard_fragments
         else if List.mem name all_known_tool_names then
           Expect_success_or_guard (guard_fragments_for_name name)
         else
@@ -954,6 +982,7 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
   let saved_home = Sys.getenv_opt "HOME" in
   let saved_env =
     [
+      ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
       ("MASC_STORAGE_TYPE", Sys.getenv_opt "MASC_STORAGE_TYPE");
       ("MASC_POSTGRES_URL", Sys.getenv_opt "MASC_POSTGRES_URL");
       ("DATABASE_URL", Sys.getenv_opt "DATABASE_URL");
@@ -966,10 +995,8 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
   Unix.putenv "DATABASE_URL" "";
   Unix.putenv "SUPABASE_DB_URL" "";
   Unix.putenv "SB_PG_URL" "";
-  let fixture =
-    make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock
-      (case_for_name schema.Types.name).init_mode
-  in
+  let base_path = temp_dir "mcp-tool-matrix-" in
+  Unix.putenv "MASC_BASE_PATH" base_path;
   let result =
     Fun.protect
       ~finally:(fun () ->
@@ -983,9 +1010,13 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
         | Some home -> Unix.putenv "HOME" home
         | None -> Unix.putenv "HOME" "")
       (fun () ->
-        Unix.putenv "HOME" fixture.base_path;
+        Unix.putenv "HOME" base_path;
         try
           let case = case_for_name schema.Types.name in
+          let fixture =
+            make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path
+              case.init_mode
+          in
           case.prepare fixture;
           let arguments = case.arguments fixture schema in
           let response = call_tool_json fixture schema arguments in
@@ -998,4 +1029,4 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
             (Printf.sprintf "%s raised during contract execution: %s"
                schema.Types.name (Printexc.to_string exn)))
   in
-  (fixture.base_path, result)
+  (base_path, result)

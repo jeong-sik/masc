@@ -5,19 +5,20 @@ let iso_of_unix = Dashboard_utils.iso_of_unix
 let file_mtime path =
   try Some (Unix.stat path).st_mtime with Unix.Unix_error _ -> None
 
-let read_jsonl_local path =
-  match Safe_ops.read_file_safe path with
-  | Error _ -> []
-  | Ok content ->
-      content
-      |> String.split_on_char '\n'
-      |> List.filter_map (fun line ->
-             let trimmed = String.trim line in
-             if trimmed = "" then None
-             else
-               match Safe_ops.parse_json_safe ~context:path trimmed with
-               | Ok json -> Some json
-               | Error _ -> None)
+let swarm_slot_samples_tail_lines () =
+  Dashboard_http_helpers.int_of_env_default
+    "MASC_CP_SWARM_SLOT_SAMPLE_TAIL_LINES"
+    ~default:2048 ~min_v:64 ~max_v:20000
+
+let read_jsonl_tail_json path ~max_lines =
+  read_jsonl_tail_lines path ~max_lines
+  |> List.filter_map (fun line ->
+         let trimmed = String.trim line in
+         if trimmed = "" then None
+         else
+           match Safe_ops.parse_json_safe ~context:path trimmed with
+           | Ok json -> Some json
+           | Error _ -> None)
 
 let swarm_live_dir config =
   Filename.concat (control_plane_dir config) "swarm-live"
@@ -94,7 +95,12 @@ let read_slot_metrics_from_json path =
         }
 
 let read_slot_metrics_from_samples path =
-  let rows = read_jsonl_local path in
+  let rows =
+    (* Fallback path only. Keep reads bounded so an oversized slot-samples
+       artifact cannot force command-plane summary refreshes to load the
+       entire file into memory. *)
+    read_jsonl_tail_json path ~max_lines:(swarm_slot_samples_tail_lines ())
+  in
   let peak_hot_slots =
     rows
     |> List.fold_left
@@ -108,6 +114,7 @@ let read_slot_metrics_from_samples path =
   in
   let ctx_per_slot =
     rows
+    |> List.rev
     |> List.find_map (fun row ->
            match U.member "ctx_per_slot" row with
            | `Int value -> Some value

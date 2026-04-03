@@ -477,6 +477,9 @@
    procedural_memory
    oas_events
    oas_worker
+   oas_worker_cascade
+   oas_worker_exec
+   oas_worker_named
    oas_sse_bridge
    env_config_introspect
    runtime_params
@@ -633,7 +636,11 @@
   tool_catalog_tiers
   ;; godsplit-misc: tool_misc decomposition
   tool_misc_transport
-  tool_misc_admin)
+  tool_misc_admin
+  ;; godsplit-oas-worker: oas_worker decomposition
+  oas_worker_cascade
+  oas_worker_exec
+  oas_worker_named)
  (libraries
    mcp_protocol
    mcp_protocol.eio

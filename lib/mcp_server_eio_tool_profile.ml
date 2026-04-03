@@ -94,18 +94,19 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
           Config.visible_tool_schemas
             ~include_hidden:show_all ~include_deprecated ()
         in
-        let without_keeper_internal =
+        let without_internal =
           List.filter
             (fun (schema : Types.tool_schema) ->
-              not (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name))
+              not (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name)
+              && not (Tool_catalog.is_on_surface Tool_catalog.System_internal schema.name))
             all
         in
-        if show_all then without_keeper_internal
+        if show_all then without_internal
         else
           List.filter
             (fun (schema : Types.tool_schema) ->
               Tool_catalog.is_public_mcp schema.name)
-            without_keeper_internal
+            without_internal
     | Managed_agent ->
         let passthrough =
           Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false ()

@@ -4,7 +4,7 @@ open Masc_mcp
 let make_message ?(content = "hello") ?(keeper_name = "luna")
     ?(channel_user_id = "user-1") ?(idempotency_key = "key-1") () =
   {
-    Channel_gate.channel = "discord";
+    Channel_gate.channel = Agent_identity.channel_of_string "discord";
     channel_user_id;
     channel_user_name = "user";
     channel_room_id = "room-1";
@@ -134,7 +134,9 @@ let test_inbound_of_json_normalizes_channel_label () =
     ]
   in
   match Channel_gate.inbound_of_json json with
-  | Ok msg -> check string "channel normalized" "discord" msg.channel
+  | Ok msg ->
+      check string "channel normalized" "discord"
+        (Agent_identity.string_of_channel msg.channel)
   | Error err -> fail ("expected inbound json to parse: " ^ err)
 
 let () =

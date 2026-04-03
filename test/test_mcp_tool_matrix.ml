@@ -22,32 +22,52 @@ let requested_tool_names () =
       | [] -> None
       | names -> Some names
 
+let has_repo_root root =
+  Sys.file_exists (Filename.concat root "dune-project")
+  && Sys.file_exists (Filename.concat root "test/dune")
+
+let rec ascend_repo_root dir =
+  if has_repo_root dir then
+    Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else ascend_repo_root parent
+
+let executable_repo_root () =
+  ascend_repo_root (Filename.dirname Sys.executable_name)
+
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None -> Sys.getcwd ()
-
-let quote = Filename.quote
-
-let realpath_or_self path =
-  try Unix.realpath path with
-  | Unix.Unix_error _ -> path
+  | Some root when String.trim root <> "" && has_repo_root root -> root
+  | _ -> (
+      match
+        try Some (Sys.getcwd ()) with
+        | Sys_error _ -> None
+      with
+      | Some cwd -> (
+          match ascend_repo_root cwd with
+          | Some root -> root
+          | None -> (
+              match executable_repo_root () with
+              | Some root -> root
+              | None -> cwd))
+      | None -> (
+          match executable_repo_root () with
+          | Some root -> root
+          | None -> Filename.current_dir_name))
 
 let path_is_within ~parent ~child =
-  let parent = realpath_or_self parent in
-  let child = realpath_or_self child in
-  if String.equal parent child then
-    true
-  else
-    let parent_with_sep =
-      if Filename.check_suffix parent Filename.dir_sep then
-        parent
-      else
-        parent ^ Filename.dir_sep
+  try
+    let parent = Unix.realpath parent in
+    let child = Unix.realpath child in
+    let prefix =
+      if String.ends_with ~suffix:"/" parent then parent else parent ^ "/"
     in
-    let plen = String.length parent_with_sep in
-    String.length child >= plen
-    && String.sub child 0 plen = parent_with_sep
+    String.starts_with ~prefix child
+  with _ ->
+    false
+
+let quote = Filename.quote
 
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
@@ -200,9 +220,12 @@ let test_known_tool_inventory_matches_raw_schemas () =
 
 let test_full_registry_tools_call_matrix () =
   let failures = ref [] in
+  let requested = requested_tool_names () in
   Masc_mcp.Config.raw_all_tool_schemas
-  |> (match requested_tool_names () with
-     | None -> Fun.id
+  |> (match requested with
+     | None ->
+         List.filter (fun (schema : Types.tool_schema) ->
+             not (List.mem schema.name Cases.generic_matrix_excluded_names))
      | Some requested ->
          List.filter (fun (schema : Types.tool_schema) ->
              List.mem schema.name requested))

@@ -193,6 +193,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
     `Assoc [
       ("namespace_id", `String "default");
       ("namespace", `String "default");
+      ("current_namespace", `String room_id);
       ("namespace_mode", `String "flattened");
       ("room", `Null);
       ("room_base_path", `Null);
@@ -834,6 +835,7 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
     [
       ("namespace_id", `String "default");
       ("namespace", `String "default");
+      ("current_namespace", `String current_room);
       ("namespace_mode", `String "flattened");
       ("room", `Null);
       ("current_room", `String current_room);
@@ -960,6 +962,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   |> with_projection_diagnostics ~surface:"shell" ~started_at
        ~extra:
          [
+           ("current_namespace", `String current_room);
            ("current_room", `String current_room);
            ("coordination_root", `String config.base_path);
            ("workspace_path", `String config.workspace_path);

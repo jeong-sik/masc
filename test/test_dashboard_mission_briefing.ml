@@ -454,6 +454,27 @@ let test_build_briefing_sections_keeps_metadata_evidence_visible () =
       check bool "metadata evidence remains visible" true found
   | _ -> fail "expected communication evidence list"
 
+let test_build_briefing_sections_watch_evidence_uses_namespace_wording () =
+  let mission_summary_json =
+    `Assoc
+      [
+        ("room_health", `String "bad");
+        ("incident_count", `Int 0);
+        ("recommended_action_count", `Int 0);
+        ("top_attention_summary", `String "");
+      ]
+  in
+  let _watch_summary, sections =
+    Briefing.build_briefing_sections ~mission_summary_json ~sessions:[]
+      ~agents:[] ~recent_messages:[]
+      ~metadata_gaps:[]
+  in
+  let watch = find_section sections "watch" in
+  match get_field "evidence" watch with
+  | `List (`String evidence :: _) ->
+      check string "watch evidence wording" "Namespace health is bad" evidence
+  | _ -> fail "expected watch evidence list"
+
 let () =
   run "Dashboard Mission Briefing"
     [
@@ -487,5 +508,7 @@ let () =
             test_build_briefing_sections_demotes_metadata_only_communication;
           test_case "metadata evidence remains visible in communication" `Quick
             test_build_briefing_sections_keeps_metadata_evidence_visible;
+          test_case "watch evidence uses namespace wording" `Quick
+            test_build_briefing_sections_watch_evidence_uses_namespace_wording;
         ] );
     ]

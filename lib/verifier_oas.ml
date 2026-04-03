@@ -203,6 +203,40 @@ let verdict_to_hook_decision (v : verdict) : Agent_sdk.Hooks.hook_decision =
     Log.Verifier.error "FAIL (skipping tool): %s" reason;
     Agent_sdk.Hooks.Skip
 
+let handle_pre_tool_use
+    ?(verify_fn = verify)
+    ~(goal : string)
+    ~(context_summary : string)
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t)
+    ()
+  : Agent_sdk.Hooks.hook_decision =
+  let action_description = sprintf "tool:%s" tool_name in
+  if should_skip ~action_description then
+    Agent_sdk.Hooks.Continue
+  else
+    (match
+       try Ok (Yojson.Safe.to_string input)
+       with Eio.Cancel.Cancelled _ as e -> raise e
+          | exn -> Error (Printexc.to_string exn)
+     with
+     | Error msg ->
+         Log.Verifier.error "Failed to serialize input for verifier: %s" msg;
+         Agent_sdk.Hooks.Skip
+     | Ok input_str ->
+         let req : verification_request = {
+           action_description;
+           action_result = input_str;
+           goal;
+           context_summary;
+         } in
+         begin match verify_fn req with
+         | Ok verdict -> verdict_to_hook_decision verdict
+         | Error msg ->
+             Log.Verifier.error "OAS run failed; skipping tool: %s" msg;
+             Agent_sdk.Hooks.Skip
+         end)
+
 (* ================================================================ *)
 (* PreToolUse Hook                                                   *)
 (* ================================================================ *)
@@ -225,32 +259,7 @@ let make_pre_tool_hook
   fun event ->
     match event with
     | Agent_sdk.Hooks.PreToolUse { tool_name; input; _ } ->
-      let action_description = sprintf "tool:%s" tool_name in
-      (* Skip read-only tools without calling the MODEL *)
-      if should_skip ~action_description then
-        Agent_sdk.Hooks.Continue
-      else
-        (match
-           try Ok (Yojson.Safe.to_string input)
-           with Eio.Cancel.Cancelled _ as e -> raise e
-              | exn -> Error (Printexc.to_string exn)
-         with
-         | Error msg ->
-             Log.Verifier.error "Failed to serialize input for verifier: %s" msg;
-             Agent_sdk.Hooks.Skip
-         | Ok input_str ->
-             let req : verification_request = {
-               action_description;
-               action_result = input_str;
-               goal;
-               context_summary;
-             } in
-             begin match verify_fn req with
-             | Ok verdict -> verdict_to_hook_decision verdict
-             | Error msg ->
-                 Log.Verifier.error "OAS run failed; skipping tool: %s" msg;
-                 Agent_sdk.Hooks.Skip
-             end)
+      handle_pre_tool_use ~verify_fn ~goal ~context_summary ~tool_name ~input ()
     | Agent_sdk.Hooks.BeforeTurn _
     | Agent_sdk.Hooks.BeforeTurnParams _
     | Agent_sdk.Hooks.AfterTurn _

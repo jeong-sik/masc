@@ -171,10 +171,13 @@ export function normalizeExecutionSessionBrief(raw: unknown): DashboardExecution
   const sessionId = asString(raw.session_id)
   const goal = asString(raw.goal)
   if (!sessionId || !goal) return null
+  const namespace = asString(raw.namespace) ?? asString(raw.room) ?? null
   return {
     session_id: sessionId,
     goal,
-    room: asString(raw.room) ?? null,
+    namespace,
+    // Keep `room` as a pure compatibility alias during namespace flattening.
+    room: namespace,
     status: asString(raw.status),
     health: asString(raw.health),
     member_names: asStringArray(raw.member_names),

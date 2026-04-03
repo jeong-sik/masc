@@ -367,7 +367,7 @@ let _tool_spec_read_only = [ "masc_operator_snapshot"; "masc_operator_digest"; "
 let _tool_spec_requires_join = [ "masc_operator_action"; "masc_operator_confirm" ]
 
 (* Tools with explicit catalog metadata that must be preserved. *)
-let _tool_spec_hidden = [ "masc_operator_judgment_write" ]
+let _tool_spec_hidden = [ "masc_operator_judgment_write"; "masc_surface_audit" ]
 let _tool_spec_hidden_destructive = [ "masc_operator_action" ]
 
 let () =

@@ -4,9 +4,8 @@
 
 ## Canonical paths
 
-1. `Room / Task Hygiene`
-   - `masc_set_room`
-   - `masc_join`
+1. `Namespace / Task Hygiene`
+   - `masc_start`
    - `masc_status`
    - `masc_transition(action=claim)` or `masc_claim_next` or `masc_add_task`
    - `masc_plan_set_task` after `masc_transition(action=claim)`
@@ -33,6 +32,7 @@
 
 - Prefer `masc_operation_start` over ad-hoc swarm stories.
 - Prefer `masc_team_session_start(operation_id=...)` over standalone sessions when command-plane truth matters.
+- Treat `masc_set_room` as a compatibility alias only; prefer `masc_start` for onboarding.
 - Treat `Social Board`, `TRPG`, and `RISC` as secondary surfaces unless the task explicitly needs them.
 - Use `/api/v1/command-plane/help` for the current golden paths and pitfalls.
 

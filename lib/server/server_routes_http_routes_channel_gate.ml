@@ -63,7 +63,10 @@ let metric_context_of_json json =
   let channel =
     match field "channel" with
     | "" -> "unknown"
-    | value -> value
+    | value ->
+        value
+        |> Agent_identity.channel_of_string
+        |> Agent_identity.string_of_channel
   in
   (channel, field "channel_room_id", field "keeper_name")
 
@@ -101,7 +104,7 @@ let record_internal_error_metric ~duration_ms body_str exn =
     match Channel_gate.inbound_of_json json with
     | Ok msg ->
         Channel_gate_metrics.record_internal_error_exn
-          ~channel:msg.channel
+          ~channel:(Agent_identity.string_of_channel msg.channel)
           ~room_id:msg.channel_room_id
           ~keeper:msg.keeper_name
           ~duration_ms exn

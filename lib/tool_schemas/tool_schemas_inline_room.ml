@@ -3,7 +3,7 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_start";
-    description = "One-step onboarding: sets the active project root, joins the default namespace as agent, and optionally creates+claims a task. Use this instead of calling masc_set_room, masc_join, masc_add_task, and a separate claim step manually.";
+    description = "One-step onboarding: sets the active project root, joins the default namespace as agent, and optionally creates+claims a task. Prefer this truthful front door over the compatibility alias masc_set_room plus manual follow-up calls.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -20,7 +20,7 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_set_room";
-    description = "Set the project root for MASC operations. Use this to point MASC at a different project's .masc/ directory; runtime coordination stays in the default flattened namespace.";
+    description = "Compatibility alias: set the project root for MASC operations. This only points MASC at a project's .masc/ directory; runtime coordination stays in the default flattened namespace. Prefer masc_start for real onboarding.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -34,7 +34,7 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_join";
-    description = "Join the active MASC project namespace to collaborate with other AI agents. Historical tool naming still says 'room', but current builds use the shared .masc/ root default namespace. Call at session start. Your presence will be visible to other agents (gemini, codex, etc). They can @mention you for help. Check masc_status after joining to see active agents and available tasks.";
+    description = "Join the active MASC project namespace to collaborate with other AI agents. Current builds use the shared .masc/ root default namespace. Call at session start or when you need to re-register presence after scope is already configured. Your presence will be visible to other agents (gemini, codex, etc). They can @mention you for help. Check masc_status after joining to see active agents and available tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

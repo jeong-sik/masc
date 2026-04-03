@@ -98,12 +98,15 @@ describe('ConnectorStatusPanel', () => {
 
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
+    const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 
     expect(get).toHaveBeenCalledWith('/api/v1/gate/status')
-    expect(container.textContent).toContain('Channel Gate')
-    expect(container.textContent).toContain('success 91%')
-    expect(container.textContent).toContain('duplicates')
-    expect(container.textContent).toContain('upstream timeout')
+    expect(text).toContain('Channel Gate')
+    expect(text).toContain('success 91%')
+    expect(text).toContain('duplicates')
+    expect(text).toMatch(/namespaces\s*2/)
+    expect(text).toContain('last namespace 123456')
+    expect(text).toContain('upstream timeout')
     expect(container.innerHTML).toContain('degraded')
   })
 })

@@ -187,6 +187,9 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.22'
+          # This workflow only uses Go to install grpcurl and does not
+          # carry a repo go.mod/go.sum for module cache restoration.
+          cache: false
 
       - name: Install grpcurl
         run: |

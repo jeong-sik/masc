@@ -173,15 +173,15 @@ let host_port_of_request request =
         None)
 
 let allow_anonymous_mutations =
-  lazy (match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
-    | Some ("1" | "true") -> true
-    | _ -> false)
+  match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
+  | Some ("1" | "true") -> true
+  | _ -> false
 
 let ensure_same_origin_browser_request request :
     (unit, Types.masc_error) result =
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
   | None ->
-    if Lazy.force allow_anonymous_mutations then Ok ()
+    if allow_anonymous_mutations then Ok ()
     else
       Error (Types.Unauthorized
         "Authentication required: provide a bearer token or Origin header. \
@@ -430,6 +430,15 @@ let authorize_token_bound_permission_request ~base_path ~permission request :
                      action = Types.show_permission permission;
                    }))
 
+let is_dashboard_bootstrap_path path =
+  String.starts_with ~prefix:"/api/v1/dashboard/" path
+
+let not_initialized_response path =
+  if is_dashboard_bootstrap_path path then
+    {|{"status":"initializing","message":"Server is warming up"}|}
+  else
+    {|{"error":"not initialized"}|}
+
 let rec with_public_read handler request reqd =
   let strict = http_auth_strict_enabled () in
   let path = Http_server_eio.Request.path request in
@@ -437,7 +446,7 @@ let rec with_public_read handler request reqd =
     with_read_auth handler request reqd
   else
     match !server_state with
-    | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+    | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
     | Some state -> handler state request reqd
 
 and with_read_auth handler request reqd =

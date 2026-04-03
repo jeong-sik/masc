@@ -2,7 +2,9 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useRef, useEffect } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
+import autoAnimate from '@formkit/auto-animate'
 import { EmptyState } from '../common/empty-state'
 import { LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
@@ -159,6 +161,14 @@ function TaskColumn({
   badgeClass: string
   children: ComponentChildren
 }) {
+  const listRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (listRef.current) {
+      autoAnimate(listRef.current, { duration: 250, easing: 'ease-out' })
+    }
+  }, [listRef])
+
   return html`
     <section class="flex min-h-[240px] flex-col gap-4 rounded-2xl border border-card-border/60 bg-[rgba(9,14,24,0.82)] p-4">
       <div class="flex items-start justify-between gap-3 border-b border-card-border/50 pb-3">
@@ -168,7 +178,7 @@ function TaskColumn({
         </div>
         <span class="rounded-lg px-2.5 py-1 text-[12px] font-semibold ${badgeClass}">${count}</span>
       </div>
-      <div class="flex max-h-[680px] flex-col gap-3 overflow-y-auto pr-1 custom-scrollbar">
+      <div ref=${listRef} class="flex max-h-[680px] flex-col gap-3 overflow-y-auto pr-1 custom-scrollbar">
         ${children}
       </div>
     </section>

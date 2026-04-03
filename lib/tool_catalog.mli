@@ -117,6 +117,7 @@ type surface =
   | Admin
   | Keeper_internal
   | Keeper_denied
+  | System_internal
 
 val tools_for_surface : surface -> string list
 (** Canonical tool name list for [surface]. *)

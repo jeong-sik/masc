@@ -117,7 +117,7 @@ let command_plane_help_http_json () =
           [
             concept ~id:"namespace" ~title:"Namespace"
               ~summary:
-                "Project coordination namespace. Historical room naming remains only as a compatibility alias. In current builds masc_set_room selects the project root and the runtime namespace is always the flattened default under .masc/.";
+                "Project coordination namespace. Use masc_start as the primary onboarding entrypoint. Historical room naming remains only as a compatibility alias, and masc_set_room now selects only the project coordination root while runtime state still lives in the flattened default namespace under .masc/.";
             concept ~id:"task" ~title:"Task"
               ~summary:
                 "Backlog work item. Claim semantics differ by tool: masc_transition(action=claim) leaves planning current_task unset, while masc_claim_next auto-binds it in current builds.";
@@ -137,20 +137,28 @@ let command_plane_help_http_json () =
       ( "golden_paths",
         `List
           [
-            path ~id:"room_task_hygiene" ~title:"Namespace / Task Hygiene"
+            path ~id:"namespace_task_hygiene" ~title:"Namespace / Task Hygiene"
               ~summary:
                 "Minimal MCP sequence before doing any real work in the project namespace."
               ~when_to_use:
                 "Use this before benchmark runs, CPv2 experiments, or ordinary implementation work."
               ~steps:
                 [
-                  step ~id:"join" ~title:"Join the namespace" ~tool:"masc_join"
+                  step ~id:"start" ~title:"Start namespace onboarding" ~tool:"masc_start"
                     ~summary:
-                      "Register agent identity and capabilities in the default project namespace."
+                      "Preferred front door. Sets the project coordination root, joins the default namespace, and can optionally create+claim a task in one call."
+                    ~success_signals:
+                      [ "coordination root resolves to the project root"; "agent can appear in masc_status immediately after onboarding" ]
+                    ~pitfalls:
+                      [ "calling masc_set_room only changes project scope; it does not complete the full onboarding flow";
+                        "omitting task_title means you still need a later claim/create step" ];
+                  step ~id:"status" ~title:"Verify namespace state" ~tool:"masc_status"
+                    ~summary:
+                      "Confirm the namespace is healthy, your agent is visible, and the backlog is in the expected state."
                     ~success_signals:
                       [ "agent visible in masc_status"; "namespace agent roster includes your agent" ]
                     ~pitfalls:
-                      [ "masc_set_room normalizes to project-root scope"; "without join you are invisible to scheduling" ];
+                      [ "without join you are invisible to scheduling" ];
                   step ~id:"claim" ~title:"Claim or create work" ~tool:"masc_transition"
                     ~summary:
                       "Claim a specific task with masc_transition(action=claim), or use masc_claim_next when any queued task is acceptable."
@@ -304,11 +312,11 @@ let command_plane_help_http_json () =
       ( "tool_groups",
         `List
           [
-            tool_group ~id:"room-task" ~title:"Namespace / Task Hygiene"
+            tool_group ~id:"namespace-task" ~title:"Namespace / Task Hygiene"
               ~description:
                 "Core namespace/task tools every session should use before higher-level workflows."
               ~tools:
-                [ "masc_set_room"; "masc_join"; "masc_status"; "masc_transition"; "masc_claim_next"; "masc_plan_set_task"; "masc_heartbeat" ];
+                [ "masc_start"; "masc_join"; "masc_status"; "masc_transition"; "masc_claim_next"; "masc_plan_set_task"; "masc_heartbeat" ];
             tool_group ~id:"cpv2-core" ~title:"CPv2 Benchmark Core"
               ~description:
                 "Canonical swarm/benchmark tool family."
@@ -323,11 +331,11 @@ let command_plane_help_http_json () =
       ( "pitfalls",
         `List
           [
-            pitfall ~id:"repo-root-room" ~title:"Project scope flattens to default namespace"
-              ~symptom:"You point masc_set_room at a worktree but the visible coordination state still behaves like the project root."
+            pitfall ~id:"project-scope-default-namespace" ~title:"Project scope flattens to default namespace"
+              ~symptom:"You point masc_start or masc_set_room at a worktree but the visible coordination state still behaves like the project root."
               ~why:"Current builds flatten coordination to the default namespace under the project root; worktrees are code-isolation only."
-              ~fix_tool:"masc_join"
-              ~fix_summary:"Treat worktrees as code-isolation only. Join the default project namespace and reason about shared coordination state.";
+              ~fix_tool:"masc_start"
+              ~fix_summary:"Treat worktrees as code-isolation only. Use masc_start against the project root, then reason about shared coordination state in the default namespace.";
             pitfall ~id:"claimed-not-current" ~title:"Claimed task is not current task"
               ~symptom:"Task is claimed, but planning/log tools still act like no current task is selected."
               ~why:"Some claim paths only mutate backlog ownership. In current builds masc_transition(action=claim) still requires an explicit current_task bind."
@@ -358,25 +366,24 @@ let command_plane_help_http_json () =
       ( "examples",
         `List
           [
-            example ~id:"join-room" ~title:"Join namespace for task hygiene"
-              ~path_id:"room_task_hygiene" ~transport:"mcp"
+            example ~id:"join-namespace" ~title:"Join namespace for task hygiene"
+              ~path_id:"namespace_task_hygiene" ~transport:"mcp"
               ~request:
                 (`Assoc
                    [
-                     ("tool", `String "masc_join");
+                     ("tool", `String "masc_start");
                      ("arguments",
                       `Assoc
                         [
-                          ("agent_name", `String "codex");
-                          ("capabilities",
-                           `List [ `String "ocaml"; `String "dashboard"; `String "documentation" ]);
+                          ("path", `String "/workspace/project");
+                          ("task_title", `String "Audit namespace consistency");
                         ]);
                    ])
               ~response:
                 (`Assoc
                    [
                      ("agent", `String "codex-...");
-                     ("status", `String "joined");
+                     ("status", `String "started");
                      ("namespace", `String "default");
                    ])
               ~notes:

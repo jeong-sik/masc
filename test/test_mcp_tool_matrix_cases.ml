@@ -124,9 +124,6 @@ let all_known_tool_names =
     "masc_dispatch_rebalance";
     "masc_dispatch_recall";
     "masc_dispatch_tick";
-    "masc_encryption_disable";
-    "masc_encryption_enable";
-    "masc_encryption_status";
     "masc_episode_flush";
     "masc_episode_list";
     "masc_error_add";
@@ -135,7 +132,6 @@ let all_known_tool_names =
     "masc_find_by_capability";
     "masc_fire_task";
     "masc_gc";
-    "masc_generate_key";
     "masc_get_metrics";
     "masc_goal_dispatch";
     "masc_goal_list";
@@ -149,8 +145,6 @@ let all_known_tool_names =
     "masc_handover_create";
     "masc_handover_get";
     "masc_handover_list";
-    "masc_hat_status";
-    "masc_hat_wear";
     "masc_heartbeat";
     "masc_heartbeat_list";
     "masc_heartbeat_result";
@@ -287,11 +281,6 @@ let all_known_tool_names =
     "masc_team_session_step";
     "masc_team_session_stop";
     "masc_team_session_verify_trace";
-    "masc_tempo";
-    "masc_tempo_adjust";
-    "masc_tempo_get";
-    "masc_tempo_reset";
-    "masc_tempo_set";
     "masc_tool_admin_snapshot";
     "masc_tool_admin_update";
     "masc_tool_help";

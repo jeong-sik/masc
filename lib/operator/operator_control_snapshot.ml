@@ -205,131 +205,136 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
     | Some n -> n
     | None -> Keeper_types.keeper_names config
   in
-  let rows =
-    List.filter_map
-      (fun name ->
-        match Keeper_types.read_meta config name with
-        | Error _ | Ok None -> None
-        | Ok (Some meta) when lightweight && meta.paused ->
-            Some
-              (`Assoc
-                [
-                  ("runtime_class", `String "keeper");
-                  ("pipeline_stage", `String "paused");
-                  ("name", `String meta.name);
-                  ("agent_name", `String meta.agent_name);
-                  ("status", `String "paused");
-                  ("paused", `Bool true);
-                  ("goal", `String meta.goal);
-                  ("short_goal", `String meta.short_goal);
-                  ("turn_count", `Int meta.runtime.usage.total_turns);
-                  ("updated_at", `String meta.updated_at);
-                  ("created_at", `String meta.created_at);
-                ])
-        | Ok (Some meta) ->
-            let agent_json =
-              Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
-            in
-            let keepalive_running =
-              Keeper_status_bridge.runtime_keepalive_running config meta
-            in
-            let agent_exists =
-              match agent_json |> U.member "exists" with
-              | `Bool value -> value
-              | _ -> false
-            in
-            let now_ts = Time_compat.now () in
-            let keepalive_started_at =
-              Keeper_status_bridge.runtime_keepalive_started_at config meta
-            in
-            let diagnostic =
-              Keeper_exec_status.keeper_diagnostic_json ~meta
-                ~agent_status:agent_json ~keepalive_running ~history_items:[]
-                ~now_ts
-              |> Keeper_exec_status.augment_keeper_diagnostic_json
-                   ~meta ~keepalive_running ~keepalive_started_at ~now_ts
-            in
-            let allowed_tool_names, latest_tool_names, latest_tool_call_count,
-                latest_action_source, tool_audit_source, tool_audit_at =
-              if lightweight then ([], [], None, None, None, None)
-              else keeper_tool_audit_fields config meta
-            in
-            let agent_status =
-              if not agent_exists then "offline"
-              else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
-            in
-            let pipeline_stage =
-              Keeper_exec_status.derive_pipeline_stage ~meta
-                ~surface_status:agent_status ~now_ts
-            in
-            Some
-              (`Assoc
-                [
-                  ("runtime_class", `String "keeper");
-                  ("pipeline_stage", `String pipeline_stage);
-                  ("name", `String meta.name);
-                  ("agent_name", `String meta.agent_name);
-                  ("trace_id", `String meta.runtime.trace_id);
-                  ("goal", `String meta.goal);
-                  ("short_goal", `String meta.short_goal);
-                  ("mid_goal", `String meta.mid_goal);
-                  ("long_goal", `String meta.long_goal);
-                  ("status", `String agent_status);
-                  ("agent", agent_json);
-                  ("generation", `Int meta.runtime.generation);
-                  ("turn_count", `Int meta.runtime.usage.total_turns);
-                  ("context_ratio",
-                    (match compute_context_ratio meta with
-                     | Some r -> `Float r
-                     | None -> `Null));
-                  ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
-                  ("last_model_used", `String meta.runtime.usage.last_model_used);
-                  ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
-                  ("keepalive_running", `Bool keepalive_running);
-                  ( "next_model_hint",
-                    string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta)
-                  );
-                  ( "active_goal_ids",
-                    `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
-                  );
-                  ( "last_autonomous_action_at",
-                    if String.trim meta.runtime.last_autonomous_action_at = "" then `Null
-                    else `String meta.runtime.last_autonomous_action_at );
-                  ("autonomous_action_count", `Int meta.runtime.autonomous_action_count);
-                  ("autonomous_turn_count", `Int meta.runtime.autonomous_turn_count);
-                  ("autonomous_text_turn_count", `Int meta.runtime.autonomous_text_turn_count);
-                  ("autonomous_tool_turn_count", `Int meta.runtime.autonomous_tool_turn_count);
-                  ("board_reactive_turn_count", `Int meta.runtime.board_reactive_turn_count);
-                  ("mention_reactive_turn_count", `Int meta.runtime.mention_reactive_turn_count);
-                  ("noop_turn_count", `Int meta.runtime.noop_turn_count);
-                  ("allowed_tool_names", `List (List.map (fun value -> `String value) allowed_tool_names));
-                  ("latest_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
-                  ("recent_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
-                  ("latest_tool_call_count", option_to_json (fun value -> `Int value) latest_tool_call_count);
-                  ("latest_action_source", string_option_to_json latest_action_source);
-                  ("tool_audit_source", string_option_to_json tool_audit_source);
-                  ("tool_audit_at", string_option_to_json tool_audit_at);
-                  ("updated_at", `String meta.updated_at);
-                  ("created_at", `String meta.created_at);
-                  ("recent_activity",
-                    if include_recent_activity then
-                      let store = Keeper_types.keeper_metrics_store config name in
-                      let lines =
-                        let dated = Dated_jsonl.read_recent_lines store 5 in
-                        if dated <> [] then dated
+  (* Parallel keeper I/O: each keeper's metadata + agent status reads run
+     concurrently as Eio fibers.  Same pattern as dashboard_http_keeper.ml. *)
+  let n = List.length names in
+  let results = Array.make n None in
+  Eio.Fiber.all
+    (List.mapi
+       (fun idx name () ->
+         results.(idx) <-
+           (match Keeper_types.read_meta config name with
+            | Error _ | Ok None -> None
+            | Ok (Some meta) when lightweight && meta.paused ->
+                Some
+                  (`Assoc
+                    [
+                      ("runtime_class", `String "keeper");
+                      ("pipeline_stage", `String "paused");
+                      ("name", `String meta.name);
+                      ("agent_name", `String meta.agent_name);
+                      ("status", `String "paused");
+                      ("paused", `Bool true);
+                      ("goal", `String meta.goal);
+                      ("short_goal", `String meta.short_goal);
+                      ("turn_count", `Int meta.runtime.usage.total_turns);
+                      ("updated_at", `String meta.updated_at);
+                      ("created_at", `String meta.created_at);
+                    ])
+            | Ok (Some meta) ->
+                let agent_json =
+                  Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
+                in
+                let keepalive_running =
+                  Keeper_status_bridge.runtime_keepalive_running config meta
+                in
+                let agent_exists =
+                  match agent_json |> U.member "exists" with
+                  | `Bool value -> value
+                  | _ -> false
+                in
+                let now_ts = Time_compat.now () in
+                let keepalive_started_at =
+                  Keeper_status_bridge.runtime_keepalive_started_at config meta
+                in
+                let diagnostic =
+                  Keeper_exec_status.keeper_diagnostic_json ~meta
+                    ~agent_status:agent_json ~keepalive_running ~history_items:[]
+                    ~now_ts
+                  |> Keeper_exec_status.augment_keeper_diagnostic_json
+                       ~meta ~keepalive_running ~keepalive_started_at ~now_ts
+                in
+                let allowed_tool_names, latest_tool_names, latest_tool_call_count,
+                    latest_action_source, tool_audit_source, tool_audit_at =
+                  if lightweight then ([], [], None, None, None, None)
+                  else keeper_tool_audit_fields config meta
+                in
+                let agent_status =
+                  if not agent_exists then "offline"
+                  else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
+                in
+                let pipeline_stage =
+                  Keeper_exec_status.derive_pipeline_stage ~meta
+                    ~surface_status:agent_status ~now_ts
+                in
+                Some
+                  (`Assoc
+                    [
+                      ("runtime_class", `String "keeper");
+                      ("pipeline_stage", `String pipeline_stage);
+                      ("name", `String meta.name);
+                      ("agent_name", `String meta.agent_name);
+                      ("trace_id", `String meta.runtime.trace_id);
+                      ("goal", `String meta.goal);
+                      ("short_goal", `String meta.short_goal);
+                      ("mid_goal", `String meta.mid_goal);
+                      ("long_goal", `String meta.long_goal);
+                      ("status", `String agent_status);
+                      ("agent", agent_json);
+                      ("generation", `Int meta.runtime.generation);
+                      ("turn_count", `Int meta.runtime.usage.total_turns);
+                      ("context_ratio",
+                        (match compute_context_ratio meta with
+                         | Some r -> `Float r
+                         | None -> `Null));
+                      ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
+                      ("last_model_used", `String meta.runtime.usage.last_model_used);
+                      ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
+                      ("keepalive_running", `Bool keepalive_running);
+                      ( "next_model_hint",
+                        string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta)
+                      );
+                      ( "active_goal_ids",
+                        `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
+                      );
+                      ( "last_autonomous_action_at",
+                        if String.trim meta.runtime.last_autonomous_action_at = "" then `Null
+                        else `String meta.runtime.last_autonomous_action_at );
+                      ("autonomous_action_count", `Int meta.runtime.autonomous_action_count);
+                      ("autonomous_turn_count", `Int meta.runtime.autonomous_turn_count);
+                      ("autonomous_text_turn_count", `Int meta.runtime.autonomous_text_turn_count);
+                      ("autonomous_tool_turn_count", `Int meta.runtime.autonomous_tool_turn_count);
+                      ("board_reactive_turn_count", `Int meta.runtime.board_reactive_turn_count);
+                      ("mention_reactive_turn_count", `Int meta.runtime.mention_reactive_turn_count);
+                      ("noop_turn_count", `Int meta.runtime.noop_turn_count);
+                      ("allowed_tool_names", `List (List.map (fun value -> `String value) allowed_tool_names));
+                      ("latest_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
+                      ("recent_tool_names", `List (List.map (fun value -> `String value) latest_tool_names));
+                      ("latest_tool_call_count", option_to_json (fun value -> `Int value) latest_tool_call_count);
+                      ("latest_action_source", string_option_to_json latest_action_source);
+                      ("tool_audit_source", string_option_to_json tool_audit_source);
+                      ("tool_audit_at", string_option_to_json tool_audit_at);
+                      ("updated_at", `String meta.updated_at);
+                      ("created_at", `String meta.created_at);
+                      ("recent_activity",
+                        if include_recent_activity then
+                          let store = Keeper_types.keeper_metrics_store config name in
+                          let lines =
+                            let dated = Dated_jsonl.read_recent_lines store 5 in
+                            if dated <> [] then dated
+                            else
+                              let metrics_path = Keeper_types.keeper_metrics_path config name in
+                              Keeper_memory.read_file_tail_lines metrics_path
+                                ~max_bytes:8000 ~max_lines:5
+                          in
+                          `List (List.filter_map (fun line ->
+                            try Some (Yojson.Safe.from_string line)
+                            with Yojson.Json_error _ -> None) lines)
                         else
-                          let metrics_path = Keeper_types.keeper_metrics_path config name in
-                          Keeper_memory.read_file_tail_lines metrics_path
-                            ~max_bytes:8000 ~max_lines:5
-                      in
-                      `List (List.filter_map (fun line ->
-                        try Some (Yojson.Safe.from_string line)
-                        with Yojson.Json_error _ -> None) lines)
-                    else
-                      `List []);
-                ]))
-      names
-  in
+                          `List []);
+                    ])))
+       names);
+  let rows = Array.to_list results |> List.filter_map Fun.id in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
 let persistent_agents_json ?keeper_names config =
@@ -398,36 +403,43 @@ let sessions_json ?(status_cache : (string, Yojson.Safe.t) Hashtbl.t option) con
     |> List.sort (fun (a : Team_session_types.session) (b : Team_session_types.session) ->
            compare b.started_at a.started_at)
   in
-  let items =
-    List.map
-      (fun (session : Team_session_types.session) ->
-        let recent_events =
-          Team_session_store.read_events ~max_events:_session_recent_event_limit
-            config session.session_id
-          |> Team_session_engine_eio.take_last _session_recent_event_limit
-        in
-        let status =
-          match status_cache with
-          | Some tbl -> (
-              match Hashtbl.find_opt tbl session.session_id with
-              | Some cached -> cached
-              | None ->
-                  let s = Team_session_engine_eio.session_status_json config session in
-                  Hashtbl.replace tbl session.session_id s;
-                  s)
-          | None -> Team_session_engine_eio.session_status_json config session
-        in
-        `Assoc
-          [
-            ("session_id", `String session.session_id);
-            ("command_plane_operation_id", `String ("detachment-" ^ session.session_id));
-            ("command_plane_detachment_id", `String ("detachment-" ^ session.session_id));
-            ("status", status);
-            ("recent_events", `List recent_events);
-          ])
-      ordered_sessions
-  in
-  `Assoc [ ("count", `Int (List.length items)); ("items", `List items) ]
+  (* Parallel session I/O: each session's events + status reads run
+     concurrently as Eio fibers.  Same pattern as dashboard_http_keeper.ml.
+     Hashtbl cache access is safe under Eio cooperative scheduling because
+     find_opt/replace are non-yielding operations. *)
+  let n = List.length ordered_sessions in
+  let results = Array.make n (`Assoc []) in
+  Eio.Fiber.all
+    (List.mapi
+       (fun idx (session : Team_session_types.session) () ->
+         let recent_events =
+           Team_session_store.read_events ~max_events:_session_recent_event_limit
+             config session.session_id
+           |> Team_session_engine_eio.take_last _session_recent_event_limit
+         in
+         let status =
+           match status_cache with
+           | Some tbl -> (
+               match Hashtbl.find_opt tbl session.session_id with
+               | Some cached -> cached
+               | None ->
+                   let s = Team_session_engine_eio.session_status_json config session in
+                   Hashtbl.replace tbl session.session_id s;
+                   s)
+           | None -> Team_session_engine_eio.session_status_json config session
+         in
+         results.(idx) <-
+           `Assoc
+             [
+               ("session_id", `String session.session_id);
+               ("command_plane_operation_id", `String ("detachment-" ^ session.session_id));
+               ("command_plane_detachment_id", `String ("detachment-" ^ session.session_id));
+               ("status", status);
+               ("recent_events", `List recent_events);
+             ])
+       ordered_sessions);
+  let items = Array.to_list results in
+  `Assoc [ ("count", `Int n); ("items", `List items) ]
 
 let room_json config =
   let initialized = Room.is_initialized config in

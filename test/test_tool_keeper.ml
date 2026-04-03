@@ -994,7 +994,7 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
       let memory_bank_path = Masc_mcp.Keeper_types.keeper_memory_bank_path config meta.name in
       let decision_log_path = Masc_mcp.Keeper_types.keeper_decision_log_path config meta.name in
       let turn_json = Yojson.Safe.from_string
-          {|{"channel":"turn","generation":0,"trace_id":"trace-1","context_ratio":0.41,"context_tokens":120,"context_max":1024,"message_count":4,"memory_check":{"performed":true,"passed":true,"final_score":0.9},"skill_primary":"masc-heartbeat","skill_secondary":["masc-keeper-autonomy"],"skill_reason":"stateful routing","skill_selection_mode":"agent","skill_provenance":"judgment"}|}
+          {|{"channel":"turn","generation":0,"trace_id":"trace-1","context_ratio":0.41,"context_tokens":120,"context_max":1024,"message_count":4,"memory_check":{"performed":true,"passed":true,"final_score":0.9},"skill_primary":"masc-heartbeat","skill_secondary":["masc-keeper-autonomy"],"skill_reason":"stateful routing","skill_selection_mode":"agent","skill_provenance":"judgment","action_source":"structured_model"}|}
       in
       let compaction_json = Yojson.Safe.from_string
           {|{"channel":"proactive","generation":0,"trace_id":"trace-1","compacted":true,"compaction_before_tokens":180,"compaction_after_tokens":120,"memory_compaction_performed":true,"memory_compaction_before_notes":4,"memory_compaction_after_notes":2,"memory_compaction_dropped_notes":2,"memory_compaction_invalid_dropped":1,"memory_compaction_reason":"dedupe"}|}
@@ -1051,6 +1051,8 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
         Yojson.Safe.Util.(json |> member "storage_paths" |> member "decisions" |> to_string);
       check string "tool audit source from metrics fallback" "keeper_metrics"
         Yojson.Safe.Util.(json |> member "tool_audit_source" |> to_string);
+      check string "action source from metrics fallback" "structured_model"
+        Yojson.Safe.Util.(json |> member "latest_action_source" |> to_string);
       check int "tool audit count falls back to zero" 0
         Yojson.Safe.Util.(json |> member "latest_tool_call_count" |> to_int);
       check bool "tool audit names remain empty without tool use" true

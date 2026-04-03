@@ -678,6 +678,7 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
           [
             ("ts", `String (Types.now_iso ()));
             ("selected_mode", `String "text_response");
+            ("action_source", `String "structured_model");
             ("tool_call_count", `Int 0);
             ("tools_used", `List []);
           ]);
@@ -704,6 +705,9 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
       in
       check string "decision log source present in keeper brief" "keeper_decision_log"
         (brief |> member "tool_audit_source" |> to_string);
+      check string "decision log action source present in keeper brief"
+        "structured_model"
+        (brief |> member "latest_action_source" |> to_string);
       check int "decision log zero tool count preserved" 0
         (brief |> member "latest_tool_call_count" |> to_int);
       check bool "decision log still reports empty tool list" true

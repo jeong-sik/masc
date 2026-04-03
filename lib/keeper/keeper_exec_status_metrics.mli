@@ -3,6 +3,7 @@ type metrics_summary
 type tool_audit_snapshot = {
   latest_tool_names : string list;
   latest_tool_call_count : int option;
+  latest_action_source : string option;
   tool_audit_source : string option;
   tool_audit_at : string option;
 }

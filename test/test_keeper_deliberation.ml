@@ -182,6 +182,12 @@ let test_baseline_no_mention_returns_noop () =
   | D.Noop _ -> ()
   | _ -> fail "expected Noop for no mention"
 
+let test_baseline_execution_result_emits_baseline_source () =
+  let result = D.baseline_execution_result base_obs in
+  check string "baseline source" "baseline"
+    (D.action_source_to_string result.action_source);
+  check bool "baseline fallback not used" false result.fallback_used
+
 (* ---------- Deliberation meta tests ---------- *)
 
 let test_deliberation_meta_json_roundtrip () =
@@ -477,6 +483,8 @@ let test_execute_structured_result_keeps_legal_action () =
       }
   in
   let result = D.execute_structured_result obs structured in
+  check string "legal action source" "structured_model"
+    (D.action_source_to_string result.action_source);
   check bool "fallback not used" false result.fallback_used;
   check (option string) "no fallback reason" None result.fallback_reason;
   check (list string) "policy labels" [ "task_claim" ] result.policy_labels;
@@ -496,6 +504,8 @@ let test_execute_structured_result_falls_back_to_baseline () =
       }
   in
   let result = D.execute_structured_result obs structured in
+  check string "fallback action source" "fallback_after_validation_failure"
+    (D.action_source_to_string result.action_source);
   check bool "fallback used" true result.fallback_used;
   check bool "fallback reason present" true (Option.is_some result.fallback_reason);
   check (list string) "policy labels" [ "noop" ] result.policy_labels;
@@ -911,6 +921,8 @@ let () =
             test_baseline_mention_returns_reply;
           test_case "no mention returns Noop" `Quick
             test_baseline_no_mention_returns_noop;
+          test_case "baseline execution emits baseline source" `Quick
+            test_baseline_execution_result_emits_baseline_source;
         ] );
       ( "deliberation_meta",
         [

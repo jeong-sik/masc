@@ -383,6 +383,19 @@ type structured_result = {
   confidence: float;
 }
 
+type action_source =
+  | Baseline
+  | Structured_model
+  | Fallback_after_validation_failure
+
+let action_source_to_string = function
+  | Baseline -> "baseline"
+  | Structured_model -> "structured_model"
+  | Fallback_after_validation_failure -> "fallback_after_validation_failure"
+
+let action_source_to_json source =
+  `String (action_source_to_string source)
+
 type legality_verdict =
   | Legal
   | Illegal of string
@@ -390,6 +403,7 @@ type legality_verdict =
 type execution_result = {
   proposed_action: deliberation_action;
   selected_action: deliberation_action;
+  action_source: action_source;
   fallback_used: bool;
   fallback_reason: string option;
   policy_labels: string list;
@@ -472,14 +486,46 @@ let legality_verdict obs action =
   | None -> Legal
   | Some reason -> Illegal reason
 
+let baseline_execution_result (obs : world_observation) : execution_result =
+  let action = deterministic_baseline_action obs in
+  {
+    proposed_action = action;
+    selected_action = action;
+    action_source = Baseline;
+    fallback_used = false;
+    fallback_reason = None;
+    policy_labels = policy_labels_of_action action;
+    reasoning = "deterministic_baseline";
+    confidence = 1.0;
+  }
+
+let action_source_of_execution_result (result : execution_result) =
+  result.action_source
+
+let execution_result_to_json (result : execution_result) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("proposed_action", deliberation_action_to_json result.proposed_action);
+      ("selected_action", deliberation_action_to_json result.selected_action);
+      ("action_source", action_source_to_json result.action_source);
+      ("fallback_used", `Bool result.fallback_used);
+      ( "fallback_reason",
+        match result.fallback_reason with
+        | Some reason -> `String reason
+        | None -> `Null );
+      ("policy_labels", `List (List.map (fun label -> `String label) result.policy_labels));
+      ("reasoning", `String result.reasoning);
+      ("confidence", `Float result.confidence);
+    ]
+
 let execute_structured_result (obs : world_observation)
     (result : structured_result) : execution_result =
-  let baseline_action = deterministic_baseline_action obs in
   match legality_verdict obs result.action with
   | Legal ->
       {
         proposed_action = result.action;
         selected_action = result.action;
+        action_source = Structured_model;
         fallback_used = false;
         fallback_reason = None;
         policy_labels = policy_labels_of_action result.action;
@@ -487,12 +533,14 @@ let execute_structured_result (obs : world_observation)
         confidence = result.confidence;
       }
   | Illegal reason ->
+      let baseline = baseline_execution_result obs in
       {
         proposed_action = result.action;
-        selected_action = baseline_action;
+        selected_action = baseline.selected_action;
+        action_source = Fallback_after_validation_failure;
         fallback_used = true;
         fallback_reason = Some reason;
-        policy_labels = policy_labels_of_action baseline_action;
+        policy_labels = baseline.policy_labels;
         reasoning = result.reasoning;
         confidence = result.confidence;
       }

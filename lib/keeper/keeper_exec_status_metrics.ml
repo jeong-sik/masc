@@ -42,6 +42,7 @@ type metrics_summary = {
 type tool_audit_snapshot = {
   latest_tool_names : string list;
   latest_tool_call_count : int option;
+  latest_action_source : string option;
   tool_audit_source : string option;
   tool_audit_at : string option;
 }
@@ -89,6 +90,7 @@ let empty_tool_audit_snapshot =
   {
     latest_tool_names = [];
     latest_tool_call_count = None;
+    latest_action_source = None;
     tool_audit_source = None;
     tool_audit_at = None;
   }
@@ -456,6 +458,18 @@ let json_int_opt_member key json =
   | `Float value -> Some (int_of_float value)
   | _ -> None
 
+let action_source_opt_member json =
+  match Safe_ops.json_string_opt "action_source" json with
+  | Some _ as value -> value
+  | None -> (
+      match Yojson.Safe.Util.member "deliberation_execution" json with
+      | `Assoc _ as nested ->
+          Safe_ops.json_string_opt "action_source" nested
+      | _ -> None)
+
+let has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source =
+  tools <> [] || Option.is_some raw_tool_call_count || Option.is_some action_source
+
 let json_iso_opt json =
   match Safe_ops.json_string_opt "ts" json with
   | Some text when String.trim text <> "" -> Some (String.trim text)
@@ -482,27 +496,23 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
              let json = Yojson.Safe.from_string line in
              let tools = json_string_list_member "tools_used" json in
              let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
-             let tool_call_count =
-               match raw_tool_call_count with
-               | Some _ as value -> value
-               | None -> Some (List.length tools)
-             in
-             let has_decision_shape =
-               Option.is_some (json_iso_opt json)
-               || Option.is_some (Safe_ops.json_string_opt "selected_mode" json)
-               || Option.is_some (Safe_ops.json_string_opt "outcome" json)
-               || tools <> []
-               || Option.is_some raw_tool_call_count
-             in
-             if not has_decision_shape then None
-             else
-               Some
-                 {
-                   latest_tool_names = List.sort_uniq String.compare tools;
-                   latest_tool_call_count = tool_call_count;
-                   tool_audit_source = Some "keeper_decision_log";
-                   tool_audit_at = json_iso_opt json;
-                 }
+           let tool_call_count =
+             match raw_tool_call_count with
+             | Some _ as value -> value
+             | None -> Some (List.length tools)
+           in
+            let action_source = action_source_opt_member json in
+            if not (has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source)
+            then None
+            else
+              Some
+                {
+                  latest_tool_names = List.sort_uniq String.compare tools;
+                  latest_tool_call_count = tool_call_count;
+                  latest_action_source = action_source;
+                  tool_audit_source = Some "keeper_decision_log";
+                  tool_audit_at = json_iso_opt json;
+                }
            with Yojson.Json_error _ -> None)
 
 let latest_tool_audit_snapshot_from_metrics config keeper_name =
@@ -521,19 +531,15 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
              | Some _ as value -> value
              | None -> Some (List.length tools)
            in
-           let has_metric_shape =
-             Option.is_some (json_iso_opt json)
-             || Option.is_some (Safe_ops.json_string_opt "channel" json)
-             || Option.is_some (Safe_ops.json_string_opt "work_kind" json)
-             || tools <> []
-             || Option.is_some raw_tool_call_count
-           in
-           if not has_metric_shape then None
+           let action_source = action_source_opt_member json in
+           if not (has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source)
+           then None
            else
              Some
                {
                  latest_tool_names = tools;
                  latest_tool_call_count = tool_call_count;
+                 latest_action_source = action_source;
                  tool_audit_source = Some "keeper_metrics";
                  tool_audit_at = json_iso_opt json;
                }

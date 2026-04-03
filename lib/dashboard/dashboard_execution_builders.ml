@@ -255,6 +255,10 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     (if keeper_tools <> [] then keeper_tools else audit.latest_tool_names)
     |> cap_string_list
   in
+  let latest_action_source =
+    trim_to_option (string_field "latest_action_source" keeper)
+    |> option_or_else (fun () -> audit.latest_action_source)
+  in
   let skill_route_summary = skill_route_summary_of_keeper keeper in
   let (emoji, korean_name) = get_agent_identity name in
   {
@@ -287,6 +291,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
         @ tool_preview_fields "allowed_tool" allowed_tool_names
         @ [
             ("latest_tool_call_count", option_to_json (fun value -> `Int value) audit.latest_tool_call_count);
+            ("latest_action_source", json_string_option latest_action_source);
             ("tool_audit_source", json_string_option audit.tool_audit_source);
             ("tool_audit_at", json_string_option audit.tool_audit_at);
             ("autonomous_action_count", `Int autonomous_action_count);

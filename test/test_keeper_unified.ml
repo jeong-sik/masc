@@ -938,11 +938,12 @@ let test_prompt_prefers_silence_guidance () =
      found)
 
 let test_sanitize_text_utf8_replaces_control_chars () =
-  let raw = "alpha\000beta\001gamma\n\tomega" in
+  let raw = "alpha\000beta\001gamma\127delta\n\tomega" in
   let sanitized = Masc_mcp.Inference_utils.sanitize_text_utf8 raw in
   check bool "no disallowed control chars" false
     (contains_disallowed_control_char sanitized);
-  check string "content preserved with spaces" "alpha beta gamma\n\tomega"
+  check string "content preserved with spaces"
+    "alpha beta gamma delta\n\tomega"
     sanitized
 
 let test_prompt_sanitizes_control_chars () =
@@ -971,6 +972,47 @@ let test_prompt_sanitizes_control_chars () =
     (contains_substring user "ping pong");
   check bool "board preview preserved" true
     (contains_substring user "bad preview")
+
+let test_sanitize_messages_utf8_cleans_history_path () =
+  let user_msg =
+    Agent_sdk.Types.
+      {
+        role = User;
+        content = [ Text "hist\000ory\127entry" ];
+        name = None;
+        tool_call_id = None;
+      }
+  in
+  let tool_msg =
+    Agent_sdk.Types.
+      {
+        role = Tool;
+        content =
+          [
+            ToolResult
+              {
+                tool_use_id = "tool\001id";
+                content = "result\127payload";
+                is_error = false;
+              };
+          ];
+        name = None;
+        tool_call_id = None;
+      }
+  in
+  let sanitized =
+    Masc_mcp.Inference_utils.sanitize_messages_utf8 [ user_msg; tool_msg ]
+  in
+  match sanitized with
+  | [ user_msg; tool_msg ] ->
+      check string "user history content sanitized" "hist ory entry"
+        (Agent_sdk.Types.text_of_message user_msg);
+      (match tool_msg.Agent_sdk.Types.content with
+       | [ Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ] ->
+           check string "tool id sanitized" "tool id" tool_use_id;
+           check string "tool payload sanitized" "result payload" content
+       | _ -> fail "expected sanitized tool result")
+  | _ -> fail "expected two sanitized messages"
 
 let test_metrics_mixed_response () =
   let result =
@@ -1303,6 +1345,8 @@ let () =
             test_sanitize_text_utf8_replaces_control_chars;
           test_case "prompt sanitizes control chars" `Quick
             test_prompt_sanitizes_control_chars;
+          test_case "sanitize_messages_utf8 cleans history path" `Quick
+            test_sanitize_messages_utf8_cleans_history_path;
         ] );
       ( "config",
         [

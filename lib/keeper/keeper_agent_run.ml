@@ -641,7 +641,7 @@ let run_turn
               | Some s -> s
               | None -> 0.0
             in
-            let sorted = List.sort
+            let sorted = List.stable_sort
               (fun a b -> compare (score_of b) (score_of a))
               non_essential in
             essential @ (List.filteri (fun i _ -> i < budget) sorted)

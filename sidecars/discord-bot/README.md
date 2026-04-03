@@ -1,6 +1,6 @@
-# MASC Discord Bot
+# Discord Gate Bot
 
-Discord bot consumer for the MASC Channel Gate.
+Discord bot consumer for the Channel Gate.
 
 ## Architecture
 

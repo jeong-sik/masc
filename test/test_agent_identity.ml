@@ -77,14 +77,14 @@ let test_anonymous () =
 
 let test_channel_roundtrip () =
   let channels = [
-    Agent_identity.Telegram;
-    Agent_identity.Discord;
-    Agent_identity.Slack;
-    Agent_identity.Signal;
-    Agent_identity.Webchat;
+    Agent_identity.External "telegram";
+    Agent_identity.External "discord";
+    Agent_identity.External "slack";
+    Agent_identity.External "signal";
+    Agent_identity.External "webchat";
     Agent_identity.Api;
     Agent_identity.Internal;
-    Agent_identity.Unknown "custom";
+    Agent_identity.External "custom";
   ] in
   List.iter (fun ch ->
     let str = Agent_identity.string_of_channel ch in
@@ -92,6 +92,40 @@ let test_channel_roundtrip () =
     check bool (Printf.sprintf "roundtrip for %s" str) true 
       (Agent_identity.string_of_channel back = str)
   ) channels
+
+let test_channel_normalization () =
+  let normalize channel =
+    Agent_identity.channel_of_string channel |> Agent_identity.string_of_channel
+  in
+  check string "trim + lowercase external" "discord"
+    (normalize "  DisCord  ");
+  check string "blank becomes unknown" "unknown"
+    (normalize "   ");
+  check string "api normalized" "api"
+    (normalize "  API  ");
+  check string "internal normalized" "internal"
+    (normalize "  INTERNAL  ");
+  check string "external stringified as normalized label" "slack"
+    (Agent_identity.string_of_channel (Agent_identity.External "  SlAck "));
+  match Agent_identity.channel_of_string "  DisCord  " with
+  | Agent_identity.External "discord" -> ()
+  | _ -> fail "expected normalized opaque external channel"
+
+let test_channel_yojson_backward_compat () =
+  check (result string string) "legacy Discord string decodes"
+    (Ok "discord")
+    (match Agent_identity.channel_of_yojson (`String "Discord") with
+     | Ok channel -> Ok (Agent_identity.string_of_channel channel)
+     | Error err -> Error err);
+  check string "known external serializes like legacy constructor"
+    "\"Discord\""
+    (Yojson.Safe.to_string
+       (Agent_identity.channel_to_yojson (Agent_identity.External "DisCord")));
+  check string "unknown external serializes as tagged external"
+    "[\"External\",\"custom-edge\"]"
+    (Yojson.Safe.to_string
+       (Agent_identity.channel_to_yojson
+          (Agent_identity.External "  Custom-Edge  ")))
 
 let test_same_agent () =
   let id1 = Agent_identity.from_agent_name "agent-a" in
@@ -117,7 +151,7 @@ let test_to_display_string () =
   let identity = Agent_identity.({
     uuid = "agent-test123456"; session_key = "12345678-1234-1234-1234-123456789abc";
     agent_name = "test-agent";
-    channel = Some Telegram;
+    channel = Some (Agent_identity.External "telegram");
     user_id = Some "user123";
     room_id = Some "room-a";
     capabilities = [];
@@ -134,7 +168,7 @@ let test_to_display_string_empty_session_key () =
     uuid = "agent-emptykey";
     session_key = "";
     agent_name = "empty-key-agent";
-    channel = Some Api;
+    channel = Some Agent_identity.Api;
     user_id = None;
     room_id = None;
     capabilities = [];
@@ -355,6 +389,9 @@ let () =
       test_case "from_mcp_params_long_session_key_prefix" `Quick test_from_mcp_params_long_session_key_prefix;
       test_case "anonymous" `Quick test_anonymous;
       test_case "channel_roundtrip" `Quick test_channel_roundtrip;
+      test_case "channel_normalization" `Quick test_channel_normalization;
+      test_case "channel_yojson_backward_compat" `Quick
+        test_channel_yojson_backward_compat;
       test_case "same_agent" `Quick test_same_agent;
       test_case "to_display_string" `Quick test_to_display_string;
       test_case "to_display_string_empty_session_key" `Quick test_to_display_string_empty_session_key;

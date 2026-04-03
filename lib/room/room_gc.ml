@@ -457,58 +457,14 @@ let gc config ?(days=7) () =
     ("orphan_dets", `Int cp_result.detachments_removed);
     ("dropped_intents", `Int cp_result.intents_removed);
   ]) in
-  (* 9. Archive stale room directories (no file modified in N days).
-         Prevents .masc/rooms/ from growing unbounded and slowing down
-         snapshot computation (each room adds hundreds of JSON files). *)
-  let room_archive_count = ref 0 in
-  let rooms_root = rooms_root_dir config in
-  if Sys.file_exists rooms_root && Sys.is_directory rooms_root then begin
-    let archive_rooms_dir = Filename.concat
-      (Filename.concat (masc_root_dir config) "archive") "rooms" in
-    let now_f = Time_compat.now () in
-    let threshold_sec = float_of_int days *. 86400.0 in
-    Sys.readdir rooms_root |> Array.iter (fun room_id ->
-        Room_query.safe_yield ();
-      let room_dir = Filename.concat rooms_root room_id in
-      if Sys.is_directory room_dir then begin
-        (* Find most recent mtime across all files in the room *)
-        let max_mtime = ref 0.0 in
-        let rec scan dir =
-          (try
-            Sys.readdir dir |> Array.iter (fun name ->
-              Room_query.safe_yield ();
-              let path = Filename.concat dir name in
-              if Sys.is_directory path then scan path
-              else
-                (try
-                  let st = Unix.stat path in
-                  if st.Unix.st_mtime > !max_mtime then
-                    max_mtime := st.Unix.st_mtime
-                with Unix.Unix_error _ -> ()))
-          with Sys_error _ -> ())
-        in
-        scan room_dir;
-        let age_sec = now_f -. !max_mtime in
-        if !max_mtime > 0.0 && age_sec > threshold_sec then begin
-          mkdir_p archive_rooms_dir;
-          let dest = Filename.concat archive_rooms_dir room_id in
-          (try Unix.rename room_dir dest
-           with Unix.Unix_error _ ->
-             Log.Gc.warn "failed to archive room %s" room_id);
-          incr room_archive_count
-        end
-      end
-    )
-  end;
-  if !room_archive_count > 0 then
-    results := Printf.sprintf "📦 Archived %d stale room(s) (no activity for %d+ days)" !room_archive_count days :: !results
-  else
-    results := "✅ No stale rooms" :: !results;
+  (* 9. Room archival removed — rooms are flattened (#4638).
+     Startup migration (migrate_room_to_flat) moves active room to root. *)
+  results := "✅ Rooms flattened (no room archival needed)" :: !results;
 
   log_event config (Printf.sprintf
     "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"keeper_orphans\":%d,\"sessions_archived\":%d,\"board_artifacts\":%d,\"governance_test_artifacts\":%d,\"governance_artifacts\":%d,\"rooms_archived\":%d,\"cp_cleanup\":%s,\"days\":%d,\"ts\":\"%s\"}"
     !stale_count !old_msg_count !preserved_count !pubsub_cleanup_count !keeper_orphan_count !session_archive_count
     board_artifact_count governance_test_artifact_count governance_artifact_count
-    !room_archive_count cp_json days (now_iso ()));
+    0 cp_json days (now_iso ()));
 
   String.concat "\n" (List.rev !results)

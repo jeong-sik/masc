@@ -162,6 +162,25 @@ let migrate_legacy_dirs (state : Mcp_server.server_state) =
 let migrate_legacy_keeper_dirs_blocking (state : Mcp_server.server_state) =
   migrate_legacy_dirs_with_renames state [ ("resident-keepers", "keepers") ]
 
+let migrate_room_to_flat (state : Mcp_server.server_state) =
+  let masc_root = Room.masc_root_dir state.room_config in
+  let rooms_dir = Filename.concat masc_root "rooms" in
+  if not (Sys.file_exists rooms_dir) then ()
+  else begin
+    let current_room =
+      let p = Filename.concat masc_root "current_room" in
+      if Sys.file_exists p then String.trim (Fs_compat.load_file p)
+      else "focus-room"
+    in
+    let room_dir = Filename.concat rooms_dir current_room in
+    if Sys.file_exists room_dir && Sys.is_directory room_dir then begin
+      Log.Misc.info "migrate: flattening room %s to .masc/ root" current_room;
+      migrate_legacy_dirs_with_renames state
+        [ (Filename.concat "rooms" current_room, ".") ]
+    end else
+      Log.Misc.warn "migrate: rooms/ exists but active room %s not found" current_room
+  end
+
 let migrate_legacy_trace_dirs (state : Mcp_server.server_state) =
   migrate_legacy_dirs_with_renames state [ ("perpetual", "traces") ]
 
@@ -171,6 +190,7 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
      Keeper autoboot and other bootstrap readers should see the canonical paths
      on their first pass, not rely on a later lazy migration task. *)
   migrate_legacy_keeper_dirs_blocking state;
+  migrate_room_to_flat state;
   Mcp_server.set_sse_callback state Sse.broadcast
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =

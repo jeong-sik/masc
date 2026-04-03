@@ -1,6 +1,6 @@
-# MASC Discord Bot
+# Discord Gate Bot
 
-Discord bot consumer for the MASC Channel Gate.
+Discord bot consumer for the Channel Gate.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ the Channel Gate's HTTP API. No business logic, no LLM calls.
 ### 1. Create Discord Bot
 
 1. Go to https://discord.com/developers/applications
-2. New Application -> name it (e.g., "MASC Keeper")
+2. New Application -> name it (e.g., "Keeper Gateway")
 3. Bot tab -> Reset Token -> copy the token
 4. Bot tab -> enable "Message Content Intent"
 5. OAuth2 -> URL Generator -> select "bot" scope

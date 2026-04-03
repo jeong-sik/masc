@@ -85,8 +85,8 @@ let tool_case_timeout_sec () =
   | Some raw -> (
       match int_of_string_opt (String.trim raw) with
       | Some value when value > 0 -> value
-      | _ -> 15)
-  | None -> 15
+      | _ -> 25)
+  | None -> 25
 
 let runner_path () =
   let candidate =

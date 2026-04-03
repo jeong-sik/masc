@@ -5,6 +5,8 @@
 
     @since 2.125.0 *)
 
+module Swarm = Agent_sdk_swarm
+
 let run_swarm ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.Process.mgr ; .. >) ~(config : Room.config)
     ~(session_id : string)
     ~(masc_tools : Types.tool_schema list)

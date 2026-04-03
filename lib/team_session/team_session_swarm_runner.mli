@@ -10,6 +10,8 @@
 
     @since 2.125.0 *)
 
+module Swarm = Agent_sdk_swarm
+
 (** Run a team session through OAS Swarm Runner.
 
     Converts the session to swarm config, executes via [Runner.run],

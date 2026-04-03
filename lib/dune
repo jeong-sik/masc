@@ -303,6 +303,8 @@
    tool_team_session_routing_workers
    tool_team_session_step
    tool_team_session_step_spawn
+   tool_team_session_step_spawn_impl
+   tool_team_session_step_spawn_run
    tool_team_session_step_exec
    tool_team_session_step_types
    team_session_plan

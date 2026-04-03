@@ -1,50 +1,68 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
-import 'ninja-keys'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { navigate } from '../../router'
 import { requestConfirm } from './confirm-dialog'
 import { runGarbageCollection, cleanupZombies } from '../flow-control/flow-control-state'
 
+interface CommandPaletteAction {
+  id: string
+  title: string
+  handler: () => void | Promise<void>
+}
+
+interface NinjaKeysElement extends HTMLElement {
+  data: CommandPaletteAction[]
+}
+
 export function CommandPalette() {
-  const ref = useRef<any>(null)
+  const ref = useRef<NinjaKeysElement | null>(null)
+  const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    if (!ref.current) return
+    let cancelled = false
+
+    void import('ninja-keys')
+      .then(() => {
+        if (!cancelled) setReady(true)
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!ready || !ref.current) return
     ref.current.data = [
       {
         id: 'nav-overview',
         title: '상황판으로 이동 (Overview)',
-        hotkey: 'ctrl+1',
         handler: () => navigate('overview')
       },
       {
         id: 'nav-monitoring',
         title: '모니터링으로 이동 (Monitoring)',
-        hotkey: 'ctrl+2',
         handler: () => navigate('monitoring')
       },
       {
         id: 'nav-workspace',
         title: '작업 화면으로 이동 (Workspace)',
-        hotkey: 'ctrl+3',
         handler: () => navigate('workspace')
       },
       {
         id: 'nav-command',
         title: '운영 개입으로 이동 (Command Plane)',
-        hotkey: 'ctrl+4',
         handler: () => navigate('command')
       },
       {
         id: 'nav-lab',
         title: '실험실로 이동 (Lab)',
-        hotkey: 'ctrl+5',
         handler: () => navigate('lab')
       },
       {
         id: 'nav-logs',
         title: '로그 뷰어로 이동 (Logs)',
-        hotkey: 'ctrl+6',
         handler: () => navigate('logs')
       },
       {
@@ -64,12 +82,14 @@ export function CommandPalette() {
         }
       }
     ]
-  }, [])
+  }, [ready])
+
+  if (!ready) return null
 
   return html`
     <ninja-keys
       ref=${ref}
-      placeholder="명령어를 검색하세요... (Cmd+K)"
+      placeholder="명령어를 검색하세요... (⌘/Ctrl+K)"
       hideBreadcrumbs
       style="
         --ninja-modal-background: rgba(13, 21, 38, 0.98);

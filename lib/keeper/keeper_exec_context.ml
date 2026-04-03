@@ -858,7 +858,9 @@ let recover_latest_checkpoint_for_overflow_retry
   | None -> None
   | Some (ctx, turn_generation) ->
       let now_ts = Time_compat.now () in
-      let ctx = clamp_context_max_tokens ctx ~primary_model_max_tokens in
+      let ctx =
+        clamp_context_max_tokens ctx ~primary_model_max_tokens
+      in
       let before_tokens = token_count ctx in
       let retry_meta =
         forced_overflow_retry_meta meta ~turn_generation ~now_ts

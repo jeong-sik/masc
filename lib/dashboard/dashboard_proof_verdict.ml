@@ -245,7 +245,6 @@ let selection_json ~requested_session_id ~requested_operation_id ~session ~opera
       ("available_session_count", `Int session_count);
     ]
 
-<<<<<<< HEAD
 let namespace_json config =
   let state = Room.read_state config in
   `Assoc

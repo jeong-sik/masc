@@ -161,35 +161,9 @@ let explicit_metadata : (string * metadata) list =
       hidden_active
         "Internal operator-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
     (* Dead features: no surface, no external callers. Deprecated 2026-04-03.
-       Physical removal after 4-week telemetry confirms 0 calls. See #4709. *)
-    (* masc_hat_wear and masc_hat_status physically removed. See #4709. *)
-    ("masc_encryption_enable",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_encryption_disable",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_encryption_status",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_generate_key",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Room encryption feature never integrated.");
-    ("masc_tempo",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_get",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_set",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_adjust",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
-    ("masc_tempo_reset",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Tempo feature never integrated into workflows.");
+       Physical removal after 4-week telemetry confirms 0 calls. See #4709.
+       masc_hat_wear, masc_hat_status, masc_encryption_*, masc_generate_key,
+       and masc_tempo* are now physically removed. *)
     (* Broken tools: shell out to CLI binaries unavailable at runtime.
        masc-cost: buildable from bin/masc_cost.ml but not guaranteed to be
        present in runtime images or on PATH.

@@ -90,8 +90,6 @@ let dispatch
       Tool_cache.dispatch { Tool_cache.config } ~name ~args
   | Mod_run ->
       Tool_run.dispatch { Tool_run.config } ~name ~args
-  | Mod_tempo ->
-      Tool_tempo.dispatch { Tool_tempo.config; agent_name } ~name ~args
   | Mod_agent ->
       (* Review #4579: Mod_agent includes masc_agent_update, masc_register_capabilities etc.
          Tool_agent.dispatch already validates per-tool; keeper agent_name is passed so
@@ -242,10 +240,6 @@ let dispatch
       Some (false,
         Printf.sprintf
           "tool '%s' requires MCP session context (not available in keeper)" name)
-
-  | Mod_encryption ->
-      Some (false,
-        Printf.sprintf "tool '%s' requires MCP server state" name)
 
   | Mod_rate_limit ->
       Some (false,

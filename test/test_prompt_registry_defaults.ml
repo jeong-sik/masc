@@ -2,10 +2,12 @@
 
 module Lib = Masc_mcp
 
+let default_dir_permissions = 0o755
+
 let test_dir () =
   let tmp = Filename.temp_file "masc_prompt_registry" "" in
   Sys.remove tmp;
-  Unix.mkdir tmp 0o755;
+  Unix.mkdir tmp default_dir_permissions;
   tmp
 
 let cleanup_dir dir =
@@ -105,9 +107,7 @@ let with_clean_registry f =
     ~finally:(fun () ->
       Prompt_registry.clear ();
       cleanup_dir dir)
-    (fun () ->
-      Prompt_registry.clear ();
-      f ~dir)
+    (fun () -> f ~dir)
 
 let fixture key =
   match List.assoc_opt key fixtures with
@@ -414,10 +414,10 @@ let () =
               write_file
                 (Filename.concat prompts_dir "keeper.proactive_retry.md")
                 (markdown_fixture "keeper.proactive_retry"
-                   "Retry {{attempt_phrase}} {{reason}} {{rogue}}");
+                   "Retry {{attempt_phrase}} {{reason}} {{unexpected_var}}");
               let issues = Prompt_registry.validate_prompt_templates () in
               check bool "unexpected variable flagged" true
-                (List.mem ("keeper.proactive_retry", "rogue") issues));
+                (List.mem ("keeper.proactive_retry", "unexpected_var") issues));
           test_case "persist_overrides and restore_overrides roundtrip valid entries"
             `Quick (fun () ->
               with_registry @@ fun ~dir ~prompts_dir:_ ->
@@ -437,7 +437,7 @@ let () =
             `Quick (fun () ->
               with_registry @@ fun ~dir ~prompts_dir:_ ->
               let masc_dir = Filename.concat dir ".masc" in
-              Unix.mkdir masc_dir 0o755;
+              Unix.mkdir masc_dir default_dir_permissions;
               write_file
                 (Filename.concat masc_dir "prompt_overrides.json")
                 (Yojson.Safe.pretty_to_string
@@ -445,7 +445,8 @@ let () =
                      [
                        ("keeper.world", `String "restored world");
                        ( "keeper.proactive_retry",
-                         `String "Retry {{attempt_phrase}} {{reason}} {{rogue}}" );
+                         `String
+                           "Retry {{attempt_phrase}} {{reason}} {{unexpected_var}}" );
                      ]));
               Prompt_registry.restore_overrides dir;
               check string "valid override restored" "restored world"

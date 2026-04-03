@@ -74,8 +74,7 @@ let register_capabilities config ~agent_name ~capabilities =
     Printf.sprintf "⚠ Agent %s not found. Join first!" agent_name
 
 (** Update agent metadata (status/capabilities).
-    BUG-1600 FIX: Check both room-scoped and root agent directories,
-    matching the lookup logic used by is_agent_joined. *)
+    Since #4638 agent metadata always lives under the root agents_dir. *)
 let update_agent_r config ~agent_name ?status ?capabilities () : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else match validate_agent_name_r agent_name with

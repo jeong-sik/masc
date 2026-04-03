@@ -383,11 +383,6 @@ let resolve_agent_name config agent_name =
 (* ============================================ *)
 
 let ensure_room_bootstrap config room_id =
-  let room_id =
-    match validate_room_id room_id with
-    | Ok room_id -> room_id
-    | Error msg -> invalid_arg ("invalid room_id: " ^ msg)
-  in
   (* 1. Always ensure root infrastructure exists *)
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
@@ -425,6 +420,9 @@ let ensure_room_bootstrap config room_id =
     write_json config scoped_backlog
       (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 })
 
+let broadcast_channel config =
+  Printf.sprintf "broadcast:%s:default" (project_prefix config)
+
 (* ============================================ *)
 (* Broadcast                                    *)
 (* ============================================ *)
@@ -449,7 +447,7 @@ let broadcast config ~from_agent ~content =
   in
   write_json config msg_file (message_to_yojson msg);
   let room_id = "default" in
-  (match backend_publish config ~channel:(Printf.sprintf "broadcast:%s" room_id)
+  (match backend_publish config ~channel:(broadcast_channel config)
       ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
    | Ok _ -> ()
    | Error e -> Log.Misc.error "broadcast publish failed for %s: %s" room_id (Backend_types.show_error e));

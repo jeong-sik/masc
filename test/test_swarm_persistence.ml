@@ -263,7 +263,7 @@ let test_list_sessions_records_fallback_diagnostics () =
       Alcotest.(check int) "limit recorded" 1
         Yojson.Safe.Util.(diagnostics |> member "limit" |> to_int))
 
-let test_list_sessions_flat_scope_uses_flat_prefix () =
+let test_list_sessions_flat_namespace_uses_flat_prefix () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
       Eio_main.run @@ fun env ->
@@ -282,7 +282,7 @@ let test_list_sessions_flat_scope_uses_flat_prefix () =
         | Some key -> key ^ ":"
         | None -> Alcotest.fail "expected scoped backend key"
       in
-      Alcotest.(check string) "query prefix tracks scoped room path" expected_prefix
+      Alcotest.(check string) "query prefix tracks flat namespace path" expected_prefix
         Yojson.Safe.Util.(diagnostics |> member "query_prefix" |> to_string))
 
 let test_list_sessions_memory_backend_uses_project_prefix () =
@@ -339,8 +339,8 @@ let () =
             test_list_sessions_uses_recency_order_for_limit;
           Alcotest.test_case "list_sessions diagnostics record fallback"
             `Quick test_list_sessions_records_fallback_diagnostics;
-          Alcotest.test_case "list_sessions flat scope uses flat prefix"
-            `Quick test_list_sessions_flat_scope_uses_flat_prefix;
+          Alcotest.test_case "list_sessions flat namespace uses flat prefix"
+            `Quick test_list_sessions_flat_namespace_uses_flat_prefix;
           Alcotest.test_case "list_sessions memory backend uses project prefix"
             `Quick test_list_sessions_memory_backend_uses_project_prefix;
         ] );

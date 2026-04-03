@@ -16,10 +16,16 @@ let rooms_root_dir config = Filename.concat (masc_root_dir config) "rooms"
 let registry_root_path config = Filename.concat (masc_root_dir config) "rooms.json"
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
 
-let warned_about_legacy_room_state = ref false
+let warned_legacy_room_roots = Atomic.make []
 
-let reset_legacy_room_warning_for_testing () =
-  warned_about_legacy_room_state := false
+let rec mark_legacy_room_warning_emitted masc_root =
+  let warned = Atomic.get warned_legacy_room_roots in
+  if List.mem masc_root warned then
+    false
+  else if Atomic.compare_and_set warned_legacy_room_roots warned (masc_root :: warned) then
+    true
+  else
+    mark_legacy_room_warning_emitted masc_root
 
 let read_legacy_current_room config =
   let path = current_room_root_path config in
@@ -45,17 +51,17 @@ let legacy_room_dirs_exist config =
   with _ -> false
 
 let warn_if_legacy_room_state_exists config =
-  if not !warned_about_legacy_room_state then
-    let legacy_current_room =
-      match read_legacy_current_room config with
-      | Some room_id when room_id <> "default" -> Some room_id
-      | _ -> None
-    in
-    let has_legacy_rooms = legacy_room_dirs_exist config in
-    match legacy_current_room, has_legacy_rooms with
-    | None, false -> ()
-    | _ ->
-        warned_about_legacy_room_state := true;
+  let legacy_current_room =
+    match read_legacy_current_room config with
+    | Some room_id when room_id <> "default" -> Some room_id
+    | _ -> None
+  in
+  let has_legacy_rooms = legacy_room_dirs_exist config in
+  match legacy_current_room, has_legacy_rooms with
+  | None, false -> ()
+  | _ ->
+      let masc_root = masc_root_dir config in
+      if mark_legacy_room_warning_emitted masc_root then
         let detail =
           match legacy_current_room, has_legacy_rooms with
           | Some room_id, true ->

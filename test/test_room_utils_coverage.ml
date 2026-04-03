@@ -605,7 +605,6 @@ let test_read_current_room_warns_once_for_legacy_state () =
       Unix.mkdir rooms_dir 0o755;
       write_file (Filename.concat rooms_dir "state.json") "{}";
       write_file (Room_utils.current_room_root_path cfg) "legacy-room\n";
-      Room_utils.reset_legacy_room_warning_for_testing ();
       let before_seq = latest_ring_seq () in
       check (option string) "current room still defaults" (Some "default")
         (Room_utils.read_current_room cfg);

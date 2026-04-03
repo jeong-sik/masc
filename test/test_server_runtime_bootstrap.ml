@@ -380,6 +380,30 @@ let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
         [ "sangsu" ]
         (Keeper_types.keepalive_keeper_names state.Mcp_server.room_config))
 
+let test_blocking_bootstrap_flattens_room_with_safe_current_room_fallback () =
+  with_temp_dir "startup-blocking-room-flatten" (fun dir ->
+      let state = Mcp_server.create_state ~base_path:dir in
+      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let legacy_tasks = Filename.concat masc_root "rooms/focus-room/tasks" in
+      Fs_compat.mkdir_p legacy_tasks;
+      write_file (Filename.concat masc_root "current_room") "../escape\n";
+      write_file
+        (Filename.concat legacy_tasks "backlog.json")
+        (Yojson.Safe.to_string
+           (Types.backlog_to_yojson
+              { tasks = []; last_updated = Types.now_iso (); version = 7 }));
+      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+      let root_backlog =
+        Yojson.Safe.from_string
+          (read_file (Filename.concat masc_root "tasks/backlog.json"))
+      in
+      Alcotest.(check int) "legacy backlog promoted before init seeds defaults" 7
+        Yojson.Safe.Util.(root_backlog |> member "version" |> to_int);
+      Alcotest.(check bool) "legacy backlog not quarantined" false
+        (Sys.file_exists
+           (Filename.concat masc_root
+              "_quarantine/rooms/focus-room/tasks/backlog.json")))
+
 let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();
   Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
@@ -550,6 +574,10 @@ let () =
             "blocking bootstrap promotes legacy keeper meta"
             `Quick
             test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot;
+          Alcotest.test_case
+            "blocking bootstrap flattens room with safe current_room fallback"
+            `Quick
+            test_blocking_bootstrap_flattens_room_with_safe_current_room_fallback;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case "liveness probe is always true" `Quick

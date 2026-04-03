@@ -9,8 +9,8 @@ open Room_utils
 (** Get current room file path (legacy) *)
 let current_room_path config = current_room_root_path config
 
-(** Always returns [Some "default"] since #4638. *)
-let read_current_room _config = Some "default"
+(** Delegate to the shared reader so legacy-state warnings still fire. *)
+let read_current_room config = Room_utils.read_current_room config
 
 (** Write current room ID -- no-op since #4638 (rooms removed). *)
 let write_current_room _config _room_id = ()

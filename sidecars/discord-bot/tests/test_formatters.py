@@ -1,6 +1,6 @@
 """Tests for Discord message formatting."""
 
-from src.formatters import chunk_text
+from src.formatters import chunk_text, compose_gate_content
 from src.masc_client import GateResponse
 
 
@@ -58,3 +58,21 @@ def test_gate_response_from_error() -> None:
     assert resp.ok is False
     assert resp.error == "timeout"
     assert resp.reply == ""
+
+
+def test_compose_gate_content_includes_attachments() -> None:
+    result = compose_gate_content(
+        "hello",
+        ["- image.png: https://cdn.example/image.png"],
+    )
+    assert "hello" in result
+    assert "Attachments:" in result
+    assert "image.png" in result
+
+
+def test_compose_gate_content_handles_attachment_only_messages() -> None:
+    result = compose_gate_content(
+        "   ",
+        ["- image.png: https://cdn.example/image.png"],
+    )
+    assert result.startswith("Attachments:")

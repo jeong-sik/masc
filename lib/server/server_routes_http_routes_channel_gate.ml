@@ -9,6 +9,7 @@
     @since 2.217.0 *)
 
 open Server_auth
+open Server_utils
 
 module Http = Http_server_eio
 
@@ -52,8 +53,30 @@ let http_status_of_gate_error : Channel_gate.gate_error -> Httpun.Status.t = fun
   | Dispatch_unavailable -> `Service_unavailable
   | Internal _ -> `Internal_server_error
 
+let record_internal_error_metric ~duration_ms body_str exn =
+  let fallback () =
+    Channel_gate_metrics.record_internal_error_exn
+      ~channel:"unknown"
+      ~room_id:""
+      ~keeper:""
+      ~duration_ms exn
+  in
+  try
+    let json = Yojson.Safe.from_string body_str in
+    match Channel_gate.inbound_of_json json with
+    | Ok msg ->
+        Channel_gate_metrics.record_internal_error_exn
+          ~channel:(Agent_identity.string_of_channel msg.channel)
+          ~room_id:msg.channel_room_id
+          ~keeper:msg.keeper_name
+          ~duration_ms exn
+    | Error _ -> fallback ()
+  with
+  | Yojson.Json_error _ -> fallback ()
+
 let handle_gate_message ~sw ~clock state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
+    let request_started = Unix.gettimeofday () in
     let result =
       try
         let json = Yojson.Safe.from_string body_str in
@@ -76,6 +99,10 @@ let handle_gate_message ~sw ~clock state request reqd =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
           (* Log details server-side, return generic message to client *)
+          let duration_ms =
+            int_of_float ((Unix.gettimeofday () -. request_started) *. 1000.0)
+          in
+          record_internal_error_metric ~duration_ms body_str exn;
           Log.Misc.error "channel_gate internal error: %s" (Printexc.to_string exn);
           Error (Channel_gate.Internal "", "internal error")
     in
@@ -118,6 +145,79 @@ let handle_gate_status _state request reqd =
   respond_json_with_cors ~status:`OK request reqd
     (Yojson.Safe.to_string json)
 
+let gate_keeper_ctx ~sw ~clock state =
+  {
+    Tool_keeper.config = state.Mcp_server.room_config;
+    agent_name = "gate:connector";
+    sw;
+    clock;
+    proc_mgr = state.Mcp_server.proc_mgr;
+    net = state.Mcp_server.net;
+  }
+
+let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
+  match
+    Tool_keeper.dispatch (gate_keeper_ctx ~sw ~clock state) ~name:tool_name ~args
+  with
+  | Some (true, body) -> (
+      try
+        ignore (Yojson.Safe.from_string body);
+        respond_json_with_cors ~status:`OK request reqd body
+      with
+      | Yojson.Json_error err ->
+          Log.Misc.error "channel_gate %s returned invalid json: %s"
+            tool_name err;
+          respond_json_with_cors ~status:`Internal_server_error request reqd
+            (Yojson.Safe.to_string
+               (Channel_gate.error_json "internal error")) )
+  | Some (false, err) ->
+      let lower = String.lowercase_ascii err in
+      let status =
+        if String_util.contains_substring lower "keeper not found" then `Not_found
+        else `Bad_gateway
+      in
+      respond_json_with_cors ~status request reqd
+        (Yojson.Safe.to_string (Channel_gate.error_json err))
+  | None ->
+      respond_json_with_cors ~status:`Service_unavailable request reqd
+        (Yojson.Safe.to_string
+           (Channel_gate.error_json "keeper dispatch unavailable"))
+
+(** GET /api/v1/gate/keepers?limit=100&detailed=true
+
+    Authenticated keeper discovery for channel-side connectors. *)
+let handle_gate_keepers ~sw ~clock state request reqd =
+  let limit =
+    int_query_param request "limit" ~default:100
+    |> fun value -> max 1 (min 200 value)
+  in
+  let detailed = bool_query_param request "detailed" ~default:true in
+  let args =
+    `Assoc [ ("limit", `Int limit); ("detailed", `Bool detailed) ]
+  in
+  respond_keeper_tool_json ~sw ~clock state request reqd
+    ~tool_name:"masc_keeper_list" ~args
+
+(** GET /api/v1/gate/keeper-status?name=<keeper>
+
+    Authenticated single-keeper status for connector admin surfaces. *)
+let handle_gate_keeper_status ~sw ~clock state request reqd =
+  match query_param request "name" with
+  | Some raw_name ->
+      let name = String.trim raw_name in
+      if name = "" then
+        respond_json_with_cors ~status:`Bad_request request reqd
+          (Yojson.Safe.to_string
+             (Channel_gate.error_json "name is required"))
+      else
+        let args = `Assoc [ ("name", `String name) ] in
+        respond_keeper_tool_json ~sw ~clock state request reqd
+          ~tool_name:"masc_keeper_status" ~args
+  | None ->
+      respond_json_with_cors ~status:`Bad_request request reqd
+        (Yojson.Safe.to_string
+           (Channel_gate.error_json "name is required"))
+
 (** Register all gate routes on the router. *)
 let add_routes ~sw ~clock router =
   router
@@ -134,4 +234,14 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/gate/status" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          handle_gate_status state request reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/gate/keepers" (fun request reqd ->
+       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+         handle_gate_keepers ~sw ~clock state request reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/gate/keeper-status" (fun request reqd ->
+       with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
+         handle_gate_keeper_status ~sw ~clock state request reqd
        ) request reqd)

@@ -12,19 +12,53 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from typing import Any, cast
 
 import discord
 from discord import app_commands
 
 from .config import get_config
-from .formatters import chunk_text, format_error_embed, format_keeper_embed
-from .masc_client import GateResponse, MascGateClient
+from .formatters import (
+    chunk_text,
+    compose_gate_content,
+    format_error_embed,
+    format_keeper_embed,
+)
+from .masc_client import BreakerSnapshot, GateResponse, MascGateClient
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 logger = logging.getLogger("masc-discord-bot")
+
+
+def attachment_lines(message: discord.Message) -> list[str]:
+    """Render Discord attachments into deterministic plain text."""
+    lines: list[str] = []
+    visible = message.attachments[:5]
+    for attachment in visible:
+        filename = attachment.filename.strip() or "attachment"
+        lines.append(f"- {filename}: {attachment.url}")
+    extra = len(message.attachments) - len(visible)
+    if extra > 0:
+        lines.append(f"- ... {extra} more attachment(s)")
+    return lines
+
+
+def channel_stats_for(status: dict[str, Any] | None, channel_name: str) -> dict[str, Any] | None:
+    """Extract one connector row from gate status."""
+    if status is None:
+        return None
+    rows = status.get("channels")
+    if not isinstance(rows, list):
+        return None
+    for item in cast(list[object], rows):
+        if isinstance(item, dict):
+            row = cast(dict[str, Any], item)
+            if row.get("channel") == channel_name:
+                return row
+    return None
 
 
 class MascBot(discord.Client):
@@ -37,12 +71,15 @@ class MascBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.gate = MascGateClient()
         self.cfg = get_config()
-        self._keeper_map = self.cfg.keeper_map()
+        self.keeper_bindings = self.cfg.keeper_map()
 
     async def setup_hook(self) -> None:
         """Register slash commands on startup."""
-        self.tree.add_command(keeper_ask)
-        self.tree.add_command(keeper_status)
+        self.tree.add_command(keeper_ask)  # pyright: ignore[reportUnknownArgumentType]
+        self.tree.add_command(keeper_status)  # pyright: ignore[reportUnknownArgumentType]
+        self.tree.add_command(keeper_bind)  # pyright: ignore[reportUnknownArgumentType]
+        self.tree.add_command(keeper_unbind)  # pyright: ignore[reportUnknownArgumentType]
+        self.tree.add_command(keeper_map)  # pyright: ignore[reportUnknownArgumentType]
         await self.tree.sync()
         logger.info("Slash commands synced")
 
@@ -54,42 +91,53 @@ class MascBot(discord.Client):
     async def on_ready(self) -> None:
         assert self.user is not None
         logger.info("Bot ready: %s (id=%s)", self.user.name, self.user.id)
-        logger.info("Keeper map: %s", self._keeper_map)
+        logger.info("Keeper map: %s", self.keeper_bindings)
 
-        # Health check on startup
         healthy = await self.gate.health_check()
         if healthy:
             logger.info("Gate health check: OK")
         else:
             logger.warning("Gate health check: FAILED (bot will retry on messages)")
 
-    async def on_message(self, message: discord.Message) -> None:
-        """Route channel messages to the mapped keeper."""
-        # Ignore own messages
-        if message.author == self.user:
-            return
-        # Ignore DMs for now
-        if not message.guild:
-            return
+    def _resolve_keeper_for_channel(self, channel: discord.abc.Snowflake) -> str | None:
+        channel_id = str(channel.id)
+        direct = self.keeper_bindings.get(channel_id)
+        if direct is not None:
+            return direct
+        if isinstance(channel, discord.Thread) and channel.parent is not None:
+            return self.keeper_bindings.get(str(channel.parent.id))
+        return None
 
-        channel_id = str(message.channel.id)
-        keeper_name = self._keeper_map.get(channel_id)
+    def channel_binding_debug(self, channel: discord.abc.Snowflake) -> tuple[str | None, str]:
+        channel_id = str(channel.id)
+        direct = self.keeper_bindings.get(channel_id)
+        if direct is not None:
+            return direct, "direct"
+        if isinstance(channel, discord.Thread) and channel.parent is not None:
+            inherited = self.keeper_bindings.get(str(channel.parent.id))
+            if inherited is not None:
+                return inherited, "thread-parent"
+        return None, "unmapped"
 
-        if keeper_name is None:
-            return  # Channel not mapped to any keeper
+    def set_channel_binding(self, channel_id: str, keeper_name: str) -> None:
+        self.keeper_bindings[channel_id] = keeper_name
 
-        # Show typing while waiting for keeper response
-        async with message.channel.typing():
-            response = await self.gate.send_message(
-                keeper_name=keeper_name,
-                content=message.content,
-                channel_user_id=str(message.author.id),
-                channel_user_name=str(message.author),
-                channel_room_id=channel_id,
-                message_id=str(message.id),
-            )
+    def remove_channel_binding(self, channel_id: str) -> str | None:
+        return self.keeper_bindings.pop(channel_id, None)
 
-        await self._send_response(message.channel, response)
+    def _compose_gate_content(self, message: discord.Message) -> str:
+        return compose_gate_content(message.content, attachment_lines(message))
+
+    def is_admin(self, interaction: discord.Interaction) -> bool:
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            return False
+        if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
+            return True
+        role_id = self.cfg.discord_admin_role_id.strip()
+        if not role_id:
+            return False
+        return any(str(role.id) == role_id for role in member.roles)
 
     async def _send_response(
         self,
@@ -99,7 +147,7 @@ class MascBot(discord.Client):
         """Send a gate response to a Discord channel."""
         if not response.ok:
             if response.error == "duplicate message":
-                return  # Silently skip duplicates
+                return
             embed = format_error_embed(response.error)
             await channel.send(embed=embed)
             return
@@ -109,17 +157,159 @@ class MascBot(discord.Client):
                 await channel.send(chunk)
             return
 
-        # Short replies: plain text. Medium replies or replies with stats: embed.
         if len(response.reply) <= 500 and not response.model_used:
-            chunks = chunk_text(response.reply)
-            for chunk in chunks:
+            for chunk in chunk_text(response.reply):
                 await channel.send(chunk)
         else:
             embed = format_keeper_embed(response)
             await channel.send(embed=embed)
 
+    async def on_message(self, message: discord.Message) -> None:
+        """Route channel messages to the mapped keeper."""
+        if message.author == self.user or message.author.bot:
+            return
+        if not message.guild:
+            return
+
+        keeper_name = self._resolve_keeper_for_channel(message.channel)
+        if keeper_name is None:
+            return
+
+        content = self._compose_gate_content(message)
+        if not content:
+            logger.info("Skipping empty Discord message %s", message.id)
+            return
+
+        async with message.channel.typing():
+            response = await self.gate.send_message(
+                keeper_name=keeper_name,
+                content=content,
+                channel_user_id=str(message.author.id),
+                channel_user_name=str(message.author),
+                channel_room_id=str(message.channel.id),
+                message_id=str(message.id),
+            )
+
+        await self._send_response(message.channel, response)
+
+
+def breaker_summary(snapshot: BreakerSnapshot) -> str:
+    if snapshot.open:
+        return f"open ({snapshot.remaining_sec}s)"
+    if snapshot.consecutive_failures > 0 and snapshot.last_failure:
+        return f"closed, last failure: {snapshot.last_failure}"
+    return "closed"
+
+
+def keeper_status_embed(keeper_name: str, data: dict[str, Any]) -> discord.Embed:
+    """Build a compact embed from masc_keeper_status JSON."""
+    embed = discord.Embed(
+        title=f"Keeper: {keeper_name}",
+        color=0x5865F2,
+    )
+
+    active_model = str(data.get("active_model", "-"))
+    running = "yes" if bool(data.get("keepalive_running", False)) else "no"
+    last_turn_ago = data.get("last_turn_ago_s")
+    last_turn_value = "-"
+    if isinstance(last_turn_ago, (int, float)):
+        last_turn_value = f"{last_turn_ago:.0f}s ago"
+
+    embed.add_field(name="Model", value=active_model or "-", inline=True)
+    embed.add_field(name="Keepalive", value=running, inline=True)
+    embed.add_field(name="Last Turn", value=last_turn_value, inline=True)
+
+    goal = data.get("goal")
+    if isinstance(goal, str) and goal.strip():
+        embed.add_field(name="Goal", value=goal[:1024], inline=False)
+
+    blocker = data.get("last_blocker")
+    if isinstance(blocker, str) and blocker.strip():
+        embed.add_field(name="Last Blocker", value=blocker[:1024], inline=False)
+
+    return embed
+
+
+def connector_status_embed(
+    *,
+    channel_id: str | None,
+    channel_binding: tuple[str | None, str],
+    gate_status: dict[str, Any] | None,
+    breaker: BreakerSnapshot,
+) -> discord.Embed:
+    """Build connector status embed for Discord operators."""
+    embed = discord.Embed(
+        title="Discord Connector Status",
+        color=0x57F287 if not breaker.open else 0xFEE75C,
+    )
+
+    binding_name, binding_source = channel_binding
+    embed.add_field(
+        name="Current Channel",
+        value=f"{channel_id or 'n/a'}\nkeeper: {binding_name or 'unmapped'} ({binding_source})",
+        inline=False,
+    )
+    embed.add_field(name="Breaker", value=breaker_summary(breaker), inline=False)
+
+    if gate_status is None:
+        embed.description = "Gate status unavailable"
+        return embed
+
+    discord_row = channel_stats_for(gate_status, "discord")
+    if discord_row is None:
+        embed.description = "No Discord traffic recorded yet"
+        return embed
+
+    health = str(discord_row.get("health", "unknown"))
+    success_rate = discord_row.get("success_rate_pct", 0)
+    errors = discord_row.get("error_count", 0)
+    duplicates = discord_row.get("duplicate_count", 0)
+    rooms = discord_row.get("room_count", 0)
+    avg_duration_ms = discord_row.get("avg_duration_ms", 0)
+    max_duration_ms = discord_row.get("max_duration_ms", 0)
+    last_error = str(discord_row.get("last_error", "")).strip()
+
+    embed.add_field(
+        name="Connector",
+        value=(
+            f"health: {health}\n"
+            f"success: {success_rate}%\n"
+            f"errors: {errors} | duplicates: {duplicates}\n"
+            f"rooms: {rooms}"
+        ),
+        inline=True,
+    )
+    embed.add_field(
+        name="Latency",
+        value=(
+            f"avg: {int(avg_duration_ms) / 1000:.1f}s\n"
+            f"max: {int(max_duration_ms) / 1000:.1f}s"
+        ),
+        inline=True,
+    )
+
+    if last_error:
+        embed.add_field(name="Last Error", value=last_error[:1024], inline=False)
+
+    return embed
+
+
+async def keeper_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    bot = interaction.client
+    assert isinstance(bot, MascBot)
+    names = await bot.gate.list_keepers()
+    needle = current.strip().lower()
+    matches = [
+        name for name in names if not needle or needle in name.lower()
+    ][:25]
+    return [app_commands.Choice(name=name, value=name) for name in matches]
+
 
 # ── Slash Commands ──────────────────────────────────────────
+
 
 @app_commands.command(name="keeper-ask", description="Send a message to a specific keeper")
 @app_commands.describe(
@@ -139,10 +329,10 @@ async def keeper_ask(
 
     response = await bot.gate.send_message(
         keeper_name=keeper,
-        content=message,
+        content=message.strip(),
         channel_user_id=str(interaction.user.id),
         channel_user_name=str(interaction.user),
-        channel_room_id=str(interaction.channel_id),
+        channel_room_id=str(interaction.channel_id or "unknown"),
         message_id=f"slash-{interaction.id}",
     )
 
@@ -155,25 +345,180 @@ async def keeper_ask(
             await interaction.followup.send(embed=embed)
     else:
         embed = format_error_embed(response.error)
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-@app_commands.command(name="keeper-status", description="Check gate connection status")
-async def keeper_status(interaction: discord.Interaction) -> None:
-    """Check if the gate is reachable."""
-    await interaction.response.defer(thinking=True)
+@keeper_ask.autocomplete("keeper")
+async def keeper_ask_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    return await keeper_name_autocomplete(interaction, current)
+
+
+@app_commands.command(
+    name="keeper-status",
+    description="Show connector health or a single keeper status",
+)
+@app_commands.describe(
+    keeper="Optional keeper name",
+)
+async def keeper_status(
+    interaction: discord.Interaction,
+    keeper: str | None = None,
+) -> None:
+    """Check gate + connector health, or inspect one keeper."""
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
     bot = interaction.client
     assert isinstance(bot, MascBot)
 
-    healthy = await bot.gate.health_check()
-    if healthy:
-        await interaction.followup.send("Gate: connected")
-    else:
-        await interaction.followup.send("Gate: unreachable")
+    if keeper is not None and keeper.strip():
+        data = await bot.gate.keeper_status(keeper)
+        if data is None:
+            embed = format_error_embed(f"keeper status unavailable: {keeper}")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+        embed = keeper_status_embed(keeper.strip(), data)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
+
+    channel_binding = (
+        bot.channel_binding_debug(interaction.channel)
+        if interaction.channel is not None
+        else (None, "no-channel")
+    )
+    embed = connector_status_embed(
+        channel_id=str(interaction.channel_id) if interaction.channel_id is not None else None,
+        channel_binding=channel_binding,
+        gate_status=await bot.gate.gate_status(),
+        breaker=bot.gate.breaker_snapshot(),
+    )
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@keeper_status.autocomplete("keeper")
+async def keeper_status_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    return await keeper_name_autocomplete(interaction, current)
+
+
+@app_commands.command(
+    name="keeper-bind",
+    description="Bind the current Discord channel to a keeper",
+)
+@app_commands.describe(keeper="Keeper name")
+async def keeper_bind(
+    interaction: discord.Interaction,
+    keeper: str,
+) -> None:
+    """Bind the current channel to a keeper in runtime memory."""
+    bot = interaction.client
+    assert isinstance(bot, MascBot)
+
+    if not bot.is_admin(interaction):
+        await interaction.response.send_message(
+            "Admin role or Manage Server permission required.",
+            ephemeral=True,
+        )
+        return
+
+    if interaction.channel is None:
+        await interaction.response.send_message("Channel context required.", ephemeral=True)
+        return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
+    keeper_name = keeper.strip()
+    known = await bot.gate.list_keepers()
+    if keeper_name not in known:
+        status = await bot.gate.keeper_status(keeper_name)
+        if status is None:
+            embed = format_error_embed(f"unknown keeper: {keeper_name}")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+    channel_id = str(interaction.channel.id)
+    bot.set_channel_binding(channel_id, keeper_name)
+    await interaction.followup.send(
+        f"Bound channel `{channel_id}` to keeper `{keeper_name}`.",
+        ephemeral=True,
+    )
+
+
+@keeper_bind.autocomplete("keeper")
+async def keeper_bind_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    return await keeper_name_autocomplete(interaction, current)
+
+
+@app_commands.command(
+    name="keeper-unbind",
+    description="Remove the current Discord channel binding",
+)
+async def keeper_unbind(interaction: discord.Interaction) -> None:
+    """Remove channel -> keeper binding from runtime memory."""
+    bot = interaction.client
+    assert isinstance(bot, MascBot)
+
+    if not bot.is_admin(interaction):
+        await interaction.response.send_message(
+            "Admin role or Manage Server permission required.",
+            ephemeral=True,
+        )
+        return
+
+    if interaction.channel is None:
+        await interaction.response.send_message("Channel context required.", ephemeral=True)
+        return
+
+    channel_id = str(interaction.channel.id)
+    removed = bot.remove_channel_binding(channel_id)
+    if removed is None:
+        await interaction.response.send_message(
+            f"Channel `{channel_id}` is not currently bound.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.send_message(
+        f"Removed binding `{channel_id}` -> `{removed}`.",
+        ephemeral=True,
+    )
+
+
+@app_commands.command(
+    name="keeper-map",
+    description="Show runtime Discord channel bindings",
+)
+async def keeper_map(interaction: discord.Interaction) -> None:
+    """Show current runtime bindings."""
+    bot = interaction.client
+    assert isinstance(bot, MascBot)
+
+    binding = (
+        bot.channel_binding_debug(interaction.channel)
+        if interaction.channel is not None
+        else (None, "no-channel")
+    )
+    lines = [
+        f"current channel: {interaction.channel_id or 'n/a'}",
+        f"resolved keeper: {binding[0] or 'unmapped'} ({binding[1]})",
+        f"runtime bindings: {len(bot.keeper_bindings)}",
+    ]
+
+    for channel_id, keeper_name in sorted(bot.keeper_bindings.items())[:10]:
+        lines.append(f"- {channel_id} -> {keeper_name}")
+
+    await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
 # ── Entry point ─────────────────────────────────────────────
+
 
 def main() -> None:
     """Run the bot."""

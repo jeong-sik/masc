@@ -1,23 +1,64 @@
 (** Channel_gate_metrics -- per-channel message counters and status.
 
-    Thread-safe via [Eio_guard.with_mutex].  Call [record_message]
-    after each gate dispatch; read state via [snapshot_json].
+    Thread-safe via [Eio_guard.with_mutex]. Call [record_attempt]
+    for every gate ingress, including validation failures and duplicates,
+    then read state via [snapshot_json].
 
     @since 2.218.0 *)
+
+(** Ingress outcome classification for connector diagnostics. *)
+type outcome =
+  | Success
+  | Duplicate
+  | Validation_error of string
+  | Keeper_error of string
+  | Dispatch_unavailable
+  | Internal_error of string
 
 (** Per-channel statistics snapshot (immutable). *)
 type channel_stats = {
   channel : string;
   message_count : int;
+  success_count : int;
   error_count : int;
+  duplicate_count : int;
+  validation_error_count : int;
+  keeper_error_count : int;
+  dispatch_unavailable_count : int;
+  internal_error_count : int;
   last_activity_ts : float;
+  last_success_ts : float;
+  last_error_ts : float;
   last_keeper : string;
+  last_room_id : string;
+  last_error : string;
+  last_error_kind : string;
+  last_outcome : string;
   total_duration_ms : int;
+  timed_count : int;
+  max_duration_ms : int;
+  slow_count : int;
+  room_count : int;
 }
 
-val record_message :
-  channel:string -> keeper:string -> duration_ms:int -> success:bool -> unit
-(** Record one gate message.  Thread-safe. *)
+val record_attempt :
+  channel:string ->
+  room_id:string ->
+  keeper:string ->
+  duration_ms:int ->
+  outcome ->
+  unit
+(** Record one gate attempt. Thread-safe. *)
+
+val record_internal_error_exn :
+  channel:string ->
+  room_id:string ->
+  keeper:string ->
+  duration_ms:int ->
+  exn ->
+  unit
+(** Record an unexpected gate exception with the same channel metadata.
+    The public status surface receives a redacted internal error string. *)
 
 val snapshot : unit -> channel_stats list
 (** Return a list of per-channel stats, sorted by message_count desc. *)

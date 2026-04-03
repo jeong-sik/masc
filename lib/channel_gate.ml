@@ -173,7 +173,18 @@ let extract_reply_text (body : string) : string =
 
 let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
   match validate msg with
-  | Error e -> Error (Validation e)
+  | Error e ->
+      Channel_gate_metrics.record_attempt
+        ~channel:(Agent_identity.string_of_channel msg.channel)
+        ~room_id:msg.channel_room_id
+        ~keeper:(String.trim msg.keeper_name)
+        ~duration_ms:0
+        (match e with
+         | Duplicate_message _ -> Channel_gate_metrics.Duplicate
+         | _ ->
+             Channel_gate_metrics.Validation_error
+               (validation_error_to_string e));
+      Error (Validation e)
   | Ok () ->
       let args =
         `Assoc [
@@ -200,8 +211,12 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
           in
           let ch = Agent_identity.string_of_channel msg.channel in
           let keeper = String.trim msg.keeper_name in
-          Channel_gate_metrics.record_message
-            ~channel:ch ~keeper ~duration_ms ~success:true;
+          Channel_gate_metrics.record_attempt
+            ~channel:ch
+            ~room_id:msg.channel_room_id
+            ~keeper
+            ~duration_ms
+            Channel_gate_metrics.Success;
           let reply = extract_reply_text body in
           let stats = match extract_turn_stats body with
             | Some s -> Some { s with duration_ms }
@@ -212,16 +227,20 @@ let handle_inbound ~sw ~clock ~proc_mgr ~net ~config (msg : inbound_message) =
           let duration_ms =
             int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
           in
-          Channel_gate_metrics.record_message
+          Channel_gate_metrics.record_attempt
             ~channel:(Agent_identity.string_of_channel msg.channel)
+            ~room_id:msg.channel_room_id
             ~keeper:(String.trim msg.keeper_name)
-            ~duration_ms ~success:false;
+            ~duration_ms
+            (Channel_gate_metrics.Keeper_error err);
           Error (Keeper_error err)
       | None ->
-          Channel_gate_metrics.record_message
+          Channel_gate_metrics.record_attempt
             ~channel:(Agent_identity.string_of_channel msg.channel)
+            ~room_id:msg.channel_room_id
             ~keeper:(String.trim msg.keeper_name)
-            ~duration_ms:0 ~success:false;
+            ~duration_ms:0
+            Channel_gate_metrics.Dispatch_unavailable;
           Error Dispatch_unavailable
 
 (* ── JSON helpers ───────────────────────────────────────────── *)

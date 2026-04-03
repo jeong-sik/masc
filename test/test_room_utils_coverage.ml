@@ -91,6 +91,11 @@ let rec rm_rf path =
     end else
       Sys.remove path
 
+let latest_ring_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.seq
+  | [] -> 0
+
 let test_resolve_masc_base_path_keeps_git_root_resolution_when_env_ignored () =
   let scratch = Filename.temp_dir "room-utils-worktree" "" in
   let repo_root = Filename.concat scratch "repo" in
@@ -588,6 +593,39 @@ let test_rooms_root_dir_with_cluster () =
   let result = Room_utils.rooms_root_dir cfg in
   check string "rooms with cluster" "/home/user/.masc/clusters/staging/rooms" result
 
+let test_read_current_room_warns_once_for_legacy_state () =
+  let scratch = Filename.temp_dir "room-utils-legacy" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
+      let masc_dir = Room_utils.masc_root_dir cfg in
+      let rooms_dir = Room_utils.rooms_root_dir cfg in
+      Unix.mkdir masc_dir 0o755;
+      Unix.mkdir rooms_dir 0o755;
+      write_file (Filename.concat rooms_dir "state.json") "{}";
+      write_file (Room_utils.current_room_root_path cfg) "legacy-room\n";
+      Room_utils.reset_legacy_room_warning_for_testing ();
+      let before_seq = latest_ring_seq () in
+      check (option string) "current room still defaults" (Some "default")
+        (Room_utils.read_current_room cfg);
+      let entries =
+        Log.Ring.recent ~limit:20 ~module_filter:"Room" ~since_seq:before_seq ()
+      in
+      check bool "legacy warning emitted"
+        true
+        (List.exists
+           (fun (entry : Log.Ring.entry) ->
+             Room_utils.contains_substring entry.message
+               "Legacy room-scoped state detected")
+           entries);
+      let after_first_seq = latest_ring_seq () in
+      ignore (Room_utils.read_current_room cfg);
+      let follow_up =
+        Log.Ring.recent ~limit:20 ~module_filter:"Room" ~since_seq:after_first_seq ()
+      in
+      check int "warning logged once" 0 (List.length follow_up))
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -712,5 +750,7 @@ let () =
       test_case "current_room_root_path" `Quick test_current_room_root_path;
       test_case "masc_root_dir nested with cluster" `Quick test_masc_root_dir_with_cluster_nested;
       test_case "rooms_root_dir with cluster" `Quick test_rooms_root_dir_with_cluster;
+      test_case "read_current_room warns once for legacy state" `Quick
+        test_read_current_room_warns_once_for_legacy_state;
     ];
   ]

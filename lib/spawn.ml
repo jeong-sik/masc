@@ -369,7 +369,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
          Without this, a long-running subprocess (e.g. fire_task) freezes the
          entire server — health endpoint, SSE, all keeper fibers. *)
       let (raw_output, status) =
-        Eio_unix.run_in_systhread (fun () ->
+        Eio_guard.run_in_systhread (fun () ->
           let ic = Unix.in_channel_of_descr stdout_read in
           let output =
             Fun.protect

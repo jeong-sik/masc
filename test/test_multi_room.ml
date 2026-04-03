@@ -32,10 +32,10 @@ let test_current_room_defaults_to_default () =
       check (option string) "default room" (Some "default")
         (Room.read_current_room config))
 
-let test_write_current_room_is_noop () =
+let test_write_current_room_updates_label () =
   with_config (fun config ->
-      Room.write_current_room config "ignored-room";
-      check (option string) "still default after write" (Some "default")
+      Room.write_current_room config "focus-room";
+      check (option string) "current room label updated" (Some "focus-room")
         (Room.read_current_room config))
 
 let () =
@@ -45,7 +45,7 @@ let () =
         [
           test_case "defaults to default" `Quick
             test_current_room_defaults_to_default;
-          test_case "write is noop" `Quick
-            test_write_current_room_is_noop;
+          test_case "write updates label" `Quick
+            test_write_current_room_updates_label;
         ] );
     ]

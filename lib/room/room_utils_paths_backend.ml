@@ -50,6 +50,23 @@ let legacy_room_dirs_exist config =
     Sys.is_directory path && Array.length (Sys.readdir path) > 0
   with _ -> false
 
+let normalize_current_room_label room_id =
+  let room_id = String.trim room_id in
+  if room_id = "" then None
+  else if room_id = "." || room_id = ".." then None
+  else if String.contains room_id '/' || String.contains room_id '\\' then None
+  else if String_util.contains_substring room_id ".." then None
+  else if
+    not
+      (Re.execp
+         (Re.compile
+            Re.(whole_string (rep1 (alt [ rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '.'; char '_'; char '-' ]))))
+         room_id)
+  then
+    None
+  else
+    Some room_id
+
 let warn_if_legacy_room_state_exists config =
   let legacy_current_room =
     match read_legacy_current_room config with
@@ -79,12 +96,18 @@ let warn_if_legacy_room_state_exists config =
           "Legacy room-scoped state detected; startup now always resolves to the default scope and %s."
           detail
 
-(** Read current room ID.
-    Since #4638 rooms are removed; always returns [Some "default"].
-    Emits a one-time warning when legacy room-scoped state is detected. *)
 let read_current_room config =
-  warn_if_legacy_room_state_exists config;
-  Some "default"
+  let has_legacy_rooms = legacy_room_dirs_exist config in
+  if has_legacy_rooms then (
+    warn_if_legacy_room_state_exists config;
+    Some "default")
+  else
+    match read_legacy_current_room config with
+    | Some room_id -> (
+        match normalize_current_room_label room_id with
+        | Some valid_room_id -> Some valid_room_id
+        | None -> Some "default")
+    | None -> Some "default"
 
 (** @deprecated Since #4638 all rooms resolve to [masc_root_dir]. *)
 let room_dir_for config _room_id = masc_root_dir config

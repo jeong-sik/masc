@@ -243,9 +243,11 @@ let () =
                 (make_entry ~version:"1.0" "review.prompt" "v1 {{code}}");
               Prompt_registry.register
                 (make_entry ~version:"2.0" "review.prompt" "v2 {{code}}");
-              check int "count includes both versions" 2
+              Prompt_registry.register
+                (make_entry ~version:"1.0" "audit.prompt" "audit {{code}}");
+              check int "count includes all registered versions" 3
                 (Prompt_registry.count ());
-              check int "unique ids count" 1 (Prompt_registry.count_unique ());
+              check int "unique ids count" 2 (Prompt_registry.count_unique ());
               check bool "id exists" true
                 (Prompt_registry.exists ~id:"review.prompt" ());
               check bool "specific version exists" true
@@ -253,7 +255,7 @@ let () =
               check int "versions listed" 2
                 (List.length (Prompt_registry.get_versions ~id:"review.prompt" ()));
               check (list string) "list_ids includes prompt"
-                [ "review.prompt" ]
+                [ "audit.prompt"; "review.prompt" ]
                 (Prompt_registry.list_ids () |> List.sort String.compare);
               (match Prompt_registry.get ~id:"review.prompt" () with
               | Some entry -> check string "latest version chosen" "2.0" entry.version
@@ -306,13 +308,15 @@ let () =
                 ~score:0.4 ();
               Prompt_registry.update_metrics ~id:"beta.prompt" ~version:"1.0"
                 ~score:1.0 ();
+              Prompt_registry.update_metrics ~id:"beta.prompt" ~version:"1.0"
+                ~score:0.6 ();
               let stats = Prompt_registry.stats () in
               check int "total prompts" 2 stats.total_prompts;
               check int "active prompts" 2 stats.active_prompts;
               check int "deprecated prompts" 0 stats.deprecated_prompts;
-              check (option string) "most used" (Some "alpha.prompt")
-                stats.most_used;
-              check (float 0.0001) "avg usage across prompts" 1.5 stats.avg_usage;
+              check (option string) "most used remains deterministic in tie"
+                (Some "alpha.prompt") stats.most_used;
+              check (float 0.0001) "avg usage across prompts" 2.0 stats.avg_usage;
               match Prompt_registry.get ~id:"alpha.prompt" ~version:"1.0" () with
               | Some entry -> (
                   match entry.metrics with
@@ -344,9 +348,23 @@ let () =
               Prompt_registry.init ~persist_dir ();
               Prompt_registry.register
                 (make_entry ~version:"1.0" "persisted.prompt" "disk-backed");
+              let persisted_path =
+                Filename.concat persist_dir "persisted.prompt_1.0.json"
+              in
               check bool "json persisted to disk" true
-                (Sys.file_exists
-                   (Filename.concat persist_dir "persisted.prompt_1.0.json"));
+                (Sys.file_exists persisted_path);
+              let persisted_json =
+                persisted_path
+                |> In_channel.with_open_text
+                     (fun ic -> In_channel.input_all ic |> Yojson.Safe.from_string)
+              in
+              let stored_entry =
+                match Prompt_registry.prompt_entry_of_yojson persisted_json with
+                | Ok entry -> entry
+                | Error msg -> fail msg
+              in
+              check string "persisted id" "persisted.prompt" stored_entry.id;
+              check string "persisted template" "disk-backed" stored_entry.template;
               Prompt_registry.clear ();
               Prompt_registry.init ~persist_dir ();
               match Prompt_registry.get ~id:"persisted.prompt" ~version:"1.0" ()

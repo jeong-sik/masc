@@ -43,6 +43,7 @@ let test_message_roundtrip () =
     content = "Hello @gemini!";
     mention = Some "gemini";
     timestamp = "2024-01-01T00:00:00Z";
+    trace_context = None;
   } in
   let json = message_to_yojson msg in
   match message_of_yojson json with

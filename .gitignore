@@ -87,3 +87,4 @@ sidecars/**/.venv/
 # Scratch files from local workflows
 issue*.md
 .nvimlog
+config/personas/uranium666

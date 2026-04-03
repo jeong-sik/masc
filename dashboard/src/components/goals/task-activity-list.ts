@@ -2,6 +2,7 @@
 // Independent from global traceSlots (avoids keeper-detail overlay collision).
 
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import { EmptyState } from '../common/empty-state'
 import { LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
@@ -12,12 +13,12 @@ import { activeFilter, type ActivityFilter } from './task-detail-state'
 
 function kindIcon(kind: TraceEventKind) {
   switch (kind) {
-    case 'tool_call': return html`<${Settings} size=${14} />`
-    case 'broadcast': return html`<${MessageSquare} size=${14} />`
-    case 'task': return html`<${CheckSquare} size=${14} />`
-    case 'heartbeat': return html`<${Heart} size=${14} />`
-    case 'lifecycle': return html`<${RefreshCcw} size=${14} />`
-    default: return html`<${Dot} size=${14} />`
+    case 'tool_call': return html`<${Settings} size=${14} aria-hidden="true" focusable="false" />`
+    case 'broadcast': return html`<${MessageSquare} size=${14} aria-hidden="true" focusable="false" />`
+    case 'task': return html`<${CheckSquare} size=${14} aria-hidden="true" focusable="false" />`
+    case 'heartbeat': return html`<${Heart} size=${14} aria-hidden="true" focusable="false" />`
+    case 'lifecycle': return html`<${RefreshCcw} size=${14} aria-hidden="true" focusable="false" />`
+    default: return html`<${Dot} size=${14} aria-hidden="true" focusable="false" />`
   }
 }
 
@@ -39,8 +40,21 @@ function durationColor(ms: number | undefined): string {
   return 'text-bad'
 }
 
+function wrapAsCodeBlock(text: string, language = ''): string {
+  const matches = text.match(/`+/g)
+  const longestFence = matches ? Math.max(...matches.map(match => match.length)) : 0
+  const fence = '`'.repeat(Math.max(3, longestFence + 1))
+  return `${fence}${language}\n${text}\n${fence}`
+}
+
+function formatPayload(value: unknown): string {
+  if (typeof value === 'string') return wrapAsCodeBlock(value)
+  return wrapAsCodeBlock(JSON.stringify(value ?? null, null, 2), 'json')
+}
+
 function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
   const hasDetail = event.toolArgs != null || event.toolResult != null || (event.detail && Object.keys(event.detail).length > 0)
+  const [isOpen, setIsOpen] = useState(false)
 
   if (!hasDetail) {
     return html`
@@ -53,37 +67,42 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
     `
   }
 
-  const formatArgs = (val: any) => typeof val === 'string' ? val : `\`\`\`json\n${JSON.stringify(val, null, 2)}\n\`\`\``
-
   return html`
-    <details class="rounded-lg hover:bg-[var(--white-3)] transition-colors">
+    <details
+      class="rounded-lg hover:bg-[var(--white-3)] transition-colors"
+      onToggle=${(evt: Event) => {
+        setIsOpen((evt.currentTarget as HTMLDetailsElement).open)
+      }}
+    >
       <summary class="flex items-center gap-3 py-1.5 px-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
         <span class="text-[13px] ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
         <span class="flex-1 text-[12px] text-text-body truncate">${event.summary}</span>
         ${event.duration_ms != null ? html`<span class="text-[10px] tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
         ${event.ts_iso ? html`<${TimeAgo} timestamp=${event.ts_iso} class="text-[10px] text-text-dim shrink-0" />` : null}
-        <span class="text-[10px] text-text-dim flex items-center justify-center"><${ChevronRight} size=${14} /></span>
+        <span class="text-[10px] text-text-dim flex items-center justify-center"><${ChevronRight} size=${14} aria-hidden="true" focusable="false" /></span>
       </summary>
-      <div class="px-3 pb-2 pt-1 ml-7">
-        ${event.toolArgs != null ? html`
-          <div class="mb-1">
-            <div class="text-[10px] text-text-dim mb-0.5">args</div>
-            <div class="max-h-[300px] overflow-y-auto custom-scrollbar">
-              <${Markdown} text=${formatArgs(event.toolArgs)} />
+      ${isOpen ? html`
+        <div class="px-3 pb-2 pt-1 ml-7">
+          ${event.toolArgs != null ? html`
+            <div class="mb-1">
+              <div class="text-[10px] text-text-dim mb-0.5">args</div>
+              <div class="max-h-[300px] overflow-y-auto custom-scrollbar">
+                <${Markdown} text=${formatPayload(event.toolArgs)} />
+              </div>
             </div>
-          </div>
-        ` : null}
-        ${event.toolResult != null ? html`
-          <div>
-            <div class="text-[10px] text-text-dim mb-0.5">result</div>
-            <div class="max-h-[300px] overflow-y-auto custom-scrollbar">
-              <${Markdown} text=${formatArgs(event.toolResult)} />
+          ` : null}
+          ${event.toolResult != null ? html`
+            <div>
+              <div class="text-[10px] text-text-dim mb-0.5">result</div>
+              <div class="max-h-[300px] overflow-y-auto custom-scrollbar">
+                <${Markdown} text=${formatPayload(event.toolResult)} />
+              </div>
             </div>
-          </div>
-        ` : null}
-        ${event.error ? html`<div class="text-[11px] text-bad mt-1">${event.error}</div>` : null}
-        ${event.cost_usd != null ? html`<div class="text-[10px] text-text-dim mt-1">cost: $${event.cost_usd.toFixed(4)}</div>` : null}
-      </div>
+          ` : null}
+          ${event.error ? html`<div class="text-[11px] text-bad mt-1">${event.error}</div>` : null}
+          ${event.cost_usd != null ? html`<div class="text-[10px] text-text-dim mt-1">cost: $${event.cost_usd.toFixed(4)}</div>` : null}
+        </div>
+      ` : null}
     </details>
   `
 }

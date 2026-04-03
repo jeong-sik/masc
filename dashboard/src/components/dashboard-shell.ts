@@ -29,7 +29,7 @@ const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab 
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
 function lazyTabFallback(label: string) {
-  return html`<${LoadingState} class="loading-state">${label} 불러오는 중...<//>`
+  return html`<${LoadingState}>${label} 불러오는 중...<//>`
 }
 
 function formatDisconnectDuration(): string {

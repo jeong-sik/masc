@@ -16,12 +16,12 @@ import {
   serverStatus,
 } from './store'
 import {
-  requestRoomTruth,
-  requestRoomTruthNow,
-  roomTruth,
-  roomTruthError,
-  normalizeRoomTruth,
-} from './room-truth-store'
+  requestNamespaceTruth,
+  requestNamespaceTruthNow,
+  namespaceTruth,
+  namespaceTruthError,
+  normalizeNamespaceTruth,
+} from './namespace-truth-store'
 import { mergeServerStatus } from './store-normalizers'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
 import { operatorSnapshot, operatorRoomDigest } from './operator-signals'
@@ -151,17 +151,17 @@ const AUTORESEARCH_EVENTS = new Set([
   'autoresearch_stopped',
 ])
 
-/** Hydrate room-truth signals directly from SSE payload — zero HTTP fetch. */
-function handleRoomTruthSnapshot(payload: unknown): void {
+/** Hydrate namespace-truth signals directly from SSE payload — zero HTTP fetch. */
+function handleNamespaceTruthSnapshot(payload: unknown): void {
   try {
-    const normalized = normalizeRoomTruth(payload)
-    roomTruth.value = normalized
+    const normalized = normalizeNamespaceTruth(payload)
+    namespaceTruth.value = normalized
     serverStatus.value = mergeServerStatus(
       serverStatus.value,
-      normalized.room.status ?? null,
+      normalized.namespace.status ?? null,
     )
   } catch (err) {
-    console.debug('[SSE] room-truth snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
+    console.debug('[SSE] namespace-truth snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
   }
 }
 
@@ -268,15 +268,15 @@ function handleReconnect(): void {
 }
 
 function hydrateAfterReconnect(): void {
-  requestRoomTruthNow()
+  requestNamespaceTruthNow()
   void refreshActiveRoute().catch(err =>
     console.warn('[SSE] reconnect route refresh failed', err instanceof Error ? err.message : err),
   )
-  // Safety-net retry: if room-truth fetch failed (e.g. server warm-up),
+  // Safety-net retry: if namespace-truth fetch failed (e.g. server warm-up),
   // the scheduler's error signal will be set. Retry once after delay.
   setTimeout(() => {
-    if (roomTruthError.value) {
-      requestRoomTruthNow()
+    if (namespaceTruthError.value) {
+      requestNamespaceTruthNow()
     }
     void refreshActiveRoute().catch(retryErr =>
       console.warn('[SSE] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
@@ -297,9 +297,9 @@ export function setupSSEReaction(): () => void {
   const unsubscribe = lastEvent.subscribe((event) => {
     if (!event) return
 
-    // 0. Room-truth snapshot — server push, no HTTP fetch needed
-    if (event.type === 'room_truth_snapshot' && event.payload) {
-      handleRoomTruthSnapshot(event.payload)
+    // 0. Namespace-truth snapshot — server push, no HTTP fetch needed
+    if (event.type === 'namespace_truth_snapshot' && event.payload) {
+      handleNamespaceTruthSnapshot(event.payload)
       return
     }
 
@@ -390,7 +390,7 @@ export function startPeriodicRefresh(): void {
     if (!connected.value) {
       invalidateDashboardCache()
     }
-    requestRoomTruth()
+    requestNamespaceTruth()
     void refreshActiveRoute().catch(err =>
       console.warn('[periodic] route refresh failed', err instanceof Error ? err.message : err),
     )

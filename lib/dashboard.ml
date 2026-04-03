@@ -237,7 +237,8 @@ let tempo_section (config : Room_utils.config) : section =
   { title = "Tempo"; content; empty_msg = "" }
 
 let ordered_room_ids (config : Room_utils.config) =
-  let current_room = Room.current_room_id config in
+  let _ = config in
+  let current_room = "default" in
   (current_room, [ current_room ])
 
 let room_snapshot (config : Room_utils.config) ~current_room room_id =
@@ -349,7 +350,7 @@ let room_overview_section (snapshots : room_snapshot list) : section =
         snapshot.locks
     ) snapshots
   in
-  { title = "Rooms"; content; empty_msg = "(no rooms)" }
+  { title = "Namespaces"; content; empty_msg = "(no namespaces)" }
 
 let room_section now (snapshot : room_snapshot) : section =
   let (active, pending) = split_tasks snapshot.tasks in
@@ -366,9 +367,9 @@ let room_section now (snapshot : room_snapshot) : section =
   {
     title =
       if snapshot.is_current then
-        Printf.sprintf "Room: %s (current)" snapshot.room_id
+        Printf.sprintf "Namespace: %s (flattened current)" snapshot.room_id
       else
-        Printf.sprintf "Room: %s" snapshot.room_id;
+        Printf.sprintf "Namespace: %s" snapshot.room_id;
     content;
     empty_msg = "";
   }
@@ -390,7 +391,7 @@ let locks_section locks : section =
   { title = "Locks"; content; empty_msg = "0" }
 
 let count_locks (config : Room_utils.config) : int =
-  count_locks_for_room config (Room.current_room_id config)
+  count_locks_for_room config "default"
 
 (* Agent workflow summaries: recent activity per active agent *)
 let agent_workflow_section now (_config : Room_utils.config) (agents : Types.agent list) : section =
@@ -497,7 +498,7 @@ let generate ?(scope = All) (config : Room_utils.config) : string =
   let swarm = swarm_json config in
   let header =
     Printf.sprintf
-      "========================================\n   MASC Dashboard   %s\n   Room: %s | %d room%s | %d agents\n========================================"
+      "========================================\n   MASC Dashboard   %s\n   Namespace: %s (flattened) | %d namespace%s | %d agents\n========================================"
       timestamp
       current_room
       (List.length room_ids)
@@ -582,7 +583,7 @@ let generate_compact ?(scope = All) (config : Room_utils.config) : string =
   in
   String.concat "\n"
     [
-      Printf.sprintf "MASC [%s] %d agents / %d tasks"
+      Printf.sprintf "MASC [%s namespace] %d agents / %d tasks"
         current_room (List.length all_agents)
         (List.length all_tasks);
       Printf.sprintf "ATTENTION: %s" attention_line;

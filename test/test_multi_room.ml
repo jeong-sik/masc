@@ -35,7 +35,7 @@ let with_config f =
 let select_room config room_id =
   Room.write_current_room config room_id;
   Room.ensure_room_bootstrap config room_id;
-  Room.config_with_resolved_scope config
+  Room.with_scope config (Room.Named room_id)
 
 let test_current_room_defaults_to_default () =
   with_config (fun config ->
@@ -45,8 +45,10 @@ let test_current_room_defaults_to_default () =
 let test_current_room_write_and_resolve_scope () =
   with_config (fun config ->
       let focused = select_room config "focus-room" in
-      check (option string) "focused room selected" (Some "focus-room")
+      check (option string) "compat pointer stays default" (Some "default")
         (Room.read_current_room config);
+      check string "named scope remains explicit" "focus-room"
+        (Room.activity_room_id focused);
       check bool "focused scope initialized" true (Room.is_initialized focused))
 
 let test_current_room_tasks_are_isolated () =
@@ -58,7 +60,7 @@ let test_current_room_tasks_are_isolated () =
         (List.length (Room.get_tasks_raw_in_room config "default"));
       check int "focus room task count" 1
         (List.length (Room.get_tasks_raw_in_room config "focus-room"));
-      check int "current room task count follows pointer" 1
+      check int "default namespace task count remains canonical" 1
         (List.length (Room.get_tasks_raw config)))
 
 let test_current_room_agents_are_isolated () =
@@ -66,6 +68,8 @@ let test_current_room_agents_are_isolated () =
       ignore (Room.join config ~agent_name:"default-agent" ~capabilities:[] ());
       let focused = select_room config "focus-room" in
       ignore (Room.join focused ~agent_name:"focus-agent" ~capabilities:[] ());
+      check (option string) "compat pointer still default" (Some "default")
+        (Room.read_current_room config);
       check int "default room agent count" 1
         (List.length (Room.get_agents_raw_in_room config "default"));
       check int "focus room agent count" 1

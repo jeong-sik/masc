@@ -39,7 +39,7 @@ let test_snapshot_exposes_keeper_and_social_actions () =
       match find_action "social_sweep" with
       | None -> Alcotest.fail "expected social_sweep in available_actions"
       | Some row ->
-          Alcotest.(check string) "target_type" "room"
+          Alcotest.(check string) "target_type" "namespace"
             Yojson.Safe.Util.(row |> member "target_type" |> to_string);
           Alcotest.(check bool) "confirm_required false" false
             Yojson.Safe.Util.(row |> member "confirm_required" |> to_bool);

@@ -146,7 +146,7 @@ export function buildLiveJudgeSituationReport({
   briefing: DashboardMissionBriefingResponse | null | undefined
   target: LiveJudgeTarget
 }): string {
-  const room = mission?.summary.current_room ?? 'default'
+  const namespace = mission?.summary.namespace ?? mission?.summary.namespace_id ?? 'default'
   const roomHealth = mission?.summary.room_health ?? 'unknown'
   const sessionCount = mission?.sessions.length ?? 0
   const attentionCount = mission?.attention_queue.length ?? 0
@@ -157,8 +157,8 @@ export function buildLiveJudgeSituationReport({
   ) ?? []
   const lines = [
     `[상황 보고] ${target.name}${target.model ? ` · ${target.model}` : ''}`,
-    `- room: ${room}`,
-    `- room_health: ${roomHealth}`,
+    `- namespace: ${namespace}`,
+    `- namespace_health: ${roomHealth}`,
     `- sessions: ${sessionCount}, attention: ${attentionCount}, blockers: ${blockerCount}`,
     briefing?.summary ? `- deterministic_briefing: ${trimText(briefing.summary, 180) ?? briefing.summary}` : null,
     sectionSummaries.length > 0 ? `- section_highlights: ${sectionSummaries.join(' / ')}` : null,
@@ -187,7 +187,7 @@ function createLiveJudgeWorkflowContext(
     focus_kind: 'live_judgment',
     operation_id: null,
     summary: `${target.name}에게 상황판 요약을 보내 live 판단을 받습니다.`,
-    payload_preview: `room ${mission?.summary.current_room ?? 'default'} · attention ${mission?.attention_queue.length ?? 0} · gaps ${metadataGapCount}`,
+    payload_preview: `namespace ${mission?.summary.namespace ?? mission?.summary.namespace_id ?? 'default'} · attention ${mission?.attention_queue.length ?? 0} · gaps ${metadataGapCount}`,
     suggested_payload: { message },
     preview: {
       keeper_name: target.name,
@@ -300,7 +300,7 @@ export function MissionBriefingCard() {
           `
         : html`
             <div class="mb-4">
-              <${EmptyState} message="실제 판단 대상 keeper를 아직 찾지 못했습니다. room-truth와 operator snapshot이 들어오면 상황 보고 버튼이 활성화됩니다." compact />
+              <${EmptyState} message="실제 판단 대상 keeper를 아직 찾지 못했습니다. namespace-truth와 operator snapshot이 들어오면 상황 보고 버튼이 활성화됩니다." compact />
             </div>
           `}
 

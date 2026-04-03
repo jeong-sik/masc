@@ -128,10 +128,12 @@ let identity_digest prefix identity =
   Printf.sprintf "%s:%s" prefix (Digest.to_hex (Digest.string identity))
 
 let is_internal_attention incident =
-  String.equal (string_field "target_type" incident) "room"
+  let target_type = string_field "target_type" incident in
+  String.equal target_type "namespace" || String.equal target_type "room"
 
 let is_internal_action action =
-  String.equal (string_field "target_type" action) "room"
+  let target_type = string_field "target_type" action in
+  String.equal target_type "namespace" || String.equal target_type "room"
 
 let incident_action_types kind =
   match kind with
@@ -467,7 +469,7 @@ let build_sessions sessions attention_queue agent_briefs keeper_briefs command_p
                ("goal", `String session.goal);
                ("created_by", json_string_option session.created_by);
                ("origin_kind", `String session.origin_kind);
-               ("room", json_string_option session.room);
+               ("namespace", json_string_option session.namespace);
                ("status", `String session.status);
                ("health", `String session.health);
                ("member_names", string_list_json session.member_names);

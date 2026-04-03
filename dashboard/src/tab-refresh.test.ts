@@ -11,8 +11,8 @@ vi.mock('./store', async (importOriginal) => {
   }
 })
 
-vi.mock('./room-truth-store', () => ({
-  requestRoomTruth: vi.fn(),
+vi.mock('./namespace-truth-store', () => ({
+  requestNamespaceTruth: vi.fn(),
 }))
 
 vi.mock('./operator-store', () => ({
@@ -35,18 +35,18 @@ vi.mock('./command-store', () => ({
 import { refreshPlanForRoute } from './tab-refresh'
 
 describe('refreshPlanForRoute', () => {
-  it('hydrates overview from room truth and mission snapshot', () => {
+  it('hydrates overview from namespace truth and mission snapshot', () => {
     expect(refreshPlanForRoute({
       tab: 'overview',
       params: {},
-    })).toEqual(['shell', 'roomTruth', 'missionSnapshot'])
+    })).toEqual(['shell', 'namespaceTruth', 'missionSnapshot'])
   })
 
   it('uses the current monitoring sections', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'agents' },
-    })).toEqual(['roomTruth', 'execution', 'missionSnapshot'])
+    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
 
     expect(refreshPlanForRoute({
       tab: 'monitoring',
@@ -58,12 +58,12 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'command',
       params: { section: 'intervene' },
-    })).toEqual(['roomTruth', 'operatorSnapshot', 'operatorRoomDigest'])
+    })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest'])
 
     expect(refreshPlanForRoute({
       tab: 'command',
       params: { section: 'governance' },
-    })).toEqual(['roomTruth', 'governance'])
+    })).toEqual(['namespaceTruth', 'governance'])
   })
 
   it('refreshes the new workspace and lab sections only where store-backed data is needed', () => {

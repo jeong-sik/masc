@@ -418,6 +418,9 @@ let room_json config =
       [
         ("initialized", `Bool false);
         ("project", `String (Filename.basename config.base_path));
+        ("namespace_id", `String "default");
+        ("namespace", `String "default");
+        ("namespace_mode", `String "flattened");
       ]
   else
     let state = Room.read_state config in
@@ -429,7 +432,9 @@ let room_json config =
         ("initialized", `Bool true);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("project", `String state.project);
-        ("current_room", string_option_to_json (Room.read_current_room config));
+        ("namespace_id", `String "default");
+        ("namespace", `String "default");
+        ("namespace_mode", `String "flattened");
         ("paused", `Bool state.paused);
         ("pause_reason", string_option_to_json state.pause_reason);
         ("paused_by", string_option_to_json state.paused_by);
@@ -465,10 +470,10 @@ let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
 
 let invalidate_snapshot_cache () = _snapshot_cache := None
 
-let room_scope_cache_segment (config : Room_utils.config) =
+let namespace_scope_cache_segment (config : Room_utils.config) =
   match config.scope with
   | Room_utils_backend_setup.Default -> "default"
-  | Room_utils_backend_setup.Named room_id -> "room:" ^ room_id
+  | Room_utils_backend_setup.Named room_id -> "namespace:" ^ room_id
 
 let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
     ?(include_keepers = true) ?(include_summary_fields = true)
@@ -477,7 +482,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   let cache_key =
     Printf.sprintf "%s|%s|%s|%s|%b|%b|%b|%b|%b|%b"
       ctx.config.base_path
-      (room_scope_cache_segment ctx.config)
+      (namespace_scope_cache_segment ctx.config)
       (Option.value ~default:"" actor)
       (Option.value ~default:"" view)
       include_messages include_sessions include_keepers include_summary_fields
@@ -603,7 +608,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("judgment_owner", `String "fallback_read_model");
          ("authoritative_judgment_available", `Bool false);
          ("provenance_summary", operator_surface_contract_json);
-         ("room", room_json config);
+         ("namespace", room_json config);
        ]
       @ (
          (* Parallelize independent I/O: sessions, keepers, persistent_agents.

@@ -401,7 +401,7 @@ let test_dashboard_mission_projection () =
         check bool "summary-only participant marked non-live" false
           (delta_brief |> member "is_live" |> to_bool);
         check string "summary-only participant archived reason"
-          "not in current room state"
+          "not in current namespace state"
           (delta_brief |> member "archived_reason" |> to_string);
         check bool "participant preview omits old tool telemetry" true
           (delta_brief |> member "recent_tool_names" = `Null);
@@ -432,7 +432,7 @@ let test_dashboard_mission_projection () =
         check bool "internal signals are room-scoped" true
           (internal_signals
            |> List.for_all (fun row ->
-                row |> member "target_type" |> to_string = "room"));
+                row |> member "target_type" |> to_string = "namespace"));
         let session_detail =
           Lib.Dashboard_mission.session_json
             ~actor:"test-dashboard-projection"

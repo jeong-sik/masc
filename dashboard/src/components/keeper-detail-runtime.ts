@@ -257,7 +257,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
   const keeperConfig = peekLoadedKeeperConfig(keeper.name)
   const configLoadStatus = peekKeeperConfigLoadStatus(keeper.name)
-  const room = operatorSnapshot.value?.room ?? {}
+  const room = operatorSnapshot.value?.namespace ?? {}
   const actions = (operatorSnapshot.value?.available_actions ?? [])
     .filter(action => action.target_type === 'keeper' || action.target_type === 'room')
     .slice(0, 8)
@@ -272,7 +272,8 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const auditSource = observedAudit.toolAuditSource
   const auditAt = observedAudit.toolAuditAt
   const capabilities = keeper.agent?.capabilities ?? []
-  const roomName = room.current_room ?? room.room_id ?? serverStatus.value?.room ?? 'default'
+  const roomName =
+    room.namespace ?? room.namespace_id ?? serverStatus.value?.namespace ?? 'default'
   const project = room.project ?? serverStatus.value?.project ?? 'N/A'
   const clusterRaw = room.cluster ?? serverStatus.value?.cluster ?? null
   const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'

@@ -25,7 +25,7 @@ import { EmptyState } from './common/empty-state'
 import { AgentAvatar } from './overview/agent-avatar'
 import { openAgentDetail } from './agent-detail'
 import { formatDuration, trimText } from './mission-utils'
-import { roomTruth } from '../room-truth-store'
+import { namespaceTruth } from '../namespace-truth-store'
 import {
   resolveRuntimeCounts,
   runtimeCountSourceLabel,
@@ -259,14 +259,14 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
-    roomTruthCounts: roomTruth.value?.room.counts,
+    namespaceTruthCounts: namespaceTruth.value?.namespace.counts,
     shellCounts: shellCounts.value,
   })
   const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
   const countSourceLabel = runtimeCountSourceLabel(runtimeCounts.source)
-  const roomStatus = roomTruth.value?.room.status ?? serverStatus.value
-  const roomName = roomStatus?.room ?? 'default'
-  const roomBasePath = roomStatus?.room_base_path ?? null
+  const roomStatus = namespaceTruth.value?.namespace.status ?? serverStatus.value
+  const roomName = roomStatus?.namespace ?? 'default'
+  const roomBasePath = roomStatus?.namespace_base_path ?? null
 
   const briefMap = new Map<string, DashboardMissionAgentBrief>(
     briefs.map(brief => [brief.agent_name, brief] as const),

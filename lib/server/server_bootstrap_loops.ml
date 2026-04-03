@@ -59,7 +59,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
           Log.Dashboard.info
             "patched keeper-dependent dashboard caches (%d lifecycle event(s))"
             (List.length events);
-          Server_dashboard_http.broadcast_room_truth_snapshot state
+          Server_dashboard_http.broadcast_namespace_truth_snapshot state
         end
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

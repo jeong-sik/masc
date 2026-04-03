@@ -166,8 +166,12 @@ let test_dashboard_execution_live_empty_room () =
             ()
         in
         let open Yojson.Safe.Util in
-        check string "default room" "default"
-          (json |> member "status" |> member "room" |> to_string);
+        check string "default namespace id" "default"
+          (json |> member "status" |> member "namespace_id" |> to_string);
+        check string "default namespace" "default"
+          (json |> member "status" |> member "namespace" |> to_string);
+        check string "namespace mode flattened" "flattened"
+          (json |> member "status" |> member "namespace_mode" |> to_string);
         check int "execution queue empty" 0
           (json |> member "execution_queue" |> to_list |> List.length);
         check int "session briefs empty" 0
@@ -180,7 +184,7 @@ let test_dashboard_execution_live_empty_room () =
           (json |> member "continuity_briefs" |> to_list |> List.length);
       ))
 
-let test_dashboard_execution_current_room_status () =
+let test_dashboard_execution_namespace_status () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -190,7 +194,7 @@ let test_dashboard_execution_current_room_status () =
       ignore (Lib.Room.init config ~agent_name:None);
       Lib.Room.write_current_room config "focus-room";
       Lib.Room.ensure_room_bootstrap config "focus-room";
-      check (option string) "room state current_room" (Some "focus-room")
+      check (option string) "room state current_room flattened" (Some "default")
         (Lib.Room.read_current_room config);
       Eio.Switch.run (fun sw ->
         let json =
@@ -203,13 +207,19 @@ let test_dashboard_execution_current_room_status () =
         in
         let open Yojson.Safe.Util in
         let status = json |> member "status" in
-        check string "status room follows current room" "focus-room"
-          (status |> member "room" |> to_string);
-        check string "status current_room exposed" "focus-room"
-          (status |> member "current_room" |> to_string);
+        check string "status namespace_id exposed" "default"
+          (status |> member "namespace_id" |> to_string);
+        check string "status namespace exposed" "default"
+          (status |> member "namespace" |> to_string);
+        check string "status namespace mode flattened" "flattened"
+          (status |> member "namespace_mode" |> to_string);
+        check bool "legacy room removed" true
+          (status |> member "room" = `Null);
+        check bool "legacy room base path removed" true
+          (status |> member "room_base_path" = `Null);
       ))
 
-let test_dashboard_shell_current_room_status () =
+let test_dashboard_shell_namespace_status () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -223,10 +233,16 @@ let test_dashboard_shell_current_room_status () =
       let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       let status = json |> member "status" in
-      check string "shell room follows current room" "focus-room"
-        (status |> member "room" |> to_string);
-      check string "shell current_room exposed" "focus-room"
-        (status |> member "current_room" |> to_string);
+      check string "shell namespace_id exposed" "default"
+        (status |> member "namespace_id" |> to_string);
+      check string "shell namespace exposed" "default"
+        (status |> member "namespace" |> to_string);
+      check string "shell namespace mode flattened" "flattened"
+        (status |> member "namespace_mode" |> to_string);
+      check bool "shell legacy room removed" true
+        (status |> member "room" = `Null);
+      check bool "shell legacy room base path removed" true
+        (status |> member "room_base_path" = `Null);
       check string "shell coordination root surfaced" dir
         (status |> member "coordination_root" |> to_string);
       check string "shell workspace path surfaced" dir
@@ -431,9 +447,9 @@ let () =
           Alcotest.test_case "fixture response" `Quick test_dashboard_execution_fixture;
           Alcotest.test_case "live empty room is safe" `Quick test_dashboard_execution_live_empty_room;
           Alcotest.test_case "current room drives status" `Quick
-            test_dashboard_execution_current_room_status;
+            test_dashboard_execution_namespace_status;
           Alcotest.test_case "shell follows current room" `Quick
-            test_dashboard_shell_current_room_status;
+            test_dashboard_shell_namespace_status;
           Alcotest.test_case "shell surfaces workspace separately" `Quick
             test_dashboard_shell_surfaces_workspace_when_different;
           Alcotest.test_case "shell includes meta cognition summary" `Quick

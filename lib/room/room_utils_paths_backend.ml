@@ -13,22 +13,12 @@ let rooms_root_dir config = Filename.concat (masc_root_dir config) "rooms"
 let registry_root_path config = Filename.concat (masc_root_dir config) "rooms.json"
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
 
-(** Read current room ID from .masc/current_room. *)
+(** Read the compatibility current-room pointer.
+    Room flattening keeps the file for backward compatibility, but the
+    operational namespace is always the default root scope. *)
 let read_current_room config =
-  let read_from path =
-    match Safe_ops.read_file_safe path with
-    | Ok content ->
-      let trimmed = String.trim content in
-      if trimmed = "" then None
-      else
-        (match String.split_on_char '\n' trimmed with
-         | line :: _ -> Some (String.trim line)
-         | [] -> None)
-    | Error _ -> None
-  in
-  match read_from (current_room_root_path config) with
-  | Some room_id -> Some room_id
-  | None -> Some "default"
+  let _ = config in
+  Some "default"
 
 let room_dir_for config room_id =
   if room_id = "default" then
@@ -37,12 +27,11 @@ let room_dir_for config room_id =
     Filename.concat (rooms_root_dir config) room_id
 
 (** Resolve the initial scope from the current_room file.
-    Called once at config creation time; the result is stored in config.scope
-    so that all subsequent path lookups are pure and deterministic. *)
+    Named-room pointer resolution is deprecated; new configs always boot into
+    the flat default namespace. *)
 let resolve_initial_scope config =
-  match read_current_room config with
-  | Some "default" | None -> Default
-  | Some room_id -> Named room_id
+  let _ = config in
+  Default
 
 (** Scope-based directory resolution.
     Both branches are pure — no filesystem reads.

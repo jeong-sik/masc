@@ -65,7 +65,7 @@ export interface DashboardShellResponse {
   auth?: DashboardShellAuthSummary | null
 }
 
-export interface DashboardRoomTruthAttentionSummary {
+export interface DashboardNamespaceTruthAttentionSummary {
   count: number
   bad_count: number
   warn_count: number
@@ -73,13 +73,13 @@ export interface DashboardRoomTruthAttentionSummary {
   top_item?: OperatorAttentionItem | null
 }
 
-export interface DashboardRoomTruthRecommendationSummary {
+export interface DashboardNamespaceTruthRecommendationSummary {
   count: number
   provenance?: string | null
   top_action?: OperatorRecommendedAction | null
 }
 
-export interface DashboardRoomTruthMetaCognitionDigest {
+export interface DashboardNamespaceTruthMetaCognitionDigest {
   post_id: string
   title: string
   created_at: string
@@ -90,13 +90,13 @@ export interface DashboardRoomTruthMetaCognitionDigest {
   provenance?: string | null
 }
 
-export interface DashboardRoomTruthMetaCognition {
+export interface DashboardNamespaceTruthMetaCognition {
   summary?: DashboardShellMetaCognitionSummary | null
-  latest_digest?: DashboardRoomTruthMetaCognitionDigest | null
+  latest_digest?: DashboardNamespaceTruthMetaCognitionDigest | null
   provenance?: string | null
 }
 
-export interface DashboardRoomTruthFocus {
+export interface DashboardNamespaceTruthFocus {
   label: string
   reason: string
   source: string
@@ -108,9 +108,9 @@ export interface DashboardRoomTruthFocus {
   suggested_params?: Record<string, string>
 }
 
-export interface DashboardRoomTruthResponse {
+export interface DashboardNamespaceTruthResponse {
   generated_at?: string
-  room: {
+  namespace: {
     status?: ServerStatus | null
     counts?: DashboardShellResponse['counts']
     provenance?: string | null
@@ -130,15 +130,15 @@ export interface DashboardRoomTruthResponse {
     active_lanes?: number
     provenance?: string | null
   }
-  meta_cognition?: DashboardRoomTruthMetaCognition | null
+  meta_cognition?: DashboardNamespaceTruthMetaCognition | null
   operator?: {
     health?: string | null
-    attention_summary?: DashboardRoomTruthAttentionSummary | null
-    recommendation_summary?: DashboardRoomTruthRecommendationSummary | null
+    attention_summary?: DashboardNamespaceTruthAttentionSummary | null
+    recommendation_summary?: DashboardNamespaceTruthRecommendationSummary | null
     pending_confirm_summary?: PendingConfirmSummary | null
     provenance?: string | null
   }
-  focus?: DashboardRoomTruthFocus | null
+  focus?: DashboardNamespaceTruthFocus | null
 }
 
 export interface ServerBuildIdentity {
@@ -365,8 +365,9 @@ export interface DashboardPlanningResponse {
 
 
 export interface ServerStatus {
-  room?: string
-  room_base_path?: string
+  namespace_id?: string
+  namespace?: string
+  namespace_base_path?: string
   coordination_root?: string
   workspace_path?: string
   workspace_differs?: boolean

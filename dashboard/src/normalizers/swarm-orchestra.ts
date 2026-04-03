@@ -139,20 +139,21 @@ function normalizeOrchestraFocus(raw: unknown): CommandPlaneOrchestraFocus | nul
 
 export function normalizeOrchestra(raw: unknown): CommandPlaneOrchestraResponse {
   const root = isRecord(raw) ? raw : {}
-  const room = isRecord(root.room) ? root.room : {}
+  const namespace = isRecord(root.namespace) ? root.namespace : (isRecord(root.room) ? root.room : {})
   const summary = isRecord(root.summary) ? root.summary : undefined
   return {
     version: asString(root.version),
     generated_at: asString(root.generated_at),
-    room: {
-      room_id: asString(room.room_id),
-      project: asString(room.project),
-      cluster: asString(room.cluster),
-      paused: asBoolean(room.paused),
-      pause_reason: asString(room.pause_reason) ?? null,
-      agent_count: asNumber(room.agent_count),
-      task_count: asNumber(room.task_count),
-      message_count: asNumber(room.message_count),
+    namespace: {
+      namespace_id: asString(namespace.namespace_id) ?? asString(namespace.room_id),
+      namespace: asString(namespace.namespace),
+      project: asString(namespace.project),
+      cluster: asString(namespace.cluster),
+      paused: asBoolean(namespace.paused),
+      pause_reason: asString(namespace.pause_reason) ?? null,
+      agent_count: asNumber(namespace.agent_count),
+      task_count: asNumber(namespace.task_count),
+      message_count: asNumber(namespace.message_count),
     },
     summary: summary
       ? {

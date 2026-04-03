@@ -19,7 +19,7 @@ function sampleMission(): DashboardMissionResponse {
     generated_at: '2026-03-31T00:00:00Z',
     summary: {
       room_health: 'warn',
-      current_room: 'default',
+      namespace: 'default',
     },
     sessions: [
       {
@@ -84,7 +84,7 @@ function sampleBriefing(): DashboardMissionBriefingResponse {
 
 function sampleOperatorSnapshot(): OperatorSnapshot {
   return {
-    room: {
+    namespace: {
       paused: false,
     },
     sessions: [],
@@ -246,7 +246,7 @@ describe('MissionBriefingCard', () => {
         attention_queue: [],
         summary: {
           ...sampleMission().summary,
-          current_room: null,
+          namespace: null,
           room_health: 'unknown',
         },
       } as unknown as DashboardMissionResponse,
@@ -260,7 +260,7 @@ describe('MissionBriefingCard', () => {
     })
 
     expect(report).toContain('[상황 보고] live-judge · glm-5')
-    expect(report).toContain('- room: default')
+    expect(report).toContain('- namespace: default')
     expect(report).toContain('- sessions: 0, attention: 0, blockers: 0')
     expect(report).toContain('live 판단을 해 주세요.')
   }, 20000)

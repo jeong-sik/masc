@@ -39,7 +39,7 @@ let recent_tool_host_failures ~now () =
                     severity =
                       Failure_envelope.severity_to_string envelope.severity;
                     summary = envelope.summary;
-                    target_type = "room";
+                    target_type = "namespace";
                     target_id = None;
                     actor = None;
                     evidence =
@@ -112,7 +112,7 @@ let build_room_attention_items ?command_plane_summary config =
                    kind;
                    severity = "warn";
                    summary;
-                   target_type = "room";
+                   target_type = "namespace";
                    target_id = None;
                    actor = None;
                    evidence = signal_json;
@@ -123,7 +123,7 @@ let build_room_attention_items ?command_plane_summary config =
                    kind;
                    severity = "bad";
                    summary;
-                   target_type = "room";
+                   target_type = "namespace";
                    target_id = None;
                    actor = None;
                    evidence = signal_json;
@@ -149,7 +149,7 @@ let build_room_attention_items ?command_plane_summary config =
                    kind;
                    severity = if count >= 3 then "bad" else "warn";
                    summary;
-                   target_type = "room";
+                   target_type = "namespace";
                    target_id = None;
                    actor = None;
                    evidence =
@@ -171,7 +171,7 @@ let build_room_attention_items ?command_plane_summary config =
           summary =
             Printf.sprintf "%d pending confirmation(s) are waiting for operator input"
               (List.length pending_confirms);
-          target_type = "room";
+          target_type = "namespace";
           target_id = None;
           actor = None;
           evidence = `Assoc [ ("count", `Int (List.length pending_confirms)) ];
@@ -251,7 +251,7 @@ let room_recommendations ?command_plane_summary config =
                    Some
                      {
                        action_type;
-                       target_type = "room";
+                       target_type = "namespace";
                        target_id = None;
                        severity;
                        reason;
@@ -262,7 +262,7 @@ let room_recommendations ?command_plane_summary config =
                Some
                  {
                    action_type;
-                   target_type = "room";
+                   target_type = "namespace";
                    target_id = None;
                    severity = if count >= 3 then "bad" else "warn";
                    reason;
@@ -306,7 +306,9 @@ let room_state_json config =
   if not (Room.is_initialized config) then
     `Assoc
       [
-        ("room_id", `String "default");
+        ("namespace_id", `String "default");
+        ("namespace", `String "default");
+        ("namespace_mode", `String "flattened");
         ("project", `String (Filename.basename config.base_path));
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool false);
@@ -316,7 +318,9 @@ let room_state_json config =
     let state = Room.read_state config in
     `Assoc
       [
-        ("room_id", `String (Option.value ~default:"default" (Room.read_current_room config)));
+        ("namespace_id", `String "default");
+        ("namespace", `String "default");
+        ("namespace_mode", `String "flattened");
         ("project", `String state.project);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool state.paused);
@@ -366,7 +370,7 @@ let urgency_rank = function
   | _ -> 0
 
 let target_rank = function
-  | "room" -> 3
+  | "room" | "namespace" -> 3
   | "team_session" -> 2
   | "keeper" -> 1
   | _ -> 0
@@ -374,7 +378,7 @@ let target_rank = function
 let kind_rank = function
   | "pending_confirm" -> 4
   | "session_risk" -> 3
-  | "room_gate" -> 2
+  | "namespace_gate" -> 2
   | "keeper_pressure" -> 1
   | _ -> 0
 
@@ -498,7 +502,7 @@ let pending_confirm_review_item ~now (entry : pending_confirm) =
     advice = review_empty_advice_json;
   }
 
-let room_gate_review_item ~room_json =
+let namespace_gate_review_item ~room_json =
   let paused = json_bool_opt room_json "paused" |> Option.value ~default:false in
   if not paused then None
   else
@@ -506,12 +510,12 @@ let room_gate_review_item ~room_json =
     let pause_reason =
       json_string_opt room_json "pause_reason" |> Option.value ~default:"운영 점검"
     in
-    let summary = "Room이 현재 일시정지 상태입니다." in
+    let summary = "기본 namespace가 현재 일시정지 상태입니다." in
     let recommended_action =
       Some
         {
-          action_type = "room_resume";
-          target_type = "room";
+          action_type = "namespace_resume";
+          target_type = "namespace";
           target_id = None;
           severity = "warn";
           reason = pause_reason;
@@ -520,9 +524,9 @@ let room_gate_review_item ~room_json =
     in
     Some
       {
-        id = "room_gate:" ^ room_id;
-        kind = "room_gate";
-        target_type = "room";
+        id = "namespace_gate:" ^ room_id;
+        kind = "namespace_gate";
+        target_type = "namespace";
         target_id = None;
         severity = "warn";
         urgency = "soon";
@@ -534,7 +538,7 @@ let room_gate_review_item ~room_json =
         stale_sec = None;
         confirm_required = false;
         recommended_action;
-        truth_ref = review_truth_ref_json ~target_type:"room" ~target_id:None;
+        truth_ref = review_truth_ref_json ~target_type:"namespace" ~target_id:None;
         friction =
           `Assoc
             [
@@ -762,7 +766,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
       (`Assoc
         [
           ("trace_id", `String (trace_id "opsd"));
-          ("target_type", `String "room");
+          ("target_type", `String "namespace");
           ("target_id", `Null);
           ("health", `String "ok");
           ("judgment_owner", `String "fallback_read_model");
@@ -812,7 +816,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
           Swarm_status.build_json ~timeline_limit_override:6 config
     in
     match target_type with
-    | "room" ->
+    | "namespace" ->
         let sessions =
           tracked_sessions
           |> List.map (fun session -> build_session_digest config session ~now)
@@ -837,7 +841,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
           summary_of_recommendations ~actor:actor_name recommended_actions
         in
         let active_guidance =
-          active_guidance_fields ~config ~actor:actor_name ~target_type:"room"
+          active_guidance_fields ~config ~actor:actor_name ~target_type:"namespace"
             ~target_id:None ~fallback_recommendations:recommended_actions
             ~fallback_summary:fallback_recommendation_summary
         in
@@ -845,7 +849,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
         let review_items =
           (confirm_scope.visible_entries
           |> List.map (pending_confirm_review_item ~now))
-          @ (match room_gate_review_item ~room_json:room_state_json with
+          @ (match namespace_gate_review_item ~room_json:room_state_json with
             | Some item -> [ item ]
             | None -> [])
           @ (sessions |> List.filter_map session_review_item)
@@ -861,7 +865,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
           (`Assoc
             ([
               ("trace_id", `String (trace_id "opsd"));
-              ("target_type", `String "room");
+              ("target_type", `String "namespace");
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
               ("provenance_summary", operator_surface_contract_json);
@@ -884,7 +888,7 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
                   (List.map (recommended_action_to_yojson ~actor:actor_name)
                      recommended_actions) );
               ("recommendation_summary", fallback_recommendation_summary);
-              ("room", room_state_json);
+              ("namespace", room_state_json);
               ( "session_cards",
                 `List
                   (List.map (session_card_to_yojson ~actor:actor_name) limited_sessions)

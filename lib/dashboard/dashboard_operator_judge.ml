@@ -177,11 +177,11 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used jso
           generated_at_unix +. float_of_int (room_ttl_sec ())
         in
         Some
-          (Operator_judgment.record config ~surface:"command.warroom"
+          (Operator_judgment.record config ~surface:"command.namespace"
              ~target_type:Operator_judgment.Room ~target_id:None ~summary
              ~confidence ?model_name:(Some model_used)
              ?recommended_action:
-               (build_recommended_action ~actor:keeper_name ~target_type:"room"
+               (build_recommended_action ~actor:keeper_name ~target_type:"namespace"
                   ~target_id:None (json |> member "recommended_action"))
              ~evidence_refs:(parse_string_list json "evidence_refs")
              ~disagreement_with_truth:

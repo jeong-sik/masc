@@ -216,25 +216,25 @@ let explicit_metadata : (string * metadata) list =
     ("masc_execute_dry_run", readonly_tool);
     ( "masc_admin_cleanup",
       with_semantic_flags ~destructive:true
-        (hidden_active "Administrative cleanup mutates persisted room state and should be treated as destructive.") );
+        (hidden_active "Administrative cleanup mutates persisted namespace state and should be treated as destructive.") );
     ( "masc_admin_reset",
       with_semantic_flags ~destructive:true
-        (hidden_active "Administrative reset clears room state and should be treated as destructive.") );
+        (hidden_active "Administrative reset clears namespace state and should be treated as destructive.") );
     ( "masc_gc_force",
       with_semantic_flags ~destructive:true
         (hidden_active "Forced garbage collection removes persisted artifacts and should be treated as destructive.") );
     ( "masc_room_delete",
       with_semantic_flags ~destructive:true
-        (hidden_active "Room deletion removes persisted state and should be treated as destructive.") );
+        (hidden_active "Namespace deletion removes persisted state and should be treated as destructive.") );
     ( "masc_room_destroy",
       with_semantic_flags ~destructive:true
-        (hidden_active "Room destruction removes persisted state and should be treated as destructive.") );
+        (hidden_active "Namespace destruction removes persisted state and should be treated as destructive.") );
     ( "masc_force_leave",
       with_semantic_flags ~destructive:true
-        (hidden_active "Forced membership removal mutates room state and should be treated as destructive.") );
+        (hidden_active "Forced membership removal mutates namespace state and should be treated as destructive.") );
     ( "masc_force_remove_agent",
       with_semantic_flags ~destructive:true
-        (hidden_active "Forced agent removal mutates room state and should be treated as destructive.") );
+        (hidden_active "Forced agent removal mutates namespace state and should be treated as destructive.") );
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
         (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );

@@ -119,11 +119,13 @@ let pulse_of_tone = function
   | "warn" -> Some "pulse"
   | _ -> Some "steady"
 
-let room_json config =
+let namespace_json config =
   if not (Room.is_initialized config) then
     `Assoc
       [
-        ("room_id", `String "default");
+        ("namespace_id", `String "default");
+        ("namespace", `String "default");
+        ("namespace_mode", `String "flattened");
         ("project", `String (Filename.basename config.base_path));
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool false);
@@ -138,7 +140,9 @@ let room_json config =
     let tasks = Room.get_tasks_raw config in
     `Assoc
       [
-        ("room_id", `String (Option.value ~default:"default" (Room.read_current_room config)));
+        ("namespace_id", `String "default");
+        ("namespace", `String "default");
+        ("namespace_mode", `String "flattened");
         ("project", `String state.project);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool state.paused);
@@ -148,21 +152,23 @@ let room_json config =
         ("message_count", `Int state.message_seq);
       ]
 
-let room_node room_json session_count operation_count worker_count keeper_count
+let namespace_node namespace_json session_count operation_count worker_count keeper_count
     alert_count pending_confirm_count =
-  let room_id = string_opt room_json "room_id" |> Option.value ~default:"default" in
-  let paused = bool_opt room_json "paused" |> Option.value ~default:false in
+  let namespace_id =
+    string_opt namespace_json "namespace" |> Option.value ~default:"default"
+  in
+  let paused = bool_opt namespace_json "paused" |> Option.value ~default:false in
   let tone = if paused || pending_confirm_count > 0 || alert_count > 0 then "warn" else "ok" in
-  node ~id:("room:" ^ room_id) ~kind:"room" ~label:room_id
-    ?subtitle:(string_opt room_json "project")
-    ~tone ~provenance:"truth" ~visual_class:"room-core" ~glyph:"◎"
+  node ~id:("namespace:" ^ namespace_id) ~kind:"namespace" ~label:namespace_id
+    ?subtitle:(string_opt namespace_json "project")
+    ~tone ~provenance:"truth" ~visual_class:"namespace-core" ~glyph:"◎"
     ?pulse:(pulse_of_tone tone)
     ~facts:
       [
         fact "project"
-          (string_opt room_json "project" |> Option.value ~default:"n/a");
+          (string_opt namespace_json "project" |> Option.value ~default:"n/a");
         fact "cluster"
-          (string_opt room_json "cluster" |> Option.value ~default:"default");
+          (string_opt namespace_json "cluster" |> Option.value ~default:"default");
         fact "sessions" (string_of_int session_count);
         fact "operations" (string_of_int operation_count);
         fact "workers" (string_of_int worker_count);
@@ -505,8 +511,10 @@ let by_id rows key_field =
 let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
   let config = ctx.config in
   let actor = ctx.agent_name in
-  let room = room_json config in
-  let room_id = "room:" ^ (string_opt room "room_id" |> Option.value ~default:"default") in
+  let namespace = namespace_json config in
+  let namespace_id =
+    "namespace:" ^ (string_opt namespace "namespace" |> Option.value ~default:"default")
+  in
   let operator_snapshot = Operator_control.snapshot_json ~actor ctx in
   let pending_summary =
     assoc_or_empty operator_snapshot "pending_confirm_summary"
@@ -611,7 +619,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
   in
   let keeper_nodes = List.map keeper_node keepers in
   let nodes =
-    room_node room (List.length sessions) (List.length active_operation_rows)
+    namespace_node namespace (List.length sessions) (List.length active_operation_rows)
       (List.length actual_worker_nodes + List.length ghost_worker_nodes)
       (List.length keeper_nodes) (List.length alerts)
       (int_opt pending_summary "total_count" |> Option.value ~default:0)
@@ -623,9 +631,9 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
   let edges =
     (sessions
     |> List.map (fun (session : Team_session_types.session) ->
-           edge ~id:("edge:room-session:" ^ session.session_id) ~source:room_id
-             ~target:("session:" ^ session.session_id) ~kind:"contains"
-             ~label:"session" ~provenance:"truth" ())
+           edge ~id:("edge:namespace-session:" ^ session.session_id)
+             ~source:namespace_id ~target:("session:" ^ session.session_id)
+             ~kind:"contains" ~label:"session" ~provenance:"truth" ())
     )
     @ (sessions
       |> List.filter_map (fun (session : Team_session_types.session) ->
@@ -663,7 +671,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
                match string_opt (assoc_or_empty swarm_json "operation") "operation_id" with
                | Some operation_id when List.mem_assoc operation_id operation_rows_by_id ->
                    "operation:" ^ operation_id
-               | _ -> room_id)
+               | _ -> namespace_id)
          in
          (worker_lanes
          |> List.map (fun (lane_name, _rows) ->
@@ -701,19 +709,19 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
              match string_opt keeper_json "id" with
              | Some keeper_id ->
                  Some
-                   (edge ~id:("edge:room-keeper:" ^ keeper_id) ~source:room_id
-                      ~target:keeper_id ~kind:"continuity" ~label:"keeper"
-                      ~provenance:"truth" ())
+                   (edge ~id:("edge:namespace-keeper:" ^ keeper_id)
+                      ~source:namespace_id ~target:keeper_id ~kind:"continuity"
+                      ~label:"keeper" ~provenance:"truth" ())
              | None -> None))
   in
   let signals =
     List.filter_map Fun.id
       [
-        signal_for_pending_confirms pending_summary room_id;
-        signal_for_runtime_blocker swarm_json room_id;
-        signal_for_hot_proof summary_json room_id;
+        signal_for_pending_confirms pending_summary namespace_id;
+        signal_for_runtime_blocker swarm_json namespace_id;
+        signal_for_hot_proof summary_json namespace_id;
       ]
-    @ signals_for_alerts alerts room_id
+    @ signals_for_alerts alerts namespace_id
   in
   let focus =
     match List.find_opt (fun signal_json -> string_opt signal_json "tone" = Some "bad") signals with
@@ -749,7 +757,10 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
             `Assoc
               [
                 ("target_kind", `String "node");
-                ("target_id", `String (string_opt node_json "id" |> Option.value ~default:room_id));
+                ( "target_id",
+                  `String
+                    (string_opt node_json "id"
+                    |> Option.value ~default:namespace_id) );
                 ("label", `String (string_opt node_json "label" |> Option.value ~default:"session"));
                 ("reason", `String "A session needs supervision or is not fully healthy.");
                 ("suggested_surface", `String "intervene");
@@ -759,9 +770,14 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
             `Assoc
               [
                 ("target_kind", `String "node");
-                ("target_id", `String room_id);
-                ("label", `String (string_opt room "room_id" |> Option.value ~default:"default"));
-                ("reason", `String "Room-wide view is healthy enough; start from the command overview.");
+                ("target_id", `String namespace_id);
+                ( "label",
+                  `String
+                    (string_opt namespace "namespace" |> Option.value ~default:"default") );
+                ( "reason",
+                  `String
+                    "Namespace-wide view is healthy enough; start from the command overview."
+                );
                 ("suggested_surface", `String "summary");
                 ("suggested_params", `Assoc []);
               ])
@@ -770,7 +786,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
     [
       ("version", `String "orchestra.v1");
       ("generated_at", `String (Types.now_iso ()));
-      ("room", room);
+      ("namespace", namespace);
       ( "summary",
         `Assoc
           [
@@ -790,5 +806,12 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
       ("focus", focus);
       ("swarm_status", swarm_status_json);
       ("swarm_proof", assoc_or_empty summary_json "swarm_proof");
-      ("truth_notes", `List [ `String "room-wide orchestra map is composed from command-plane truth, swarm live state, and operator read models."; `String "provenance marks whether a node or signal is truth, derived, or fallback."; ]);
+      ( "truth_notes",
+        `List
+          [
+            `String
+              "namespace-wide orchestra map is composed from command-plane truth, swarm live state, and operator read models.";
+            `String
+              "provenance marks whether a node or signal is truth, derived, or fallback.";
+          ] );
     ]

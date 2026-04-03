@@ -186,7 +186,7 @@ function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
 }
 
 function renderSummaryBadges(activeCount: number, deferredCount: number, recentCount: number) {
-  const roomPaused = operatorSnapshot.value?.room?.paused
+  const roomPaused = operatorSnapshot.value?.namespace?.paused
   const roomLabel =
     typeof roomPaused === 'boolean'
       ? roomPaused ? '룸 일시정지' : '룸 진행 중'
@@ -245,12 +245,12 @@ function renderTruth(item: OperatorReviewItem | null) {
   }
 
   if (item.target_type === 'room') {
-    const room = detailDigest?.room ?? snapshot?.room ?? {}
+    const room = detailDigest?.namespace ?? snapshot?.namespace ?? {}
     return html`
       <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
           <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Room</div>
-          <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
+          <strong>${room.namespace ?? room.namespace_id ?? 'default'}</strong>
           <div class="text-[12px] text-[var(--text-muted)]">${room.project ?? 'project'} · ${room.cluster ?? 'cluster'}</div>
         </div>
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">

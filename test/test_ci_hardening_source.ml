@@ -176,8 +176,8 @@ let test_dashboard_warm_hydration_contracts () =
   check bool "mission default route serves cached surface immediately" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "cached_surface_or_first_success_json _mission_cache");
-  check bool "room truth advertises initializing while execution warms" true
-    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
+  check bool "namespace truth advertises initializing while execution warms" true
+    (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        {|("status", `String "initializing")|});
   check bool "execution render timeout is env-configurable" true
     (file_contains_pattern "lib/dashboard/dashboard_execution.ml"
@@ -230,10 +230,19 @@ let test_input_validation_contracts () =
 let test_room_current_validation_contracts () =
   (* Room.read_current_room and Room.ensure_room_bootstrap were removed from
      h2_gateway. Room validation now happens at the MCP/tool dispatch layer.
-     Verify h2_gateway still serves room-truth API endpoint. *)
-  check bool "h2 gateway serves room-truth endpoint" true
+     Verify h2_gateway serves canonical namespace routes only. *)
+  check bool "h2 gateway serves namespace-truth endpoint" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       "dashboard_room_truth_http_json")
+       {|"/api/v1/dashboard/namespace-truth"|});
+  check bool "h2 gateway removes room-truth alias endpoint" true
+    (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|"/api/v1/dashboard/room-truth"|});
+  check bool "h2 gateway serves namespace current endpoint" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|"/api/v1/namespace/current"|});
+  check bool "h2 gateway removes room current alias endpoint" true
+    (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
+       {|"/api/v1/room/current"|})
 
 let test_root_redirect_contracts () =
   check bool "http root redirects to dashboard" true
@@ -539,12 +548,15 @@ let test_dashboard_timeout_guard_contracts () =
     (file_contains_pattern "dashboard/src/components/transport-health.ts"
        "let inflightTransportHealthRefresh: Promise<void> | null = null")
 
-let test_room_truth_adaptive_timeout_contracts () =
+let test_namespace_truth_adaptive_timeout_contracts () =
   check bool "shell fiber uses adaptive timeout" true
-    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
+    (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        "shell_timeout_s");
-  check bool "room-truth timeout configurable via env var" true
-    (file_contains_pattern "lib/server/server_dashboard_http_room_truth.ml"
+  check bool "namespace-truth timeout configurable via canonical env var" true
+    (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
+       "MASC_DASHBOARD_NAMESPACE_TRUTH_TIMEOUT_S");
+  check bool "namespace-truth timeout still honors legacy env fallback" true
+    (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        "MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S");
   check bool "shell_warmed tracking exists" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
@@ -628,8 +640,8 @@ let () =
            test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
            test_case "http client fd safety contracts" `Quick
              test_http_client_fd_safety_contracts;
-           test_case "room-truth adaptive timeout contracts" `Quick
-             test_room_truth_adaptive_timeout_contracts;
+           test_case "namespace-truth adaptive timeout contracts" `Quick
+             test_namespace_truth_adaptive_timeout_contracts;
            test_case "runtime precondition contracts" `Quick
              test_runtime_precondition_contracts;
            test_case "router contract alignment" `Quick

@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { missionError, missionLoading } from '../../mission-store'
-import { roomTruthError } from '../../room-truth-store'
+import { namespaceTruthError } from '../../namespace-truth-store'
 import type {
   DashboardMissionResponse,
   DashboardMissionSessionBrief,
@@ -29,7 +29,7 @@ type SessionItem = DashboardMissionSessionBrief | DashboardMissionSessionCard
 export function synthesizeSituation(snap: DashboardMissionResponse | null): SituationResult {
   const loadErrors = [
     missionError.value?.trim(),
-    roomTruthError.value?.trim(),
+    namespaceTruthError.value?.trim(),
   ].filter((value): value is string => Boolean(value))
 
   if (!snap) {

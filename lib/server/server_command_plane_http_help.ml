@@ -115,9 +115,9 @@ let command_plane_help_http_json () =
       ( "concepts",
         `List
           [
-            concept ~id:"room" ~title:"Room"
+            concept ~id:"namespace" ~title:"Namespace"
               ~summary:
-                "The coordination scope. In practice masc_set_room resolves to the repo-root room, not an arbitrary nested worktree.";
+                "Project coordination namespace. Historical room naming remains only as a compatibility alias. In current builds masc_set_room selects the project root and the runtime namespace is always the flattened default under .masc/.";
             concept ~id:"task" ~title:"Task"
               ~summary:
                 "Backlog work item. Claim semantics differ by tool: masc_transition(action=claim) leaves planning current_task unset, while masc_claim_next auto-binds it in current builds.";
@@ -137,20 +137,20 @@ let command_plane_help_http_json () =
       ( "golden_paths",
         `List
           [
-            path ~id:"room_task_hygiene" ~title:"Room / Task Hygiene"
+            path ~id:"room_task_hygiene" ~title:"Namespace / Task Hygiene"
               ~summary:
-                "Minimal MCP sequence before doing any real work in a room."
+                "Minimal MCP sequence before doing any real work in the project namespace."
               ~when_to_use:
                 "Use this before benchmark runs, CPv2 experiments, or ordinary implementation work."
               ~steps:
                 [
-                  step ~id:"join" ~title:"Join the room" ~tool:"masc_join"
+                  step ~id:"join" ~title:"Join the namespace" ~tool:"masc_join"
                     ~summary:
-                      "Register agent identity and capabilities in the repo-root room."
+                      "Register agent identity and capabilities in the default project namespace."
                     ~success_signals:
-                      [ "agent visible in masc_status"; "room agent roster includes your agent" ]
+                      [ "agent visible in masc_status"; "namespace agent roster includes your agent" ]
                     ~pitfalls:
-                      [ "masc_set_room points at repo root semantics"; "without join you are invisible to scheduling" ];
+                      [ "masc_set_room normalizes to project-root scope"; "without join you are invisible to scheduling" ];
                   step ~id:"claim" ~title:"Claim or create work" ~tool:"masc_transition"
                     ~summary:
                       "Claim a specific task with masc_transition(action=claim), or use masc_claim_next when any queued task is acceptable."
@@ -304,9 +304,9 @@ let command_plane_help_http_json () =
       ( "tool_groups",
         `List
           [
-            tool_group ~id:"room-task" ~title:"Room / Task Hygiene"
+            tool_group ~id:"room-task" ~title:"Namespace / Task Hygiene"
               ~description:
-                "Core room/task tools every session should use before higher-level workflows."
+                "Core namespace/task tools every session should use before higher-level workflows."
               ~tools:
                 [ "masc_set_room"; "masc_join"; "masc_status"; "masc_transition"; "masc_claim_next"; "masc_plan_set_task"; "masc_heartbeat" ];
             tool_group ~id:"cpv2-core" ~title:"CPv2 Benchmark Core"
@@ -323,11 +323,11 @@ let command_plane_help_http_json () =
       ( "pitfalls",
         `List
           [
-            pitfall ~id:"repo-root-room" ~title:"Room path resolves to repo root"
-              ~symptom:"You point masc_set_room at a worktree but the room still behaves like the repo root."
-              ~why:"Room semantics are repo-root scoped; worktrees share the same room substrate."
+            pitfall ~id:"repo-root-room" ~title:"Project scope flattens to default namespace"
+              ~symptom:"You point masc_set_room at a worktree but the visible coordination state still behaves like the project root."
+              ~why:"Current builds flatten coordination to the default namespace under the project root; worktrees are code-isolation only."
               ~fix_tool:"masc_join"
-              ~fix_summary:"Treat worktrees as code-isolation only. Join the repo-root room and reason about shared room state.";
+              ~fix_summary:"Treat worktrees as code-isolation only. Join the default project namespace and reason about shared coordination state.";
             pitfall ~id:"claimed-not-current" ~title:"Claimed task is not current task"
               ~symptom:"Task is claimed, but planning/log tools still act like no current task is selected."
               ~why:"Some claim paths only mutate backlog ownership. In current builds masc_transition(action=claim) still requires an explicit current_task bind."
@@ -358,7 +358,7 @@ let command_plane_help_http_json () =
       ( "examples",
         `List
           [
-            example ~id:"join-room" ~title:"Join room for task hygiene"
+            example ~id:"join-room" ~title:"Join namespace for task hygiene"
               ~path_id:"room_task_hygiene" ~transport:"mcp"
               ~request:
                 (`Assoc
@@ -377,7 +377,7 @@ let command_plane_help_http_json () =
                    [
                      ("agent", `String "codex-...");
                      ("status", `String "joined");
-                     ("room", `String "repo-root room");
+                     ("namespace", `String "default");
                    ])
               ~notes:
                 [ "Response is trimmed to canonical fields."; "Use masc_status next to confirm visibility." ];

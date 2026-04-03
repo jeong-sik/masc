@@ -272,9 +272,9 @@ let rec add_routes ~sw ~clock router =
          let json = Env_config_introspect.to_json () in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/room-truth" (fun request reqd ->
+  |> Http.Router.get "/api/v1/dashboard/namespace-truth" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_room_truth_http_json ~state ~sw ~clock req in
+         let json = dashboard_namespace_truth_http_json ~state ~sw ~clock req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->

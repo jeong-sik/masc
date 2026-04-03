@@ -142,9 +142,23 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       | `List items -> items
       | _ -> []
     in
-    let current_room = snapshot_json |> member_assoc "room" |> string_field "current_room" in
+    let scope_json =
+      match snapshot_json |> member_assoc "namespace" with
+      | `Assoc _ as value -> value
+      | _ -> snapshot_json |> member_assoc "room"
+    in
+    let current_namespace =
+      match trim_to_option (Some (scope_json |> string_field "namespace")) with
+      | Some value -> value
+      | None -> (
+          match trim_to_option (Some (scope_json |> string_field "namespace_id")) with
+          | Some value -> value
+          | None ->
+              trim_to_option (Some (scope_json |> string_field "current_room"))
+              |> Option.value ~default:"default")
+    in
     let sessions =
-      Briefing_compactors.relevant_sessions_for_briefing ~current_room ~now_ts sessions
+      Briefing_compactors.relevant_sessions_for_briefing ~current_namespace ~now_ts sessions
     in
     let keepers =
       match snapshot_json |> member_assoc "keepers" |> member_assoc "items" with
@@ -170,7 +184,8 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       `Assoc
         [
           ("room_health", member_assoc "room_health" summary);
-          ("current_room", member_assoc "current_room" summary);
+          ("namespace_id", member_assoc "namespace_id" summary);
+          ("namespace", member_assoc "namespace" summary);
           ("active_agents", member_assoc "active_agents" summary);
           ("keeper_pressure", member_assoc "keeper_pressure" summary);
           ("active_operations", member_assoc "active_operations" summary);
@@ -211,9 +226,9 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
           ( "basis",
             `Assoc
               [
-                ( "current_room",
+                ( "namespace",
                   member_assoc "summary" mission_json
-                  |> member_assoc "current_room" );
+                  |> member_assoc "namespace" );
                 ("crew_count", `Int (List.length sessions));
                 ("agent_count", `Int (List.length agents_json));
                 ("keeper_count", `Int (List.length keepers));

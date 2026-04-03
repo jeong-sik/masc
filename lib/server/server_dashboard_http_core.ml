@@ -194,11 +194,16 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   in
   let status_json =
     `Assoc [
-      ( "room",
+      ( "namespace_id",
         `String
           (if Room.is_initialized config then Room.current_room_id config
            else Filename.basename config.base_path) );
-      ("room_base_path", `String config.base_path);
+      ( "namespace",
+        `String
+          (if Room.is_initialized config then Room.current_room_id config
+           else Filename.basename config.base_path) );
+      ("namespace_mode", `String "flattened");
+      ("namespace_base_path", `String config.base_path);
       ("coordination_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);
       ("workspace_differs", `Bool (config.workspace_path <> config.base_path));
@@ -320,7 +325,7 @@ let operator_actor_hint request =
    every ~18s worst-case, which is acceptable for dashboard SSE polling. *)
 
 (* Late-bound broadcast refs — set by server_dashboard_http.ml after
-   Sse module is in scope.  Same pattern as _broadcast_room_truth_ref. *)
+   Sse module is in scope. Same pattern as _broadcast_namespace_truth_ref. *)
 let _operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref =
   ref (fun (_json : Yojson.Safe.t) -> ())
 
@@ -456,7 +461,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
             }
           in
           match
-            Operator_control.digest_json ~actor:"dashboard" ~target_type:"room"
+            Operator_control.digest_json ~actor:"dashboard" ~target_type:"namespace"
               ~sessions ?command_plane_summary ?swarm_status ctx
           with
           | Ok json ->
@@ -584,14 +589,16 @@ let operator_digest_http_json ~state ~sw ~clock request =
     &&
     match target_type with
     | None -> true
-    | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "room"
+    | Some raw ->
+        let normalized = String.lowercase_ascii (String.trim raw) in
+        String.equal normalized "room" || String.equal normalized "namespace"
   in
   if default_room_request then
     Ok (cached_surface_json _operator_digest_cache)
   else
     let started_at = Unix.gettimeofday () in
     let effective_target_type =
-      Option.value ~default:"room" target_type
+      Option.value ~default:"namespace" target_type
     in
     match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () ->
       Ok
@@ -611,13 +618,16 @@ let operator_digest_http_json ~state ~sw ~clock request =
                }
              in
              let command_plane_summary, swarm_status =
-               if String.equal effective_target_type "room" then
+               if String.equal effective_target_type "room"
+                  || String.equal effective_target_type "namespace"
+               then
                  command_plane_summary_cache_parts ~allow_initializing:false ~state
                else
                  (None, None)
              in
              let sessions =
-               if String.equal effective_target_type "room"
+               if (String.equal effective_target_type "room"
+                   || String.equal effective_target_type "namespace")
                   && Room.is_initialized config
                then
                  Some (dashboard_active_or_recent_sessions ~clock config)
@@ -828,16 +838,15 @@ let dashboard_proof_http_json ~state request =
 
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
-  let current_room =
-    Room.read_current_room config |> Option.value ~default:"default"
-  in
+  let current_namespace = "default" in
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in
   `Assoc
     [
-      ("room", `String current_room);
-      ("current_room", `String current_room);
-      ("room_base_path", `String config.base_path);
+      ("namespace_id", `String current_namespace);
+      ("namespace", `String current_namespace);
+      ("namespace_mode", `String "flattened");
+      ("namespace_base_path", `String config.base_path);
       ("coordination_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);
       ("workspace_differs", `Bool (config.workspace_path <> config.base_path));
@@ -897,7 +906,8 @@ let dashboard_message_json (message : Types.message) =
     ]
 
 let dashboard_current_room_id config =
-  Room.current_room_id config
+  let _ = config in
+  "default"
 
 let dashboard_tasks_safe config =
   Room.get_tasks_raw_in_room config (dashboard_current_room_id config)
@@ -925,7 +935,7 @@ let dashboard_shell_timeout_s =
     ~default:8.0 ~min_v:2.0 ~max_v:30.0
 
 let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
-  let current_room = dashboard_current_room_id config in
+  let current_namespace = "default" in
   let started_at = Unix.gettimeofday () in
   let measure_ms f =
     let t0 = Unix.gettimeofday () in
@@ -960,7 +970,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   |> with_projection_diagnostics ~surface:"shell" ~started_at
        ~extra:
          [
-           ("current_room", `String current_room);
+           ("current_namespace", `String current_namespace);
            ("coordination_root", `String config.base_path);
            ("workspace_path", `String config.workspace_path);
            ("keeper_count_source", `String "keeper_meta");

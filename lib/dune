@@ -98,8 +98,8 @@
    server_dashboard_http_runtime_support
    server_dashboard_http_runtime_info
    server_dashboard_http_execution_surfaces
-   server_dashboard_http_room_truth_support
-   server_dashboard_http_room_truth
+   server_dashboard_http_namespace_truth_support
+   server_dashboard_http_namespace_truth
    server_meta_cognition_feedback
    server_dashboard_http
    server_dashboard_http_cache

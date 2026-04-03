@@ -48,7 +48,7 @@ export function OpsRoomColumn() {
   const roomControlDisclosureRef = useRef<HTMLDetailsElement | null>(null)
   const snapshot = operatorSnapshot.value
   const roomDigest = operatorRoomDigest.value
-  const room = snapshot?.room ?? {}
+  const room = snapshot?.namespace ?? {}
   const pendingState = selectPendingConfirmState(snapshot)
   const pendingConfirms = pendingState.items
   const recentMessages = snapshot?.recent_messages ?? []
@@ -225,7 +225,7 @@ export function OpsRoomColumn() {
         <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
           <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
             <span>룸</span>
-            <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
+            <strong>${room.namespace ?? room.namespace_id ?? 'default'}</strong>
           </div>
           <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
             <span>프로젝트</span>

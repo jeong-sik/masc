@@ -175,7 +175,7 @@ printf '[5/6] verify surface readiness projection\n'
 readiness_json="$(curl -fsS --http1.1 --max-time "$HTTP_TIMEOUT_SEC" "http://127.0.0.1:${PORT}/api/v1/dashboard/surface-readiness")"
 if ! printf '%s' "$readiness_json" | jq -e '
   .proof_bar == "fixture+live_spotcheck"
-  and any(.surfaces[]; .id == "command.warroom" and .exposure_status == "lab" and .hidden_from_nav == true and .meets_main_gate == false)
+  and any(.surfaces[]; .id == "command.namespace" and .exposure_status == "lab" and .hidden_from_nav == true and .meets_main_gate == false)
 ' >/dev/null 2>&1; then
   echo "FAIL: surface readiness projection mismatch"
   printf '%s\n' "$readiness_json" | jq .
@@ -199,5 +199,5 @@ printf '\nPASS dashboard collaboration evidence smoke\n'
 printf '  session_id: %s\n' "$SESSION_ID"
 printf '  base_path: %s\n' "$BASE_PATH"
 printf '  log_file: %s\n' "$LOG_FILE"
-printf '  readiness: %s\n' "$(printf '%s' "$readiness_json" | jq -c '.surfaces[] | select(.id == "command.warroom") | {id, exposure_status, hidden_from_nav, meets_main_gate}')"
+printf '  readiness: %s\n' "$(printf '%s' "$readiness_json" | jq -c '.surfaces[] | select(.id == "command.namespace") | {id, exposure_status, hidden_from_nav, meets_main_gate}')"
 printf '  evidence: %s\n' "$(printf '%s' "$evidence_json" | jq -c '{evidence_status, counts, proof}')"

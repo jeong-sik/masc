@@ -174,13 +174,20 @@ let legacy_room_candidates rooms_dir =
       |> List.filter_map (fun room_id ->
            let room_path = Filename.concat rooms_dir room_id in
            if Sys.is_directory room_path then
-             match Room.validate_room_id room_id with
-             | Ok valid_room_id -> Some valid_room_id
-             | Error msg ->
+             let trimmed_room_id = String.trim room_id in
+             if not (String.equal room_id trimmed_room_id) then begin
+               Log.Misc.warn
+                 "migrate: ignoring invalid legacy room dir %S (must not have leading/trailing whitespace)"
+                 room_id;
+               None
+             end else
+               match Room.validate_room_id room_id with
+               | Ok valid_room_id -> Some valid_room_id
+               | Error msg ->
                  Log.Misc.warn
                    "migrate: ignoring invalid legacy room dir %s (%s)" room_id
                    msg;
-                 None
+                   None
            else
              None)
     with _ -> []

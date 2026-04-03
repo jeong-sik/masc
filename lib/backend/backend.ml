@@ -34,6 +34,7 @@ module FileSystem = struct
     fs: Eio.Fs.dir_ty Eio.Path.t;
     mutex: Eio.Mutex.t;
     key_index: (string, unit) Hashtbl.t;
+    mutable key_index_promise: unit Eio.Promise.or_exn option;
   }
 
   (** Create a new FileSystem backend *)
@@ -51,6 +52,7 @@ module FileSystem = struct
       fs = path;
       mutex = Eio.Mutex.create ();
       key_index = Hashtbl.create 256;
+      key_index_promise = None;
     }
 
   (** {2 Key Validation} *)
@@ -235,19 +237,35 @@ module FileSystem = struct
     | _ -> acc
 
   let ensure_key_index t =
-    if Hashtbl.length t.key_index = 0 then begin
-      (try
-         let keys =
-           collect_keys_under ~requested_prefix:"" ~logical_prefix:"" t.fs []
-         in
-         List.iter (fun k -> Hashtbl.replace t.key_index k ()) keys;
-         if Hashtbl.length t.key_index > 0 then
-           Log.legacy_traceln ~level:Log.Info ~module_name:"Backend"
-             (Printf.sprintf "key_index populated: %d keys" (Hashtbl.length t.key_index))
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | _ -> ())
-    end
+    if Hashtbl.length t.key_index > 0 then ()
+    else
+      match t.key_index_promise with
+      | Some p ->
+        (* Another fiber is populating — wait for it rather than
+           proceeding with an empty index or starting a duplicate. *)
+        (match Eio.Promise.await p with
+         | Ok () -> ()
+         | Error _ -> ())
+      | None ->
+        let p, r = Eio.Promise.create () in
+        t.key_index_promise <- Some p;
+        (try
+           let keys =
+             collect_keys_under ~requested_prefix:"" ~logical_prefix:"" t.fs []
+           in
+           List.iter (fun k -> Hashtbl.replace t.key_index k ()) keys;
+           if Hashtbl.length t.key_index > 0 then
+             Log.legacy_traceln ~level:Log.Info ~module_name:"Backend"
+               (Printf.sprintf "key_index populated: %d keys" (Hashtbl.length t.key_index));
+           Eio.Promise.resolve_ok r ()
+         with exn ->
+           t.key_index_promise <- None;
+           Eio.Promise.resolve_error r exn;
+           match exn with
+           | Eio.Cancel.Cancelled _ -> raise exn
+           | _ ->
+             Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
+               (Printf.sprintf "key_index population failed: %s" (Printexc.to_string exn)))
 
   (** Check if key exists (in-memory index first, filesystem fallback) *)
   let exists t key =

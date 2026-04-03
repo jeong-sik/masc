@@ -160,7 +160,8 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     nickname nickname agent_type session_id
   end
 
-(** @deprecated Since #4638 rooms are flattened; delegates to [join config]. *)
+(** @deprecated Since #4638 rooms are flattened; room_id is ignored.
+    Kept for callers that still pass a room_id parameter. *)
 let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
   ensure_room_bootstrap config room_id;

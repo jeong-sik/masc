@@ -9,7 +9,8 @@ let masc_root_dir config =
       let seg = sanitize_namespace_segment other in
       Filename.concat (Filename.concat masc_root "clusters") seg
 
-(** @deprecated Kept for backward-compat; always returns [masc_root_dir]. *)
+(** @deprecated Since #4638. Still returns [masc_root_dir ^ "/rooms"] for
+    migration code that needs to locate legacy room directories. *)
 let rooms_root_dir config = Filename.concat (masc_root_dir config) "rooms"
 let registry_root_path config = Filename.concat (masc_root_dir config) "rooms.json"
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"

@@ -189,7 +189,7 @@ let test_constructor_is_pure () =
       Alcotest.(check int) "constructor does not restore persisted sessions" 0
         (List.length (Session.connected_agents state.Mcp_server.session_registry)))
 
-let test_restore_persisted_sessions_uses_scoped_agents_dir () =
+let test_restore_persisted_sessions_uses_flat_agents_dir () =
   with_temp_dir "startup-scope" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
       let agents = Room.agents_dir state.Mcp_server.room_config in
@@ -528,8 +528,8 @@ let () =
             test_force_jsonl_fallback_env;
           Alcotest.test_case "constructors stay pure" `Quick
             test_constructor_is_pure;
-          Alcotest.test_case "restore_persisted_sessions uses scoped agents dir"
-            `Quick test_restore_persisted_sessions_uses_scoped_agents_dir;
+          Alcotest.test_case "restore_persisted_sessions uses flat agents dir"
+            `Quick test_restore_persisted_sessions_uses_flat_agents_dir;
           Alcotest.test_case "keeper paths use cluster root" `Quick
             test_keeper_paths_use_cluster_root;
           Alcotest.test_case "room init bootstraps keeper runtime dirs" `Quick

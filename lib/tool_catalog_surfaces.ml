@@ -186,6 +186,13 @@ let spawned_agent_surface_tools =
     "masc_team_session_compare"; "masc_team_session_prove";
     "masc_update_priority";
     "masc_verify_handoff"; "masc_workflow_guide";
+    (* Moved from Local_worker: schemas exist but local_worker_tool_schemas
+       cannot resolve them. Spawned_agent avoids keeper namespace overlap. *)
+    "masc_improve_loop_start"; "masc_improve_loop_status";
+    "masc_improve_loop_pause"; "masc_improve_loop_resume"; "masc_improve_loop_tick";
+    "masc_library_add"; "masc_library_list"; "masc_library_promote";
+    "masc_library_read"; "masc_library_search";
+    "masc_relay_now"; "masc_relay_smart_check";
   ]
 
 let local_worker_surface_tools =
@@ -200,12 +207,6 @@ let local_worker_surface_tools =
     "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
     "masc_repair_loop_start"; "masc_repair_loop_status";
     "masc_repair_loop_iterate"; "masc_repair_loop_stop";
-    (* Phase 2: surface SSOT *)
-    "masc_improve_loop_pause"; "masc_improve_loop_resume";
-    "masc_improve_loop_start"; "masc_improve_loop_status"; "masc_improve_loop_tick";
-    "masc_library_add"; "masc_library_list"; "masc_library_promote";
-    "masc_library_read"; "masc_library_search";
-    "masc_relay_now"; "masc_relay_smart_check";
   ]
 
 let session_min_surface_tools =

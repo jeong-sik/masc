@@ -25,9 +25,9 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 
 일반 작업이든 benchmark든 먼저 이 순서를 맞춘다.
 
-**Quick path**: `masc_start(path="/repo", task_title="My task")` — 1번을 처리하고, `task_title`이 있으면 task create/claim/bind까지는 옵션으로 도와줄 수 있다.
+Quick path: `masc_start(path="/repo", task_title="My task")` — 1번을 처리하고, `task_title`이 있으면 task create/claim/bind까지는 옵션으로 도와줄 수 있다.
 
-**Step-by-step**:
+Step-by-step:
 
 1. `masc_start`
    - project root를 coordination root로 잡고 default namespace join까지 처리한다.

@@ -1,8 +1,6 @@
 import { vi } from 'vitest'
 import { html } from 'htm/preact'
 
-void vi
-
 // Mock all lucide-preact icons to a lightweight span to avoid happy-dom timeout issues
 // This drastically reduces mounting time during parallel test runs.
 vi.mock('lucide-preact', async (importOriginal) => {

@@ -816,6 +816,6 @@
  (libraries masc_test_deps))
 
 (rule
- (target test_mcp_tool_matrix_names_gen.ml)
+ (targets test_mcp_tool_matrix_names_gen.ml)
  (deps tool_inventory_gen.exe)
- (action (with-stdout-to %{target} (run ./tool_inventory_gen.exe))))
+ (action (with-stdout-to %{targets} (run ./tool_inventory_gen.exe))))

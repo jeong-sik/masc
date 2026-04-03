@@ -119,23 +119,13 @@ let with_unix_capture ?env ?stdin_content (argv : string list)
              on_error ()
          | Some stdout_r ->
              stdout_r_ref := None;
-             (* Run blocking read + waitpid in systhread to avoid freezing
-                the Eio event loop while subprocess is running. *)
-             let (output, status) =
-               Eio_unix.run_in_systhread (fun () ->
-                 let ic = Unix.in_channel_of_descr stdout_r in
-                 let out =
-                   Fun.protect
-                     ~finally:(fun () -> In_channel.close ic)
-                     (fun () -> In_channel.input_all ic)
-                 in
-                 let rec waitpid_retry () =
-                   try Unix.waitpid [] pid
-                   with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_retry ()
-                 in
-                 let (_, st) = waitpid_retry () in
-                 (out, st))
+             let ic = Unix.in_channel_of_descr stdout_r in
+             let output =
+               Fun.protect
+                 ~finally:(fun () -> In_channel.close ic)
+                 (fun () -> In_channel.input_all ic)
              in
+             let (_pid, status) = Unix.waitpid [] pid in
              on_success status output)
        with
        | Eio.Cancel.Cancelled _ as exn ->

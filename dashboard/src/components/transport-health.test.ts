@@ -198,7 +198,6 @@ describe('TransportHealthPanel', () => {
   })
 
   it('debounces SSE-driven transport refreshes through FetchScheduler', async () => {
-    vi.useFakeTimers()
     const lastEvent = signal<unknown>(null)
     const get = vi.fn<(path: string) => Promise<unknown>>().mockResolvedValue(sampleResponse())
 
@@ -208,6 +207,7 @@ describe('TransportHealthPanel', () => {
     await flushUi()
     expect(get).toHaveBeenCalledTimes(1)
 
+    vi.useFakeTimers()
     lastEvent.value = { type: 'agent_joined' }
     lastEvent.value = { type: 'agent_left' }
     lastEvent.value = { type: 'task_claimed' }
@@ -215,7 +215,6 @@ describe('TransportHealthPanel', () => {
     expect(get).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(1)
-    await flushUi()
     expect(get).toHaveBeenCalledTimes(2)
   })
 })

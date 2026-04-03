@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { ActionButton } from '../common/button'
+import { Markdown } from '../common/markdown'
 import type { KeeperConversationDetails, KeeperConversationEntry } from '../../types'
 
 export type ChatTranscriptVariant = 'default' | 'messenger'
@@ -288,7 +289,7 @@ export function ChatMessageBubble({
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}
                       </button>
                       ${rawExpanded
-                        ? html`<pre class="rounded-2xl border border-[rgba(148,163,184,0.12)] bg-[rgba(2,10,24,0.84)] px-3 py-3">${JSON.stringify(entry.details.rawPayload, null, 2)}</pre>`
+                        ? html`<div class="mt-2"><${Markdown} text=${`\`\`\`json\n${JSON.stringify(entry.details.rawPayload, null, 2)}\n\`\`\``} /></div>`
                         : null}
                     </div>
                   `

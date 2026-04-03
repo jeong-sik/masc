@@ -464,6 +464,71 @@ let test_jsonl_backend_uses_explicit_base_dir () =
   Alcotest.(check bool) "writes under explicit base_dir" true (Sys.file_exists expected_path);
   cleanup_tmp_dir dir
 
+let test_jsonl_backend_ignores_malformed_lines_on_retrieve () =
+  let dir = setup_tmp_dir () in
+  let base_dir = Filename.concat dir ".masc-jsonl-retrieve" in
+  let agent_name = "test-jsonl-retrieve" in
+  let session_id = "session-retrieve" in
+  let backend =
+    Memory_oas_bridge.make_backend ~base_dir ~agent_name ~session_id ()
+  in
+  let path =
+    Filename.concat
+      (Filename.concat (Filename.concat base_dir "memory") agent_name)
+      (session_id ^ ".jsonl")
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Out_channel.with_open_text path (fun oc ->
+    output_string oc "not json\n";
+    output_string oc {|{"key":"other","value":"skip","ts":1}|};
+    output_char oc '\n';
+    output_string oc {|{"key":"target","value":"first","ts":2}|};
+    output_char oc '\n';
+    output_string oc {|{"key":"target","value":"latest","ts":3}|};
+    output_char oc '\n');
+  match backend.retrieve ~key:"target" with
+  | Some (`String value) ->
+      Alcotest.(check string) "latest valid entry wins" "latest" value
+  | _ -> Alcotest.fail "expected retrieve to ignore malformed lines";
+  cleanup_tmp_dir dir
+
+let test_jsonl_backend_query_ignores_malformed_lines () =
+  let dir = setup_tmp_dir () in
+  let base_dir = Filename.concat dir ".masc-jsonl-query" in
+  let agent_name = "test-jsonl-query" in
+  let session_id = "session-query" in
+  let backend =
+    Memory_oas_bridge.make_backend ~base_dir ~agent_name ~session_id ()
+  in
+  let path =
+    Filename.concat
+      (Filename.concat (Filename.concat base_dir "memory") agent_name)
+      (session_id ^ ".jsonl")
+  in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Out_channel.with_open_text path (fun oc ->
+    output_string oc {|{"key":"pref/a","value":"old","ts":1}|};
+    output_char oc '\n';
+    output_string oc "bad-line\n";
+    output_string oc {|{"key":"pref/b","value":"ok","ts":2}|};
+    output_char oc '\n';
+    output_string oc {|{"key":"pref/a","value":null,"ts":3}|};
+    output_char oc '\n';
+    output_string oc {|{"key":"pref/c","value":"new","ts":4}|};
+    output_char oc '\n');
+  let results = backend.query ~prefix:"pref/" ~limit:10 in
+  Alcotest.(check int) "malformed and tombstoned entries skipped" 2
+    (List.length results);
+  Alcotest.(check bool) "pref/b present" true
+    (List.exists
+       (function key, `String value -> key = "pref/b" && value = "ok" | _ -> false)
+       results);
+  Alcotest.(check bool) "pref/c present" true
+    (List.exists
+       (function key, `String value -> key = "pref/c" && value = "new" | _ -> false)
+       results);
+  cleanup_tmp_dir dir
+
 let test_seed_episodes_loads_recent_jsonl () =
   let dir = setup_tmp_dir () in
   let first =
@@ -610,6 +675,10 @@ let () =
       Alcotest.test_case "query returns empty" `Quick test_jsonl_backend_query;
       Alcotest.test_case "uses explicit base_dir" `Quick
         test_jsonl_backend_uses_explicit_base_dir;
+      Alcotest.test_case "retrieve ignores malformed lines" `Quick
+        test_jsonl_backend_ignores_malformed_lines_on_retrieve;
+      Alcotest.test_case "query ignores malformed lines" `Quick
+        test_jsonl_backend_query_ignores_malformed_lines;
       Alcotest.test_case "seed_episodes loads recent jsonl" `Quick
         test_seed_episodes_loads_recent_jsonl;
       Alcotest.test_case "seed_episodes respects limit" `Quick

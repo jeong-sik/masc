@@ -159,6 +159,17 @@ let test_read_file_safe_too_large () =
   Sys.remove path;
   check bool "Error on oversized file" true (Result.is_error result)
 
+let test_read_file_safe_negative_limit () =
+  let open Safe_ops in
+  let path = Filename.temp_file "test_safe_ops_" ".txt" in
+  let oc = open_out path in
+  output_string oc "1234";
+  close_out oc;
+  check_raises "negative max_bytes rejected"
+    (Invalid_argument "check_file_size: max_bytes must not be negative")
+    (fun () -> ignore (read_file_safe ~max_bytes:(-1) path));
+  Sys.remove path
+
 let test_read_json_file_safe_too_large () =
   let open Safe_ops in
   let path = Filename.temp_file "test_safe_ops_" ".json" in
@@ -362,6 +373,7 @@ let () =
       test_case "not found" `Quick test_read_file_safe_not_found;
       test_case "valid file" `Quick test_read_file_safe_valid;
       test_case "too large" `Quick test_read_file_safe_too_large;
+      test_case "negative limit" `Quick test_read_file_safe_negative_limit;
     ];
     "read_json_file_safe", [
       test_case "nonexistent" `Quick test_read_json_file_safe_nonexistent;

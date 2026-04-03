@@ -838,7 +838,7 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
     [
       ("namespace_id", `String canonical_namespace);
       ("namespace", `String canonical_namespace);
-      ("current_namespace", `String current_room);
+      ("current_namespace", `String canonical_namespace);
       ("namespace_mode", `String "flattened");
       ("room", `Null);
       ("current_room", `String current_room);
@@ -931,6 +931,7 @@ let dashboard_shell_timeout_s =
 
 let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   let current_room = dashboard_current_room_id config in
+  let canonical_namespace = Room.default_namespace_id in
   let started_at = Unix.gettimeofday () in
   let measure_ms f =
     let t0 = Unix.gettimeofday () in
@@ -965,7 +966,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   |> with_projection_diagnostics ~surface:"shell" ~started_at
        ~extra:
          [
-           ("current_namespace", `String current_room);
+           ("current_namespace", `String canonical_namespace);
            ("current_room", `String current_room);
            ("coordination_root", `String config.base_path);
            ("workspace_path", `String config.workspace_path);

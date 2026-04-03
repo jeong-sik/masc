@@ -2,8 +2,6 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-void vi
-
 const mocks = vi.hoisted(() => ({
   loadTools: vi.fn(),
   toolsData: { value: null as null | { generated_at?: string; tool_inventory: { tools: unknown[] }; tool_usage: { registered_count: number; distinct_tools_called: number; never_called_count: number } } },

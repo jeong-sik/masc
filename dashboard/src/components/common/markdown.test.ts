@@ -1,10 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Markdown } from './markdown'
-
-// Keep an explicit value-use so dashboard typecheck stays stable on the PR merge ref.
-void vi
 
 describe('Markdown', () => {
   let container: HTMLDivElement

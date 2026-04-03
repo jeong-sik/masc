@@ -2,6 +2,8 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+void vi
+
 const mocks = vi.hoisted(() => ({
   fetchKeeperConfig: vi.fn(async () => ({
     name: 'keeper-sangsu',

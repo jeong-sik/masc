@@ -37,10 +37,12 @@ type contract_case = {
   expectation : expectation;
 }
 
-(* Tool inventory auto-generated from Config.raw_all_tool_schemas at build time.
-   See tool_inventory_gen.ml and the dune rule that produces
-   test_mcp_tool_matrix_names_gen.ml. *)
-let all_known_tool_names = Test_mcp_tool_matrix_names_gen.names
+(* Tool inventory derived directly from Config.raw_all_tool_schemas at link time.
+   No code generation step needed — the library is already linked. *)
+let all_known_tool_names =
+  Masc_mcp.Config.raw_all_tool_schemas
+  |> List.map (fun (schema : Types.tool_schema) -> schema.name)
+  |> List.sort_uniq String.compare
 
 let strict_success_names =
   [

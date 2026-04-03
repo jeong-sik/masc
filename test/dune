@@ -585,10 +585,22 @@
  (modules test_dashboard_collaboration_evidence test_tool_team_session_support)
  (libraries masc_test_deps))
 
-; MCP Tool Matrix (3 modules: test driver + cases + runtime-derived names + runner dep)
+; Normalized actor (operator_pending_confirm)
+(test
+ (name test_normalized_actor)
+ (modules test_normalized_actor)
+ (libraries masc_test_deps))
+
+; Failover leader deterministic selection
+(test
+ (name test_failover_leader)
+ (modules test_failover_leader)
+ (libraries masc_test_deps))
+
+; MCP Tool Matrix (2 modules + generated names + runner dep)
 (test
  (name test_mcp_tool_matrix)
- (modules test_mcp_tool_matrix test_mcp_tool_matrix_cases test_mcp_tool_matrix_names_gen)
+ (modules test_mcp_tool_matrix test_mcp_tool_matrix_cases)
  (deps tool_matrix_case_runner.exe)
  (libraries masc_test_deps))
 
@@ -771,24 +783,12 @@
  (modules test_atomic_simple)
  (libraries masc_test_deps))
 
-; tool_inventory_gen produces test_mcp_tool_matrix_names_gen.ml at build time.
-(executable
- (name tool_inventory_gen)
- (modules tool_inventory_gen)
- (libraries masc_test_deps))
-
-(rule
- (target test_mcp_tool_matrix_names_gen.ml)
- (deps (:gen tool_inventory_gen.exe))
- (action (with-stdout-to %{target} (run %{gen}))))
-
 (executable
  (name tool_matrix_manifest)
- (modules tool_matrix_manifest test_mcp_tool_matrix_cases test_mcp_tool_matrix_names_gen)
+ (modules tool_matrix_manifest test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))
 
 (executable
  (name tool_matrix_case_runner)
- (modules tool_matrix_case_runner test_mcp_tool_matrix_cases test_mcp_tool_matrix_names_gen)
+ (modules tool_matrix_case_runner test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))
-

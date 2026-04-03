@@ -15,16 +15,12 @@ let identity_rng = Random.State.make_self_init ()
 
 (** {1 Core Types} *)
 
-(** Channel/surface type - where the agent is connected from *)
+(** Connection surface known to core.
+    External platform names stay opaque so core does not depend on connector vendors. *)
 type channel =
-  | Telegram
-  | Discord
-  | Slack
-  | Signal
-  | Webchat
   | Api
   | Internal
-  | Unknown of string
+  | External of string
 [@@deriving yojson]
 
 (** Agent identity - extracted from session/request context *)
@@ -53,25 +49,18 @@ let generate_uuid ~agent_name =
 
 (** {1 Channel Parsing} *)
 
-let channel_of_string = function
-  | "telegram" -> Telegram
-  | "discord" -> Discord
-  | "slack" -> Slack
-  | "signal" -> Signal
-  | "webchat" -> Webchat
+let channel_of_string s =
+  let normalized = String.trim s |> String.lowercase_ascii in
+  match normalized with
   | "api" -> Api
   | "internal" -> Internal
-  | s -> Unknown s
+  | "" -> External "unknown"
+  | other -> External other
 
 let string_of_channel = function
-  | Telegram -> "telegram"
-  | Discord -> "discord"
-  | Slack -> "slack"
-  | Signal -> "signal"
-  | Webchat -> "webchat"
   | Api -> "api"
   | Internal -> "internal"
-  | Unknown s -> s
+  | External s -> s
 
 (** {1 Identity Creation} *)
 

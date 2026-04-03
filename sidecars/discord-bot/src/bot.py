@@ -1,6 +1,6 @@
-"""MASC Discord Bot -- Channel Gate consumer.
+"""Discord bot consumer for the Channel Gate.
 
-Bridges Discord messages to MASC keepers via the Channel Gate HTTP API.
+Bridges Discord messages to gate-backed keepers via the Channel Gate HTTP API.
 This bot is a pure protocol adapter: no business logic, no LLM calls.
 
 Usage:
@@ -24,13 +24,13 @@ from .formatters import (
     format_error_embed,
     format_keeper_embed,
 )
-from .masc_client import BreakerSnapshot, GateResponse, MascGateClient
+from .gate_client import BreakerSnapshot, GateClient, GateResponse
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
-logger = logging.getLogger("masc-discord-bot")
+logger = logging.getLogger("discord-gate-bot")
 
 
 def attachment_lines(message: discord.Message) -> list[str]:
@@ -62,14 +62,14 @@ def channel_stats_for(status: dict[str, Any] | None, channel_name: str) -> dict[
 
 
 class MascBot(discord.Client):
-    """Discord client that routes messages to MASC keepers."""
+    """Discord client that routes messages to gate-backed keepers."""
 
     def __init__(self) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
-        self.gate = MascGateClient()
+        self.gate = GateClient()
         self.cfg = get_config()
         self.keeper_bindings = self.cfg.keeper_map()
 
@@ -202,7 +202,7 @@ def breaker_summary(snapshot: BreakerSnapshot) -> str:
 
 
 def keeper_status_embed(keeper_name: str, data: dict[str, Any]) -> discord.Embed:
-    """Build a compact embed from masc_keeper_status JSON."""
+    """Build a compact embed from keeper status JSON."""
     embed = discord.Embed(
         title=f"Keeper: {keeper_name}",
         color=0x5865F2,
@@ -525,8 +525,8 @@ def main() -> None:
     cfg = get_config()
     bot = MascBot()
 
-    logger.info("Starting MASC Discord Bot")
-    logger.info("Gate URL: %s", cfg.masc_mcp_url)
+    logger.info("Starting Discord Gate bot")
+    logger.info("Gate URL: %s", cfg.gate_base_url)
 
     try:
         asyncio.run(bot.start(cfg.discord_bot_token))

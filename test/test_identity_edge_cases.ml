@@ -56,8 +56,8 @@ let test_unknown_channel () =
   ] in
   let identity = Agent_registry_eio.get_or_create_identity params in
   match identity.channel with
-  | Some (Agent_identity.Unknown s) -> check string "unknown" "unknown_platform_xyz" s
-  | _ -> fail "expected Unknown channel"
+  | Some (Agent_identity.External s) -> check string "opaque external" "unknown_platform_xyz" s
+  | _ -> fail "expected opaque external channel"
 
 (* Empty capabilities list *)
 let test_empty_capabilities () =

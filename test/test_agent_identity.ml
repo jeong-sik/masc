@@ -77,14 +77,14 @@ let test_anonymous () =
 
 let test_channel_roundtrip () =
   let channels = [
-    Agent_identity.Telegram;
-    Agent_identity.Discord;
-    Agent_identity.Slack;
-    Agent_identity.Signal;
-    Agent_identity.Webchat;
+    Agent_identity.External "telegram";
+    Agent_identity.External "discord";
+    Agent_identity.External "slack";
+    Agent_identity.External "signal";
+    Agent_identity.External "webchat";
     Agent_identity.Api;
     Agent_identity.Internal;
-    Agent_identity.Unknown "custom";
+    Agent_identity.External "custom";
   ] in
   List.iter (fun ch ->
     let str = Agent_identity.string_of_channel ch in
@@ -117,7 +117,7 @@ let test_to_display_string () =
   let identity = Agent_identity.({
     uuid = "agent-test123456"; session_key = "12345678-1234-1234-1234-123456789abc";
     agent_name = "test-agent";
-    channel = Some Telegram;
+    channel = Some (Agent_identity.External "telegram");
     user_id = Some "user123";
     room_id = Some "room-a";
     capabilities = [];
@@ -134,7 +134,7 @@ let test_to_display_string_empty_session_key () =
     uuid = "agent-emptykey";
     session_key = "";
     agent_name = "empty-key-agent";
-    channel = Some Api;
+    channel = Some Agent_identity.Api;
     user_id = None;
     room_id = None;
     capabilities = [];

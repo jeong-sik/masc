@@ -4,7 +4,7 @@ open Masc_mcp
 let make_message ?(content = "hello") ?(keeper_name = "luna")
     ?(channel_user_id = "user-1") ?(idempotency_key = "key-1") () =
   {
-    Channel_gate.channel = Agent_identity.Discord;
+    Channel_gate.channel = "discord";
     channel_user_id;
     channel_user_name = "user";
     channel_room_id = "room-1";

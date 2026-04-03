@@ -849,9 +849,18 @@ let recover_latest_checkpoint_for_overflow_retry
           ( context_of_oas_checkpoint checkpoint ~primary_model_max_tokens,
             turn_generation )
     | _, _, Some checkpoint ->
-        Some
-          ( context_of_legacy_checkpoint checkpoint ~primary_model_max_tokens,
-            checkpoint.generation )
+        (try
+           Some
+             ( context_of_legacy_checkpoint checkpoint
+                 ~primary_model_max_tokens,
+               checkpoint.generation )
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+             Log.Keeper.error
+               "keeper:%s overflow retry legacy checkpoint restore failed: %s"
+               meta.runtime.trace_id (Printexc.to_string exn);
+             None)
     | _ -> None
   in
   match selected with
@@ -871,9 +880,10 @@ let recover_latest_checkpoint_for_overflow_retry
       let compaction_applied =
         String.starts_with ~prefix:"applied:" decision
       in
-      if not compaction_applied then None
+      let after_tokens = token_count compacted_ctx in
+      let meaningful_reduction = after_tokens < before_tokens in
+      if not (compaction_applied && meaningful_reduction) then None
       else
-        let after_tokens = token_count compacted_ctx in
         let compaction =
           {
             applied = true;

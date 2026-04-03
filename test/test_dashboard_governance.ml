@@ -21,6 +21,20 @@ let cleanup_dir dir =
   in
   rm dir
 
+let ensure_dir path =
+  if not (Sys.file_exists path) then Unix.mkdir path 0o755
+
+let write_legacy_judgment ~base_path json =
+  let masc = Filename.concat base_path ".masc" in
+  let governance = Filename.concat masc "governance" in
+  ensure_dir masc;
+  ensure_dir governance;
+  let path = Filename.concat governance "judgments.jsonl" in
+  let oc = open_out path in
+  output_string oc (Yojson.Safe.to_string json);
+  output_char oc '\n';
+  close_out oc
+
 let test_empty_governance_structure () =
   let dir = test_dir () in
   Fun.protect
@@ -36,6 +50,10 @@ let test_empty_governance_structure () =
       in
       let open Yojson.Safe.Util in
       let _gen = json |> member "generated_at" |> to_string in
+      check bool "case tracking retired" false
+        (json |> member "case_tracking_available" |> to_bool);
+      check bool "retirement note present" true
+        (json |> member "note" |> to_string |> String.length > 0);
       let summary = json |> member "summary" in
       check int "cases_open is 0" 0 (summary |> member "cases_open" |> to_int);
       check int "pending_ruling is 0" 0 (summary |> member "pending_ruling" |> to_int);
@@ -66,6 +84,75 @@ let test_empty_governance_structure () =
       check int "judgments empty" 0 (List.length judgments);
       let pending = json |> member "pending_actions" |> to_list in
       check int "pending_actions empty" 0 (List.length pending))
+
+let test_runtime_status_and_judgments_are_live () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let now = Unix.gettimeofday () in
+      let generated_at = "2026-04-04T12:00:00Z" in
+      let expires_at = Dashboard_utils.iso_of_unix (now +. 3600.0) in
+      let legacy_judgment =
+        `Assoc
+          [
+            ("target_kind", `String "agent_health");
+            ("target_id", `String "dreamer");
+            ("status", `String "active");
+            ("summary", `String "dreamer has been stalled for 30 minutes");
+            ("confidence", `Float 0.85);
+            ("generated_at", `String generated_at);
+            ("expires_at", `String expires_at);
+            ("model_used", `String "llama:qwen3.5");
+            ("keeper_name", `String Lib.Dashboard_governance_judge.keeper_name);
+            ( "recommended_action",
+              `Assoc
+                [
+                  ("action_kind", `String "recover");
+                  ("resolved_tool", `String "masc_operator_confirm");
+                  ("target_type", `String "agent");
+                  ("target_id", `String "dreamer");
+                  ("reason", `String "zombie agent detected");
+                ] );
+            ( "guardrail_state",
+              `Assoc
+                [
+                  ("requires_human_gate", `Bool true);
+                  ("ready_to_execute", `Bool false);
+                ] );
+          ]
+      in
+      write_legacy_judgment ~base_path:dir legacy_judgment;
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      st.judge_online <- true;
+      st.generated_at <- Some generated_at;
+      st.generated_at_unix <- Some now;
+      st.expires_at <- Some expires_at;
+      st.expires_at_unix <- Some (now +. 3600.0);
+      st.model_used <- Some "llama:qwen3.5";
+      st.last_error <- None;
+      let json =
+        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+          ~status_filter:None
+      in
+      let open Yojson.Safe.Util in
+      let summary = json |> member "summary" in
+      check bool "summary judge_online is live" true
+        (summary |> member "judge_online" |> to_bool);
+      check string "summary judge_last_seen_at uses runtime" generated_at
+        (summary |> member "judge_last_seen_at" |> to_string);
+      let judge = json |> member "judge" in
+      check bool "judge section online" true
+        (judge |> member "judge_online" |> to_bool);
+      check string "judge model uses runtime" "llama:qwen3.5"
+        (judge |> member "model_used" |> to_string);
+      let judgments = json |> member "judgments" |> to_list in
+      check int "legacy judgment surfaced" 1 (List.length judgments);
+      let first = List.hd judgments in
+      check string "judgment target id" "dreamer"
+        (first |> member "target_id" |> to_string);
+      check string "judgment tool" "masc_operator_confirm"
+        (first |> member "recommended_action" |> member "resolved_tool" |> to_string))
 
 let test_governance_dir_created_before_read () =
   let dir = test_dir () in
@@ -104,6 +191,8 @@ let () =
         [
           test_case "empty governance structure" `Quick
             test_empty_governance_structure;
+          test_case "runtime status and judgments are live" `Quick
+            test_runtime_status_and_judgments_are_live;
         ] );
       ( "init",
         [

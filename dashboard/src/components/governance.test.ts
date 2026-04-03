@@ -168,6 +168,37 @@ describe('Governance surface', () => {
     expect(container.textContent).toContain('keeper가 활동 중일 때 자동 생성됩니다')
   }, 20000)
 
+  it('shows retired guidance when case tracking is disabled', async () => {
+    const retiredResponse: DashboardGovernanceResponse = {
+      generated_at: '2026-03-26T00:00:00Z',
+      case_tracking_available: false,
+      note: 'Governance case tracking is retired; dashboard surfaces only live judge status and recent judgments.',
+      summary: {
+        judge_online: false,
+      },
+      items: [],
+      activity: [],
+      judgments: [],
+      pending_actions: [],
+    }
+
+    const { Governance } = await loadComponentWithApi({
+      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: vi.fn().mockResolvedValue(retiredResponse),
+      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(governanceBundle()),
+      fetchRuntimeParams: vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
+      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+    })
+
+    render(html`<${Governance} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('거버넌스 케이스 추적은 중단되었고')
+    expect(container.textContent).toContain('judge-only / 최근 판단 0건')
+    expect(container.textContent).not.toContain('keeper가 활동 중일 때 자동 생성됩니다')
+  }, 20000)
+
   it('renders judgments section with recommended action', async () => {
     const withJudgments: DashboardGovernanceResponse = {
       generated_at: '2026-03-30T00:00:00Z',

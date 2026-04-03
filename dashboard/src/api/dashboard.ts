@@ -273,6 +273,9 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
       : []
     return {
       generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
+      case_tracking_available:
+        typeof raw.case_tracking_available === 'boolean' ? raw.case_tracking_available : undefined,
+      note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
       summary: isRecord(raw.summary)
         ? {
             cases_open: asInt(raw.summary.cases_open) ?? undefined,

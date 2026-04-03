@@ -331,6 +331,8 @@ export interface DashboardMemoryResponse {
 
 export interface DashboardGovernanceResponse {
   generated_at?: string
+  case_tracking_available?: boolean
+  note?: string
   summary?: {
     cases_open?: number
     pending_ruling?: number

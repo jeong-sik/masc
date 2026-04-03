@@ -112,8 +112,9 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
 
 let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
   : Yojson.Safe.t * bool =
-  ignore (now_ts, base_path);
-  (* Governance case tracking is retired — return empty governance status *)
+  ignore now_ts;
+  let runtime = Dashboard_governance_judge.runtime_status base_path in
+  (* Governance case tracking is retired, but judge runtime status is still live. *)
   (`Assoc [
     ("alert_level", `String "ok");
     ("cases_open", `Int 0);
@@ -126,7 +127,8 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
     ("last_activity_age_s", `Null);
     ("slo_target_case_age_s", `Int 0);
     ("slo_breached", `Bool false);
-    ("judge_online", `Bool false);
+    ("judge_online", `Bool runtime.judge_online);
+    ("case_tracking_available", `Bool false);
   ], true)
 
 let slot_monitoring_json () : Yojson.Safe.t =

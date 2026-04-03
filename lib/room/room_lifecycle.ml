@@ -171,8 +171,8 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     [join]. *)
 let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
-  ensure_room_bootstrap config room_id;
   let legacy_room_id = compat_room_id config room_id in
+  ensure_room_bootstrap config legacy_room_id;
 
   let agent_type = match agent_type_override with
     | Some t -> t

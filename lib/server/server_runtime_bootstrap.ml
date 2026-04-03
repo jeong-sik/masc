@@ -176,7 +176,11 @@ let legacy_room_candidates rooms_dir =
            if Sys.is_directory room_path then
              match Room.validate_room_id room_id with
              | Ok valid_room_id -> Some valid_room_id
-             | Error _ -> None
+             | Error msg ->
+                 Log.Misc.warn
+                   "migrate: ignoring invalid legacy room dir %s (%s)" room_id
+                   msg;
+                 None
            else
              None)
     with _ -> []

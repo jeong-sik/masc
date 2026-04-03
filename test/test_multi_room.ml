@@ -89,7 +89,11 @@ let test_join_in_room_sanitizes_invalid_room_id () =
           check (option string) "hook sees sanitized room label" (Some "default")
             !captured_room_id;
           let event_log = current_event_log_path config in
-          let last_event = read_lines event_log |> List.rev |> List.hd in
+          let last_event =
+            match read_lines event_log |> List.rev with
+            | last_event :: _ -> last_event
+            | [] -> fail "expected agent join event in log"
+          in
           let room_id =
             Yojson.Safe.from_string last_event
             |> Yojson.Safe.Util.member "room_id"

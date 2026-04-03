@@ -427,6 +427,42 @@ let test_blocking_bootstrap_flattens_single_legacy_room_without_current_room () 
            (Filename.concat masc_root
               "_quarantine/rooms/team-room/tasks/backlog.json")))
 
+let test_blocking_bootstrap_skips_flatten_with_multiple_legacy_rooms () =
+  with_temp_dir "startup-blocking-room-multi-fallback" (fun dir ->
+      let state = Mcp_server.create_state ~base_path:dir in
+      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let alpha_tasks = Filename.concat masc_root "rooms/alpha-room/tasks" in
+      let beta_tasks = Filename.concat masc_root "rooms/beta-room/tasks" in
+      Fs_compat.mkdir_p alpha_tasks;
+      Fs_compat.mkdir_p beta_tasks;
+      write_file
+        (Filename.concat alpha_tasks "backlog.json")
+        (Yojson.Safe.to_string
+           (Types.backlog_to_yojson
+              { tasks = []; last_updated = Types.now_iso (); version = 7 }));
+      write_file
+        (Filename.concat beta_tasks "backlog.json")
+        (Yojson.Safe.to_string
+           (Types.backlog_to_yojson
+              { tasks = []; last_updated = Types.now_iso (); version = 11 }));
+      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
+      let root_backlog_path = Filename.concat masc_root "tasks/backlog.json" in
+      let root_backlog_promoted =
+        if Sys.file_exists root_backlog_path then
+          let root_backlog = Yojson.Safe.from_string (read_file root_backlog_path) in
+          let version = Yojson.Safe.Util.(root_backlog |> member "version" |> to_int) in
+          version = 7 || version = 11
+        else
+          false
+      in
+      Alcotest.(check bool)
+        "multiple legacy rooms do not promote a legacy backlog into root"
+        false root_backlog_promoted;
+      Alcotest.(check bool) "alpha-room backlog stays in legacy dir" true
+        (Sys.file_exists (Filename.concat alpha_tasks "backlog.json"));
+      Alcotest.(check bool) "beta-room backlog stays in legacy dir" true
+        (Sys.file_exists (Filename.concat beta_tasks "backlog.json")))
+
 let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();
   Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
@@ -605,6 +641,10 @@ let () =
             "blocking bootstrap flattens single legacy room without current_room"
             `Quick
             test_blocking_bootstrap_flattens_single_legacy_room_without_current_room;
+          Alcotest.test_case
+            "blocking bootstrap skips flatten with multiple legacy rooms"
+            `Quick
+            test_blocking_bootstrap_skips_flatten_with_multiple_legacy_rooms;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case "liveness probe is always true" `Quick

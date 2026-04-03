@@ -39,7 +39,7 @@ let find_substring ~(needle : string) (haystack : string) : int option =
   in
   loop 0
 
-(** Detect transient TCP/TLS errors that warrant a single immediate retry.
+(** Detect transient TCP/TLS errors that warrant retry with short backoff.
     These patterns match OAS cascade error messages for connection-level failures. *)
 let transient_error_patterns =
   [ "Connection_reset"; "Broken pipe"; "End_of_file";
@@ -49,6 +49,17 @@ let is_transient_network_error (msg : string) : bool =
   List.exists
     (fun needle -> string_contains_substring ~needle msg)
     transient_error_patterns
+
+(** Max transient retries (excluding the initial attempt).  Total attempts
+    = 1 initial + max_transient_retries.  OAS internal retry is 3 per
+    provider; this outer retry covers cases where all providers fail
+    transiently (e.g. TCP keepalive expiry across all backends). *)
+let max_transient_retries = 2
+
+(** Exponential backoff delay for transient retry [attempt] (1-indexed).
+    Delays: 1s, 2s — total wait 3s before giving up. *)
+let transient_backoff_sec (attempt : int) : float =
+  Float.min 4.0 (1.0 *. Float.of_int (1 lsl (attempt - 1)))
 
 let context_overflow_anchor = "available context size ("
 
@@ -70,6 +81,9 @@ let context_overflow_limit (msg : string) : int option =
       else
         String.sub lowered start_idx (end_idx - start_idx)
         |> int_of_string_opt
+
+let should_attempt_context_overflow_retry (msg : string) : bool =
+  Option.is_some (context_overflow_limit msg)
 
 let recover_context_overflow_retry
     ~(meta : keeper_meta)
@@ -464,6 +478,10 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("work_kind", `String work_kind);
         ("tool_call_count", `Int result.tool_calls_made);
         ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
+        ("cascade",
+         match result.cascade_observation with
+         | Some observation -> Oas_worker.cascade_observation_to_json observation
+         | None -> `Null);
         ("snapshot_source", `String snapshot_source);
         ("memory_check", memory_check_default_json ());
         ("handoff_performed",
@@ -633,7 +651,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       (* 5. Run via OAS Agent.run() with transient-error retry *)
       let run_result, latency_ms =
         Keeper_exec_context.timed (fun () ->
-          let do_run ~max_context =
+          let do_run ~max_context ~is_retry =
             Keeper_agent_run.run_turn ~config ~meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:"keeper_unified"
@@ -642,24 +660,38 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
               ~max_cost_usd
+              ~is_retry
               ()
           in
-          match do_run ~max_context:primary_max_context with
-          | Ok _ as ok -> ok
-          | Error e when is_transient_network_error e ->
-              Log.Keeper.warn "%s: transient network error, retrying once: %s"
-                meta.name (short_preview e);
-              Eio.Fiber.yield ();
-              do_run ~max_context:primary_max_context
-          | Error e -> (
-              match
-                recover_context_overflow_retry ~meta ~base_dir
-                  ~primary_max_context ~error:e
-              with
-              | Some retry_max_context ->
-                  Eio.Fiber.yield ();
-                  do_run ~max_context:retry_max_context
-              | None -> Error e))
+          let rec retry_loop ~max_context ~attempt ~is_retry
+              ~overflow_retry_used =
+            match do_run ~max_context ~is_retry with
+            | Ok _ as ok -> ok
+            | Error e when is_transient_network_error e
+                           && attempt <= max_transient_retries ->
+                let delay = transient_backoff_sec attempt in
+                Log.Keeper.warn
+                  "%s: transient network error (retry %d/%d), backoff %.0fs: %s"
+                  meta.name attempt max_transient_retries delay
+                  (short_preview e);
+                Eio.Time.sleep (Eio_context.get_clock ()) delay;
+                retry_loop ~max_context ~attempt:(attempt + 1)
+                  ~is_retry:true ~overflow_retry_used
+            | Error e when (not overflow_retry_used)
+                           && should_attempt_context_overflow_retry e -> (
+                match
+                  recover_context_overflow_retry ~meta ~base_dir
+                    ~primary_max_context ~error:e
+                with
+                | Some retry_max_context ->
+                    Eio.Fiber.yield ();
+                    retry_loop ~max_context:retry_max_context ~attempt:1
+                      ~is_retry:true ~overflow_retry_used:true
+                | None -> Error e)
+            | Error e -> Error e
+          in
+          retry_loop ~max_context:primary_max_context ~attempt:1
+            ~is_retry:false ~overflow_retry_used:false)
       in
       match run_result with
       | Error e ->

@@ -873,6 +873,25 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         Yojson.Safe.Util.(
           json |> member "cascade" |> member "attempt_details_source" |> to_string))
 
+let test_context_overflow_limit_parses_common_oas_errors () =
+  check (option int) "available context size extracted" (Some 159671)
+    (UT.context_overflow_limit
+       "OpenAI returned 400: This model's maximum context length is 128000 tokens. However, your messages resulted in 193217 tokens. available context size (159671)");
+  check (option int) "missing digits" None
+    (UT.context_overflow_limit
+       "available context size () but message malformed");
+  check (option int) "non-overflow message" None
+    (UT.context_overflow_limit
+       "HTTP error: 503 Service Unavailable")
+
+let test_should_attempt_context_overflow_retry_only_for_overflow_errors () =
+  check bool "overflow string retries" true
+    (UT.should_attempt_context_overflow_retry
+       "provider error: available context size (32768) exceeded");
+  check bool "non-overflow string skips retry" false
+    (UT.should_attempt_context_overflow_retry
+       "Network error: Connection_reset")
+
 let test_metrics_persist_social_state_fields () =
   let result =
     make_run_result
@@ -1506,5 +1525,12 @@ let () =
               (UT.is_transient_network_error ""));
           test_case "overflow retry plan preserves generation" `Quick
             test_overflow_retry_plan_preserves_recovered_generation;
+        ] );
+      ( "context_overflow",
+        [
+          test_case "parses common OAS overflow errors" `Quick
+            test_context_overflow_limit_parses_common_oas_errors;
+          test_case "overflow retry gate only opens for overflow errors" `Quick
+            test_should_attempt_context_overflow_retry_only_for_overflow_errors;
         ] );
     ]

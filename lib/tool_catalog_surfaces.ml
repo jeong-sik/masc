@@ -256,12 +256,13 @@ let keeper_denied_surface_tools =
 let system_internal_surface_tools =
   [
     (* MCP protocol internals *)
-    "masc_mcp_session"; "masc_suspend"; "masc_listen"; "masc_pending_interrupts";
+    "masc_mcp_session"; "masc_suspend"; "masc_listen";
     (* Session lifecycle — auto-called *)
     "masc_init"; "masc_reset"; "masc_register_capabilities";
-    (* Governance pipeline — auto-executed *)
-    "masc_governance_set"; "masc_approve"; "masc_reject";
-    "masc_branch"; "masc_interrupt";
+    (* Governance pipeline — auto-executed (active tools only;
+       masc_approve/reject/branch/interrupt/pending_interrupts are Deprecated
+       in Tool_catalog — they shell out to the removed masc-checkpoint CLI) *)
+    "masc_governance_set";
     (* Concurrency control *)
     "masc_lock"; "masc_unlock";
     (* Heartbeat system loop *)

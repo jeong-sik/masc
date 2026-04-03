@@ -171,16 +171,20 @@ let test_keeper_internal_tools_have_schemas () =
 (* {1 SSOT Validation — Phase 4: no orphans, surface constraints} *)
 
 let test_no_orphaned_tools () =
-  (* Every registered tool schema must belong to at least one surface. *)
+  (* Every registered tool schema must belong to at least one surface,
+     except Deprecated tools which are intentionally removed from all surfaces. *)
   let on_any_surface name =
     List.exists (fun surface ->
       Tool_catalog.is_on_surface surface name
     ) Tool_catalog.all_surfaces
   in
+  let is_deprecated name =
+    List.exists (fun (n, _) -> String.equal n name) Tool_catalog.deprecated_tool_entries
+  in
   let orphaned =
     Config.raw_all_tool_schemas
     |> List.filter (fun (schema : Types.tool_schema) ->
-         not (on_any_surface schema.name))
+         not (on_any_surface schema.name) && not (is_deprecated schema.name))
     |> List.map (fun (schema : Types.tool_schema) -> schema.name)
   in
   if orphaned <> [] then

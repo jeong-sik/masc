@@ -339,7 +339,7 @@ let status_sections ?events (config : Room.config) (session : Team_session_types
   (summary, team_health, communication_metrics, orchestration_state, cascade_metrics)
 
 let session_status_json (config : Room.config) (session : Team_session_types.session) =
-  let events = Team_session_store.read_events ~max_events:2000 config session.session_id in
+  let events = Team_session_store.read_events ~max_events:200 config session.session_id in
   let worker_run_summary =
     let snapshot = worker_run_event_snapshot ~events config session in
     let recent_runs =

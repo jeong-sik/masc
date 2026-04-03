@@ -224,6 +224,77 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
       Alcotest.(check int) "lightweight recent_actions omitted" 0
         Yojson.Safe.Util.(json |> member "recent_actions" |> to_list |> List.length))
 
+let test_snapshot_lightweight_summary_caps_completed_sessions_by_recency () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let team = team_ctx env sw config "owner" in
+      let now = Time_compat.now () in
+      let update_session_exn session_id f =
+        match Team_session_store.update_session config session_id f with
+        | Ok _ -> ()
+        | Error err -> Alcotest.fail err
+      in
+      let running_session_id = start_session_exn team in
+      let paused_session_id = start_session_exn team in
+      update_session_exn paused_session_id (fun session ->
+          {
+            session with
+            status = Team_session_types.Paused;
+            updated_at_iso = iso_of_unix (now -. 2.0);
+          });
+      let completed_session started_at updated_at =
+        let session_id = start_session_exn team in
+        update_session_exn session_id (fun session ->
+            {
+              session with
+              status = Team_session_types.Completed;
+              started_at;
+              planned_end_at = started_at +. 120.0;
+              stopped_at = Some updated_at;
+              last_event_at = Some updated_at;
+              updated_at_iso = iso_of_unix updated_at;
+            });
+        session_id
+      in
+      let recent_long_session_id =
+        completed_session (now -. 10_000.0) (now -. 1.0)
+      in
+      let _recent_completed_a = completed_session (now -. 10.0) (now -. 10.0) in
+      let _recent_completed_b = completed_session (now -. 20.0) (now -. 20.0) in
+      let _recent_completed_c = completed_session (now -. 30.0) (now -. 30.0) in
+      let _recent_completed_d = completed_session (now -. 40.0) (now -. 40.0) in
+      let oldest_completed_session_id =
+        completed_session (now -. 50.0) (now -. 50.0)
+      in
+      let json =
+        Operator_control.snapshot_json ~view:"summary"
+          ~include_keepers:false ~include_messages:false ~include_command_plane:false
+          ~lightweight_summary:true
+          (operator_ctx env sw config "owner")
+      in
+      let session_ids =
+        Yojson.Safe.Util.(json |> member "sessions" |> member "items" |> to_list)
+        |> List.map (fun row -> Yojson.Safe.Util.(row |> member "session_id" |> to_string))
+      in
+      Alcotest.(check int) "lightweight summary keeps active plus 5 recent completed" 7
+        (List.length session_ids);
+      Alcotest.(check bool) "running session preserved" true
+        (List.mem running_session_id session_ids);
+      Alcotest.(check bool) "paused session preserved" true
+        (List.mem paused_session_id session_ids);
+      Alcotest.(check bool) "recency beats early start time" true
+        (List.mem recent_long_session_id session_ids);
+      Alcotest.(check bool) "oldest completed session capped out" false
+        (List.mem oldest_completed_session_id session_ids))
+
 let test_orchestra_room_core_shape () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

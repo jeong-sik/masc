@@ -735,7 +735,7 @@ let () =
       test_case "has tool_help" `Quick test_masc_mcp_tools_has_tool_help;
       test_case "omits tool_admin_snapshot" `Quick
         test_masc_mcp_tools_has_tool_admin_snapshot;
-      test_case "omits keeper_tool_catalog" `Quick
+      test_case "includes keeper_tool_catalog" `Quick
         test_masc_mcp_tools_has_keeper_tool_catalog;
       test_case "has tool_list" `Quick test_masc_mcp_tools_has_tool_list;
       test_case "has tool_grant" `Quick test_masc_mcp_tools_has_tool_grant;

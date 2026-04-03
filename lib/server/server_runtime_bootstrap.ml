@@ -15,23 +15,24 @@ let force_jsonl_fallback_env () =
 let requested_backend_mode () =
   Env_config_core.storage_type ()
 
-(* Tune GC for server workload: dashboard refresh loops create large
-   transient allocations (2GB+ for execution snapshot) that cause the
-   major heap to grow permanently.  Aggressive space_overhead triggers
-   more frequent major collections, and custom_major_ratio forces
-   compaction to return memory to the OS. *)
+(* GC tuning for long-running server with bursty allocation.
+
+   Dashboard refresh loops create 2GB+ transient allocations per cycle.
+   With aggressive GC settings (space_overhead=40), the major GC runs
+   frequently.  Each major GC slice walks the entire heap including
+   MADV_FREE'd pages on macOS, triggering page faults that freeze the
+   Eio event loop for seconds — blocking /health and all HTTP endpoints.
+
+   Fix: enlarge minor heap to reduce promotion rate, and relax major GC
+   pressure so slices are less frequent.  Verified: OCAMLRUNPARAM="s=16M,o=200"
+   keeps /health responsive under load.  Overridable via OCAMLRUNPARAM. *)
 let () =
   let open Gc in
   let ctrl = get () in
   set { ctrl with
-    (* Trigger major GC sooner to limit peak heap size.
-       Default 120 means heap can be 2.2x live data before collection.
-       40 limits to 1.4x, reducing peak RSS. *)
-    space_overhead = 40;
-    (* Compact more aggressively: default 500 means compact only when
-       heap is 6x the live data.  80 compacts at 1.8x, returning
-       memory to the OS faster after transient allocation spikes. *)
-    max_overhead = 80;
+    minor_heap_size = 2 * 1024 * 1024;  (* 2M words = 16MB; default 256K words *)
+    space_overhead = 200;               (* default 120; higher = less frequent major GC *)
+    max_overhead = 1_000_000;           (* disable auto-compaction; MADV_FREE is sufficient *)
   }
 
 let init_runtime_context env =

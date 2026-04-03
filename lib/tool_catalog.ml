@@ -195,6 +195,13 @@ let explicit_metadata : (string * metadata) list =
     ("masc_tempo_reset",
      deprecated ~implementation_status:Real
        "No surface, no external callers. Tempo feature never integrated into workflows.");
+    (* Broken tools: shell out to non-existent CLI. Deprecated 2026-04-03. See #4709. *)
+    ("masc_cost_log",
+     deprecated ~implementation_status:Real
+       "Shells out to masc-cost CLI which does not exist. Always fails at runtime.");
+    ("masc_cost_report",
+     deprecated ~implementation_status:Real
+       "Shells out to masc-cost CLI which does not exist. Always fails at runtime.");
     (* Semantic annotations for governance risk classification. *)
     ("masc_status", readonly_tool);
     ("masc_tasks", readonly_tool);

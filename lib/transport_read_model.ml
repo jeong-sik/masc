@@ -26,18 +26,52 @@ let ipaddr_is_unspecified = function
   | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
   | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
 
+let ipaddr_is_loopback = function
+  | Ipaddr.V4 addr ->
+      let octets = Ipaddr.V4.to_octets addr in
+      String.length octets = 4 && Char.code octets.[0] = 127
+  | Ipaddr.V6 addr ->
+      Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
+
 let is_unspecified_host host =
   match Ipaddr.of_string (String.trim host) with
   | Ok ip -> ipaddr_is_unspecified ip
   | Error _ -> false
 
+let is_canonical_loopback_alias host =
+  let normalized = String.trim host |> String.lowercase_ascii in
+  match normalized with
+  | "localhost" -> true
+  | _ -> (
+      match Ipaddr.of_string normalized with
+      | Ok (Ipaddr.V6 addr) -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
+      | Ok (Ipaddr.V4 _) -> false
+      | Error _ -> false)
+
 let normalize_advertised_host host =
-  if is_unspecified_host host then "127.0.0.1" else host
+  let trimmed = String.trim host in
+  if is_unspecified_host trimmed || is_canonical_loopback_alias trimmed then
+    "127.0.0.1"
+  else
+    trimmed
+
+let normalize_loopback_base_url base_url =
+  let trimmed = trim_trailing_slashes base_url in
+  let uri = Uri.of_string trimmed in
+  match Uri.host uri with
+  | Some host ->
+      let normalized_host = normalize_advertised_host host in
+      if String.equal normalized_host host then
+        trimmed
+      else
+        Uri.with_host uri (Some normalized_host) |> Uri.to_string
+        |> trim_trailing_slashes
+  | None -> trimmed
 
 let make_http_context ?(include_configured = false) ~base_url ~host
     ~allow_legacy_accept () =
   {
-    base_url = trim_trailing_slashes base_url;
+    base_url = normalize_loopback_base_url base_url;
     host = normalize_advertised_host host;
     allow_legacy_accept;
     include_configured;
@@ -52,7 +86,7 @@ let context_from_env ?(include_configured = false) ~allow_legacy_accept () =
     match Sys.getenv_opt "MASC_HTTP_BASE_URL" with
     | Some raw -> (
         match trim_nonempty raw with
-        | Some value -> trim_trailing_slashes value
+        | Some value -> normalize_loopback_base_url value
         | None -> default_base_url)
     | None -> default_base_url
   in

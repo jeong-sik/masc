@@ -55,6 +55,7 @@ val append_metrics_snapshot :
   message_count:int ->
   compaction:Keeper_exec_context.compaction_event ->
   handoff_json:Yojson.Safe.t option ->
+  ?deliberation_execution:Keeper_deliberation.execution_result ->
   unit ->
   unit
 
@@ -67,6 +68,12 @@ val broadcast_lifecycle_events :
 
 (** Detect transient TCP/TLS errors eligible for retry. Exposed for testing. *)
 val is_transient_network_error : string -> bool
+
+(** Parse the provider-reported available context limit from an overflow error. *)
+val context_overflow_limit : string -> int option
+
+(** [true] when an error string should trigger overflow recovery handling. *)
+val should_attempt_context_overflow_retry : string -> bool
 
 val run_unified_turn :
   config:Room.config ->

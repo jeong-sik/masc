@@ -405,6 +405,7 @@ let handle_keeper_status ctx args : tool_result =
                 empty_tool_audit_snapshot with
                 latest_tool_call_count =
                   (if has_runtime_activity then Some 0 else None);
+                latest_action_source = None;
                 tool_audit_source =
                   (if has_runtime_activity then Some "keeper_runtime_meta" else None);
                 tool_audit_at =
@@ -477,6 +478,8 @@ let handle_keeper_status ctx args : tool_result =
              string_list_to_json tool_audit_snapshot.latest_tool_names);
            ("latest_tool_call_count",
              Json_util.int_opt_to_json tool_audit_snapshot.latest_tool_call_count);
+           ("latest_action_source",
+             Json_util.string_opt_to_json tool_audit_snapshot.latest_action_source);
            ("tool_audit_source",
              Json_util.string_opt_to_json tool_audit_snapshot.tool_audit_source);
            ("tool_audit_at",

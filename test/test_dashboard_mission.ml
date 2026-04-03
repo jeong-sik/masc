@@ -645,6 +645,7 @@ let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
                 ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_vote" ]);
                 ("latest_tool_names", `List []);
                 ("latest_tool_call_count", `Null);
+                ("latest_action_source", `String "structured_model");
                 ("tool_audit_source", `Null);
                 ("tool_audit_at", `Null);
               ];
@@ -658,6 +659,8 @@ let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
         ((brief |> member "allowed_tool_names" |> to_list) <> []);
       check string "heartbeat task source wins in keeper brief" "heartbeat_task"
         (brief |> member "tool_audit_source" |> to_string);
+      check string "heartbeat task preserves fallback action source" "structured_model"
+        (brief |> member "latest_action_source" |> to_string);
       check bool "no observed tools without evidence" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
 
@@ -678,6 +681,7 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
           [
             ("ts", `String (Types.now_iso ()));
             ("selected_mode", `String "text_response");
+            ("action_source", `String "structured_model");
             ("tool_call_count", `Int 0);
             ("tools_used", `List []);
           ]);
@@ -704,6 +708,9 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
       in
       check string "decision log source present in keeper brief" "keeper_decision_log"
         (brief |> member "tool_audit_source" |> to_string);
+      check string "decision log action source present in keeper brief"
+        "structured_model"
+        (brief |> member "latest_action_source" |> to_string);
       check int "decision log zero tool count preserved" 0
         (brief |> member "latest_tool_call_count" |> to_int);
       check bool "decision log still reports empty tool list" true

@@ -20,7 +20,8 @@ val usage_of_response : Oas_response.api_response -> Agent_sdk.Types.api_usage
 (** Measure wall-clock latency of a thunk in milliseconds. *)
 val timed : (unit -> 'a) -> 'a * int
 
-(** Replace invalid UTF-8 bytes with U+FFFD. *)
+(** Replace invalid UTF-8 bytes with U+FFFD and replace disallowed ASCII
+    control characters with spaces (except LF/CR/TAB). *)
 val sanitize_text_utf8 : string -> string
 
 (** Sanitize text content blocks in a message. *)

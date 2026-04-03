@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [2.217.1] - 2026-04-03
+
+### Changed
+- **Dashboard toast/icon refresh** -- replace raw toast glyphs with lucide icons, icon close affordance, and tighter toast presentation for dashboard notifications.
+
+### Deprecated
+- None.
+
 ## [2.217.0] - 2026-04-02
 
 ### Added

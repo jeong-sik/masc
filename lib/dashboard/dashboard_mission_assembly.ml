@@ -25,6 +25,9 @@ let keeper_tool_audit_json_fields config keeper agent_name =
     | Some _ as value -> value
     | None -> None
   in
+  let fallback_action_source =
+    trim_to_option (string_field "latest_action_source" keeper)
+  in
   let fallback_at =
     trim_to_option (string_field "tool_audit_at" keeper)
   in
@@ -50,8 +53,16 @@ let keeper_tool_audit_json_fields config keeper agent_name =
           }
     | None -> None
   in
+  let fallback_latest_action_source =
+    match file_snapshot with
+    | Some snapshot -> (
+        match snapshot.latest_action_source with
+        | Some _ as value -> value
+        | None -> fallback_action_source)
+    | None -> fallback_action_source
+  in
   let allowed_tool_names, latest_tool_names, latest_tool_call_count,
-      tool_audit_source, tool_audit_at =
+      latest_action_source, tool_audit_source, tool_audit_at =
     match A2a_tools.latest_heartbeat_task agent_name,
           A2a_tools.latest_heartbeat_result agent_name with
     | Some task, Some result ->
@@ -59,20 +70,28 @@ let keeper_tool_audit_json_fields config keeper agent_name =
           ( task.allowed_tools,
             result.tool_names,
             Some result.tool_call_count,
+            fallback_latest_action_source,
             Some "heartbeat_task_pending_result",
             Some task.created_at )
         else
           ( task.allowed_tools,
             result.tool_names,
             Some result.tool_call_count,
+            fallback_latest_action_source,
             Some "heartbeat_result",
             Some result.updated_at )
     | Some task, None ->
-        (task.allowed_tools, [], None, Some "heartbeat_task", Some task.created_at)
+        ( task.allowed_tools,
+          [],
+          None,
+          fallback_latest_action_source,
+          Some "heartbeat_task",
+          Some task.created_at )
     | None, Some result ->
         ( fallback_allowed,
           result.tool_names,
           Some result.tool_call_count,
+          fallback_latest_action_source,
           Some "heartbeat_result",
           Some result.updated_at )
     | None, None ->
@@ -81,6 +100,7 @@ let keeper_tool_audit_json_fields config keeper agent_name =
             ( fallback_allowed,
               snapshot.latest_tool_names,
               snapshot.latest_tool_call_count,
+              snapshot.latest_action_source,
               snapshot.tool_audit_source,
               snapshot.tool_audit_at )
         | None ->
@@ -93,15 +113,21 @@ let keeper_tool_audit_json_fields config keeper agent_name =
                 max acc e.Keeper_tools_oas.last_used_at) 0.0 tracked in
               let at_str = if latest_at > 0.0
                 then Some (Dashboard_utils.iso_of_unix latest_at) else None in
-              (fallback_allowed, names, Some total, Some "keeper_dispatch", at_str)
+              (fallback_allowed, names, Some total, None, Some "keeper_dispatch", at_str)
             else
-              (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at))
+              ( fallback_allowed,
+                fallback_latest,
+                fallback_count,
+                fallback_action_source,
+                fallback_source,
+                fallback_at ))
   in
   [
     ("allowed_tool_names", string_list_json allowed_tool_names);
     ("latest_tool_names", string_list_json latest_tool_names);
     ( "latest_tool_call_count",
       option_to_json (fun value -> `Int value) latest_tool_call_count );
+    ("latest_action_source", json_string_option latest_action_source);
     ("tool_audit_source", json_string_option tool_audit_source);
     ("tool_audit_at", json_string_option tool_audit_at);
   ]

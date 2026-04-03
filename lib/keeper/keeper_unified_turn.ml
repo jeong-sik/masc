@@ -10,6 +10,15 @@ open Keeper_types
 open Keeper_exec_context
 module Social = Keeper_social_model
 
+let substring_matches_at ~(needle : string) (haystack : string) start_idx =
+  let needle_len = String.length needle in
+  let rec loop offset =
+    if offset = needle_len then true
+    else if haystack.[start_idx + offset] <> needle.[offset] then false
+    else loop (offset + 1)
+  in
+  loop 0
+
 let string_contains_substring ~(needle : string) (haystack : string) : bool =
   let needle_len = String.length needle in
   let hay_len = String.length haystack in
@@ -18,7 +27,7 @@ let string_contains_substring ~(needle : string) (haystack : string) : bool =
   else
     let rec loop i =
       if i + needle_len > hay_len then false
-      else if String.sub haystack i needle_len = needle then true
+      else if substring_matches_at ~needle haystack i then true
       else loop (i + 1)
     in
     loop 0
@@ -28,9 +37,19 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
     ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
-(** Detect transient TCP/TLS errors that warrant retry with backoff.
-    These patterns match OAS cascade error messages for connection-level failures.
-    See #4523: Connection_reset/Broken_pipe/EOF from idle TCP teardown. *)
+let find_substring ~(needle : string) (haystack : string) : int option =
+  let needle_len = String.length needle in
+  let hay_len = String.length haystack in
+  let rec loop i =
+    if needle_len = 0 then Some 0
+    else if i + needle_len > hay_len then None
+    else if substring_matches_at ~needle haystack i then Some i
+    else loop (i + 1)
+  in
+  loop 0
+
+(** Detect transient TCP/TLS errors that warrant retry with short backoff.
+    These patterns match OAS cascade error messages for connection-level failures. *)
 let transient_error_patterns =
   [ "Connection_reset"; "Broken pipe"; "End_of_file";
     "connection closed"; "Connection refused" ]
@@ -50,6 +69,70 @@ let max_transient_retries = 2
     Delays: 1s, 2s — total wait 3s before giving up. *)
 let transient_backoff_sec (attempt : int) : float =
   Float.min 4.0 (1.0 *. Float.of_int (1 lsl (attempt - 1)))
+
+let context_overflow_anchor = "available context size ("
+
+let context_overflow_limit (msg : string) : int option =
+  let lowered = String.lowercase_ascii msg in
+  match find_substring ~needle:context_overflow_anchor lowered with
+  | None -> None
+  | Some anchor_idx ->
+      let start_idx = anchor_idx + String.length context_overflow_anchor in
+      let rec consume_digits idx =
+        if idx >= String.length lowered then idx
+        else
+          match lowered.[idx] with
+          | '0' .. '9' -> consume_digits (idx + 1)
+          | _ -> idx
+      in
+      let end_idx = consume_digits start_idx in
+      if end_idx = start_idx then None
+      else
+        String.sub lowered start_idx (end_idx - start_idx)
+        |> int_of_string_opt
+
+let should_attempt_context_overflow_retry (msg : string) : bool =
+  Option.is_some (context_overflow_limit msg)
+
+type overflow_retry_plan = {
+  retry_max_context : int;
+  retry_generation : int;
+}
+
+let recover_context_overflow_retry
+    ~(meta : keeper_meta)
+    ~(base_dir : string)
+    ~(primary_max_context : int)
+    ~(error : string) : overflow_retry_plan option =
+  match context_overflow_limit error with
+  | None -> None
+  | Some actual_limit ->
+      let retry_max_context =
+        if primary_max_context <= 0 then actual_limit
+        else min primary_max_context actual_limit
+      in
+      let model = Keeper_exec_context.checkpoint_model_of_meta meta in
+      match
+        Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
+          ~base_dir ~meta ~model
+          ~primary_model_max_tokens:retry_max_context
+      with
+      | Some recovery ->
+          Log.Keeper.warn
+            "%s: context overflow retry prepared with compacted checkpoint (%d->%d tokens, max_context=%d, generation=%d)"
+            meta.name recovery.compaction.before_tokens
+            recovery.compaction.after_tokens
+            retry_max_context recovery.turn_generation;
+          Some
+            {
+              retry_max_context;
+              retry_generation = recovery.turn_generation;
+            }
+      | None ->
+          Log.Keeper.warn
+            "%s: context overflow detected but checkpoint recovery was unavailable: %s"
+            meta.name (short_preview error);
+          None
 
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
@@ -118,6 +201,7 @@ let append_decision_record
     ~(outcome : string)
     ~(selected_mode : string)
     ?social_state
+    ?deliberation_execution
     ?(result : Keeper_agent_run.run_result option = None)
     ?error
     () : unit =
@@ -203,6 +287,17 @@ let append_decision_record
         ("tools_used", `List (List.map (fun s -> `String s) tools_used));
         ("claim_was_available", `Bool (observation.unclaimed_task_count > 0));
         ("claim_executed", `Bool claim_executed);
+        ( "action_source",
+          match deliberation_execution with
+          | Some execution ->
+              Keeper_deliberation.action_source_of_execution_result execution
+              |> Keeper_deliberation.action_source_to_json
+          | None -> `Null );
+        ( "deliberation_execution",
+          match deliberation_execution with
+          | Some execution ->
+              Keeper_deliberation.execution_result_to_json execution
+          | None -> `Null );
         ( "response_preview",
           match response_preview with
           | Some preview -> `String preview
@@ -366,7 +461,8 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     ~(context_max : int)
     ~(message_count : int)
     ~(compaction : Keeper_exec_context.compaction_event)
-    ~(handoff_json : Yojson.Safe.t option) () : unit =
+    ~(handoff_json : Yojson.Safe.t option)
+    ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
   let work_kind =
@@ -375,27 +471,6 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     else "noop"
   in
   let metrics_store = keeper_metrics_store config meta.name in
-  let cascade_json =
-    match result.cascade_observation with
-    | Some obs -> Oas_worker.cascade_observation_to_json obs
-    | None ->
-        `Assoc
-          [
-            ("cascade_name", `String meta.cascade_name);
-            ("configured_labels", `List []);
-            ("candidate_models", `List []);
-            ("primary_model", `Null);
-            ("selected_model", `String result.model_used);
-            ("selected_model_raw", `String result.model_used);
-            ("selected_index", `Null);
-            ("fallback_hops", `Null);
-            ("fallback_applied", `Bool false);
-            ("attempts", `List []);
-            ("fallback_events", `List []);
-            ("attempt_details_available", `Bool false);
-            ("attempt_details_source", `String "no_oas_observation");
-          ]
-  in
   let snapshot =
     `Assoc
       [
@@ -407,7 +482,6 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("trace_id", `String meta.runtime.trace_id);
         ("generation", `Int turn_generation);
         ("model_used", `String result.model_used);
-        ("cascade", cascade_json);
         ( "usage",
           `Assoc
             [
@@ -435,6 +509,21 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
         ("work_kind", `String work_kind);
         ("tool_call_count", `Int result.tool_calls_made);
         ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
+        ( "action_source",
+          match deliberation_execution with
+          | Some execution ->
+              Keeper_deliberation.action_source_of_execution_result execution
+              |> Keeper_deliberation.action_source_to_json
+          | None -> `Null );
+        ( "deliberation_execution",
+          match deliberation_execution with
+          | Some execution ->
+              Keeper_deliberation.execution_result_to_json execution
+          | None -> `Null );
+        ("cascade",
+         match result.cascade_observation with
+         | Some observation -> Oas_worker.cascade_observation_to_json observation
+         | None -> `Null);
         ("snapshot_source", `String snapshot_source);
         ("memory_check", memory_check_default_json ());
         ("handoff_performed",
@@ -601,18 +690,14 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
            No dynamic_context needed here. *)
         { system_prompt; dynamic_context = "" }
       in
-      (* 5. Run via OAS Agent.run() with transient-error retry.
-         Exponential backoff (1s, 2s, 4s) up to max_transient_retries.
-         OAS already retries 3x per provider internally; this outer loop
-         covers simultaneous backend failures (e.g. TCP keepalive expiry
-         across all providers).  See #4523. *)
+      (* 5. Run via OAS Agent.run() with transient-error retry *)
       let run_result, latency_ms =
         Keeper_exec_context.timed (fun () ->
-          let do_run ?(is_retry = false) () =
-            Keeper_agent_run.run_turn ~config ~meta ~base_dir
-              ~max_context:primary_max_context ~build_turn_prompt
+          let do_run ~run_meta ~max_context ~run_generation ~is_retry =
+            Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
+              ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:"keeper_unified"
-              ~generation ~max_turns
+              ~generation:run_generation ~max_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
@@ -620,8 +705,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_retry
               ()
           in
-          let rec retry_loop attempt =
-            match do_run ~is_retry:(attempt > 1) () with
+          let rec retry_loop ~run_meta ~max_context ~run_generation
+              ~attempt ~is_retry
+              ~overflow_retry_used =
+            match do_run ~run_meta ~max_context ~run_generation ~is_retry with
             | Ok _ as ok -> ok
             | Error e when is_transient_network_error e
                            && attempt <= max_transient_retries ->
@@ -631,10 +718,36 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   meta.name attempt max_transient_retries delay
                   (short_preview e);
                 Eio.Time.sleep (Eio_context.get_clock ()) delay;
-                retry_loop (attempt + 1)
-            | result -> result
+                retry_loop ~run_meta ~max_context ~run_generation
+                  ~attempt:(attempt + 1)
+                  ~is_retry:true ~overflow_retry_used
+            | Error e when (not overflow_retry_used)
+                           && should_attempt_context_overflow_retry e -> (
+                match
+                  recover_context_overflow_retry ~meta ~base_dir
+                    ~primary_max_context ~error:e
+                with
+                | Some retry_plan ->
+                    let retry_meta =
+                      if retry_plan.retry_generation = run_meta.runtime.generation
+                      then run_meta
+                      else
+                        map_runtime
+                          (fun rt ->
+                            { rt with generation = retry_plan.retry_generation })
+                          run_meta
+                    in
+                    Eio.Fiber.yield ();
+                    retry_loop ~run_meta:retry_meta
+                      ~max_context:retry_plan.retry_max_context
+                      ~run_generation:retry_plan.retry_generation ~attempt:1
+                      ~is_retry:true ~overflow_retry_used:true
+                | None -> Error e)
+            | Error e -> Error e
           in
-          retry_loop 1)
+          retry_loop ~run_meta:meta ~max_context:primary_max_context
+            ~run_generation:generation ~attempt:1
+            ~is_retry:false ~overflow_retry_used:false)
       in
       match run_result with
       | Error e ->

@@ -68,6 +68,10 @@ let () =
           Alcotest.test_case "best first search blocks and routes research pipeline"
             `Quick
             Test_command_plane_v2_search.test_best_first_search_blocks_and_routes_research_pipeline;
+          Alcotest.test_case
+            "best first search skips units blocked by tool allowlist"
+            `Quick
+            Test_command_plane_v2_search.test_best_first_search_skips_units_blocked_by_tool_allowlist;
           Alcotest.test_case "invalid search strategy is rejected" `Quick
             Test_command_plane_v2_search.test_invalid_search_strategy_is_rejected;
           Alcotest.test_case
@@ -87,5 +91,9 @@ let () =
             Test_command_plane_v2_policy_inputs.test_unit_reparent_requires_unit_id;
           Alcotest.test_case "policy update requires unit_id" `Quick
             Test_command_plane_v2_policy_inputs.test_policy_update_requires_unit_id;
+          Alcotest.test_case
+            "start operation rejects unit policy model mismatch"
+            `Quick
+            Test_command_plane_v2_policy_inputs.test_start_operation_rejects_unit_policy_model_mismatch;
         ] );
     ]

@@ -200,6 +200,7 @@ let keeper_denied_surface_tools =
     "masc_force_leave"; "masc_force_remove_agent";
     "masc_admin_reset"; "masc_admin_cleanup";
     "masc_gc_force"; "masc_config_set"; "masc_config_reset";
+    "masc_reset";
     "masc_spawn";
     "masc_operator_action"; "masc_operator_confirm";
     "masc_operator_judgment_write";

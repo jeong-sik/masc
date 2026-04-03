@@ -110,11 +110,15 @@ let stale_factor =
 exception Compute_timeout of string * bool
 
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
-    it and recomputing.  Must exceed the longest endpoint timeout (currently
-    120s for /execution) to avoid evicting slots mid-compute.  Bounds
-    worst-case latency to [max_wait_sec + compute_time]. *)
+    it and recomputing.
+
+    This must stay at or above the largest caller wait budget used with
+    [get_or_compute_with_timeout]; otherwise concurrent waiters can evict an
+    active [Computing { stale = None }] slot before their own wait budget is
+    exhausted, causing early failures and duplicate recomputation.  Keep this
+    above the current 120s caller budget. *)
 let max_wait_sec = 130.0
-let wait_poll_interval_sec = 0.1
+let wait_poll_interval_sec = 0.25
 
 (** Eio path: per-key locking with stampede protection + stale-while-revalidate.
 

@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { AlertTriangle } from 'lucide-preact'
 import { ActionButton } from './common/button'
 import { TextArea } from './common/input'
 import { EmptyState } from './common/empty-state'
@@ -75,7 +76,7 @@ export function GuardrailPane({
               ${order?.status === 'needs_human_gate'
                 ? html`
                     <div class="mt-4 flex flex-col gap-3 rounded-xl border border-warn/30 bg-warn/10 p-4 shadow-inner">
-                      <h4 class="text-[12px] font-bold text-warn uppercase tracking-wider">⚠️ 관리자 승인 대기</h4>
+                      <h4 class="text-[12px] font-bold text-warn uppercase tracking-wider flex items-center gap-1.5"><${AlertTriangle} size=${14} /> 관리자 승인 대기</h4>
                       <div class="text-text-strong text-[13px] leading-relaxed">이 집행 명령은 고위험 작업으로 분류되어 승인이 필요합니다.</div>
                       <div class="mt-1.5 flex gap-2.5">
                         <button type="button" class="rounded-xl border border-ok/30 bg-ok/20 px-4 py-2 text-[13px] font-semibold text-ok transition-all duration-200 hover:bg-ok/30 disabled:opacity-50 shadow-sm shadow-black/15" onClick=${() => respondToExecutionOrder('confirm')} disabled=${governanceActing.value}>

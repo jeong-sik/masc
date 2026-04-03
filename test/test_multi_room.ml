@@ -62,13 +62,25 @@ let read_lines path =
       in
       loop [])
 
-let current_event_log_path config =
-  let tm = Unix.gmtime (Unix.gettimeofday ()) in
-  Filename.concat
-    (Filename.concat
-       (Filename.concat (Room.masc_dir config) "events")
-       (Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1)))
-    (Printf.sprintf "%02d.jsonl" tm.tm_mday)
+(* Find the most recent .jsonl event file under .masc/events/ rather than
+   computing the path from wall-clock time, which is racy around UTC
+   day/month boundaries (#4792 review). *)
+let find_latest_event_log config =
+  let events_dir = Filename.concat (Room.masc_dir config) "events" in
+  let rec collect_jsonl dir =
+    if not (Sys.file_exists dir) then []
+    else
+      Sys.readdir dir |> Array.to_list
+      |> List.concat_map (fun name ->
+           let path = Filename.concat dir name in
+           if Sys.is_directory path then collect_jsonl path
+           else if Filename.check_suffix name ".jsonl" then [ path ]
+           else [])
+  in
+  let files = collect_jsonl events_dir in
+  match List.sort (fun a b -> compare b a) files with
+  | latest :: _ -> Some latest
+  | [] -> None
 
 let test_join_in_room_sanitizes_invalid_room_id () =
   with_config (fun config ->
@@ -88,7 +100,11 @@ let test_join_in_room_sanitizes_invalid_room_id () =
             (str_contains result "room default");
           check (option string) "hook sees sanitized room label" (Some "default")
             !captured_room_id;
-          let event_log = current_event_log_path config in
+          let event_log =
+            match find_latest_event_log config with
+            | Some path -> path
+            | None -> fail "expected event log file under .masc/events/"
+          in
           let last_event =
             match read_lines event_log |> List.rev with
             | last_event :: _ -> last_event

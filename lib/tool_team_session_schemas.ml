@@ -694,23 +694,4 @@ After masc_team_session_stop or masc_team_session_report.";
             ("required", `List [ `String "session_id" ]);
           ];
     };
-    {
-      name = "masc_team_session_verify_trace";
-      description =
-        "Verify worker-run trace evidence for a team session using stored worker run snapshots. \
-Use when validating that spawned workers actually ran and produced the claimed results. \
-After masc_team_session_prove; the final verification step in the proof chain.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("session_id", `Assoc [ ("type", `String "string") ]);
-                  ("worker_run_id", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "session_id" ]);
-          ];
-    };
   ]

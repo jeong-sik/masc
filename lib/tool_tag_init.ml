@@ -75,9 +75,6 @@ let register_all () =
     "masc_heartbeat_stop"; "masc_heartbeat_list";
   ];
 
-  (* Mod_hat physically removed (#4709).
-     Mod_cost and Mod_rate_limit are fully covered by schemas. *)
-
   (* Mod_suspend: fully covered by schemas — no entries needed *)
 
   (* ── Mod_library: Tool_library ────────────────────────────────── *)

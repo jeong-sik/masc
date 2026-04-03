@@ -2,6 +2,7 @@
 // Extracted from autoresearch.ts to separate state from UI.
 
 import { signal, computed } from '@preact/signals'
+import { requestConfirm } from './common/confirm-dialog'
 import { createAsyncResource } from '../lib/async-state'
 import {
   deleteAutoresearchLoop,
@@ -131,12 +132,12 @@ export async function retrySelectedLoop() {
 export async function deleteSelectedLoop() {
   const loop = selectedLoop.value
   if (!loop?.loop_id) return
-  if (typeof globalThis.confirm === 'function') {
-    const confirmed = globalThis.confirm(
-      `루프 ${loop.loop_id}와 연결된 worktree/branch/results를 삭제합니다. 계속할까요?`,
-    )
-    if (!confirmed) return
-  }
+  const confirmed = await requestConfirm({
+    title: '루프 삭제',
+    message: `루프 ${loop.loop_id}와 연결된 worktree/branch/results를 삭제합니다. 계속할까요?`,
+    tone: 'danger'
+  })
+  if (!confirmed) return
   await runLoopAction(() => deleteAutoresearchLoop(loop.loop_id))
 }
 

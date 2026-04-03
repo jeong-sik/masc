@@ -929,17 +929,6 @@ let test_keeper_dispatch_auxiliary_surfaces_smoke () =
             ])
       in
       check bool "keeper up ok" true ok;
-      let ok, trajectory_body =
-        dispatch "masc_keeper_trajectory"
-          (`Assoc [ ("name", `String kname); ("limit", `Int 5) ])
-      in
-      check bool "keeper trajectory ok" true ok;
-      check bool "trajectory body non-empty" true (String.length trajectory_body > 0);
-      let ok, eval_body =
-        dispatch "masc_keeper_eval" (`Assoc [ ("name", `String kname) ])
-      in
-      check bool "keeper eval ok" true ok;
-      check bool "eval body non-empty" true (String.length eval_body > 0);
       let ok, _ =
         dispatch "masc_keeper_down" (`Assoc [ ("name", `String kname) ])
       in

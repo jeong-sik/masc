@@ -352,7 +352,7 @@ type overflow_retry_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
   compaction : compaction_event;
   turn_generation : int;
-}
+} [@@warning "-69"]
 
 let maybe_rollover_oas_handoff
     ~(base_dir : string)
@@ -817,7 +817,7 @@ let forced_overflow_retry_meta
       };
   }
 
-let recover_latest_checkpoint_for_overflow_retry
+let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(model : string)

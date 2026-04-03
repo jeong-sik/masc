@@ -3,10 +3,9 @@
 open Alcotest
 
 module Subscriptions = Masc_mcp.Subscriptions
-module Encryption = Masc_mcp.Encryption
 
 (* Initialize RNG for crypto *)
-let () = Encryption.initialize ()
+let () = Mirage_crypto_rng_unix.use_default ()
 
 (* Helper: check if s2 is substring of s1 *)
 let contains s1 s2 =

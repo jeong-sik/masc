@@ -1,6 +1,6 @@
 (** Tool_suspend - Agent suspension and circuit breaker tools
 
-    Implements masc_suspend and masc_circuit_status handlers.
+    Implements masc_suspend handler and circuit breaker check_can_join.
     Part of MASC Social v4 Tier 1 security layer.
 
     @since 0.6.0
@@ -200,22 +200,6 @@ Requires admin privileges or room owner status.";
       ("required", `List [`String "target_agent"; `String "reason"]);
     ];
   };
-  {
-    name = "masc_circuit_status";
-    description = "Check the circuit breaker status for an agent. \
-Shows if the agent is blocked due to repeated failures. \
-Circuit states: closed (normal), half_open (testing), open (blocked). \
-Open state includes remaining cooldown time.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Agent ID to check (optional, defaults to caller)");
-        ]);
-      ]);
-    ];
-  };
 ]
 
 (** {1 Dispatch} *)
@@ -223,7 +207,6 @@ Open state includes remaining cooldown time.";
 let dispatch ctx ~name ~args =
   match name with
   | "masc_suspend" -> Some (handle_suspend ctx args)
-  | "masc_circuit_status" -> Some (handle_circuit_status ctx args)
   | _ -> None
 
 (** {1 Blacklist Check for Join} *)

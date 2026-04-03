@@ -377,11 +377,14 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
  *  Shared by doFetchExecution (HTTP) and SSE execution_snapshot handler. */
 export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void {
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
-  const previousRoom = serverStatus.value?.room
+  const previousNamespace = serverStatus.value?.namespace
   if (normalizedStatus) {
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
   }
-  const roomChanged = previousRoom != null && normalizedStatus?.room != null && previousRoom !== normalizedStatus.room
+  const roomChanged =
+    previousNamespace != null
+    && normalizedStatus?.namespace != null
+    && previousNamespace !== normalizedStatus.namespace
   const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
     .map(normalizeAgent)
     .filter((row): row is Agent => row !== null)

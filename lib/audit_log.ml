@@ -3,8 +3,6 @@
     Writes audit events to .masc/audit.jsonl for security monitoring.
     JSONL format for grep-ability and stream processing.
 
-    Complements tool_audit.ml which handles reading/querying.
-
     Security basis:
     - Open Challenges in MAS Security (arxiv:2505.02077v1)
     - Immutable audit trails for post-incident analysis

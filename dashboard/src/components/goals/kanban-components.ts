@@ -9,6 +9,7 @@ import { ActionButton } from '../common/button'
 import { Card } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
+import { requestConfirm } from '../common/confirm-dialog'
 import { tasksByStatus, refreshExecution, executionLoading, executionLoaded, executionError } from '../../store'
 import { deleteTask } from '../../api/actions'
 import type { Task } from '../../types'
@@ -70,7 +71,12 @@ export function KanbanCard({ task }: { task: Task }) {
 
   async function handleDelete(e: Event) {
     e.stopPropagation()
-    if (!confirm(`"${task.title}" 태스크를 삭제하시겠습니까?`)) return
+    const confirmed = await requestConfirm({
+      title: '태스크 삭제',
+      message: `"${task.title}" 태스크를 삭제하시겠습니까?`,
+      tone: 'danger'
+    })
+    if (!confirmed) return
     deletingTaskId.value = task.id
     try {
       await deleteTask(task.id)

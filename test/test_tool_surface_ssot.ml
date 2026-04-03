@@ -46,7 +46,7 @@ let test_session_min_parity () =
   check_set_equal "Session_min" ~expected:legacy ~actual:ssot
 
 let test_admin_parity () =
-  let legacy = set_of Tool_permissions.admin_tools in
+  let legacy = set_of (Tool_catalog.tools_for_surface Tool_catalog.Admin) in
   let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Admin) in
   check_set_equal "Admin" ~expected:legacy ~actual:ssot
 

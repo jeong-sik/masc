@@ -48,7 +48,7 @@ export function SessionBriefCard({
               <div class="mission-status-dot ${liveStateClass(brief.status, brief.health)} ${dotStateBg(liveStateClass(brief.status, brief.health))}"></div>
               <strong>${brief.goal}</strong>
             </div>
-            <div class="text-[var(--text-muted)] text-[13px] mt-1">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
+            <div class="text-[var(--text-muted)] text-[13px] mt-1">${brief.session_id}${brief.namespace ? ` · ${brief.namespace}` : ''}</div>
           </div>
           <${StatusChip} label=${statusLabel(brief.status)} tone=${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)} />
         </div>
@@ -140,7 +140,7 @@ export function SessionDetailCard({
     <${Card} title="세션 상세" class="mission-list-card rounded-xl">
       <div class="grid gap-1.5 mb-4">
         <h3 class="m-0 text-[var(--text-strong)] text-lg">${session.goal}</h3>
-        <p class="m-0 text-[var(--text-body)] leading-normal">${session.session_id}${session.room ? ` · ${session.room}` : ''}</p>
+        <p class="m-0 text-[var(--text-body)] leading-normal">${session.session_id}${session.namespace ? ` · ${session.namespace}` : ''}</p>
       </div>
 
       ${error ? html`<div class="grid gap-1.5">${error}</div>` : null}

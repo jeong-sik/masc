@@ -6,23 +6,23 @@ import {
 } from './runtime-counts'
 
 describe('resolveRuntimeCounts', () => {
-  it('uses room-truth counts while execution is still warming', () => {
+  it('uses namespace-truth counts while execution is still warming', () => {
     expect(resolveRuntimeCounts({
       executionLoaded: false,
       agentsCount: 0,
       keepersCount: 0,
-      roomTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
+      namespaceTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
       shellCounts: { agents: 1, keepers: 1, tasks: 4 },
     })).toEqual({
       agents: 2,
       keepers: 3,
       tasks: 12,
       totalRuntimes: 5,
-      source: 'room-truth',
+      source: 'namespace-truth',
     })
   })
 
-  it('falls back to shell counts when room-truth is unavailable', () => {
+  it('falls back to shell counts when namespace-truth is unavailable', () => {
     expect(resolveRuntimeCounts({
       executionLoaded: false,
       agentsCount: 0,
@@ -43,7 +43,7 @@ describe('resolveRuntimeCounts', () => {
       agentsCount: 2,
       keepersCount: 3,
       tasksCount: 1,
-      roomTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
+      namespaceTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
     })).toEqual({
       agents: 2,
       keepers: 3,
@@ -58,13 +58,13 @@ describe('resolveRuntimeCounts', () => {
       executionLoaded: true,
       agentsCount: 0,
       keepersCount: 0,
-      roomTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
+      namespaceTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
     })).toEqual({
       agents: 2,
       keepers: 3,
       tasks: 12,
       totalRuntimes: 5,
-      source: 'room-truth',
+      source: 'namespace-truth',
     })
   })
 })
@@ -72,7 +72,7 @@ describe('resolveRuntimeCounts', () => {
 describe('runtimeCountSourceLabel', () => {
   it('maps count source ids to user-facing labels', () => {
     expect(runtimeCountSourceLabel('execution')).toBe('execution 상세')
-    expect(runtimeCountSourceLabel('room-truth')).toBe('room-truth')
+    expect(runtimeCountSourceLabel('namespace-truth')).toBe('namespace-truth')
     expect(runtimeCountSourceLabel('shell')).toBe('shell')
   })
 })

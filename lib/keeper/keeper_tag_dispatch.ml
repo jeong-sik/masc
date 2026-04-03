@@ -82,12 +82,6 @@ let dispatch
       Tool_a2a.dispatch { Tool_a2a.config; agent_name } ~name ~args
   | Mod_auth ->
       Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args
-  | Mod_audit ->
-      Tool_audit.dispatch { Tool_audit.config } ~name ~args
-  | Mod_cost ->
-      Tool_cost.dispatch { Tool_cost.agent_name } ~name ~args
-  | Mod_cache ->
-      Tool_cache.dispatch { Tool_cache.config } ~name ~args
   | Mod_run ->
       Tool_run.dispatch { Tool_run.config } ~name ~args
   | Mod_agent ->
@@ -117,11 +111,6 @@ let dispatch
         ~name ~args
   | Mod_library ->
       Tool_library.dispatch { Tool_library.agent_name } ~name ~args
-  | Mod_model_catalog ->
-      Tool_model_catalog.dispatch () ~name ~args
-  | Mod_goals ->
-      Tool_goals.dispatch { Tool_goals.config; agent_name;
-                            call_keeper_msg = None } ~name ~args
 
   (* ── Tier A special: Tool_shard returns Yojson.Safe.t ──────── *)
 
@@ -143,13 +132,6 @@ let dispatch
         { Tool_task.config; agent_name;
           sw = Eio_context.get_switch_opt () }
         ~name ~args
-
-  | Mod_fire_task ->
-      (match require_sw () with
-       | Ok sw ->
-           Tool_fire_task.dispatch
-             { Tool_fire_task.config; agent_name; sw } ~name ~args
-       | Error e -> Some (false, e))
 
   | Mod_relay ->
       (match require_sw () with
@@ -240,10 +222,6 @@ let dispatch
       Some (false,
         Printf.sprintf
           "tool '%s' requires MCP session context (not available in keeper)" name)
-
-  | Mod_rate_limit ->
-      Some (false,
-        Printf.sprintf "tool '%s' requires MCP session registry" name)
 
   (* ── Tier D: Cycle-breaking — modules that back-reference Keeper_exec_* *)
 

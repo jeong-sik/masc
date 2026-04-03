@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
+import { requestConfirm } from './common/confirm-dialog'
 import { isOfflineStatus } from '../lib/status-utils'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import type { Keeper, KeeperDiagnostic } from '../types'
@@ -425,7 +426,12 @@ export function KeeperRuntimeActions({
     }
   }
   const runShutdown = async () => {
-    if (!confirm(`${keeper.name} 키퍼를 종료합니까?`)) return
+    const confirmed = await requestConfirm({
+      title: '키퍼 종료',
+      message: `${keeper.name} 키퍼를 종료합니까?`,
+      tone: 'danger'
+    })
+    if (!confirmed) return
     keeperShuttingDown.value = { ...keeperShuttingDown.value, [keeper.name]: true }
     try {
       const response = await shutdownKeeper(keeper.name)

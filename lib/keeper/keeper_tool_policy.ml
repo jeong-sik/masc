@@ -37,7 +37,6 @@ let inject_masc_schemas (schemas : Types.tool_schema list) =
     else
       match Tool_dispatch.lookup_tag name with
       | Some Tool_dispatch.Mod_inline
-      | Some Tool_dispatch.Mod_rate_limit
       | Some Tool_dispatch.Mod_compact
       | Some Tool_dispatch.Mod_keeper
       | Some Tool_dispatch.Mod_operator

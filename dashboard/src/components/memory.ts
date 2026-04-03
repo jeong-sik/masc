@@ -3,6 +3,7 @@ import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
+import { requestConfirm } from './common/confirm-dialog'
 import { EmptyState } from './common/empty-state'
 import { Markdown } from './common/markdown'
 import { TextInput, TextArea } from './common/input'
@@ -285,7 +286,12 @@ function PostCard({ post }: { post: BoardPost }) {
 
   const handleDelete = async (event: Event) => {
     event.stopPropagation()
-    if (!confirm(`"${post.title}" 게시글을 삭제하시겠습니까?`)) return
+    const confirmed = await requestConfirm({
+      title: '게시글 삭제',
+      message: `"${post.title}" 게시글을 삭제하시겠습니까?`,
+      tone: 'danger'
+    })
+    if (!confirmed) return
     deletingPostId.value = post.id
     try {
       await deleteBoardPost(post.id)

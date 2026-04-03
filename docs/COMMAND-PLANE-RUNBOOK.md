@@ -8,8 +8,8 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 
 ## 개념 맵
 
-- `room`
-  - 조율 범위. `masc_set_room`은 worktree가 아니라 repo-root room semantics로 수렴한다.
+- `namespace`
+  - 조율 범위. tool 이름은 아직 `room`을 쓰지만 현재 구현은 project root 아래 `.masc/`의 single default namespace로 수렴한다.
 - `task`
   - backlog item. `masc_transition(action="claim")`은 backlog 소유권만 바꾸고 planning `current_task`는 자동으로 안 잡힌다. `masc_claim_next`는 current builds에서 planning `current_task`를 함께 맞춘다.
 - `operation`
@@ -21,7 +21,7 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 - `trace`
   - operation/checkpoint/dispatch/policy lineage.
 
-## Golden Path 1. Room / Task Hygiene
+## Golden Path 1. Namespace / Task Hygiene
 
 일반 작업이든 benchmark든 먼저 이 순서를 맞춘다.
 
@@ -30,12 +30,12 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 **Step-by-step**:
 
 1. `masc_set_room`
-   - repo root를 room으로 잡는다.
-   - worktree 경로를 줘도 room은 repo-root 기준으로 동작한다.
+   - project root를 coordination root로 잡는다.
+   - worktree 경로를 줘도 runtime namespace는 project-root 기준 default namespace로 수렴한다.
 2. `masc_join`
-   - agent identity와 capabilities를 room에 등록한다.
+   - agent identity와 capabilities를 default namespace에 등록한다.
 3. `masc_status`
-   - room 상태와 agent roster를 확인한다.
+   - namespace 상태와 agent roster를 확인한다.
 4. `masc_transition(action="claim")` 또는 `masc_claim_next`
    - 작업을 claim한다. backlog가 비어 있으면 먼저 `masc_add_task`.
 5. 필요 시 `masc_plan_set_task`
@@ -48,9 +48,9 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 - `masc_transition(action="claim") != current_task`
 - `masc_claim_next -> current_task` (current builds)
 - `join != heartbeat`
-- `worktree != room`
+- `worktree != namespace`
 
-이 셋을 헷갈리면 dashboard와 실제 room state가 어긋난다.
+이 셋을 헷갈리면 dashboard와 실제 coordination state가 어긋난다.
 
 ### 최소 MCP 예시
 
@@ -260,7 +260,7 @@ Content-Type: application/json
 
 1. `masc_operator_snapshot`
 2. `masc_operator_digest`
-   - room/team-session 상태를 operator-friendly하게 요약한다.
+   - namespace/team-session 상태를 operator-friendly하게 요약한다.
    - command-plane search/microarch signal은 여기서 먼저 읽고, 더 자세한 정보가 필요할 때만 full command-plane surface로 내려간다.
 3. `masc_operator_action`
 4. `masc_operator_confirm`
@@ -299,7 +299,7 @@ Content-Type: application/json
 
 ## Which Tool Now?
 
-- room이 안 잡혔다: `masc_set_room`
+- project namespace가 안 잡혔다: `masc_set_room`
 - agent가 roster에 없다: `masc_join`
 - task는 claimed인데 current_task가 없다: `masc_plan_set_task`
 - agent가 stale/zombie처럼 보인다: `masc_heartbeat`
@@ -311,13 +311,13 @@ Content-Type: application/json
 
 ## 자주 틀리는 포인트
 
-### 1. worktree를 room으로 착각
+### 1. worktree를 namespace로 착각
 
 증상:
-- worktree path로 `masc_set_room` 했는데 기존 room state가 그대로 보임
+- worktree path로 `masc_set_room` 했는데 기존 coordination state가 그대로 보임
 
 정리:
-- room은 repo root 기준이다
+- runtime namespace는 project root 기준 default 하나다
 - worktree는 code isolation일 뿐이다
 
 ### 2. claim만 하면 current_task가 잡힐 거라 생각

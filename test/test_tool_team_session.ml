@@ -94,14 +94,6 @@ let () =
             Test_tool_team_session_misc.test_unauthorized_session_access;
           Alcotest.test_case "final-done-delta-snapshot-stable" `Quick
             Test_tool_team_session_misc.test_final_done_delta_snapshot_stable;
-          Alcotest.test_case "verify-trace-uses-worker-run-raw-trace"
-            `Quick
-            Test_tool_team_session_misc.test_verify_trace_uses_worker_run_raw_trace;
-          Alcotest.test_case
-            "verify-trace-reports-summary-only-when-direct-evidence-missing"
-            `Quick
-            Test_tool_team_session_misc
-              .test_verify_trace_reports_summary_only_when_direct_evidence_missing;
           Alcotest.test_case
             "delegate-rejects-not-ready-worker-with-guidance" `Quick
             Test_tool_team_session_misc
@@ -122,9 +114,6 @@ let () =
             "delegate-rejects-unplanned-worker-container" `Quick
             Test_tool_team_session_misc
               .test_delegate_rejects_unplanned_worker_container;
-          Alcotest.test_case
-            "verify-trace-reports-summary-only-without-checkpoint" `Quick
-            Test_tool_team_session_misc.test_verify_trace_reports_summary_only_without_checkpoint;
           Alcotest.test_case "memory-backend-event-lock-serializes-fibers"
             `Quick
             Test_tool_team_session_flow

@@ -191,11 +191,6 @@ let test_permission_for_tool_websocket_discovery () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
-let test_permission_for_tool_local_runtime_models () =
-  match Auth.permission_for_tool "masc_local_runtime_models" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
 let test_permission_for_tool_runtime_verify () =
   match Auth.permission_for_tool "masc_runtime_verify" with
   | Some Types.CanReadState -> ()
@@ -504,11 +499,6 @@ let test_permission_for_tool_operator_confirm () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
-let test_permission_for_tool_persona_list () =
-  match Auth.permission_for_tool "masc_persona_list" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
 let test_permission_for_tool_voice_sessions () =
   match Auth.permission_for_tool "masc_voice_sessions" with
   | Some Types.CanReadState -> ()
@@ -762,7 +752,6 @@ let () =
       test_case "tool_revoke" `Quick test_permission_for_tool_revoke;
       test_case "tool_admin_snapshot" `Quick test_permission_for_tool_admin_snapshot;
       test_case "tool_admin_update" `Quick test_permission_for_tool_admin_update;
-      test_case "local_runtime_models" `Quick test_permission_for_tool_local_runtime_models;
       test_case "runtime_verify" `Quick test_permission_for_tool_runtime_verify;
       test_case "observe_swarm" `Quick test_permission_for_tool_observe_swarm;
       test_case "operator_snapshot" `Quick test_permission_for_tool_operator_snapshot;
@@ -772,7 +761,6 @@ let () =
         test_permission_for_tool_collaboration_evidence;
       test_case "operator_action" `Quick test_permission_for_tool_operator_action;
       test_case "operator_confirm" `Quick test_permission_for_tool_operator_confirm;
-      test_case "persona_list" `Quick test_permission_for_tool_persona_list;
       test_case "voice_sessions" `Quick test_permission_for_tool_voice_sessions;
       test_case "voice_speak" `Quick test_permission_for_tool_voice_speak;
       test_case "voice_ping_pong" `Quick test_permission_for_tool_voice_ping_pong;

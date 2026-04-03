@@ -1,5 +1,5 @@
 /* UI — toast animation, markdown content, think block, SPA refresh tabs, button.agent,
-   room-truth-card, monitor buttons, agent-event-badge variants. Extracted from global.css for #3915. */
+   namespace-truth-card, monitor buttons, agent-event-badge variants. Extracted from global.css for #3915. */
 
 /* ═══ UI ═══ */
 
@@ -100,9 +100,9 @@ button.agent-card {
   &:hover { background: var(--white-8); }
 }
 
-/* room-truth-strip: migrated to inline Tailwind */
+/* namespace-truth-strip: migrated to inline Tailwind */
 
-@utility room-truth-card {
+@utility namespace-truth-card {
   background:
     linear-gradient(180deg, rgba(40, 56, 92, 0.34), rgba(19, 29, 51, 0.9)),
     var(--card);
@@ -160,4 +160,3 @@ button.monitor-row {
 @utility agent-event-badge--task { background: var(--warn-12); color: var(--warn); }
 @utility agent-event-badge--board { background: var(--cyan-12); color: var(--cyan); }
 @utility agent-event-badge--default { background: var(--border-slate-12); color: var(--text-muted); }
-

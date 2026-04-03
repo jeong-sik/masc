@@ -5,7 +5,9 @@
 
 open Dashboard_http_helpers
 
-let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
+(* Tool_audit module removed — audit-based tool call health is retired.
+   Returns zeroed metrics so dashboard consumers degrade gracefully. *)
+let tool_call_health_json (_config : Room.config) : Yojson.Safe.t =
   let window_hours =
     float_of_env_default
       "MASC_DASHBOARD_TOOL_CALL_WINDOW_HOURS"
@@ -13,38 +15,13 @@ let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
       ~min_v:0.1
       ~max_v:168.0
   in
-  let since = Time_compat.now () -. (window_hours *. 3600.0) in
-  let events = Tool_audit.read_audit_events config ~since in
-  let total = ref 0 in
-  let failures = ref 0 in
-  let timeouts = ref 0 in
-  let durations_rev = ref [] in
-  List.iter
-    (fun (e : Tool_audit.audit_event) ->
-      if e.event_type = "tool_call" then begin
-        incr total;
-        if not e.success then incr failures;
-        let (_tool_name, timeout_now, duration_ms_opt) =
-          parse_tool_call_detail e.detail
-        in
-        if timeout_now then incr timeouts;
-        (match duration_ms_opt with
-         | Some d -> durations_rev := d :: !durations_rev
-         | None -> ())
-      end)
-    events;
-  let total_f = float_of_int !total in
-  let failure_rate =
-    if !total = 0 then 0.0 else float_of_int !failures /. total_f
-  in
-  let p95_duration_ms = percentile_int !durations_rev ~pct:0.95 in
   `Assoc [
     ("window_hours", `Float window_hours);
-    ("tool_calls", `Int !total);
-    ("failures", `Int !failures);
-    ("timeouts", `Int !timeouts);
-    ("failure_rate", `Float failure_rate);
-    ("p95_duration_ms", Json_util.int_opt_to_json p95_duration_ms);
+    ("tool_calls", `Int 0);
+    ("failures", `Int 0);
+    ("timeouts", `Int 0);
+    ("failure_rate", `Float 0.0);
+    ("p95_duration_ms", `Null);
   ]
 
 let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =

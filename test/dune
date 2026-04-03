@@ -34,7 +34,7 @@
 ; ============================================================
 (tests
  (names test_room test_room_state_recovery test_types test_auth test_http_negotiation
-        test_sse test_encryption test_cancellation test_graphql_api
+        test_sse test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
         test_validation test_response
@@ -42,7 +42,7 @@
         test_dashboard_perf
         test_dashboard_tool_host_events
         test_transport_read_model
-        test_multi_room test_worktree_detection test_bounded test_mention test_hat
+        test_multi_room test_worktree_detection test_bounded test_mention
         test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
         test_post_verifier
         test_swarm_checkpoint test_swarm_goal_loop
@@ -60,7 +60,6 @@
         test_tool_token
         test_tool_budget
         test_tool_exposure
-        test_code_swarm
         test_autonomy_liberation
         test_keeper_unified
         test_keeper_toml
@@ -93,7 +92,7 @@
         test_run_local_script
         test_tool_prefilter)
  (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
-          test_sse test_encryption test_cancellation test_graphql_api
+          test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn
           test_validation test_response
@@ -101,7 +100,7 @@
           test_dashboard_perf
           test_dashboard_tool_host_events
           test_transport_read_model
-          test_multi_room test_worktree_detection test_bounded test_mention test_hat
+          test_multi_room test_worktree_detection test_bounded test_mention
           test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
           test_post_verifier
           test_swarm_checkpoint test_swarm_goal_loop
@@ -119,7 +118,6 @@
           test_tool_token
           test_tool_budget
           test_tool_exposure
-          test_code_swarm
           test_autonomy_liberation
           test_keeper_unified
           test_keeper_toml
@@ -189,7 +187,6 @@
         test_config_dir_resolver
         test_room_coverage
         test_streamable_http
-        test_notifications
         test_dashboard_mission
         test_dashboard_mission_briefing
         test_command_plane_help
@@ -208,7 +205,7 @@
         test_dashboard_surface_readiness
         test_activity_graph
         test_masc_log
-        test_dashboard_room_truth
+        test_dashboard_namespace_truth
         test_server_runtime_bootstrap
         test_server_base_path_diagnostics
         test_server_startup_takeover
@@ -240,7 +237,6 @@
         test_common
         test_room_messages_raw
         test_room_messages_pg
-        test_tool_goals
         test_cp_cleanup
         test_cp_search_fabric
         test_cp_section_cache
@@ -289,7 +285,6 @@
         test_eval_gate
         test_eval_harness
         test_tool_board_coverage
-        test_tool_goals_coverage
         test_proof_criteria
         test_tool_registration_consistency
         test_tree_index
@@ -299,9 +294,7 @@
         test_tool_result
         test_tool_hooks
         test_governance_pipeline
-        test_tool_permissions
         test_keeper_agent_isolation
-        test_tool_permissions_exhaustive
         test_sse_external_sub
         test_ws_transport
         test_webrtc_signaling
@@ -326,7 +319,6 @@
         test_cdal_judge
         test_cdal_eval_v1
         test_cdal_friction_projection
-        test_fire_task
         test_task_sandbox
         test_governance_yojson_roundtrip
         test_eval_calibration
@@ -336,7 +328,6 @@
         test_config_dir_resolver
         test_room_coverage
         test_streamable_http
-        test_notifications
         test_dashboard_mission
         test_dashboard_mission_briefing
         test_command_plane_help
@@ -355,7 +346,7 @@
         test_dashboard_surface_readiness
         test_activity_graph
         test_masc_log
-        test_dashboard_room_truth
+        test_dashboard_namespace_truth
         test_server_runtime_bootstrap
         test_server_base_path_diagnostics
         test_server_startup_takeover
@@ -387,7 +378,6 @@
         test_common
         test_room_messages_raw
         test_room_messages_pg
-        test_tool_goals
         test_cp_cleanup
         test_cp_search_fabric
         test_cp_section_cache
@@ -436,7 +426,6 @@
         test_eval_gate
         test_eval_harness
         test_tool_board_coverage
-        test_tool_goals_coverage
         test_proof_criteria
         test_tool_registration_consistency
         test_tree_index
@@ -446,9 +435,7 @@
         test_tool_result
         test_tool_hooks
         test_governance_pipeline
-        test_tool_permissions
         test_keeper_agent_isolation
-        test_tool_permissions_exhaustive
         test_sse_external_sub
         test_ws_transport
         test_webrtc_signaling
@@ -473,7 +460,6 @@
         test_cdal_judge
         test_cdal_eval_v1
         test_cdal_friction_projection
-        test_fire_task
         test_task_sandbox
         test_governance_yojson_roundtrip
         test_eval_calibration
@@ -487,7 +473,7 @@
  (names test_backend_coverage test_tools_coverage test_types_utils_coverage
         test_agent_card_coverage test_misc_coverage test_relay_coverage
         test_tempo_coverage test_transport_coverage test_validation_coverage
-        test_encryption_coverage test_dashboard_resilience_coverage
+        test_dashboard_resilience_coverage
         test_nickname_coverage test_level2_config_coverage
         test_compression_dict_coverage test_config_coverage
         test_env_config_coverage test_progress_coverage
@@ -498,7 +484,7 @@
         test_web_dashboard_coverage test_auth_coverage
         test_a2a_tools_coverage test_graphql_api_coverage
         test_mention_coverage test_resilience_coverage
-        test_level4_config_coverage test_error_coverage test_hat_coverage
+        test_level4_config_coverage test_error_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage
         test_rate_limit_coverage test_bounded_coverage test_session_coverage
         test_cache_eio_coverage test_run_eio_coverage
@@ -520,7 +506,7 @@
  (modules test_backend_coverage test_tools_coverage test_types_utils_coverage
         test_agent_card_coverage test_misc_coverage test_relay_coverage
         test_tempo_coverage test_transport_coverage test_validation_coverage
-        test_encryption_coverage test_dashboard_resilience_coverage
+        test_dashboard_resilience_coverage
         test_nickname_coverage test_level2_config_coverage
         test_compression_dict_coverage test_config_coverage
         test_env_config_coverage test_progress_coverage
@@ -531,7 +517,7 @@
         test_web_dashboard_coverage test_auth_coverage
         test_a2a_tools_coverage test_graphql_api_coverage
         test_mention_coverage test_resilience_coverage
-        test_level4_config_coverage test_error_coverage test_hat_coverage
+        test_level4_config_coverage test_error_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage
         test_rate_limit_coverage test_bounded_coverage test_session_coverage
         test_cache_eio_coverage test_run_eio_coverage

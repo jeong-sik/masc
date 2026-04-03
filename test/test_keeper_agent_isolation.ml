@@ -12,7 +12,7 @@
 module Keeper_exec_tools = Masc_mcp.Keeper_exec_tools
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Tool_shard = Masc_mcp.Tool_shard
-module Tool_permissions = Masc_mcp.Tool_permissions
+module Tool_catalog = Masc_mcp.Tool_catalog
 module Keeper_types = Masc_mcp.Keeper_types
 module Tool_code_write = Masc_mcp.Tool_code_write
 
@@ -171,7 +171,7 @@ let test_shard_tools_overlap_with_agent_documented () =
    ============================================================ *)
 
 let test_research_admin_overlap_documented () =
-  let admin = Tool_permissions.admin_tools in
+  let admin = Tool_catalog.tools_for_surface Tool_catalog.Admin in
   let meta = make_meta ~soul_profile:"research" () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
@@ -189,7 +189,7 @@ let test_research_admin_overlap_documented () =
    ============================================================ *)
 
 let test_non_research_admin_tools_documented () =
-  let admin = Tool_permissions.admin_tools in
+  let admin = Tool_catalog.tools_for_surface Tool_catalog.Admin in
   let meta = make_meta ~policy_voice_enabled:true () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let overlap = List.filter (fun n -> List.mem n admin) keeper_names in

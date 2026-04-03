@@ -5,17 +5,19 @@ import { html } from 'htm/preact'
 import { EmptyState } from '../common/empty-state'
 import { LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
+import { Markdown } from '../common/markdown'
+import { Settings, MessageSquare, CheckSquare, Heart, RefreshCcw, Dot, ChevronRight } from 'lucide-preact'
 import type { UnifiedTraceEvent, TraceEventKind } from '../session-trace/session-trace-state'
 import { activeFilter, type ActivityFilter } from './task-detail-state'
 
-function kindIcon(kind: TraceEventKind): string {
+function kindIcon(kind: TraceEventKind) {
   switch (kind) {
-    case 'tool_call': return '\u2699'
-    case 'broadcast': return '\u25B6'
-    case 'task': return '\u2611'
-    case 'heartbeat': return '\u2764'
-    case 'lifecycle': return '\u21C4'
-    default: return '\u00B7'
+    case 'tool_call': return html`<${Settings} size=${14} />`
+    case 'broadcast': return html`<${MessageSquare} size=${14} />`
+    case 'task': return html`<${CheckSquare} size=${14} />`
+    case 'heartbeat': return html`<${Heart} size=${14} />`
+    case 'lifecycle': return html`<${RefreshCcw} size=${14} />`
+    default: return html`<${Dot} size=${14} />`
   }
 }
 
@@ -51,6 +53,8 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
     `
   }
 
+  const formatArgs = (val: any) => typeof val === 'string' ? val : `\`\`\`json\n${JSON.stringify(val, null, 2)}\n\`\`\``
+
   return html`
     <details class="rounded-lg hover:bg-[var(--white-3)] transition-colors">
       <summary class="flex items-center gap-3 py-1.5 px-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
@@ -58,19 +62,23 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
         <span class="flex-1 text-[12px] text-text-body truncate">${event.summary}</span>
         ${event.duration_ms != null ? html`<span class="text-[10px] tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
         ${event.ts_iso ? html`<${TimeAgo} timestamp=${event.ts_iso} class="text-[10px] text-text-dim shrink-0" />` : null}
-        <span class="text-[10px] text-text-dim">\u25B8</span>
+        <span class="text-[10px] text-text-dim flex items-center justify-center"><${ChevronRight} size=${14} /></span>
       </summary>
       <div class="px-3 pb-2 pt-1 ml-7">
         ${event.toolArgs != null ? html`
           <div class="mb-1">
             <div class="text-[10px] text-text-dim mb-0.5">args</div>
-            <pre class="text-[11px] text-text-body whitespace-pre-wrap break-all bg-[var(--white-3)] rounded p-2 max-h-[200px] overflow-y-auto">${typeof event.toolArgs === 'string' ? event.toolArgs : JSON.stringify(event.toolArgs, null, 2)}</pre>
+            <div class="max-h-[300px] overflow-y-auto custom-scrollbar">
+              <${Markdown} text=${formatArgs(event.toolArgs)} />
+            </div>
           </div>
         ` : null}
         ${event.toolResult != null ? html`
           <div>
             <div class="text-[10px] text-text-dim mb-0.5">result</div>
-            <pre class="text-[11px] text-text-body whitespace-pre-wrap break-all bg-[var(--white-3)] rounded p-2 max-h-[200px] overflow-y-auto">${typeof event.toolResult === 'string' ? event.toolResult : JSON.stringify(event.toolResult, null, 2)}</pre>
+            <div class="max-h-[300px] overflow-y-auto custom-scrollbar">
+              <${Markdown} text=${formatArgs(event.toolResult)} />
+            </div>
           </div>
         ` : null}
         ${event.error ? html`<div class="text-[11px] text-bad mt-1">${event.error}</div>` : null}

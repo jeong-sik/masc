@@ -172,6 +172,9 @@ let host_port_of_request request =
           host_header (Printexc.to_string exn);
         None)
 
+(* Evaluated at module init time (eager). MASC_ALLOW_ANONYMOUS_MUTATIONS
+   must be set before the module is loaded. This is safe because the
+   server process sets all env vars at startup before any module init. *)
 let allow_anonymous_mutations =
   match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
   | Some ("1" | "true") -> true

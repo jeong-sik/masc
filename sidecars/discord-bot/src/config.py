@@ -96,7 +96,9 @@ class BotConfig(BaseSettings):
     @classmethod
     def api_token_not_empty(cls, v: str) -> str:
         if not v.strip():
-            raise ValueError("GATE_API_TOKEN (or legacy MASC_API_TOKEN) is required")
+            raise ValueError(
+                "MASC_API_TOKEN is required (GATE_API_TOKEN is also accepted as a legacy alias)"
+            )
         return v.strip()
 
     @field_validator("discord_keeper_map")

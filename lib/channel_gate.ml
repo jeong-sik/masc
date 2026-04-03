@@ -4,7 +4,7 @@
 (* ── Types ──────────────────────────────────────────────────── *)
 
 type inbound_message = {
-  channel : string;
+  channel : Agent_identity.channel;
   channel_user_id : string;
   channel_user_name : string;
   channel_room_id : string;
@@ -100,7 +100,7 @@ let dedup_table_size () =
 let () = Channel_gate_metrics.register_dedup_size_fn dedup_table_size
 
 let normalize_channel_label channel =
-  Agent_identity.channel_of_string channel |> Agent_identity.string_of_channel
+  Agent_identity.string_of_channel channel
 
 (* ── Validation (pure) ──────────────────────────────────────── *)
 
@@ -271,7 +271,7 @@ let inbound_of_json json =
   try
     let str key = json |> member key |> to_string_option
                   |> Option.value ~default:"" in
-    let channel = str "channel" |> normalize_channel_label in
+    let channel = str "channel" |> Agent_identity.channel_of_string in
     let metadata =
       match json |> member "metadata" with
       | `Assoc pairs ->

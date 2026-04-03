@@ -585,11 +585,6 @@
  (modules test_dashboard_collaboration_evidence test_tool_team_session_support)
  (libraries masc_test_deps))
 
-<<<<<<< HEAD
-; MCP Tool Matrix (2 modules + generated names + runner dep)
-||||||| parent of e4567a573 (fix(connector): restore post-4808 followups)
-; MCP Tool Matrix (2 modules + runner dep)
-=======
 ; Normalized actor (operator_pending_confirm)
 (test
  (name test_normalized_actor)
@@ -603,7 +598,6 @@
  (libraries masc_test_deps))
 
 ; MCP Tool Matrix (2 modules + generated names + runner dep)
->>>>>>> e4567a573 (fix(connector): restore post-4808 followups)
 (test
  (name test_mcp_tool_matrix)
  (modules test_mcp_tool_matrix test_mcp_tool_matrix_cases)
@@ -798,4 +792,3 @@
  (name tool_matrix_case_runner)
  (modules tool_matrix_case_runner test_mcp_tool_matrix_cases)
  (libraries masc_test_deps))
-

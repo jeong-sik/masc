@@ -22,19 +22,39 @@ let requested_tool_names () =
       | [] -> None
       | names -> Some names
 
+let has_repo_root root =
+  Sys.file_exists (Filename.concat root "dune-project")
+  && Sys.file_exists (Filename.concat root "test/dune")
+
+let rec ascend_repo_root dir =
+  if has_repo_root dir then
+    Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else ascend_repo_root parent
+
+let executable_repo_root () =
+  ascend_repo_root (Filename.dirname Sys.executable_name)
+
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None -> (
-      try Sys.getcwd () with
-      | Sys_error _ ->
-          (* Executable is at _build/default/test/xxx.exe — need 4 dirname
-             calls to reach the repo root, not 3 (which stops at _build/). *)
-          Sys.executable_name
-          |> Filename.dirname
-          |> Filename.dirname
-          |> Filename.dirname
-          |> Filename.dirname)
+  | Some root when String.trim root <> "" && has_repo_root root -> root
+  | _ -> (
+      match
+        try Some (Sys.getcwd ()) with
+        | Sys_error _ -> None
+      with
+      | Some cwd -> (
+          match ascend_repo_root cwd with
+          | Some root -> root
+          | None -> (
+              match executable_repo_root () with
+              | Some root -> root
+              | None -> cwd))
+      | None -> (
+          match executable_repo_root () with
+          | Some root -> root
+          | None -> Filename.current_dir_name))
 
 let quote = Filename.quote
 

@@ -162,12 +162,7 @@ let explicit_metadata : (string * metadata) list =
         "Internal operator-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
     (* Dead features: no surface, no external callers. Deprecated 2026-04-03.
        Physical removal after 4-week telemetry confirms 0 calls. See #4709. *)
-    ("masc_hat_wear",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Role-hat feature unused since introduction.");
-    ("masc_hat_status",
-     deprecated ~implementation_status:Real
-       "No surface, no external callers. Role-hat feature unused since introduction.");
+    (* masc_hat_wear and masc_hat_status physically removed. See #4709. *)
     ("masc_encryption_enable",
      deprecated ~implementation_status:Real
        "No surface, no external callers. Room encryption feature never integrated.");

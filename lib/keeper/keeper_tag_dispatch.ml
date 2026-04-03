@@ -119,8 +119,6 @@ let dispatch
         ~name ~args
   | Mod_library ->
       Tool_library.dispatch { Tool_library.agent_name } ~name ~args
-  | Mod_hat ->
-      Tool_hat.dispatch { Tool_hat.config; agent_name } ~name ~args
   | Mod_model_catalog ->
       Tool_model_catalog.dispatch () ~name ~args
   | Mod_goals ->

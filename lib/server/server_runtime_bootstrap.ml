@@ -15,6 +15,25 @@ let force_jsonl_fallback_env () =
 let requested_backend_mode () =
   Env_config_core.storage_type ()
 
+(* Tune GC for server workload: dashboard refresh loops create large
+   transient allocations (2GB+ for execution snapshot) that cause the
+   major heap to grow permanently.  Aggressive space_overhead triggers
+   more frequent major collections, and custom_major_ratio forces
+   compaction to return memory to the OS. *)
+let () =
+  let open Gc in
+  let ctrl = get () in
+  set { ctrl with
+    (* Trigger major GC sooner to limit peak heap size.
+       Default 120 means heap can be 2.2x live data before collection.
+       40 limits to 1.4x, reducing peak RSS. *)
+    space_overhead = 40;
+    (* Compact more aggressively: default 500 means compact only when
+       heap is 6x the live data.  80 compacts at 1.8x, returning
+       memory to the OS faster after transient allocation spikes. *)
+    max_overhead = 80;
+  }
+
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in
   let mono_clock = Eio.Stdenv.mono_clock env in

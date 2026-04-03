@@ -37,7 +37,7 @@ let float_of_env_default name ~default ~min_v ~max_v =
 
 let dashboard_session_list_limit () =
   int_of_env_default "MASC_DASHBOARD_SESSION_LIST_LIMIT"
-    ~default:200 ~min_v:20 ~max_v:1000
+    ~default:20 ~min_v:5 ~max_v:200
 
 let operator_snapshot_session_window_seconds () =
   float_of_env_default "MASC_OPERATOR_SNAPSHOT_SESSION_WINDOW_SECONDS"

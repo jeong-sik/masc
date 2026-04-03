@@ -95,7 +95,7 @@ type section_cache = Cp_snapshot_section_cache.section_cache
 
 let _section_cache = Cp_snapshot_section_cache.shared_cache
 
-let _session_limit = 50
+let _session_limit = 20
 
 let _make_section_cache = Cp_snapshot_section_cache.create
 

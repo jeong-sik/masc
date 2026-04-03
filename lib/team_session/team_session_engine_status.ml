@@ -325,7 +325,7 @@ let status_sections ?events (config : Room.config) (session : Team_session_types
   let events =
     match events with
     | Some rows -> rows
-    | None -> Team_session_store.read_events ~max_events:2000 config session.session_id
+    | None -> Team_session_store.read_events ~max_events:200 config session.session_id
   in
   let summary = summary_json_of_session ~events config session in
   let active_agents =

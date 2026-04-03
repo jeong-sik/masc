@@ -101,7 +101,7 @@ let record_internal_error_metric ~duration_ms body_str exn =
     match Channel_gate.inbound_of_json json with
     | Ok msg ->
         Channel_gate_metrics.record_internal_error_exn
-          ~channel:(Agent_identity.string_of_channel msg.channel)
+          ~channel:msg.channel
           ~room_id:msg.channel_room_id
           ~keeper:msg.keeper_name
           ~duration_ms exn

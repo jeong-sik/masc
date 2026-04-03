@@ -133,7 +133,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
              Eio.Time.with_timeout clock session_list_timeout_s (fun () ->
                  Ok
                    (Team_session_store.list_sessions ~since_unix:cutoff_unix
-                      ~limit:100 config))
+                      ~limit:20 config))
            with
           | Ok rows -> rows
           | Error `Timeout ->

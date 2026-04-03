@@ -197,13 +197,11 @@ let make_backend ~base_dir ~agent_name ~session_id
     try
       (* De-duplicate by key (latest wins), skip tombstones *)
       let tbl = Hashtbl.create 32 in
-      let () =
-        fold_entries ~path ~init:() (fun () (key, value, ts) ->
-            if String.length key >= String.length prefix
-               && String.sub key 0 (String.length prefix) = prefix
-            then
-              Hashtbl.replace tbl key (value, ts))
-      in
+      fold_entries ~path ~init:() (fun () (key, value, ts) ->
+          if String.length key >= String.length prefix
+             && String.sub key 0 (String.length prefix) = prefix
+          then
+            Hashtbl.replace tbl key (value, ts));
       (* Collect non-tombstone entries *)
       let results = Hashtbl.fold (fun key (value, ts) acc ->
         match value with

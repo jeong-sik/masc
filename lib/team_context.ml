@@ -32,9 +32,19 @@ let max_tasks = 10
 let findings_tail_max_bytes = 256 * 1024
 
 let take_last n items =
-  let len = List.length items in
-  if len <= n then items
-  else List.filteri (fun i _ -> i >= len - n) items
+  if n <= 0 then []
+  else
+    let rec advance lead lag remaining =
+      match lead with
+      | [] -> lag
+      | _ :: lead_tail when remaining > 0 ->
+          advance lead_tail lag (remaining - 1)
+      | _ :: lead_tail -> (
+          match lag with
+          | [] -> []
+          | _ :: lag_tail -> advance lead_tail lag_tail 0)
+    in
+    advance items items n
 
 (** Shared findings file within the session directory. *)
 let findings_path ~base_path ~team_session_id =

@@ -57,7 +57,8 @@ val record_internal_error_exn :
   duration_ms:int ->
   exn ->
   unit
-(** Record an unexpected gate exception with the same channel metadata. *)
+(** Record an unexpected gate exception with the same channel metadata.
+    The public status surface receives a redacted internal error string. *)
 
 val snapshot : unit -> channel_stats list
 (** Return a list of per-channel stats, sorted by message_count desc. *)

@@ -93,6 +93,34 @@ async def test_list_keepers_uses_cached_names_when_breaker_is_open() -> None:
     await client.aclose()
 
 
+@pytest.mark.asyncio
+async def test_send_message_uses_retry_count_after_first_attempt() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(503, json={"ok": False, "error": "down"})
+
+    client = make_client(httpx.MockTransport(handler))
+    client._max_retries = 2  # pyright: ignore[reportPrivateUsage]
+
+    response = await client.send_message(
+        keeper_name="luna",
+        content="hello",
+        channel_user_id="u1",
+        channel_user_name="user",
+        channel_room_id="room",
+        message_id="m4",
+    )
+
+    assert response.ok is False
+    assert response.error == "gate returned 503"
+    assert attempts == 3
+
+    await client.aclose()
+
+
 def test_config_allows_zero_disable_values(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GATE_MAX_RETRIES", raising=False)
     monkeypatch.delenv("STATUS_CACHE_TTL_SEC", raising=False)

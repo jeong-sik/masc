@@ -111,7 +111,7 @@ class MascGateClient:
         return self._breaker_failure_threshold > 0 and self._breaker_reset_sec > 0
 
     def _max_attempts(self) -> int:
-        return max(1, self._max_retries)
+        return 1 + max(0, self._max_retries)
 
     def _breaker_error(self) -> str:
         remaining = max(1, int(round(self._breaker_open_until - self._now())))
@@ -275,7 +275,9 @@ class MascGateClient:
                 self._note_transport_failure(f"gate error: {e}")
                 return GateResponse.from_error(f"gate error: {e}")
 
-        return GateResponse.from_error("max retries exceeded")
+        return GateResponse.from_error(
+            f"gate retries exhausted after {max_attempts} attempts"
+        )
 
     async def health_check(self) -> bool:
         """Check if the gate is reachable."""

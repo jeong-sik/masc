@@ -56,12 +56,21 @@ type stats_acc = {
   mutable max_dur_ms : int;
   mutable slow_count : int;
   rooms : (string, unit) Hashtbl.t;
+  room_order : string Queue.t;
 }
 
-let slow_threshold_ms () =
+let parse_slow_threshold_ms value =
+  try max 250 (min 120_000 (int_of_string (String.trim value))) with _ -> 10_000
+
+let cached_slow_threshold_ms =
   match Sys.getenv_opt "MASC_CHANNEL_GATE_SLOW_MS" with
-  | Some s -> (try max 250 (min 120_000 (int_of_string (String.trim s))) with _ -> 10_000)
+  | Some value -> parse_slow_threshold_ms value
   | None -> 10_000
+
+let slow_threshold_ms () =
+  cached_slow_threshold_ms
+
+let max_tracked_rooms = 256
 
 let make_acc () =
   {
@@ -86,6 +95,7 @@ let make_acc () =
     max_dur_ms = 0;
     slow_count = 0;
     rooms = Hashtbl.create 8;
+    room_order = Queue.create ();
   }
 
 let table : (string, stats_acc) Hashtbl.t = Hashtbl.create 16
@@ -119,6 +129,19 @@ let update_error_fields acc ~now ~kind ~message =
   acc.last_error_kind <- kind;
   acc.last_error <- message
 
+let remember_room acc room_id =
+  acc.last_room_id <- room_id;
+  if not (Hashtbl.mem acc.rooms room_id) then begin
+    if Hashtbl.length acc.rooms >= max_tracked_rooms
+       && not (Queue.is_empty acc.room_order)
+    then begin
+      let evicted = Queue.take acc.room_order in
+      Hashtbl.remove acc.rooms evicted
+    end;
+    Hashtbl.replace acc.rooms room_id ();
+    Queue.add room_id acc.room_order
+  end
+
 let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
   Eio_guard.with_mutex mu (fun () ->
       let trimmed_channel = String.trim channel in
@@ -131,10 +154,7 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
       acc.last_outcome <- outcome_name outcome;
       if trimmed_keeper <> "" then acc.last_keeper <- trimmed_keeper;
       let trimmed_room = String.trim room_id in
-      if trimmed_room <> "" then begin
-        acc.last_room_id <- trimmed_room;
-        Hashtbl.replace acc.rooms trimmed_room ()
-      end;
+      if trimmed_room <> "" then remember_room acc trimmed_room;
       if duration_ms > 0 then begin
         acc.total_dur_ms <- acc.total_dur_ms + duration_ms;
         acc.timed_count <- acc.timed_count + 1;
@@ -162,9 +182,9 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
           acc.internal_error_count <- acc.internal_error_count + 1;
           update_error_fields acc ~now ~kind:"internal" ~message)
 
-let record_internal_error_exn ~channel ~room_id ~keeper ~duration_ms exn =
+let record_internal_error_exn ~channel ~room_id ~keeper ~duration_ms _exn =
   record_attempt ~channel ~room_id ~keeper ~duration_ms
-    (Internal_error (Printexc.to_string exn))
+    (Internal_error "internal error")
 
 let snapshot () =
   Eio_guard.with_mutex_ro mu (fun () ->

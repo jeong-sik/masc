@@ -50,6 +50,7 @@ class BotConfig(BaseSettings):
         default=120,
         validation_alias=AliasChoices("GATE_TIMEOUT_SEC", "gate_timeout_sec"),
     )
+    # Retries after the first attempt; 0 disables retries.
     gate_max_retries: int = Field(
         default=2,
         validation_alias=AliasChoices("GATE_MAX_RETRIES", "gate_max_retries"),

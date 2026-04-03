@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { defaultBoardVoter, post } from './core'
+import { defaultBoardVoter, get, post } from './core'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -37,5 +37,72 @@ describe('post', () => {
     window.history.replaceState({}, '', '/')
 
     expect(defaultBoardVoter()).toBe('dashboard-user')
+  })
+})
+
+describe('get bootstrap warm-up mapping', () => {
+  it('maps dashboard namespace-truth not-initialized errors to initializing payloads', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"error":"not initialized"}', {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/namespace-truth')
+
+    expect(data.status).toBe('initializing')
+    expect(data.message).toContain('warming up')
+  })
+
+  it('maps dashboard shell not-initialized errors to an empty bootstrap shell payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"error":"not initialized"}', {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const data = await get<{
+      status?: { project?: string }
+      counts?: { agents?: number; tasks?: number; keepers?: number }
+    }>('/api/v1/dashboard/shell')
+
+    expect(data.status?.project).toBe('initializing')
+    expect(data.counts).toEqual({ agents: 0, tasks: 0, keepers: 0 })
+  })
+
+  it('preserves errors for non-bootstrap routes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"error":"not initialized"}', {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(get('/api/v1/board')).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 500,
+      path: '/api/v1/board',
+    })
+  })
+
+  it('does not remap non-5xx bootstrap responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"error":"not initialized"}', {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(get('/api/v1/dashboard/namespace-truth')).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      status: 401,
+      path: '/api/v1/dashboard/namespace-truth',
+    })
   })
 })

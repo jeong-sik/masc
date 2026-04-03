@@ -9,6 +9,7 @@ import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { Overview } from './overview/overview'
 import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
+import { LoadingState } from './common/feedback-state'
 import {
   DASHBOARD_SURFACES,
   DASHBOARD_NAV_ITEMS,

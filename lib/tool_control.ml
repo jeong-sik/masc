@@ -27,8 +27,12 @@ let handle_resume ctx _args =
 let handle_pause_status ctx args =
   let requested_namespace = get_string args "namespace_id" "" |> String.trim in
   let namespace_id = "default" in
+  let pause_info =
+    if Room.is_initialized ctx.config then Room.pause_info ctx.config
+    else None
+  in
   let payload =
-    match Room.pause_info ctx.config with
+    match pause_info with
     | Some (by, reason, at) ->
         `Assoc
           [

@@ -289,6 +289,7 @@ let build_session_contexts seeds operation_contexts : session_context list =
                  ("session_id", `String seed.session_id);
                  ("goal", `String seed.goal);
                  ("namespace", json_string_option seed.namespace);
+                 (* Legacy room alias now mirrors the flattened namespace. *)
                  ("room", json_string_option seed.namespace);
                  ("status", `String seed.status);
                  ("health", `String seed.health);

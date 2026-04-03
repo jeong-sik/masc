@@ -245,10 +245,24 @@ let context_of_oas_checkpoint
   let max_tokens =
     checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
   in
+  (* Cap loaded messages to prevent unbounded memory growth.
+     Checkpoints accumulate full message history (200+ messages, 500KB+).
+     With 9 keepers loading simultaneously, this causes 14GB+ peak allocation.
+     The context_reducer (keep_last 30) trims during Agent.run anyway,
+     so loading more than ~60 messages from checkpoint is wasted work.
+     Keep last 60 to give the reducer room to operate. *)
+  let max_checkpoint_messages = 60 in
+  let messages =
+    let n = List.length cp.messages in
+    if n <= max_checkpoint_messages then cp.messages
+    else
+      let drop = n - max_checkpoint_messages in
+      List.filteri (fun i _ -> i >= drop) cp.messages
+  in
   sync_oas_context
     {
       system_prompt;
-      messages = cp.messages;
+      messages;
       max_tokens;
       context = Agent_sdk.Context.copy cp.context;
     }

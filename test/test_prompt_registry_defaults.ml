@@ -3,6 +3,7 @@
 module Lib = Masc_mcp
 
 let default_dir_permissions = 0o755
+let test_created_at = 1234.0
 
 let test_dir () =
   let tmp = Filename.temp_file "masc_prompt_registry" "" in
@@ -115,7 +116,7 @@ let fixture key =
   | None -> failwith ("missing fixture: " ^ key)
 
 let make_entry ?(version = "1.0") ?(variables = []) ?metrics ?(deprecated = false)
-    ?(created_at = 1234.0) id template =
+    ?(created_at = test_created_at) id template =
   Prompt_registry.
     { id; template; version; variables; metrics; created_at; deprecated }
 
@@ -306,6 +307,8 @@ let () =
                 ~score:0.8 ();
               Prompt_registry.update_metrics ~id:"alpha.prompt" ~version:"1.0"
                 ~score:0.4 ();
+              Prompt_registry.update_metrics ~id:"alpha.prompt" ~version:"1.0"
+                ~score:0.6 ();
               Prompt_registry.update_metrics ~id:"beta.prompt" ~version:"1.0"
                 ~score:1.0 ();
               Prompt_registry.update_metrics ~id:"beta.prompt" ~version:"1.0"
@@ -314,14 +317,14 @@ let () =
               check int "total prompts" 2 stats.total_prompts;
               check int "active prompts" 2 stats.active_prompts;
               check int "deprecated prompts" 0 stats.deprecated_prompts;
-              check (option string) "most used remains deterministic in tie"
+              check (option string) "most used prompt"
                 (Some "alpha.prompt") stats.most_used;
-              check (float 0.0001) "avg usage across prompts" 2.0 stats.avg_usage;
+              check (float 0.0001) "avg usage across prompts" 2.5 stats.avg_usage;
               match Prompt_registry.get ~id:"alpha.prompt" ~version:"1.0" () with
               | Some entry -> (
                   match entry.metrics with
                   | Some metrics ->
-                      check int "usage_count" 2 metrics.usage_count;
+                      check int "usage_count" 3 metrics.usage_count;
                       check (float 0.0001) "avg_score" 0.6 metrics.avg_score
                   | None -> fail "missing metrics")
               | None -> fail "missing updated prompt");

@@ -99,22 +99,6 @@ let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = fa
     required_permission = None;
   }
 
-let deprecated_default ?canonical_name ?replacement
-    ?(implementation_status = Adapter) reason =
-  {
-    visibility = Default;
-    lifecycle = Deprecated;
-    implementation_status;
-    canonical_name;
-    replacement;
-    reason = Some reason;
-    allow_direct_call_when_hidden = false;
-    readonly = None;
-    destructive = None;
-    idempotent = None;
-    required_permission = None;
-  }
-
 let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
     ?(implementation_status = Real) reason =
   {

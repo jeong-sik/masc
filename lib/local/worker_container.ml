@@ -508,6 +508,7 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       provider = Some provider;
       hooks;
       guardrails = effective_guardrails;
+      tool_retry_policy = Some Oas.Tool_retry_policy.default_internal;
       raw_trace = Some raw_trace;
       periodic_callbacks;
     }
@@ -559,4 +560,3 @@ let materialize_direct_evidence ~base_path ~worker_name
           Log.LocalWorker.error
             "direct evidence persist failed for %s/%s: %s"
             worker_name session_id (Oas.Error.to_string err)
-

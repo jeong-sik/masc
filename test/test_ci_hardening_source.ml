@@ -228,20 +228,19 @@ let test_input_validation_contracts () =
        "maybe_evict_expired config")
 
 let test_room_current_validation_contracts () =
-  (* Room.read_current_room and Room.ensure_room_bootstrap were removed from
-     h2_gateway. Room validation now happens at the MCP/tool dispatch layer.
-     Verify h2_gateway serves canonical namespace routes only. *)
+  (* H2 gateway serves canonical namespace routes and keeps temporary room
+     aliases so mixed dashboard/backend deployments do not break during rollout. *)
   check bool "h2 gateway serves namespace-truth endpoint" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|"/api/v1/dashboard/namespace-truth"|});
-  check bool "h2 gateway removes room-truth alias endpoint" true
-    (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
+  check bool "h2 gateway keeps room-truth alias endpoint during rollout" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|"/api/v1/dashboard/room-truth"|});
   check bool "h2 gateway serves namespace current endpoint" true
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|"/api/v1/namespace/current"|});
-  check bool "h2 gateway removes room current alias endpoint" true
-    (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
+  check bool "h2 gateway keeps room current alias endpoint during rollout" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|"/api/v1/room/current"|})
 
 let test_root_redirect_contracts () =

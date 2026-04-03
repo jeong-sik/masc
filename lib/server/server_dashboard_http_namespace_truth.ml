@@ -156,7 +156,7 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
   match namespace_truth_snapshot_from_caches state with
   | None -> ()
   | Some snapshot ->
-      let sse_json =
+      let namespace_sse_json =
         `Assoc
           [
             ("type", `String "namespace_truth_snapshot");
@@ -164,7 +164,16 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
             ("ts_unix", `Float (Time_compat.now ()));
           ]
       in
-      Sse.broadcast_to Observers sse_json;
+      let legacy_sse_json =
+        `Assoc
+          [
+            ("type", `String "room_truth_snapshot");
+            ("payload", snapshot);
+            ("ts_unix", `Float (Time_compat.now ()));
+          ]
+      in
+      Sse.broadcast_to Observers namespace_sse_json;
+      Sse.broadcast_to Observers legacy_sse_json;
       ignore
         (Server_meta_cognition_feedback.maybe_post_digest
            ~config:state.Mcp_server.room_config snapshot);

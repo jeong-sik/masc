@@ -501,7 +501,8 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let json = Env_config_introspect.to_json () in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
-      | `GET, "/api/v1/dashboard/namespace-truth" ->
+      | `GET, "/api/v1/dashboard/namespace-truth"
+      | `GET, "/api/v1/dashboard/room-truth" ->
           let state = get_server_state () in
           let json =
             dashboard_namespace_truth_http_json ~state ~sw ~clock httpun_request
@@ -779,7 +780,8 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd json ~extra_headers:cors
 
-      | `GET, "/api/v1/namespace/current" ->
+      | `GET, "/api/v1/namespace/current"
+      | `GET, "/api/v1/room/current" ->
           let state = get_server_state () in
           let _config = state.Mcp_server.room_config in
           let json =
@@ -793,7 +795,8 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
-      | `POST, "/api/v1/namespace/current" ->
+      | `POST, "/api/v1/namespace/current"
+      | `POST, "/api/v1/room/current" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in
           h2_read_body h2_reqd (fun body_str ->

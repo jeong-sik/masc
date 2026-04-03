@@ -155,7 +155,9 @@ let namespace_json config =
 let namespace_node namespace_json session_count operation_count worker_count keeper_count
     alert_count pending_confirm_count =
   let namespace_id =
-    string_opt namespace_json "namespace" |> Option.value ~default:"default"
+    first_some (string_opt namespace_json "namespace_id")
+      (string_opt namespace_json "namespace")
+    |> Option.value ~default:"default"
   in
   let paused = bool_opt namespace_json "paused" |> Option.value ~default:false in
   let tone = if paused || pending_confirm_count > 0 || alert_count > 0 then "warn" else "ok" in

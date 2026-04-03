@@ -298,7 +298,7 @@ export function setupSSEReaction(): () => void {
     if (!event) return
 
     // 0. Namespace-truth snapshot — server push, no HTTP fetch needed
-    if (event.type === 'namespace_truth_snapshot' && event.payload) {
+    if ((event.type === 'namespace_truth_snapshot' || event.type === 'room_truth_snapshot') && event.payload) {
       handleNamespaceTruthSnapshot(event.payload)
       return
     }

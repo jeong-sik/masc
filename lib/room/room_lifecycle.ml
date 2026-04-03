@@ -160,8 +160,9 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     nickname nickname agent_type session_id
   end
 
-(** @deprecated Since #4638 rooms are flattened; room_id is ignored.
-    Kept for callers that still pass a room_id parameter. *)
+(** @deprecated Since #4638 storage is flattened to the default scope.
+    This compat helper still accepts [room_id] and preserves it in legacy
+    messages/log entries, but agent state is shared with [join]. *)
 let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
   ensure_room_bootstrap config room_id;

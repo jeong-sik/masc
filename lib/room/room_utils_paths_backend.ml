@@ -9,15 +9,76 @@ let masc_root_dir config =
       let seg = sanitize_namespace_segment other in
       Filename.concat (Filename.concat masc_root "clusters") seg
 
-(** @deprecated Since #4638. Still returns [masc_root_dir ^ "/rooms"] for
-    migration code that needs to locate legacy room directories. *)
+(** @deprecated Since #4638. Still returns
+    [Filename.concat (masc_root_dir config) "rooms"] for migration code that
+    needs to locate legacy room directories. *)
 let rooms_root_dir config = Filename.concat (masc_root_dir config) "rooms"
 let registry_root_path config = Filename.concat (masc_root_dir config) "rooms.json"
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
 
+let warned_about_legacy_room_state = ref false
+
+let reset_legacy_room_warning_for_testing () =
+  warned_about_legacy_room_state := false
+
+let read_legacy_current_room config =
+  let path = current_room_root_path config in
+  if Sys.file_exists path then
+    try
+      let ic = open_in path in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+          match String.trim (input_line ic) with
+          | "" -> None
+          | room_id -> Some room_id)
+    with _ -> None
+  else
+    None
+
+let legacy_room_dirs_exist config =
+  let path = rooms_root_dir config in
+  Sys.file_exists path
+  &&
+  try
+    Sys.is_directory path && Array.length (Sys.readdir path) > 0
+  with _ -> false
+
+let warn_if_legacy_room_state_exists config =
+  if not !warned_about_legacy_room_state then
+    let legacy_current_room =
+      match read_legacy_current_room config with
+      | Some room_id when room_id <> "default" -> Some room_id
+      | _ -> None
+    in
+    let has_legacy_rooms = legacy_room_dirs_exist config in
+    match legacy_current_room, has_legacy_rooms with
+    | None, false -> ()
+    | _ ->
+        warned_about_legacy_room_state := true;
+        let detail =
+          match legacy_current_room, has_legacy_rooms with
+          | Some room_id, true ->
+              Printf.sprintf
+                "legacy current_room=%S and room data under %S will be ignored"
+                room_id (rooms_root_dir config)
+          | Some room_id, false ->
+              Printf.sprintf "legacy current_room=%S will be ignored" room_id
+          | None, true ->
+              Printf.sprintf "legacy room data under %S will be ignored"
+                (rooms_root_dir config)
+          | None, false -> ""
+        in
+        Log.Room.warn
+          "Legacy room-scoped state detected; startup now always resolves to the default scope and %s."
+          detail
+
 (** Read current room ID.
-    Since #4638 rooms are removed; always returns [Some "default"]. *)
-let read_current_room _config = Some "default"
+    Since #4638 rooms are removed; always returns [Some "default"].
+    Emits a one-time warning when legacy room-scoped state is detected. *)
+let read_current_room config =
+  warn_if_legacy_room_state_exists config;
+  Some "default"
 
 (** @deprecated Since #4638 all rooms resolve to [masc_root_dir]. *)
 let room_dir_for config _room_id = masc_root_dir config

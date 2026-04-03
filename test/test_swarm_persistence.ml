@@ -263,7 +263,7 @@ let test_list_sessions_records_fallback_diagnostics () =
       Alcotest.(check int) "limit recorded" 1
         Yojson.Safe.Util.(diagnostics |> member "limit" |> to_int))
 
-let test_list_sessions_named_scope_uses_scoped_prefix () =
+let test_list_sessions_flat_scope_uses_flat_prefix () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
       Eio_main.run @@ fun env ->
@@ -339,8 +339,8 @@ let () =
             test_list_sessions_uses_recency_order_for_limit;
           Alcotest.test_case "list_sessions diagnostics record fallback"
             `Quick test_list_sessions_records_fallback_diagnostics;
-          Alcotest.test_case "list_sessions named scope uses scoped prefix"
-            `Quick test_list_sessions_named_scope_uses_scoped_prefix;
+          Alcotest.test_case "list_sessions flat scope uses flat prefix"
+            `Quick test_list_sessions_flat_scope_uses_flat_prefix;
           Alcotest.test_case "list_sessions memory backend uses project prefix"
             `Quick test_list_sessions_memory_backend_uses_project_prefix;
         ] );

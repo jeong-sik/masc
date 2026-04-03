@@ -5,6 +5,9 @@ import { fetchLogs } from '../api/dashboard.js'
 import type { LogEntry } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
 import { TextInput } from './common/input'
+import { ActionButton } from './common/button'
+import { EmptyState } from './common/empty-state'
+import { ErrorState, LoadingState } from './common/feedback-state'
 import { createAsyncResource, loaded } from '../lib/async-state'
 
 interface LogData {
@@ -363,9 +366,10 @@ export function LogViewer() {
               />
               자동
             </label>
-            <button
-              type="button"
-              class="logs-refresh-btn rounded-md border border-[rgba(71,184,255,0.22)] bg-[rgba(71,184,255,0.12)] px-3 py-2 text-[11px] font-medium text-[#dff3ff]"
+            <${ActionButton}
+              variant="primary"
+              size="md"
+              class="logs-refresh-btn"
               onClick=${() => {
                 latestSeq.value = null
                 logResource.reset()
@@ -374,12 +378,14 @@ export function LogViewer() {
               disabled=${logLoading}
             >
               ${logLoading ? '...' : '새로고침'}
-            </button>
+            <//>
           </div>
         </div>
 
         ${logError ? html`
-          <div class="mx-4 mt-4 rounded-md border border-solid border-[#e05050] bg-[rgba(224,80,80,0.12)] px-4 py-3 text-[12px] text-[#ffb3b3]">${logError}</div>
+          <div class="mx-4 mt-4">
+            <${ErrorState}>${logError}<//>
+          </div>
         ` : null}
 
         <div class="px-3 pt-3">
@@ -394,8 +400,10 @@ export function LogViewer() {
 
         ${logEntries.length === 0
           ? html`
-              <div class="flex flex-1 items-center justify-center px-6 text-[13px] text-[var(--text-muted)]">
-                ${logLoading ? '로그를 불러오는 중...' : '조건에 맞는 로그가 없습니다.'}
+              <div class="flex flex-1 items-center justify-center px-6">
+                ${logLoading
+                  ? html`<${LoadingState} class="w-full max-w-[420px]">로그를 불러오는 중...<//>`
+                  : html`<${EmptyState} message="조건에 맞는 로그가 없습니다." icon="📜" compact />`}
               </div>
             `
           : html`

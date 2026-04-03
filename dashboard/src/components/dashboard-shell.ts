@@ -3,7 +3,7 @@ import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
-import { dashboardLoading, serverStatus } from '../store'
+import { dashboardLoading, serverStatus, shellCounts } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { Overview } from './overview/overview'
@@ -13,10 +13,12 @@ import {
   DASHBOARD_SURFACES,
   DASHBOARD_NAV_ITEMS,
   currentSectionForRoute,
+  type DashboardSectionNavItem,
   visibleSectionItemsForTab,
 } from '../config/navigation'
 import { RouteLink } from './common/route-link'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
+import type { TabId } from '../types'
 
 const buildIdentityOpen = signal(false)
 
@@ -163,6 +165,107 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   `
 }
 
+interface SurfaceMetric {
+  label: string
+  value: string
+  tone?: 'default' | 'active' | 'warn' | 'ok'
+}
+
+function surfaceMetricsForTab(tab: TabId): SurfaceMetric[] {
+  const counts = shellCounts.value
+  const snap = missionSnapshot.value
+  const sessions = snap?.sessions ?? snap?.session_briefs ?? []
+  let blockers = 0
+  for (let i = 0; i < sessions.length; i++) {
+    if (sessions[i]?.blocker_summary) blockers++
+  }
+  const attention = (snap?.attention_queue?.length ?? 0) + blockers
+  const syncing = dashboardLoading.value || missionLoading.value || namespaceTruthInitializing.value
+
+  switch (tab) {
+    case 'overview':
+      return [
+        counts ? { label: 'agents', value: String(counts.agents), tone: 'active' } : null,
+        counts ? { label: 'tasks', value: String(counts.tasks) } : null,
+        counts ? { label: 'keepers', value: String(counts.keepers) } : null,
+        attention > 0 ? { label: 'attention', value: String(attention), tone: 'warn' } : null,
+      ].filter(Boolean) as SurfaceMetric[]
+    case 'monitoring':
+      return [
+        { label: 'sessions', value: String(sessions.length), tone: 'active' },
+        attention > 0 ? { label: 'attention', value: String(attention), tone: 'warn' } : null,
+        syncing ? { label: 'sync', value: 'updating', tone: 'ok' } : null,
+      ].filter(Boolean) as SurfaceMetric[]
+    case 'command':
+      return [
+        attention > 0 ? { label: 'attention', value: String(attention), tone: 'warn' } : null,
+        { label: 'sessions', value: String(sessions.length) },
+        syncing ? { label: 'sync', value: 'updating', tone: 'ok' } : null,
+      ].filter(Boolean) as SurfaceMetric[]
+    case 'workspace':
+      return [
+        counts ? { label: 'tasks', value: String(counts.tasks), tone: 'active' } : null,
+        attention > 0 ? { label: 'attention', value: String(attention), tone: 'warn' } : null,
+        counts ? { label: 'keepers', value: String(counts.keepers) } : null,
+      ].filter(Boolean) as SurfaceMetric[]
+    case 'lab':
+      return [
+        syncing ? { label: 'sync', value: 'updating', tone: 'ok' } : null,
+        counts ? { label: 'agents', value: String(counts.agents), tone: 'active' } : null,
+        counts ? { label: 'keepers', value: String(counts.keepers) } : null,
+      ].filter(Boolean) as SurfaceMetric[]
+    case 'logs':
+      return [
+        { label: 'stream', value: connected.value ? 'live' : 'reconnecting', tone: connected.value ? 'ok' : 'warn' },
+        { label: 'sessions', value: String(sessions.length) },
+        syncing ? { label: 'sync', value: 'updating', tone: 'active' } : null,
+      ].filter(Boolean) as SurfaceMetric[]
+    default:
+      return []
+  }
+}
+
+function metricToneClass(metric: SurfaceMetric): string {
+  switch (metric.tone) {
+    case 'active':
+      return 'surface-pill active'
+    case 'warn':
+      return 'surface-pill warn'
+    case 'ok':
+      return 'surface-pill ok'
+    default:
+      return 'surface-pill'
+  }
+}
+
+function SectionQuickNav({
+  tab,
+  currentSectionId,
+  sections,
+}: {
+  tab: TabId
+  currentSectionId?: string
+  sections: DashboardSectionNavItem[]
+}) {
+  if (sections.length === 0) return null
+
+  return html`
+    <nav class="mt-4 flex flex-wrap gap-2" aria-label="현재 화면 섹션 빠른 이동">
+      ${sections.map(item => html`
+        <${RouteLink}
+          tab=${tab}
+          params=${item.params}
+          class=${item.id === currentSectionId ? 'surface-pill active' : 'surface-pill muted'}
+          ariaCurrent=${item.id === currentSectionId ? 'page' : undefined}
+          title=${item.description}
+        >
+          ${item.label}
+        <//>
+      `)}
+    </nav>
+  `
+}
+
 export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggle?: () => void }) {
   const currentTab = route.value.tab
   const currentSection = currentSectionForRoute(route.value)
@@ -298,16 +401,67 @@ function SurfaceLead() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
-
+  const sections = visibleSectionItemsForTab(currentTab)
   const description = currentSection?.description ?? currentView?.description ?? null
+  const metrics = surfaceMetricsForTab(currentTab)
+  const isSyncing = dashboardLoading.value || missionLoading.value || namespaceTruthInitializing.value
 
   return html`
-    <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-      <h2 class="flex items-center gap-2 text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
-        ${currentSection?.label ?? currentView?.label ?? '홈'}
-        ${description ? html`<span class="text-[13px] font-normal text-[rgba(255,255,255,0.44)] truncate min-w-0">${description}</span>` : null}
-      </h2>
-    </div>
+    <section class="surface-context-card mb-4 px-4 py-4">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="surface-pill active" aria-hidden="true">${currentView?.icon ?? 'M'}</span>
+            <span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[rgba(154,217,255,0.62)]">
+              ${currentView?.label ?? 'Dashboard'}
+            </span>
+            ${currentSection && currentSection.label !== currentView?.label
+              ? html`<span class="surface-pill">${currentSection.label}</span>`
+              : null}
+            <span class=${connected.value ? 'surface-pill ok' : 'surface-pill warn'}>
+              ${connected.value ? 'live' : 'offline'}
+            </span>
+            ${isSyncing ? html`<span class="surface-pill">syncing</span>` : null}
+          </div>
+
+          <div class="mt-3 flex flex-wrap items-end gap-3">
+            <h2 class="min-w-0 text-[24px] font-bold tracking-[-0.03em] text-[var(--text-strong)]">
+              ${currentSection?.label ?? currentView?.label ?? '홈'}
+            </h2>
+            ${sections.length > 0
+              ? html`<span class="text-[12px] text-[var(--text-muted)]">${sections.length}개 section</span>`
+              : null}
+          </div>
+
+          ${description
+            ? html`<p class="mt-2 max-w-[900px] text-[13px] leading-relaxed text-[rgba(255,255,255,0.68)]">${description}</p>`
+            : null}
+
+          ${currentSection && currentView?.description && currentSection.description !== currentView.description
+            ? html`<div class="mt-2 text-[11px] text-[var(--text-muted)]">surface: ${currentView.description}</div>`
+            : null}
+        </div>
+
+        ${metrics.length > 0
+          ? html`
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                ${metrics.map(metric => html`
+                  <div class=${metricToneClass(metric)}>
+                    <span class="uppercase tracking-[0.08em] opacity-80">${metric.label}</span>
+                    <strong class="text-[12px] text-current">${metric.value}</strong>
+                  </div>
+                `)}
+              </div>
+            `
+          : null}
+      </div>
+
+      <${SectionQuickNav}
+        tab=${currentTab}
+        currentSectionId=${currentSection?.id}
+        sections=${sections}
+      />
+    </section>
   `
 }
 

@@ -64,6 +64,7 @@ export function App() {
     // Cancel any pending SSE-triggered refreshes from the previous tab
     // to prevent stale fetch results arriving after navigation (C-4/M-12).
     cancelPendingSSERefreshes()
+    mobileMenuOpen.value = false
     refreshForRoute(route.value, { recordVisit: true })
   }, [route.value.tab, route.value.params.section, route.value.params.q])
 
@@ -117,7 +118,15 @@ export function App() {
       <${RemoteWarningBanner} />
 
       <div class="flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col">
-        <aside id="dashboard-side-rail" class="${sidebarCollapsed.value ? 'w-14' : 'w-[220px]'} shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-[300px] ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+        ${mobileMenuOpen.value ? html`
+          <button
+            type="button"
+            class="fixed inset-0 z-20 hidden bg-[rgba(5,10,18,0.72)] backdrop-blur-sm max-[768px]:block"
+            aria-label="탐색 메뉴 닫기"
+            onClick=${() => { mobileMenuOpen.value = false }}
+          ></button>
+        ` : null}
+        <aside id="dashboard-side-rail" class="${sidebarCollapsed.value ? 'w-14' : 'w-[220px]'} relative z-30 shrink-0 overflow-y-auto overflow-x-hidden rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(15,22,36,0.6)] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] max-[1100px]:w-full max-[1100px]:max-h-[300px] ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
           <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
         </aside>
 

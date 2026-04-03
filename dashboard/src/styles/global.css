@@ -109,6 +109,77 @@
   background: var(--white-3);
 }
 
+@utility surface-context-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(71, 184, 255, 0.08), rgba(15, 22, 36, 0.12) 44%, rgba(15, 22, 36, 0.28) 100%),
+    rgba(10, 15, 26, 0.62);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.18);
+}
+
+@utility surface-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+  &.active {
+    border-color: rgba(71, 184, 255, 0.24);
+    background: rgba(71, 184, 255, 0.14);
+    color: #dff3ff;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08);
+  }
+  &.warn {
+    border-color: rgba(230, 167, 0, 0.22);
+    background: rgba(230, 167, 0, 0.12);
+    color: #ffd78f;
+  }
+  &.ok {
+    border-color: rgba(74, 222, 128, 0.2);
+    background: rgba(74, 222, 128, 0.1);
+    color: #bff3ce;
+  }
+  &.muted:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--text-body);
+  }
+}
+
+@utility feedback-panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 16px;
+}
+
+@utility feedback-panel-loading {
+  border-color: rgba(71, 184, 255, 0.18);
+  background: rgba(71, 184, 255, 0.08);
+  color: #dff3ff;
+}
+
+@utility feedback-panel-empty {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+}
+
+@utility feedback-panel-error {
+  border-color: rgba(224, 80, 80, 0.3);
+  background: rgba(224, 80, 80, 0.12);
+  color: #ffb3b3;
+}
+
 /* ── Section header (reusable pattern) ─────────────────────── */
 
 @utility section-header {

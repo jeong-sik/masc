@@ -13,7 +13,7 @@ import type { ComponentChildren } from 'preact'
 import type { Signal } from '@preact/signals'
 import type { AsyncState } from '../../lib/async-state'
 import { EmptyState } from './empty-state'
-import { LoadingState } from './feedback-state'
+import { ErrorState, LoadingState } from './feedback-state'
 
 interface AsyncContainerProps<T> {
   state: Signal<AsyncState<T>>
@@ -39,9 +39,9 @@ export function AsyncContainer<T>({
 
     case 'error':
       return html`
-        <div class="px-4 py-3 rounded-lg bg-[var(--bad-12)] border border-[var(--bad-30)] text-[var(--bad-light)] text-[length:var(--fs-sm)]">
+        <${ErrorState}>
           ${s.message}
-        </div>
+        <//>
       `
 
     case 'loaded':

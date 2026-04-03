@@ -4,6 +4,7 @@ module WO = Masc_mcp.Keeper_world_observation
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
 module KAR = Masc_mcp.Keeper_agent_run
+module KEC = Masc_mcp.Keeper_exec_context
 module KSM = Masc_mcp.Keeper_social_model
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
@@ -66,6 +67,28 @@ let contains_disallowed_control_char s =
       else loop (i + 1)
   in
   loop 0
+
+let append_dense_turn ctx idx =
+  let payload = String.make 160 'x' in
+  KEC.append ctx
+    (Agent_sdk.Types.user_msg
+       (Printf.sprintf "turn %02d user %s" idx payload))
+  |> fun next ->
+  KEC.append next
+    (Agent_sdk.Types.assistant_msg
+       (Printf.sprintf "turn %02d assistant %s" idx payload))
+
+let build_dense_retry_context ~turns ~max_tokens =
+  let rec loop idx ctx =
+    if idx > turns then ctx else loop (idx + 1) (append_dense_turn ctx idx)
+  in
+  let ctx =
+    loop 1 (KEC.create ~system_prompt:"keeper unified" ~max_tokens)
+  in
+  KEC.append ctx
+    (Agent_sdk.Types.assistant_msg
+       "done\n\n[STATE]\nGoal: retry after overflow\nProgress: ready\n[/STATE]")
+  |> KEC.sync_oas_context
 
 (* ---------- World Observation type tests ---------- *)
 
@@ -1014,6 +1037,45 @@ let test_sanitize_messages_utf8_cleans_history_path () =
        | _ -> fail "expected sanitized tool result")
   | _ -> fail "expected two sanitized messages"
 
+let test_overflow_retry_plan_preserves_recovered_generation () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta =
+        {
+          minimal_meta with
+          runtime =
+            {
+              minimal_meta.runtime with
+              trace_id = "trace-overflow-plan";
+              generation = 0;
+            };
+        }
+      in
+      let session =
+        KEC.create_session ~session_id:meta.runtime.trace_id ~base_dir
+      in
+      let legacy_ctx =
+        build_dense_retry_context ~turns:18 ~max_tokens:2048
+      in
+      ignore (KEC.save_checkpoint session legacy_ctx ~generation:3);
+      match
+        UT.recover_context_overflow_retry ~meta ~base_dir
+          ~primary_max_context:192
+          ~error:
+            "HTTP 400: prompt exceeds available context size (192) for this model"
+      with
+      | Some retry_plan ->
+          check int "retry generation preserved" 3
+            retry_plan.UT.retry_generation;
+          check int "retry max_context clamped" 192
+            retry_plan.retry_max_context
+      | None -> fail "expected overflow retry plan")
+
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
@@ -1430,5 +1492,7 @@ let () =
           test_case "empty string not transient" `Quick (fun () ->
             check bool "empty" false
               (UT.is_transient_network_error ""));
+          test_case "overflow retry plan preserves generation" `Quick
+            test_overflow_retry_plan_preserves_recovered_generation;
         ] );
     ]

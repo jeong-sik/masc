@@ -64,6 +64,11 @@ let transient_backoff_sec (attempt : int) : float =
 
 let context_overflow_anchor = "available context size ("
 
+type overflow_retry_plan = {
+  retry_max_context : int;
+  retry_generation : int;
+}
+
 let context_overflow_limit (msg : string) : int option =
   let lowered = String.lowercase_ascii msg in
   match find_substring ~needle:context_overflow_anchor lowered with
@@ -83,11 +88,15 @@ let context_overflow_limit (msg : string) : int option =
         String.sub lowered start_idx (end_idx - start_idx)
         |> int_of_string_opt
 
+let meta_with_generation (meta : keeper_meta) ~(generation : int) : keeper_meta =
+  if generation = meta.runtime.generation then meta
+  else map_runtime (fun rt -> { rt with generation }) meta
+
 let recover_context_overflow_retry
     ~(meta : keeper_meta)
     ~(base_dir : string)
     ~(primary_max_context : int)
-    ~(error : string) : int option =
+    ~(error : string) : overflow_retry_plan option =
   match context_overflow_limit error with
   | None -> None
   | Some actual_limit ->
@@ -107,7 +116,11 @@ let recover_context_overflow_retry
             meta.name recovery.compaction.before_tokens
             recovery.compaction.after_tokens
             retry_max_context recovery.turn_generation;
-          Some retry_max_context
+          Some
+            {
+              retry_max_context;
+              retry_generation = recovery.turn_generation;
+            }
       | None ->
           Log.Keeper.warn
             "%s: context overflow detected but checkpoint recovery was unavailable: %s"
@@ -671,8 +684,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          across all providers).  See #4523. *)
       let run_result, latency_ms =
         Keeper_exec_context.timed (fun () ->
-          let do_run ?(is_retry = false) ~max_context () =
-            Keeper_agent_run.run_turn ~config ~meta ~base_dir
+          let do_run ?(is_retry = false) ~(turn_meta : keeper_meta) ~generation
+              ~max_context () =
+            Keeper_agent_run.run_turn ~config ~meta:turn_meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:"keeper_unified"
               ~generation ~max_turns
@@ -683,8 +697,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_retry
               ()
           in
-          let rec retry_loop attempt =
-            match do_run ~is_retry:(attempt > 1)
+          let rec retry_loop attempt ~(turn_meta : keeper_meta) ~generation =
+            match do_run ~is_retry:(attempt > 1) ~turn_meta ~generation
                     ~max_context:primary_max_context () with
             | Ok _ as ok -> ok
             | Error e when is_transient_network_error e
@@ -695,18 +709,24 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   meta.name attempt max_transient_retries delay
                   (short_preview e);
                 Eio.Time.sleep (Eio_context.get_clock ()) delay;
-                retry_loop (attempt + 1)
+                retry_loop (attempt + 1) ~turn_meta ~generation
             | Error e -> (
                 match
-                  recover_context_overflow_retry ~meta ~base_dir
+                  recover_context_overflow_retry ~meta:turn_meta ~base_dir
                     ~primary_max_context ~error:e
                 with
-                | Some retry_max_context ->
+                | Some retry_plan ->
+                    let retry_meta =
+                      meta_with_generation turn_meta
+                        ~generation:retry_plan.retry_generation
+                    in
                     Eio.Fiber.yield ();
-                    do_run ~is_retry:true ~max_context:retry_max_context ()
+                    do_run ~is_retry:true ~turn_meta:retry_meta
+                      ~generation:retry_plan.retry_generation
+                      ~max_context:retry_plan.retry_max_context ()
                 | None -> Error e)
           in
-          retry_loop 1)
+          retry_loop 1 ~turn_meta:meta ~generation)
       in
       match run_result with
       | Error e ->

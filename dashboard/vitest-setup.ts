@@ -26,3 +26,21 @@ vi.mock('lucide-preact', async (importOriginal) => {
 
   return mocked
 })
+
+// Mock Shiki to avoid heavy loading during happy-dom tests
+vi.mock('shiki', () => {
+  function escapeHtml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+  }
+  return {
+    createHighlighter: vi.fn().mockResolvedValue({
+      getLoadedLanguages: vi.fn().mockReturnValue([]),
+      loadLanguage: vi.fn().mockResolvedValue(undefined),
+      codeToHtml: vi.fn((code: string) => `<pre class="shiki"><code>${escapeHtml(code)}</code></pre>`)
+    })
+  }
+})

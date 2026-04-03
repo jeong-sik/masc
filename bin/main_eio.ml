@@ -281,6 +281,7 @@ let acquire_pid_lock port =
       exit 1
 
 let run_cmd host port base_path =
+  Printexc.record_backtrace true;
   acquire_pid_lock port;
   Log.init_from_env ();
   Unix.putenv "MASC_BASE_PATH" base_path;
@@ -405,6 +406,11 @@ let run_cmd host port base_path =
         exit 1
     | Unix.Unix_error (Unix.EACCES, _, _) ->
         Log.Server.error "[FATAL] Permission denied binding to port %d" port;
+        exit 1
+    | exn ->
+        let bt = Printexc.get_backtrace () in
+        Log.Server.error "[FATAL] Unhandled exception: %s" (Printexc.to_string exn);
+        if bt <> "" then Log.Server.error "[FATAL] Backtrace:\n%s" bt;
         exit 1)
   in
   try_start 0;

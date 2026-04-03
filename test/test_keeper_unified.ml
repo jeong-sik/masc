@@ -1037,6 +1037,16 @@ let test_sanitize_messages_utf8_cleans_history_path () =
        | _ -> fail "expected sanitized tool result")
   | _ -> fail "expected two sanitized messages"
 
+let test_sanitize_messages_utf8_reuses_clean_history_list () =
+  let msgs =
+    [
+      Agent_sdk.Types.user_msg "already clean";
+      Agent_sdk.Types.assistant_msg "still clean";
+    ]
+  in
+  let sanitized = Masc_mcp.Inference_utils.sanitize_messages_utf8 msgs in
+  check bool "same list reused" true (sanitized == msgs)
+
 let test_overflow_retry_plan_preserves_recovered_generation () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -1409,6 +1419,8 @@ let () =
             test_prompt_sanitizes_control_chars;
           test_case "sanitize_messages_utf8 cleans history path" `Quick
             test_sanitize_messages_utf8_cleans_history_path;
+          test_case "sanitize_messages_utf8 reuses clean history list" `Quick
+            test_sanitize_messages_utf8_reuses_clean_history_list;
         ] );
       ( "config",
         [

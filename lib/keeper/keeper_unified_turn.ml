@@ -10,34 +10,32 @@ open Keeper_types
 open Keeper_exec_context
 module Social = Keeper_social_model
 
-let string_contains_substring ~(needle : string) (haystack : string) : bool =
+let find_substring ~(needle : string) (haystack : string) : int option =
   let needle_len = String.length needle in
   let hay_len = String.length haystack in
-  if needle_len = 0 then true
-  else if needle_len > hay_len then false
-  else
-    let rec loop i =
-      if i + needle_len > hay_len then false
-      else if String.sub haystack i needle_len = needle then true
-      else loop (i + 1)
+  let matches_at start_idx =
+    let rec loop offset =
+      if offset = needle_len then true
+      else if haystack.[start_idx + offset] <> needle.[offset] then false
+      else loop (offset + 1)
     in
     loop 0
+  in
+  let rec loop i =
+    if needle_len = 0 then Some 0
+    else if i + needle_len > hay_len then None
+    else if matches_at i then Some i
+    else loop (i + 1)
+  in
+  loop 0
+
+let string_contains_substring ~(needle : string) (haystack : string) : bool =
+  String_util.contains_substring haystack needle
 
 let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
   string_contains_substring
     ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
-
-let find_substring ~(needle : string) (haystack : string) : int option =
-  let needle_len = String.length needle in
-  let hay_len = String.length haystack in
-  let rec loop i =
-    if needle_len = 0 then Some 0
-    else if i + needle_len > hay_len then None
-    else if String.sub haystack i needle_len = needle then Some i
-    else loop (i + 1)
-  in
-  loop 0
 
 (** Detect transient TCP/TLS errors that warrant retry with backoff.
     These patterns match OAS cascade error messages for connection-level failures.

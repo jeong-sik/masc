@@ -88,22 +88,50 @@ let sanitize_text_utf8 (s : string) : string =
     loop 0;
     Buffer.contents buf
 
+let rec sanitize_content_blocks_utf8
+    (blocks : Agent_sdk.Types.content_block list)
+  : Agent_sdk.Types.content_block list =
+  match blocks with
+  | [] -> blocks
+  | block :: rest ->
+      let sanitized_block =
+        match block with
+        | Agent_sdk.Types.Text s ->
+            let sanitized = sanitize_text_utf8 s in
+            if sanitized == s then block else Agent_sdk.Types.Text sanitized
+        | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error } ->
+            let sanitized_tool_use_id = sanitize_text_utf8 tool_use_id in
+            let sanitized_content = sanitize_text_utf8 content in
+            if sanitized_tool_use_id == tool_use_id && sanitized_content == content
+            then block
+            else
+              Agent_sdk.Types.ToolResult {
+                tool_use_id = sanitized_tool_use_id;
+                content = sanitized_content;
+                is_error;
+              }
+        | _ -> block
+      in
+      let sanitized_rest = sanitize_content_blocks_utf8 rest in
+      if sanitized_block == block && sanitized_rest == rest then blocks
+      else sanitized_block :: sanitized_rest
+
 let sanitize_message_utf8 (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
-  { m with
-    content = List.map (fun block ->
-      match block with
-      | Agent_sdk.Types.Text s -> Agent_sdk.Types.Text (sanitize_text_utf8 s)
-      | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error } ->
-          Agent_sdk.Types.ToolResult {
-            tool_use_id = sanitize_text_utf8 tool_use_id;
-            content = sanitize_text_utf8 content;
-            is_error }
-      | other -> other
-    ) m.content;
-  }
+  let sanitized_content = sanitize_content_blocks_utf8 m.content in
+  if sanitized_content == m.content then m
+  else { m with content = sanitized_content }
 
 let sanitize_messages_utf8 (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
-  List.map sanitize_message_utf8 msgs
+  let rec loop messages =
+    match messages with
+    | [] -> messages
+    | msg :: rest ->
+        let sanitized_msg = sanitize_message_utf8 msg in
+        let sanitized_rest = loop rest in
+        if sanitized_msg == msg && sanitized_rest == rest then messages
+        else sanitized_msg :: sanitized_rest
+  in
+  loop msgs
 
 (* ================================================================ *)
 (* Concurrency diagnostics (observability only, no throttling)       *)

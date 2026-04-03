@@ -63,7 +63,10 @@ let wait_for_background_delegate_settle
         Team_session_store.read_events config session_id
         |> List.filter (fun json ->
                Yojson.Safe.Util.member "event_type" json
-               = `String "team_step_delegate")
+               = `String "team_step_delegate"
+               && Yojson.Safe.Util.member "worker_run_id"
+                    (Yojson.Safe.Util.member "detail" json)
+                  = `String worker_run_id)
       in
       if delegate_events <> [] then ()
       else (
@@ -71,6 +74,41 @@ let wait_for_background_delegate_settle
         loop (attempts - 1))
   in
   loop 200
+
+let test_wait_for_background_delegate_settle_ignores_other_worker_events () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "owner"));
+  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "owner"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None; net = None }
+  in
+  let session_id = start_session_exn ctx ~goal:"delegate-settle-filter" |> get_session_id in
+  Team_session_store.append_event config session_id
+    ~event_type:"team_step_delegate"
+    ~detail:
+      (`Assoc
+        [
+          ("worker_run_id", `String "other-run");
+          ("target_agent", `String "worker-a");
+          ("success", `Bool true);
+        ]);
+  let target_worker_run_id = "target-run" in
+  Alcotest.match_raises
+    "unrelated delegate event does not settle target"
+    (function
+      | exn ->
+          Room_utils.contains_substring (Printexc.to_string exn)
+            "background delegate did not settle before cleanup")
+    (fun () ->
+      wait_for_background_delegate_settle ctx config session_id target_worker_run_id;
+      ());
+  Team_session_store.save_worker_run_meta_json config session_id target_worker_run_id
+    (`Assoc [ ("worker_run_id", `String target_worker_run_id) ]);
+  wait_for_background_delegate_settle ctx config session_id target_worker_run_id;
+  cleanup_dir base_dir
 
 let test_prove_strong_requires_additional_evidence () =
   with_eio @@ fun env ->

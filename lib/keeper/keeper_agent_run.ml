@@ -103,15 +103,22 @@ let prioritized_disclosed_tool_names
   let fallback_tools =
     Keeper_exec_tools.dedupe_tool_names fallback_tools
   in
+  let seen = Hashtbl.create (max 16 max_tools) in
   let add_with_budget acc names =
     let remaining = max_tools - List.length acc in
     if remaining <= 0 then
       acc
     else
-      let unseen =
-        List.filter (fun name -> not (List.mem name acc)) names
-      in
-      acc @ take remaining unseen
+      let remaining = ref remaining in
+      let added_rev = ref [] in
+      List.iter (fun name ->
+        if !remaining > 0 && not (Hashtbl.mem seen name) then begin
+          Hashtbl.replace seen name ();
+          decr remaining;
+          added_rev := name :: !added_rev
+        end
+      ) names;
+      acc @ List.rev !added_rev
   in
   let acc = add_with_budget [] always_include_tools in
   let acc = add_with_budget acc retrieved_names in
@@ -673,11 +680,10 @@ let run_turn
           Log.Keeper.info
             "keeper:%s turn_budget turn=%d/%d last_turn=%b"
             meta.name turn max_turns is_last_turn;
-        (* Context overflow guard: cap tool count to prevent exceeding
-           small model context windows (e.g. 8K).  ~118 tokens/tool schema,
-           so 40 tools ≈ 4700 tokens — safe for 8K models.  Beyond 40,
-           truncate to always_include_tools + top BM25 results by score.
-           Configurable via MASC_KEEPER_MAX_TOOLS_PER_TURN. *)
+        (* Context overflow guard: tool disclosure is first budgeted via
+           prioritized_disclosed_tool_names, then overlays can still grow the
+           visible set. Cap the post-overlay set to stay inside small-model
+           context windows. Configurable via MASC_KEEPER_MAX_TOOLS_PER_TURN. *)
         let all_allowed =
           if List.length all_allowed > max_tools then begin
             Log.Keeper.info

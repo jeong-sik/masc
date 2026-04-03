@@ -99,22 +99,6 @@ let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = fa
     required_permission = None;
   }
 
-let deprecated_default ?canonical_name ?replacement
-    ?(implementation_status = Adapter) reason =
-  {
-    visibility = Default;
-    lifecycle = Deprecated;
-    implementation_status;
-    canonical_name;
-    replacement;
-    reason = Some reason;
-    allow_direct_call_when_hidden = false;
-    readonly = None;
-    destructive = None;
-    idempotent = None;
-    required_permission = None;
-  }
-
 let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
     ?(implementation_status = Real) reason =
   {
@@ -157,25 +141,12 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_judgment_write",
       hidden_active
         "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    ( "masc_operator_judgment_latest",
-      hidden_active
-        "Internal operator-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    (* Dead features: no surface, no external callers.
-       Removed on 2026-04-03 from grep/audit evidence in #4709 and PR #4757;
-       no 4-week telemetry window is claimed here.
-       masc_hat_wear, masc_hat_status, masc_encryption_*, masc_generate_key,
-       and masc_tempo* are now physically removed. *)
+    (* Dead features physically removed in #4709 and #4757:
+       operator_judgment_latest, hat_wear, hat_status, encryption_*,
+       generate_key, tempo*, cost_log, cost_report. *)
     (* Broken tools: shell out to CLI binaries unavailable at runtime.
-       masc-cost: buildable from bin/masc_cost.ml but not guaranteed to be
-       present in runtime images or on PATH.
        masc-checkpoint: removed from codebase (refactor #102).
        Deprecated 2026-04-03. See #4709, #4734. *)
-    ("masc_cost_log",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-cost CLI which may be unavailable in the runtime environment or missing from PATH.");
-    ("masc_cost_report",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-cost CLI which may be unavailable in the runtime environment or missing from PATH.");
     ("masc_interrupt",
      deprecated ~implementation_status:Real
        "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");

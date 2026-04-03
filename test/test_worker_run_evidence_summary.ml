@@ -1,6 +1,5 @@
 open Alcotest
 open Masc_mcp
-open Test_tool_team_session_support
 
 module U = Yojson.Safe.Util
 
@@ -191,49 +190,6 @@ let test_summary_distinguishes_missing_vs_unavailable_evidence () =
   check bool "proof status stays absent when no proof_run_id" false
     (has_key "proof_status" unavailable_proof)
 
-let test_verify_trace_returns_canonical_worker_run_summary () =
-  with_eio @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  let config = Room.default_config base_dir in
-  ignore (Room.init config ~agent_name:(Some "owner"));
-  ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
-  let ctx : _ Tool_team_session.context =
-    {
-      config;
-      agent_name = "owner";
-      sw;
-      clock = Eio.Stdenv.clock env;
-      proc_mgr = None;
-      net = None;
-    }
-  in
-  let session_id = start_session_exn ctx ~goal:"verify-trace-canonical" |> get_session_id in
-  let worker_run_id = "run-trace-1" in
-  ignore
-    (write_worker_run_raw_trace_exn config ~session_id ~worker_run_id
-       ~worker_name:"llama-local-impl");
-  let verify_ok, verify_body =
-    dispatch_exn ctx ~name:"masc_team_session_verify_trace"
-      ~args:
-        (`Assoc
-          [
-            ("session_id", `String session_id);
-            ("worker_run_id", `String worker_run_id);
-          ])
-  in
-  check bool "verify trace ok" true verify_ok;
-  let result = parse_json_exn verify_body |> result_field in
-  let worker_run = U.member "worker_run" result in
-  let meta_json =
-    Team_session_store.worker_run_meta_path config session_id worker_run_id
-    |> Room_utils.read_json config
-  in
-  let canonical = Worker_run_evidence_summary.summary_json meta_json in
-  check bool "verify_trace worker_run uses canonical summary" true
-    (Yojson.Safe.equal canonical worker_run);
-  cleanup_dir base_dir
-
 let () =
   Alcotest.run "worker_run_evidence_summary"
     [
@@ -245,7 +201,5 @@ let () =
             test_summary_projects_tool_surface_visibility;
           test_case "distinguishes missing vs unavailable evidence" `Quick
             test_summary_distinguishes_missing_vs_unavailable_evidence;
-          test_case "verify_trace returns canonical worker run summary" `Quick
-            test_verify_trace_returns_canonical_worker_run_summary;
         ] );
     ]

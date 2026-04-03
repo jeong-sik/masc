@@ -244,22 +244,6 @@ let test_cascade_observation_json_includes_fallback_fields () =
   Alcotest.(check string) "attempt detail boundary preserved" "oas_metrics_callbacks"
     Yojson.Safe.Util.(json |> member "attempt_details_source" |> to_string)
 
-let test_model_catalog_status_includes_cascade_metrics () =
-  let result =
-    Tool_model_catalog.dispatch () ~name:"masc_model_catalog"
-      ~args:(`Assoc [ ("action", `String "status") ])
-  in
-  match result with
-  | None -> Alcotest.fail "expected masc_model_catalog dispatch result"
-  | Some (ok, body) ->
-      Alcotest.(check bool) "status ok" true ok;
-      let json = Yojson.Safe.from_string body in
-      let metrics =
-        Yojson.Safe.Util.(json |> member "result" |> member "cascade_metrics")
-      in
-      Alcotest.(check bool) "cascade_metrics is list" true
-        (match metrics with `List _ -> true | _ -> false)
-
 let make_worker_meta ?(effective_model = "local-qwen") () :
     Worker_container_types.worker_container_meta =
   {
@@ -972,8 +956,6 @@ let () =
         test_cascade_names_produce_models;
       Alcotest.test_case "cascade observation json includes fallback fields" `Quick
         test_cascade_observation_json_includes_fallback_fields;
-      Alcotest.test_case "model catalog status includes cascade metrics" `Quick
-        test_model_catalog_status_includes_cascade_metrics;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick

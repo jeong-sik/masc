@@ -7,8 +7,6 @@ open Alcotest
 
 module Mcp_server_eio = Masc_mcp.Mcp_server_eio
 module Mcp_server = Masc_mcp.Mcp_server
-module Tool_audit = Masc_mcp.Tool_audit
-
 (* ============================================================
    Type Tests
    ============================================================ *)
@@ -374,41 +372,6 @@ let test_governance_defaults_mixed_case () =
   check bool "audit enabled" true g.audit_enabled
 
 (* ============================================================
-   audit_event_to_json Tests
-   ============================================================ *)
-
-let test_audit_event_to_json_full () =
-  let event : Tool_audit.audit_event = {
-    timestamp = 1706400000.0;
-    agent = "claude-test";
-    event_type = "tool_call";
-    success = true;
-    detail = Some "masc_status";
-    details = Some (`Assoc [("tool_name", `String "masc_status")]);
-  } in
-  let json = Tool_audit.audit_event_to_json event in
-  let open Yojson.Safe.Util in
-  check (float 0.1) "timestamp" 1706400000.0 (json |> member "timestamp" |> to_float);
-  check string "agent" "claude-test" (json |> member "agent" |> to_string);
-  check string "event_type" "tool_call" (json |> member "event_type" |> to_string);
-  check bool "success" true (json |> member "success" |> to_bool);
-  check string "detail" "masc_status" (json |> member "detail" |> to_string)
-
-let test_audit_event_to_json_no_detail () =
-  let event : Tool_audit.audit_event = {
-    timestamp = 1706400000.0;
-    agent = "gemini";
-    event_type = "join";
-    success = false;
-    detail = None;
-    details = None;
-  } in
-  let json = Tool_audit.audit_event_to_json event in
-  let open Yojson.Safe.Util in
-  check bool "success false" false (json |> member "success" |> to_bool);
-  check bool "detail null" true ((json |> member "detail") = `Null)
-
-(* ============================================================
    mcp_session_to_json Tests
    ============================================================ *)
 
@@ -590,10 +553,6 @@ let () =
       test_case "paranoid" `Quick test_governance_defaults_paranoid;
       test_case "unknown" `Quick test_governance_defaults_unknown;
       test_case "mixed case" `Quick test_governance_defaults_mixed_case;
-    ];
-    "audit_event_to_json", [
-      test_case "full" `Quick test_audit_event_to_json_full;
-      test_case "no detail" `Quick test_audit_event_to_json_no_detail;
     ];
     "mcp_session_to_json", [
       test_case "full" `Quick test_mcp_session_to_json_full;

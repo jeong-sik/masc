@@ -278,7 +278,6 @@ let judgment_latest_schema =
           ("required", `List [ `String "surface"; `String "target_type" ]);
         ];
   }
-
 let json_string_of_result = function
   | Ok json -> (true, Yojson.Safe.to_string json)
   | Error message -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String message) ]))
@@ -334,10 +333,6 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
   | "masc_operator_judgment_write" ->
       Some
         (json_string_of_result (Operator_control.judgment_write_json control_ctx args))
-  | "masc_operator_judgment_latest" ->
-      Some
-        (json_string_of_result
-           (Operator_control.judgment_latest_json control_ctx args))
   | _ -> None
 
 let schemas : tool_schema list =
@@ -349,7 +344,6 @@ let schemas : tool_schema list =
     surface_audit_schema ~remote:false;
     collaboration_evidence_schema ~remote:false;
     judgment_write_schema;
-    judgment_latest_schema;
   ]
 
 let remote_schemas : tool_schema list =
@@ -373,7 +367,7 @@ let _tool_spec_read_only = [ "masc_operator_snapshot"; "masc_operator_digest"; "
 let _tool_spec_requires_join = [ "masc_operator_action"; "masc_operator_confirm" ]
 
 (* Tools with explicit catalog metadata that must be preserved. *)
-let _tool_spec_hidden = [ "masc_operator_judgment_write"; "masc_operator_judgment_latest" ]
+let _tool_spec_hidden = [ "masc_operator_judgment_write" ]
 let _tool_spec_hidden_destructive = [ "masc_operator_action" ]
 
 let () =

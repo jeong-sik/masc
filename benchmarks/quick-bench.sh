@@ -256,8 +256,7 @@ measure_avg "masc_broadcast" "masc_broadcast" "$(jq -cn --arg agent "$MASC_AGENT
 measure_lock_cycle "$BENCH_ITERATIONS"
 measure_avg "masc_a2a_discover" "masc_a2a_discover" '{}' "$BENCH_ITERATIONS"
 measure_avg "masc_find_by_capability" "masc_find_by_capability" '{"capability":"code-review"}' "$BENCH_ITERATIONS"
-measure_avg "masc_local_runtime_status" "masc_local_runtime_status" '{}' "$BENCH_ITERATIONS"
-measure_avg "masc_local_runtime_bench" "masc_local_runtime_bench" '{"parallelism":1,"rounds":1,"prompt":"Reply with OK only.","max_tokens":16,"timeout_sec":10}' 1
+measure_avg "masc_runtime_verify" "masc_runtime_verify" '{}' "$BENCH_ITERATIONS"
 
 echo ""
 echo "=== Benchmark Complete ==="

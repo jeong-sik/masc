@@ -125,44 +125,12 @@ let handle_runtime_bench _ctx args : result =
 let dispatch ctx ~name ~args : result option =
   match name with
   (* Canonical names *)
-  | "masc_local_runtime_models" ->
-      Some (handle_models ctx)
-  | "masc_local_runtime_status" ->
-      Some (handle_runtime_status ctx args)
   | "masc_runtime_verify" ->
       Some (handle_runtime_verify ctx args)
-  | "masc_local_runtime_bench" ->
-      Some (handle_runtime_bench ctx args)
   | _ -> None
 
 let schemas : tool_schema list =
   [
-    {
-      name = "masc_local_runtime_models";
-      description =
-        "Read the local model runtime model inventory from /v1/models. Use this before spawning local workers so the leader can choose an explicit model id.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ("properties", `Assoc []);
-          ];
-    };
-    {
-      name = "masc_local_runtime_status";
-      description =
-        "Inspect the local model runtime pool used for spawned local workers. Returns runtime inventory, matched server processes, configured capacity, and current MASC model permit configuration.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("include_models", `Assoc [ ("type", `String "boolean") ]);
-                ] );
-          ];
-    };
     {
       name = "masc_runtime_verify";
       description =
@@ -178,27 +146,6 @@ let schemas : tool_schema list =
                   ("expected_model", `Assoc [ ("type", `String "string") ]);
                   ("expected_slots", `Assoc [ ("type", `String "integer") ]);
                   ("expected_ctx", `Assoc [ ("type", `String "integer") ]);
-                ] );
-          ];
-    };
-    {
-      name = "masc_local_runtime_bench";
-      description =
-        "Run a direct concurrency benchmark against the configured local model runtime pool to estimate current same-box parallel completion behavior.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("model", `Assoc [ ("type", `String "string") ]);
-                  ("runtime_pool", `Assoc [ ("type", `String "string") ]);
-                  ("parallelism", `Assoc [ ("type", `String "integer") ]);
-                  ("rounds", `Assoc [ ("type", `String "integer") ]);
-                  ("prompt", `Assoc [ ("type", `String "string") ]);
-                  ("max_tokens", `Assoc [ ("type", `String "integer") ]);
-                  ("timeout_sec", `Assoc [ ("type", `String "integer") ]);
                 ] );
           ];
     };

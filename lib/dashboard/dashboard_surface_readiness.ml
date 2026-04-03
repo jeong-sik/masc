@@ -155,7 +155,7 @@ let all_entries =
           logs_ref = Some "/api/v1/dashboard/logs";
           metrics_ref = Some "/metrics";
           proof_ref = None;
-          tool_name = Some "masc_operator_judgment_latest";
+          tool_name = None;
         };
     };
     {

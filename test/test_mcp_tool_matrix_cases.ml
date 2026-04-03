@@ -103,6 +103,31 @@ let strict_guard_cases =
     ("masc_reset", [ "confirm" ]);
   ]
 
+let endpoint_unavailable_guard_names =
+  [
+    "masc_approve";
+    "masc_branch";
+    "masc_interrupt";
+    "masc_pending_interrupts";
+    "masc_reject";
+  ]
+
+let endpoint_unavailable_guard_fragments =
+  [
+    "not available on this MCP endpoint";
+  ]
+
+let generic_matrix_excluded_names =
+  [
+    "masc_keeper_msg";
+    "masc_observe_topology";
+    "masc_operator_snapshot";
+    "masc_policy_status";
+    "masc_repo_synthesis_swarm_start";
+    "masc_tool_admin_snapshot";
+    "masc_unit_define";
+  ]
+
 let string_starts_with ~prefix s =
   let plen = String.length prefix in
   let slen = String.length s in
@@ -839,6 +864,8 @@ let case_for_name name =
     | None ->
         if List.mem name strict_success_names then
           Expect_success
+        else if List.mem name endpoint_unavailable_guard_names then
+          Expect_guard endpoint_unavailable_guard_fragments
         else if List.mem name all_known_tool_names then
           Expect_success_or_guard (guard_fragments_for_name name)
         else

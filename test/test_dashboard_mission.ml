@@ -372,6 +372,12 @@ let test_dashboard_mission_projection () =
           (summary |> member "paused" = `Null);
         check bool "mission summary trims active_agents" true
           (summary |> member "active_agents" = `Null);
+        check string "mission summary namespace_id" "default"
+          (summary |> member "namespace_id" |> to_string);
+        check string "mission summary namespace" "default"
+          (summary |> member "namespace" |> to_string);
+        check string "mission summary namespace mode" "flattened"
+          (summary |> member "namespace_mode" |> to_string);
         check bool "full session cards omitted from mission payload" true
           (sessions = []);
         check bool "session brief keeps member previews" true
@@ -520,6 +526,10 @@ let test_dashboard_mission_http_default_bootstraps_first_success () =
         check bool "default mission leaves initializing placeholder" true
           (json |> member "summary" |> member "room_health" |> to_string
            <> "initializing");
+        check string "default mission exposes namespace id" "default"
+          (json |> member "summary" |> member "namespace_id" |> to_string);
+        check string "default mission exposes namespace" "default"
+          (json |> member "summary" |> member "namespace" |> to_string);
         check bool "default mission includes session briefs" true
           (json |> member "session_briefs" |> to_list
          |> List.exists (fun row -> row |> member "session_id" |> to_string = session_id));
@@ -557,6 +567,10 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
         check bool "default mission leaves initializing placeholder" true
           (json |> member "summary" |> member "room_health" |> to_string
            <> "initializing");
+        check string "default mission exposes namespace id" "default"
+          (json |> member "summary" |> member "namespace_id" |> to_string);
+        check string "default mission exposes namespace" "default"
+          (json |> member "summary" |> member "namespace" |> to_string);
         check bool "default mission includes session briefs" true
           (json |> member "session_briefs" |> to_list
          |> List.exists (fun row -> row |> member "session_id" |> to_string = session_id));

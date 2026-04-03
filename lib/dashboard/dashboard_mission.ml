@@ -550,7 +550,7 @@ type mission_projection = {
   generated_at : string;
   snapshot_json : Yojson.Safe.t;
   digest_json : Yojson.Safe.t;
-  room_json : Yojson.Safe.t;
+  namespace_json : Yojson.Safe.t;
   command_json : Yojson.Safe.t;
   incidents : Yojson.Safe.t list;
   recommended_actions : Yojson.Safe.t list;
@@ -629,7 +629,11 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
                 ("error", `String message);
               ])
   in
-  let room_json = member_assoc "room" snapshot_json in
+  let namespace_json =
+    match member_assoc "namespace" snapshot_json with
+    | `Assoc _ as value -> value
+    | _ -> member_assoc "room" snapshot_json
+  in
   let incidents =
     list_field "attention_items" digest_json
     |> List.sort (fun left right ->
@@ -653,7 +657,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
     | _ -> []
   in
   let agent_briefs =
-    Dashboard_mission_assembly.build_agent_briefs config sessions attention_queue room_json keeper_items
+    Dashboard_mission_assembly.build_agent_briefs config sessions attention_queue namespace_json keeper_items
   in
   let keeper_briefs = Dashboard_mission_assembly.build_keeper_briefs config keeper_items in
   let internal_signals = Dashboard_mission_assembly.build_internal_signals incidents recommended_actions in
@@ -661,7 +665,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
     generated_at = Types.now_iso ();
     snapshot_json;
     digest_json;
-    room_json;
+    namespace_json;
     command_json;
     incidents;
     recommended_actions;
@@ -690,9 +694,12 @@ let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mg
     `Assoc
       [
         ("room_health", `String (string_field ~default:"ok" "health" projection.digest_json));
-        ("cluster", json_string_option (Some (string_field "cluster" projection.room_json)));
-        ("project", json_string_option (Some (string_field "project" projection.room_json)));
-        ("current_room", member_assoc "current_room" projection.room_json);
+        ("cluster", json_string_option (Some (string_field "cluster" projection.namespace_json)));
+        ("project", json_string_option (Some (string_field "project" projection.namespace_json)));
+        ("namespace_id", json_string_option (Some (string_field "namespace_id" projection.namespace_json)));
+        ("namespace", json_string_option (Some (string_field "namespace" projection.namespace_json)));
+        ("namespace_mode", json_string_option (Some (string_field "namespace_mode" projection.namespace_json)));
+        ("current_room", member_assoc "current_room" projection.namespace_json);
       ]
   in
   let command_focus_json =

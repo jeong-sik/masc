@@ -3,7 +3,8 @@
 module Lib = Masc_mcp
 
 let default_dir_permissions = 0o755
-let test_created_at = 1234.0
+let test_created_at_timestamp = 1234.0
+let expected_avg_usage = 2.5
 
 let test_dir () =
   let tmp = Filename.temp_file "masc_prompt_registry" "" in
@@ -116,7 +117,7 @@ let fixture key =
   | None -> failwith ("missing fixture: " ^ key)
 
 let make_entry ?(version = "1.0") ?(variables = []) ?metrics ?(deprecated = false)
-    ?(created_at = test_created_at) id template =
+    ?(created_at = test_created_at_timestamp) id template =
   Prompt_registry.
     { id; template; version; variables; metrics; created_at; deprecated }
 
@@ -237,7 +238,7 @@ let () =
         ] );
       ( "versioned_registry",
         [
-          test_case "version selection, counts, and explicit unregister work"
+          test_case "version selection keeps latest and tracks unique ids"
             `Quick (fun () ->
               with_clean_registry @@ fun ~dir:_ ->
               Prompt_registry.register
@@ -319,7 +320,8 @@ let () =
               check int "deprecated prompts" 0 stats.deprecated_prompts;
               check (option string) "most used prompt"
                 (Some "alpha.prompt") stats.most_used;
-              check (float 0.0001) "avg usage across prompts" 2.5 stats.avg_usage;
+              check (float 0.0001) "avg usage across prompts" expected_avg_usage
+                stats.avg_usage;
               match Prompt_registry.get ~id:"alpha.prompt" ~version:"1.0" () with
               | Some entry -> (
                   match entry.metrics with
@@ -357,9 +359,15 @@ let () =
               check bool "json persisted to disk" true
                 (Sys.file_exists persisted_path);
               let persisted_json =
-                persisted_path
-                |> In_channel.with_open_text
-                     (fun ic -> In_channel.input_all ic |> Yojson.Safe.from_string)
+                try
+                  persisted_path
+                  |> In_channel.with_open_text
+                       (fun ic -> In_channel.input_all ic |> Yojson.Safe.from_string)
+                with
+                | Yojson.Json_error msg ->
+                    fail
+                      ("failed to parse persisted prompt json at "
+                     ^ persisted_path ^ ": " ^ msg)
               in
               let stored_entry =
                 match Prompt_registry.prompt_entry_of_yojson persisted_json with

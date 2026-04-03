@@ -247,10 +247,6 @@ type tool_exec_observer =
 let make_file_read ?workdir ?on_exec () =
   Agent_sdk.Tool.create
     ~name:"file_read"
-    ~descriptor:{ kind = None;
-                  shell = None; mutation_class = None;
-                  concurrency_class = None;
-                  notes = []; examples = [] }
     ~description:"Read file contents by absolute path. Returns file text. \
       Use shell_exec with 'ls' instead if you need directory listing. \
       Maximum 100KB per read to prevent context overflow."
@@ -303,9 +299,6 @@ let make_file_read ?workdir ?on_exec () =
 let make_file_write ?workdir ?on_exec () =
   Agent_sdk.Tool.create
     ~name:"file_write"
-    ~descriptor:{ kind = None; shell = None; mutation_class = None;
-                  concurrency_class = None;
-                  notes = []; examples = [] }
     ~description:"Write content to a file by absolute path. Creates the file \
       if it doesn't exist, overwrites if it does. Creates parent directories. \
       Use file_read first to check existing content before overwriting."
@@ -364,10 +357,6 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
     ~description () =
   Agent_sdk.Tool.create
     ~name:"shell_exec"
-    ~descriptor:{ kind = None;
-                  shell = None; mutation_class = None;
-                  concurrency_class = None;
-                  notes = []; examples = [] }
     ~description
     ~parameters:[
       { name = "command";

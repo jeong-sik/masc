@@ -167,4 +167,33 @@ describe('TransportHealthPanel', () => {
     expect(container.innerHTML).not.toContain('2 ICE')
     expect(container.textContent).toContain('namespace default')
   })
+
+  it('renders namespace chip with cluster prefix for non-default clusters', async () => {
+    const get = vi.fn<(path: string) => Promise<unknown>>().mockResolvedValue(
+      sampleResponse({
+        cluster: {
+          cluster: 'prod',
+          room_id: 'default',
+          topology_available: false,
+          topology_source: 'metrics_only',
+          total_units: null,
+          managed_units: null,
+          live_agents: null,
+          active_operations: null,
+          stale_units: null,
+        },
+      }),
+    )
+
+    const { TransportHealthPanel } = await loadComponentWithApi({
+      get,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${TransportHealthPanel} />`, container)
+    await flushUi()
+
+    expect(get).toHaveBeenCalledWith('/api/v1/dashboard/transport-health')
+    expect(container.textContent).toContain('prod / namespace default')
+  })
 })

@@ -12,8 +12,8 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "vitest run",
-    "test:serial": "vitest run --no-file-parallelism --maxWorkers=1",
+    "test": "vitest run --no-file-parallelism --maxWorkers=1",
+    "test:serial": "pnpm test",
     "test:watch": "vitest"
   },
   "dependencies": {

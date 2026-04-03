@@ -335,7 +335,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                            `List []);
                      ])
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Log.Dashboard.error "keepers_json fiber error (%s): %s"
+             Log.Dashboard.error "keepers_json error (%s): %s"
                name (Printexc.to_string exn);
              None))
        names);

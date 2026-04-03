@@ -7,7 +7,7 @@ type session_context = Dashboard_mission_assembly.session_context = {
   goal : string;
   created_by : string option;
   origin_kind : string;
-  namespace : string option;
+  room : string option;
   status : string;
   health : string;
   member_names : string list;
@@ -49,10 +49,7 @@ let active_or_recent_sessions config =
     ~limit:(Dashboard_http_helpers.dashboard_session_list_limit ()) config
   |> List.filter is_active_or_recent
 
-let room_scope_cache_segment (config : Room_utils.config) =
-  match config.scope with
-  | Room_utils_backend_setup.Default -> "default"
-  | Room_utils_backend_setup.Named room_id -> "room:" ^ room_id
+let room_scope_cache_segment (_config : Room_utils.config) = "default"
 
 let room_scoped_cache_key (config : Room_utils.config) prefix actor_name =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
@@ -67,11 +64,6 @@ let top_item items =
   match items with
   | item :: _ -> item
   | [] -> `Null
-
-let coordination_scope_json snapshot_json =
-  match member_assoc "namespace" snapshot_json with
-  | `Assoc _ as value -> value
-  | _ -> member_assoc "room" snapshot_json
 
 let session_payload_json session_json =
   match member_assoc "status" session_json with
@@ -246,10 +238,7 @@ let build_session_context session_json session_cards =
           |> Option.value ~default:session_id;
         created_by = trim_to_option (string_field "created_by" meta);
         origin_kind = session_origin_kind meta;
-        namespace =
-          (match trim_to_option (string_field "namespace_id" meta) with
-          | Some _ as value -> value
-          | None -> trim_to_option (string_field "room_id" meta));
+        room = trim_to_option (string_field "room_id" meta);
         status;
         health =
           (if is_terminal then
@@ -385,8 +374,7 @@ let rec evidence_preview_strings json =
   | _ -> []
 
 let is_internal_attention incident =
-  let target_type = string_field "target_type" incident in
-  String.equal target_type "namespace" || String.equal target_type "room"
+  String.equal (string_field "target_type" incident) "room"
 
 let related_sessions_for_attention incident sessions =
   let direct_session =
@@ -527,7 +515,7 @@ let build_session_briefs sessions attention_queue actions =
                ("session_id", `String session.session_id);
                ("goal", `String session.goal);
                ("created_by", json_string_option session.created_by);
-               ("namespace", json_string_option session.namespace);
+               ("room", json_string_option session.room);
                ("status", `String session.status);
                ("health", `String session.health);
                ("member_names", `List (List.map (fun value -> `String value) session.member_names));
@@ -559,7 +547,7 @@ type mission_projection = {
   generated_at : string;
   snapshot_json : Yojson.Safe.t;
   digest_json : Yojson.Safe.t;
-  namespace_json : Yojson.Safe.t;
+  room_json : Yojson.Safe.t;
   command_json : Yojson.Safe.t;
   incidents : Yojson.Safe.t list;
   recommended_actions : Yojson.Safe.t list;
@@ -638,7 +626,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
                 ("error", `String message);
               ])
   in
-  let namespace_json = coordination_scope_json snapshot_json in
+  let room_json = member_assoc "room" snapshot_json in
   let incidents =
     list_field "attention_items" digest_json
     |> List.sort (fun left right ->
@@ -662,7 +650,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
     | _ -> []
   in
   let agent_briefs =
-    Dashboard_mission_assembly.build_agent_briefs config sessions attention_queue namespace_json keeper_items
+    Dashboard_mission_assembly.build_agent_briefs config sessions attention_queue room_json keeper_items
   in
   let keeper_briefs = Dashboard_mission_assembly.build_keeper_briefs config keeper_items in
   let internal_signals = Dashboard_mission_assembly.build_internal_signals incidents recommended_actions in
@@ -670,7 +658,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
     generated_at = Types.now_iso ();
     snapshot_json;
     digest_json;
-    namespace_json;
+    room_json;
     command_json;
     incidents;
     recommended_actions;
@@ -699,10 +687,9 @@ let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mg
     `Assoc
       [
         ("room_health", `String (string_field ~default:"ok" "health" projection.digest_json));
-        ("cluster", json_string_option (Some (string_field "cluster" projection.namespace_json)));
-        ("project", json_string_option (Some (string_field "project" projection.namespace_json)));
-        ("namespace_id", member_assoc "namespace_id" projection.namespace_json);
-        ("namespace", member_assoc "namespace" projection.namespace_json);
+        ("cluster", json_string_option (Some (string_field "cluster" projection.room_json)));
+        ("project", json_string_option (Some (string_field "project" projection.room_json)));
+        ("current_room", member_assoc "current_room" projection.room_json);
       ]
   in
   let command_focus_json =

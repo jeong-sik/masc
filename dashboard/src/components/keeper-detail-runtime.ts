@@ -257,7 +257,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
   const keeperConfig = peekLoadedKeeperConfig(keeper.name)
   const configLoadStatus = peekKeeperConfigLoadStatus(keeper.name)
-  const room = operatorSnapshot.value?.namespace ?? {}
+  const namespaceStatus = operatorSnapshot.value?.namespace ?? {}
   const actions = (operatorSnapshot.value?.available_actions ?? [])
     .filter(
       action =>
@@ -277,10 +277,10 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const auditSource = observedAudit.toolAuditSource
   const auditAt = observedAudit.toolAuditAt
   const capabilities = keeper.agent?.capabilities ?? []
-  const roomName =
-    room.namespace ?? room.namespace_id ?? serverStatus.value?.namespace ?? 'default'
-  const project = room.project ?? serverStatus.value?.project ?? 'N/A'
-  const clusterRaw = room.cluster ?? serverStatus.value?.cluster ?? null
+  const namespaceName =
+    namespaceStatus.namespace ?? namespaceStatus.namespace_id ?? serverStatus.value?.namespace ?? 'default'
+  const project = namespaceStatus.project ?? serverStatus.value?.project ?? 'N/A'
+  const clusterRaw = namespaceStatus.cluster ?? serverStatus.value?.cluster ?? null
   const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'
   const allowlistFallback = toolAuditStateLabel(allowlistEmptyState(keeper))
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
@@ -315,7 +315,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="flex flex-col gap-1.5">
-      <${SignalRow} label="룸" value=${roomName} />
+      <${SignalRow} label="네임스페이스" value=${namespaceName} />
       <${SignalRow} label="프로젝트" value=${project} />
       ${clusterVisible ? html`<${SignalRow} label="클러스터" value=${clusterRaw} />` : null}
       <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />

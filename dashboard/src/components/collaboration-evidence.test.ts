@@ -79,14 +79,14 @@ describe('collaborationEvidenceSupportRows', () => {
     fixture.counts.message_broadcast_count = 4
     fixture.linkage.selected_operation_id = 'op-1'
     fixture.linkage.unlinked_activity_count = 2
-    fixture.linkage.gaps = ['room activity exists without explicit session/operation linkage']
+    fixture.linkage.gaps = ['namespace activity exists without explicit session/operation linkage']
 
     expect(collaborationEvidenceSupportRows(fixture)).toEqual([
       'proof verdict · proven · available',
       'linked operation · op-1',
-      'unlinked room activity · 2',
+      'unlinked namespace activity · 2',
       'message broadcast count · 4',
-      'linkage gap · room activity exists without explicit session/operation linkage',
+      'linkage gap · namespace activity exists without explicit session/operation linkage',
     ])
   })
 })

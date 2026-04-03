@@ -7,10 +7,7 @@ open Types
 open Room_utils
 open Room_state
 
-let room_id_of_config (config : Room_utils_backend_setup.config) =
-  match config.scope with
-  | Default -> "default"
-  | Named id -> id
+let room_id_of_config (_config : Room_utils_backend_setup.config) = "default"
 
 (** Join room - with auto-generated nickname and metadata *)
 let join config ~agent_name ?(agent_type_override=None) ~capabilities
@@ -163,11 +160,12 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     nickname nickname agent_type session_id
   end
 
-(** @deprecated Use [join (with_scope config (Named room_id))] instead. *)
+(** @deprecated Since #4638 storage is flattened to the default scope.
+    This compat helper still accepts [room_id] and preserves it in legacy
+    messages/log entries, but agent state is shared with [join]. *)
 let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
-  let scoped = with_scope config (Named room_id) in
-  ensure_room_bootstrap scoped room_id;
+  ensure_room_bootstrap config room_id;
 
   let agent_type = match agent_type_override with
     | Some t -> t
@@ -180,22 +178,22 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
   let nickname =
     if Nickname.is_generated_nickname agent_name then agent_name
     else
-      let resolved = resolve_agent_name (with_scope config (Named room_id)) agent_name in
+      let resolved = resolve_agent_name config agent_name in
       if resolved <> agent_name && Nickname.is_generated_nickname resolved then
         resolved
       else
         Nickname.generate agent_type
   in
   let agent_file_dedup =
-    Filename.concat (agents_dir scoped) (safe_filename nickname ^ ".json")
+    Filename.concat (agents_dir config) (safe_filename nickname ^ ".json")
   in
   if Sys.file_exists agent_file_dedup then begin
     (* Lock the agent file to prevent race with heartbeat writes.
        read-modify-write must be atomic; without this lock, a concurrent
        heartbeat can update current_task/status between our read and write,
        and the rejoin write would silently discard those changes. *)
-    let was_inactive = with_file_lock scoped agent_file_dedup (fun () ->
-      match read_agent_with_repair scoped agent_file_dedup with
+    let was_inactive = with_file_lock config agent_file_dedup (fun () ->
+      match read_agent_with_repair config agent_file_dedup with
       | Ok existing_agent ->
           let is_inactive = existing_agent.status = Inactive in
           let updated = { existing_agent with
@@ -203,23 +201,23 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
             last_seen = now_iso ();
             capabilities;
           } in
-          write_json scoped agent_file_dedup (agent_to_yojson updated);
+          write_json config agent_file_dedup (agent_to_yojson updated);
           is_inactive
       | Error e ->
           Log.Room.warn "agent dedup: invalid agent JSON for %s: %s" nickname e;
           false
     ) in
     if was_inactive then begin
-      let _ = update_state scoped (fun s ->
+      let _ = update_state config (fun s ->
         let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
         { s with active_agents = agents }
       ) in
-      let _ = broadcast scoped ~from_agent:nickname
+      let _ = broadcast config ~from_agent:nickname
                 ~content:(Printf.sprintf "👋 %s rejoined room %s" nickname room_id) in
-      log_event scoped (Printf.sprintf
+      log_event config (Printf.sprintf
         "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
         room_id nickname (now_iso ()));
-      !Room_hooks.observe_agent_lifecycle_fn scoped ~agent_id:nickname ~room_id
+      !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname ~room_id
         ~event_kind:"rejoin"
         ~details:(`Assoc [ ("rejoin", `Bool true) ]);
     end;
@@ -236,7 +234,7 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
       parent_task;
     } in
     let agent_file =
-      Filename.concat (agents_dir scoped) (safe_filename nickname ^ ".json")
+      Filename.concat (agents_dir config) (safe_filename nickname ^ ".json")
     in
     let agent = {
       name = nickname;
@@ -248,16 +246,16 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
       last_seen = now_iso ();
       meta = Some meta;
     } in
-    write_json scoped agent_file (agent_to_yojson agent);
-    let _ = update_state scoped (fun s ->
+    write_json config agent_file (agent_to_yojson agent);
+    let _ = update_state config (fun s ->
       let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
       { s with active_agents = agents }
     ) in
     let _ =
-      broadcast scoped ~from_agent:nickname
+      broadcast config ~from_agent:nickname
         ~content:(Printf.sprintf "👋 %s joined the room" nickname)
     in
-    log_event scoped (Printf.sprintf
+    log_event config (Printf.sprintf
       "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"capabilities\":%s,\"ts\":\"%s\"}"
       room_id
       nickname
@@ -265,7 +263,7 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
       session_id
       (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
       (now_iso ()));
-    !Room_hooks.observe_agent_lifecycle_fn scoped ~agent_id:nickname ~room_id
+    !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname ~room_id
       ~event_kind:"join"
       ~details:
         (`Assoc

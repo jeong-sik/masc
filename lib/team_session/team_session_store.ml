@@ -292,10 +292,7 @@ let normalize_worker_run_meta_json config ~session_id ~worker_run_id json =
         |> assoc_put_string_list "evidence_refs" evidence_refs)
   | _ -> json
 
-let activity_room_id (config : Room_utils.config) =
-  match config.scope with
-  | Default -> "default"
-  | Named id -> id
+let activity_room_id (_config : Room_utils.config) = "default"
 
 let detail_string key detail =
   match Yojson.Safe.Util.member key detail with

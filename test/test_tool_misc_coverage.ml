@@ -71,15 +71,16 @@ let () = test "dispatch_dashboard" (fun () ->
   ignore (Room.add_task ctx.config ~title:"default task" ~priority:2 ~description:"");
   Room.write_current_room ctx.config "second-room";
   Room.ensure_room_bootstrap ctx.config "second-room";
-  let second_room = Room.with_scope ctx.config (Room.Named "second-room") in
+  let second_room = Room.config_with_resolved_scope ctx.config in
   ignore (Room.add_task second_room ~title:"second task" ~priority:1 ~description:"");
   let args = `Assoc [] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some (success, result) ->
       assert success;
       assert (str_contains result "MASC Dashboard");
-      assert (str_contains result "Namespace: default (flattened)");
-      assert (not (str_contains result "second-room"));
+      (* Header follows the current_room pointer. *)
+      assert (str_contains result "Room: second-room");
+      assert (not (str_contains result "2 room"));
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
@@ -103,15 +104,14 @@ let () = test "dispatch_dashboard_current_scope" (fun () ->
   let ctx = make_test_ctx () in
   Room.write_current_room ctx.config "focus-room";
   Room.ensure_room_bootstrap ctx.config "focus-room";
-  let focused = Room.with_scope ctx.config (Room.Named "focus-room") in
+  let focused = Room.config_with_resolved_scope ctx.config in
   ignore (Room.add_task focused ~title:"focus task" ~priority:2 ~description:"");
   let args = `Assoc [("scope", `String "current")] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some (success, result) ->
       assert success;
       assert (str_contains result "MASC Dashboard");
-      assert (str_contains result "Namespace: default (flattened)");
-      assert (not (str_contains result "focus-room"))
+      assert (str_contains result "Room: focus-room")
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"

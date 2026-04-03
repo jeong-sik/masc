@@ -132,14 +132,14 @@ let update_state config f =
     new_state
   )
 
-let read_state_in_room config room_id =
-  read_state (with_scope config (Named room_id))
+let read_state_in_room config _room_id =
+  read_state config
 
-let write_state_in_room config room_id state =
-  write_state (with_scope config (Named room_id)) state
+let write_state_in_room config _room_id state =
+  write_state config state
 
-let update_state_in_room config room_id f =
-  update_state (with_scope config (Named room_id)) f
+let update_state_in_room config _room_id f =
+  update_state config f
 
 (* ============================================ *)
 (* Sequence Numbers                             *)
@@ -150,8 +150,8 @@ let next_seq config =
   let state = update_state config (fun s -> { s with message_seq = s.message_seq + 1 }) in
   state.message_seq
 
-let next_seq_in_room config room_id =
-  next_seq (with_scope config (Named room_id))
+let next_seq_in_room config _room_id =
+  next_seq config
 
 (* ============================================ *)
 (* Pause State                                  *)
@@ -188,10 +188,7 @@ let write_backlog config backlog =
 let current_room_id config =
   read_current_room config |> Option.value ~default:"default"
 
-let activity_room_id config =
-  match config.scope with
-  | Default -> "default"
-  | Named id -> id
+let activity_room_id _config = "default"
 
 let emit_message_activity config ~from_agent ~content ~mention
     ?session_id ?operation_id ?worker_run_id ?(evidence_refs = []) () =
@@ -240,17 +237,17 @@ let emit_message_activity config ~from_agent ~content ~mention
         ~tags:[ "message"; "mention" ] ()
   | _ -> ()
 
-let tasks_dir_in_room config room_id =
-  tasks_dir (with_scope config (Named room_id))
+let tasks_dir_in_room config _room_id =
+  tasks_dir config
 
-let messages_dir_in_room config room_id =
-  messages_dir (with_scope config (Named room_id))
+let messages_dir_in_room config _room_id =
+  messages_dir config
 
-let backlog_path_in_room config room_id =
-  backlog_path (with_scope config (Named room_id))
+let backlog_path_in_room config _room_id =
+  backlog_path config
 
-let read_backlog_in_room config room_id =
-  read_backlog (with_scope config (Named room_id))
+let read_backlog_in_room config _room_id =
+  read_backlog config
 
 (* ============================================ *)
 (* Task ID / Archive Management                 *)
@@ -386,11 +383,6 @@ let resolve_agent_name config agent_name =
 (* ============================================ *)
 
 let ensure_room_bootstrap config room_id =
-  let room_id =
-    match validate_room_id room_id with
-    | Ok room_id -> room_id
-    | Error msg -> invalid_arg ("invalid room_id: " ^ msg)
-  in
   (* 1. Always ensure root infrastructure exists *)
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
@@ -406,7 +398,6 @@ let ensure_room_bootstrap config room_id =
       root_perpetual_dir;
       root_tasks_dir;
       root_messages_dir;
-      rooms_root_dir config;
     ];
   if not (path_exists_root config (root_state_path config)) then
     write_json_root config (root_state_path config)
@@ -415,25 +406,28 @@ let ensure_room_bootstrap config room_id =
     write_json_root config root_backlog_path
       (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 });
 
-  (* 2. Bootstrap the target room via scoped config — unified path *)
-  let scoped = with_scope config (Named room_id) in
-  let scoped_agents = agents_dir scoped in
-  let scoped_tasks = tasks_dir scoped in
-  let scoped_messages = messages_dir scoped in
-  let scoped_state = state_path scoped in
-  let scoped_backlog = backlog_path scoped in
-  List.iter mkdir_p [ masc_dir scoped; scoped_agents; scoped_tasks; scoped_messages ];
-  if not (path_exists scoped scoped_state) then
-    write_json scoped scoped_state (room_state_to_yojson (default_room_state config));
-  if not (path_exists scoped scoped_backlog) then
-    write_json scoped scoped_backlog
+  (* 2. Bootstrap target room — since #4638 always resolves to root .masc/ *)
+  ignore room_id;
+  let scoped_agents = agents_dir config in
+  let scoped_tasks = tasks_dir config in
+  let scoped_messages = messages_dir config in
+  let scoped_state = state_path config in
+  let scoped_backlog = backlog_path config in
+  List.iter mkdir_p [ masc_dir config; scoped_agents; scoped_tasks; scoped_messages ];
+  if not (path_exists config scoped_state) then
+    write_json config scoped_state (room_state_to_yojson (default_room_state config));
+  if not (path_exists config scoped_backlog) then
+    write_json config scoped_backlog
       (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 })
+
+let broadcast_channel config =
+  Printf.sprintf "broadcast:%s:default" (project_prefix config)
 
 (* ============================================ *)
 (* Broadcast                                    *)
 (* ============================================ *)
 
-let broadcast config ~from_agent ~content =
+let broadcast ?trace_context config ~from_agent ~content =
   ensure_initialized config;
   let seq = next_seq config in
   let mention = Mention.extract content in
@@ -446,14 +440,15 @@ let broadcast config ~from_agent ~content =
     content = safe_content;
     mention;
     timestamp = now_iso ();
+    trace_context;
   } in
   let msg_file =
     Filename.concat (messages_dir config)
       (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
   in
   write_json config msg_file (message_to_yojson msg);
-  let room_id = match config.scope with Default -> "default" | Named id -> id in
-  (match backend_publish config ~channel:(Printf.sprintf "broadcast:%s" room_id)
+  let room_id = "default" in
+  (match backend_publish config ~channel:(broadcast_channel config)
       ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
    | Ok _ -> ()
    | Error e -> Log.Misc.error "broadcast publish failed for %s: %s" room_id (Backend_types.show_error e));

@@ -131,7 +131,7 @@ let set_thread_id t ~post_id ~thread_id =
   | Ok pid ->
     match Caqti_eio.Pool.use (fun conn ->
       let module C = (val conn : Caqti_eio.CONNECTION) in
-      C.exec set_thread_id_q (Post_id.to_string pid, thread_id)
+      C.exec set_thread_id_q (thread_id, Post_id.to_string pid)
     ) t.pool with
     | Ok () -> Ok ()
     | Error err -> Error (caqti_err err)
@@ -165,11 +165,16 @@ let delete_post t ~post_id =
 
 let karma_by_author_q =
   (Caqti_type.unit ->* Caqti_type.(t2 string int))
-  {|SELECT author, \
-      SUM(votes_up) - SUM(votes_down) AS karma \
-    FROM masc_board_posts \
-    GROUP BY author \
-    ORDER BY karma DESC|}
+  "SELECT author, COALESCE(SUM(votes_up), 0)::int AS karma \
+   FROM ( \
+     SELECT author, votes_up FROM masc_board_posts \
+     WHERE (expires_at = 0 OR expires_at > extract(epoch from now())) \
+     UNION ALL \
+     SELECT author, votes_up FROM masc_board_comments \
+     WHERE (expires_at = 0 OR expires_at > extract(epoch from now())) \
+   ) AS combined \
+   GROUP BY author \
+   ORDER BY karma DESC"
 
 let get_all_karma t =
   match Caqti_eio.Pool.use (fun conn ->
@@ -182,9 +187,10 @@ let get_all_karma t =
       []
 
 let get_agent_karma t ~agent_name =
-  get_all_karma t
-  |> List.find_opt (fun (name, _) -> String.equal name agent_name)
-  |> Option.map snd |> Option.value ~default:0
+  let all_karma = get_all_karma t in
+  match List.find_opt (fun (name, _) -> name = agent_name) all_karma with
+  | Some (_, karma) -> karma
+  | None -> 0
 
 (** {1 TTL Sweep} *)
 

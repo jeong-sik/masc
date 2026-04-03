@@ -299,14 +299,17 @@ let keeper_compact_max_messages () : int =
 let keeper_compact_max_tokens () : int =
   int_of_env_default
     "MASC_KEEPER_COMPACT_MAX_TOKENS"
-    ~default:0
+    ~default:8000
     ~min_v:0
     ~max_v:5000000
 
+(** Cooldown between compaction attempts.  Previous default (90s) exceeded
+    the proactive heartbeat interval (30s), permanently blocking compaction
+    for proactive keepers.  15s allows compaction to fire every other cycle. *)
 let keeper_continuity_compaction_cooldown_sec () : int =
   int_of_env_default
     "MASC_KEEPER_CONTINUITY_COMPACTION_COOLDOWN_SEC"
-    ~default:90
+    ~default:15
     ~min_v:0
     ~max_v:172800
 
@@ -654,11 +657,12 @@ let keeper_unified_max_tokens () : int =
     A productive keeper workflow (read -> inspect -> edit -> build -> verify)
     can consume 8-12 turns once retries and board/reporting steps are included.
     Previous default (1000) caused 787s+ latency per turn.
-    At 10, multi-step workflows still truncate too often before [extend_turns]
-    is used. *)
+    20 caused 6.7GB RSS in 2 minutes with 3 concurrent keepers (each turn
+    serializes full message history as JSON for the LLM API call).
+    3 is sufficient for proactive "one observation, one action" cycles. *)
 let keeper_unified_max_turns () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TURNS"
-    ~default:20
+    ~default:3
     ~min_v:1
     ~max_v:50

@@ -377,59 +377,26 @@ let build_deliberation_prompt
   | Ok value -> value
   | Error _ -> Prompt_registry.get_prompt "keeper.deliberation"
 
+type structured_result = {
+  action: deliberation_action;
+  reasoning: string;
+  confidence: float;
+}
+
 (* ---------- Response parser ---------- *)
 
-(** Extract a JSON object from a raw MODEL response string.
-    Handles cases where the MODEL wraps JSON in markdown code fences or
-    adds extra text before/after the JSON. *)
-let extract_json_from_response (raw : string) : (Yojson.Safe.t, string) result =
+let clamp_confidence raw_conf =
+  max 0.0 (min 1.0 raw_conf)
+
+let json_of_response (raw : string) : (Yojson.Safe.t, string) result =
   let trimmed = String.trim raw in
-  (* Try direct parse first *)
-  match Yojson.Safe.from_string trimmed with
-  | json -> Ok json
-  | exception Yojson.Json_error _ ->
-      (* Try to find JSON between code fences *)
-      let re_fenced = Re.Pcre.re {|```(json)?\n?(.*)\n?```|} |> Re.compile in
-      (match Re.exec_opt re_fenced trimmed with
-      | Some g ->
-        let inner = Re.Group.get g 2 in
-        (match Yojson.Safe.from_string (String.trim inner) with
-        | json -> Ok json
-        | exception Yojson.Json_error _ -> Error "JSON parse failed after fence extraction")
-      | None ->
-        (* Try to find first { ... } substring *)
-        let len = String.length trimmed in
-        let rec find_brace i =
-          if i >= len then Error "no JSON object found in response"
-          else if trimmed.[i] = '{' then
-            (* Find matching closing brace *)
-            let depth = ref 0 in
-            let in_string = ref false in
-            let escape = ref false in
-            let j = ref i in
-            let found = ref false in
-            while !j < len && not !found do
-              let c = trimmed.[!j] in
-              if !escape then escape := false
-              else if c = '\\' && !in_string then escape := true
-              else if c = '"' then in_string := not !in_string
-              else if not !in_string then (
-                if c = '{' then incr depth
-                else if c = '}' then (
-                  decr depth;
-                  if !depth = 0 then found := true));
-              if not !found then incr j
-            done;
-            if !found then
-              let substr = String.sub trimmed i (!j - i + 1) in
-              match Yojson.Safe.from_string substr with
-              | json -> Ok json
-              | exception Yojson.Json_error msg ->
-                  Error (Printf.sprintf "extracted JSON parse failed: %s" msg)
-            else Error "unmatched braces in response"
-          else find_brace (i + 1)
-        in
-        find_brace 0)
+  if trimmed = "" then
+    Error "empty response"
+  else
+    match Yojson.Safe.from_string trimmed with
+    | json -> Ok json
+    | exception Yojson.Json_error msg ->
+        Error (Printf.sprintf "strict JSON parse failed: %s" msg)
 
 (** Parse a deliberation action from the "action" and "params" fields of the
     MODEL response JSON. Returns the typed action or an error string. *)
@@ -540,21 +507,61 @@ let rec parse_action_from_json (json : Yojson.Safe.t)
   | "" -> Error "missing 'action' field in MODEL response"
   | unknown -> Error (Printf.sprintf "unknown action type: %s" unknown)
 
+let structured_result_of_json (json : Yojson.Safe.t)
+    : (structured_result, string) result =
+  match parse_action_from_json json with
+  | Error msg -> Error msg
+  | Ok action ->
+      let reasoning =
+        Safe_ops.json_string ~default:"" "reasoning" json
+      in
+      let confidence =
+        clamp_confidence (Safe_ops.json_float ~default:0.5 "confidence" json)
+      in
+      Ok { action; reasoning; confidence }
+
+let structured_result_schema : structured_result Agent_sdk.Structured.schema =
+  {
+    Agent_sdk.Structured.name = "keeper_deliberation_decision";
+    description =
+      "Choose exactly one typed keeper deliberation action and return only the tool input object.";
+    params =
+      [
+        {
+          Agent_sdk.Types.name = "action";
+          description = "One of: noop, reply_in_room, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, multi_step.";
+          param_type = Agent_sdk.Types.String;
+          required = true;
+        };
+        {
+          Agent_sdk.Types.name = "params";
+          description = "Action-specific parameters.";
+          param_type = Agent_sdk.Types.Object;
+          required = true;
+        };
+        {
+          Agent_sdk.Types.name = "reasoning";
+          description = "Optional short explanation for the chosen action.";
+          param_type = Agent_sdk.Types.String;
+          required = false;
+        };
+        {
+          Agent_sdk.Types.name = "confidence";
+          description = "Confidence score from 0.0 to 1.0.";
+          param_type = Agent_sdk.Types.Number;
+          required = false;
+        };
+      ];
+    parse = structured_result_of_json;
+  }
+
 (** Parse the MODEL's JSON response into a deliberation_action with reasoning
     and confidence. Returns [(action, reasoning, confidence)] or an error string. *)
 let parse_deliberation_response (raw : string)
     : (deliberation_action * string * float, string) result =
-  match extract_json_from_response raw with
-  | Error msg -> Error (Printf.sprintf "json extraction failed: %s" msg)
-  | Ok json -> (
-      match parse_action_from_json json with
-      | Error msg -> Error msg
-      | Ok action ->
-          let reasoning =
-            Safe_ops.json_string ~default:"" "reasoning" json
-          in
-          let confidence =
-            let raw_conf = Safe_ops.json_float ~default:0.5 "confidence" json in
-            max 0.0 (min 1.0 raw_conf)
-          in
-          Ok (action, reasoning, confidence))
+  match json_of_response raw with
+  | Error msg -> Error msg
+  | Ok json ->
+      structured_result_of_json json
+      |> Result.map (fun result ->
+             (result.action, result.reasoning, result.confidence))

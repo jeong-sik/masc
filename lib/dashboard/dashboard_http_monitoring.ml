@@ -113,9 +113,10 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
 let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
   : Yojson.Safe.t * bool =
   let runtime = Dashboard_governance_judge.runtime_status_at ~now_ts base_path in
+  let alert_level = if runtime.judge_online then "ok" else "warn" in
   (* Governance case tracking is retired, but judge runtime status is still live. *)
   (`Assoc [
-    ("alert_level", `String "ok");
+    ("alert_level", `String alert_level);
     ("cases_open", `Int 0);
     ("pending_ruling", `Int 0);
     ("ready_auto_execute", `Int 0);

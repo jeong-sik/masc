@@ -92,14 +92,10 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
   return html`
     <div class="mt-2 space-y-1.5">
       ${event.toolArgs ? html`
-        <div class="text-[11px] font-mono text-[var(--text-muted)] bg-[var(--white-3)] px-3 py-2 rounded-lg overflow-x-auto whitespace-pre-wrap break-all">
-          ${typeof event.toolArgs === 'string' ? event.toolArgs : JSON.stringify(event.toolArgs, null, 2)}
-        </div>
+        <div class="max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]"><${Markdown} text=${typeof event.toolArgs === 'string' ? event.toolArgs : '```json\n' + JSON.stringify(event.toolArgs, null, 2) + '\n```'} /></div>
       ` : null}
       ${event.toolResult || event.error ? html`
-        <div class="text-[11px] font-mono ${event.error ? 'text-[var(--bad)]' : 'text-[var(--text-dim)]'} bg-[var(--white-3)] px-3 py-2 rounded-lg overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
-          ${event.error ?? event.toolResult}
-        </div>
+        <div class="max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]"><${Markdown} text=${typeof (event.error ?? event.toolResult) === 'string' && String(event.error ?? event.toolResult).includes('```') ? String(event.error ?? event.toolResult) : '```json\n' + JSON.stringify((event.error ?? event.toolResult), null, 2) + '\n```'} /></div>
       ` : null}
       ${gateRejected ? html`
         <div class="text-[10px] px-2 py-1 rounded bg-[var(--bad-10)] text-[#ef4444] inline-block">

@@ -24,6 +24,9 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_snapshot_lightweight_summary_caps_completed_sessions_by_recency;
+          Alcotest.test_case "snapshot waiters share inflight result" `Quick
+            Test_operator_control_snapshot
+            .test_snapshot_waiters_share_inflight_result;
           Alcotest.test_case "orchestra room core shape" `Quick
             Test_operator_control_snapshot.test_orchestra_room_core_shape;
           Alcotest.test_case "orchestra session edge and pending signal" `Quick

@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { Markdown } from "../common/markdown"
 import { useSignal } from '@preact/signals'
 import { CountBadge } from '../common/badge'
 import { ActionButton } from '../common/button'
@@ -36,8 +37,9 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
           <${ActionButton} variant="subtle" size="sm" onClick=${() => void navigator.clipboard.writeText(text)}>복사<//>
         </div>
         ${expanded.value ? html`
-          <pre class="px-3 py-2 text-[12px] font-mono overflow-x-auto max-h-[400px] overflow-y-auto
-            ${success ? 'text-[var(--text-body)]' : 'text-[#fda4af]'}">${formatted}</pre>
+          <div class="max-h-[400px] overflow-auto bg-[var(--bg-0)]">
+            <${Markdown} text=${'```json\n' + formatted + '\n```'} />
+          </div>
         ` : null}
       </div>
     </div>

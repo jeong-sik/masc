@@ -155,6 +155,14 @@ let test_worker_allows_worker_only_tools () =
       (Tool_access_policy.allows_name worker_policy tool_name)
   ) Tool_access_role.worker_only_tools
 
+let test_channel_gate_requires_worker () =
+  let reader_policy = Tool_access_role.policy_for_role Reader in
+  let worker_policy = Tool_access_role.policy_for_role Worker in
+  check bool "Reader denies channel_gate" false
+    (Tool_access_policy.allows_name reader_policy "channel_gate");
+  check bool "Worker allows channel_gate" true
+    (Tool_access_policy.allows_name worker_policy "channel_gate")
+
 (* ================================================================ *)
 (* Unregistered tool behavior                                        *)
 (* ================================================================ *)
@@ -229,6 +237,8 @@ let () =
             test_reader_denies_worker_only_tools;
           test_case "Worker allows worker_only" `Quick
             test_worker_allows_worker_only_tools;
+          test_case "channel_gate requires worker" `Quick
+            test_channel_gate_requires_worker;
         ] );
       ( "unregistered",
         [

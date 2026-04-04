@@ -31,6 +31,10 @@ cp .env.example .env
 # BotConfig auto-loads .env from the current working directory
 ```
 
+`GATE_API_TOKEN` is recommended. For local loopback development only, the bot
+can omit it when the server keeps `require_token=false`; in that mode the
+connector falls back to same-origin auth headers against `127.0.0.1`/`localhost`.
+
 ### 3. Run
 
 ```bash

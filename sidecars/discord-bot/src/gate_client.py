@@ -18,6 +18,8 @@ from .config import get_config
 
 logger = logging.getLogger(__name__)
 
+CONNECTOR_AGENT_NAME = "discord-gate-bot"
+
 
 @dataclass(frozen=True, slots=True)
 class GateResponse:
@@ -89,10 +91,7 @@ class GateClient:
         self._keeper_cache_ttl = cfg.keeper_cache_ttl_sec
         self._breaker_failure_threshold = cfg.gate_breaker_failure_threshold
         self._breaker_reset_sec = cfg.gate_breaker_reset_sec
-        self._headers = {
-            "Authorization": f"Bearer {cfg.gate_api_token}",
-            "Content-Type": "application/json",
-        }
+        self._headers = self._build_headers(cfg)
         self._client: httpx.AsyncClient | None = None
         self._consecutive_failures = 0
         self._breaker_open_until = 0.0
@@ -100,6 +99,17 @@ class GateClient:
         self._status_cache: tuple[float, dict[str, Any]] | None = None
         self._keeper_names_cache: tuple[float, list[str]] | None = None
         self._keeper_status_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+    def _build_headers(self, cfg: Any) -> dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "X-MASC-Agent": CONNECTOR_AGENT_NAME,
+        }
+        if cfg.gate_api_token:
+            headers["Authorization"] = f"Bearer {cfg.gate_api_token}"
+        else:
+            headers["Origin"] = cfg.gate_origin()
+        return headers
 
     def _now(self) -> float:
         return time.monotonic()

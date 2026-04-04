@@ -6,12 +6,26 @@ Fails fast at startup if any required config is missing.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from pathlib import Path
 from typing import Final, cast
+from urllib.parse import urlparse
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
+
+
+def _is_loopback_host(raw_host: str | None) -> bool:
+    if raw_host is None:
+        return False
+    host = raw_host.strip().lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 class BotConfig(BaseSettings):
@@ -33,6 +47,7 @@ class BotConfig(BaseSettings):
         ),
     )
     masc_api_token: str = Field(
+        default="",
         validation_alias=AliasChoices(
             "MASC_API_TOKEN",
             "masc_api_token",
@@ -109,12 +124,16 @@ class BotConfig(BaseSettings):
 
     @field_validator("masc_api_token")
     @classmethod
-    def api_token_not_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError(
-                "MASC_API_TOKEN is required (GATE_API_TOKEN is also accepted as a legacy alias)"
-            )
+    def normalize_api_token(cls, v: str) -> str:
         return v.strip()
+
+    @model_validator(mode="after")
+    def validate_gate_auth_mode(self) -> BotConfig:
+        if self.masc_api_token or self.gate_base_url_is_loopback():
+            return self
+        raise ValueError(
+            "MASC_API_TOKEN is required unless GATE_BASE_URL/MASC_MCP_URL points at a loopback host"
+        )
 
     @field_validator("discord_keeper_map")
     @classmethod
@@ -203,6 +222,16 @@ class BotConfig(BaseSettings):
     @property
     def gate_api_token(self) -> str:
         return self.masc_api_token
+
+    def gate_base_url_is_loopback(self) -> bool:
+        parsed = urlparse(self.gate_base_url)
+        return _is_loopback_host(parsed.hostname)
+
+    def gate_origin(self) -> str:
+        parsed = urlparse(self.gate_base_url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+        return self.gate_base_url.rstrip("/")
 
 
 # Lazy singleton - instantiated on first get_config() call.

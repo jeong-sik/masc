@@ -109,6 +109,11 @@ end
 module Relay = struct
   let target_agent =
     get_string ~default:"auto" "MASC_RELAY_TARGET_AGENT"
+
+  (** Model name for context-size estimation in relay tools.
+      "auto" falls back to relay.ml's generic 100K default. *)
+  let context_model =
+    get_string ~default:"auto" "MASC_RELAY_CONTEXT_MODEL"
 end
 
 (** {1 CLI Configuration} *)

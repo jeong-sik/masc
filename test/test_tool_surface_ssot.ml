@@ -225,18 +225,21 @@ let test_system_internal_callable () =
       (String.concat ", " uncallable);
   Alcotest.(check bool) "all system_internal callable" true (uncallable = [])
 
-let test_pruned_tools_move_to_system_internal () =
+let test_pruned_tools_registered_as_deprecated () =
+  (* Tools pruned from user-facing surfaces in #4999 are registered as
+     Deprecated in explicit_metadata (#5039). They remain on System_internal
+     for backward compat but carry Deprecated lifecycle. *)
+  let deprecated_names =
+    List.map fst Tool_catalog.deprecated_tool_entries
+  in
   List.iter
     (fun name ->
+      Alcotest.(check bool) (name ^ " is Deprecated") true
+        (List.mem name deprecated_names);
       Alcotest.(check bool) (name ^ " on System_internal") true
         (Tool_catalog.is_on_surface Tool_catalog.System_internal name);
       Alcotest.(check bool) (name ^ " hidden") false
-        (Tool_catalog.is_visible name);
-      Alcotest.(check bool) (name ^ " callable") true
-        (Tool_catalog.allow_direct_call name);
-      Alcotest.(check (option string)) (name ^ " reason")
-        (Some "System-internal tool; callable but not listed in tools/list.")
-        (Tool_catalog.metadata name).Tool_catalog.reason)
+        (Tool_catalog.is_visible name))
     [
       "masc_a2a_delegate";
       "masc_a2a_discover";
@@ -322,7 +325,7 @@ let () =
             test_system_internal_not_visible;
           Alcotest.test_case "System_internal callable" `Quick
             test_system_internal_callable;
-          Alcotest.test_case "pruned tools move to System_internal" `Quick
-            test_pruned_tools_move_to_system_internal;
+          Alcotest.test_case "pruned tools registered as Deprecated" `Quick
+            test_pruned_tools_registered_as_deprecated;
         ] );
     ]

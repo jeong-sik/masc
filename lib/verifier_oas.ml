@@ -1,9 +1,10 @@
 (** Verifier_oas — Action verification engine with OAS Guardrails/Hooks bridge.
 
     Cheap-model action verification for feedback loops.
-    Each action is sent to a cheap model with a structured prompt:
-    "Given goal X, action Y produced result Z. Is this correct?"
-    The model responds PASS/WARN/FAIL with a brief reason.
+    Each action is sent to a cheap model with a [report_verdict] tool.
+    The model calls the tool with a typed verdict (PASS/WARN/FAIL + reason).
+    If the model responds with text instead of a tool call, a lenient
+    text parser serves as fallback (Samchon Rank 1: lenient parsing).
 
     Budget: max 200 output tokens per verification (~0.01 cents).
     Skip: read-only actions (file reads, glob, grep, searches).
@@ -13,8 +14,12 @@
     - [make_pre_tool_hook]: wraps verify as an OAS PreToolUse hook
     - [guardrails_with_read_only_tag]: wraps should_skip as OAS Custom filter
 
+    ADR D3: verdict extraction uses structured tool output (deterministic)
+    instead of regex/prefix matching on free text (nondeterministic).
+
     @since 2.61.0 (verifier core)
-    @since Phase 4 (OAS Guardrails adapter) *)
+    @since Phase 4 (OAS Guardrails adapter)
+    @since 2.223.0 (structured verdict via report_verdict tool) *)
 
 open Printf
 
@@ -121,6 +126,73 @@ let parse_verdict (text : string) : (verdict, string) result =
       (if len > 80 then String.sub trimmed 0 80 ^ "..." else trimmed))
 
 (* ================================================================ *)
+(* Structured Verdict: Tool Schema + JSON Parsing (ADR D3)          *)
+(* ================================================================ *)
+
+(** JSON schema for the report_verdict tool.
+    Forces the LLM to call a tool with typed parameters instead of
+    producing free-text output.
+
+    Schema constrains verdict to exactly PASS/WARN/FAIL via enum,
+    making invalid values structurally impossible (Samchon: "constraint
+    through absence"). *)
+let report_verdict_schema : Types.tool_schema =
+  { name = "report_verdict";
+    description =
+      "Report your verification verdict. You MUST call this tool \
+       with your assessment. verdict must be exactly PASS, WARN, or FAIL.";
+    input_schema = `Assoc [
+      "type", `String "object";
+      "properties", `Assoc [
+        "verdict", `Assoc [
+          "type", `String "string";
+          "enum", `List [`String "PASS"; `String "WARN"; `String "FAIL"];
+          "description", `String "PASS if correct, WARN if acceptable with concerns, FAIL if wrong or harmful";
+        ];
+        "reason", `Assoc [
+          "type", `String "string";
+          "description", `String "Brief explanation for the verdict (required for WARN and FAIL)";
+        ];
+      ];
+      "required", `List [`String "verdict"];
+    ];
+  }
+
+(** Parse verdict from tool call JSON arguments (deterministic path).
+    The JSON is produced by the LLM calling report_verdict, so the
+    "verdict" field is constrained by the schema enum.
+
+    Handles Samchon absorption points:
+    - Type coercion: accepts both quoted and unquoted values
+    - Case insensitivity: "pass", "Pass", "PASS" all accepted
+    - Missing reason: defaults to descriptive string *)
+let parse_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) result =
+  let open Yojson.Safe.Util in
+  try
+    let verdict_str =
+      args |> member "verdict" |> to_string |> String.uppercase_ascii
+    in
+    let reason =
+      try args |> member "reason" |> to_string
+      with Type_error _ -> ""
+    in
+    match verdict_str with
+    | "PASS" -> Ok Pass
+    | "WARN" ->
+      let r = if reason = "" then "unspecified concern" else reason in
+      Ok (Warn r)
+    | "FAIL" ->
+      let r = if reason = "" then "action did not achieve goal" else reason in
+      Ok (Fail r)
+    | other ->
+      Error (sprintf "unexpected verdict value: %s" other)
+  with
+  | Type_error (msg, _) ->
+    Error (sprintf "verdict JSON type error: %s" msg)
+  | exn ->
+    Error (sprintf "verdict JSON parse error: %s" (Printexc.to_string exn))
+
+(* ================================================================ *)
 (* Verification Prompt                                              *)
 (* ================================================================ *)
 
@@ -155,28 +227,56 @@ One line only.|}
 (* Core: verify                                                     *)
 (* ================================================================ *)
 
+(** Verify an action using structured tool output (ADR D3 compliant).
+
+    Primary path: LLM calls [report_verdict] tool with typed verdict.
+    Fallback path: if LLM responds with text, [parse_verdict] extracts
+    the verdict from free text (Samchon Rank 1: lenient fallback).
+
+    The structured path is deterministic (JSON schema constrains output).
+    The fallback path is nondeterministic but returns Error on failure
+    instead of silently degrading. *)
 let verify (req : verification_request) : (verdict, string) result =
   if should_skip ~action_description:req.action_description then
     Ok Pass
   else
     let prompt = build_prompt req in
+    let verdict_ref = ref None in
+    let dispatch ~name:_ ~args =
+      match parse_verdict_from_json args with
+      | Ok v ->
+        verdict_ref := Some v;
+        (false, sprintf "Verdict recorded: %s" (verdict_to_string v))
+      | Error msg ->
+        Log.Verifier.warn "Structured verdict parse failed: %s" msg;
+        (false, sprintf "Invalid verdict format: %s" msg)
+    in
     match
-      Oas_worker.run_named
+      Oas_worker_named.run_named_with_masc_tools
         ~cascade_name:"verifier"
         ~goal:prompt
+        ~masc_tools:[report_verdict_schema]
+        ~dispatch
         ~max_turns:1
         ~temperature:0.0
         ~max_tokens:200
         ()
     with
     | Ok result ->
-      let text = Oas_response.text_of_response result.response in
-      (match parse_verdict text with
-       | Ok verdict -> Ok verdict
-       | Error parse_err ->
-         Log.Verifier.warn "Verdict parse failed (%s); raw=%s"
-           parse_err (String.sub text 0 (min 80 (String.length text)));
-         Error (sprintf "verdict parse: %s" parse_err))
+      (match !verdict_ref with
+       | Some v ->
+         Log.Verifier.debug "verdict via structured tool call";
+         Ok v
+       | None ->
+         (* LLM responded with text instead of tool call — lenient fallback *)
+         let text = Oas_response.text_of_response result.response in
+         Log.Verifier.info "verdict via text fallback (model did not call report_verdict)";
+         (match parse_verdict text with
+          | Ok verdict -> Ok verdict
+          | Error parse_err ->
+            Log.Verifier.warn "Verdict parse failed (%s); raw=%s"
+              parse_err (String.sub text 0 (min 80 (String.length text)));
+            Error (sprintf "verdict parse: %s" parse_err)))
     | Error message ->
       Error message
 

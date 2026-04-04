@@ -120,50 +120,104 @@ REJECT: <reason> - if the notes are vague, avoidant, or do not address the task|
     calibration_section
 
 (* ================================================================ *)
-(* Verdict parsing                                                  *)
+(* Structured Review Verdict: Tool Schema + JSON Parsing (ADR D3)   *)
 (* ================================================================ *)
 
-(** Parse LLM verdict text.
-    Returns [Some verdict] on successful parse, [None] on format mismatch.
-    Callers must decide how to handle [None] — the old behavior of silently
-    mapping format mismatch to [Approve] hides evaluator bias (RFC-0001 H1). *)
-let parse_verdict_opt (text : string) : verdict option =
+(** JSON schema for the report_review_verdict tool.
+    Forces the LLM to call a tool with typed parameters.
+    verdict is constrained to APPROVE/REJECT by enum. *)
+let report_review_verdict_schema : Types.tool_schema =
+  { name = "report_review_verdict";
+    description =
+      "Report your review verdict. You MUST call this tool with your assessment. \
+       verdict must be exactly APPROVE or REJECT.";
+    input_schema = `Assoc [
+      "type", `String "object";
+      "properties", `Assoc [
+        "verdict", `Assoc [
+          "type", `String "string";
+          "enum", `List [`String "APPROVE"; `String "REJECT"];
+          "description", `String "APPROVE if notes describe real work, REJECT if vague or avoidant";
+        ];
+        "reason", `Assoc [
+          "type", `String "string";
+          "description", `String "Brief explanation (required for REJECT)";
+        ];
+      ];
+      "required", `List [`String "verdict"];
+    ];
+  }
+
+(** Parse review verdict from tool call JSON arguments (deterministic). *)
+let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) result =
+  let open Yojson.Safe.Util in
+  try
+    let verdict_str =
+      args |> member "verdict" |> to_string |> String.uppercase_ascii
+    in
+    let reason =
+      try args |> member "reason" |> to_string
+      with Type_error _ -> ""
+    in
+    match verdict_str with
+    | "APPROVE" -> Ok Approve
+    | "REJECT" ->
+      let r = if reason = "" then "completion notes did not address the task" else reason in
+      Ok (Reject r)
+    | other ->
+      Error (sprintf "unexpected review verdict value: %s" other)
+  with
+  | Type_error (msg, _) ->
+    Error (sprintf "review verdict JSON type error: %s" msg)
+  | exn ->
+    Error (sprintf "review verdict JSON parse error: %s" (Printexc.to_string exn))
+
+(* ================================================================ *)
+(* Verdict parsing (text fallback — Samchon Rank 1: lenient)        *)
+(* ================================================================ *)
+
+(** Parse "APPROVE" or "REJECT: reason" from model text output.
+    Returns Result instead of bare verdict to avoid silent degradation.
+    ADR D3: unknown format returns Error, NOT a permissive default. *)
+let parse_verdict (text : string) : (verdict, string) result =
   let trimmed = String.trim text in
   let upper = String.uppercase_ascii trimmed in
-  if String.length upper >= 7 && String.sub upper 0 7 = "APPROVE" then
-    Some Approve
-  else if String.length upper >= 6 && String.sub upper 0 6 = "REJECT" then
+  let has_boundary prefix =
+    let plen = String.length prefix in
+    String.length upper = plen
+    || (String.length upper > plen
+        && let c = upper.[plen] in
+           c = ' ' || c = ':' || c = '-')
+  in
+  if String.length upper >= 7
+     && String.sub upper 0 7 = "APPROVE"
+     && has_boundary "APPROVE"
+  then
+    Ok Approve
+  else if String.length upper >= 6
+          && String.sub upper 0 6 = "REJECT"
+          && has_boundary "REJECT"
+  then
     let rest =
       if String.length trimmed > 6 then
         String.trim (String.sub trimmed 6 (String.length trimmed - 6))
       else ""
     in
-    (* Strip leading colon/dash *)
     let reason =
       if String.length rest > 0 && (rest.[0] = ':' || rest.[0] = '-') then
         String.trim (String.sub rest 1 (String.length rest - 1))
       else rest
     in
-    if reason = "" then Some (Reject "completion notes did not address the task")
-    else Some (Reject reason)
+    if reason = "" then Ok (Reject "completion notes did not address the task")
+    else Ok (Reject reason)
+  else if String.length trimmed = 0 then
+    Error "empty review output"
   else
-    None
-
-(** Backward-compatible wrapper. Logs a warning on format mismatch and
-    falls back to [Approve] for liveness. Prefer [parse_verdict_opt] in
-    new code to make the fallback explicit. *)
-let parse_verdict (text : string) : verdict =
-  match parse_verdict_opt text with
-  | Some v -> v
-  | None ->
-    let preview =
-      let t = String.trim text in
-      if String.length t > 80 then String.sub t 0 80 ^ "..." else t
-    in
-    Log.Task.warn
-      "[anti-rationalization] format mismatch in LLM verdict (falling back to Approve): %S"
-      preview;
-    Approve
+    (* ADR D3: unknown format is NOT silently approved.
+       Previous behavior defaulted to Approve here — this was a
+       D3 + Unknown→Permissive double violation. *)
+    Error (sprintf "unrecognized review format: %s"
+      (if String.length trimmed > 80 then String.sub trimmed 0 80 ^ "..." else trimmed))
 
 (* ================================================================ *)
 (* Cross-model cascade selection (#3067)                             *)
@@ -262,17 +316,29 @@ let review
     emit { verdict = Reject reason;
       evaluator_cascade; generator_cascade; gate = "contract"; fallback_reason = None }
   | None ->
-    (* Gate 3: LLM review via evaluator cascade *)
+    (* Gate 3: LLM review via evaluator cascade (structured tool output, ADR D3) *)
     let prompt = build_prompt ~few_shot_block req in
     (match generator_cascade with
      | Some gc when gc = evaluator_cascade ->
        Log.Task.warn "[anti-rationalization] same cascade for generator (%s) and evaluator (%s) — cross-model separation not active"
          gc evaluator_cascade
      | _ -> ());
+    let verdict_ref = ref None in
+    let dispatch ~name:_ ~args =
+      match parse_review_verdict_from_json args with
+      | Ok v ->
+        verdict_ref := Some v;
+        (false, match v with Approve -> "Approved" | Reject r -> "Rejected: " ^ r)
+      | Error msg ->
+        Log.Task.warn "[anti-rationalization] structured verdict parse failed: %s" msg;
+        (false, sprintf "Invalid verdict format: %s" msg)
+    in
     (match
-       Oas_worker.run_named
+       Oas_worker.run_named_with_masc_tools
          ~cascade_name:evaluator_cascade
          ~goal:prompt
+         ~masc_tools:[report_review_verdict_schema]
+         ~dispatch
          ~max_turns:1
          ~temperature:0.0
          ~max_tokens:200
@@ -280,22 +346,32 @@ let review
          ()
      with
      | Ok result ->
-       let text = Oas_response.text_of_response result.response in
-       let (v, gate) = match parse_verdict_opt text with
-         | Some verdict -> (verdict, "llm")
-         | None -> (Approve, "format_fallback")
+       let (v, gate, fallback_reason) = match !verdict_ref with
+         | Some v ->
+           Log.Task.info "[anti-rationalization] verdict via structured tool call";
+           (v, "structured_tool", None)
+         | None ->
+           (* LLM responded with text — lenient fallback *)
+           let text = Oas_response.text_of_response result.response in
+           Log.Task.info "[anti-rationalization] verdict via text fallback";
+           (match parse_verdict text with
+            | Ok v -> (v, "llm_text_fallback", None)
+            | Error parse_err ->
+              (* ADR D3: parse failure is NOT silently approved.
+                 Use Reject instead of Approve for unknown format. *)
+              Log.Task.warn "[anti-rationalization] verdict parse failed: %s (rejecting)" parse_err;
+              ( Reject (sprintf "review format unrecognized: %s" parse_err),
+                "format_reject",
+                Some parse_err ))
        in
        (match v with
         | Reject reason ->
           Log.Task.info "[anti-rationalization] LLM rejected: agent=%s task=%s cascade=%s reason=%s"
             req.agent_name req.task_title evaluator_cascade reason
-        | Approve when gate = "format_fallback" ->
-          Log.Task.warn "[anti-rationalization] LLM format mismatch → Approve fallback: agent=%s task=%s cascade=%s"
-            req.agent_name req.task_title evaluator_cascade
         | Approve ->
           Log.Task.info "[anti-rationalization] LLM approved: agent=%s task=%s cascade=%s"
             req.agent_name req.task_title evaluator_cascade);
-       emit { verdict = v; evaluator_cascade; generator_cascade; gate; fallback_reason = None }
+       emit { verdict = v; evaluator_cascade; generator_cascade; gate; fallback_reason }
      | Error msg ->
        (* Liveness > correctness: if LLM is unavailable, approve *)
        Log.Task.warn "[anti-rationalization] LLM unavailable: %s (approving by default)" msg;

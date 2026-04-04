@@ -8,6 +8,9 @@
 
 open Printf
 
+(** Confidence threshold for routing documents to library vs candidates. *)
+let library_confidence_threshold = 0.5
+
 (* String helper - check if sub is contained in s *)
 let string_contains ~sub s =
   let sub_len = String.length sub in
@@ -179,7 +182,7 @@ let handle_add ctx args =
       (false, sprintf "Invalid source. Must be one of: %s" (String.concat ", " valid_sources))
     else begin
       (* Determine destination based on confidence *)
-      let dest_dir = if confidence < 0.5 then candidates_dir () else library_root () in
+      let dest_dir = if confidence < library_confidence_threshold then candidates_dir () else library_root () in
       let date = Time_compat.now () |> Unix.localtime in
       let date_str = sprintf "%04d%02d%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday in
       let topic_slug = String.lowercase_ascii title

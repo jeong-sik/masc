@@ -495,6 +495,11 @@ let rec add_routes ~sw ~clock router =
          let json = dashboard_planning_http_json ~config:state.Mcp_server.room_config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/mission" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_mission_http_json ~state ~sw ~clock req in

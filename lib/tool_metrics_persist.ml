@@ -11,7 +11,7 @@
 
     @since 2.108.0 — Issue #3280 *)
 
-let flush_interval_s = 300.0 (* 5 minutes *)
+let flush_interval_s = Env_config.InternalTimers.metrics_flush_sec
 
 (* ── JSONL record format ────────────────────────────── *)
 

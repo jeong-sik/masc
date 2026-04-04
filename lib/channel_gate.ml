@@ -69,7 +69,10 @@ let dedup_table : (string, float) Hashtbl.t = Hashtbl.create 256
 
 let dedup_mutex = Eio.Mutex.create ()
 
-let dedup_max_entries = 10_000
+let dedup_max_entries =
+  match Sys.getenv_opt "MASC_CHANNEL_GATE_DEDUP_MAX_ENTRIES" with
+  | Some s -> (try max 100 (min 100_000 (int_of_string s)) with _ -> 10_000)
+  | None -> 10_000
 
 let with_dedup_lock f = Eio_guard.with_mutex dedup_mutex f
 

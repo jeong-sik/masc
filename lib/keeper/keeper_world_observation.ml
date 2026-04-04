@@ -296,7 +296,7 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
       if trimmed = "" then "No continuity snapshot available." else trimmed
 
 (** Board event cursor bootstrap window (seconds). *)
-let bootstrap_window_sec = 300.0
+let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec
 
 let is_self_author ~self_tokens (author : string) : bool =
   List.mem (String.lowercase_ascii (String.trim author)) self_tokens

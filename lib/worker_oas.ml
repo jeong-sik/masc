@@ -552,10 +552,12 @@ and run_existing_worker_agent
           (match proof with
            | Some p ->
              Log.LocalWorker.warn
-               "worker %s errored with CDAL proof: run_id=%s status=%s (proof persisted by Proof_store)"
+               "worker %s errored with CDAL proof: run_id=%s status=%s error=%s"
                worker_name p.run_id
                (proof_result_status_to_string p.result_status)
-           | None -> ());
+               detail
+           | None ->
+             Log.LocalWorker.warn "worker %s errored (no proof): %s" worker_name detail);
           let* () =
             Worker_container.append_worker_completion_log
               ~base_path ~team_session_id ~worker_name ~prompt ~tool_names

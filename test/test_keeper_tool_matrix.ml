@@ -16,50 +16,6 @@ let requested_tool_names () =
       | [] -> None
       | names -> Some names
 
-let has_repo_root root =
-  Sys.file_exists (Filename.concat root "dune-project")
-  && Sys.file_exists (Filename.concat root "test/dune")
-
-let rec ascend_repo_root dir =
-  if has_repo_root dir then
-    Some dir
-  else
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then None else ascend_repo_root parent
-
-let executable_repo_root () =
-  ascend_repo_root (Filename.dirname Sys.executable_name)
-
-let source_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when String.trim root <> "" && has_repo_root root -> root
-  | _ -> (
-      match
-        try Some (Sys.getcwd ()) with
-        | Sys_error _ -> None
-      with
-      | Some cwd -> (
-          match ascend_repo_root cwd with
-          | Some root -> root
-          | None -> (
-              match executable_repo_root () with
-              | Some root -> root
-              | None -> cwd))
-      | None -> (
-          match executable_repo_root () with
-          | Some root -> root
-          | None -> Filename.current_dir_name))
-
-let path_is_within ~parent ~child =
-  try
-    let parent = Unix.realpath parent in
-    let child = Unix.realpath child in
-    let prefix =
-      if String.ends_with ~suffix:"/" parent then parent else parent ^ "/"
-    in
-    String.starts_with ~prefix child
-  with _ -> false
-
 let quote = Filename.quote
 
 let read_file path =
@@ -82,17 +38,17 @@ let tool_case_timeout_sec () =
   | None -> 25
 
 let runner_path () =
+  let exe_dir = Filename.dirname Sys.executable_name in
   let candidate =
-    Filename.concat (Filename.dirname Sys.executable_name)
-      "keeper_tool_matrix_case_runner.exe"
+    Filename.concat exe_dir "keeper_tool_matrix_case_runner.exe"
   in
-  if Sys.file_exists candidate
-     && path_is_within ~parent:(source_root ()) ~child:candidate
-  then
+  if Sys.file_exists candidate then
     candidate
   else
-    Filename.concat (source_root ())
-      "_build/default/test/keeper_tool_matrix_case_runner.exe"
+    failwith
+      (Printf.sprintf
+         "keeper_tool_matrix_case_runner.exe not found next to test executable (%s)"
+         exe_dir)
 
 let find_result_line output =
   output

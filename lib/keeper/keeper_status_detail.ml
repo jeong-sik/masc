@@ -114,13 +114,22 @@ let handle_keeper_status ctx args : tool_result =
            | None -> None
            | Some cfg ->
              let pricing = Llm_provider.Pricing.pricing_for_model cfg.model_id in
-             let provider_name = Llm_provider.Provider_config.(match cfg.kind with
-               | Anthropic -> "claude" | OpenAI_compat -> "openai"
-               | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code") in
+             (* Extract provider name from label directly to avoid
+                OpenAI_compat conflating llama/openrouter *)
+             let provider_name =
+               match String.index_opt label ':' with
+               | Some idx when idx > 0 ->
+                 String.sub label 0 idx |> String.trim |> String.lowercase_ascii
+               | _ ->
+                 Llm_provider.Provider_config.(match cfg.kind with
+                   | Anthropic -> "claude" | OpenAI_compat -> "openai"
+                   | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code")
+             in
              Some (`Assoc [
                ("provider", `String provider_name);
                ("model_id", `String cfg.model_id);
-               ("max_context", `Int cfg.max_tokens);
+               ("max_context", `Int (Oas_model_resolve.max_context_of_label label));
+               ("max_output_tokens", `Int cfg.max_tokens);
                ("api_key_env", if cfg.api_key <> "" then `String "(set)" else `Null);
                ("cost_per_million_input", `Float pricing.input_per_million);
                ("cost_per_million_output", `Float pricing.output_per_million);

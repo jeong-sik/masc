@@ -345,13 +345,16 @@ let run
           stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
         }
     | Error err ->
+      let detail = Oas.Error.to_string err in
       (match proof with
        | Some p ->
-         Log.Misc.warn "oas_worker: agent errored with CDAL proof: run_id=%s status=%s"
+         Log.Misc.warn "oas_worker: agent errored with CDAL proof: run_id=%s status=%s error=%s"
            p.run_id
            (proof_result_status_to_string p.result_status)
-       | None -> ());
-      Error (Printf.sprintf "Agent run failed: %s" (Oas.Error.to_string err)))
+           detail
+       | None ->
+         Log.Misc.warn "oas_worker: agent errored (no proof): %s" detail);
+      Error (Printf.sprintf "Agent run failed: %s" detail))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

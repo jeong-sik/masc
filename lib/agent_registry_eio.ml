@@ -150,7 +150,7 @@ let set_resolved_name sid name =
 (** {1 Statistics} *)
 
 (** Get count of active agents *)
-let active_count ?(within_seconds = 300.0) () =
+let active_count ?(within_seconds = Env_config.Zombie.threshold_seconds) () =
   match get_registry () with
   | Ok reg -> List.length (Agent_identity.Registry.list_active reg ~within_seconds)
   | Error e ->
@@ -166,7 +166,7 @@ let total_count () =
       0
 
 (** List all active identities *)
-let list_active ?(within_seconds = 300.0) () =
+let list_active ?(within_seconds = Env_config.Zombie.threshold_seconds) () =
   match get_registry () with
   | Ok reg -> Agent_identity.Registry.list_active reg ~within_seconds
   | Error e ->

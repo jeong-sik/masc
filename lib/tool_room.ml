@@ -107,29 +107,23 @@ let status_worktree_active (ctx : context) =
       Log.Room.warn "worktree_active check failed: %s" (Printexc.to_string exn);
       false
 
-let safe_resolve_agent_name (ctx : context) ~joined =
-  if not joined then
-    ctx.agent_name
-  else
-    try Room.resolve_agent_name ctx.config ctx.agent_name
-    with
-    | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
-    | exn ->
-        Log.Room.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
-          (Printexc.to_string exn);
-        ctx.agent_name
+let safe_resolve_agent_name (ctx : context) =
+  try Room.resolve_agent_name ctx.config ctx.agent_name
+  with
+  | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
+  | exn ->
+      Log.Room.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
+        (Printexc.to_string exn);
+      ctx.agent_name
 
-let safe_current_task (ctx : context) ~joined =
-  if not joined then
-    None
-  else
-    try Planning_eio.get_current_task ctx.config
-    with
-    | Sys_error _ | Yojson.Json_error _ -> None
-    | exn ->
-        Log.Room.warn "get_current_task failed for %s: %s" ctx.agent_name
-          (Printexc.to_string exn);
-        None
+let safe_current_task (ctx : context) =
+  try Planning_eio.get_current_task ctx.config
+  with
+  | Sys_error _ | Yojson.Json_error _ -> None
+  | exn ->
+      Log.Room.warn "get_current_task failed for %s: %s" ctx.agent_name
+        (Printexc.to_string exn);
+      None
 
 let safe_get_agents (ctx : context) =
   try Room.get_agents_raw ctx.config
@@ -182,15 +176,11 @@ let status_summary_string (ctx : context) =
   let backlog = Room.read_backlog_in_room ctx.config current_room in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
-  let joined =
-    try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name
-    with Sys_error _ | Yojson.Json_error _ -> false
-  in
-  let actual_name = safe_resolve_agent_name ctx ~joined in
+  let actual_name = safe_resolve_agent_name ctx in
   let matches_you assignee =
     String.equal assignee ctx.agent_name || String.equal assignee actual_name
   in
-  let current_task = safe_current_task ctx ~joined in
+  let current_task = safe_current_task ctx in
   let worktree_active = status_worktree_active ctx in
   let cluster_name =
     match ctx.config.backend_config.Backend_types.cluster_name with
@@ -256,7 +246,7 @@ let status_summary_string (ctx : context) =
   let guidance =
     Workflow_guide.current_state_guidance
       ~room_set:true
-      ~joined
+      ~joined:true
       ~task_claimed:(Option.is_some your_task)
       ~current_task_set:(Option.is_some current_task)
       ~worktree_active ~session_active:false
@@ -268,11 +258,6 @@ let status_summary_string (ctx : context) =
   in
   let attention_items =
     []
-    |> fun items ->
-    if not joined then
-      items @ [ "You are not joined in the project namespace. Call masc_join." ]
-    else
-      items
     |> fun items ->
     if Option.is_some your_task && Option.is_none current_task then
       items
@@ -298,8 +283,6 @@ let status_summary_string (ctx : context) =
   Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" cluster_name);
   if cluster_name <> state.project then
     Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
-  Buffer.add_string buf
-    (Printf.sprintf "📍 Scope: %s (flattened)\n" current_room);
   Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" ctx.config.base_path);
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf
@@ -309,8 +292,8 @@ let status_summary_string (ctx : context) =
        in_progress_count (max 0 state.message_seq));
   Buffer.add_string buf
     (Printf.sprintf
-       "🧭 You: agent=%s | joined=%s | owned=%s | current=%s | worktree=%s\n"
-       actual_name (bool_flag joined) (option_or_dash your_task)
+       "🧭 You: agent=%s | owned=%s | current=%s | worktree=%s\n"
+       actual_name (option_or_dash your_task)
        (option_or_dash current_task) (bool_flag worktree_active));
   if suggested_next <> [] then
     Buffer.add_string buf
@@ -448,7 +431,6 @@ let handle_room_strategy_set ctx args =
 
 type agent_state = {
   room_set : bool;
-  joined : bool;
   task_claimed : bool;
   current_task_set : bool;
   worktree_active : bool;
@@ -456,14 +438,8 @@ type agent_state = {
 
 let inspect_state ctx =
   let room_set = Room.is_initialized ctx.config in
-  let joined =
-    if room_set then
-      (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name
-       with Sys_error _ | Yojson.Json_error _ -> false)
-    else false
-  in
   let task_claimed =
-    if joined then
+    if room_set then
       let actual_name = Room.resolve_agent_name ctx.config ctx.agent_name in
       Room.get_tasks_raw ctx.config
       |> List.exists (fun (task : Types.task) ->
@@ -474,7 +450,7 @@ let inspect_state ctx =
     else false
   in
   let current_task_set =
-    if joined then Option.is_some (Planning_eio.get_current_task ctx.config)
+    if room_set then Option.is_some (Planning_eio.get_current_task ctx.config)
     else false
   in
   let worktree_active =
@@ -482,13 +458,11 @@ let inspect_state ctx =
       status_worktree_active ctx
     else false
   in
-  { room_set; joined; task_claimed; current_task_set; worktree_active }
+  { room_set; task_claimed; current_task_set; worktree_active }
 
 let state_to_json st =
   `Assoc [
-    ("namespace_ready", `Bool st.room_set);
-    ("room_set", `Bool st.room_set);
-    ("joined", `Bool st.joined);
+    ("project_set", `Bool st.room_set);
     ("task_claimed", `Bool st.task_claimed);
     ("current_task_set", `Bool st.current_task_set);
     ("worktree_active", `Bool st.worktree_active);
@@ -501,7 +475,7 @@ let handle_workflow_guide ctx _args =
   let st = inspect_state ctx in
   let guidance =
     Workflow_guide.current_state_guidance
-      ~room_set:st.room_set ~joined:st.joined
+      ~room_set:st.room_set ~joined:st.room_set
       ~task_claimed:st.task_claimed ~current_task_set:st.current_task_set
       ~worktree_active:st.worktree_active ~session_active:false
   in
@@ -517,12 +491,13 @@ let handle_workflow_guide ctx _args =
 
 let check_assertion st assertion =
   let (passed, fix_hint) = match assertion with
-    | "namespace_ready" | "room_set" ->
+    | "namespace_ready" | "room_set" | "project_set" ->
         (st.room_set,
-         "Call masc_start with your project root path. masc_set_room remains only as a compatibility alias.")
+         "Call masc_start with your project root path to set the active project scope.")
     | "joined" ->
-        (st.joined,
-         "Call masc_join to register your agent in the project namespace")
+        (* Compat: joined is always true when project is set — Room concept removed *)
+        (st.room_set,
+         "Call masc_start with your project root path to set the active project scope.")
     | "task_claimed" ->
         (st.task_claimed,
          "Claim a task with masc_transition(action=claim) or masc_claim_next")
@@ -543,7 +518,7 @@ let check_assertion st assertion =
 
 let handle_check ctx args =
   let st = inspect_state ctx in
-  let default_assertions = [ "room_set"; "joined"; "task_claimed"; "current_task_set" ] in
+  let default_assertions = [ "project_set"; "task_claimed"; "current_task_set" ] in
   let assertions =
     match Yojson.Safe.Util.member "assertions" args with
     | `List items ->

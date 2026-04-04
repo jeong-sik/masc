@@ -93,13 +93,6 @@ let test_build_response_prompt_contains_mention () =
       let _ = Str.search_forward (Str.regexp "bob") prompt 0 in true
     with Not_found -> false)
 
-let test_build_response_prompt_contains_join () =
-  let prompt = Auto_responder.build_response_prompt ~from_agent:"alice" ~content:"test" ~mention:"bob" in
-  check bool "contains join" true
-    (try
-      let _ = Str.search_forward (Str.regexp "masc_join") prompt 0 in true
-    with Not_found -> false)
-
 let test_build_response_prompt_contains_broadcast () =
   let prompt = Auto_responder.build_response_prompt ~from_agent:"alice" ~content:"test" ~mention:"bob" in
   check bool "contains broadcast" true
@@ -107,12 +100,12 @@ let test_build_response_prompt_contains_broadcast () =
       let _ = Str.search_forward (Str.regexp "masc_broadcast") prompt 0 in true
     with Not_found -> false)
 
-let test_build_response_prompt_contains_leave () =
+let test_build_response_prompt_no_join () =
   let prompt = Auto_responder.build_response_prompt ~from_agent:"alice" ~content:"test" ~mention:"bob" in
-  check bool "contains leave" true
+  check bool "no join" true
     (try
-      let _ = Str.search_forward (Str.regexp "masc_leave") prompt 0 in true
-    with Not_found -> false)
+      let _ = Str.search_forward (Str.regexp "masc_join") prompt 0 in false
+    with Not_found -> true)
 
 (* ============================================================
    extract_nickname Tests
@@ -238,9 +231,8 @@ let () =
       test_case "contains from" `Quick test_build_response_prompt_contains_from;
       test_case "contains content" `Quick test_build_response_prompt_contains_content;
       test_case "contains mention" `Quick test_build_response_prompt_contains_mention;
-      test_case "contains join" `Quick test_build_response_prompt_contains_join;
       test_case "contains broadcast" `Quick test_build_response_prompt_contains_broadcast;
-      test_case "contains leave" `Quick test_build_response_prompt_contains_leave;
+      test_case "no join in prompt" `Quick test_build_response_prompt_no_join;
     ];
     "extract_nickname", [
       test_case "returns option" `Quick test_extract_nickname_returns_option;

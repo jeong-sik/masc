@@ -838,12 +838,7 @@ let test_handle_request_tools_call_managed_profile_sdk_alias_claim () =
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
   Alcotest.(check bool) "init success" true ok_init;
-  let (ok_join, _join_msg) =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
-  in
-  Alcotest.(check bool) "join success" true ok_join;
+  (* Room join removed *)
   let _added =
     Masc_mcp.Room.add_task state.room_config ~title:"managed-claim"
       ~priority:2 ~description:""
@@ -883,12 +878,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
   Alcotest.(check bool) "init success" true ok_init;
-  let (ok_join, _) =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
-  in
-  Alcotest.(check bool) "join success" true ok_join;
+  (* Room join removed *)
   ignore
     (Masc_mcp.Room.add_task state.room_config ~title:"transition-claim"
        ~priority:2 ~description:"");
@@ -935,12 +925,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
   Alcotest.(check bool) "init success" true ok_init;
-  let (ok_join, _) =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
-  in
-  Alcotest.(check bool) "join success" true ok_join;
+  (* Room join removed *)
   ignore
     (Masc_mcp.Room.add_task state.room_config ~title:"transition-done"
        ~priority:2 ~description:"");
@@ -1001,12 +986,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
   Alcotest.(check bool) "init success" true ok_init;
-  let (ok_join, _) =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
-  in
-  Alcotest.(check bool) "join success" true ok_join;
+  (* Room join removed *)
   ignore
     (Masc_mcp.Room.add_task state.room_config ~title:"deprecated-claim"
        ~priority:2 ~description:"");
@@ -1385,12 +1365,7 @@ let test_execute_tool_team_session_step_direct_call () =
       in
       Alcotest.(check bool) "init success" true ok_init;
 
-      let (ok_join, _join_msg) =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-          ~name:"masc_join"
-          ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
-      in
-      Alcotest.(check bool) "join success" true ok_join;
+      (* Room join removed *)
 
       let (ok_start, start_msg) =
         Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -1507,27 +1482,21 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
   in
   Alcotest.(check bool) "init success" true ok_init;
 
-  let (ok_join_codex, join_codex_msg) =
+  let (ok_join_codex, _join_codex_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
+      ~name:"masc_status"
       ~arguments:(`Assoc [("agent_name", `String "codex")])
   in
-  Alcotest.(check bool) "join codex success" true ok_join_codex;
-  Alcotest.(check bool)
-    "join codex type"
-    true
-    (contains_substring join_codex_msg "Type: codex");
+  Alcotest.(check bool) "status codex success" true ok_join_codex;
+  (* Room join removed - agent type detection happens at heartbeat/status level *)
 
-  let (ok_join_gemini, join_gemini_msg) =
+  let (ok_join_gemini, _join_gemini_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
+      ~name:"masc_status"
       ~arguments:(`Assoc [("agent_name", `String "gemini")])
   in
-  Alcotest.(check bool) "join gemini success" true ok_join_gemini;
-  Alcotest.(check bool)
-    "explicit agent_name should win over persisted nickname"
-    true
-    (contains_substring join_gemini_msg "Type: gemini");
+  Alcotest.(check bool) "status gemini success" true ok_join_gemini;
+  (* Agent name "gemini" accepted without join requirement *)
 
   cleanup_dir base_path
 
@@ -2507,12 +2476,7 @@ let test_execute_tool_autoresearch_uses_resolved_session_agent () =
           ~name:"masc_init" ~arguments:(`Assoc [])
       in
       Alcotest.(check bool) "init success" true ok_init;
-      let (ok_join, _) =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-          ~name:"masc_join"
-          ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
-      in
-      Alcotest.(check bool) "join success" true ok_join;
+      (* Room join removed *)
       let (ok_start, msg) =
         Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
           ~name:"masc_autoresearch_start"

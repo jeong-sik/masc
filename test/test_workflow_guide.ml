@@ -31,14 +31,12 @@ let test_start_failure () =
   check_has_tool g.next_steps "masc_start";
   check_has_tool g.next_steps "masc_init"
 
-let test_join_success () =
-  let g = WG.next_steps ~tool_name:"masc_join" ~success:true in
-  check_has_tool g.next_steps "masc_status";
-  check_has_tool g.next_steps "masc_transition";
-  check bool "join has preconditions" true (List.length g.preconditions > 0)
+let test_set_project_success () =
+  let g = WG.next_steps ~tool_name:"masc_set_project" ~success:true in
+  check_has_tool g.next_steps "masc_status"
 
-let test_join_failure () =
-  let g = WG.next_steps ~tool_name:"masc_join" ~success:false in
+let test_set_project_failure () =
+  let g = WG.next_steps ~tool_name:"masc_set_project" ~success:false in
   check_has_tool g.next_steps "masc_start"
 
 let test_claim_success () =
@@ -90,7 +88,7 @@ let test_guidance_to_json_null_for_empty () =
   check bool "empty guidance serializes to Null" true (json = `Null)
 
 let test_guidance_to_json_has_next_steps () =
-  let g = WG.next_steps ~tool_name:"masc_join" ~success:true in
+  let g = WG.next_steps ~tool_name:"masc_status" ~success:true in
   let json = WG.guidance_to_json g in
   match json with
   | `Assoc fields ->
@@ -99,13 +97,13 @@ let test_guidance_to_json_has_next_steps () =
 
 (* ── Workflow context for tool help ──────────────────────────────── *)
 
-let test_workflow_context_join () =
-  match WG.workflow_context ~tool_name:"masc_join" with
+let test_workflow_context_status () =
+  match WG.workflow_context ~tool_name:"masc_status" with
   | Some (before, after, _mistakes) ->
-      check bool "join before includes start" true
+      check bool "status before includes start" true
         (List.mem "masc_start" before);
-      check bool "join after is non-empty" true (List.length after > 0)
-  | None -> fail "Expected workflow context for masc_join"
+      check bool "status after is non-empty" true (List.length after > 0)
+  | None -> fail "Expected workflow context for masc_status"
 
 let test_workflow_context_unknown () =
   let ctx = WG.workflow_context ~tool_name:"masc_nonexistent" in
@@ -119,13 +117,6 @@ let test_state_not_room_set () =
     ~current_task_set:false ~worktree_active:false ~session_active:false
   in
   check_has_tool g.next_steps "masc_start"
-
-let test_state_room_set_not_joined () =
-  let g = WG.current_state_guidance
-    ~room_set:true ~joined:false ~task_claimed:false
-    ~current_task_set:false ~worktree_active:false ~session_active:false
-  in
-  check_has_tool g.next_steps "masc_join"
 
 let test_state_joined_no_task () =
   let g = WG.current_state_guidance
@@ -204,7 +195,7 @@ let check_tool_exists_in_schemas name =
 
 let test_next_steps_reference_real_tools () =
   let tools_to_check = [
-    "masc_start"; "masc_join"; "masc_status";
+    "masc_start"; "masc_set_project"; "masc_status";
     "masc_claim"; "masc_claim_next";
     "masc_done"; "masc_transition";
     "masc_add_task"; "masc_batch_add_tasks";
@@ -227,8 +218,8 @@ let () =
     "golden_path_1", [
       test_case "start success" `Quick test_start_success;
       test_case "start failure" `Quick test_start_failure;
-      test_case "join success" `Quick test_join_success;
-      test_case "join failure" `Quick test_join_failure;
+      test_case "set_project success" `Quick test_set_project_success;
+      test_case "set_project failure" `Quick test_set_project_failure;
       test_case "claim success" `Quick test_claim_success;
       test_case "plan_set_task success" `Quick test_plan_set_task_success;
       test_case "done success" `Quick test_done_success;
@@ -258,12 +249,11 @@ let () =
       test_case "has next_steps" `Quick test_guidance_to_json_has_next_steps;
     ];
     "workflow_context", [
-      test_case "join context" `Quick test_workflow_context_join;
+      test_case "status context" `Quick test_workflow_context_status;
       test_case "unknown context" `Quick test_workflow_context_unknown;
     ];
     "state_guidance", [
       test_case "not room set" `Quick test_state_not_room_set;
-      test_case "room set not joined" `Quick test_state_room_set_not_joined;
       test_case "joined no task" `Quick test_state_joined_no_task;
       test_case "task claimed no current" `Quick test_state_task_claimed_no_current;
       test_case "ready to work" `Quick test_state_ready_to_work;

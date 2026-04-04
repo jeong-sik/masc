@@ -27,11 +27,11 @@ let test_all_selector_matches_everything () =
     (Tool_access_policy.selector_matches_name All "nonexistent_tool_xyz")
 
 let test_names_selector_exact_match () =
-  let sel = Tool_access_policy.Names [ "masc_status"; "masc_join" ] in
+  let sel = Tool_access_policy.Names [ "masc_status"; "masc_start" ] in
   check bool "matches listed name" true
     (Tool_access_policy.selector_matches_name sel "masc_status");
   check bool "rejects unlisted name" false
-    (Tool_access_policy.selector_matches_name sel "masc_leave")
+    (Tool_access_policy.selector_matches_name sel "masc_broadcast")
 
 let test_names_selector_trims_and_dedupes () =
   let sel = Tool_access_policy.Names [ " masc_status "; "masc_status"; ""; "  " ] in
@@ -56,7 +56,7 @@ let test_union_single_element_unwraps () =
   check bool "matches through single union" true
     (Tool_access_policy.selector_matches_name sel "masc_status");
   check bool "rejects non-member" false
-    (Tool_access_policy.selector_matches_name sel "masc_leave")
+    (Tool_access_policy.selector_matches_name sel "masc_broadcast")
 
 let test_union_matches_any_member () =
   let selector =

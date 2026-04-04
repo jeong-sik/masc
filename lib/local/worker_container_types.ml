@@ -560,25 +560,16 @@ let local_worker_max_tokens () = Env_config.Worker.local_worker_max_tokens
 
 let local_worker_heartbeat_interval_sec () = Env_config.Worker.local_worker_heartbeat_sec
 
-let join_worker ~sw ~(auth_token : string option) ~session_id ~worker_name =
-  let args =
-    `Assoc
-      [
-        ("agent_name", `String worker_name);
-        ( "capabilities",
-          `List
-            [
-              `String "llama";
-              `String "mcp-worker";
-              `String "local-tool-loop";
-            ] );
-      ]
-  in
-  call_masc_tool ~sw ~auth_token ~session_id ~tool_name:"masc_join" ~args
+let join_worker ~sw:_ ~(auth_token : string option) ~session_id:_ ~worker_name:_ =
+  (* Room join concept removed — workers no longer register presence via masc_join.
+     Activity is tracked through heartbeats and the session registry. *)
+  ignore (auth_token);
+  ()
 
-let leave_worker ~sw ~(auth_token : string option) ~session_id ~worker_name =
-  let args = `Assoc [ ("agent_name", `String worker_name) ] in
-  call_masc_tool ~sw ~auth_token ~session_id ~tool_name:"masc_leave" ~args
+let leave_worker ~sw:_ ~(auth_token : string option) ~session_id:_ ~worker_name:_ =
+  (* Room leave concept removed — workers no longer deregister via masc_leave. *)
+  ignore (auth_token);
+  ()
 
 let default_system_prompt ~worker_name ~model_id ?session_id ?role
     ?selection_note () =

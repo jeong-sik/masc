@@ -69,7 +69,7 @@ let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
 
 (** {1 Tool Lists — inline sub-library tools only}
 
-    Most tools register read_only/requires_join via Tool_spec.register
+    Most tools register read_only via Tool_spec.register
     in their own modules. These lists cover only tools from
     Tool_schemas_inline (lib/tool_schemas/ sub-library) which cannot
     depend on Tool_spec. *)
@@ -77,15 +77,11 @@ let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
 let read_only_tools_inline =
   ["masc_status"; "masc_who"; "masc_messages"]
 
-let requires_join_tools_inline =
-  ["masc_broadcast"; "masc_listen"; "masc_leave"]
-
 let mcp_context_required_tools_inline =
   Tool_schemas_inline.schemas
   |> List.map (fun (schema : Types.tool_schema) -> schema.name)
 
 let () = Tool_dispatch.init_read_only_set read_only_tools_inline
-let () = Tool_dispatch.init_requires_join_set requires_join_tools_inline
 let () = Tool_dispatch.init_mcp_context_required_set mcp_context_required_tools_inline
 
 (* Tag registry initialization.

@@ -247,9 +247,6 @@ let handle_batch_add_tasks ctx args =
     (true, Room.batch_add_tasks_with_contracts ctx.config tasks)
 
 let handle_claim ctx args =
-  if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
-    result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
-  else
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
   | Error e -> result_to_response (Error e)
@@ -274,9 +271,6 @@ let handle_claim ctx args =
   result_to_response result
 
 let handle_claim_next ctx _args =
-  if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
-    (false, Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
-  else
   let result = Room.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
   let message = match result with
     | Room.Claim_next_claimed { task_id; message; _ } ->

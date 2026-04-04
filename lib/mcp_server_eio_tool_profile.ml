@@ -183,13 +183,13 @@ let label_words_from_identifier ident =
 (** Custom human-readable titles for key tools.
     Falls back to auto-generated Title Case when absent. *)
 let custom_tool_titles : (string * string) list = [
-  (* Room lifecycle *)
-  ("masc_init", "Initialize Room");
-  ("masc_join", "Join Room");
-  ("masc_leave", "Leave Room");
-  ("masc_status", "Room Status");
-  ("masc_reset", "Reset Room");
-  ("masc_who", "List Online Agents");
+  (* Project lifecycle *)
+  ("masc_init", "Initialize Project");
+  ("masc_start", "Start Project");
+  ("masc_set_project", "Set Project Root");
+  ("masc_status", "Project Status");
+  ("masc_reset", "Reset Project");
+  ("masc_who", "List Active Agents");
   ("masc_check", "Check Preconditions");
   ("masc_workflow_guide", "Workflow Guide");
   (* Task management *)

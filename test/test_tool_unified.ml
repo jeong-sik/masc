@@ -14,7 +14,7 @@ let () =
       ( "tool_info",
         [
           test_case "known tool exposes lifecycle metadata" `Quick (fun () ->
-              let info = Tool_unified.tool_info "masc_join" in
+              let info = Tool_unified.tool_info "masc_start" in
               check string "lifecycle" "active"
                 (Tool_catalog.lifecycle_to_string info.lifecycle));
           test_case "unknown tool still returns info" `Quick (fun () ->

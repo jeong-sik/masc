@@ -106,17 +106,17 @@ let test_custom_opens_specific_tools_only () =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_types.Custom
-           [ "masc_status"; "masc_tasks"; "masc_join" ])
+           [ "masc_status"; "masc_tasks"; "masc_heartbeat" ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "only keeper-compatible tools allowed" 2
+  Alcotest.(check int) "only keeper-compatible tools allowed" 3
     (List.length names);
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_tasks" true
     (List.mem "masc_tasks" names);
-  Alcotest.(check bool) "filters masc_join" false
-    (List.mem "masc_join" names);
+  Alcotest.(check bool) "has masc_heartbeat" true
+    (List.mem "masc_heartbeat" names);
   Alcotest.(check bool) "no masc_board_post" false
     (List.mem "masc_board_post" names)
 
@@ -126,7 +126,7 @@ let test_deny_overrides_allow () =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_types.Custom
-           [ "masc_status"; "masc_tasks"; "masc_join" ])
+           [ "masc_status"; "masc_tasks"; "masc_heartbeat" ])
       ~tool_denylist:[ "masc_tasks" ] ()
   in
   let names = KET.keeper_masc_tool_names meta in
@@ -507,7 +507,7 @@ let test_schemas_match_names () =
     make_meta
       ~tool_access:
         (Masc_mcp.Keeper_types.Custom
-           [ "masc_status"; "masc_join"; "masc_tasks" ])
+           [ "masc_status"; "masc_heartbeat"; "masc_tasks" ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in

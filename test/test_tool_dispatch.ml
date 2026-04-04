@@ -138,9 +138,9 @@ let () =
         [
           test_case "inline tools can be marked as requiring mcp context" `Quick (fun () ->
               Tool_dispatch.init_mcp_context_required_set
-                [ "masc_join"; "masc_messages" ];
-              check bool "masc_join" true
-                (Tool_dispatch.is_mcp_context_required "masc_join");
+                [ "masc_broadcast"; "masc_messages" ];
+              check bool "masc_broadcast" true
+                (Tool_dispatch.is_mcp_context_required "masc_broadcast");
               check bool "masc_messages" true
                 (Tool_dispatch.is_mcp_context_required "masc_messages"));
           test_case "non-inline tool returns false" `Quick (fun () ->

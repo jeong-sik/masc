@@ -23,12 +23,10 @@ let essential_tools = [
     "Stop a periodic heartbeat started by masc_heartbeat_start.";
   make_schema "masc_broadcast"
     "Send a message visible to ALL agents via SSE push.";
-  make_schema "masc_join"
-    "Join the MASC namespace to collaborate with other AI agents.";
-  make_schema "masc_leave"
-    "Leave the MASC namespace and mark yourself as offline.";
+  make_schema "masc_start"
+    "One-step onboarding: sets the active project root.";
   make_schema "masc_status"
-    "Get current namespace status: active agents, task queue, recent broadcasts.";
+    "Get current project status: active agents, task queue, recent broadcasts.";
   make_schema "masc_dashboard"
     "Render the MASC dashboard summarizing namespaces, agents, and tasks.";
   make_schema "masc_agents"
@@ -71,11 +69,11 @@ let test_broadcast_in_top3 () =
   check bool "masc_broadcast in top-3" true
     (has_tool "masc_broadcast" result)
 
-let test_join_in_top3 () =
+let test_start_in_top3 () =
   let result = Tool_prefilter.filter
-    ~tools:essential_tools ~query:"join the namespace" ~k:3 in
-  check bool "masc_join in top-3" true
-    (has_tool "masc_join" result)
+    ~tools:essential_tools ~query:"set the project root" ~k:3 in
+  check bool "masc_start in top-3" true
+    (has_tool "masc_start" result)
 
 let test_add_task_in_top3 () =
   let result = Tool_prefilter.filter
@@ -187,7 +185,7 @@ let () =
         [
           test_case "heartbeat in top-3" `Quick test_heartbeat_in_top3;
           test_case "broadcast in top-3" `Quick test_broadcast_in_top3;
-          test_case "join in top-3" `Quick test_join_in_top3;
+          test_case "start in top-3" `Quick test_start_in_top3;
           test_case "add_task in top-3" `Quick test_add_task_in_top3;
         ] );
       ( "synonyms",

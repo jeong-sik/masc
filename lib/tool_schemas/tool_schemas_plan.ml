@@ -57,7 +57,7 @@ After masc_plan_init; omit task_id if masc_plan_set_task was called.";
     name = "masc_plan_set_task";
     description = "Set the current task for your session so you can omit task_id in subsequent planning calls. \
 Use when starting work on a task after claiming it. \
-After masc_claim_next; auto-cleared on masc_leave.";
+After masc_claim_next; auto-cleared on task completion.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -73,7 +73,7 @@ After masc_claim_next; auto-cleared on masc_leave.";
     name = "masc_plan_get_task";
     description = "Get the task_id you're currently working on (session-scoped). \
 Use when resuming work after a context switch or verifying your current assignment. \
-Set via masc_plan_set_task. Auto-cleared on masc_leave.";
+Set via masc_plan_set_task. Auto-cleared on task completion.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -84,7 +84,7 @@ Set via masc_plan_set_task. Auto-cleared on masc_leave.";
     name = "masc_plan_clear_task";
     description = "Clear your current task assignment without completing it (does not change task status). \
 Use when switching to a different task, abandoning work, or resetting session state. \
-Use masc_transition to change task status separately. Auto-called on masc_leave.";
+Use masc_transition to change task status separately. Auto-called on task done.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

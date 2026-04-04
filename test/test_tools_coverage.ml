@@ -79,7 +79,7 @@ let test_all_names_start_with_masc () =
 (* ============================================================ *)
 
 let test_find_tool_existing () =
-  let tools = ["masc_init"; "masc_join"; "masc_leave"; "masc_status";
+  let tools = ["masc_init"; "masc_start"; "masc_set_project"; "masc_status";
                "masc_broadcast"; "masc_transition";
                "masc_team_session_step"; "masc_team_session_finalize";
                "masc_team_session_list";
@@ -154,25 +154,14 @@ let test_masc_init_schema () =
           Alcotest.(check bool) "has agent_name property" true (List.mem_assoc "agent_name" props)
       | None -> Alcotest.fail "masc_init missing properties"
 
-let test_masc_join_schema () =
-  match find_tool "masc_join" with
-  | None -> Alcotest.fail "masc_join not found"
+let test_masc_set_project_schema () =
+  match find_tool "masc_set_project" with
+  | None -> Alcotest.fail "masc_set_project not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
-          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
-          Alcotest.(check bool) "has capabilities" true (List.mem_assoc "capabilities" props)
-      | None -> Alcotest.fail "masc_join missing properties"
-
-let test_masc_leave_schema () =
-  match find_tool "masc_leave" with
-  | None -> Alcotest.fail "masc_leave not found"
-  | Some schema ->
-      match get_json_list "required" schema.input_schema with
-      | Some reqs ->
-          Alcotest.(check bool) "agent_name is required" true
-            (List.mem (`String "agent_name") reqs)
-      | None -> Alcotest.fail "masc_leave missing required field"
+          Alcotest.(check bool) "has path" true (List.mem_assoc "path" props)
+      | None -> Alcotest.fail "masc_set_project missing properties"
 
 let test_masc_status_schema () =
   match find_tool "masc_status" with
@@ -1007,8 +996,7 @@ let () =
     ];
     "core_tools", [
       Alcotest.test_case "masc_init" `Quick test_masc_init_schema;
-      Alcotest.test_case "masc_join" `Quick test_masc_join_schema;
-      Alcotest.test_case "masc_leave" `Quick test_masc_leave_schema;
+      Alcotest.test_case "masc_set_project" `Quick test_masc_set_project_schema;
       Alcotest.test_case "masc_status" `Quick test_masc_status_schema;
       Alcotest.test_case "masc_broadcast" `Quick test_masc_broadcast_schema;
       Alcotest.test_case "masc_transition" `Quick test_masc_transition_schema;

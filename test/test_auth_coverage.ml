@@ -166,15 +166,10 @@ let test_permission_for_tool_reset () =
   | Some Types.CanReset -> ()
   | _ -> fail "expected CanReset"
 
-let test_permission_for_tool_join () =
-  match Auth.permission_for_tool "masc_join" with
+let test_permission_for_tool_start () =
+  match Auth.permission_for_tool "masc_start" with
   | Some Types.CanJoin -> ()
-  | _ -> fail "expected CanJoin"
-
-let test_permission_for_tool_leave () =
-  match Auth.permission_for_tool "masc_leave" with
-  | Some Types.CanLeave -> ()
-  | _ -> fail "expected CanLeave"
+  | _ -> fail "expected CanJoin for masc_start"
 
 let test_permission_for_tool_status () =
   match Auth.permission_for_tool "masc_status" with
@@ -723,8 +718,7 @@ let () =
     "permission_for_tool", [
       test_case "init" `Quick test_permission_for_tool_init;
       test_case "reset" `Quick test_permission_for_tool_reset;
-      test_case "join" `Quick test_permission_for_tool_join;
-      test_case "leave" `Quick test_permission_for_tool_leave;
+      test_case "start" `Quick test_permission_for_tool_start;
       test_case "status" `Quick test_permission_for_tool_status;
       test_case "transport_status" `Quick test_permission_for_tool_transport_status;
       test_case "websocket_discovery" `Quick test_permission_for_tool_websocket_discovery;

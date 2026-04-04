@@ -1049,16 +1049,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
     List.fold_left
       (fun acc room_id ->
         try
-          if
-            not
-              (Room.is_agent_joined_in_room config ~room_id
-                 ~agent_name:meta.agent_name)
-          then begin
-            Room.ensure_room_bootstrap config room_id;
-            ignore
-              (Room.join config ~agent_name:meta.agent_name
-                 ~capabilities:[ "keeper" ] ())
-          end;
+          (* Room join concept removed — just update heartbeat for keeper activity tracking *)
           ignore
             (Room.heartbeat_in_room config ~room_id ~agent_name:meta.agent_name);
           room_id :: acc

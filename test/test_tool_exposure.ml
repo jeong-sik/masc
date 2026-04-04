@@ -98,7 +98,7 @@ let () =
               let meta = Tool_catalog.metadata "masc_operation_pause" in
               check (option bool) "destructive" (Some false) meta.destructive);
           test_case "default tools have None annotations" `Quick (fun () ->
-              let meta = Tool_catalog.metadata "masc_join" in
+              let meta = Tool_catalog.metadata "masc_status" in
               check (option bool) "readonly" None meta.readonly;
               check (option bool) "destructive" None meta.destructive;
               check (option bool) "idempotent" None meta.idempotent);
@@ -124,7 +124,6 @@ let () =
               let hidden_names =
                 [
                   "masc_operator_judgment_write";
-                  "masc_set_room";
                 ]
               in
               List.iter
@@ -137,7 +136,6 @@ let () =
               let hidden_names =
                 [
                   "masc_operator_judgment_write";
-                  "masc_set_room";
                 ]
               in
               List.iter
@@ -145,18 +143,10 @@ let () =
                   check bool (name ^ " should be visible with flag") true
                     (Tool_catalog.is_visible ~include_hidden:true name))
                 hidden_names);
-          test_case "masc_set_room stays callable as a hidden compatibility alias" `Quick
+          test_case "masc_set_project is visible" `Quick
             (fun () ->
-              let meta = Tool_catalog.metadata "masc_set_room" in
-              check bool "masc_set_room hidden" false
-                (Tool_catalog.is_visible "masc_set_room");
-              check bool "masc_set_room direct call allowed" true
-                (Tool_catalog.allow_direct_call "masc_set_room");
-              check bool "masc_set_room on system_internal surface" true
-                (Tool_catalog.is_on_surface Tool_catalog.System_internal
-                   "masc_set_room");
-              check (option string) "masc_set_room replacement" (Some "masc_start")
-                meta.replacement);
+              check bool "masc_set_project visible" true
+                (Tool_catalog.is_visible "masc_set_project"));
           test_case "legacy mitosis tools are removed from the public registry" `Quick
             (fun () ->
               let removed_names =

@@ -380,18 +380,11 @@ let rec run_worker_via_oas
   in
   Fun.protect
     ~finally:(fun () ->
-      ignore
-        (Worker_container_types.leave_worker ~sw ~auth_token
-           ~session_id ~worker_name))
+      Worker_container_types.leave_worker ~sw ~auth_token
+           ~session_id ~worker_name)
     (fun () ->
-      let _ =
-        match
-          Worker_container_types.join_worker ~sw ~auth_token
-            ~session_id ~worker_name
-        with
-        | Ok _ -> ()
-        | Error e -> raise (Failure ("worker join failed: " ^ e))
-      in
+      Worker_container_types.join_worker ~sw ~auth_token
+            ~session_id ~worker_name;
       let workspace_path =
         if String.trim meta.workspace_path <> "" then meta.workspace_path
         else base_path
@@ -446,18 +439,11 @@ and resume_worker_via_oas
   in
   Fun.protect
     ~finally:(fun () ->
-      ignore
-        (Worker_container_types.leave_worker ~sw ~auth_token ~session_id
-           ~worker_name))
+      Worker_container_types.leave_worker ~sw ~auth_token ~session_id
+           ~worker_name)
     (fun () ->
-      let _ =
-        match
-          Worker_container_types.join_worker ~sw ~auth_token ~session_id
-            ~worker_name
-        with
-        | Ok _ -> ()
-        | Error e -> raise (Failure ("worker join failed: " ^ e))
-      in
+      Worker_container_types.join_worker ~sw ~auth_token ~session_id
+            ~worker_name;
       let agent =
         Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config ()
       in

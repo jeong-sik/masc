@@ -2,7 +2,7 @@
 
     Delegates to sub-modules:
     - Tool_inline_dispatch_room: masc_start, masc_lock, masc_unlock,
-      masc_set_room, masc_join, masc_leave
+      masc_set_project
     - Tool_inline_dispatch_comm: masc_bounded_run, masc_broadcast,
       masc_messages, masc_listen, masc_who
     - Tool_inline_dispatch_episode: masc_episode_flush, masc_episode_list
@@ -12,6 +12,9 @@
     Keeps inline: verify, mcp_session, cancellation, subscription,
     progress, interrupt, approve, reject, pending_interrupts, branch,
     governance_set, spawn, discover_tools.
+
+    Room concept removed: masc_join, masc_leave, masc_set_room removed.
+    Project scope is set via masc_start or masc_set_project.
 *)
 
 (** Re-export shared types so callers can use
@@ -81,13 +84,11 @@ let dispatch (ctx : context) ~(name : string) : result option =
   in
 
   match name with
-  (* ── Room lifecycle (delegated) ─────────────────────────────── *)
+  (* ── Project lifecycle (delegated) ─────────────────────────────── *)
   | "masc_start" -> Tool_inline_dispatch_room.handle_start ctx
   | "masc_lock" -> Tool_inline_dispatch_room.handle_lock ctx
   | "masc_unlock" -> Tool_inline_dispatch_room.handle_unlock ctx
-  | "masc_set_room" -> Tool_inline_dispatch_room.handle_set_room ctx
-  | "masc_join" -> Tool_inline_dispatch_room.handle_join ctx
-  | "masc_leave" -> Tool_inline_dispatch_room.handle_leave ctx
+  | "masc_set_project" | "masc_set_room" -> Tool_inline_dispatch_room.handle_set_project ctx
 
   (* ── Communication (delegated) ──────────────────────────────── *)
   | "masc_bounded_run" -> Tool_inline_dispatch_comm.handle_bounded_run ctx

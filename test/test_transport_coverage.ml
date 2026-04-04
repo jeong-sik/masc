@@ -231,8 +231,8 @@ let test_request_no_id () =
 let test_request_with_params () =
   let req : Transport.request = {
     id = Some "req-002";
-    method_name = "masc_join";
-    params = `Assoc [("agent_name", `String "claude")];
+    method_name = "masc_broadcast";
+    params = `Assoc [("agent_name", `String "claude"); ("message", `String "hello")];
     headers = [];
   } in
   let open Yojson.Safe.Util in
@@ -404,10 +404,10 @@ let test_jsonrpc_serialize_response_no_id () =
      with Not_found -> false)
 
 let test_jsonrpc_make_request_basic () =
-  let json = Transport.JsonRpc.make_request ~method_name:"masc_join" ~params:(`Assoc []) () in
+  let json = Transport.JsonRpc.make_request ~method_name:"masc_broadcast" ~params:(`Assoc []) () in
   let json_str = Yojson.Safe.to_string json in
   check bool "has method" true
-    (try let _ = Str.search_forward (Str.regexp "masc_join") json_str 0 in true
+    (try let _ = Str.search_forward (Str.regexp "masc_broadcast") json_str 0 in true
      with Not_found -> false)
 
 let test_jsonrpc_make_request_with_id () =
@@ -456,13 +456,8 @@ let test_rest_tool_to_endpoint_claim () =
   check string "method" "POST" (Transport.Rest.method_to_string m);
   check string "path" "/mcp" path
 
-let test_rest_tool_to_endpoint_join () =
-  let (m, path) = Transport.Rest.tool_to_endpoint "masc_join" in
-  check string "method" "POST" (Transport.Rest.method_to_string m);
-  check string "path" "/mcp" path
-
-let test_rest_tool_to_endpoint_leave () =
-  let (m, path) = Transport.Rest.tool_to_endpoint "masc_leave" in
+let test_rest_tool_to_endpoint_start () =
+  let (m, path) = Transport.Rest.tool_to_endpoint "masc_start" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
   check string "path" "/mcp" path
 
@@ -574,8 +569,8 @@ let test_rest_generate_openapi_paths () =
   check bool "has status" true
     (try let _ = Str.search_forward (Str.regexp "masc_status") json_str 0 in true
      with Not_found -> false);
-  check bool "has join" true
-    (try let _ = Str.search_forward (Str.regexp "masc_join") json_str 0 in true
+  check bool "has broadcast" true
+    (try let _ = Str.search_forward (Str.regexp "masc_broadcast") json_str 0 in true
      with Not_found -> false)
 
 let test_rest_generate_openapi_document () =
@@ -843,8 +838,7 @@ let () =
       test_case "tasks" `Quick test_rest_tool_to_endpoint_tasks;
       test_case "add_task" `Quick test_rest_tool_to_endpoint_add_task;
       test_case "claim" `Quick test_rest_tool_to_endpoint_claim;
-      test_case "join" `Quick test_rest_tool_to_endpoint_join;
-      test_case "leave" `Quick test_rest_tool_to_endpoint_leave;
+      test_case "start" `Quick test_rest_tool_to_endpoint_start;
       test_case "broadcast" `Quick test_rest_tool_to_endpoint_broadcast;
       test_case "agent_card" `Quick test_rest_tool_to_endpoint_agent_card;
       test_case "websocket_discovery" `Quick test_rest_tool_to_endpoint_websocket_discovery;

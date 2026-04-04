@@ -124,8 +124,6 @@ let affected_resource_ids_for_tool = function
   | "masc_plan_clear_task" ->
       task_resource_ids
   | "masc_init"
-  | "masc_join"
-  | "masc_leave"
   | "masc_register_capabilities"
   | "masc_heartbeat"
   | "masc_suspend" ->

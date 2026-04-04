@@ -138,7 +138,7 @@ let rec masc_error_to_string = function
   | NotInitialized -> "❌ MASC not initialized. Use masc_init first."
   | AlreadyInitialized -> "MASC already initialized."
   | AgentNotFound name -> Printf.sprintf "❌ Agent not found: %s" name
-  | AgentNotJoined name -> Printf.sprintf "❌ Agent not joined: %s. Use masc_join first." name
+  | AgentNotJoined name -> Printf.sprintf "❌ Agent not registered: %s. Use masc_start to set the project scope." name
   | AgentAlreadyJoined name -> Printf.sprintf "⚠ %s is already in the room" name
   | TaskNotFound id -> Printf.sprintf "❌ Task not found: %s. Call masc_status to refresh your task list." id
   | TaskAlreadyClaimed { task_id; by } ->

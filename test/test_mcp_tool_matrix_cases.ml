@@ -67,10 +67,8 @@ let strict_success_names =
     "masc_handover_list";
     "masc_heartbeat";
     "masc_init";
-    "masc_join";
     "masc_keeper_down";
     "masc_keeper_list";
-    "masc_leave";
     "masc_library_add";
     "masc_library_list";
     "masc_messages";
@@ -285,18 +283,9 @@ let ensure_initialized fixture =
   | false, body when contains_substring body "already initialized" -> ()
   | false, body -> failwith ("masc_init failed: " ^ body)
 
-let ensure_joined fixture =
-  match execute_tool fixture ~name:"masc_join"
-          ~arguments:
-            (`Assoc
-              [
-                ("agent_name", `String fixture.agent_name);
-                ("capabilities", `List [ `String "testing"; `String "tool-matrix" ]);
-              ])
-  with
-  | true, _ -> ()
-  | false, body when contains_substring body "already joined" -> ()
-  | false, body -> failwith ("masc_join failed: " ^ body)
+let ensure_ready fixture =
+  (* Room join concept removed — just ensure the project is initialized *)
+  ensure_initialized fixture
 
 let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let worktree_dir = setup_git_repo base_path in
@@ -344,7 +333,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   | Init_only -> ensure_initialized fixture
   | Init_joined ->
       ensure_initialized fixture;
-      ensure_joined fixture);
+      ensure_ready fixture);
   fixture
 
 let ensure_task fixture =
@@ -853,7 +842,6 @@ let case_for_name name =
   let init_mode =
     match name with
     | "masc_init" | "masc_start" | "masc_set_room" -> Fresh
-    | "masc_join" -> Init_only
     | _ -> Init_joined
   in
   let prepare fixture = prepare_for_name fixture name in

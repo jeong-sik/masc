@@ -281,8 +281,7 @@ let core_remote_operation_names =
   dedupe_strings
     (List.map (fun binding -> binding.canonical_operation) sdk_bindings
     @ [
-        "masc_join";
-        "masc_leave";
+        "masc_set_project";
         "masc_who";
         "masc_agents";
         "masc_agent_update";

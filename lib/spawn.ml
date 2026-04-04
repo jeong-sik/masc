@@ -49,21 +49,20 @@ let masc_lifecycle_suffix = {|
 
 You are running as a MASC-managed agent. Follow these lifecycle rules:
 
-1. **Session Start**: Call `mcp__masc__masc_join` with your agent name
+1. **Session Start**: Call `mcp__masc__masc_start` with your project path if not set
 2. **Heartbeat**: Call `mcp__masc__masc_heartbeat` every 2 minutes during long tasks
 3. **Context Handoff**: If context pressure rises or you are about to stop mid-task,
    write a structured handover with `mcp__masc__masc_handover_create`
-4. **Task Completion**: Call `mcp__masc__masc_transition` with action="done" then `mcp__masc__masc_leave`
+4. **Task Completion**: Call `mcp__masc__masc_transition` with action="done"
 
 Example lifecycle:
 ```
-mcp__masc__masc_join(agent_name="gemini", capabilities=["typescript","react"])
+mcp__masc__masc_start(path="/path/to/project")
 ... work ...
 mcp__masc__masc_heartbeat(agent_name="gemini")  // every 2 min
 ... more work ...
 mcp__masc__masc_handover_create(...)  // when a successor needs your state
 mcp__masc__masc_transition(agent_name="gemini", task_id="task-XXX", action="done")
-mcp__masc__masc_leave(agent_name="gemini")
 ```
 
 IMPORTANT: If you cannot finish in one pass, hand off explicitly before leaving.

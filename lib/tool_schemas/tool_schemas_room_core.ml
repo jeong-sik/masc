@@ -10,9 +10,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_status";
-    description = "Get current project namespace/cluster status: active agents, task queue, recent broadcasts, and cluster info. \
-Use when you need a snapshot of who is online and what tasks are available. \
-Call after masc_join to orient yourself. Pair with masc_tasks for detailed backlog.";
+    description = "Get current project status: active agents, task queue, recent broadcasts, and cluster info. \
+Use when you need a snapshot of who is active and what tasks are available. \
+Call after masc_start to orient yourself. Pair with masc_tasks for detailed backlog.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -47,7 +47,7 @@ Pair with masc_check to assert specific prerequisites before acting.";
   };
   {
     name = "masc_check";
-    description = "Assert preconditions on your agent state (joined, task claimed, worktree active, etc). \
+    description = "Assert preconditions on your agent state (project set, task claimed, worktree active, etc). \
 Call when you want to confirm prerequisites before starting work; returns pass/fail with fix hints. \
 Pair with masc_workflow_guide for next-step recommendations.";
     input_schema = `Assoc [
@@ -58,11 +58,11 @@ Pair with masc_workflow_guide for next-step recommendations.";
           ("items", `Assoc [
             ("type", `String "string");
             ("enum", `List [
-              `String "room_set"; `String "joined"; `String "task_claimed";
+              `String "project_set"; `String "task_claimed";
               `String "current_task_set"; `String "worktree_active";
             ]);
           ]);
-          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false. Historical key 'room_set' now means project namespace configured.");
+          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false.");
         ]);
       ]);
       ("required", `List [`String "assertions"]);
@@ -71,8 +71,8 @@ Pair with masc_workflow_guide for next-step recommendations.";
   {
     name = "masc_init";
     description = "Create the .masc/ folder to bootstrap a new MASC project namespace in this project. \
-Call once per project when no .masc/ exists yet; if it already exists you auto-join. \
-After init, call masc_join to register your presence, then masc_add_task or masc_claim_next.";
+Call once per project when no .masc/ exists yet; if it already exists the project scope is already set. \
+After init, call masc_start to set project scope, then masc_add_task or masc_claim_next.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

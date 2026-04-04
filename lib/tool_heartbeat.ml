@@ -146,8 +146,8 @@ Prefer masc_heartbeat_start for automatic pings. Pair with masc_cleanup_zombies 
   {
     name = "masc_heartbeat_start";
     description = "Start automatic background heartbeat pings at a given interval. \
-Call after masc_join to keep your presence alive during long-running work. \
-Smart mode skips beats when busy. Stop with masc_heartbeat_stop before masc_leave.";
+Call after masc_start to keep your activity alive during long-running work. \
+Smart mode skips beats when busy. Stop with masc_heartbeat_stop when done.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -174,7 +174,7 @@ Smart mode skips beats when busy. Stop with masc_heartbeat_stop before masc_leav
   {
     name = "masc_heartbeat_stop";
     description = "Stop a periodic heartbeat that was started by masc_heartbeat_start. \
-Call when your long task is complete or you are about to masc_leave. \
+Call when your long task is complete or you are finishing your session. \
 Get heartbeat_id from masc_heartbeat_start response or masc_heartbeat_list.";
     input_schema = `Assoc [
       ("type", `String "object");

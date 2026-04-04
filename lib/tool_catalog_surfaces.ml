@@ -107,8 +107,8 @@ type surface =
 
 let public_mcp_surface_tools =
   [
-    (* Room lifecycle *)
-    "masc_start"; "masc_join"; "masc_leave"; "masc_status";
+    (* Project lifecycle *)
+    "masc_start"; "masc_set_project"; "masc_status";
     (* Messaging *)
     "masc_broadcast"; "masc_messages"; "masc_who";
     (* Task coordination *)
@@ -142,8 +142,9 @@ let public_mcp_surface_tools =
 
 let spawned_agent_surface_tools =
   [
+    "masc_start"; "masc_set_project";
     "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
-    "masc_task_history"; "masc_broadcast"; "masc_join"; "masc_leave";
+    "masc_task_history"; "masc_broadcast";
     "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
     "masc_messages";
     "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";

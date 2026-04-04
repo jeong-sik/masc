@@ -54,8 +54,8 @@ After masc_portal_open establishes the channel; check responses via portal statu
   {
     name = "masc_portal_close";
     description = "Close your portal connection to the target agent. \
-Use when finished with the A2A exchange or cleaning up before leaving the room. \
-Auto-closes on masc_leave. Pair with masc_portal_open to re-establish if needed.";
+Use when finished with the A2A exchange or cleaning up before session end. \
+Auto-closes on session end. Pair with masc_portal_open to re-establish if needed.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

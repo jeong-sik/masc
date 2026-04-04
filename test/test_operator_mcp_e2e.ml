@@ -539,36 +539,20 @@ let _test_operator_mcp_supervises_team_session_impl () =
   in
   ignore
     (call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"operator-supervisor"
-       ~id:1 ~name:"masc_join"
-       (`Assoc
-         [
-           ("agent_name", `String supervisor_nickname);
-           ("capabilities", `List [ `String "supervisor"; `String "operator" ]);
-         ]));
+       ~id:1 ~name:"masc_status"
+       (`Assoc [("agent_name", `String supervisor_nickname)]));
   ignore
     (call_tool ~token:planner_token ~path:"/mcp" ~session_id:"planner" ~id:2
-       ~name:"masc_join"
-       (`Assoc
-         [
-           ("agent_name", `String planner_nickname);
-           ("capabilities", `List [ `String "planner"; `String "team-session" ]);
-         ]));
+       ~name:"masc_status"
+       (`Assoc [("agent_name", `String planner_nickname)]));
   ignore
     (call_tool ~token:implementer_a_token ~path:"/mcp" ~session_id:"implementer-a"
-       ~id:3 ~name:"masc_join"
-       (`Assoc
-         [
-           ("agent_name", `String implementer_a_nickname);
-           ("capabilities", `List [ `String "backend"; `String "team-session" ]);
-         ]));
+       ~id:3 ~name:"masc_status"
+       (`Assoc [("agent_name", `String implementer_a_nickname)]));
   ignore
     (call_tool ~token:implementer_b_token ~path:"/mcp" ~session_id:"implementer-b"
-       ~id:4 ~name:"masc_join"
-       (`Assoc
-         [
-           ("agent_name", `String implementer_b_nickname);
-           ("capabilities", `List [ `String "docs"; `String "tests"; `String "team-session" ]);
-         ]));
+       ~id:4 ~name:"masc_status"
+       (`Assoc [("agent_name", `String implementer_b_nickname)]));
   let start_json =
     call_tool ~token:supervisor_token ~path:"/mcp" ~session_id:"operator-supervisor"
       ~id:5 ~name:"masc_team_session_start"

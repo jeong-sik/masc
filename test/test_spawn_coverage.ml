@@ -113,11 +113,8 @@ let test_masc_mcp_tools_not_empty () =
 let test_masc_mcp_tools_has_status () =
   check bool "has status" true (List.mem "mcp__masc__masc_status" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_join () =
-  check bool "has join" true (List.mem "mcp__masc__masc_join" Spawn.masc_mcp_tools)
-
-let test_masc_mcp_tools_has_leave () =
-  check bool "has leave" true (List.mem "mcp__masc__masc_leave" Spawn.masc_mcp_tools)
+let test_masc_mcp_tools_has_start () =
+  check bool "has start" true (List.mem "mcp__masc__masc_start" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_broadcast () =
   check bool "has broadcast" true (List.mem "mcp__masc__masc_broadcast" Spawn.masc_mcp_tools)
@@ -202,9 +199,9 @@ let test_lifecycle_suffix_has_protocol () =
     (try let _ = Str.search_forward (Str.regexp_string "MASC LIFECYCLE") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-let test_lifecycle_suffix_has_join () =
-  check bool "has join" true
-    (try let _ = Str.search_forward (Str.regexp_string "masc_join") Spawn.masc_lifecycle_suffix 0 in true
+let test_lifecycle_suffix_has_start () =
+  check bool "has start" true
+    (try let _ = Str.search_forward (Str.regexp_string "masc_start") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
 let test_lifecycle_suffix_has_heartbeat () =
@@ -725,8 +722,7 @@ let () =
     "masc_mcp_tools", [
       test_case "not empty" `Quick test_masc_mcp_tools_not_empty;
       test_case "has status" `Quick test_masc_mcp_tools_has_status;
-      test_case "has join" `Quick test_masc_mcp_tools_has_join;
-      test_case "has leave" `Quick test_masc_mcp_tools_has_leave;
+      test_case "has start" `Quick test_masc_mcp_tools_has_start;
       test_case "has broadcast" `Quick test_masc_mcp_tools_has_broadcast;
       test_case "omits claim" `Quick test_masc_mcp_tools_omits_claim;
       test_case "omits done" `Quick test_masc_mcp_tools_omits_done;
@@ -752,7 +748,7 @@ let () =
     "lifecycle_suffix", [
       test_case "not empty" `Quick test_lifecycle_suffix_not_empty;
       test_case "has protocol" `Quick test_lifecycle_suffix_has_protocol;
-      test_case "has join" `Quick test_lifecycle_suffix_has_join;
+      test_case "has start" `Quick test_lifecycle_suffix_has_start;
       test_case "has heartbeat" `Quick test_lifecycle_suffix_has_heartbeat;
       test_case "has handover_create" `Quick test_lifecycle_suffix_has_handover_create;
       test_case "omits relay_checkpoint" `Quick test_lifecycle_suffix_omits_relay_checkpoint;

@@ -129,14 +129,9 @@ let test_risk_medium_transition_claim () =
   Alcotest.(check string) "transition claim is medium"
     "medium" (Gp.risk_level_to_string risk)
 
-let test_risk_medium_join () =
-  let risk = Gp.assess_risk ~tool_name:"masc_join" ~input:no_args in
-  Alcotest.(check string) "join is medium"
-    "medium" (Gp.risk_level_to_string risk)
-
-let test_risk_medium_leave () =
-  let risk = Gp.assess_risk ~tool_name:"masc_leave" ~input:no_args in
-  Alcotest.(check string) "leave is medium"
+let test_risk_medium_claim () =
+  let risk = Gp.assess_risk ~tool_name:"masc_claim_next" ~input:no_args in
+  Alcotest.(check string) "claim is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_start () =
@@ -494,7 +489,7 @@ let test_production_allows_low () =
 
 let test_production_allows_medium () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_join" ~input:`Null in
+    ~tool_name:"masc_claim_next" ~input:`Null in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "production should allow medium")
@@ -525,7 +520,7 @@ let test_enterprise_allows_low () =
 
 let test_enterprise_allows_medium () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_join" ~input:`Null in
+    ~tool_name:"masc_claim_next" ~input:`Null in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "enterprise should allow medium")
@@ -555,7 +550,7 @@ let test_paranoid_allows_low () =
 
 let test_paranoid_confirms_medium () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_join" ~input:`Null in
+    ~tool_name:"masc_claim_next" ~input:`Null in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "paranoid should require confirm for medium"
@@ -675,7 +670,7 @@ let test_hook_paranoid_blocks_medium () =
   let tmpdir = make_tmpdir () in
   let config = Room.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
-  let result = hook ~name:"masc_join" ~args:`Null in
+  let result = hook ~name:"masc_claim_next" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
        Alcotest.(check bool) "blocked" false r.Tool_result.success;
@@ -767,8 +762,7 @@ let () =
       Alcotest.test_case "medium: claim_task" `Quick test_risk_medium_claim_task;
       Alcotest.test_case "medium: transition claim" `Quick
         test_risk_medium_transition_claim;
-      Alcotest.test_case "medium: join" `Quick test_risk_medium_join;
-      Alcotest.test_case "medium: leave" `Quick test_risk_medium_leave;
+      Alcotest.test_case "medium: claim" `Quick test_risk_medium_claim;
       Alcotest.test_case "medium: start" `Quick test_risk_medium_start;
       Alcotest.test_case "medium: stop" `Quick test_risk_medium_stop;
       Alcotest.test_case "medium: pause" `Quick test_risk_medium_pause;

@@ -13,7 +13,7 @@ let recovery_hint (message : string) : string option =
   if contains msg "not initialized" || contains msg "no .masc/" then
     Some "Run masc_init to initialize, or use masc_start(path=...) for one-step setup."
   else if contains msg "not joined" || contains msg "join the room" then
-    Some "Call masc_join first, or use masc_start for one-step setup."
+    Some "Use masc_start(path=...) to set the project scope."
   else if contains msg "task not found" || contains msg "not found" && contains msg "task" then
     Some "Call masc_status to see available tasks."
   else if contains msg "already claimed" then

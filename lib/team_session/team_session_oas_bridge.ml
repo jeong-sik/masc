@@ -111,14 +111,11 @@ let tool_requires_presence = function
   | _ -> false
 
 let ensure_agent_joined ~(config : Room.config) ~(agent_name : string) =
+  (* Room join concept removed — just ensure project is initialized. *)
   try
     if not (Room.is_initialized config) then (
       let (_init_msg : string) = Room.init config ~agent_name:None in ());
-    let joined =
-      try Room.is_agent_joined config ~agent_name
-      with Sys_error _ | Not_found | Yojson.Json_error _ -> false
-    in
-    if not joined then ignore (Room.join config ~agent_name ~capabilities:[] ());
+    ignore agent_name;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

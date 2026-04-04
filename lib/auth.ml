@@ -265,8 +265,7 @@ let declared_permission_for_tool tool_name =
 let legacy_permission_for_tool = function
   | "masc_init" -> Some CanInit
   | "masc_reset" -> Some CanReset
-  | "masc_join" -> Some CanJoin
-  | "masc_leave" -> Some CanLeave
+  | "masc_start" | "masc_set_project" | "masc_set_room" -> Some CanJoin
   | "masc_status" | "masc_who" | "masc_tasks" | "masc_messages"
   | "masc_transport_status" | "masc_websocket_discovery"
   | "masc_agents" | "masc_portal_status"

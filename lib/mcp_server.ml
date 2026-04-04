@@ -489,8 +489,9 @@ let create_state ~base_path =
     net = None;
   } in
   Tool_board.set_agent_lookup (fun name ->
-    try Room.is_agent_joined state.room_config ~agent_name:name
-    with Sys_error _ | Not_found | Invalid_argument _ -> false);
+    (* Room join concept removed — use session registry for agent presence.
+       Board posts are valid from any active agent. *)
+    ignore name; true);
   state
 
 (** Create state with Eio context - required for PostgresNative backend *)
@@ -535,11 +536,9 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     env = Some env;
     net = Some net;
   } in
-  (* Board post kind auto-classification: reads state.room_config so
-     room changes via set_room are reflected automatically. *)
-  Tool_board.set_agent_lookup (fun name ->
-    try Room.is_agent_joined state.room_config ~agent_name:name
-    with Sys_error _ | Not_found | Invalid_argument _ -> false);
+  (* Board post kind auto-classification: room concept removed.
+     Board posts are valid from any active agent. *)
+  Tool_board.set_agent_lookup (fun name -> ignore name; true);
   state
 
 (** Register SSE broadcast callback *)

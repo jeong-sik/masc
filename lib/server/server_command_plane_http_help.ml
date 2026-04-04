@@ -117,7 +117,7 @@ let command_plane_help_http_json () =
           [
             concept ~id:"namespace" ~title:"Project Scope"
               ~summary:
-                "Shared project coordination scope. Use masc_start as the primary onboarding entrypoint. Historical room naming remains only as a compatibility alias, and masc_set_room now selects only the project coordination root while runtime state still lives in the flattened default scope under .masc/.";
+                "Shared project coordination scope. Use masc_start to set the project root. masc_set_project (or legacy masc_set_room) also sets project scope and are kept for compatibility.";
             concept ~id:"task" ~title:"Task"
               ~summary:
                 "Backlog work item. Claim semantics differ by tool: masc_transition(action=claim) leaves planning current_task unset, while masc_claim_next auto-binds it in current builds.";
@@ -146,11 +146,11 @@ let command_plane_help_http_json () =
                 [
                   step ~id:"start" ~title:"Start project onboarding" ~tool:"masc_start"
                     ~summary:
-                      "Preferred front door. Sets the project coordination root, joins the default shared scope, and can optionally create+claim a task in one call."
+                      "Preferred front door. Sets the project coordination root and can optionally create+claim a task in one call."
                     ~success_signals:
-                      [ "coordination root resolves to the project root"; "agent can appear in masc_status immediately after onboarding" ]
+                      [ "coordination root resolves to the project root" ]
                     ~pitfalls:
-                      [ "calling masc_set_room only changes project scope; it does not complete the full onboarding flow";
+                      [ "calling masc_set_project/masc_set_room only sets the project scope; use masc_start for full onboarding";
                         "omitting task_title means you still need a later claim/create step" ];
                   step ~id:"status" ~title:"Verify project state" ~tool:"masc_status"
                     ~summary:
@@ -316,7 +316,7 @@ let command_plane_help_http_json () =
               ~description:
                 "Core namespace/task tools every session should use before higher-level workflows."
               ~tools:
-                [ "masc_start"; "masc_join"; "masc_status"; "masc_transition"; "masc_claim_next"; "masc_plan_set_task"; "masc_heartbeat" ];
+                [ "masc_start"; "masc_status"; "masc_transition"; "masc_claim_next"; "masc_plan_set_task"; "masc_heartbeat" ];
             tool_group ~id:"cpv2-core" ~title:"CPv2 Benchmark Core"
               ~description:
                 "Canonical swarm/benchmark tool family."

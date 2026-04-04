@@ -3,7 +3,7 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_start";
-    description = "One-step onboarding: sets the active project root, joins the default namespace as agent, and optionally creates+claims a task. Prefer this truthful front door over the compatibility alias masc_set_room plus manual follow-up calls.";
+    description = "One-step onboarding: sets the active project root and optionally creates+claims a task. Provide path to point MASC at your project directory. Optionally provide task_title to create and claim a task immediately.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -13,14 +13,14 @@ let schemas : tool_schema list = [
         ]);
         ("task_title", `Assoc [
           ("type", `String "string");
-          ("description", `String "If provided, creates a task with this title, claims it, and sets it as current_task. Omit to just join without a task.");
+          ("description", `String "If provided, creates a task with this title, claims it, and sets it as current_task. Omit to just set the project scope.");
         ]);
       ]);
     ];
   };
   {
-    name = "masc_set_room";
-    description = "Compatibility alias: set the project root for MASC operations. This only points MASC at a project's .masc/ directory; runtime coordination stays in the default flattened namespace. Prefer masc_start for real onboarding.";
+    name = "masc_set_project";
+    description = "Set the active project root for MASC operations. Points MASC at a project's .masc/ directory. Prefer masc_start for full onboarding.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -30,43 +30,6 @@ let schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "path"]);
-    ];
-  };
-  {
-    name = "masc_join";
-    description = "Join the active MASC project namespace to collaborate with other AI agents. Current builds use the shared .masc/ root default namespace. Call at session start or when you need to re-register presence after scope is already configured. Your presence will be visible to other agents (gemini, codex, etc). They can @mention you for help. Check masc_status after joining to see active agents and available tasks.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your identity: 'claude', 'gemini', or 'codex'");
-        ]);
-        ("capabilities", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Your strengths (e.g., ['typescript', 'code-review', 'testing'])");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
-    ];
-  };
-  {
-    name = "masc_leave";
-    description = "Leave the active MASC project namespace and mark yourself as offline. \
-Call when: (1) session ends, (2) switching project scopes, (3) work complete. \
-Side effects: releases all your locks, sets presence to offline. \
-Other agents will see you've left via SSE. \
-Example: masc_leave({agent_name: 'claude-xyz'})";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
     ];
   };
   {
@@ -132,7 +95,6 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
   {
     name = "masc_messages";
     description = "Get recent broadcast messages from all agents. \
-Use to: catch up after joining, check if someone @mentioned you, see namespace activity. \
 Returns chronological list with sender, timestamp, content. \
 Default: last 20 messages. Use limit param for more/less. \
 Tip: Search for '@your-name' in results to find mentions.";
@@ -173,10 +135,9 @@ Tip: Search for '@your-name' in results to find mentions.";
   };
   {
     name = "masc_who";
-    description = "List all agents currently in the active namespace with their capabilities. \
-Shows: agent name, join time, capabilities (e.g., ['typescript', 'testing']). \
-Use to: find who can help, check if specific agent is online, see team composition. \
-Agents appear after masc_join, disappear after masc_leave. \
+    description = "List active agents with their session information. \
+Shows: agent name, last activity, capabilities. \
+Use to: find who can help, check if specific agent is active, see team composition. \
 Tip: Use capabilities to find the right agent for @mentions.";
     input_schema = `Assoc [
       ("type", `String "object");

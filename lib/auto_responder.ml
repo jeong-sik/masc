@@ -91,20 +91,14 @@ let has_timeout =
     String.trim (Process_eio.run_argv ~timeout_sec:2.0 ["which"; "timeout"]) <> "")
 
 let build_response_prompt ~from_agent ~content ~mention =
-  Printf.sprintf {|You received a mention in the MASC room from %s.
+  Printf.sprintf {|You received a mention in the MASC project from %s.
 
 Message: "%s"
 
 Quick response protocol:
-1. Call mcp__masc__masc_join(agent_name="%s")
-   → Read the response to get your assigned nickname (e.g., "gemini-rare-beaver")
-2. Call mcp__masc__masc_broadcast using YOUR ASSIGNED NICKNAME from step 1:
-   mcp__masc__masc_broadcast(agent_name="<your-assigned-nickname>", message="[your concise response]")
-   IMPORTANT: Do NOT use "%s" - use the full nickname from the join response!
-3. Call mcp__masc__masc_leave()
-
-Respond in 1-2 sentences. Be helpful and concise.|}
-    from_agent content mention mention
+1. Call mcp__masc__masc_broadcast(agent_name="%s", message="[your concise response]")
+   Respond in 1-2 sentences. Be helpful and concise.|}
+    from_agent content mention
 
 let cli_argv_of_agent_type (agent_type : string) : string list =
   match agent_type with
@@ -248,38 +242,15 @@ let call_model_and_broadcast ~sw ~agent_type ~prompt ~mention =
   if response = "" || response = "no response" then
     Log.AutoResponder.info "MODEL returned empty response"
   else begin
-    let join_args =
-      `Assoc [
-        ("agent_name", `String agent_type);
-        ("capabilities", `List [`String "model-auto-responder"]);
-      ]
-    in
-    match masc_call ~sw ~tool_name:"masc_join" ~args:join_args with
-    | Error e ->
-        debug_log (Printf.sprintf "MASC_JOIN_FAILED: %s" e);
-        Log.AutoResponder.error "Failed to join MASC (%s)" e
-    | Ok join_resp -> (
-        debug_log (Printf.sprintf "MASC_JOIN: %s"
-          (if String.length join_resp > 200 then String.sub join_resp 0 200 ^ "..." else join_resp));
-        match extract_nickname join_resp with
-        | None ->
-            debug_log "MASC_JOIN_FAILED: Could not extract nickname";
-            Log.AutoResponder.error "Failed to join MASC (no nickname)"
-        | Some nickname ->
-            let msg = Printf.sprintf "@%s %s" mention response in
-            let broadcast_args = `Assoc [("agent_name", `String nickname); ("message", `String msg)] in
-            (try ignore (masc_call ~sw ~tool_name:"masc_broadcast" ~args:broadcast_args)
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn -> Log.AutoResponder.error "broadcast failed: %s" (Printexc.to_string exn));
-            let leave_args = `Assoc [("agent_name", `String nickname)] in
-            (try ignore (masc_call ~sw ~tool_name:"masc_leave" ~args:leave_args)
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn -> Log.AutoResponder.error "leave failed: %s" (Printexc.to_string exn));
-            let short_resp = if String.length response > 50 then String.sub response 0 50 ^ "..." else response in
-            Log.AutoResponder.info "%s: %s" nickname short_resp
-      )
+    (* Room join concept removed — broadcast directly as agent_type *)
+    let msg = Printf.sprintf "@%s %s" mention response in
+    let broadcast_args = `Assoc [("agent_name", `String agent_type); ("message", `String msg)] in
+    (try ignore (masc_call ~sw ~tool_name:"masc_broadcast" ~args:broadcast_args)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn -> Log.AutoResponder.error "broadcast failed: %s" (Printexc.to_string exn));
+    let short_resp = if String.length response > 50 then String.sub response 0 50 ^ "..." else response in
+    Log.AutoResponder.info "%s: %s" agent_type short_resp
   end
 
 (* --- Public API --- *)

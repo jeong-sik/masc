@@ -554,8 +554,6 @@ let coordination_tool_names : string list =
     "masc_tasks";
     "masc_add_task";
     "masc_broadcast";
-    "masc_join";
-    "masc_leave";
     "masc_who";
     "masc_heartbeat";
     "masc_messages";

@@ -25,14 +25,14 @@ let () =
               check int "call_count" 2 count);
           test_case "tracks success and failure separately" `Quick (fun () ->
               Tool_registry.reset ();
-              Tool_registry.record_call ~tool_name:"masc_join" ~success:true
+              Tool_registry.record_call ~tool_name:"masc_heartbeat" ~success:true
                 ~duration_ms:5 ();
-              Tool_registry.record_call ~tool_name:"masc_join" ~success:false
+              Tool_registry.record_call ~tool_name:"masc_heartbeat" ~success:false
                 ~duration_ms:15 ();
-              Tool_registry.record_call ~tool_name:"masc_join" ~success:true
+              Tool_registry.record_call ~tool_name:"masc_heartbeat" ~success:true
                 ~duration_ms:8 ();
               let stats = Tool_registry.get_stats () in
-              let s = List.assoc "masc_join" stats in
+              let s = List.assoc "masc_heartbeat" stats in
               check int "call_count" 3 s.call_count;
               check int "success_count" 2 s.success_count;
               check int "failure_count" 1 s.failure_count);
@@ -127,7 +127,7 @@ let () =
               let json =
                 Tool_registry.stats_report
                   ~top_n:20
-                  ~all_tool_names:[ "masc_status"; "masc_join" ]
+                  ~all_tool_names:[ "masc_status"; "masc_heartbeat" ]
               in
               let s = Yojson.Safe.to_string json in
               check bool "contains total_calls"
@@ -145,14 +145,14 @@ let () =
                   ~duration_ms:1 ()
               done;
               for _ = 1 to 2 do
-                Tool_registry.record_call ~tool_name:"masc_join" ~success:true
+                Tool_registry.record_call ~tool_name:"masc_heartbeat" ~success:true
                   ~duration_ms:1 ()
               done;
-              Tool_registry.record_call ~tool_name:"masc_leave" ~success:true
+              Tool_registry.record_call ~tool_name:"masc_broadcast" ~success:true
                 ~duration_ms:1 ();
               let json =
                 Tool_registry.stats_report ~top_n:2
-                  ~all_tool_names:[ "masc_status"; "masc_join"; "masc_leave" ]
+                  ~all_tool_names:[ "masc_status"; "masc_heartbeat"; "masc_broadcast" ]
               in
               let open Yojson.Safe.Util in
               check int "top_n_requested" 2

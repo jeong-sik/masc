@@ -1,7 +1,7 @@
 # Product Operating Plan
 
-> Current package version: v2.232.0
-> Latest release: v2.232.0 (2026-04-04)
+> Current package version: v2.233.0
+> Latest release: v2.233.0 (2026-04-04)
 > Updated: 2026-04-04
 
 Execution companion for capsule-only coordination hardening:

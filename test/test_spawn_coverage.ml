@@ -467,6 +467,14 @@ let test_parse_gemini_output_cli_json () =
   (* cost_usd now requires explicit total_cost_usd in JSON; no hardcoded pricing *)
   check bool "no cost without total_cost_usd" true (p.cost_usd = None)
 
+let test_parse_gemini_output_with_cost () =
+  let json = {|{"usageMetadata": {"promptTokenCount": 200, "candidatesTokenCount": 80}, "total_cost_usd": 0.0042}|} in
+  let p = Spawn.parse_gemini_output json in
+  check (option int) "input" (Some 200) p.input_tokens;
+  check (option int) "output" (Some 80) p.output_tokens;
+  check bool "has cost" true (Option.is_some p.cost_usd);
+  check (option (float 0.0001)) "cost value" (Some 0.0042) p.cost_usd
+
 let test_parse_gemini_output_invalid () =
   let p = Spawn.parse_gemini_output "invalid" in
   check (option int) "input None" None p.input_tokens;
@@ -794,6 +802,7 @@ let () =
       test_case "success" `Quick test_parse_gemini_output_success;
       test_case "with cache" `Quick test_parse_gemini_output_with_cache;
       test_case "cli json stats" `Quick test_parse_gemini_output_cli_json;
+      test_case "with explicit cost" `Quick test_parse_gemini_output_with_cost;
       test_case "invalid" `Quick test_parse_gemini_output_invalid;
     ];
     "int_opt_to_json", [

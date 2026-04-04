@@ -26,6 +26,12 @@ let keeper_board_tool_names =
     "keeper_board_search";
   ]
 
+let keeper_optional_board_tool_names =
+  [
+    (* Deliberately excluded from default presets. Explicit opt-in only. *)
+    "keeper_board_delete";
+  ]
+
 let keeper_voice_tool_names =
   [ "keeper_voice_speak"; "keeper_voice_listen"; "keeper_voice_agent";
     "keeper_voice_sessions";

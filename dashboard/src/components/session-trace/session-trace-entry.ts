@@ -2,7 +2,7 @@
 // Reuses tool category patterns from keeper-trajectory-timeline.ts.
 
 import { html } from 'htm/preact'
-import { JsonViewerCard } from '../common/json-viewer'
+import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
 import { truncate } from '../../lib/truncate'
@@ -94,7 +94,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
     <div class="mt-2 space-y-1.5">
       ${event.toolArgs ? html`
         <div class="mt-1">
-          <${JsonViewerCard} data=${event.toolArgs} title="Args" />
+          <${JsonViewerCard} data=${parseJsonLikeData(event.toolArgs)} title="Args" />
         </div>
       ` : null}
       ${event.toolResult || event.error ? html`

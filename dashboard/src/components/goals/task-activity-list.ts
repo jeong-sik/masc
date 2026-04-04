@@ -6,7 +6,7 @@ import { useState } from 'preact/hooks'
 import { EmptyState } from '../common/empty-state'
 import { LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
-import { JsonViewerCard } from '../common/json-viewer'
+import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { Settings, MessageSquare, CheckSquare, Heart, RefreshCcw, Dot, ChevronRight } from 'lucide-preact'
 import type { UnifiedTraceEvent, TraceEventKind } from '../session-trace/session-trace-state'
 import { activeFilter, type ActivityFilter } from './task-detail-state'
@@ -74,12 +74,12 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
         <div class="px-3 pb-2 pt-1 ml-7">
           ${event.toolArgs != null ? html`
             <div class="mb-1">
-              <${JsonViewerCard} data=${event.toolArgs} title="Args" />
+              <${JsonViewerCard} data=${parseJsonLikeData(event.toolArgs)} title="Args" />
             </div>
           ` : null}
           ${event.toolResult != null ? html`
             <div class="mb-1">
-              <${JsonViewerCard} data=${event.toolResult} title="Result" />
+              <${JsonViewerCard} data=${parseJsonLikeData(event.toolResult)} title="Result" />
             </div>
           ` : null}
           ${event.error ? html`<div class="text-[11px] text-bad mt-1">${event.error}</div>` : null}

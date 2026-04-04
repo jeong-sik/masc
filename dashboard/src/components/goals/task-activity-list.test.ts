@@ -5,10 +5,14 @@ import '@testing-library/jest-dom'
 import type { UnifiedTraceEvent } from '../session-trace/session-trace-state'
 import { activeFilter } from './task-detail-state'
 
-vi.mock('../common/json-viewer', () => ({
-  JsonViewerCard: ({ data, title }: { data: unknown; title?: string }) =>
-    h('div', { 'data-testid': 'json-viewer-card', 'data-title': title ?? '' }, typeof data === 'string' ? data : JSON.stringify(data)),
-}))
+vi.mock('../common/json-viewer', async importOriginal => {
+  const actual = await importOriginal<typeof import('../common/json-viewer')>()
+  return {
+    ...actual,
+    JsonViewerCard: ({ data, title }: { data: unknown; title?: string }) =>
+      h('div', { 'data-testid': 'json-viewer-card', 'data-title': title ?? '' }, typeof data === 'string' ? data : JSON.stringify(data)),
+  }
+})
 vi.mock('../common/time-ago', () => ({
   TimeAgo: ({ timestamp }: { timestamp: string }) => h('span', {}, timestamp),
 }))
@@ -88,6 +92,29 @@ describe('TaskActivityList', () => {
     await waitFor(() => {
       expect(screen.getByTestId('json-viewer-card')).toBeInTheDocument()
     })
+    const text = screen.getByTestId('json-viewer-card').textContent ?? ''
+    expect(text).toContain('"ok":true')
+  })
+
+  it('parses JSON string payloads before passing them to the structured viewer', async () => {
+    const { container } = render(h(TaskActivityList, {
+      events: [sampleToolCallEvent({ toolArgs: undefined, toolResult: '{"ok":true}' })],
+      loading: false,
+      error: null,
+      showToolCalls: true,
+    }))
+
+    const details = container.querySelector('details')
+    expect(details).not.toBeNull()
+    if (!details) return
+
+    details.open = true
+    fireEvent(details, new Event('toggle', { bubbles: true }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('json-viewer-card')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('json-viewer-card')).toHaveAttribute('data-title', 'Result')
     const text = screen.getByTestId('json-viewer-card').textContent ?? ''
     expect(text).toContain('"ok":true')
   })

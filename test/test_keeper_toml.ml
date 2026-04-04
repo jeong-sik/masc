@@ -172,6 +172,38 @@ let test_parse_multiline_string_unterminated () =
     check bool "mentions unterminated" true (contains e "unterminated");
     check bool "includes line number" true (contains e "line")
 
+let test_parse_multiline_preserves_leading_whitespace () =
+  (* Content lines with leading whitespace must be preserved exactly *)
+  let input = "key = \"\"\"\n  indented line\n    double indented\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "preserves leading ws" "  indented line\n    double indented\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail e
+
+let test_parse_multiline_consecutive_empty_lines () =
+  let input = "key = \"\"\"\nfirst\n\n\nlast\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "consecutive empty lines" "first\n\n\nlast\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail e
+
+let test_parse_multiline_content_on_opening_line () =
+  (* Content starting on the same line as the opening delimiter *)
+  let input = "key = \"\"\"content starts here\nand continues\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "content on opening line" "content starts here\nand continues\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail e
+
 let test_parse_multiline_with_other_keys () =
   let input = "[sec]\na = \"before\"\nb = \"\"\"\nmulti\nline\n\"\"\"\nc = \"after\"" in
   match TL.parse_toml input with
@@ -585,6 +617,9 @@ let () =
           test_case "multiline string same line" `Quick test_parse_multiline_string_same_line;
           test_case "multiline string unterminated" `Quick test_parse_multiline_string_unterminated;
           test_case "multiline with other keys" `Quick test_parse_multiline_with_other_keys;
+          test_case "multiline preserves leading whitespace" `Quick test_parse_multiline_preserves_leading_whitespace;
+          test_case "multiline consecutive empty lines" `Quick test_parse_multiline_consecutive_empty_lines;
+          test_case "multiline content on opening line" `Quick test_parse_multiline_content_on_opening_line;
         ] );
       ( "profile_defaults",
         [

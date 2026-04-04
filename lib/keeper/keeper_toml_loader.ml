@@ -147,14 +147,31 @@ let parse_value (raw : string) : (toml_value, string) result =
       | None -> Error (Printf.sprintf "cannot parse value: %s" s)
   end
 
+let skip_leading_ws (s : string) : int =
+  let len = String.length s in
+  let rec aux i = if i < len && is_ws s.[i] then aux (i + 1) else i in
+  aux 0
+
 let starts_with_triple_quote (s : string) : bool =
-  let t = String.trim s in
-  String.length t >= 3
-  && t.[0] = '"' && t.[1] = '"' && t.[2] = '"'
+  let i = skip_leading_ws s in
+  let len = String.length s in
+  len >= i + 3 && s.[i] = '"' && s.[i + 1] = '"' && s.[i + 2] = '"'
 
 let extract_after_triple_quote (s : string) : string =
-  let t = String.trim s in
-  String.sub t 3 (String.length t - 3)
+  (* Skip whitespace before the opening triple-quote, then return everything
+     after the delimiter WITHOUT trimming -- preserves significant whitespace.
+     Known limitations:
+     - Escaped triple-quotes inside multiline strings are not supported;
+       they will be treated as the closing delimiter.
+     - strip_comment runs on the key=value line before triple-quote
+       detection, so a hash in the value portion of a same-line triple-quoted
+       string may be misinterpreted as a comment.  Multi-line form is
+       unaffected since the opening line typically has no content after
+       the delimiter. *)
+  let i = skip_leading_ws s in
+  let len = String.length s in
+  if i + 3 <= len then String.sub s (i + 3) (len - i - 3)
+  else ""
 
 let strip_trailing_cr (s : string) : string =
   let len = String.length s in
@@ -178,13 +195,15 @@ let parse_toml (content : string) : (toml_doc, string) result =
     incr line_num;
     if Option.is_none !error then begin
       if !ml_active then begin
-        (* Inside a multiline basic string: accumulate until closing triple-quote *)
+        (* Inside a multiline basic string: accumulate until closing
+           triple-quote delimiter.  find_close scans the untrimmed line_cr
+           so content whitespace is preserved.  trimmed is only used as a
+           fast-path skip when the line has no quote character at all. *)
         let line_cr = strip_trailing_cr raw_line in
         let trimmed = String.trim line_cr in
-        (* Check if this line contains the closing triple-quote *)
         match String.index_opt trimmed '"' with
         | Some _ when String.length trimmed >= 3 ->
-          (* Look for triple-quote anywhere in the line *)
+          (* Look for triple-quote anywhere in the untrimmed line *)
           let len = String.length line_cr in
           let rec find_close i =
             if i + 2 >= len then None

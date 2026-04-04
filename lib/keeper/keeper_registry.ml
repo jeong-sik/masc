@@ -308,17 +308,26 @@ let wakeup_all ?base_path () =
 let fiber_health_of ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with
   | None -> Fiber_unknown
-  | Some entry ->
-      if entry.state = Dead then Fiber_dead
-      else
-        match Eio.Promise.peek entry.done_p with
-        | None -> Fiber_alive
-        | Some `Stopped -> Fiber_unknown
-        | Some (`Crashed _) ->
-            let max_restarts = Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
-            if entry.restart_count >= max_restarts
-            then Fiber_dead
-            else Fiber_zombie
+  | Some entry -> (
+      match entry.state with
+      | Dead -> Fiber_dead
+      | Crashed ->
+          let max_restarts =
+            Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
+          in
+          if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie
+      | Stopped -> Fiber_unknown
+      | Running | Paused -> (
+          match Eio.Promise.peek entry.done_p with
+          | None -> Fiber_alive
+          | Some `Stopped -> Fiber_unknown
+          | Some (`Crashed _) ->
+              let max_restarts =
+                Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
+              in
+              if entry.restart_count >= max_restarts
+              then Fiber_dead
+              else Fiber_zombie))
 
 let crash_log_of ~base_path name =
   match get ~base_path name with

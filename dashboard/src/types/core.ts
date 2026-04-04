@@ -609,6 +609,7 @@ export interface KeeperConfigRuntime {
   paused: boolean
   registered: boolean
   keepalive_running: boolean
+  registry_state?: string | null
   fiber_health: string
   presence_keepalive: boolean
   presence_keepalive_sec: number

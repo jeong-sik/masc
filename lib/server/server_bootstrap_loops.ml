@@ -308,6 +308,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     result);
   Tool_metrics_persist.start_flush_fiber ~sw ~clock
     ~base_path:state.room_config.base_path;
+  (* System_internal tool usage log: durable JSONL for pruning evidence (#5120) *)
+  Tool_usage_log.init ~base_path:state.room_config.base_path;
+  Tool_usage_log.install ();
   Otel_dispatch_hook.install ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;

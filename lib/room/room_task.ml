@@ -6,11 +6,75 @@ include Room_state
 
 let activity_room_id _config = "default"
 
+let task_actor_kind agent_name =
+  let normalized = String.lowercase_ascii (String.trim agent_name) in
+  if normalized = "" || normalized = "system" then
+    "system"
+  else if Resilience.Zombie.is_keeper_name normalized then
+    "keeper"
+  else
+    "agent"
+
+let trim_opt = function
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let normalize_execution_links (links : Types.task_execution_links) =
+  {
+    operation_id = trim_opt links.operation_id;
+    session_id = trim_opt links.session_id;
+    autoresearch_loop_id = trim_opt links.autoresearch_loop_id;
+  }
+
+let normalize_task_contract (contract : Types.task_contract) =
+  {
+    contract with
+    completion_contract = normalized_string_list contract.completion_contract;
+    required_evidence = normalized_string_list contract.required_evidence;
+    inspect_gate_evidence = normalized_string_list contract.inspect_gate_evidence;
+    verify_gate_evidence = normalized_string_list contract.verify_gate_evidence;
+    links = normalize_execution_links contract.links;
+  }
+
+let empty_task_contract =
+  {
+    strict = false;
+    completion_contract = [];
+    required_evidence = [];
+    inspect_gate_evidence = [];
+    verify_gate_evidence = [];
+    links =
+      {
+        operation_id = None;
+        session_id = None;
+        autoresearch_loop_id = None;
+      };
+  }
+
+let merge_execution_links (existing : Types.task_execution_links) ?session_id
+    ?operation_id ?autoresearch_loop_id () =
+  {
+    session_id =
+      (match trim_opt session_id with
+      | Some _ as value -> value
+      | None -> trim_opt existing.session_id);
+    operation_id =
+      (match trim_opt operation_id with
+      | Some _ as value -> value
+      | None -> trim_opt existing.operation_id);
+    autoresearch_loop_id =
+      (match trim_opt autoresearch_loop_id with
+      | Some _ as value -> value
+      | None -> trim_opt existing.autoresearch_loop_id);
+  }
+
 let emit_task_activity config ~agent_name ~task_id ~kind ~payload =
   try
     !Room_hooks.activity_emit_fn config
       ~room_id:(activity_room_id config)
-      ~actor:Room_hooks.{ kind = "agent"; id = agent_name }
+      ~actor:Room_hooks.{ kind = task_actor_kind agent_name; id = agent_name }
       ~subject:Room_hooks.{ kind = "task"; id = task_id }
       ~kind
       ~payload
@@ -62,12 +126,13 @@ let observe_task_transition config ~agent_name ~task_id ~transition ~details =
     ~room_id:(activity_room_id config) ~task_id ~transition ~details
 
 (** Add task — file-locked to prevent task ID collision under concurrency *)
-let add_task config ~title ~priority ~description =
+let add_task ?contract config ~title ~priority ~description =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     let backlog = read_backlog config in
     let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
+    let contract = Option.map normalize_task_contract contract in
 
     let new_task = {
       id = task_id;
@@ -80,6 +145,8 @@ let add_task config ~title ~priority ~description =
       worktree = None;
       required_role = Types_core.Unassigned;
       stage = None;
+      contract;
+      handoff_context = None;
     } in
 
     let new_backlog = {
@@ -95,6 +162,11 @@ let add_task config ~title ~priority ~description =
             ("task_id", `String task_id);
             ("title", `String title);
             ("priority", `Int priority);
+            ( "strict_contract",
+              `Bool
+                (match contract with
+                | Some contract -> contract.strict
+                | None -> false) );
           ]);
 
     !Room_hooks.on_task_mutation_fn ();
@@ -102,12 +174,14 @@ let add_task config ~title ~priority ~description =
     Printf.sprintf "✅ Added %s: %s" task_id title)
 
 (** Add task with a required role constraint — file-locked *)
-let add_task_with_role config ~title ~priority ~description ~required_role =
+let add_task_with_role ?contract config ~title ~priority ~description
+    ~required_role =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     let backlog = read_backlog config in
     let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
+    let contract = Option.map normalize_task_contract contract in
 
     let new_task = {
       id = task_id;
@@ -120,6 +194,8 @@ let add_task_with_role config ~title ~priority ~description ~required_role =
       worktree = None;
       required_role;
       stage = None;
+      contract;
+      handoff_context = None;
     } in
 
     let new_backlog = {
@@ -137,6 +213,11 @@ let add_task_with_role config ~title ~priority ~description ~required_role =
             ("priority", `Int priority);
             ( "required_role",
               `String (Types_core.role_to_string required_role) );
+            ( "strict_contract",
+              `Bool
+                (match contract with
+                | Some contract -> contract.strict
+                | None -> false) );
           ]);
 
     let role_str = Types_core.role_to_string required_role in
@@ -145,16 +226,17 @@ let add_task_with_role config ~title ~priority ~description ~required_role =
     Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str)
 
 (** Add multiple tasks in a batch *)
-let batch_add_tasks config tasks =
+let batch_add_tasks_internal config tasks =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     try
       let backlog = read_backlog config in
       let next_num = ref (next_task_number config backlog) in
-      let added_tasks = List.map (fun (title, priority, description) ->
+      let added_tasks = List.map (fun (title, priority, description, contract) ->
         let task_id = Printf.sprintf "task-%03d" !next_num in
         incr next_num;
+        let contract = Option.map normalize_task_contract contract in
         {
           id = task_id;
           title;
@@ -164,7 +246,10 @@ let batch_add_tasks config tasks =
           files = [];
           created_at = now_iso ();
           worktree = None;
-          required_role = Types_core.Unassigned; stage = None;
+          required_role = Types_core.Unassigned;
+          stage = None;
+          contract;
+          handoff_context = None;
         }
       ) tasks in
       let new_backlog = {
@@ -183,6 +268,11 @@ let batch_add_tasks config tasks =
                   ("task_id", `String task.id);
                   ("title", `String task.title);
                   ("priority", `Int task.priority);
+                  ( "strict_contract",
+                    `Bool
+                      (match task.contract with
+                      | Some contract -> contract.strict
+                      | None -> false) );
                 ]))
         added_tasks;
       let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
@@ -195,6 +285,15 @@ let batch_add_tasks config tasks =
     | e ->
       Printf.sprintf "❌ Error adding batch tasks: %s" (Printexc.to_string e)
   )
+
+let batch_add_tasks config tasks =
+  batch_add_tasks_internal config
+    (List.map (fun (title, priority, description) ->
+         (title, priority, description, None))
+       tasks)
+
+let batch_add_tasks_with_contracts config tasks =
+  batch_add_tasks_internal config tasks
 
 (** Claim task with file locking (TOCTOU prevention) *)
 let claim_task config ~agent_name ~task_id =
@@ -247,9 +346,16 @@ let claim_task config ~agent_name ~task_id =
             let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
             emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
               ~payload:(`Assoc [ ("task_id", `String task_id) ]);
-            log_event config (Printf.sprintf
-              "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}"
-              agent_name task_id (now_iso ()));
+            log_event config
+              (Yojson.Safe.to_string
+                 (`Assoc
+                   [
+                     ("type", `String "task_claim");
+                     ("agent", `String agent_name);
+                     ("actor_kind", `String (task_actor_kind agent_name));
+                     ("task", `String task_id);
+                     ("ts", `String (now_iso ()));
+                   ]));
             observe_task_transition config ~agent_name ~task_id
               ~transition:"claim"
               ~details:
@@ -275,8 +381,7 @@ let claim_task_r config ~agent_name ~task_id
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
-    (* BUG-005: Verify agent has joined before allowing claim.
-       Single path: agents_dir derives from config.scope. *)
+    (* BUG-005: Verify agent has joined before allowing claim. *)
     let actual_name = resolve_agent_name config agent_name in
     let filename = safe_filename actual_name ^ ".json" in
     let agent_path = Filename.concat (agents_dir config) filename in
@@ -341,7 +446,16 @@ let claim_task_r config ~agent_name ~task_id
                   let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
                   emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
                     ~payload:(`Assoc [ ("task_id", `String task_id) ]);
-                  log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_claim"); ("agent", `String agent_name); ("task", `String task_id); ("ts", `String (now_iso ()))]));
+                  log_event config
+                    (Yojson.Safe.to_string
+                       (`Assoc
+                         [
+                           ("type", `String "task_claim");
+                           ("agent", `String agent_name);
+                           ("actor_kind", `String (task_actor_kind agent_name));
+                           ("task", `String task_id);
+                           ("ts", `String (now_iso ()));
+                         ]));
                   observe_task_transition config ~agent_name ~task_id
                     ~transition:"claim"
                     ~details:
@@ -364,7 +478,8 @@ let claim_task_r config ~agent_name ~task_id
     When [~force:true], release/cancel/done bypass the assignee guard.
     Used by keeper for orphan task cleanup. *)
 let transition_task_r config ~agent_name ~task_id ~action
-    ?expected_version ?(notes="") ?(reason="") ?(force=false) () : string Types.masc_result =
+    ?expected_version ?(notes="") ?(reason="") ?handoff_context
+    ?(force=false) () : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else match validate_agent_name_r agent_name, validate_task_id_r task_id with
     | Error e, _ -> Error e
@@ -440,7 +555,19 @@ let transition_task_r config ~agent_name ~task_id ~action
                                 (task_status_to_string task.task_status))
                       | Ok (new_status, set_current) ->
                           let new_tasks = List.map (fun t ->
-                            if t.id = task_id then { t with task_status = new_status } else t
+                            if t.id = task_id then
+                              {
+                                t with
+                                task_status = new_status;
+                                handoff_context =
+                                  (match action with
+                                  | Types.Release -> handoff_context
+                                  | Types.Claim | Types.Start | Types.Done_action
+                                  | Types.Cancel ->
+                                      None);
+                              }
+                            else
+                              t
                           ) backlog.tasks in
                           let new_backlog = {
                             tasks = new_tasks;
@@ -466,12 +593,43 @@ let transition_task_r config ~agent_name ~task_id ~action
                             | Error msg ->
                                 Log.Misc.error "agent state write failed: %s" msg
                           end;
-                          log_event config (Printf.sprintf
-                            "{\"type\":\"task_transition\",\"agent\":\"%s\",\"task\":\"%s\",\"action\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"ts\":\"%s\"}"
-                            agent_name task_id action_s
-                            (task_status_to_string task.task_status)
-                            (task_status_to_string new_status)
-                            now);
+                          log_event config
+                            (Yojson.Safe.to_string
+                               (`Assoc
+                                 ([
+                                    ("type", `String "task_transition");
+                                    ("agent", `String agent_name);
+                                    ( "actor_kind",
+                                      `String (task_actor_kind agent_name) );
+                                    ("task", `String task_id);
+                                    ("action", `String action_s);
+                                    ( "from",
+                                      `String
+                                        (task_status_to_string task.task_status)
+                                    );
+                                    ( "to",
+                                      `String (task_status_to_string new_status)
+                                    );
+                                    ("ts", `String now);
+                                  ]
+                                 @
+                                 (match trim_opt (Some notes) with
+                                 | Some notes -> [ ("notes", `String notes) ]
+                                 | None -> [])
+                                 @
+                                 (match trim_opt (Some reason) with
+                                 | Some reason -> [ ("reason", `String reason) ]
+                                 | None -> [])
+                                 @
+                                 (match handoff_context with
+                                 | Some handoff_context when action = Types.Release
+                                   ->
+                                     [
+                                       ( "handoff_context",
+                                         Types.task_handoff_context_to_yojson
+                                           handoff_context );
+                                     ]
+                                 | _ -> []))));
                           (match action with
                            | Types.Claim ->
                                emit_task_activity config ~agent_name ~task_id
@@ -502,7 +660,21 @@ let transition_task_r config ~agent_name ~task_id ~action
                            | Types.Release ->
                                emit_task_activity config ~agent_name ~task_id
                                  ~kind:"task.released"
-                                 ~payload:(`Assoc [ ("task_id", `String task_id) ]));
+                                 ~payload:
+                                   (`Assoc
+                                     ([
+                                        ("task_id", `String task_id);
+                                      ]
+                                     @
+                                     match handoff_context with
+                                     | Some handoff_context ->
+                                         [
+                                           ( "handoff_context",
+                                             Types
+                                             .task_handoff_context_to_yojson
+                                               handoff_context );
+                                         ]
+                                     | None -> [])));
                           let duration_ms =
                             match action with
                             | Types.Done_action | Types.Cancel ->
@@ -532,12 +704,16 @@ let transition_task_r config ~agent_name ~task_id ~action
         )
 
 (** Release task back to backlog - transition wrapper *)
-let release_task_r config ~agent_name ~task_id ?expected_version () : string Types.masc_result =
-  transition_task_r config ~agent_name ~task_id ~action:Types.Release ?expected_version ()
+let release_task_r config ~agent_name ~task_id ?expected_version ?handoff_context
+    () : string Types.masc_result =
+  transition_task_r config ~agent_name ~task_id ~action:Types.Release
+    ?expected_version ?handoff_context ()
 
 (** Force-release a task regardless of assignee. Keeper privilege. *)
-let force_release_task_r config ~agent_name ~task_id () : string Types.masc_result =
-  transition_task_r config ~agent_name ~task_id ~action:Types.Release ~force:true ()
+let force_release_task_r config ~agent_name ~task_id ?handoff_context
+    () : string Types.masc_result =
+  transition_task_r config ~agent_name ~task_id ~action:Types.Release
+    ?handoff_context ~force:true ()
 
 (** Force-done a task regardless of assignee. Keeper privilege. *)
 let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_result =
@@ -598,13 +774,17 @@ let complete_task config ~agent_name ~task_id ~notes =
                     ("task_id", `String task_id);
                     ("notes", if notes = "" then `Null else `String notes);
                   ]);
-            log_event config (Yojson.Safe.to_string (`Assoc [
-              ("type", `String "task_done");
-              ("agent", `String agent_name);
-              ("task", `String task_id);
-              ("notes", if notes = "" then `Null else `String notes);
-              ("ts", `String (now_iso ()));
-            ]));
+              log_event config
+                (Yojson.Safe.to_string
+                   (`Assoc
+                     [
+                       ("type", `String "task_done");
+                       ("agent", `String agent_name);
+                       ("actor_kind", `String (task_actor_kind agent_name));
+                       ("task", `String task_id);
+                       ("notes", if notes = "" then `Null else `String notes);
+                       ("ts", `String (now_iso ()));
+                     ]));
             observe_task_transition config ~agent_name ~task_id
               ~transition:"done"
               ~details:
@@ -790,7 +970,17 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                       ("task_id", `String task_id);
                       ("reason", if reason = "" then `Null else `String reason);
                     ]);
-              log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_cancelled"); ("agent", `String agent_name); ("task", `String task_id); ("reason", if reason = "" then `Null else `String reason); ("ts", `String (now_iso ()))]));
+              log_event config
+                (Yojson.Safe.to_string
+                   (`Assoc
+                     [
+                       ("type", `String "task_cancelled");
+                       ("agent", `String agent_name);
+                       ("actor_kind", `String (task_actor_kind agent_name));
+                       ("task", `String task_id);
+                       ("reason", if reason = "" then `Null else `String reason);
+                       ("ts", `String (now_iso ()));
+                     ]));
               observe_task_transition config ~agent_name ~task_id
                 ~transition:"cancel"
                 ~details:
@@ -830,3 +1020,101 @@ type claim_next_result = Types.claim_next_result =
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of { excluded_count : int }
   | Claim_next_error of string
+
+let link_task_execution_artifacts_r config ~task_id ?session_id ?operation_id
+    ?autoresearch_loop_id () : string Types.masc_result =
+  if not (is_initialized config) then Error Types.NotInitialized
+  else
+    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+    with_file_lock config backlog_path (fun () ->
+        try
+          let backlog = read_backlog config in
+          match List.find_opt (fun task -> task.id = task_id) backlog.tasks with
+          | None -> Error (Types.TaskNotFound task_id)
+          | Some task ->
+              let existing_contract =
+                match task.contract with
+                | Some contract -> normalize_task_contract contract
+                | None -> empty_task_contract
+              in
+              let updated_contract =
+                {
+                  existing_contract with
+                  links =
+                    merge_execution_links existing_contract.links ?session_id
+                      ?operation_id ?autoresearch_loop_id ();
+                }
+                |> normalize_task_contract
+              in
+              let new_tasks =
+                List.map
+                  (fun candidate ->
+                    if candidate.id = task_id then
+                      { candidate with contract = Some updated_contract }
+                    else
+                      candidate)
+                  backlog.tasks
+              in
+              let new_backlog =
+                {
+                  tasks = new_tasks;
+                  last_updated = now_iso ();
+                  version = backlog.version + 1;
+                }
+              in
+              write_backlog config new_backlog;
+              emit_task_activity config ~agent_name:"system" ~task_id
+                ~kind:"task.linked"
+                ~payload:
+                  (`Assoc
+                    ([
+                       ("task_id", `String task_id);
+                     ]
+                    @
+                    (match trim_opt session_id with
+                    | Some session_id -> [ ("session_id", `String session_id) ]
+                    | None -> [])
+                    @
+                    (match trim_opt operation_id with
+                    | Some operation_id ->
+                        [ ("operation_id", `String operation_id) ]
+                    | None -> [])
+                    @
+                    (match trim_opt autoresearch_loop_id with
+                    | Some autoresearch_loop_id ->
+                        [
+                          ( "autoresearch_loop_id",
+                            `String autoresearch_loop_id );
+                        ]
+                    | None -> [])));
+              log_event config
+                (Yojson.Safe.to_string
+                   (`Assoc
+                     ([
+                        ("type", `String "task_linked");
+                        ("agent", `String "system");
+                        ("actor_kind", `String "system");
+                        ("task", `String task_id);
+                        ("ts", `String (now_iso ()));
+                      ]
+                     @
+                     (match trim_opt session_id with
+                     | Some session_id -> [ ("session_id", `String session_id) ]
+                     | None -> [])
+                     @
+                     (match trim_opt operation_id with
+                     | Some operation_id ->
+                         [ ("operation_id", `String operation_id) ]
+                     | None -> [])
+                     @
+                     (match trim_opt autoresearch_loop_id with
+                     | Some autoresearch_loop_id ->
+                         [
+                           ( "autoresearch_loop_id",
+                             `String autoresearch_loop_id );
+                         ]
+                     | None -> []))));
+              Ok (Printf.sprintf "✅ Linked execution artifacts for %s" task_id)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | e -> Error (Types.IoError (Printexc.to_string e)))

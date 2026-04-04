@@ -542,12 +542,12 @@ let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
    tree which can be several MB.  Unbounded growth caused OOM when the
    dashboard was connected for extended periods (#4795). *)
 let _snapshot_max_entries =
-  match Sys.getenv_opt "MASC_DASHBOARD_SNAPSHOT_CACHE_MAX_ENTRIES" with
-  | Some s -> (try max 4 (min 64 (int_of_string (String.trim s))) with Failure _ -> 16)
-  | None -> 16
+  Dashboard_http_helpers.int_of_env_default
+    "MASC_DASHBOARD_SNAPSHOT_CACHE_MAX_ENTRIES" ~default:16 ~min_v:4 ~max_v:64
 
-(* Evict one expired or oldest entry when table exceeds _snapshot_max_entries.
-   Must be called inside _snapshot_mu. *)
+(* Evict one expired or oldest entry when table reaches _snapshot_max_entries.
+   Called inside _snapshot_mu when Eio is ready; pre-Eio callers are
+   single-threaded so no lock is needed. *)
 let _maybe_evict_snapshot () =
   if Hashtbl.length _snapshot_table >= _snapshot_max_entries then begin
     let now_ts = Time_compat.now () in
@@ -563,19 +563,25 @@ let _maybe_evict_snapshot () =
      | Some key -> Hashtbl.remove _snapshot_table key
      | None ->
        (* All fresh or computing — evict the entry closest to expiry *)
-       let oldest = ref None in
+       let oldest_cached = ref None in
+       let any_key = ref None in
        Hashtbl.iter (fun key slot ->
          match slot with
          | Cached { expires_at; _ } ->
-           (match !oldest with
-            | None -> oldest := Some (key, expires_at)
-            | Some (_, e) when expires_at < e -> oldest := Some (key, expires_at)
+           (match !oldest_cached with
+            | None -> oldest_cached := Some (key, expires_at)
+            | Some (_, e) when expires_at < e -> oldest_cached := Some (key, expires_at)
             | _ -> ())
-         | _ -> ()
+         | Computing _ ->
+           if !any_key = None then any_key := Some key
        ) _snapshot_table;
-       (match !oldest with
+       (match !oldest_cached with
         | Some (key, _) -> Hashtbl.remove _snapshot_table key
-        | None -> ()))
+        | None ->
+          (* Last resort: evict a Computing slot to enforce the cap *)
+          (match !any_key with
+           | Some key -> Hashtbl.remove _snapshot_table key
+           | None -> ())))
   end
 
 let invalidate_snapshot_cache () =
@@ -657,7 +663,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       | `Wait ->
         (* Another fiber is computing this key — poll-retry outside mutex
            to remain cancellable. *)
-        Eio.Fiber.yield ();
+        Eio.Time.sleep ctx.clock _poll_interval_s;
         cache_lookup ~waited:(waited +. _poll_interval_s)
       | `Compute cond ->
         (match compute_snapshot () with

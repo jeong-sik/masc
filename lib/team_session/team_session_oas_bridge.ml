@@ -362,11 +362,17 @@ let preview_text_opt text =
   let trimmed = String.trim text in
   if trimmed = "" then None else Some (preview_text trimmed)
 
-let proof_result_status_to_string = function
-  | Oas.Cdal_proof.Completed -> "completed"
-  | Oas.Cdal_proof.Errored -> "errored"
-  | Oas.Cdal_proof.Timed_out -> "timed_out"
-  | Oas.Cdal_proof.Cancelled -> "cancelled"
+let lowercase_enum_case_name raw =
+  let raw =
+    match String.rindex_opt raw '.' with
+    | Some idx when idx + 1 < String.length raw ->
+        String.sub raw (idx + 1) (String.length raw - idx - 1)
+    | _ -> raw
+  in
+  String.lowercase_ascii raw
+
+let proof_result_status_to_string status =
+  Oas.Cdal_proof.show_result_status status |> lowercase_enum_case_name
 
 let worker_name_of_planned_worker ~(fallback : string)
     (pw : Team_session_types.planned_worker) =
@@ -714,7 +720,8 @@ let planned_worker_to_entry
 (* ── session -> swarm_config ───────────────────────────────────── *)
 
 let session_to_swarm_config
-    ~sw:_ ~net:(_net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+    ~(sw : Eio.Switch.t)
+    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : Room.config)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
@@ -758,8 +765,21 @@ let session_to_swarm_config
       match all_selections with
       | [] -> entry_count
       | _ ->
-          (* local_capacity_for_selections removed from OAS SDK. TODO(#4326) *)
-          entry_count
+          (try
+            let capacity =
+              Llm_provider.Cascade_config.local_capacity_for_selections ~sw ~net
+                all_selections
+            in
+            slot_aware_concurrency_cap ~entry_count
+              ~selection_count:(List.length all_selections)
+              ~all_discovered:capacity.all_discovered
+              ~endpoints_found:capacity.endpoints_found ~total:capacity.total
+          with
+          | Eio.Cancel.Cancelled _ as ex -> raise ex
+          | ex ->
+            Eio.traceln "[swarm] capacity probe failed, using entry_count: %s"
+              (Printexc.to_string ex);
+            entry_count)
   in
   { entries; mode;
     convergence = make_convergence_metric ~entry_count success_by_agent;

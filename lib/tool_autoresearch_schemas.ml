@@ -85,6 +85,10 @@ session tools.";
           ("type", `String "string");
           ("description", `String "Optional human-owned instruction note, analogous to program.md.");
         ]);
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional task ID to link this autoresearch loop back into deterministic task gates.");
+        ]);
         ("max_cycles", `Assoc [
           ("type", `String "integer");
           ("description", `String "Maximum number of experiment cycles (default: 100)");

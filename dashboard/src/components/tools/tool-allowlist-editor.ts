@@ -101,10 +101,10 @@ function removeFromList(listSig: typeof alsoAllowItems, name: string) {
 
 function RemovableChip({ name, onRemove }: { name: string; onRemove: () => void }) {
   return html`
-    <span class="inline-flex items-center gap-0.5 py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">
+    <span class="inline-flex items-center gap-0.5 py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">
       ${name}
       <button type="button"
-        class="text-[#9ad9ff]/50 hover:text-[#ff6b6b] cursor-pointer text-[11px] leading-none transition-colors"
+        class="text-[var(--accent)]/50 hover:text-[#ff6b6b] cursor-pointer text-[11px] leading-none transition-colors"
         onClick=${onRemove}
         title="제거"
       >\u00d7</button>
@@ -114,7 +114,7 @@ function RemovableChip({ name, onRemove }: { name: string; onRemove: () => void 
 
 function ReadOnlyChip({ name }: { name: string }) {
   return html`
-    <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">
+    <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">
       ${name}
     </span>
   `
@@ -267,8 +267,8 @@ function ToolSearchPicker({
                     ...${getItemProps({ item: name, index: idx })}
                     class=${`w-full flex items-start gap-2 text-left px-3 py-1.5 cursor-pointer transition-colors ${
                       highlightedIndex === idx
-                        ? 'bg-[rgba(71,184,255,0.16)] text-[#9ad9ff]'
-                        : 'hover:bg-[rgba(71,184,255,0.08)]'
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                        : 'hover:bg-[var(--accent-10)]'
                     }`}
                   >
                     <span class="text-[11px] text-[var(--text-body)] font-medium shrink-0">${name}</span>
@@ -443,7 +443,7 @@ export function ToolAllowlistEditor({
           <button type="button"
             class=${`py-1 px-3 rounded-lg text-[10px] font-medium border transition-colors cursor-pointer ${
               policyMode.value === mode
-                ? 'border-[rgba(71,184,255,0.35)] bg-[rgba(71,184,255,0.16)] text-[#9ad9ff]'
+                ? 'border-[var(--accent-30)] bg-[var(--accent-soft)] text-[var(--accent)]'
                 : 'border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)]'
             }`}
             onClick=${() => { policyMode.value = mode; textInputSection.value = null }}
@@ -494,7 +494,7 @@ export function ToolAllowlistEditor({
 
             ${isCustomEmpty
               ? html`
-                <div class="flex flex-col gap-2 px-3 py-2 rounded-lg bg-[rgba(239,68,68,0.12)] border border-[rgba(239,68,68,0.3)]">
+                <div class="flex flex-col gap-2 px-3 py-2 rounded-lg bg-[rgba(239,68,68,0.12)] border border-[var(--bad-30)]">
                   <div class="flex items-start gap-2">
                     <span class="text-red-400 text-[13px] shrink-0 font-bold">0</span>
                     <span class="text-[11px] text-red-300 leading-snug">
@@ -504,7 +504,7 @@ export function ToolAllowlistEditor({
                   ${resolvedAllowlist.length > 0
                     ? html`
                       <button type="button"
-                        class="self-start py-1 px-3 rounded-lg text-[10px] font-medium border border-[rgba(71,184,255,0.35)] bg-[rgba(71,184,255,0.12)] text-[#9ad9ff] hover:bg-[rgba(71,184,255,0.22)] cursor-pointer transition-colors"
+                        class="self-start py-1 px-3 rounded-lg text-[10px] font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[rgba(71,184,255,0.22)] cursor-pointer transition-colors"
                         onClick=${() => { customAllowItems.value = [...resolvedAllowlist] }}
                       >현재 resolved list에서 복사 (${resolvedAllowlist.length}개)</button>
                     `

@@ -288,8 +288,8 @@ let test_permission_for_tool_worktree_remove () =
 
 let test_permission_for_tool_interrupt () =
   match Auth.permission_for_tool "masc_interrupt" with
-  | Some Types.CanInterrupt -> ()
-  | _ -> fail "expected CanInterrupt"
+  | None -> ()
+  | _ -> fail "expected None (removed tool)"
 
 (* ============================================================
    HTTP same-origin mutation guard regressions
@@ -416,8 +416,8 @@ let test_http_auth_rejects_query_token_fallback () =
 
 let test_permission_for_tool_approve () =
   match Auth.permission_for_tool "masc_approve" with
-  | Some Types.CanApprove -> ()
-  | _ -> fail "expected CanApprove"
+  | None -> ()
+  | _ -> fail "expected None (removed tool)"
 
 let test_permission_for_tool_auth_enable () =
   match Auth.permission_for_tool "masc_auth_enable" with

@@ -157,6 +157,18 @@ Use when looking for specific topics, past discussions, or related prior work.";
       ("required", `List [`String "query"]);
     ];
   };
+  {
+    name = "keeper_board_delete";
+    description = "Delete a board post that is clearly safe to remove. \
+Use only for generated garbage, expired automation, or other explicitly-approved cleanup cases.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to delete")]);
+      ]);
+      ("required", `List [`String "post_id"]);
+    ];
+  };
 ]
 
 let select_named_schemas (names : string list) (schemas : Types.tool_schema list) :

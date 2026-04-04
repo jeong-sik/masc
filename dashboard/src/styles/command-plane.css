@@ -9,7 +9,7 @@
     box-shadow: 0 0 0 1px var(--cyan-16);
   }
   & span {
-    color: var(--white-60);
+    color: var(--text-muted);
     font-size: var(--fs-sm);
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -18,7 +18,7 @@
     line-height: 1.3;
   }
   & strong { font-size: 28px; line-height: 1; }
-  & small { color: var(--white-50); font-size: var(--fs-sm); }
+  & small { color: var(--text-dim); font-size: var(--fs-sm); }
 }
 
 @utility cmd-focus-banner {
@@ -32,7 +32,7 @@
     line-height: 1.2;
     word-break: break-word;
   }
-  & p { margin: 0; color: var(--frost-72); line-height: 1.5; }
+  & p { margin: 0; color: var(--text-body); line-height: 1.5; }
 }
 
 @utility cmd-hero {
@@ -65,7 +65,7 @@
   & p {
     margin: 0;
     max-width: 60ch;
-    color: rgba(226, 232, 240, 0.76);
+    color: var(--text-body);
     line-height: 1.6;
   }
 }
@@ -80,11 +80,11 @@
   &.bad {
     border-color: rgba(248,113,113,0.24);
   }
-  & p { margin: 10px 0 0; color: var(--white-82); line-height: 1.5; }
+  & p { margin: 10px 0 0; color: var(--text-body); line-height: 1.5; }
 }
 
 @utility cmd-readiness-row {
-  & p { margin: 8px 0 0; color: var(--white-82); line-height: 1.5; }
+  & p { margin: 8px 0 0; color: var(--text-body); line-height: 1.5; }
 }
 
 @utility cmd-surface-tab {
@@ -106,7 +106,7 @@
 @utility cmd-alert {
   & p {
     margin: 10px 0 0;
-    color: var(--white-78);
+    color: var(--text-body);
     line-height: 1.5;
     overflow-wrap: anywhere;
     word-break: break-word;
@@ -134,14 +134,14 @@
   letter-spacing: 0.03em;
   border-radius: 9999px;
   background: var(--white-8);
-  color: rgba(255,255,255,0.86);
+  color: var(--text-body);
   white-space: nowrap;
   line-height: 1.3;
   border: 1px solid transparent;
   &.ok { background: rgba(74,222,128,0.14); color: var(--ok); border-color: rgba(74,222,128,0.25); }
   &.warn { background: rgba(251,191,36,0.14); color: var(--warn); border-color: rgba(251,191,36,0.25); }
   &.bad { background: rgba(248,113,113,0.14); color: var(--bad-light); border-color: rgba(248,113,113,0.25); }
-  &.muted { background: var(--white-6); color: var(--white-35); border-color: var(--white-8); }
+  &.muted { background: var(--white-6); color: var(--text-dim); border-color: var(--white-8); }
 }
 
 @utility cmd-tag {
@@ -154,12 +154,12 @@
   text-transform: uppercase;
   border-radius: 6px;
   background: var(--white-8);
-  color: rgba(255,255,255,0.86);
+  color: var(--text-body);
   white-space: nowrap;
   &.ok { background: rgba(74,222,128,0.12); color: var(--ok); }
   &.warn { background: rgba(251,191,36,0.12); color: var(--warn); }
   &.bad { background: rgba(248,113,113,0.12); color: var(--bad-light); }
-  &.muted { background: var(--white-6); color: var(--white-35); }
+  &.muted { background: var(--white-6); color: var(--text-dim); }
 }
 
 @utility cmd-tag-row {
@@ -167,7 +167,7 @@
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 8px;
-  color: var(--white-56);
+  color: var(--text-muted);
   font-size: var(--fs-sm);
 }
 
@@ -192,15 +192,15 @@
 }
 
 @utility cmd-gauge-copy {
-  & span { color: rgba(191, 219, 254, 0.92); font-size: var(--fs-sm); letter-spacing: 0.08em; text-transform: uppercase; }
-  & small { color: rgba(226, 232, 240, 0.7); line-height: 1.5; }
+  & span { color: var(--text-muted); font-size: var(--fs-sm); letter-spacing: 0.08em; text-transform: uppercase; }
+  & small { color: var(--text-body); line-height: 1.5; }
 }
 
 @utility cmd-signal-rail {
   &.ok { border-color: var(--ok-18); }
   &.warn { border-color: var(--warn-20); }
   &.bad { border-color: rgba(248,113,113,0.22); }
-  & small { color: rgba(226, 232, 240, 0.66); line-height: 1.5; }
+  & small { color: var(--text-body); line-height: 1.5; }
 }
 
 @utility cmd-signal-copy {
@@ -210,7 +210,7 @@
     line-height: 1.1;
   }
   & span {
-    color: rgba(148, 163, 184, 0.9);
+    color: var(--text-muted);
     font-size: var(--fs-sm);
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -238,4 +238,3 @@
 @utility tone-bg-ok { background: var(--ok-soft); color: var(--ok); }
 @utility tone-bg-warn { background: rgba(251,191,36,0.16); color: var(--warn); }
 @utility tone-bg-bad { background: rgba(248,113,113,0.16); color: var(--bad-light); }
-

@@ -90,6 +90,7 @@ val run_named :
   ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
+  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
@@ -123,6 +124,7 @@ val run_model_by_label :
   ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
+  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?contract:Oas.Risk_contract.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
@@ -144,6 +146,7 @@ val run_named_with_masc_tools :
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
+  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
@@ -169,6 +172,7 @@ val run_model_with_masc_tools :
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
+  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?contract:Oas.Risk_contract.t ->
   ?raw_trace:Oas.Raw_trace.t ->

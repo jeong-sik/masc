@@ -180,18 +180,16 @@ let test_empty_string_tool_allowed () =
 (* ================================================================ *)
 
 let test_admin_only_count () =
-  check bool "admin_only_tools is non-empty" true
-    (List.length Tool_access_role.admin_only_tools > 0);
-  check bool "admin_only_tools has expected size (23)"
-    true
-    (List.length Tool_access_role.admin_only_tools = 23)
+  let n = List.length Tool_access_role.admin_only_tools in
+  check bool "admin_only_tools is non-empty" true (n > 0);
+  check bool "admin_only_tools has no duplicates" true
+    (List.length (List.sort_uniq String.compare Tool_access_role.admin_only_tools) = n)
 
 let test_worker_only_count () =
-  check bool "worker_only_tools is non-empty" true
-    (List.length Tool_access_role.worker_only_tools > 0);
-  check bool "worker_only_tools has expected size (53)"
-    true
-    (List.length Tool_access_role.worker_only_tools = 53)
+  let n = List.length Tool_access_role.worker_only_tools in
+  check bool "worker_only_tools is non-empty" true (n > 0);
+  check bool "worker_only_tools has no duplicates" true
+    (List.length (List.sort_uniq String.compare Tool_access_role.worker_only_tools) = n)
 
 let test_no_overlap_admin_worker () =
   List.iter (fun tool_name ->

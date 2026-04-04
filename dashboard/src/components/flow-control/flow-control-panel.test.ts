@@ -7,7 +7,6 @@ void vi
 const fetchPauseStatus = vi.fn().mockResolvedValue(undefined)
 const pauseRoom = vi.fn().mockResolvedValue(undefined)
 const resumeRoom = vi.fn().mockResolvedValue(undefined)
-const interruptRoom = vi.fn().mockResolvedValue(undefined)
 const fetchRoomStrategy = vi.fn().mockResolvedValue(undefined)
 const runGarbageCollection = vi.fn().mockResolvedValue(undefined)
 const cleanupZombies = vi.fn().mockResolvedValue(undefined)
@@ -32,7 +31,6 @@ async function loadPanel() {
     fetchRoomStrategy,
     flowLoading,
     flowState,
-    interruptRoom,
     maintenanceLoading,
     maintenanceResult,
     pauseRoom,
@@ -75,7 +73,6 @@ describe('FlowControlPanel', () => {
     expect(container.textContent).toContain('흐름 제어')
     expect(container.textContent).toContain('일시정지')
     expect(container.textContent).toContain('재개')
-    expect(container.textContent).toContain('인터럽트')
     expect(container.textContent).not.toContain('새로고침')
   })
 })

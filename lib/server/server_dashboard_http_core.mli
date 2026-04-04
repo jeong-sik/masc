@@ -150,7 +150,7 @@ val dashboard_proof_http_json :
 (** {1 Shell and Data Helpers} *)
 
 val dashboard_shell_status_json : Room.config -> Yojson.Safe.t
-val dashboard_task_json : Types.task -> Yojson.Safe.t
+val dashboard_task_json : Room.config -> Types.task -> Yojson.Safe.t
 val dashboard_agent_json : Types.agent -> Yojson.Safe.t
 val dashboard_message_json : Types.message -> Yojson.Safe.t
 val dashboard_current_room_id : Room.config -> string

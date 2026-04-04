@@ -1,14 +1,12 @@
-(** Tool_catalog — Visibility, lifecycle, and tier metadata for MCP tools.
+(** Tool_catalog — Visibility and lifecycle metadata for MCP tools.
 
     Central registry for tool access control:
     - Visibility: Default (public) vs Hidden (internal-only)
     - Lifecycle: Active, Deprecated, Placeholder
-    - Tier: Essential (~20) < Standard (~50) < Full (all)
     - Surface: Canonical per-surface tool name membership SSOT
 
     Sub-modules (private):
     - Tool_catalog_surfaces: surface type, canonical tool lists, keeper-internal
-    - Tool_catalog_tiers: tier type, essential/standard tool lists
 
     @since 2.188.0 — Decomposed from monolithic tool_catalog.ml *)
 
@@ -29,11 +27,6 @@ type implementation_status =
   | Adapter
   | Simulation
   | Placeholder
-
-(* Re-export tier type and surface type from sub-modules *)
-include (Tool_catalog_tiers : sig
-  type tier = Tool_catalog_tiers.tier = Essential | Standard | Full
-end)
 
 include (Tool_catalog_surfaces : sig
   type surface = Tool_catalog_surfaces.surface =
@@ -141,27 +134,10 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_judgment_write",
       hidden_active
         "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    (* Dead features physically removed in #4709 and #4757:
-       operator_judgment_latest, hat_wear, hat_status, encryption_*,
-       generate_key, tempo*, cost_log, cost_report. *)
-    (* Broken tools: shell out to CLI binaries unavailable at runtime.
-       masc-checkpoint: removed from codebase (refactor #102).
-       Deprecated 2026-04-03. See #4709, #4734. *)
-    ("masc_interrupt",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_approve",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_reject",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_pending_interrupts",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_branch",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
+    (* Physically removed: masc_interrupt, masc_approve, masc_reject,
+       masc_pending_interrupts, masc_branch (masc-checkpoint CLI removed,
+       #4709/#4734), operator_judgment_latest, hat_wear, hat_status,
+       encryption_*, generate_key, tempo*, cost_log, cost_report (#4709/#4757). *)
     (* Semantic annotations for governance risk classification. *)
     ("masc_status", readonly_tool);
     ("masc_tasks", readonly_tool);
@@ -175,8 +151,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_tool_help", readonly_tool);
     ("masc_keeper_list", readonly_tool);
     ("masc_keeper_status", readonly_tool);
-    ("masc_transport_status", readonly_tool);
-    ("masc_websocket_discovery", readonly_tool);
+    ("masc_transport_status", deprecated "Pruned from all surfaces in #4999");
+    ("masc_websocket_discovery", deprecated "Pruned from all surfaces in #4999");
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
     ( "masc_set_room",
@@ -196,15 +172,9 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_room_delete",
       with_semantic_flags ~destructive:true
         (hidden_active "Namespace deletion removes persisted state and should be treated as destructive.") );
-    ( "masc_room_destroy",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Namespace destruction removes persisted state and should be treated as destructive.") );
     ( "masc_force_leave",
       with_semantic_flags ~destructive:true
         (hidden_active "Forced membership removal mutates namespace state and should be treated as destructive.") );
-    ( "masc_force_remove_agent",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Forced agent removal mutates namespace state and should be treated as destructive.") );
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
         (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );
@@ -219,14 +189,38 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_execute",
       with_semantic_flags ~destructive:true
         (hidden_active "Direct execution can apply privileged side effects and should be treated as destructive.") );
-    ("masc_neo4j_query", destructive_tool);
-    ("masc_pg_query", destructive_tool);
     ("masc_tool_grant", destructive_tool);
     ("masc_tool_revoke", destructive_tool);
     ( "masc_operation_stop",
       destructive_tool );
     ( "masc_operation_pause",
       { default_metadata with destructive = Some false } );
+    (* Tools pruned from all surfaces in #4999 — registered as Deprecated
+       so the SSOT orphan check passes while handlers remain for backward compat.
+       Removed from System_internal surface; schema kept for in-flight sessions. *)
+    ("masc_episode_flush", deprecated "Pruned from all surfaces in #4999");
+    ("masc_episode_list", deprecated "Pruned from all surfaces in #4999");
+    ("masc_portal_open", deprecated "Pruned from all surfaces in #4999");
+    ("masc_portal_send", deprecated "Pruned from all surfaces in #4999");
+    ("masc_portal_close", deprecated "Pruned from all surfaces in #4999");
+    ("masc_portal_status", deprecated "Pruned from all surfaces in #4999");
+    ("masc_a2a_discover", deprecated "Pruned from all surfaces in #4999");
+    ("masc_a2a_query_skill", deprecated "Pruned from all surfaces in #4999");
+    ("masc_a2a_delegate", deprecated "Pruned from all surfaces in #4999");
+    ("masc_a2a_subscribe", deprecated "Pruned from all surfaces in #4999");
+    ("masc_a2a_unsubscribe", deprecated "Pruned from all surfaces in #4999");
+    ("masc_webrtc_offer", deprecated "Pruned from all surfaces in #4999");
+    ("masc_webrtc_answer", deprecated "Pruned from all surfaces in #4999");
+    ("masc_board_migrate", deprecated "Pruned from all surfaces in #4999");
+    ("masc_board_reclassify", deprecated "Pruned from all surfaces in #4999");
+    ("masc_voice_ping_pong", deprecated "Pruned from all surfaces in #4999");
+    ("masc_voice_speak", deprecated "Pruned from all surfaces in #4999");
+    ("masc_voice_session_start", deprecated "Pruned from all surfaces in #4999");
+    ("masc_voice_session_end", deprecated "Pruned from all surfaces in #4999");
+    ("masc_voice_sessions", deprecated "Pruned from all surfaces in #4999");
+    ("masc_voice_agent", deprecated "Pruned from all surfaces in #4999");
+    ("masc_voice_conference_start", deprecated "Pruned from all surfaces in #4999");
+    ("masc_voice_conference_end", deprecated "Pruned from all surfaces in #4999");
   ]
 
 (* ================================================================ *)
@@ -298,24 +292,43 @@ let implementation_allows_public_visibility = function
   | Simulation | Placeholder -> false
 
 let metadata name =
-  match Hashtbl.find_opt metadata_table name with
-  | Some meta -> meta
-  | None ->
-    if is_public_mcp name then default_metadata
-    else if Hashtbl.mem keeper_internal_set name then
-      keeper_internal_metadata name
-    else if Tool_catalog_surfaces.is_on_surface System_internal name then
-      { default_metadata with
-        visibility = Hidden;
-        allow_direct_call_when_hidden = true;
-        reason = Some "System-internal tool; callable but not listed in tools/list." }
-    else
-      (* Non-public, non-explicit tools are internal: hidden from tools/list
-         but callable via tools/call (tool_allowed_in_profile uses include_hidden). *)
-      { default_metadata with
-        visibility = Hidden;
-        allow_direct_call_when_hidden = true;
-        reason = Some "Internal tool; not on public MCP surface." }
+  let base =
+    match Hashtbl.find_opt metadata_table name with
+    | Some meta -> meta
+    | None ->
+      if is_public_mcp name then default_metadata
+      else if Hashtbl.mem keeper_internal_set name then
+        keeper_internal_metadata name
+      else if Tool_catalog_surfaces.is_on_surface System_internal name then
+        { default_metadata with
+          visibility = Hidden;
+          allow_direct_call_when_hidden = true;
+          reason = Some "System-internal tool; callable but not listed in tools/list." }
+      else
+        (* Non-public, non-explicit tools are internal: hidden from tools/list
+           but callable via tools/call (tool_allowed_in_profile uses include_hidden). *)
+        { default_metadata with
+          visibility = Hidden;
+          allow_direct_call_when_hidden = true;
+          reason = Some "Internal tool; not on public MCP surface." }
+  in
+  if Tool_catalog_surfaces.is_on_surface System_internal name then
+    (* Surface membership is the canonical "hidden but callable" contract for
+       system-internal tools, even when a tool also carries explicit metadata
+       for semantic hints like readonly/destructive. *)
+    {
+      base with
+      visibility = Hidden;
+      allow_direct_call_when_hidden = true;
+      reason =
+        (match base.reason with
+        | Some _ -> base.reason
+        | None ->
+            Some
+              "System-internal tool; callable but not listed in tools/list.");
+    }
+  else
+    base
 
 let implementation_status name =
   let meta = metadata name in
@@ -349,18 +362,6 @@ let deprecated_tool_entries : (string * metadata) list =
   List.filter (fun (_name, meta) -> meta.lifecycle = Deprecated) explicit_metadata
 
 (* ================================================================ *)
-(* Re-export: Tier system (from Tool_catalog_tiers)                 *)
-(* ================================================================ *)
-
-let essential_tools = Tool_catalog_tiers.essential_tools
-let standard_tools = Tool_catalog_tiers.standard_tools
-let tier_to_string = Tool_catalog_tiers.tier_to_string
-let tier_of_string = Tool_catalog_tiers.tier_of_string
-let tool_tier = Tool_catalog_tiers.tool_tier
-let is_in_tier = Tool_catalog_tiers.is_in_tier
-let tier_tool_count = Tool_catalog_tiers.tier_tool_count
-
-(* ================================================================ *)
 (* JSON metadata helpers                                            *)
 (* ================================================================ *)
 
@@ -371,7 +372,6 @@ let metadata_to_fields name =
       ("visibility", `String (visibility_to_string meta.visibility));
       ("lifecycle", `String (lifecycle_to_string meta.lifecycle));
       ("implementationStatus", `String (implementation_status_to_string meta.implementation_status));
-      ("tier", `String (tier_to_string (tool_tier name)));
     ]
   in
   let with_canonical =

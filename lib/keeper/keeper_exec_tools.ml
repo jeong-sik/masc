@@ -229,6 +229,9 @@ let handle_keeper_fs_edit
         | "append" -> Fs_compat.append_file target content
         | "overwrite" | "" -> Fs_compat.save_file target content
         | other -> raise (Invalid_argument ("unsupported_mode:" ^ other)));
+       Log.Keeper.info "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d"
+         meta.name target (if mode = "" then "overwrite" else mode)
+         (String.length content);
        Yojson.Safe.to_string
          (`Assoc
              [ "ok", `Bool true
@@ -249,15 +252,30 @@ let handle_keeper_bash
       ~(args : Yojson.Safe.t)
   =
   let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
+  let cmd_for_log =
+    cmd
+    |> Worker_dev_tools.sanitize_command_for_log
+    |> Worker_dev_tools.truncate_for_log
+  in
   let timeout_sec =
     Safe_ops.json_float ~default:30.0 "timeout_sec" args |> fun n -> max 1.0 (min 180.0 n)
   in
+  (* Coding/Full presets allow write operations and relaxed metachar rules *)
+  let write_enabled =
+    match meta.tool_access with
+    | Preset { preset = Coding; _ } | Preset { preset = Full; _ } -> true
+    | _ -> false
+  in
   if cmd = ""
   then error_json "cmd_required"
-  else (
-    match Worker_dev_tools.validate_command cmd with
+  else
+    let validate =
+      if write_enabled then Worker_dev_tools.validate_command_coding
+      else Worker_dev_tools.validate_command
+    in
+    match validate cmd with
     | Error reason ->
-      Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd;
+      Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd_for_log;
       Yojson.Safe.to_string
         (`Assoc
             [ "ok", `Bool false
@@ -265,9 +283,24 @@ let handle_keeper_bash
             ; "reason", `String reason
             ])
     | Ok () ->
-      if Worker_dev_tools.is_write_operation cmd
+      (* Destructive guard: always active regardless of preset *)
+      if Worker_dev_tools.is_destructive_bash_operation cmd
       then (
-        Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s)" cmd meta.name;
+        Log.Keeper.warn "keeper_bash DESTRUCTIVE blocked: %s (keeper=%s)" cmd_for_log meta.name;
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool false
+              ; "error", `String "destructive_operation_blocked"
+              ; ( "reason"
+                , `String
+                    "This command is destructive (force push, push to main, rm -rf, \
+                     etc.) and is blocked for all presets." )
+              ; "cmd", `String cmd_for_log
+              ]))
+      (* Write gate: only for non-coding presets *)
+      else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
+      then (
+        Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s)" cmd_for_log meta.name;
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false
@@ -275,11 +308,12 @@ let handle_keeper_bash
               ; ( "reason"
                 , `String
                     "This command modifies state (git push/commit, make deploy, etc.). \
-                     Use keeper_shell_readonly for read operations, or request \
-                     shell_mode=coding policy from the operator." )
-              ; "cmd", `String cmd
+                     Use a Coding preset keeper for write access." )
+              ; "cmd", `String cmd_for_log
               ]))
       else (
+        if write_enabled && Worker_dev_tools.is_write_operation cmd then
+          Log.Keeper.info "WRITE_AUDIT: keeper=%s cmd=%s" meta.name cmd_for_log;
         let root = project_root_of_config config in
         let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) cmd in
         let st, out =
@@ -290,7 +324,7 @@ let handle_keeper_bash
               [ "ok", `Bool (st = Unix.WEXITED 0)
               ; "status", process_status_to_json st
               ; "output", `String (truncate_tool_output out)
-              ])))
+              ]))
 ;;
 
 let handle_keeper_shell_readonly

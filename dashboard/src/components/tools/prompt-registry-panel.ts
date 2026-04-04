@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { Markdown } from "../common/markdown"
 import { useEffect, useState } from 'preact/hooks'
 import {
   clearPromptOverride,
@@ -131,7 +132,7 @@ export function PromptRegistryPanel() {
               <button
                 type="button"
                 class="rounded-lg border px-3 py-2 text-left transition-colors ${selectedPrompt?.key === prompt.key
-                  ? 'border-[rgba(71,184,255,0.35)] bg-[rgba(71,184,255,0.12)]'
+                  ? 'border-[var(--accent-30)] bg-[var(--accent-10)]'
                   : 'border-[var(--card-border)] bg-[var(--white-2)] hover:bg-[var(--white-4)]'}"
                 onClick=${() => {
                   setSelectedKey(prompt.key)
@@ -184,7 +185,7 @@ export function PromptRegistryPanel() {
 
             <div class="mb-4">
               <div class="mb-2 text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">파일 기준값</div>
-              <pre class="max-h-[220px] overflow-auto rounded-lg border border-[var(--card-border)] bg-[rgba(6,12,24,0.72)] px-3 py-3 text-[12px] leading-relaxed whitespace-pre-wrap break-words text-[var(--text-body)]">${selectedPrompt.file_value ?? '없음'}</pre>
+              <div class="max-h-[220px] overflow-auto rounded-lg border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```markdown\n' + (selectedPrompt.file_value ?? '없음') + '\n```'} /></div>
             </div>
 
             <div class="mb-2 flex items-center justify-between gap-2">

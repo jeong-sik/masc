@@ -17,6 +17,16 @@ let format_goals (goal_ids : string list) : string =
   String.concat "\n"
     (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
 
+let format_scope_messages
+    (messages : (string * string) list) : string =
+  String.concat "\n"
+    (List.map
+       (fun (from_agent, content) ->
+         Printf.sprintf "- %s: %s"
+           from_agent
+           (Keeper_types.short_preview ~max_len:200 content))
+       messages)
+
 let format_board_events
     (events : Keeper_world_observation.pending_board_event list) : string =
   String.concat "\n"
@@ -154,6 +164,13 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
          (List.length observation.pending_mentions));
     Buffer.add_string ubuf (format_mentions observation.pending_mentions);
     Buffer.add_string ubuf "\n\n");
+  if observation.pending_scope_messages <> [] then (
+    Buffer.add_string ubuf
+      (Printf.sprintf "### Scope Messages (%d recent)\n"
+         (List.length observation.pending_scope_messages));
+    Buffer.add_string ubuf
+      (format_scope_messages observation.pending_scope_messages);
+    Buffer.add_string ubuf "\n\n");
   (* Active goals *)
   if observation.active_goals <> [] then (
     Buffer.add_string ubuf
@@ -161,13 +178,13 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
          (List.length observation.active_goals));
     Buffer.add_string ubuf (format_goals observation.active_goals);
     Buffer.add_string ubuf "\n\n");
-  (* Room state *)
+  (* Namespace state *)
   if
     observation.unclaimed_task_count > 0
     || observation.failed_task_count > 0
     || observation.active_agent_count > 0
   then (
-    Buffer.add_string ubuf "### Room State\n";
+    Buffer.add_string ubuf "### Namespace State\n";
     if observation.unclaimed_task_count > 0 then
       Buffer.add_string ubuf
         (Printf.sprintf "- Unclaimed tasks: %d\n"
@@ -189,40 +206,40 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
   if meta.room_signal_prompt_enabled && has_room_signal_section observation then (
     match observation.room_signal_interpretation with
     | Some interpretation ->
-        Buffer.add_string ubuf "### Room Signal Interpretation\n";
+        Buffer.add_string ubuf "### Namespace Signal Interpretation\n";
         Buffer.add_string ubuf
-          (Printf.sprintf "- room_signal_primary: %s\n"
+          (Printf.sprintf "- namespace_signal_primary: %s\n"
              (format_room_signal_salience interpretation.primary_salience));
         (match interpretation.secondary_saliences with
          | [] -> ()
          | secondary ->
              Buffer.add_string ubuf
-               (Printf.sprintf "- room_signal_secondary: %s\n"
+               (Printf.sprintf "- namespace_signal_secondary: %s\n"
                   (secondary
                   |> List.map format_room_signal_salience
                   |> String.concat ", ")));
         Buffer.add_string ubuf
-          (Printf.sprintf "- room_signal_reason: %s\n" interpretation.reason);
+          (Printf.sprintf "- namespace_signal_reason: %s\n" interpretation.reason);
         (match interpretation.target_id with
          | Some target_id ->
              Buffer.add_string ubuf
-               (Printf.sprintf "- room_signal_target_id: %s\n" target_id)
+               (Printf.sprintf "- namespace_signal_target_id: %s\n" target_id)
          | None -> ());
         (match interpretation.evidence_refs with
          | [] -> ()
          | refs ->
              Buffer.add_string ubuf
-               (Printf.sprintf "- room_signal_evidence_refs: %s\n"
+               (Printf.sprintf "- namespace_signal_evidence_refs: %s\n"
                   (String.concat ", " refs)));
         (match observation.room_signal_digest_ref with
          | Some digest ->
              Buffer.add_string ubuf
-               (Printf.sprintf "- room_digest_post_id: %s\n" digest.post_id);
+               (Printf.sprintf "- namespace_digest_post_id: %s\n" digest.post_id);
              Buffer.add_string ubuf
-               (Printf.sprintf "- room_digest_title: %s\n" digest.title)
+               (Printf.sprintf "- namespace_digest_title: %s\n" digest.title)
          | None -> ());
         Buffer.add_string ubuf
-          "- room_signal_guard: do not call keeper_board_post or keeper_task_claim from this derived signal alone; read at least one raw board item from room_signal_evidence_refs or room_digest_post_id first.\n\n"
+          "- namespace_signal_guard: do not call keeper_board_post or keeper_task_claim from this derived signal alone; read at least one raw board item from namespace_signal_evidence_refs or namespace_digest_post_id first.\n\n"
     | None -> ());
   (* Context health *)
   Buffer.add_string ubuf

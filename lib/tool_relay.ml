@@ -11,10 +11,10 @@ type context = {
 
 type result = bool * string
 
-let handle_relay_status _ctx args =
+let handle_relay_status ctx args =
   let*! messages = get_int_required args "messages" in
   let*! tool_calls = get_int_required args "tool_calls" in
-  let model = get_string args "model" "claude" in
+  let model = get_string args "model" ctx.agent_name in
   let metrics = Relay.estimate_context ~messages ~tool_calls ~model in
   let actual_tokens_opt = match Yojson.Safe.Util.member "actual_tokens" args with
     | `Int n -> Some n
@@ -36,7 +36,7 @@ let handle_relay_status _ctx args =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
-let handle_relay_checkpoint _ctx args =
+let handle_relay_checkpoint ctx args =
   let*! summary = get_string_required args "summary" in
   let*! messages = get_int_required args "messages" in
   let*! tool_calls = get_int_required args "tool_calls" in
@@ -51,7 +51,7 @@ let handle_relay_checkpoint _ctx args =
    if goal_ids <> [] then
      Log.Misc.info "[RELAY] active_goal_ids provided but not persisted (goal store not integrated): %s"
        (String.concat "," goal_ids));
-  let metrics = Relay.estimate_context ~messages ~tool_calls ~model:"claude" in
+  let metrics = Relay.estimate_context ~messages ~tool_calls ~model:ctx.agent_name in
   let _cp = Relay.save_checkpoint ~summary ~task:current_task ~todos ~pdca:pdca_state ~files:relevant_files ~metrics in
   let json = `Assoc [
     ("status", `String "checkpoint_saved");
@@ -64,7 +64,7 @@ let handle_relay_checkpoint _ctx args =
 let handle_relay_now ctx args =
   let summary = get_string args "summary" "" in
   let current_task = get_string_opt args "current_task" in
-  let target_agent = get_string args "target_agent" "claude" in
+  let target_agent = get_string args "target_agent" ctx.agent_name in
   let generation = get_int args "generation" 0 in
   let active_goal_ids = get_string_list args "active_goal_ids" in
   let goal_blockers = get_string_list args "goal_blockers" in
@@ -113,7 +113,7 @@ let handle_relay_now ctx args =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
-let handle_relay_smart_check _ctx args =
+let handle_relay_smart_check ctx args =
   let messages = get_int args "messages" 0 in
   let tool_calls = get_int args "tool_calls" 0 in
   let hint_str = get_string args "task_hint" "simple" in
@@ -126,7 +126,8 @@ let handle_relay_smart_check _ctx args =
     | "exploration" -> Relay.Exploration_task
     | _ -> Relay.Simple_task
   in
-  let metrics = Relay.estimate_context ~messages ~tool_calls ~model:"claude" in
+  let model = get_string args "model" ctx.agent_name in
+  let metrics = Relay.estimate_context ~messages ~tool_calls ~model in
   let decision = Relay.should_relay_smart ~config:Relay.default_config ~metrics ~task_hint in
   let decision_str = match decision with
     | `Proactive -> "proactive"
@@ -158,8 +159,7 @@ let schemas : Types.tool_schema list = [
         ]);
         ("model", `Assoc [
           ("type", `String "string");
-          ("description", `String "Model name (claude, gemini, codex) for max context lookup");
-          ("default", `String "claude");
+          ("description", `String "Model name for max context lookup. Defaults to the calling agent's own name.");
         ]);
       ]);
       ("required", `List [`String "messages"; `String "tool_calls"]);
@@ -229,8 +229,7 @@ Call masc_relay_checkpoint first to save state. The successor continues where yo
         ]);
         ("target_agent", `Assoc [
           ("type", `String "string");
-          ("description", `String "Agent to relay to (default: claude)");
-          ("default", `String "claude");
+          ("description", `String "Agent to relay to. Defaults to the calling agent's own name.");
         ]);
         ("generation", `Assoc [
           ("type", `String "integer");

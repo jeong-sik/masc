@@ -103,12 +103,15 @@ let resolve_max_context model =
     (match Llm_provider.Provider_registry.find default_registry model with
      | Some entry -> entry.Llm_provider.Provider_registry.max_context
      | None ->
-       (* Layer 3: extract base provider from hyphenated name
-          e.g. "claude-opus" -> "claude", "gpt-4o" -> registry lookup "gpt" *)
+       (* Layer 3: extract base provider from separator
+          "provider:model" -> "provider" (colon), "claude-opus" -> "claude" (hyphen) *)
        let base =
-         match String.index_opt model '-' with
+         match String.index_opt model ':' with
          | Some idx when idx > 0 -> String.sub model 0 idx
-         | _ -> ""
+         | _ ->
+           match String.index_opt model '-' with
+           | Some idx when idx > 0 -> String.sub model 0 idx
+           | _ -> ""
        in
        if base <> "" then
          match Llm_provider.Provider_registry.find default_registry base with
@@ -116,13 +119,26 @@ let resolve_max_context model =
          | None -> 100_000
        else 100_000)
 
+(** {1 Token estimation constants}
+
+    Heuristic estimates for context usage prediction.
+    These are NOT empirically calibrated — they are order-of-magnitude guesses
+    adjusted by [calibration.correction_factor] at runtime.
+
+    Provenance: initial values set during v2.100 development (2026-01) based
+    on informal observation of Claude/local model conversations.
+    No formal benchmark has validated these specific numbers.
+
+    TODO(RFC-0001 Phase 0): Replace with empirical calibration once
+    heuristic_metrics.jsonl collects actual token counts per message type. *)
+let tokens_per_user_msg = 150
+let tokens_per_assistant_msg = 500
+let tokens_per_tool_call = 200
+let tokens_per_tool_result = 300
+
 (** Estimate context usage.
     Token-per-message estimates are rough heuristics, corrected by calibration. *)
 let estimate_context ~messages ~tool_calls ~model =
-  let tokens_per_user_msg = 150 in
-  let tokens_per_assistant_msg = 500 in
-  let tokens_per_tool_call = 200 in
-  let tokens_per_tool_result = 300 in
 
   let message_tokens = messages * (tokens_per_user_msg + tokens_per_assistant_msg) in
   let tool_tokens = tool_calls * (tokens_per_tool_call + tokens_per_tool_result) in
@@ -148,13 +164,20 @@ type task_hint =
   | Exploration_task             (* Codebase exploration *)
   | Simple_task                  (* Quick task, no relay needed *)
 
-(** Estimate additional context consumption *)
+(** Task cost estimates (tokens). Same heuristic caveat as above —
+    these are order-of-magnitude guesses, not measured values. *)
+let cost_large_file_read = 10_000
+let cost_per_file_edit   = 3_000
+let cost_long_running    = 20_000
+let cost_exploration     = 15_000
+let cost_simple          = 1_000
+
 let estimate_task_cost = function
-  | Large_file_read _ -> 10000   (* ~10K tokens for large file *)
-  | Multi_file_edit n -> n * 3000  (* ~3K per file *)
-  | Long_running_task -> 20000  (* Conservative estimate *)
-  | Exploration_task -> 15000   (* Search results, etc *)
-  | Simple_task -> 1000         (* Minimal *)
+  | Large_file_read _ -> cost_large_file_read
+  | Multi_file_edit n -> n * cost_per_file_edit
+  | Long_running_task -> cost_long_running
+  | Exploration_task -> cost_exploration
+  | Simple_task -> cost_simple
 
 (** Proactive relay decision - key insight: predict before hitting limit *)
 let should_relay_proactive ~config ~metrics ~task_hint =

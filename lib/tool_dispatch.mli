@@ -30,11 +30,20 @@ val mint_token : name:string -> (Tool_token.t, string) result
 
 (** {2 Dispatch Hooks}
 
-    Pre-hooks run before the handler; post-hooks run after. *)
+    Pre-hooks run before the handler; post-hooks run after.
 
-type pre_hook = name:string -> args:Yojson.Safe.t -> Tool_result.t option
-(** Pre-hook: receives tool name and args before handler runs.
-    Return [None] to proceed, [Some result] to short-circuit. *)
+    Pre-hooks return a {!pre_hook_action}:
+    - [Pass]: this hook has no opinion — continue to next hook.
+    - [Proceed coerced_args]: replace args and continue (e.g. type coercion).
+    - [Reject result]: short-circuit with an error result. *)
+
+type pre_hook_action =
+  | Pass
+  | Proceed of Yojson.Safe.t
+  | Reject of Tool_result.t
+
+type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
+(** Pre-hook: receives tool name and args before handler runs. *)
 
 type post_hook = Tool_result.t -> Tool_result.t
 (** Post-hook: receives result after handler completes.
@@ -50,9 +59,11 @@ val register_pre_hook : pre_hook -> unit
 val register_post_hook : post_hook -> unit
 val clear_hooks : unit -> unit
 
-val run_pre_hooks : name:string -> args:Yojson.Safe.t -> Tool_result.t option
-(** Execute registered pre-hooks in order.
-    Returns the first short-circuit result, if any. *)
+val run_pre_hooks :
+  name:string -> args:Yojson.Safe.t -> Tool_result.t option * Yojson.Safe.t
+(** Execute registered pre-hooks in order, threading coerced args.
+    Returns [(Some rejection, _)] on short-circuit,
+    or [(None, final_args)] when all hooks pass. *)
 
 val dispatch_structured : token:Tool_token.t -> args:Yojson.Safe.t -> Tool_result.t option
 (** Structured dispatch with hook support.

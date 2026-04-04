@@ -86,7 +86,7 @@ let resolve_plugin_id args =
 let default_model_label () =
   match Sys.getenv_opt "MODEL_LABEL" with
   | Some value when String.trim value <> "" -> String.trim value
-  | _ -> "llama:qwen3.5-9b-local"
+  | _ -> Env_config.Local_runtime.default_model
 
 let load_state_required config loop_id =
   match Tool_repair_loop_storage.load_state config loop_id with

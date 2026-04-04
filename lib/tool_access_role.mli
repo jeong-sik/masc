@@ -10,7 +10,7 @@
 
 val admin_only_tools : string list
 (** Tools requiring Admin role. Derived from legacy CanInit, CanReset,
-    CanInterrupt, CanApprove, CanAdmin permissions. *)
+    CanAdmin permissions. *)
 
 val worker_only_tools : string list
 (** Tools requiring at least Worker role. Derived from legacy CanAddTask,

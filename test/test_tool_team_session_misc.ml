@@ -101,6 +101,8 @@ let test_wait_for_background_delegate_settle_ignores_other_worker_events () =
               ("success", `Bool true);
             ]);
       let target_worker_run_id = "target-run" in
+      let negative_path_attempts = 10 in
+      let negative_path_sleep_sec = 0.001 in
       Alcotest.match_raises
         "unrelated delegate event does not settle target"
         (function
@@ -108,7 +110,9 @@ let test_wait_for_background_delegate_settle_ignores_other_worker_events () =
               Room_utils.contains_substring (Printexc.to_string exn)
                 "background delegate did not settle before cleanup")
         (fun () ->
-          wait_for_background_delegate_settle ~attempts:10 ~sleep_sec:0.001
+          wait_for_background_delegate_settle
+            ~attempts:negative_path_attempts
+            ~sleep_sec:negative_path_sleep_sec
             ctx config session_id target_worker_run_id;
           ());
       Team_session_store.save_worker_run_meta_json config session_id target_worker_run_id

@@ -108,12 +108,15 @@ let rec sample_gamma shape =
     loop ()
   end
 
+(** Minimum prior value for numerical stability in Beta distribution sampling. *)
+let min_prior = 0.1
+
 (** Sample from Beta(alpha, beta) distribution using Gamma decomposition.
     Beta(a,b) = Gamma(a,1) / (Gamma(a,1) + Gamma(b,1)) *)
 let sample_beta ~alpha ~beta =
-  (* Clamp to minimum 0.1 for numerical stability *)
-  let alpha = Float.max 0.1 alpha in
-  let beta = Float.max 0.1 beta in
+  (* Clamp to minimum for numerical stability *)
+  let alpha = Float.max min_prior alpha in
+  let beta = Float.max min_prior beta in
   let x = sample_gamma alpha in
   let y = sample_gamma beta in
   if x +. y = 0.0 then 0.5  (* Degenerate case *)
@@ -245,8 +248,8 @@ let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
     let updated_at = json |> member "updated_at" |> to_float in
     Some {
       name;
-      alpha = Float.max 0.1 alpha;
-      beta = Float.max 0.1 beta;
+      alpha = Float.max min_prior alpha;
+      beta = Float.max min_prior beta;
       selections;
       last_selected_at;
       total_votes_up;
@@ -270,7 +273,8 @@ let load_stats () =
         | Some s ->
             Hashtbl.replace stats_table s.name s
         | None ->
-            Log.Thompson.error "Failed to parse stats line"
+            Log.Thompson.warn "Failed to parse stats line: %s"
+              (Yojson.Safe.to_string json)
       ) entries;
       Log.Metrics.debug "thompson sampling loaded stats for %d agents"
         (Hashtbl.length stats_table)
@@ -321,8 +325,8 @@ let flush_pending_votes () =
       s.alpha <- (s.alpha -. 1.0) *. decay +. 1.0 +. success_rate;
       s.beta <- (s.beta -. 1.0) *. decay +. 1.0 +. (1.0 -. success_rate);
       (* Clamp to minimum *)
-      s.alpha <- Float.max 0.1 s.alpha;
-      s.beta <- Float.max 0.1 s.beta;
+      s.alpha <- Float.max min_prior s.alpha;
+      s.beta <- Float.max min_prior s.beta;
       (* Update totals *)
       s.total_votes_up <- s.total_votes_up + votes_up;
       s.total_votes_down <- s.total_votes_down + votes_down;
@@ -347,21 +351,35 @@ let record_action ~agent_name ~action =
 
 (** {1 Quality Signal Integration} *)
 
-(** Record Post Verifier result into Thompson Sampling priors.
-    Uses weaker signals than votes (0.3-0.5 vs 1.0) since verification
-    is heuristic rather than human-validated.
+(** Post-verifier signal weights for Thompson Sampling prior updates.
+    These are intentionally weaker than direct votes (1.0) because post-verifier
+    verdicts are heuristic (corpus-free text checks), not human-validated.
 
-    - Pass: small α boost (reward good content)
-    - Warn: small β nudge (mild quality concern)
-    - Fail: moderate β penalty (content rejected) *)
+    Rationale for specific values:
+    - pass_alpha_boost (0.3): A pass is a weak positive signal — the content
+      cleared automated checks, but that does not guarantee quality.
+    - warn_beta_nudge (0.1): Warnings are informational, not definitive.
+      Heavy penalty would over-rotate on stylistic issues.
+    - fail_beta_penalty (0.5): Stronger than warn because the content was
+      actively rejected, but still below 1.0 (human vote) because
+      post-verifier false positives exist.
+
+    These should be calibrated against actual agent performance data once
+    Phase 0 instrumentation (RFC-0001) collects baseline metrics.
+    TODO(RFC-0001): Register in Runtime_params for runtime tuning. *)
+let quality_pass_alpha_boost = 0.3
+let quality_warn_beta_nudge  = 0.1
+let quality_fail_beta_penalty = 0.5
+
+(** Record Post Verifier result into Thompson Sampling priors. *)
 let record_quality_signal ~agent_name ~(verdict : Post_verifier.verdict) =
   let s = get_stats agent_name in
   (match verdict with
-   | Post_verifier.Pass -> s.alpha <- s.alpha +. 0.3
-   | Post_verifier.Warn _ -> s.beta <- s.beta +. 0.1
-   | Post_verifier.Fail _ -> s.beta <- s.beta +. 0.5);
-  s.alpha <- Float.max 0.1 s.alpha;
-  s.beta <- Float.max 0.1 s.beta;
+   | Post_verifier.Pass -> s.alpha <- s.alpha +. quality_pass_alpha_boost
+   | Post_verifier.Warn _ -> s.beta <- s.beta +. quality_warn_beta_nudge
+   | Post_verifier.Fail _ -> s.beta <- s.beta +. quality_fail_beta_penalty);
+  s.alpha <- Float.max min_prior s.alpha;
+  s.beta <- Float.max min_prior s.beta;
   s.updated_at <- Time_compat.now ()
 
 (** {1 Selection Algorithm} *)

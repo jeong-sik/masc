@@ -48,7 +48,11 @@ type t = {
   cooldown_sec: float;        (** How long to stay open (default: 300s) *)
 }
 
-(** {1 Configuration} *)
+(** {1 Configuration}
+
+    SSOT for circuit breaker parameters.  This module lives in [masc_core],
+    which is below [masc_config] in the dependency graph, so env var reading
+    is self-contained here.  Do not duplicate these defaults in [env_config]. *)
 
 let default_failure_threshold = 3
 let default_failure_window = 60.0    (* 1 minute *)
@@ -59,10 +63,21 @@ let failure_threshold_from_env () =
   |> Option.map int_of_string
   |> Option.value ~default:default_failure_threshold
 
+let failure_window_from_env () =
+  let v =
+    Sys.getenv_opt "MASC_CIRCUIT_FAILURE_WINDOW_SEC"
+    |> Option.map float_of_string
+    |> Option.value ~default:default_failure_window
+  in
+  Float.max 1.0 v  (* prevent zero-window disabling the breaker *)
+
 let cooldown_from_env () =
-  Sys.getenv_opt "MASC_CIRCUIT_COOLDOWN"
-  |> Option.map float_of_string
-  |> Option.value ~default:default_cooldown
+  let v =
+    Sys.getenv_opt "MASC_CIRCUIT_COOLDOWN"
+    |> Option.map float_of_string
+    |> Option.value ~default:default_cooldown
+  in
+  Float.max 1.0 v  (* prevent zero-cooldown instant retry loops *)
 
 (** {1 Creation} *)
 

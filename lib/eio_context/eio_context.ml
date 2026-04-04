@@ -61,7 +61,7 @@ let set_switch sw =
   Atomic.set current_sw (Some sw)
 
 let with_test_env ~net ~clock ~mono_clock ~sw f =
-  Eio.Mutex.use_rw ~protect:true with_test_env_lock (fun () ->
+  Eio.Mutex.use_rw ~protect:false with_test_env_lock (fun () ->
     let snapshot = snapshot_state () in
     set_net net;
     set_clock clock;

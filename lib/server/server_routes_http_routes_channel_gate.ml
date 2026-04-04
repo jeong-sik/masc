@@ -63,10 +63,7 @@ let metric_context_of_json json =
   let channel =
     match field "channel" with
     | "" -> "unknown"
-    | value ->
-        value
-        |> Agent_identity.channel_of_string
-        |> Agent_identity.string_of_channel
+    | value -> String.lowercase_ascii (String.trim value)
   in
   (channel, field "channel_room_id", field "keeper_name")
 
@@ -104,7 +101,7 @@ let record_internal_error_metric ~duration_ms body_str exn =
     match Channel_gate.inbound_of_json json with
     | Ok msg ->
         Channel_gate_metrics.record_internal_error_exn
-          ~channel:(Agent_identity.string_of_channel msg.channel)
+          ~channel:msg.channel
           ~room_id:msg.channel_room_id
           ~keeper:msg.keeper_name
           ~duration_ms exn
@@ -115,6 +112,13 @@ let record_internal_error_metric ~duration_ms body_str exn =
 let handle_gate_message ~sw ~clock state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let request_started = Unix.gettimeofday () in
+    let dispatch =
+      Gate_keeper_backend.dispatch
+        ~sw ~clock
+        ~proc_mgr:state.Mcp_server.proc_mgr
+        ~net:state.Mcp_server.net
+        ~config:state.Mcp_server.room_config
+    in
     let result =
       try
         let json = Yojson.Safe.from_string body_str in
@@ -126,13 +130,7 @@ let handle_gate_message ~sw ~clock state request reqd =
             record_validation_error_metric ~duration_ms body_str e;
             Error (Channel_gate.Validation Channel_gate.Empty_content, e)
         | Ok msg ->
-            (match Channel_gate.handle_inbound
-              ~sw ~clock
-              ~proc_mgr:(state.Mcp_server.proc_mgr)
-              ~net:(state.Mcp_server.net)
-              ~config:state.Mcp_server.room_config
-              msg
-            with
+            (match Channel_gate.handle_inbound ~dispatch msg with
             | Ok out -> Ok out
             | Error gate_err ->
                 Error (gate_err, Channel_gate.gate_error_to_string gate_err))

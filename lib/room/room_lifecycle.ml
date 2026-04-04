@@ -88,7 +88,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
            { s with active_agents = agents }
          ) in
          let _ = broadcast config ~from_agent:nickname
-                   ~content:(Printf.sprintf "👋 %s rejoined the room" nickname) in
+                   ~content:(Printf.sprintf "👋 %s rejoined the namespace" nickname) in
          log_event config (Printf.sprintf
            "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
            nickname agent_type new_session_id (now_iso ()));
@@ -104,7 +104,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
        end
      | Error e ->
          Log.Room.warn "agent rejoin: invalid agent JSON for %s: %s" nickname e);
-    Printf.sprintf "✅ %s already in room (last_seen updated)" nickname
+    Printf.sprintf "✅ %s already in the namespace (last_seen updated)" nickname
   end else begin
     (* Collect metadata *)
   let session_id = generate_session_id () in
@@ -140,7 +140,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
   ) in
 
   (* Broadcast join *)
-  let _ = broadcast config ~from_agent:nickname ~content:(Printf.sprintf "👋 %s joined the room" nickname) in
+  let _ = broadcast config ~from_agent:nickname ~content:(Printf.sprintf "👋 %s joined the namespace" nickname) in
 
   (* Log event with metadata *)
   log_event config (Printf.sprintf
@@ -220,7 +220,7 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
         { s with active_agents = agents }
       ) in
       let _ = broadcast config ~from_agent:nickname
-                ~content:(Printf.sprintf "👋 %s rejoined room %s" nickname legacy_room_id) in
+                ~content:(Printf.sprintf "👋 %s rejoined namespace %s" nickname legacy_room_id) in
       log_event config
         (Yojson.Safe.to_string
            (`Assoc
@@ -236,7 +236,7 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
         ~event_kind:"rejoin"
         ~details:(`Assoc [ ("rejoin", `Bool true) ]);
     end;
-    Printf.sprintf "✅ %s already in room %s (last_seen updated)" nickname legacy_room_id
+    Printf.sprintf "✅ %s already in namespace %s (last_seen updated)" nickname legacy_room_id
   end else begin
     let session_id = generate_session_id () in
     let meta : agent_meta = {
@@ -268,7 +268,7 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
     ) in
     let _ =
       broadcast config ~from_agent:nickname
-        ~content:(Printf.sprintf "👋 %s joined the room" nickname)
+        ~content:(Printf.sprintf "👋 %s joined the namespace" nickname)
     in
     log_event config
       (Yojson.Safe.to_string
@@ -294,7 +294,7 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
             ( "capabilities",
               `List (List.map (fun s -> `String s) capabilities) );
           ]);
-    Printf.sprintf "✅ %s joined room %s" nickname legacy_room_id
+    Printf.sprintf "✅ %s joined namespace %s" nickname legacy_room_id
   end
 
 (** Leave room *)
@@ -326,7 +326,7 @@ let leave config ~agent_name =
       { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
     ) in
 
-    let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "👋 %s left the room" actual_name) in
+    let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "👋 %s left the namespace" actual_name) in
 
     (* Log event *)
     log_event config (Printf.sprintf
@@ -343,6 +343,6 @@ let leave config ~agent_name =
        Log.Room.error "relation-materializer leave hook error: %s"
          (Printexc.to_string exn));
 
-    Printf.sprintf "✅ %s left the room" actual_name
+    Printf.sprintf "✅ %s left the namespace" actual_name
   end else
-    Printf.sprintf "⚠ %s was not in the room" actual_name
+    Printf.sprintf "⚠ %s was not in the namespace" actual_name

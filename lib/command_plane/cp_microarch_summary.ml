@@ -1,5 +1,12 @@
 module U = Yojson.Safe.Util
 
+(** Signal classification thresholds for microarch health tones. *)
+let rework_bad = 0.4
+let rework_warn = 0.2
+let scope_drift_bad = 0.5
+let scope_drift_warn = 0.25
+let spec_commit_warn = 0.5
+
 type search_row = {
   strategy : string;
   readiness : string;
@@ -253,19 +260,19 @@ let signals_json ~(pipeline : Yojson.Safe.t) ~(cache : Yojson.Safe.t)
       ("count", `Int verification_gate_failures);
     ]);
     ("rework_rate", `Assoc [
-      ("tone", `String (if rework_rate >= 0.4 then "bad" else if rework_rate >= 0.2 then "warn" else "ok"));
+      ("tone", `String (if rework_rate >= rework_bad then "bad" else if rework_rate >= rework_warn then "warn" else "ok"));
       ("value", `Float rework_rate);
     ]);
     ("artifact_scope_drift", `Assoc [
       ("tone", `String (if artifact_scope_active = 0 then "ok"  (* no tasks use artifact scopes = feature dormant *)
-                        else if artifact_scope_drift >= 0.5 then "bad"
-                        else if artifact_scope_drift >= 0.25 then "warn"
+                        else if artifact_scope_drift >= scope_drift_bad then "bad"
+                        else if artifact_scope_drift >= scope_drift_warn then "warn"
                         else "ok"));
       ("value", `Float artifact_scope_drift);
       ("active", `Int artifact_scope_active);
     ]);
     ("speculative_posture", `Assoc [
-      ("tone", `String (if spec_active > 0 && spec_commit_rate < 0.5 then "warn" else "ok"));
+      ("tone", `String (if spec_active > 0 && spec_commit_rate < spec_commit_warn then "warn" else "ok"));
       ("active_sessions", `Int spec_active);
       ("commit_rate", `Float spec_commit_rate);
       ("total_speculations", U.member "total_speculations" speculative);

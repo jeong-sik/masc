@@ -306,7 +306,7 @@ let keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts =
       if remaining > 0.0 then `Float remaining else `Null
   | _ -> `Null
 
-let keeper_diagnostic_summary ~health_state ~quiet_reason =
+let keeper_diagnostic_summary ~meta ~health_state ~quiet_reason =
   match health_state with
   | "zombie" ->
       "Keeper fiber has terminated but registry entry persists. Supervisor will auto-restart."
@@ -325,7 +325,10 @@ let keeper_diagnostic_summary ~health_state ~quiet_reason =
       | Some "quiet_hours" ->
           "Quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep."
       | Some "min_gap" ->
-          "Keeper is inside its proactive cooldown window. Direct messages work now; autonomous check-ins will wait."
+          if meta.runtime.proactive_rt.last_outcome = Proactive_silent then
+            "Latest autonomous proactive cycle completed silently. The next deterministic cycle will open after cooldown."
+          else
+            "Keeper is inside its proactive cooldown window. Direct messages work now; autonomous check-ins will wait."
       | Some "never_started" ->
           "Keeper metadata exists but no reply turn has been recorded yet."
       | _ -> "Keeper is reachable. Send a direct message for an immediate response.")
@@ -448,7 +451,7 @@ let keeper_diagnostic_json
       ( "quiet_reason", Json_util.string_opt_to_json quiet_reason );
       ("next_action_path", `String next_action_path);
       ("recoverable", `Bool (String.equal next_action_path "recover"));
-      ("summary", `String (keeper_diagnostic_summary ~health_state ~quiet_reason));
+      ("summary", `String (keeper_diagnostic_summary ~meta ~health_state ~quiet_reason));
       ("last_reply_status", last_reply_status);
       ("last_reply_at", last_reply_at);
       ("last_reply_preview", last_reply_preview);

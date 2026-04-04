@@ -83,6 +83,10 @@ let handle_keeper_status ctx args : tool_result =
          let last_proactive_ago_s =
            if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
          in
+         let last_visible_proactive_ago_s =
+           if m.runtime.proactive_rt.last_visible_ts <= 0.0 then 0.0
+           else now_ts -. m.runtime.proactive_rt.last_visible_ts
+         in
          let trace_history_count = List.length m.runtime.trace_history in
          let active_model = active_model_of_meta m in
          let next_model_hint = next_model_hint_of_meta m in
@@ -110,13 +114,22 @@ let handle_keeper_status ctx args : tool_result =
            | None -> None
            | Some cfg ->
              let pricing = Llm_provider.Pricing.pricing_for_model cfg.model_id in
-             let provider_name = Llm_provider.Provider_config.(match cfg.kind with
-               | Anthropic -> "claude" | OpenAI_compat -> "openai"
-               | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code") in
+             (* Extract provider name from label directly to avoid
+                OpenAI_compat conflating llama/openrouter *)
+             let provider_name =
+               match String.index_opt label ':' with
+               | Some idx when idx > 0 ->
+                 String.sub label 0 idx |> String.trim |> String.lowercase_ascii
+               | _ ->
+                 Llm_provider.Provider_config.(match cfg.kind with
+                   | Anthropic -> "claude" | OpenAI_compat -> "openai"
+                   | Gemini -> "gemini" | Glm -> "glm" | Claude_code -> "claude_code")
+             in
              Some (`Assoc [
                ("provider", `String provider_name);
                ("model_id", `String cfg.model_id);
-               ("max_context", `Int cfg.max_tokens);
+               ("max_context", `Int (Oas_model_resolve.max_context_of_label label));
+               ("max_output_tokens", `Int cfg.max_tokens);
                ("api_key_env", if cfg.api_key <> "" then `String "(set)" else `Null);
                ("cost_per_million_input", `Float pricing.input_per_million);
                ("cost_per_million_output", `Float pricing.output_per_million);
@@ -453,6 +466,7 @@ let handle_keeper_status ctx args : tool_result =
            ("last_handoff_ago_s", `Float last_handoff_ago_s);
            ("last_compaction_ago_s", `Float last_compaction_ago_s);
            ("last_proactive_ago_s", `Float last_proactive_ago_s);
+           ("last_visible_proactive_ago_s", `Float last_visible_proactive_ago_s);
            ("active_model", `String active_model);
            ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
            ("runtime_cascade_metrics", runtime_cascade_metrics);
@@ -494,8 +508,15 @@ let handle_keeper_status ctx args : tool_result =
              ("idle_sec", `Int m.proactive.idle_sec);
              ("cooldown_sec", `Int m.proactive.cooldown_sec);
              ("count_total", `Int m.runtime.proactive_rt.count_total);
+             ("visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
              ("last_ts", `Float m.runtime.proactive_rt.last_ts);
              ("last_ago_s", `Float last_proactive_ago_s);
+             ("last_visible_ts", `Float m.runtime.proactive_rt.last_visible_ts);
+             ("last_visible_ago_s", `Float last_visible_proactive_ago_s);
+             ( "last_outcome"
+             , `String
+                 (proactive_cycle_outcome_to_string
+                    m.runtime.proactive_rt.last_outcome) );
              ("last_reason",
                if String.trim m.runtime.proactive_rt.last_reason = ""
                then `Null

@@ -479,7 +479,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         >취소</button>
       ` : html`
         <button type="button"
-          class="${btnBase} bg-[var(--purple)] text-[#000]"
+          class="${btnBase} bg-[var(--purple)] text-[#1e1b4b]"
           onClick=${enterEditMode}
         >편집</button>
       `}
@@ -670,6 +670,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <span class="text-xs text-[var(--text-muted)]">킵얼라이브 실행</span>
         <${BoolBadge} value=${c.runtime.keepalive_running} />
       </div>
+      <${ConfigRow} label="레지스트리 상태" value=${c.runtime.registry_state || '--'} />
       <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">프레즌스 킵얼라이브</span>

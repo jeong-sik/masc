@@ -9,6 +9,14 @@
     - File_context: Recently modified files in working directory
 *)
 
+(** {1 Relevance scoring constants} *)
+
+let cache_default_relevance = 0.5
+let broadcast_relevance_cap = 0.8
+let file_base_relevance = 0.4
+let file_recency_weight = 0.3
+let file_name_match_bonus = 0.3
+
 (** {1 String Helpers} *)
 
 let string_contains = Dashboard_utils.string_contains
@@ -91,7 +99,7 @@ let fetch_from_cache (room_config : Room_utils.config) ~(config : recall_config)
     {
       source = Masc_cache;
       content = entry.value;
-      relevance = 0.5;  (* Default relevance, could be improved with query matching *)
+      relevance = cache_default_relevance;
       metadata = `Assoc [
         ("key", `String entry.key);
         ("tags", `List (List.map (fun t -> `String t) entry.tags));
@@ -112,7 +120,7 @@ let fetch_from_broadcasts (room_config : Room_utils.config) ~(config : recall_co
     {
       source = Recent_broadcasts;
       content = Printf.sprintf "[%s] %s" msg.from_agent msg.content;
-      relevance = relevance *. 0.8;  (* Cap at 0.8 for broadcasts *)
+      relevance = relevance *. broadcast_relevance_cap;
       metadata = `Assoc [
         ("seq", `Int msg.seq);
         ("from", `String msg.from_agent);
@@ -194,12 +202,12 @@ let fetch_from_file_context (room_config : Room_utils.config) ~config:(_config :
   let calc_relevance path content i =
     let name_lower = String.lowercase_ascii (Filename.basename path) in
     let content_lower = String.lowercase_ascii content in
-    let name_match = if query <> "" && String.length query > 2 && 
+    let name_match = if query <> "" && String.length query > 2 &&
                         (string_contains ~needle:query_lower name_lower ||
-                         string_contains ~needle:query_lower content_lower) 
-                     then 0.3 else 0.0 in
+                         string_contains ~needle:query_lower content_lower)
+                     then file_name_match_bonus else 0.0 in
     let recency = 1.0 -. (float_of_int i /. float_of_int (max 1 (List.length files))) in
-    min 1.0 (0.4 +. (recency *. 0.3) +. name_match)
+    min 1.0 (file_base_relevance +. (recency *. file_recency_weight) +. name_match)
   in
   
   List.filter_map (fun path ->

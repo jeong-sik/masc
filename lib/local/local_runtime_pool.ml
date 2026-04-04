@@ -3,6 +3,11 @@ open Yojson.Safe.Util
 
 open Result_syntax
 
+(** Exponential moving average weights for latency smoothing.
+    ema_decay + ema_alpha = 1.0. Higher decay = more weight to history. *)
+let ema_decay = 0.8
+let ema_alpha = 0.2
+
 type runtime = {
   id : string;
   base_url : string;
@@ -560,7 +565,7 @@ let release (lease : lease) ~success ?error ?latency_ms () =
                 Some
                   (match runtime.latency_ema_ms with
                    | None -> latency
-                   | Some previous -> (previous *. 0.8) +. (latency *. 0.2))
+                   | Some previous -> (previous *. ema_decay) +. (latency *. ema_alpha))
             | None -> runtime.latency_ema_ms
           in
           let failure_streak, cooldown_until, last_error, total_success,

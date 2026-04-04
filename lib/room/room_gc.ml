@@ -58,12 +58,12 @@ let heartbeat config ~agent_name =
     [keeper_threshold_sec] and [agent_threshold_sec] control the inactivity
     window before an agent is considered a zombie. *)
 let cleanup_zombies
-    ?(keeper_threshold_sec = 3600.0)
-    ?(agent_threshold_sec = 300.0)
+    ?(keeper_threshold_sec = Env_config.Zombie.keeper_threshold_seconds)
+    ?(agent_threshold_sec = Env_config.Zombie.threshold_seconds)
     config =
   ensure_initialized config;
 
-  (* Single path: agents_dir derives from config.scope *)
+  (* agents_dir under .masc/ *)
   let agents_path = agents_dir config in
   let scan_paths =
     if Sys.file_exists agents_path then [ agents_path ] else []

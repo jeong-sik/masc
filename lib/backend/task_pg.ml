@@ -245,6 +245,8 @@ let row_to_task (((id, title, description), (priority, status, assignee),
     worktree = None;  (* Worktree loaded separately if needed *)
     required_role;
     stage = None;
+    contract = None;
+    handoff_context = None;
     task_status = status_of_db ~id ~status ~assignee ~claimed_at ~started_at
                     ~completed_at ~cancelled_at:None ~cancelled_by:None ~notes ~reason:None;
   }

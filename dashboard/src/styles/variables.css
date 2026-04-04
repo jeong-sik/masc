@@ -1,134 +1,124 @@
-/* MASC Dashboard — CSS Custom Properties (legacy compat) */
+/* MASC Dashboard — CSS Custom Properties (Semantic Theme System) */
 
 :root {
-  --bg-0: #0b1220;
-  --card: rgba(16, 24, 42, 0.92);
-  --card-border: rgba(138, 163, 211, 0.2);
+  /* The dashboard shell is still authored against dark surfaces.
+     Keep the browser chrome and semantic tokens aligned until
+     a full light-theme token migration lands. */
+  color-scheme: dark;
+
+  /* Base & Backgrounds */
+  --bg-root: #0b1220;
+  --bg-panel: rgba(16, 24, 42, 0.92);
+  --bg-panel-hover: rgba(30, 41, 59, 0.95);
+
+  /* Text & Typography */
   --text-strong: #eaf1ff;
   --text-body: #c0d2f2;
   --text-muted: #a8bfdf;
+  --text-dim: #a0a8b4;
+  
+  /* Borders */
+  --border-subtle: rgba(138, 163, 211, 0.12);
+  --border-base: rgba(138, 163, 211, 0.2);
+  --border-strong: rgba(138, 163, 211, 0.35);
+
+  /* Semantic Colors (Core) */
   --accent: #47b8ff;
-  --accent-soft: rgba(71, 184, 255, 0.16);
   --ok: #4ade80;
   --warn: #fbbf24;
   --bad: #ef4444;
-  --radius-lg: 12px;
-  --radius-md: 8px;
-  --radius-sm: 6px;
-  --header-h: 94px;
 
-  /* Agent status (soft tones) */
-  --agent-working: #7ae09a;
-  --agent-busy: #f0c060;
+  /* Semantic - Accent (Blue) */
+  --accent-soft: rgba(71, 184, 255, 0.16);
+  --accent-10: rgba(71, 184, 255, 0.10);
+  --accent-20: rgba(71, 184, 255, 0.20);
+  --accent-30: rgba(71, 184, 255, 0.30);
 
-  /* Tone variants */
-  --bad-light: #f87171;
+  /* Semantic - Success (Green) */
+  --ok-soft: rgba(74, 222, 128, 0.15);
+  --ok-10: rgba(74, 222, 128, 0.10);
+  --ok-20: rgba(74, 222, 128, 0.20);
+
+  /* Semantic - Warning (Yellow) */
   --warn-bright: #f97316;
+  --warn-soft: rgba(251, 191, 36, 0.15);
+  --warn-10: rgba(251, 191, 36, 0.10);
+  --warn-20: rgba(251, 191, 36, 0.20);
 
-  /* White overlay (glass morphism tints) */
-  --white-2: rgba(255, 255, 255, 0.02);
+  /* Semantic - Critical (Red) */
+  --bad-light: #f87171;
+  --bad-soft: rgba(239, 68, 68, 0.15);
+  --bad-10: rgba(239, 68, 68, 0.10);
+  --bad-20: rgba(239, 68, 68, 0.20);
+
+  /* Overlays (White Alpha) */
   --white-3: rgba(255, 255, 255, 0.03);
-  --white-3h: rgba(255, 255, 255, 0.035);
-  --white-4: rgba(255, 255, 255, 0.04);
   --white-5: rgba(255, 255, 255, 0.05);
-  --white-6: rgba(255, 255, 255, 0.06);
-  --white-8: rgba(255, 255, 255, 0.08);
   --white-10: rgba(255, 255, 255, 0.10);
-  --white-12: rgba(255, 255, 255, 0.12);
   --white-20: rgba(255, 255, 255, 0.20);
-  --white-25: rgba(255, 255, 255, 0.25);
+  --white-50: rgba(255, 255, 255, 0.50);
+  --white-80: rgba(255, 255, 255, 0.80);
+
+  /* Legacy Compatibility Variables */
+  --bg-0: var(--bg-root);
+  --bg-1: var(--bg-panel-hover);
+  --card: var(--bg-panel);
+  --card-border: var(--border-base);
+  --accent-8: var(--accent-10);
+  --accent-12: var(--accent-10);
+  --accent-14: var(--accent-10);
+  --accent-18: var(--accent-20);
+  --ok-8: var(--ok-10);
+  --ok-12: var(--ok-10);
+  --ok-18: var(--ok-20);
+  --ok-22: var(--ok-20);
+  --ok-24: var(--ok-20);
+  --ok-25: var(--ok-20);
+  --ok-30: rgba(74, 222, 128, 0.30);
+  --ok-35: rgba(74, 222, 128, 0.30);
+  --ok-40: rgba(74, 222, 128, 0.40);
+  --ok-48: rgba(74, 222, 128, 0.50);
+  --bad-8: var(--bad-10);
+  --bad-12: var(--bad-10);
+  --bad-15: var(--bad-10);
+  --bad-30: rgba(248, 113, 113, 0.3);
+  --warn-12: var(--warn-10);
+  --warn-15: var(--warn-10);
+  --warn-28: var(--warn-30);
+  --warn-30: rgba(251, 191, 36, 0.3);
+  --white-2: var(--white-3);
+  --white-3h: var(--white-3);
+  --white-4: var(--white-5);
+  --white-6: var(--white-5);
+  --white-8: var(--white-10);
+  --white-12: var(--white-10);
+  --white-25: var(--white-20);
   --white-30: rgba(255, 255, 255, 0.30);
   --white-35: rgba(255, 255, 255, 0.35);
   --white-40: rgba(255, 255, 255, 0.40);
   --white-45: rgba(255, 255, 255, 0.45);
-  --white-50: rgba(255, 255, 255, 0.50);
-  --white-55: rgba(255, 255, 255, 0.55);
-  --white-56: rgba(255, 255, 255, 0.56);
+  --white-55: var(--white-50);
+  --white-56: var(--white-50);
   --white-60: rgba(255, 255, 255, 0.60);
   --white-68: rgba(255, 255, 255, 0.68);
   --white-70: rgba(255, 255, 255, 0.70);
   --white-72: rgba(255, 255, 255, 0.72);
-  --white-78: rgba(255, 255, 255, 0.78);
-  --white-82: rgba(255, 255, 255, 0.82);
+  --white-78: var(--white-80);
+  --white-82: var(--white-80);
   --white-90: rgba(255, 255, 255, 0.9);
+  --border-slate-8: var(--border-subtle);
+  --border-slate-12: var(--border-subtle);
+  --border-slate-16: var(--border-base);
+  --border-slate-18: var(--border-base);
+  --border-slate-22: var(--border-base);
+  --border-slate-30: var(--border-strong);
+  --border-slate-35: var(--border-strong);
 
-  /* Border slate (138, 163, 211) */
-  --border-slate-8: rgba(138, 163, 211, 0.08);
-  --border-slate-12: rgba(138, 163, 211, 0.12);
-  --border-slate-16: rgba(138, 163, 211, 0.16);
-  --border-slate-18: rgba(138, 163, 211, 0.18);
-  --border-slate-22: rgba(138, 163, 211, 0.22);
-  --border-slate-30: rgba(138, 163, 211, 0.3);
-  --border-slate-35: rgba(138, 163, 211, 0.35);
-
-  /* OK / green (74, 222, 128) */
-  --ok-8: rgba(74, 222, 128, 0.08);
-  --ok-10: rgba(74, 222, 128, 0.10);
-  --ok-12: rgba(74, 222, 128, 0.12);
-  --ok-soft: rgba(74, 222, 128, 0.15);
-  --ok-18: rgba(74, 222, 128, 0.18);
-  --ok-20: rgba(74, 222, 128, 0.2);
-  --ok-22: rgba(74, 222, 128, 0.22);
-  --ok-24: rgba(74, 222, 128, 0.24);
-  --ok-25: rgba(74, 222, 128, 0.25);
-  --ok-30: rgba(74, 222, 128, 0.30);
-  --ok-35: rgba(74, 222, 128, 0.35);
-  --ok-40: rgba(74, 222, 128, 0.40);
-  --ok-48: rgba(74, 222, 128, 0.48);
-
-  /* Bad / red (239, 68, 68 and 248, 113, 113) */
-  --bad-soft: rgba(239, 68, 68, 0.15);
-  --bad-12: rgba(239, 68, 68, 0.12);
-  --bad-8: rgba(248, 113, 113, 0.08);
-  --bad-15: rgba(248, 113, 113, 0.15);
-  --bad-30: rgba(248, 113, 113, 0.3);
-
-  /* Warn / yellow (251, 191, 36) */
-  --warn-soft: rgba(251, 191, 36, 0.15);
-  --warn-12: rgba(251, 191, 36, 0.12);
-  --warn-15: rgba(251, 191, 36, 0.15);
-  --warn-20: rgba(251, 191, 36, 0.2);
-  --warn-28: rgba(251, 191, 36, 0.28);
-  --warn-30: rgba(251, 191, 36, 0.3);
-
-  /* Accent / blue (71, 184, 255) */
-  --accent-8: rgba(71, 184, 255, 0.08);
-  --accent-10: rgba(71, 184, 255, 0.10);
-  --accent-12: rgba(71, 184, 255, 0.12);
-  --accent-14: rgba(71, 184, 255, 0.14);
-  --accent-18: rgba(71, 184, 255, 0.18);
-  --accent-20: rgba(71, 184, 255, 0.20);
-
-  /* Cyan (34, 211, 238) */
-  --cyan-12: rgba(34, 211, 238, 0.12);
-  --cyan-16: rgba(34, 211, 238, 0.16);
-
-  /* FF gold (200, 168, 78) */
-  --ff-gold-8: rgba(200, 168, 78, 0.08);
-  --ff-gold-10: rgba(200, 168, 78, 0.1);
-  --ff-gold-15: rgba(200, 168, 78, 0.15);
-  --ff-gold-20: rgba(200, 168, 78, 0.2);
-
-  /* Slate gray (148, 163, 184) */
-  --slate-gray-8: rgba(148, 163, 184, 0.08);
-  --slate-gray-10: rgba(148, 163, 184, 0.1);
-  --slate-gray-12: rgba(148, 163, 184, 0.12);
-  --slate-gray-15: rgba(148, 163, 184, 0.15);
-  --slate-gray-20: rgba(148, 163, 184, 0.2);
-
-  /* FF navy (10, 22, 40) */
-  --ff-navy-44: rgba(10, 22, 40, 0.44);
-  --ff-navy-60: rgba(10, 22, 40, 0.6);
-
-  /* Blue-400 (96, 165, 250) */
-  --blue-400-8: rgba(96, 165, 250, 0.08);
-  --blue-400-15: rgba(96, 165, 250, 0.15);
-
-  /* Frost (226, 232, 240) */
-  --frost-72: rgba(226, 232, 240, 0.72);
-
-  /* Dark panels (15, 23, 42) */
-  --panel-dark-60: rgba(15, 23, 42, 0.6);
+  /* Layout & Sizing */
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
+  --header-h: 94px;
 
   /* Font-size scale */
   --fs-2xs: 11px;
@@ -138,19 +128,35 @@
   --fs-md: 15px;
   --fs-lg: 16px;
 
-  /* Extended text scale */
-  --text-dim: #a0a8b4;
-  --text-slate: #b0bfd4;
-  --text-slate-light: #cbd5e1;
-
   /* Extended palette */
   --cyan: #22d3ee;
+  --cyan-12: rgba(34, 211, 238, 0.12);
+  --cyan-16: rgba(34, 211, 238, 0.16);
   --purple: #a78bfa;
+  --text-slate: #b0bfd4;
+  --text-slate-light: #cbd5e1;
   --text-near-white: #f8fafc;
+  
+  --ff-gold-8: rgba(200, 168, 78, 0.08);
+  --ff-gold-10: rgba(200, 168, 78, 0.1);
+  --ff-gold-15: rgba(200, 168, 78, 0.15);
+  --ff-gold-20: rgba(200, 168, 78, 0.2);
+  --slate-gray-8: rgba(148, 163, 184, 0.08);
+  --slate-gray-10: rgba(148, 163, 184, 0.1);
+  --slate-gray-12: rgba(148, 163, 184, 0.12);
+  --slate-gray-15: rgba(148, 163, 184, 0.15);
+  --slate-gray-20: rgba(148, 163, 184, 0.2);
+  --ff-navy-44: rgba(10, 22, 40, 0.44);
+  --ff-navy-60: rgba(10, 22, 40, 0.6);
+  --blue-400-8: rgba(96, 165, 250, 0.08);
+  --blue-400-15: rgba(96, 165, 250, 0.15);
+  --frost-72: rgba(226, 232, 240, 0.72);
+  --panel-dark-60: rgba(15, 23, 42, 0.6);
+  --agent-working: #7ae09a;
+  --agent-busy: #f0c060;
 
-  /* Stacking layers (low -> high) */
+  /* Stacking layers */
   --z-layout: 1;
   --z-tab-sticky: 30;
   --z-header: 40;
-  /* Overlay z-index: fallback values in each component (keeper:3020 agent:3030 trpg:3040 toast:3070 tooltip:3080) */
 }

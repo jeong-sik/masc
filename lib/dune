@@ -34,6 +34,8 @@
    cancellation
    channel_gate
    channel_gate_metrics
+   gate_protocol
+   gate_keeper_backend
    command_plane_v2
    command_plane_orchestra
    cp_orchestra_helpers
@@ -97,6 +99,7 @@
    dashboard_http_keeper
    dashboard_http_autoresearch
    dashboard_harness_health
+   dashboard_goals
    dashboard_feature_health
    dashboard_http_repo_synthesis
    dashboard_provider_runs
@@ -253,6 +256,7 @@
    goal_guard
    goal_orchestrator
    goal_scheduler
+   convergence
    swarm
    swarm_goal_loop
    worker_run_evidence_summary
@@ -329,6 +333,7 @@
    tool_task
    tool_task_schemas
    task_dispatch
+   task_contract_gate
    tool_room
    workflow_guide
    tool_control
@@ -381,6 +386,9 @@
    mention_inbox
    agent_reputation
    activity_feed
+   ;; RFC-0001 Gate A: Det/NonDet boundary instrumentation
+   heuristic_metrics
+   agent_stress
    transport
    transport_read_model
    transport_metrics
@@ -517,7 +525,6 @@
    tool_autoresearch
    ;; godsplit-catalog: tool_catalog decomposition (private sub-modules)
    tool_catalog_surfaces
-   tool_catalog_tiers
    ;; godsplit-misc: tool_misc decomposition (private sub-modules)
    tool_misc_transport
    tool_misc_admin
@@ -551,6 +558,7 @@
  dashboard_http_keeper
  dashboard_http_autoresearch
  dashboard_harness_health
+ dashboard_goals
  server_routes_http_common
  server_routes_http_pages
  server_routes_http_runtime
@@ -650,7 +658,6 @@
   tool_schema_dsl
   ;; godsplit-catalog: tool_catalog decomposition
   tool_catalog_surfaces
-  tool_catalog_tiers
   ;; godsplit-misc: tool_misc decomposition
   tool_misc_transport
   tool_misc_admin

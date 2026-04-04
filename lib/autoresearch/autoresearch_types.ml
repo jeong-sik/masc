@@ -53,6 +53,7 @@ type swarm_link = {
   loop_id : string;
   session_id : string;
   operation_id : string option;
+  task_id : string option;
   target_file : string;
   program_note : string option;
   created_by : string option;

@@ -10,3 +10,9 @@ let contains_substring haystack needle =
       else loop (idx + 1)
     in
     loop 0
+
+let contains_substring_ci haystack needle =
+  needle <> "" &&
+  contains_substring
+    (String.lowercase_ascii haystack)
+    (String.lowercase_ascii needle)

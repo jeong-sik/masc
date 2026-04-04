@@ -23,6 +23,15 @@ type proactive_policy = {
   cooldown_sec: int;
 }
 
+type proactive_cycle_outcome =
+  | Proactive_never_started
+  | Proactive_unknown
+  | Proactive_silent
+  | Proactive_text_response
+  | Proactive_tool_use
+  | Proactive_mixed_response
+  | Proactive_error
+
 type tool_preset =
   | Minimal
   | Messaging
@@ -51,6 +60,9 @@ type compaction_runtime = {
 type proactive_runtime = {
   count_total: int;
   last_ts: float;
+  visible_count_total: int;
+  last_visible_ts: float;
+  last_outcome: proactive_cycle_outcome;
   last_reason: string;
   last_preview: string;
 }
@@ -147,6 +159,8 @@ val now_iso : unit -> string
 
 val tool_preset_to_string : tool_preset -> string
 val tool_preset_of_string : string -> tool_preset option
+val proactive_cycle_outcome_to_string : proactive_cycle_outcome -> string
+val proactive_cycle_outcome_of_string : string -> proactive_cycle_outcome
 val tool_access_preset : tool_access -> tool_preset option
 val tool_access_custom_allowlist : tool_access -> string list option
 val tool_access_also_allowlist : tool_access -> string list

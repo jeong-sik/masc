@@ -120,6 +120,32 @@ let register_loop (ctx : context) state =
     latest_loop_id := Some state.loop_id);
   state
 
+let prepare_managed_target_file ~source_workdir ~managed_workdir target_file =
+  match Autoresearch.validate_target_file ~workdir:managed_workdir target_file with
+  | Ok _ -> Ok []
+  | Error managed_error ->
+      match Autoresearch.validate_target_file ~workdir:source_workdir target_file with
+      | Error _ ->
+          Error (Printf.sprintf "Invalid target_file: %s" managed_error)
+      | Ok source_abs ->
+          (match
+             Autoresearch.resolve_target_file_path ~workdir:managed_workdir
+               target_file
+           with
+          | Error path_error ->
+              Error (Printf.sprintf "Invalid target_file: %s" path_error)
+          | Ok managed_abs ->
+              try
+                Fs_compat.mkdir_p (Filename.dirname managed_abs);
+                Fs_compat.save_file managed_abs
+                  (Autoresearch.read_file source_abs);
+                Ok [ "target_file_seeded_from_source" ]
+              with exn ->
+                Error
+                  (Printf.sprintf
+                     "Failed to seed target_file into managed worktree: %s"
+                     (Printexc.to_string exn)))
+
 let setup_running_loop (ctx : context) (params : start_params) =
   let state =
     Autoresearch.create_state ~goal:params.goal ~metric_fn:params.metric_fn
@@ -134,12 +160,15 @@ let setup_running_loop (ctx : context) (params : start_params) =
   with
   | Error message -> Error message
   | Ok (managed_workdir, source_workdir, warnings) -> (
-      let state = { state with workdir = managed_workdir; warnings } in
-      let baseline_result =
-        match Autoresearch.validate_target_file ~workdir:managed_workdir params.target_file with
-        | Error e ->
-            Error (Printf.sprintf "Invalid target_file: %s" e)
-        | Ok _ -> (
+      match
+        prepare_managed_target_file ~source_workdir ~managed_workdir
+          params.target_file
+      with
+      | Error message -> Error message
+      | Ok target_file_warnings ->
+          let warnings = warnings @ target_file_warnings in
+          let state = { state with workdir = managed_workdir; warnings } in
+          let baseline_result =
             match params.baseline_override with
             | Some baseline -> Ok baseline
             | None -> (
@@ -150,14 +179,14 @@ let setup_running_loop (ctx : context) (params : start_params) =
                 | Ok (baseline, _ms) -> Ok baseline
                 | Error e ->
                     Error
-                      (Printf.sprintf "Failed to measure baseline: %s" e)))
-      in
-      match baseline_result with
-      | Error message -> Error message
-      | Ok baseline ->
-          let state = { state with
-            baseline; best_score = baseline; source_workdir } in
-          Ok (register_loop ctx state))
+                      (Printf.sprintf "Failed to measure baseline: %s" e))
+          in
+          match baseline_result with
+          | Error message -> Error message
+          | Ok baseline ->
+              let state = { state with
+                baseline; best_score = baseline; source_workdir } in
+              Ok (register_loop ctx state))
 
 let status_json (ctx : context) ~loop_id json_fields =
   let strip_keys keys fields =
@@ -346,9 +375,7 @@ let handle_swarm_start (ctx : context) args =
                   let room_config =
                     match ctx.config with
                     | Some config -> config
-                    | None ->
-                        Room.default_config ctx.base_path
-                        |> Room.config_with_resolved_scope
+                    | None -> Room.default_config ctx.base_path
                   in
                   let task_link_json =
                     match task_id with
@@ -417,7 +444,7 @@ let handle_stop (ctx : context) args =
     match Autoresearch.stop_loop ~base_path:ctx.base_path ~reason id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state ->
-        let config = Room.default_config ctx.base_path |> Room.config_with_resolved_scope in
+        let config = Room.default_config ctx.base_path in
         broadcast_loop_lifecycle "autoresearch_stopped" state;
         (match Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path id with
         | Some link ->

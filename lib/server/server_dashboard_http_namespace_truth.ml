@@ -84,20 +84,35 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
                 (Printexc.to_string exn);
               fallback
         in
-        let shell_timeout_s =
-          if !(Execution_surfaces._shell_warmed) then base_timeout_s
-          else cold_timeout_s
+        (* Shell fiber timeout: must exceed inner cache timeout
+           (dashboard_shell_timeout_s, default 8s) to avoid the double-timeout
+           race where the inner cache returns timeout-error JSON while the outer
+           fiber also fires, discarding even stale data.  Fixes #5090. *)
+        let shell_fiber_timeout_s =
+          float_of_env_default "MASC_DASHBOARD_SHELL_FIBER_TIMEOUT_S"
+            ~default:12.0 ~min_v:5.0 ~max_v:30.0
         in
+        let shell_timeout_s =
+          if !(Execution_surfaces._shell_warmed) then shell_fiber_timeout_s
+          else Float.max cold_timeout_s (shell_fiber_timeout_s +. 4.0)
+        in
+        (* Graceful degradation: on timeout fall back to the last successful
+           shell result rather than empty JSON, which would zero out namespace
+           counts and focus data (61x/day under I/O contention). *)
+        let shell_fallback = !(Execution_surfaces._last_good_shell) in
         (* Sequential fetch to avoid PG connection concurrent usage (#3305). *)
         shell_ref :=
           fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
             (fun () -> dashboard_shell_http_json ~clock config)
-            (`Assoc []);
+            shell_fallback;
         execution_ref := cached_surface_json Execution_surfaces._execution_cache;
         (* command_plane_summary_http_json reads from a proactive cache ref. *)
         command_ref :=
           Server_command_plane_http.command_plane_summary_http_json ~state;
         let shell_json = !shell_ref in
+        (* Update last-known-good shell on success. *)
+        if shell_json <> `Assoc [] && shell_json <> shell_fallback then
+          Execution_surfaces._last_good_shell := shell_json;
         if (not !(Execution_surfaces._shell_warmed)) && shell_json <> `Assoc [] then
           Execution_surfaces._shell_warmed := true;
         let execution_json = !execution_ref in
@@ -136,9 +151,13 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
     let config = state.Mcp_server.room_config in
     let shell_json =
       if !(Execution_surfaces._shell_warmed) then
-        try dashboard_shell_http_json ?clock:state.Mcp_server.clock config
-        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> `Assoc []
-      else `Assoc []
+        (try
+           let result = dashboard_shell_http_json ?clock:state.Mcp_server.clock config in
+           Execution_surfaces._last_good_shell := result;
+           result
+         with Eio.Cancel.Cancelled _ as e -> raise e
+            | _ -> !(Execution_surfaces._last_good_shell))
+      else !(Execution_surfaces._last_good_shell)
     in
     let execution_json = cached_surface_json Execution_surfaces._execution_cache in
     let command_summary_json =

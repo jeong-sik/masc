@@ -76,7 +76,8 @@ let keeper_schemas : tool_schema list = [
         ("desires", `Assoc [("type", `String "string")]);
         ("room_scope", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "current"; `String "all"]);
+          ("enum", `List [`String "current"]);
+          ("description", `String "Single-room compatibility field. Keepers always attach to the current/default namespace.");
         ]);
         ("scope_kind", `Assoc [
           ("type", `String "string");
@@ -174,12 +175,12 @@ let keeper_schemas : tool_schema list = [
         ("scope_kind", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "local"; `String "global"]);
-          ("description", `String "Keeper presence scope. 'global' enables room-aware roaming state.");
+          ("description", `String "Keeper message/board visibility scope inside the single default namespace.");
         ]);
         ("room_scope", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "current"; `String "all"]);
-          ("description", `String "Which rooms the keeper should maintain presence in.");
+          ("enum", `List [`String "current"]);
+          ("description", `String "Single-room compatibility field. Keepers always maintain presence in the current/default namespace.");
         ]);
         ("mention_targets", `Assoc [
           ("type", `String "array");

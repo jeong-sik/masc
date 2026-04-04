@@ -23,12 +23,11 @@ let scope_kind_to_string = function
   | Global -> "global"
 
 let room_scope_of_string = function
-  | "all" -> All
+  | "current" | "all" -> Current
   | _ -> Current
 
 let parse_room_scope = function
-  | "current" -> Some Current
-  | "all" -> Some All
+  | "current" | "all" -> Some Current
   | _ -> None
 
 let room_scope_to_string = function

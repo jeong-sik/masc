@@ -1,6 +1,30 @@
 # Changelog
 
 
+## [2.233.0] - 2026-04-04
+
+### Removed
+- **Dead similarity scoring** -- remove proactive_similarity_score and helpers from keeper_types_profile (-220 lines) (#5136).
+
+### Fixed
+- **Keeper scheduling** -- align autonomous keepalive scheduling and tool selection (#5154).
+- **Keeper allowed paths** -- fix allowed_paths normalization against project root (#5151).
+- **CP summary** -- harden cp summary and autoresearch startup (#5153).
+- **Discord gate** -- fix local Discord gate fallback and persist bindings (#5135).
+- **Keeper priority** -- pass explicit priority through OAS named runner (#5145).
+- **Dashboard status** -- fix keeper dashboard status truth (#5134).
+- **Task archive** -- remove stale task auto-archive from claim_next (#5129).
+- **Broadcast hook** -- wire on_broadcast_mention hook into Room_state.broadcast (#5130).
+
+### Changed
+- **Room scope removal** -- remove config scope field, identity resolver, and dead room abstractions (#5138, #5149, #5157).
+- **Keeper room scope** -- normalize to single-room semantics (#5156).
+- **Audit logs** -- persist system_internal tool call logs (#5150, #5161).
+- **Dashboard previews** -- collapse keeper allowlist previews (#5155).
+- **Room migration** -- add Room-free module aliases for gradual migration (#5159).
+- **OAS boundary** -- pass request priority through OAS Builder (#5144).
+- **Architecture docs** -- add MASC-OAS architecture boundary document (#5166).
+
 ## [2.232.0] - 2026-04-04
 
 ### Changed

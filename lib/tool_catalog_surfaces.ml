@@ -334,6 +334,11 @@ let is_on_surface surface name =
   | Some tbl -> Hashtbl.mem tbl name
   | None -> false
 
+let surfaces_for_tool name =
+  List.filter_map (fun (surface, tbl) ->
+    if Hashtbl.mem tbl name then Some surface else None
+  ) surface_sets
+
 let surface_to_string = function
   | Public_mcp -> "public_mcp"
   | Spawned_agent -> "spawned_agent"

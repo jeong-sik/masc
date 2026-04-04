@@ -186,7 +186,8 @@ policy_voice_enabled = false
       check (option string) "goal" (Some "analyze logs") d.goal;
       check (option string) "soul_profile" (Some "research") d.soul_profile;
       check (option string) "will" (Some "detect issues") d.will;
-      check (option string) "room_scope" (Some "all") d.room_scope;
+      check (option string) "room_scope canonicalized to current"
+        (Some "current") d.room_scope;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "room signal prompt" (Some true)

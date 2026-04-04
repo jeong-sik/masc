@@ -344,17 +344,23 @@ let test_keeper_msg_rejects_removed_runtime_args () =
 let make_keeper_exec_meta
     ?(name = "sangsu")
     ?(allowed_paths = [])
+    ?tool_access
     () =
-  let json =
-    `Assoc
-      [
-        ("name", `String name);
-        ("agent_name", `String name);
-        ("trace_id", `String ("trace-" ^ name));
-        ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
-      ]
+  let fields =
+    [
+      ("name", `String name);
+      ("agent_name", `String name);
+      ("trace_id", `String ("trace-" ^ name));
+      ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
+    ]
   in
-  match Masc_mcp.Keeper_types.meta_of_json json with
+  let fields =
+    match tool_access with
+    | Some access ->
+        ("tool_access", Masc_mcp.Keeper_types.tool_access_to_json access) :: fields
+    | None -> fields
+  in
+  match Masc_mcp.Keeper_types.meta_of_json (`Assoc fields) with
   | Ok meta -> meta
   | Error e -> failwith ("make_keeper_exec_meta failed: " ^ e)
 
@@ -476,6 +482,18 @@ let test_keeper_fs_read_policy_gates () =
   let unified = make_keeper_exec_meta () in
   check_keeper_exec_tool_presence "unified fs_read" unified
     ~tool_name:"keeper_fs_read" ~expect_allowed:true
+
+let test_research_preset_includes_task_audit () =
+  let research =
+    make_keeper_exec_meta
+      ~name:"research-keeper"
+      ~tool_access:
+        (Masc_mcp.Keeper_types.Preset
+           { preset = Masc_mcp.Keeper_types.Research; also_allow = [] })
+      ()
+  in
+  check_keeper_exec_tool_presence "research preset task audit" research
+    ~tool_name:"keeper_tasks_audit" ~expect_allowed:true
 
 let test_keeper_fs_read_enforces_allowed_paths_and_truncation () =
   Eio_main.run @@ fun env ->
@@ -777,7 +795,7 @@ let test_keeper_list_items_expose_runtime_config_summary () =
         Yojson.Safe.Util.(row |> member "runtime_class" |> to_string);
       check string "scope kind" "global"
         Yojson.Safe.Util.(row |> member "scope_kind" |> to_string);
-      check string "room scope" "all"
+      check string "room scope normalized to current" "current"
         Yojson.Safe.Util.(row |> member "room_scope" |> to_string);
       check bool "presence keepalive removed" true
         Yojson.Safe.Util.(row |> member "presence_keepalive" = `Null);
@@ -986,7 +1004,7 @@ let test_keeper_status_detailed_reads_metrics_history_and_memory () =
           {|{"channel":"turn","generation":0,"trace_id":"trace-1","context_ratio":0.41,"context_tokens":120,"context_max":1024,"message_count":4,"memory_check":{"performed":true,"passed":true,"final_score":0.9},"skill_primary":"masc-heartbeat","skill_secondary":["masc-keeper-autonomy"],"skill_reason":"stateful routing","skill_selection_mode":"agent","skill_provenance":"judgment","action_source":"structured_model"}|}
       in
       let compaction_json = Yojson.Safe.from_string
-          {|{"channel":"proactive","generation":0,"trace_id":"trace-1","compacted":true,"compaction_before_tokens":180,"compaction_after_tokens":120,"memory_compaction_performed":true,"memory_compaction_before_notes":4,"memory_compaction_after_notes":2,"memory_compaction_dropped_notes":2,"memory_compaction_invalid_dropped":1,"memory_compaction_reason":"dedupe"}|}
+          {|{"channel":"scheduled_autonomous","generation":0,"trace_id":"trace-1","compacted":true,"compaction_before_tokens":180,"compaction_after_tokens":120,"memory_compaction_performed":true,"memory_compaction_before_notes":4,"memory_compaction_after_notes":2,"memory_compaction_dropped_notes":2,"memory_compaction_invalid_dropped":1,"memory_compaction_reason":"dedupe"}|}
       in
       Dated_jsonl.append metrics_store turn_json;
       Dated_jsonl.append metrics_store compaction_json;
@@ -2156,7 +2174,7 @@ mid_goal = "Stay bootable from declarative config."
 long_goal = "Remain durable."
 soul_profile = "delivery"
 instructions = "Bootstrap from TOML only."
-room_scope = "all"
+room_scope = "current"
 scope_kind = "global"
 mention_targets = ["janitor"]
 proactive_enabled = false
@@ -2781,6 +2799,8 @@ let () =
            test_keeper_shell_readonly_enforces_allowed_paths;
          test_case "fs_read policy gates" `Quick
            test_keeper_fs_read_policy_gates;
+         test_case "research preset includes task audit" `Quick
+           test_research_preset_includes_task_audit;
          test_case "fs_read enforces allowed paths and truncation" `Quick
            test_keeper_fs_read_enforces_allowed_paths_and_truncation;
          test_case "keeper bash requires cmd and runs" `Quick

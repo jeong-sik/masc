@@ -33,7 +33,7 @@
 ; Group 1: Pure synchronous tests
 ; ============================================================
 (tests
- (names test_room test_room_state_recovery test_types test_auth test_http_negotiation
+ (names test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
         test_sse test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
@@ -47,6 +47,7 @@
         test_post_verifier
         test_swarm_checkpoint test_swarm_goal_loop
         test_keeper_memory
+        test_keeper_exec_status
         test_keeper_lifecycle
         test_keeper_deliberation
         test_keeper_registry
@@ -59,7 +60,6 @@
         test_tool_access_policy
         test_tool_access_role
         test_tool_token
-        test_tool_budget
         test_tool_exposure
         test_autonomy_liberation
         test_keeper_unified
@@ -92,7 +92,7 @@
         test_worker_oas_scope_gate
         test_run_local_script
         test_tool_prefilter)
- (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
+ (modules test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn
@@ -106,6 +106,7 @@
           test_post_verifier
           test_swarm_checkpoint test_swarm_goal_loop
           test_keeper_memory
+          test_keeper_exec_status
           test_keeper_lifecycle
           test_keeper_deliberation
           test_keeper_registry
@@ -118,7 +119,6 @@
           test_tool_access_policy
           test_tool_access_role
           test_tool_token
-          test_tool_budget
           test_tool_exposure
           test_autonomy_liberation
           test_keeper_unified
@@ -157,8 +157,8 @@
 ; Group 2: Property-based tests (QCheck)
 ; ============================================================
 (tests
- (names test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_similarity)
- (modules test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_similarity)
+ (names test_pbt_mention test_pbt_validation test_pbt_text_processing)
+ (modules test_pbt_mention test_pbt_validation test_pbt_text_processing)
  (libraries masc_test_deps))
 
 ; ============================================================

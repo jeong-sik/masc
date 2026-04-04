@@ -669,6 +669,12 @@ let test_command_plane_snapshot_review_contracts () =
   check bool "on-demand snapshot uses timeout guard" true
     (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
        "Eio.Time.with_timeout_exn (cp_snapshot_runtime_clock state)");
+  check bool "cp summary derives swarm status from cached snapshot" true
+    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "Swarm_status.build_json_from_snapshot ~timeline_limit_override:6");
+  check bool "cp summary no longer performs live swarm scan" true
+    (file_not_contains_pattern "lib/server/server_command_plane_http_support.ml"
+       "Swarm_status.build_json ~timeline_limit_override:6 config");
   check bool "on-demand snapshot uses single-flight mutex" true
     (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
        "Eio.Mutex.use_rw ~protect:true _cp_snapshot_compute_mu");

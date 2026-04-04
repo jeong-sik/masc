@@ -502,6 +502,44 @@ let test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth () =
           (json |> member "projection_diagnostics" |> member "execution_cache_state" |> to_string);
       ))
 
+let test_last_good_shell_fallback_preserves_counts () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      warm_execution_cache ();
+      (* Warm the shell cache so _last_good_shell gets populated. *)
+      Lib.Server_dashboard_http.warm_shell_cache state;
+      let last_good = !(Lib.Server_dashboard_http._last_good_shell) in
+      check bool "last good shell is non-empty after warm"
+        true
+        (last_good <> `Assoc []);
+      (* Now verify that _last_good_shell has namespace counts. *)
+      let open Yojson.Safe.Util in
+      let counts = last_good |> member "counts" in
+      check bool "last good shell contains counts block"
+        true
+        (counts <> `Null);
+      (* Verify namespace-truth snapshot_from_caches uses the stale shell data
+         even when the warmed flag is false (cold path, simulating timeout). *)
+      Lib.Server_dashboard_http._shell_warmed := false;
+      let snapshot =
+        match Lib.Server_dashboard_http.namespace_truth_snapshot_from_caches state with
+        | Some json -> json
+        | None -> fail "expected cached namespace-truth snapshot"
+      in
+      let ns_counts = snapshot |> member "namespace" |> member "counts" in
+      (* Shell was warmed once then reset; snapshot_from_caches should still
+         produce a valid namespace block via the _last_good_shell fallback. *)
+      check bool "namespace counts block present in fallback snapshot"
+        true
+        (ns_counts <> `Null);
+      (* Restore warmed state for subsequent tests. *)
+      Lib.Server_dashboard_http._shell_warmed := true)
+
 let () =
   Alcotest.run "Dashboard Namespace Truth"
     [
@@ -523,5 +561,7 @@ let () =
             test_namespace_truth_cached_snapshot_matches_http_projection_blocks;
           test_case "expired execution warmup falls back to partial truth" `Quick
             test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth;
+          test_case "last-good shell fallback preserves namespace counts" `Quick
+            test_last_good_shell_fallback_preserves_counts;
         ] );
     ]

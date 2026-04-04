@@ -92,6 +92,48 @@ let take n items =
   else
     List.filteri (fun i _ -> i < n) items
 
+let tool_query_text_of_user_message (text : string) : string =
+  let allowed_sections =
+    [
+      "### Pending Mentions";
+      "### Scope Messages";
+      "### Active Goals";
+      "### Namespace State";
+      "### Board Activity";
+      "### Actionable Routes";
+      "### Live Worktree Delta";
+    ]
+  in
+  let is_allowed_section section =
+    List.exists
+      (fun allowed -> String.starts_with ~prefix:allowed section)
+      allowed_sections
+  in
+  let lines = String.split_on_char '\n' text in
+  let rec loop current_section kept = function
+    | [] ->
+        let filtered = List.rev kept |> String.concat "\n" |> String.trim in
+        if filtered <> "" then filtered else String.trim text
+    | line :: rest ->
+        let trimmed = String.trim line in
+        let current_section =
+          if String.starts_with ~prefix:"### " trimmed then Some trimmed
+          else current_section
+        in
+        let keep_line =
+          match current_section with
+          | None ->
+              String.starts_with ~prefix:"## Current World State" trimmed
+          | Some section ->
+              is_allowed_section section
+        in
+        if keep_line then
+          loop current_section (line :: kept) rest
+        else
+          loop current_section kept rest
+  in
+  loop None [] lines
+
 let prioritized_disclosed_tool_names
     ~(max_tools : int)
     ~(always_include_tools : string list)
@@ -252,7 +294,7 @@ let run_turn
     ?on_event
     ?(trajectory_acc : Trajectory.accumulator option)
     ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
-    ?_priority
+    ?priority
     ?(is_retry = false)
     ()
   : (run_result, string) result =
@@ -351,7 +393,7 @@ let run_turn
     Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
   (* 7. Set up agent *)
   let ctx_ref = ref ctx_work in
-  let agent_name = Printf.sprintf "keeper-%s" meta.name in
+  let agent_name = meta.agent_name in
   let meta_ref = ref meta in
   let agent_ref : Agent_sdk.Agent.t option ref = ref None in
   let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
@@ -600,8 +642,9 @@ let run_turn
           ) "" messages
         in
         let query_text =
-          if String.trim last_user_text <> "" then last_user_text
-          else user_message
+          (if String.trim last_user_text <> "" then last_user_text
+           else user_message)
+          |> tool_query_text_of_user_message
         in
         (* Confidence-gated union: always retrieve, but union fallback
            when BM25 confidence is low (e.g. Korean query vs English docs).
@@ -784,10 +827,24 @@ let run_turn
   let on_resume = if yield_on_tool then Some (fun () ->
     Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" meta.name
   ) else None in
+  let priority =
+    Option.value priority ~default:Llm_provider.Request_priority.Proactive
+  in
+  let effective_allowed_paths =
+    Keeper_alerting_path.effective_allowed_paths ~meta
+  in
   match
+        Keeper_alerting_path.absolute_allowed_paths_result
+          ~config
+          ~allowed_paths:effective_allowed_paths
+      with
+      | Error e -> Error e
+      | Ok oas_allowed_paths ->
+        (match
         Oas_worker.run_named
           ~cascade_name
           ~goal:user_message
+          ~priority
           ~session_id:meta.runtime.trace_id
           ~system_prompt:turn_system_prompt
           ~tools
@@ -806,7 +863,7 @@ let run_turn
           ?on_resume
           ~agent_ref
           ?contract
-          ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
+          ~allowed_paths:oas_allowed_paths
           ~cache_system_prompt:true
           ~yield_on_tool
           ()
@@ -931,4 +988,4 @@ let run_turn
            checkpoint = result.checkpoint;
            proof = result.proof;
            stop_reason = result.stop_reason;
-         })
+         }))

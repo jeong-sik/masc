@@ -806,8 +806,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `POST, "/api/v1/namespace/current"
       | `POST, "/api/v1/room/current" ->
-          let state = get_server_state () in
-          let config = state.Mcp_server.room_config in
           h2_read_body h2_reqd (fun body_str ->
             let error_json msg = `Assoc [("error", `String msg)] in
             try
@@ -822,11 +820,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                | None ->
                    h2_respond_json h2_reqd
                      (Yojson.Safe.to_string
-                        (error_json
+                     (error_json
                            "namespace_id is required and cannot be empty"))
                       ~status:`Bad_request ~extra_headers:cors
                | Some namespace_id ->
-                     Room.write_current_room config namespace_id;
                      let response =
                        `Assoc
                          [

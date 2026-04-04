@@ -404,7 +404,9 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                         | Agent_sdk.Autonomy_diff_guard.Empty_patch -> true
                         | _ -> false)
                       report.issues
-                 then
+                 then (
+                   restore_original_content
+                     ~workdir ~target_file ~original_content ~sync_index:false;
                    let (state, record) =
                      forced_discard_record state
                        ~hypothesis ~score_before ~elapsed_ms:0
@@ -412,8 +414,8 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                        ()
                    in
                    persist_discard_record ctx state
-                     ~loop_id:id ~hypothesis ~reason:"no diff produced" record
-                 else if not report.accepted then
+                     ~loop_id:id ~hypothesis ~reason:"no diff produced" record)
+                 else if not report.accepted then (
                    let summary = diff_guard_summary report in
                    restore_original_content
                      ~workdir ~target_file ~original_content ~sync_index:false;
@@ -434,7 +436,7 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                    persist_discard_record ctx state
                      ~loop_id:id ~hypothesis
                      ~reason:("diff guard rejected patch: " ^ summary)
-                     record
+                     record)
                  else
                    let commit_result =
                      Autoresearch.git_commit_cycle
@@ -462,6 +464,8 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                          ("cycle", `Int state.current_cycle);
                        ]
                    | Ok None ->
+                     restore_original_content
+                       ~workdir ~target_file ~original_content ~sync_index:false;
                      let (state, record) =
                        forced_discard_record state
                          ~hypothesis ~score_before ~elapsed_ms:0
@@ -587,10 +591,7 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                        Autoresearch.with_loops_rw (fun () ->
                          Hashtbl.replace Autoresearch.active_loops id state);
                        Autoresearch.save_state ~base_path:ctx.base_path state;
-                       let config =
-                         Room.default_config ctx.base_path
-                         |> Room.config_with_resolved_scope
-                       in
+                       let config = Room.default_config ctx.base_path in
                        (match
                           Autoresearch.load_swarm_link_by_loop
                             ~base_path:ctx.base_path id

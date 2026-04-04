@@ -18,10 +18,6 @@ let room_dir_for config room_id =
 (** The operational namespace is always "default". *)
 let read_current_room _config = Some "default"
 
-(** Identity function retained for external callers during migration.
-    Will be removed in Phase 1b (scope field removal). *)
-let resolve_initial_scope _config = Default
-
 (** Directory resolution. Always resolves to the root .masc/ directory. *)
 let masc_dir config = masc_root_dir config
 
@@ -274,10 +270,6 @@ let is_initialized config =
       Sys.file_exists (masc_dir config) &&
       Sys.is_directory (masc_dir config) &&
       Sys.file_exists (state_path config)
-
-(** Identity: scope is always Default. Retained for 8 external callers.
-    Will be removed in Phase 1b (scope field removal). *)
-let config_with_resolved_scope config = config
 
 (* ============================================ *)
 (* Validation helpers                           *)

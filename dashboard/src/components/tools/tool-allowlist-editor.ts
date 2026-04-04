@@ -58,6 +58,9 @@ const usageCountMap = computed<Map<string, number>>(() => {
   return m
 })
 
+const RESOLVED_CATEGORY_PREVIEW_LIMIT = 4
+const RESOLVED_TOOLS_PER_CATEGORY_LIMIT = 6
+
 // ── Helpers ──────────────────────────────────
 
 function parseToolList(raw: string): string[] {
@@ -121,7 +124,40 @@ function ReadOnlyChip({ name }: { name: string }) {
 }
 
 /** Resolved allowlist grouped by category. */
-function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Map<string, string> }) {
+export interface ResolvedAllowlistGroup {
+  category: string
+  names: string[]
+}
+
+export function buildResolvedAllowlistGroups(
+  tools: string[],
+  catMap: Map<string, string>,
+): ResolvedAllowlistGroup[] {
+  const groups = new Map<string, string[]>()
+  for (const name of tools) {
+    const cat = catMap.get(name) ?? 'other'
+    const list = groups.get(cat)
+    if (list) list.push(name)
+    else groups.set(cat, [name])
+  }
+
+  return Array.from(groups.entries())
+    .map(([category, names]) => ({
+      category,
+      names,
+    }))
+    .sort((left, right) => right.names.length - left.names.length || left.category.localeCompare(right.category))
+}
+
+export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Map<string, string> }) {
+  const [expanded, setExpanded] = useState(false)
+  const firstTool = tools[0] ?? null
+  const lastTool = tools.length > 0 ? tools[tools.length - 1] : null
+
+  useEffect(() => {
+    setExpanded(false)
+  }, [tools.length, firstTool, lastTool])
+
   if (tools.length === 0) {
     return html`
       <div class="flex flex-col gap-1">
@@ -131,29 +167,49 @@ function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Map<strin
     `
   }
 
-  const groups = new Map<string, string[]>()
-  for (const name of tools) {
-    const cat = catMap.get(name) ?? 'other'
-    const list = groups.get(cat)
-    if (list) list.push(name)
-    else groups.set(cat, [name])
-  }
+  const groups = buildResolvedAllowlistGroups(tools, catMap)
+  const visibleGroups = expanded ? groups : groups.slice(0, RESOLVED_CATEGORY_PREVIEW_LIMIT)
+  const hasHiddenContent = groups.length > RESOLVED_CATEGORY_PREVIEW_LIMIT
+    || groups.some(group => group.names.length > RESOLVED_TOOLS_PER_CATEGORY_LIMIT)
 
   return html`
     <div class="flex flex-col gap-1">
       <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-        resolved allowlist (${tools.length}개, ${groups.size} 카테고리)
+        resolved allowlist (${tools.length}개, ${groups.length} 카테고리)
       </span>
-      <div class="flex flex-col gap-2 max-h-[160px] overflow-y-auto">
-        ${Array.from(groups.entries()).map(([cat, names]) => html`
+      <div class="flex flex-col gap-2">
+        ${visibleGroups.map(group => {
+          const visibleNames = expanded ? group.names : group.names.slice(0, RESOLVED_TOOLS_PER_CATEGORY_LIMIT)
+          const hiddenToolCount = Math.max(0, group.names.length - visibleNames.length)
+          return html`
           <div class="flex flex-col gap-1">
-            <span class="text-[9px] font-bold uppercase tracking-widest text-[var(--text-muted)]">${cat} (${names.length})</span>
+            <span class="text-[9px] font-bold uppercase tracking-widest text-[var(--text-muted)]">${group.category} (${group.names.length})</span>
             <div class="flex flex-wrap gap-1">
-              ${names.map(name => html`<${ReadOnlyChip} name=${name} />`)}
+              ${visibleNames.map(name => html`<${ReadOnlyChip} name=${name} />`)}
+              ${!expanded && hiddenToolCount > 0
+                ? html`
+                    <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
+                      +${hiddenToolCount}
+                    </span>
+                  `
+                : null}
             </div>
           </div>
-        `)}
+        `
+        })}
       </div>
+      ${hasHiddenContent
+        ? html`
+            <button type="button"
+              class="self-start text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+              aria-expanded=${expanded}
+              aria-label=${expanded ? 'resolved allowlist 접기' : `resolved allowlist 전체 ${tools.length}개 보기`}
+              onClick=${() => setExpanded(value => !value)}
+            >
+              ${expanded ? '접기' : `전체 ${tools.length}개 보기`}
+            </button>
+          `
+        : null}
     </div>
   `
 }

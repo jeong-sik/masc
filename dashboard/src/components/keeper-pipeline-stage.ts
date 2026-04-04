@@ -11,7 +11,7 @@ const STAGES: { key: PipelineStage; label: string }[] = [
   { key: 'tool_use', label: 'tool' },
   { key: 'compacting', label: 'compact' },
   { key: 'handoff', label: 'handoff' },
-  { key: 'proactive', label: 'proactive' },
+  { key: 'scheduled_autonomous', label: 'auto' },
 ]
 
 const STAGE_ORDER: Record<string, number> = Object.fromEntries(

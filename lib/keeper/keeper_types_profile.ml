@@ -28,49 +28,6 @@ let short_preview ?(max_len = 220) (s : string) : string =
   if String.length s <= max_len then s
   else utf8_safe_prefix_bytes s ~max_bytes:max_len ^ "..."
 
-let normalize_similarity_text (s : string) : string =
-  let len = String.length s in
-  let buf = Bytes.create len in
-  for i = 0 to len - 1 do
-    let c = Char.lowercase_ascii s.[i] in
-    let keep =
-      (c >= 'a' && c <= 'z')
-      || (c >= '0' && c <= '9')
-      || c = ' '
-    in
-    Bytes.set buf i (if keep then c else ' ')
-  done;
-  Bytes.to_string buf
-
-let similarity_tokens (s : string) : string list =
-  s
-  |> normalize_similarity_text
-  |> String.split_on_char ' '
-  |> List.filter (fun t -> String.length t >= 2)
-
-let jaccard_similarity (a : string list) (b : string list) : float =
-  let set_of_list xs =
-    let tbl = Hashtbl.create (List.length xs) in
-    List.iter (fun x -> Hashtbl.replace tbl x ()) xs;
-    tbl
-  in
-  let sa = set_of_list a in
-  let sb = set_of_list b in
-  let sa_len = Hashtbl.length sa in
-  let sb_len = Hashtbl.length sb in
-  if sa_len = 0 && sb_len = 0 then 1.0
-  else
-    let inter =
-      Hashtbl.fold (fun k () n -> if Hashtbl.mem sb k then n + 1 else n) sa 0
-    in
-    let union = sa_len + sb_len - inter in
-    if union <= 0 then 0.0 else float_of_int inter /. float_of_int union
-
-let proactive_similarity_score ~(candidate : string) ~(previous : string) : float =
-  let a = similarity_tokens candidate in
-  let b = similarity_tokens previous in
-  jaccard_similarity a b
-
 let soul_profile_policy profile =
   match profile with
   | "safety" ->
@@ -139,7 +96,6 @@ let normalize_tool_preset_raw raw =
 let first_some = Dashboard_utils.first_some
 
 let canonical_room_scope = function
-  | "all" -> "all"
   | _ -> "current"
 
 let canonical_scope_kind = function
@@ -660,5 +616,14 @@ let session_base_dir (config : Room.config) =
   let d = Filename.concat (Room.masc_root_dir config) "traces" in
   ensure_dir d
 
+(** Strip "keeper-" prefix if already present to prevent double-prefixing.
+    E.g. "keeper-admin" -> "admin", "sangsu" -> "sangsu". *)
+let strip_keeper_prefix name =
+  let prefix = "keeper-" in
+  let plen = String.length prefix in
+  if String.length name > plen && String.sub name 0 plen = prefix
+  then String.sub name plen (String.length name - plen)
+  else name
+
 let keeper_agent_name name =
-  Printf.sprintf "keeper-%s-agent" name
+  Printf.sprintf "keeper-%s-agent" (strip_keeper_prefix name)

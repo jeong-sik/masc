@@ -23,7 +23,8 @@ desires = "Proactive anomaly detection with low false-positive rate."
 instructions = "You are a log analyzer. Read structured JSONL logs, identify patterns, correlate with recent code changes, and report findings on the board."
 
 # Trigger and scope
-room_scope = "all"
+# room_scope is a single-room compatibility field and should stay "current".
+room_scope = "current"
 scope_kind = "global"
 mention_targets = ["sherlock", "log-analyzer"]
 

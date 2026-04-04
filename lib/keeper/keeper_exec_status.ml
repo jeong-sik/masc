@@ -408,23 +408,22 @@ let keeper_surface_status
     |> Option.value ~default:"offline"
     |> String.lowercase_ascii
   in
-  if String.equal health_state "offline" then "offline"
-  else
-    match json_string_opt "status" agent_status with
-    | Some status -> (
-        match String.lowercase_ascii status with
-        | ("active" | "busy" | "listening" | "idle") as status -> status
-        | "offline" | "inactive" -> "offline"
-        | _ -> (
-            match health_state with
-            | "idle" -> "idle"
-            | "healthy" | "stale" | "degraded" -> "active"
-            | _ -> "offline"))
-    | None -> (
-        match health_state with
-        | "idle" -> "idle"
-        | "healthy" | "stale" | "degraded" -> "active"
-        | _ -> "offline")
+  let agent_runtime_status =
+    json_string_opt "status" agent_status |> Option.map String.lowercase_ascii
+  in
+  match health_state with
+  | "healthy" -> (
+      match agent_runtime_status with
+      | Some (("active" | "busy" | "listening" | "idle") as status) -> status
+      | Some ("offline" | "inactive") -> "offline"
+      | _ -> "active")
+  | "idle" -> "idle"
+  | "stale" | "degraded" | "zombie" | "dead" -> "inactive"
+  | "offline" -> "offline"
+  | _ -> (
+      match agent_runtime_status with
+      | Some ("offline" | "inactive") -> "offline"
+      | _ -> "inactive")
 
 let keeper_diagnostic_json
     ~(meta : keeper_meta)
@@ -463,14 +462,15 @@ let keeper_diagnostic_json
 (** Derive pipeline stage from keeper_meta timestamps.
     Uses recency thresholds to infer what the keeper is doing.
     Stages: "idle" | "thinking" | "tool_use" | "compacting" | "handoff"
-            | "proactive" | "offline"
+            | "scheduled_autonomous" | "offline"
     The 30s recency window matches the typical keeper turn duration. *)
 let derive_pipeline_stage
     ~(meta : keeper_meta)
     ~(surface_status : string)
     ~(now_ts : float)
   : string =
-  if String.equal surface_status "offline" then "offline"
+  if String.equal surface_status "offline" || String.equal surface_status "inactive"
+  then "offline"
   else
     let recency_threshold = 30.0 in
     let turn_ago =
@@ -485,14 +485,15 @@ let derive_pipeline_stage
       if meta.runtime.last_handoff_ts <= 0.0 then Float.infinity
       else now_ts -. meta.runtime.last_handoff_ts
     in
-    let proactive_ago =
+    let scheduled_autonomous_ago =
       if meta.runtime.proactive_rt.last_ts <= 0.0 then Float.infinity
       else now_ts -. meta.runtime.proactive_rt.last_ts
     in
     (* Pick the most recent activity within the recency window.
-       Priority order when multiple are recent: handoff > compacting > proactive > thinking *)
+       Priority order when multiple are recent:
+       handoff > compacting > scheduled autonomous > thinking *)
     if handoff_ago < recency_threshold then "handoff"
     else if compaction_ago < recency_threshold then "compacting"
-    else if proactive_ago < recency_threshold then "proactive"
+    else if scheduled_autonomous_ago < recency_threshold then "scheduled_autonomous"
     else if turn_ago < recency_threshold then "thinking"
     else "idle"

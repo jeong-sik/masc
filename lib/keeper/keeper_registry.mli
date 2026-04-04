@@ -44,8 +44,8 @@ type registry_entry = {
   grpc_close : (unit -> unit) option Atomic.t;
   done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
   done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
-      (** Exposed so the supervisor fiber can resolve on stop/crash.
-          Only the fiber owning this keeper should call [Eio.Promise.resolve]. *)
+      (** Exposed so keeper lifecycle coordinators can resolve stop/crash exactly once.
+          Callers must preserve a single terminal outcome per keeper run. *)
   restart_count : int;
   last_restart_ts : float;
   dead_since_ts : float option;

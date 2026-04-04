@@ -6,13 +6,6 @@ type storage_backend =
   | FileSystem of Backend.FileSystem.t
   | PostgresNative of Backend.Postgres.t
 
-(** Room scope — determines which directory tree is active.
-    Resolved once at config creation time, never re-read from filesystem.
-    Since #4638 the Named variant has been removed; all state lives under
-    the root .masc/ directory directly. *)
-type scope =
-  | Default          (** Root .masc/ directory *)
-
 (** Room configuration *)
 type config = {
   base_path: string;
@@ -20,11 +13,7 @@ type config = {
   lock_expiry_minutes: int;
   backend_config: Backend_types.config;
   backend: storage_backend;
-  scope: scope;
 }
-
-(** Create a config targeting a different scope. Cheap record copy. *)
-let with_scope config scope = { config with scope }
 
 let _domain_local_pg_backend_created = Atomic.make 0
 let _domain_local_pg_backend_failed = Atomic.make 0
@@ -486,7 +475,6 @@ let default_config base_path =
     lock_expiry_minutes = 2;
     backend_config;
     backend;
-    scope = Default;
   }
 
 (** Create config with Eio context - required for PostgresNative backend.
@@ -534,7 +522,6 @@ let default_config_eio ~sw ~env ?(on_backend_ready = fun _backend -> ()) base_pa
     lock_expiry_minutes = 2;
     backend_config;
     backend;
-    scope = Default;
   }
 
 (* ============================================ *)

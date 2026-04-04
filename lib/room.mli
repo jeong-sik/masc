@@ -20,8 +20,6 @@ include module type of Room_gc
 include module type of Room_agent
 include module type of Room_vote
 include module type of Room_tempo
-include module type of Room_multi
-
 (** {1 Room lifecycle (overrides)} *)
 
 (** Initialize MASC room with optional auto-join.

@@ -69,6 +69,15 @@ let contains_disallowed_control_char s =
   in
   loop 0
 
+let with_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect ~finally:(fun () ->
+    match old with
+    | Some v -> Unix.putenv name v
+    | None -> (try Unix.putenv name "" with _ -> ()))
+    f
+
 (* ---------- World Observation type tests ---------- *)
 
 let base_observation : WO.world_observation =
@@ -153,6 +162,13 @@ let minimal_meta : Masc_mcp.Keeper_types.keeper_meta =
   match Masc_mcp.Keeper_types.meta_of_json json with
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
+
+let minimal_policy_meta =
+  {
+    minimal_meta with
+    tool_access =
+      Preset { preset = Minimal; also_allow = [] };
+  }
 
 let room_signal_meta =
   { minimal_meta with room_signal_prompt_enabled = true }
@@ -327,10 +343,7 @@ let test_scheduled_turn_uses_cooldown_only () =
   let meta =
     { minimal_meta with
       proactive =
-        { minimal_meta.proactive with
-          enabled = true;
-          cooldown_sec = 60;
-        };
+        { enabled = true; idle_sec = 0; cooldown_sec = 60 };
       runtime =
         { minimal_meta.runtime with
           proactive_rt =
@@ -348,10 +361,7 @@ let test_scheduled_turn_respects_cooldown () =
   let meta =
     { minimal_meta with
       proactive =
-        { minimal_meta.proactive with
-          enabled = true;
-          cooldown_sec = 300;
-        };
+        { enabled = true; idle_sec = 0; cooldown_sec = 300 };
       runtime =
         { minimal_meta.runtime with
           proactive_rt =
@@ -364,34 +374,75 @@ let test_scheduled_turn_respects_cooldown () =
   check bool "cooldown blocks scheduled turn" false
     (WO.should_run_unified_turn ~meta base_observation)
 
+let test_scheduled_turn_requires_idle_gate () =
+  let meta =
+    {
+      minimal_meta with
+      proactive =
+        { enabled = true; idle_sec = 300; cooldown_sec = 60 };
+      runtime =
+        {
+          minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 600.0;
+            };
+        };
+    }
+  in
+  let obs = { base_observation with idle_seconds = 120 } in
+  check bool "idle gate blocks scheduled turn" false
+    (WO.should_run_unified_turn ~meta obs);
+  let decision = WO.unified_turn_decision ~meta obs in
+  check bool "decision records idle wait reason" true
+    (List.mem "idle_gate_wait" decision.reasons)
+
 let test_effective_cooldown_no_decay_within_base () =
   (* Within the base cooldown period, no decay should apply. *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:900 in
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:900
+  in
   check int "no decay within base" 1800 result
 
 let test_effective_cooldown_at_boundary () =
   (* Exactly at the base cooldown, no decay yet. *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:1800 in
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:1800
+  in
   check int "no decay at boundary" 1800 result
 
 let test_effective_cooldown_first_decay () =
   (* One full extra period: cooldown halved. *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:3600 in
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:3600
+  in
   check int "first decay halves cooldown" 900 result
 
 let test_effective_cooldown_second_decay () =
   (* Two extra periods: cooldown quartered. *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:5400 in
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:5400
+  in
   check int "second decay quarters cooldown" 450 result
 
 let test_effective_cooldown_floor () =
   (* Four+ extra periods: cooldown at floor (300s default). *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:10800 in
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:10800
+  in
   check int "decay floors at min_cooldown" 300 result
 
 let test_effective_cooldown_max_int () =
-  (* max_int (first proactive ever): should hit floor immediately. *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:max_int in
+  (* max_int (first scheduled autonomous cycle ever): should hit floor immediately. *)
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:max_int
+  in
   check int "max_int hits floor" 300 result
 
 let test_idle_decay_triggers_turn () =
@@ -400,10 +451,7 @@ let test_idle_decay_triggers_turn () =
   let meta =
     { minimal_meta with
       proactive =
-        { minimal_meta.proactive with
-          enabled = true;
-          cooldown_sec = 1800;
-        };
+        { enabled = true; idle_sec = 0; cooldown_sec = 1800 };
       runtime =
         { minimal_meta.runtime with
           proactive_rt =
@@ -415,6 +463,64 @@ let test_idle_decay_triggers_turn () =
   in
   check bool "idle decay triggers turn before base cooldown" true
     (WO.should_run_unified_turn ~meta base_observation)
+
+let test_scheduled_turn_decision_uses_backlog_acceleration () =
+  let meta =
+    {
+      minimal_meta with
+      proactive =
+        { enabled = true; idle_sec = 60; cooldown_sec = 900 };
+      runtime =
+        {
+          minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 320.0;
+            };
+        };
+    }
+  in
+  let obs =
+    {
+      base_observation with
+      idle_seconds = 120;
+      failed_task_count = 2;
+    }
+  in
+  let decision = WO.unified_turn_decision ~meta obs in
+  check bool "backlog acceleration opens scheduled turn" true decision.should_run;
+  check bool "marks actionable backlog" true
+    (List.mem "actionable_backlog" decision.reasons);
+  check bool "marks backlog cooldown elapsed" true
+    (List.mem "task_reactive_cooldown_elapsed" decision.reasons)
+
+let test_task_reactive_cooldown_floor_never_hits_zero () =
+  with_env "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC" "0" (fun () ->
+    let meta =
+      {
+        minimal_meta with
+        proactive =
+          { enabled = true; idle_sec = 60; cooldown_sec = 900 };
+        runtime =
+          {
+            minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                last_ts = Time_compat.now () -. 320.0;
+              };
+          };
+      }
+    in
+    let obs =
+      {
+        base_observation with
+        idle_seconds = 120;
+        failed_task_count = 1;
+      }
+    in
+    let decision = WO.unified_turn_decision ~meta obs in
+    check (option int) "task reactive cooldown clamps to positive floor" (Some 300)
+      decision.task_reactive_cooldown)
 
 let test_prompt_contains_identity () =
   let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
@@ -451,6 +557,53 @@ let test_prompt_mentions_extend_turns_guidance () =
          true
        with Not_found -> false
      in found)
+
+let test_prompt_includes_operational_tool_guidance () =
+  let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
+  check bool "mentions task audit guidance" true
+    (contains_substring sys "keeper_tasks_audit");
+  check bool "mentions policy-aware availability" true
+    (contains_substring sys "current tool policy");
+  check bool "mentions worktree inspection guidance" true
+    (contains_substring sys "masc_code_read");
+  check bool "mentions heartbeat maintenance guidance" true
+    (contains_substring sys "masc_heartbeat")
+
+let test_prompt_includes_autonomous_trigger_section () =
+  let meta =
+    {
+      minimal_meta with
+      proactive =
+        { enabled = true; idle_sec = 0; cooldown_sec = 60 };
+      runtime =
+        {
+          minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 300.0;
+            };
+        };
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta ~observation:base_observation in
+  check bool "has autonomous trigger section" true
+    (contains_substring user "Autonomous Trigger");
+  check bool "includes scheduled reason" true
+    (contains_substring user "scheduled autonomous keepalive turn");
+  check bool "includes cooldown detail" true
+    (contains_substring user "effective cooldown")
+
+let test_prompt_omits_autonomous_trigger_for_reactive_turn () =
+  let obs =
+    {
+      base_observation with
+      pending_mentions = [ ("alice", "please check this") ];
+      idle_seconds = 999;
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  check bool "reactive turn omits autonomous trigger section" false
+    (contains_substring user "Autonomous Trigger")
 
 let test_prompt_omits_empty_sections () =
   let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
@@ -580,6 +733,48 @@ let test_prompt_room_state_section () =
        with Not_found -> false
      in found)
 
+let test_prompt_includes_actionable_routes_for_operational_signals () =
+  let obs =
+    {
+      base_observation with
+      failed_task_count = 2;
+      worktree_change_summary =
+        Some
+          "<git_status_change>\nWorking tree changed since last keeper turn (1 files):\n?? lib/example.ml\n</git_status_change>";
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  check bool "has actionable routes section" true
+    (contains_substring user "Actionable Routes");
+  check bool "includes task audit route" true
+    (contains_substring user "keeper_tasks_audit");
+  check bool "includes worktree inspection route" true
+    (contains_substring user "inspect changed files with");
+  check bool "includes fs inspection route" true
+    (contains_substring user "keeper_fs_read")
+
+let test_prompt_actionable_routes_respect_tool_policy () =
+  let obs =
+    {
+      base_observation with
+      failed_task_count = 2;
+      worktree_change_summary =
+        Some
+          "<git_status_change>\nWorking tree changed since last keeper turn (1 files):\n?? lib/example.ml\n</git_status_change>";
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta:minimal_policy_meta ~observation:obs in
+  check bool "keeps actionable routes section" true
+    (contains_substring user "Actionable Routes");
+  check bool "does not recommend unavailable task audit tool" false
+    (contains_substring user "keeper_tasks_audit");
+  check bool "does not recommend unavailable file inspection tool" false
+    (contains_substring user "keeper_fs_read");
+  check bool "explains task audit unavailable" true
+    (contains_substring user "task-audit tooling is unavailable");
+  check bool "explains file inspection unavailable" true
+    (contains_substring user "file-inspection tools are unavailable")
+
 let test_prompt_omits_room_signal_when_flag_disabled () =
   let interpretation : Masc_mcp.Meta_cognition.interpretation =
     {
@@ -657,15 +852,6 @@ let test_prompt_includes_room_signal_when_flag_enabled () =
     (contains_substring user "namespace_digest_post_id: post-digest-1")
 
 (* ---------- Config tests ---------- *)
-
-let with_env name value f =
-  let old = Sys.getenv_opt name in
-  Unix.putenv name value;
-  Fun.protect ~finally:(fun () ->
-    match old with
-    | Some v -> Unix.putenv name v
-    | None -> (try Unix.putenv name "" with _ -> ()))
-    f
 
 let test_unified_turn_runtime_defaults () =
   with_env "MASC_KEEPER_UNIFIED_TEMP" "" (fun () ->
@@ -764,6 +950,34 @@ let test_metrics_noop_response () =
   check int "autonomous unchanged" minimal_meta.runtime.autonomous_action_count
     updated.runtime.autonomous_action_count;
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns
+
+let test_metrics_heartbeat_only_tool_response_is_maintenance_only () =
+  let result =
+    make_run_result ~text:"" ~tools:["masc_heartbeat"]
+      ~model:"test-model" ~input_tok:40 ~output_tok:0
+  in
+  let updated =
+    UT.update_metrics_from_result minimal_meta ~latency_ms:80
+      ~observation:base_observation result
+  in
+  check int "proactive_count +1"
+    (minimal_meta.runtime.proactive_rt.count_total + 1)
+    updated.runtime.proactive_rt.count_total;
+  check int "proactive visible_count unchanged"
+    minimal_meta.runtime.proactive_rt.visible_count_total
+    updated.runtime.proactive_rt.visible_count_total;
+  check bool "heartbeat-only outcome stays silent" true
+    (updated.runtime.proactive_rt.last_outcome
+     = Masc_mcp.Keeper_types.Proactive_silent);
+  check int "autonomous action unchanged"
+    minimal_meta.runtime.autonomous_action_count
+    updated.runtime.autonomous_action_count;
+  check int "autonomous tool turn unchanged"
+    minimal_meta.runtime.autonomous_tool_turn_count
+    updated.runtime.autonomous_tool_turn_count;
+  check int "noop turn increments"
+    (minimal_meta.runtime.noop_turn_count + 1)
+    updated.runtime.noop_turn_count
 
 let test_metrics_reactive_turn_does_not_mutate_proactive_runtime () =
   let reactive_observation =
@@ -1361,6 +1575,46 @@ let test_prioritized_disclosed_tool_names_skips_fallback_when_disabled () =
     [ "always-1"; "always-2"; "retrieved-1"; "retrieved-2" ]
     selected
 
+let test_tool_query_text_of_user_message_strips_continuity_noise () =
+  let user_message =
+    "## Current World State\n\n### Namespace State\n- Failed tasks: 5\n\n### Actionable Routes\n- Failed tasks: audit them with keeper_tasks_audit before deciding there is nothing meaningful to do.\n\n### Autonomous Trigger\n- Scheduler: scheduled autonomous keepalive turn.\n\n### Continuity\nDONE: 하트비트 갱신\nNEXT: 대기 유지\n\n### Live Worktree Delta\n<git_status_change>\n?? lib/example.ml\n</git_status_change>\n"
+  in
+  let query = KAR.tool_query_text_of_user_message user_message in
+  check bool "continuity heading stripped" false
+    (contains_substring query "### Continuity");
+  check bool "heartbeat residue stripped" false
+    (contains_substring query "하트비트 갱신");
+  check bool "autonomous trigger stripped" false
+    (contains_substring query "Autonomous Trigger");
+  check bool "actionable routes preserved" true
+    (contains_substring query "keeper_tasks_audit");
+  check bool "worktree section preserved" true
+    (contains_substring query "Live Worktree Delta")
+
+let test_tool_query_text_of_user_message_keeps_counted_headers () =
+  let obs =
+    {
+      base_observation with
+      pending_mentions = [ ("alice", "please inspect the failures") ];
+      pending_scope_messages = [ ("bob", "recent room update") ];
+      active_goals = [ "goal-1" ];
+      pending_board_events = [ sample_board_event ];
+      failed_task_count = 2;
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  let query = KAR.tool_query_text_of_user_message user in
+  check bool "keeps counted pending mentions header" true
+    (contains_substring query "### Pending Mentions (1)");
+  check bool "keeps mention content" true
+    (contains_substring query "@alice: please inspect the failures");
+  check bool "keeps counted scope messages header" true
+    (contains_substring query "### Scope Messages (1 recent)");
+  check bool "keeps counted active goals header" true
+    (contains_substring query "### Active Goals (1)");
+  check bool "keeps counted board activity header" true
+    (contains_substring query "### Board Activity (1 new)")
+
 let test_social_model_silences_skip_only_turn () =
   let result =
     make_run_result
@@ -1449,6 +1703,41 @@ let test_social_model_routes_blocker_to_board_post () =
           check bool "post body mentions blocker" true
             (contains_substring post.body "blocked")
       | _ -> fail "expected one request-help board post")
+
+let test_social_model_tool_only_turn_skips_protocol_violation () =
+  let result =
+    make_run_result ~text:"" ~tools:["masc_heartbeat"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1
+  in
+  let routed, state =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation result
+  in
+  check string "speech act" "defer"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "silent"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check (option string) "no protocol violation blocker" None state.blocker;
+  check string "visible response suppressed" "" routed.response_text;
+  check (list string) "tool list preserved" ["masc_heartbeat"] routed.tools_used
+
+let test_social_model_infers_board_comment_from_tool_use () =
+  let result =
+    make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_heartbeat"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1
+  in
+  let routed, state =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation result
+  in
+  check string "speech act" "comment_board"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "board_comment"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check (option string) "no protocol violation blocker" None state.blocker;
+  check string "visible response empty" "" routed.response_text;
+  check (list string) "tool list preserved"
+    ["keeper_board_comment"; "masc_heartbeat"] routed.tools_used
 
 (* ---------- render_inline_skip_reason tests ---------- *)
 
@@ -1540,6 +1829,8 @@ let () =
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn respects cooldown" `Quick
             test_scheduled_turn_respects_cooldown;
+          test_case "scheduled turn requires idle gate" `Quick
+            test_scheduled_turn_requires_idle_gate;
           test_case "idle decay: no decay within base" `Quick
             test_effective_cooldown_no_decay_within_base;
           test_case "idle decay: at boundary" `Quick
@@ -1554,6 +1845,10 @@ let () =
             test_effective_cooldown_max_int;
           test_case "idle decay: triggers turn" `Quick
             test_idle_decay_triggers_turn;
+          test_case "scheduled decision uses backlog acceleration" `Quick
+            test_scheduled_turn_decision_uses_backlog_acceleration;
+          test_case "task reactive cooldown floor never hits zero" `Quick
+            test_task_reactive_cooldown_floor_never_hits_zero;
           test_case "with goals" `Quick test_observation_with_goals;
           test_case "economic modes" `Quick test_observation_economic_modes;
         ] );
@@ -1563,6 +1858,12 @@ let () =
           test_case "contains goal" `Quick test_prompt_contains_goal;
           test_case "mentions extend_turns guidance" `Quick
             test_prompt_mentions_extend_turns_guidance;
+          test_case "includes operational tool guidance" `Quick
+            test_prompt_includes_operational_tool_guidance;
+          test_case "includes autonomous trigger section" `Quick
+            test_prompt_includes_autonomous_trigger_section;
+          test_case "omits autonomous trigger for reactive turn" `Quick
+            test_prompt_omits_autonomous_trigger_for_reactive_turn;
           test_case "omits empty sections" `Quick test_prompt_omits_empty_sections;
           test_case "includes mentions" `Quick test_prompt_includes_mentions_section;
           test_case "includes board activity" `Quick
@@ -1574,6 +1875,10 @@ let () =
           test_case "hustle economy" `Quick test_prompt_hustle_economy;
           test_case "includes worktree delta" `Quick test_prompt_includes_worktree_delta;
           test_case "room state section" `Quick test_prompt_room_state_section;
+          test_case "includes actionable routes for operational signals" `Quick
+            test_prompt_includes_actionable_routes_for_operational_signals;
+          test_case "actionable routes respect tool policy" `Quick
+            test_prompt_actionable_routes_respect_tool_policy;
           test_case "omits room signal when disabled" `Quick
             test_prompt_omits_room_signal_when_flag_disabled;
           test_case "includes room signal when enabled" `Quick
@@ -1601,6 +1906,8 @@ let () =
           test_case "text response" `Quick test_metrics_text_response;
           test_case "tool response" `Quick test_metrics_tool_response;
           test_case "noop response" `Quick test_metrics_noop_response;
+          test_case "heartbeat-only tool response is maintenance only" `Quick
+            test_metrics_heartbeat_only_tool_response_is_maintenance_only;
           test_case "reactive turn leaves proactive runtime untouched" `Quick
             test_metrics_reactive_turn_does_not_mutate_proactive_runtime;
           test_case "silent proactive cycle advances cooldown anchor" `Quick
@@ -1633,12 +1940,20 @@ let () =
             test_prioritized_disclosed_tool_names_uses_fallback_remaining_budget;
           test_case "tool disclosure skips fallback when disabled" `Quick
             test_prioritized_disclosed_tool_names_skips_fallback_when_disabled;
+          test_case "tool query strips continuity noise" `Quick
+            test_tool_query_text_of_user_message_strips_continuity_noise;
+          test_case "tool query keeps counted headers" `Quick
+            test_tool_query_text_of_user_message_keeps_counted_headers;
           test_case "social model silences skip-only turn" `Quick
             test_social_model_silences_skip_only_turn;
           test_case "social model requires explicit headers" `Quick
             test_social_model_requires_explicit_headers;
           test_case "social model routes blocker to board post" `Quick
             test_social_model_routes_blocker_to_board_post;
+          test_case "social model tool-only turn skips protocol violation" `Quick
+            test_social_model_tool_only_turn_skips_protocol_violation;
+          test_case "social model infers board comment from tool use" `Quick
+            test_social_model_infers_board_comment_from_tool_use;
           test_case "render_inline deny" `Quick
             test_render_inline_skip_reason_deny;
           test_case "render_inline cost" `Quick

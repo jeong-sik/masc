@@ -180,6 +180,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ~fallback_token:env_token_gate
     in
     let cascade_models = Oas_model_resolve.models_of_cascade_name "keeper_unified" in
+    ignore (Oas_model_resolve.refresh_local_discovery_if_possible cascade_models);
     let primary_max_context = Oas_model_resolve.resolve_primary_max_context cascade_models in
     Progress.Tracker.step tracker ~message:"Initializing session directory" ();
     let trace_id = generate_trace_id () in

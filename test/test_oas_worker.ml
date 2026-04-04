@@ -467,6 +467,48 @@ let test_oas_worker_exec_build_applies_retry_policy () =
       Oas.Agent.close agent
   | Error err -> Alcotest.fail err
 
+let test_oas_worker_exec_build_default_priority_unset () =
+  let provider = make_local_provider () in
+  let config =
+    Oas_worker_exec.default_config
+      ~name:"oas-worker-default-priority"
+      ~provider
+      ~model_id:"mock-model"
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  match Oas_worker_exec.build ~net:(require_test_net ()) ~config with
+  | Ok agent ->
+      let priority = (Oas.Agent.state agent).config.priority in
+      Alcotest.(check bool) "default priority remains unset" true
+        (Option.is_none priority);
+      Oas.Agent.close agent
+  | Error err -> Alcotest.fail err
+
+let test_oas_worker_exec_build_applies_priority () =
+  let provider = make_local_provider () in
+  let base_config =
+    Oas_worker_exec.default_config
+      ~name:"oas-worker-priority"
+      ~provider
+      ~model_id:"mock-model"
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let config =
+    { base_config with
+      priority = Some Llm_provider.Request_priority.Proactive }
+  in
+  match Oas_worker_exec.build ~net:(require_test_net ()) ~config with
+  | Ok agent ->
+      let priority = (Oas.Agent.state agent).config.priority in
+      Alcotest.(check bool) "priority propagated to agent config" true
+        (match priority with
+         | Some Llm_provider.Request_priority.Proactive -> true
+         | _ -> false);
+      Oas.Agent.close agent
+  | Error err -> Alcotest.fail err
+
 let test_worker_build_agent_uses_default_internal_retry_policy () =
   with_raw_trace "worker_build_agent_retry" @@ fun raw_trace ->
   let meta = make_worker_meta () in
@@ -1316,6 +1358,10 @@ let () =
         test_oas_worker_exec_build_defaults_without_retry_policy;
       Alcotest.test_case "oas_worker opt-in applies retry policy" `Quick
         test_oas_worker_exec_build_applies_retry_policy;
+      Alcotest.test_case "oas_worker default priority remains unset" `Quick
+        test_oas_worker_exec_build_default_priority_unset;
+      Alcotest.test_case "oas_worker applies explicit priority" `Quick
+        test_oas_worker_exec_build_applies_priority;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

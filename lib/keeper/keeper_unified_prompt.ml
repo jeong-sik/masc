@@ -73,6 +73,95 @@ let line_block label value =
 let format_room_signal_salience salience =
   Meta_cognition.salience_to_string salience
 
+let actionable_routes ~(meta : Keeper_types.keeper_meta)
+    (observation : Keeper_world_observation.world_observation) : string list =
+  let allowed_tools = Keeper_tool_policy.keeper_allowed_tool_names meta in
+  let can tool_name = List.mem tool_name allowed_tools in
+  let available tool_names =
+    List.filter (fun tool_name -> can tool_name) tool_names
+  in
+  let routes = ref [] in
+  let add route = routes := route :: !routes in
+  if observation.pending_mentions <> [] then
+    add
+      "- Pending mentions: reply in-room before going silent.";
+  if observation.pending_board_events <> [] then
+    (match available [ "keeper_board_comment"; "keeper_board_post" ] with
+     | [] ->
+         add
+           "- Board activity is actionable, but board reply tools are unavailable under the current tool policy."
+     | tools ->
+         add
+           (Printf.sprintf
+              "- Board activity: use %s if a visible response is warranted."
+              (String.concat " or " tools)));
+  if observation.unclaimed_task_count > 0 then
+    if can "keeper_task_claim" then
+      add
+        "- Unclaimed tasks: use keeper_task_claim before treating the room as idle."
+    else
+      add
+        "- Unclaimed tasks are present, but task-claim tooling is unavailable under the current tool policy.";
+  if observation.failed_task_count > 0 then
+    if can "keeper_tasks_audit" then
+      add
+        "- Failed tasks: audit them with keeper_tasks_audit before deciding there is nothing meaningful to do."
+    else
+      add
+        "- Failed tasks are actionable, but task-audit tooling is unavailable under the current tool policy.";
+  if Option.is_some observation.worktree_change_summary then
+    (match available [ "keeper_fs_read"; "keeper_shell_readonly"; "masc_code_read" ] with
+     | [] ->
+         add
+           "- Live worktree delta is actionable, but file-inspection tools are unavailable under the current tool policy."
+     | tools ->
+         add
+           (Printf.sprintf
+              "- Live worktree delta: inspect changed files with %s if you need to understand whether action is required."
+              (String.concat ", " tools)));
+  List.rev !routes
+
+let autonomous_trigger_lines
+    ~(decision : Keeper_world_observation.unified_turn_decision)
+    ~(observation : Keeper_world_observation.world_observation) : string list =
+  match decision.channel, decision.should_run with
+  | Keeper_world_observation.Scheduled_autonomous, true ->
+      let lines =
+        [
+          Some "- Scheduler: scheduled autonomous keepalive turn.";
+          (match decision.reasons with
+           | [] -> None
+           | reasons ->
+               Some
+                 (Printf.sprintf "- Reasons: %s"
+                    (String.concat ", " reasons)));
+          (match decision.idle_gate_sec with
+           | Some idle_gate ->
+               Some
+                 (Printf.sprintf "- Idle gate: %ds (current idle: %ds)"
+                    idle_gate observation.idle_seconds)
+           | None -> None);
+          (match decision.since_last_scheduled_autonomous, decision.effective_cooldown with
+           | Some since_last, Some cooldown ->
+               Some
+                 (Printf.sprintf
+                    "- Since last autonomous turn: %ds, effective cooldown: %ds"
+                    since_last cooldown)
+           | _ -> None);
+          (match decision.task_reactive_cooldown with
+           | Some cooldown
+             when observation.unclaimed_task_count > 0
+                  || observation.failed_task_count > 0 ->
+               Some
+                 (Printf.sprintf
+                    "- Backlog acceleration cooldown: %ds for unclaimed/failed tasks"
+                    cooldown)
+           | _ -> None);
+        ]
+      in
+      List.filter_map Fun.id lines
+  | _ -> []
+
 let has_room_signal_section
     (observation : Keeper_world_observation.world_observation) =
   match observation.room_signal_interpretation with
@@ -258,8 +347,23 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
    | Frugal ->
        Buffer.add_string ubuf "- Economy: Frugal (reduce token usage)\n"
    | Hustle ->
-       Buffer.add_string ubuf
-         "- Economy: Hustle (minimize actions, conserve budget)\n");
+        Buffer.add_string ubuf
+          "- Economy: Hustle (minimize actions, conserve budget)\n");
+  let turn_decision =
+    Keeper_world_observation.unified_turn_decision ~meta observation
+  in
+  let autonomous_trigger =
+    autonomous_trigger_lines ~decision:turn_decision ~observation
+  in
+  if autonomous_trigger <> [] then (
+    Buffer.add_string ubuf "\n### Autonomous Trigger\n";
+    Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
+    Buffer.add_string ubuf "\n");
+  let routes = actionable_routes ~meta observation in
+  if routes <> [] then (
+    Buffer.add_string ubuf "\n### Actionable Routes\n";
+    Buffer.add_string ubuf (String.concat "\n" routes);
+    Buffer.add_string ubuf "\n");
   (* Continuity *)
   if
     observation.continuity_summary <> ""

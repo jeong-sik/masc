@@ -187,8 +187,7 @@ let read_backlog config =
 let write_backlog config backlog =
   write_json config (backlog_path config) (backlog_to_yojson backlog)
 
-let current_room_id config =
-  read_current_room config |> Option.value ~default:default_namespace_id
+let current_room_id _config = default_namespace_id
 
 let activity_room_id _config = default_namespace_id
 
@@ -429,6 +428,11 @@ let broadcast_channel config =
 (* Broadcast                                    *)
 (* ============================================ *)
 
+(** Notification callback: invoked after a successful broadcast with the
+    mention target (if any). Set by Keeper bootstrap to wire up wakeup. *)
+let on_broadcast_mention : (string option -> unit) ref =
+  ref (fun _mention -> ())
+
 let broadcast ?trace_context config ~from_agent ~content =
   ensure_initialized config;
   let seq = next_seq config in
@@ -456,6 +460,10 @@ let broadcast ?trace_context config ~from_agent ~content =
    | Error e -> Log.Misc.error "broadcast publish failed for %s: %s" room_id (Backend_types.show_error e));
   emit_message_activity config ~from_agent:safe_agent ~content:safe_content
     ~mention ();
+  (try !on_broadcast_mention mention
+   with exn ->
+     Log.Misc.warn "on_broadcast_mention callback failed: %s"
+       (Printexc.to_string exn));
   Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
 
 (* ============================================ *)

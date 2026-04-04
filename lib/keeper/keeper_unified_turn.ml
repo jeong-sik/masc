@@ -163,23 +163,33 @@ let decision_channel_of_observation
   then
     "turn"
   else
-    "proactive"
+    "scheduled_autonomous"
 
-let is_proactive_cycle_of_observation
+let is_scheduled_autonomous_channel (channel : string) : bool =
+  String.equal channel "scheduled_autonomous"
+  || String.equal channel "proactive"
+
+let is_scheduled_autonomous_cycle_of_observation
     (observation : Keeper_world_observation.world_observation) : bool =
-  String.equal (decision_channel_of_observation observation) "proactive"
+  String.equal
+    (decision_channel_of_observation observation)
+    "scheduled_autonomous"
 
-let proactive_outcome_of_result ~(has_text : bool) ~(has_tool_calls : bool) :
-    proactive_cycle_outcome =
+let scheduled_autonomous_outcome_of_result
+    ~(has_text : bool) ~(has_tool_calls : bool) :
+    scheduled_autonomous_cycle_outcome =
   match has_text, has_tool_calls with
   | false, false -> Proactive_silent
   | true, false -> Proactive_text_response
   | false, true -> Proactive_tool_use
   | true, true -> Proactive_mixed_response
 
+let has_substantive_tool_calls (tools_used : string list) : bool =
+  List.exists (fun tool_name -> tool_name <> "masc_heartbeat") tools_used
+
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
-  if result.tools_used <> [] then "tool_use"
+  if has_substantive_tool_calls result.tools_used then "tool_use"
   else if text = "" then "noop"
   else if String.starts_with ~prefix:"SKIP:" text then "skip_text"
   else "text_response"
@@ -209,9 +219,6 @@ let observed_affordances_of_observation
   if observation.failed_task_count > 0 then add "task_audit";
   if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
   List.rev !affordances
-
-let has_substantive_tool_calls (tools_used : string list) : bool =
-  List.exists (fun tool_name -> tool_name <> "masc_heartbeat") tools_used
 
 let response_requests_confirmation (text : string) : bool =
   let trimmed = String.trim text in
@@ -403,10 +410,16 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ~input_tokens:result.usage.input_tokens
       ~output_tokens:result.usage.output_tokens ()
   in
-  let has_tool_calls = result.tools_used <> [] in
+  let substantive_tool_call_count =
+    result.tools_used
+    |> List.filter (fun tool_name -> tool_name <> "masc_heartbeat")
+    |> List.length
+  in
   let has_substantive_tools = has_substantive_tool_calls result.tools_used in
   let has_text = String.trim result.response_text <> "" in
-  let is_proactive_cycle = is_proactive_cycle_of_observation observation in
+  let is_scheduled_autonomous_cycle =
+    is_scheduled_autonomous_cycle_of_observation observation
+  in
   let is_board_reactive = observation.pending_board_events <> [] in
   let is_mention_reactive = observation.pending_mentions <> [] in
   let rt = meta.runtime in
@@ -443,43 +456,47 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         last_total_tokens = Keeper_exec_context.total_tokens result.usage;
         last_latency_ms = latency_ms;
       };
-      (* Deterministic proactive cycle accounting is separated from
+      (* Deterministic scheduled autonomous cycle accounting is separated from
          nondeterministic model output visibility. *)
       proactive_rt = {
         count_total =
           rt.proactive_rt.count_total
-          + (if update_proactive_rt && is_proactive_cycle then 1 else 0);
+          + (if update_proactive_rt && is_scheduled_autonomous_cycle then 1 else 0);
         last_ts =
-          (if update_proactive_rt && is_proactive_cycle then now_ts
+          (if update_proactive_rt && is_scheduled_autonomous_cycle then now_ts
            else rt.proactive_rt.last_ts);
         visible_count_total =
           rt.proactive_rt.visible_count_total
           + (if update_proactive_rt
-               && is_proactive_cycle
+               && is_scheduled_autonomous_cycle
                && (has_text || has_substantive_tools)
              then 1
              else 0);
         last_visible_ts =
           (if update_proactive_rt
-              && is_proactive_cycle
+              && is_scheduled_autonomous_cycle
               && (has_text || has_substantive_tools)
            then now_ts
            else rt.proactive_rt.last_visible_ts);
         last_outcome =
-          (if update_proactive_rt && is_proactive_cycle then
-             proactive_outcome_of_result ~has_text ~has_tool_calls
+          (if update_proactive_rt && is_scheduled_autonomous_cycle then
+             scheduled_autonomous_outcome_of_result ~has_text
+               ~has_tool_calls:has_substantive_tools
            else rt.proactive_rt.last_outcome);
         last_reason =
-          (if not update_proactive_rt || not is_proactive_cycle then rt.proactive_rt.last_reason
+          (if not update_proactive_rt || not is_scheduled_autonomous_cycle
+           then rt.proactive_rt.last_reason
            else if has_substantive_tools then
              Printf.sprintf "unified:tools=[%s]"
                (String.concat "," result.tools_used)
            else if not has_text then
-             "unified:" ^ proactive_cycle_outcome_to_string Proactive_silent
+             "unified:"
+             ^ scheduled_autonomous_cycle_outcome_to_string Proactive_silent
             else if has_text then "unified:text_response"
             else rt.proactive_rt.last_reason);
         last_preview =
-          (if not update_proactive_rt || not is_proactive_cycle then rt.proactive_rt.last_preview
+          (if not update_proactive_rt || not is_scheduled_autonomous_cycle
+           then rt.proactive_rt.last_preview
            else if has_text then short_preview result.response_text
            else if has_substantive_tools then
              Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
@@ -488,24 +505,24 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       (* Autonomous action tracking from tool calls *)
       autonomous_action_count =
         rt.autonomous_action_count
-        + (if is_autonomous_turn then List.length result.tools_used else 0);
+        + (if is_autonomous_turn then substantive_tool_call_count else 0);
       autonomous_turn_count =
         rt.autonomous_turn_count + (if is_autonomous_turn then 1 else 0);
       autonomous_text_turn_count =
         rt.autonomous_text_turn_count
-        + (if is_autonomous_turn && has_text && not has_tool_calls then 1 else 0);
+        + (if is_autonomous_turn && has_text && not has_substantive_tools then 1 else 0);
       autonomous_tool_turn_count =
         rt.autonomous_tool_turn_count
-        + (if is_autonomous_turn && has_tool_calls then 1 else 0);
+        + (if is_autonomous_turn && has_substantive_tools then 1 else 0);
       board_reactive_turn_count =
         rt.board_reactive_turn_count + (if is_board_reactive then 1 else 0);
       mention_reactive_turn_count =
         rt.mention_reactive_turn_count + (if is_mention_reactive then 1 else 0);
       noop_turn_count =
         rt.noop_turn_count
-        + (if is_autonomous_turn && not has_text && not has_tool_calls then 1 else 0);
+        + (if is_autonomous_turn && not has_text && not has_substantive_tools then 1 else 0);
       last_autonomous_action_at =
-        (if is_autonomous_turn && has_tool_calls then now_iso ()
+        (if is_autonomous_turn && has_substantive_tools then now_iso ()
          else rt.last_autonomous_action_at);
       last_speech_act = Social.speech_act_to_string social_state.speech_act;
       last_blocker = Option.value ~default:"" social_state.blocker;
@@ -530,16 +547,16 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
   let now_ts = Time_compat.now () in
   let _observation = observation in
   let work_kind =
-    if result.tools_used <> [] then "tool_use"
+    if has_substantive_tool_calls result.tools_used then "tool_use"
     else if String.trim result.response_text <> "" then "text_turn"
     else "noop"
   in
-  let proactive_outcome =
-    if String.equal channel "proactive" then
+  let scheduled_autonomous_outcome =
+    if is_scheduled_autonomous_channel channel then
       Some
-        (proactive_outcome_of_result
+        (scheduled_autonomous_outcome_of_result
            ~has_text:(String.trim result.response_text <> "")
-           ~has_tool_calls:(result.tools_used <> []))
+           ~has_tool_calls:(has_substantive_tool_calls result.tools_used))
     else None
   in
   let metrics_store = keeper_metrics_store config meta.name in
@@ -579,9 +596,15 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
           | Some reason -> `String reason
           | None -> `Null);
         ("work_kind", `String work_kind);
+        ( "scheduled_autonomous_outcome",
+          match scheduled_autonomous_outcome with
+          | Some outcome ->
+              `String (scheduled_autonomous_cycle_outcome_to_string outcome)
+          | None -> `Null );
         ( "proactive_outcome",
-          match proactive_outcome with
-          | Some outcome -> `String (proactive_cycle_outcome_to_string outcome)
+          match scheduled_autonomous_outcome with
+          | Some outcome ->
+              `String (scheduled_autonomous_cycle_outcome_to_string outcome)
           | None -> `Null );
         ("tool_call_count", `Int result.tool_calls_made);
         ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
@@ -692,7 +715,9 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
     ~(reason : string) ?social_state () : keeper_meta =
   let now_ts = Time_compat.now () in
-  let is_proactive_cycle = is_proactive_cycle_of_observation observation in
+  let is_scheduled_autonomous_cycle =
+    is_scheduled_autonomous_cycle_of_observation observation
+  in
   let preview =
     let trimmed = String.trim reason in
     if trimmed = "" then "unified turn failed"
@@ -710,18 +735,18 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
       proactive_rt = { meta.runtime.proactive_rt with
         count_total =
           meta.runtime.proactive_rt.count_total
-          + (if is_proactive_cycle then 1 else 0);
+          + (if is_scheduled_autonomous_cycle then 1 else 0);
         last_ts =
-          if is_proactive_cycle then now_ts
+          if is_scheduled_autonomous_cycle then now_ts
           else meta.runtime.proactive_rt.last_ts;
         last_outcome =
-          if is_proactive_cycle then Proactive_error
+          if is_scheduled_autonomous_cycle then Proactive_error
           else meta.runtime.proactive_rt.last_outcome;
         last_reason =
-          if is_proactive_cycle then "unified:error:" ^ String.trim reason
+          if is_scheduled_autonomous_cycle then "unified:error:" ^ String.trim reason
           else meta.runtime.proactive_rt.last_reason;
         last_preview =
-          if is_proactive_cycle then preview
+          if is_scheduled_autonomous_cycle then preview
           else meta.runtime.proactive_rt.last_preview;
       };
       last_speech_act =
@@ -750,6 +775,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
   match ensure_api_keys_for_labels model_labels with
   | Error e -> Error e
   | Ok () ->
+      ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
       let primary_max_context =
         Oas_model_resolve.resolve_primary_max_context model_labels
       in
@@ -945,7 +971,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                then
                  "turn"
                else
-                 "proactive"
+                 "scheduled_autonomous"
              in
              append_metrics_snapshot ~config ~meta:updated_meta ~observation
                ~result ~latency_ms ~turn_cost

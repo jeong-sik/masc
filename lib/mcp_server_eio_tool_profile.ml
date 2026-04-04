@@ -58,30 +58,8 @@ Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work. \
 Use masc_tool_help to inspect tool contracts and prefer the smallest useful surface."
 
-let apply_budget_filter ?budget_tokens schemas =
-  match budget_tokens with
-  | None -> (
-      match Tool_budget.default_budget () with
-      | None -> schemas
-      | Some budget ->
-          let usage_counts name =
-            match Tool_metrics.stats_for name with
-            | Some s -> s.Tool_metrics.call_count
-            | None -> 0
-          in
-          Tool_budget.filter_by_budget ~budget_tokens:budget ~usage_counts
-            ~tool_schemas:schemas)
-  | Some budget ->
-      let usage_counts name =
-        match Tool_metrics.stats_for name with
-        | Some s -> s.Tool_metrics.call_count
-        | None -> 0
-      in
-      Tool_budget.filter_by_budget ~budget_tokens:budget ~usage_counts
-        ~tool_schemas:schemas
-
 let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = false)
-    ?budget_tokens _state profile =
+    _state profile =
   let schemas =
     match profile with
     | Full ->
@@ -114,7 +92,7 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
           (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
     | Operator_remote -> Tool_operator.remote_schemas
   in
-  apply_budget_filter ?budget_tokens schemas
+  schemas
 
 let tool_allowed_in_profile state profile tool_name =
   match profile with

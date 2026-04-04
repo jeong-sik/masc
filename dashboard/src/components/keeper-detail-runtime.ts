@@ -4,7 +4,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { serverStatus } from '../store'
@@ -32,6 +32,7 @@ import {
 } from './keeper-config-panel'
 
 const showAllowlistEditor = signal(false)
+const DEFAULT_ALLOWLIST_PREVIEW_LIMIT = 12
 
 // ── Utility functions ────────────────────────────────────
 
@@ -104,6 +105,71 @@ function ToolChip({ name }: { name: string }) {
       title="클릭하여 도구 상세 보기"
       onClick=${() => openToolsInventory(name)}
     >${name}</button>
+  `
+}
+
+export function resolveAllowlistPreview(
+  tools: string[],
+  previewLimit = DEFAULT_ALLOWLIST_PREVIEW_LIMIT,
+): { visibleTools: string[]; hiddenCount: number } {
+  const normalizedLimit = Math.max(0, previewLimit)
+  const visibleTools = tools.slice(0, normalizedLimit)
+  return {
+    visibleTools,
+    hiddenCount: Math.max(0, tools.length - visibleTools.length),
+  }
+}
+
+export function AllowlistPreview({
+  tools,
+  emptyLabel,
+  previewLimit = DEFAULT_ALLOWLIST_PREVIEW_LIMIT,
+}: {
+  tools: string[]
+  emptyLabel: string
+  previewLimit?: number
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const firstTool = tools[0] ?? null
+  const lastTool = tools.length > 0 ? tools[tools.length - 1] : null
+
+  useEffect(() => {
+    setExpanded(false)
+  }, [tools.length, firstTool, lastTool, previewLimit])
+
+  if (tools.length === 0) {
+    return html`<span class="text-[11px] text-[var(--text-muted)] italic">${emptyLabel}</span>`
+  }
+
+  const { visibleTools, hiddenCount } = expanded
+    ? { visibleTools: tools, hiddenCount: 0 }
+    : resolveAllowlistPreview(tools, previewLimit)
+
+  return html`
+    <div class="flex flex-col gap-2">
+      <div class="flex flex-wrap gap-1.5">
+        ${visibleTools.map(tool => html`<${ToolChip} name=${tool} />`)}
+        ${!expanded && hiddenCount > 0
+          ? html`
+              <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium border border-dashed border-[var(--card-border)] text-[var(--text-muted)]">
+                +${hiddenCount}
+              </span>
+            `
+          : null}
+      </div>
+      ${tools.length > previewLimit
+        ? html`
+            <button type="button"
+              class="self-start text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+              aria-expanded=${expanded}
+              aria-label=${expanded ? '허용된 도구 접기' : `허용된 도구 나머지 ${hiddenCount}개 보기`}
+              onClick=${() => setExpanded(value => !value)}
+            >
+              ${expanded ? '접기' : `나머지 ${hiddenCount}개 보기`}
+            </button>
+          `
+        : null}
+    </div>
   `
 }
 
@@ -372,11 +438,10 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
                   ? '정적 도구 정책 로드에 실패했습니다.'
                   : '정적 도구 정책을 아직 확인할 수 없습니다.'}
           </span>
-          <div class="flex flex-wrap gap-1.5">
-            ${allowedTools.length > 0
-              ? allowedTools.map((tool: string) => html`<${ToolChip} name=${tool} />`)
-              : html`<span class="text-[11px] text-[var(--text-muted)] italic">${policyLoading ? 'loading' : policyEditable ? allowlistFallback : unavailablePolicyLabel}</span>`}
-          </div>
+          <${AllowlistPreview}
+            tools=${allowedTools}
+            emptyLabel=${policyLoading ? 'loading' : policyEditable ? allowlistFallback : unavailablePolicyLabel}
+          />
         `}
 
       <${ToolSection}

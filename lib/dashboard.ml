@@ -228,7 +228,7 @@ let count_locks_for_dir (config : Room_utils.config) locks_dir =
        | None -> 0)
 
 let count_locks_for_room (config : Room_utils.config) room_id =
-  let locks_dir = Filename.concat (Room.room_path config room_id) "locks" in
+  let locks_dir = Filename.concat (Room.room_dir_for config room_id) "locks" in
   count_locks_for_dir config locks_dir
 
 let tempo_section (config : Room_utils.config) : section =

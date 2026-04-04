@@ -121,6 +121,7 @@ let prepare_managed_worktree = Autoresearch_git.prepare_managed_worktree
 (* ================================================================ *)
 
 let has_path_traversal = Autoresearch_file.has_path_traversal
+let resolve_target_file_path = Autoresearch_file.resolve_target_file_path
 let validate_target_file = Autoresearch_file.validate_target_file
 let read_file = Autoresearch_file.read_file
 let apply_code_change = Autoresearch_file.apply_code_change

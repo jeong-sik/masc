@@ -367,11 +367,16 @@ let deprecated_tool_entries : (string * metadata) list =
 
 let metadata_to_fields name =
   let meta = metadata name in
+  let surfaces =
+    Tool_catalog_surfaces.surfaces_for_tool name
+    |> List.map (fun s -> `String (Tool_catalog_surfaces.surface_to_string s))
+  in
   let base =
     [
       ("visibility", `String (visibility_to_string meta.visibility));
       ("lifecycle", `String (lifecycle_to_string meta.lifecycle));
       ("implementationStatus", `String (implementation_status_to_string meta.implementation_status));
+      ("surfaces", `List surfaces);
     ]
   in
   let with_canonical =

@@ -1,6 +1,6 @@
 (** Keeper_unified_turn — Single entry point for keeper turns via OAS Agent.run().
 
-    Replaces the 3-path dispatcher (social/proactive/autonomy) with a unified
+    Replaces the 3-path dispatcher (social/scheduled-autonomous/autonomy) with a unified
     observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
     The model decides what to do; code only enforces safety and observes results.
 
@@ -26,6 +26,9 @@ val update_metrics_from_result :
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
   ?is_autonomous_turn:bool ->
+  (** Compatibility label: still named [update_proactive_rt] because serialized
+      runtime fields remain [proactive_*] for now, but it controls scheduled
+      autonomous runtime accounting in the unified loop. *)
   ?update_proactive_rt:bool ->
   ?social_state:Keeper_social_model.social_state ->
   Keeper_agent_run.run_result ->

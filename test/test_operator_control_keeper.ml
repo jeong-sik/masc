@@ -194,7 +194,7 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
         {|
 [keeper]
 goal = "Defaults goal"
-room_scope = "all"
+room_scope = "current"
 proactive_enabled = true
 |};
       let config = Room.default_config base_dir in
@@ -276,9 +276,7 @@ proactive_enabled = true
         json |> member "sources" |> member "override_fields" |> to_list
         |> List.map to_string
       in
-      (* Source defaults keep room_scope = "all", while live meta is mutated to
-         "current", so the override must stay visible. *)
-      Alcotest.(check bool) "room_scope override flagged" true
+      Alcotest.(check bool) "room_scope override absent in single-room mode" false
         (List.mem "coordination.room_scope" override_fields);
       Alcotest.(check bool) "override field proactive" true
         (List.mem "proactive.enabled" override_fields);
@@ -371,7 +369,9 @@ let test_snapshot_keeper_tool_audit_fallback () =
               (Yojson.Safe.to_string snapshot)
       in
       let keeper = load_keeper_snapshot 10 in
-      Alcotest.(check string) "durable keeper is active after keeper_up" "active"
+      (* keeper_up creates a healthy durable keeper; before any turn runs it should
+         surface as idle rather than active. *)
+      Alcotest.(check string) "durable keeper is idle before first turn after keeper_up" "idle"
         (keeper |> member "status" |> to_string);
       Alcotest.(check bool) "allowed tool fallback present" true
         ((keeper |> member "allowed_tool_names" |> to_list) <> []);

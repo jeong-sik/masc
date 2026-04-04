@@ -41,7 +41,7 @@ Execution loop:
 Tone: terse, operational, no speeches.
 """
 
-room_scope = "all"
+room_scope = "current"
 scope_kind = "global"
 mention_targets = ["janitor", "garbage-keeper", "tool-matrix-janitor"]
 

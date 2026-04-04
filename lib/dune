@@ -263,6 +263,7 @@
    room
    run_eio
    team_context
+   team_context_oas_adapter
    team_session_store
    team_session_report
    team_session_report_core
@@ -358,7 +359,6 @@
    tool_command_plane_schemas_02
    tool_library
    tool_deep_review
-   tool_budget
    tool_catalog
    tool_schema_dsl
    tool_result
@@ -370,6 +370,7 @@
    tool_prefilter
    tool_metrics
    tool_metrics_persist
+   tool_usage_log
    tool_inline_dispatch_types
    tool_inline_dispatch_room
    tool_inline_dispatch_comm
@@ -498,6 +499,7 @@
    observability_redact
    oas_model_resolve
    context_compact_oas
+   verifier_core
    verifier_oas
    procedural_memory
    oas_events

@@ -46,7 +46,7 @@ type world_observation = {
       reprocessing the same broadcast stream. *)
 
   idle_seconds : int;
-  (** Seconds since last keeper activity (turn or proactive). *)
+  (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
 
   active_goals : string list;
   (** Goal IDs currently assigned to this keeper. *)
@@ -80,6 +80,20 @@ type world_observation = {
 
   last_turn_budget : (int * int) option;
   (** Previous generation's turn usage as [(used, total)], if available. *)
+}
+
+type unified_turn_channel =
+  | Reactive
+  | Scheduled_autonomous
+
+type unified_turn_decision = {
+  should_run : bool;
+  channel : unified_turn_channel;
+  reasons : string list;
+  since_last_scheduled_autonomous : int option;
+  effective_cooldown : int option;
+  task_reactive_cooldown : int option;
+  idle_gate_sec : int option;
 }
 
 type board_signal_match = {
@@ -125,11 +139,18 @@ val apply_message_cursor_updates :
   (string * int) list ->
   Keeper_types.keeper_meta
 
-(** Compute effective proactive cooldown with idle decay.
+(** Compute effective scheduled autonomous cooldown with idle decay.
     After extended idle (> base cooldown), halve the cooldown each
     additional period, down to a configurable floor. *)
+val effective_scheduled_autonomous_cooldown :
+  base_cooldown:int -> since_last:int -> int
+
+(** Backward-compatible alias for the pre-rename helper name. *)
 val effective_proactive_cooldown :
   base_cooldown:int -> since_last:int -> int
+
+val unified_turn_decision :
+  meta:Keeper_types.keeper_meta -> world_observation -> unified_turn_decision
 
 val should_run_unified_turn :
   meta:Keeper_types.keeper_meta -> world_observation -> bool

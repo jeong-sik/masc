@@ -13,7 +13,13 @@ let dedupe_tool_names names =
 (* ── Static tool name lists ────────────────────────────────────── *)
 
 let keeper_coordination_tool_names =
-  [ "keeper_tasks_list"; "keeper_task_claim"; "keeper_task_done"; "keeper_broadcast" ]
+  [
+    "keeper_tasks_list";
+    "keeper_tasks_audit";
+    "keeper_task_claim";
+    "keeper_task_done";
+    "keeper_broadcast";
+  ]
 
 let keeper_board_tool_names =
   [

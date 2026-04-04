@@ -144,7 +144,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   let room_state = Room.read_state config in
   let tempo = Tempo.get_tempo config in
   (* M-17 fix: use room-scoped queries consistent with compact/shell dashboard *)
-  let room_id = Room.current_room_id config in
+  let room_id = "default" in
   let tasks = Room.get_tasks_raw_in_room config room_id in
   let agents = Room.get_agents_raw_in_room config room_id in
   let msgs = Room.get_messages_raw_in_room config ~room_id ~since_seq:0 ~limit:20 in
@@ -920,8 +920,7 @@ let dashboard_message_json (message : Types.message) =
       ("seq", `Int message.seq);
     ]
 
-let dashboard_current_room_id config =
-  Room.current_room_id config
+let dashboard_current_room_id _config = "default"
 
 let dashboard_tasks_safe config =
   Room.get_tasks_raw_in_room config (dashboard_current_room_id config)

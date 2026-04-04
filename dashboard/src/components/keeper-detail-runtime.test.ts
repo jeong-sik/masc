@@ -1,11 +1,22 @@
-import { describe, expect, it } from 'vitest'
+import { h } from 'preact'
+import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { afterEach, describe, expect, it } from 'vitest'
+import '@testing-library/jest-dom'
 
 import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
-import { resolveKeeperCurrentTaskLabel } from './keeper-detail-runtime'
+import {
+  AllowlistPreview,
+  resolveAllowlistPreview,
+  resolveKeeperCurrentTaskLabel,
+} from './keeper-detail-runtime'
 import {
   resolveKeeperObservedToolAudit,
   resolveKeeperToolPolicy,
 } from './keeper-detail-source'
+
+afterEach(() => {
+  cleanup()
+})
 
 describe('resolveKeeperToolPolicy', () => {
   it('uses keeper config as the authoritative policy source', () => {
@@ -218,5 +229,36 @@ describe('resolveKeeperCurrentTaskLabel', () => {
     }
 
     expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('not_collected')
+  })
+})
+
+describe('resolveAllowlistPreview', () => {
+  it('keeps only the requested prefix and reports the remainder', () => {
+    expect(resolveAllowlistPreview(['a', 'b', 'c', 'd'], 2)).toEqual({
+      visibleTools: ['a', 'b'],
+      hiddenCount: 2,
+    })
+  })
+})
+
+describe('AllowlistPreview', () => {
+  it('collapses long allowlists until explicitly expanded', () => {
+    const tools = Array.from({ length: 15 }, (_, index) => `tool-${index + 1}`)
+    render(h(AllowlistPreview, {
+      tools,
+      emptyLabel: 'none',
+      previewLimit: 12,
+    }))
+
+    expect(screen.getByText('tool-1')).toBeInTheDocument()
+    expect(screen.getByText('tool-12')).toBeInTheDocument()
+    expect(screen.queryByText('tool-13')).not.toBeInTheDocument()
+    expect(screen.getByText('나머지 3개 보기')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('나머지 3개 보기'))
+
+    expect(screen.getByText('tool-13')).toBeInTheDocument()
+    expect(screen.getByText('tool-15')).toBeInTheDocument()
+    expect(screen.getByText('접기')).toBeInTheDocument()
   })
 })

@@ -458,17 +458,28 @@ let run_keepalive_unified_turn
       let has_message_signal =
         obs.pending_mentions <> [] || obs.pending_scope_messages <> []
       in
+      let turn_decision =
+        Keeper_world_observation.unified_turn_decision
+          ~meta:meta_after_triage
+          obs
+      in
       let should_run_turn =
         (not (Atomic.get stop))
-        && Keeper_world_observation.should_run_unified_turn
-             ~meta:meta_after_triage
-             obs
+        && turn_decision.should_run
       in
       let meta_after_observe =
         Keeper_world_observation.apply_message_cursor_updates
           meta_after_triage
           obs.message_cursor_updates
       in
+      if should_run_turn then
+        Log.Keeper.info
+          "keepalive turn scheduled for %s: channel=%s reasons=%s"
+          meta_after_triage.name
+          (match turn_decision.channel with
+           | Keeper_world_observation.Reactive -> "reactive"
+           | Keeper_world_observation.Scheduled_autonomous -> "scheduled_autonomous")
+          (String.concat "," turn_decision.reasons);
       if (not should_run_turn)
          && (not has_message_signal)
          && obs.message_cursor_updates <> []

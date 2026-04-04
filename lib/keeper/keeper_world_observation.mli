@@ -82,6 +82,20 @@ type world_observation = {
   (** Previous generation's turn usage as [(used, total)], if available. *)
 }
 
+type unified_turn_channel =
+  | Reactive
+  | Scheduled_autonomous
+
+type unified_turn_decision = {
+  should_run : bool;
+  channel : unified_turn_channel;
+  reasons : string list;
+  since_last_proactive : int option;
+  effective_cooldown : int option;
+  task_reactive_cooldown : int option;
+  idle_gate_sec : int option;
+}
+
 type board_signal_match = {
   explicit_mention : bool;
   matched_targets : string list;
@@ -130,6 +144,9 @@ val apply_message_cursor_updates :
     additional period, down to a configurable floor. *)
 val effective_proactive_cooldown :
   base_cooldown:int -> since_last:int -> int
+
+val unified_turn_decision :
+  meta:Keeper_types.keeper_meta -> world_observation -> unified_turn_decision
 
 val should_run_unified_turn :
   meta:Keeper_types.keeper_meta -> world_observation -> bool

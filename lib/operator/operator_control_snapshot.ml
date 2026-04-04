@@ -717,18 +717,6 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       ]
     else [])
   in
-  let command_plane_json = timed "command_plane_json" (fun () ->
-    if initialized && include_command_plane then
-      Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
-    else
-      `Null)
-  in
-  let swarm_status_json =
-    if initialized && include_command_plane then
-      Swarm_status.build_json_from_snapshot config command_plane_json
-    else
-      `Null
-  in
   let keeper_names =
     if initialized && include_keepers then
       Keeper_types.keeper_names config
@@ -746,13 +734,17 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("namespace", room_json config);
        ]
       @ (
-         (* Parallelize independent I/O: sessions, keepers, persistent_agents.
-            Eio.Fiber.all runs all thunks as fibers within the current switch,
-            completing when all finish. On failure, remaining fibers are cancelled. *)
+         (* Parallelize independent I/O: sessions, keepers, persistent_agents,
+            and command_plane + swarm_status.  command_plane_json was previously
+            computed sequentially before the fiber block, blocking the entire
+            snapshot when CP took 13s+.  Now it runs as a 4th fiber, overlapping
+            with sessions/keepers I/O. *)
          let empty_section = `Assoc [ ("count", `Int 0); ("items", `List []) ] in
          let sessions_ref = ref empty_section in
          let keepers_ref = ref empty_section in
          let persistent_ref = ref empty_section in
+         let command_plane_ref = ref `Null in
+         let swarm_status_ref = ref `Null in
          Eio.Fiber.all [
            (fun () ->
              sessions_ref :=
@@ -760,8 +752,6 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
                  if initialized && include_sessions then
                    let capped =
                      if lightweight_summary then
-                       (* Lightweight: only active/paused + last 5 recent.
-                          Full session_status_json is heavy (reads events per session). *)
                        let active, rest =
                          List.partition (fun (s : Team_session_types.session) ->
                            s.status = Running || s.status = Paused) tracked_sessions
@@ -789,16 +779,27 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
                  if initialized && include_keepers then
                    persistent_agents_json ~keeper_names config
                  else empty_section));
+           (fun () ->
+             let cp = timed "command_plane_json" (fun () ->
+               if initialized && include_command_plane then
+                 Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
+               else `Null)
+             in
+             command_plane_ref := cp;
+             swarm_status_ref :=
+               if initialized && include_command_plane then
+                 Swarm_status.build_json_from_snapshot config cp
+               else `Null);
          ];
          [
            ("sessions", !sessions_ref);
            ("keepers", !keepers_ref);
            ("persistent_agents", !persistent_ref);
-           ("command_plane", command_plane_json);
+           ("command_plane", !command_plane_ref);
          ]
       )
       @ [
-         ("swarm_status", swarm_status_json);
+         ("swarm_status", !swarm_status_ref);
        ]
       @ (let (role_census, runtime_pools, lane_census, controller_census,
               control_domains, task_profiles, escalation_count) =

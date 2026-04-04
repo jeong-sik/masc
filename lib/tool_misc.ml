@@ -168,6 +168,47 @@ let take_results limit hits =
   in
   loop limit [] hits
 
+(* --- DuckDuckGo HTML search backend --- *)
+
+let ddg_result_re = Re.Pcre.re
+  {|<a rel="nofollow" class="result__a" href="[^"]*uddg=([^&"]+)[^"]*">([^<]*(?:<b>[^<]*</b>[^<]*)*)</a>|}
+  |> Re.compile
+
+let ddg_snippet_re = Re.Pcre.re
+  {|<a class="result__snippet"[^>]*>([^<]*(?:<b>[^<]*</b>[^<]*)*)</a>|}
+  |> Re.compile
+
+let parse_ddg_html (payload : string) : web_search_hit list =
+  let results = Re.all ddg_result_re payload in
+  let snippets = Re.all ddg_snippet_re payload in
+  List.mapi (fun i groups ->
+    let url_encoded = Re.Group.get groups 1 in
+    let title_raw = Re.Group.get groups 2 in
+    let url = Uri.pct_decode url_encoded in
+    let title = clean_search_text title_raw in
+    let snippet =
+      match List.nth_opt snippets i with
+      | Some sg -> clean_search_text (Re.Group.get sg 1)
+      | None -> ""
+    in
+    (title, url, snippet)
+  ) results
+
+let fetch_ddg_html ~query =
+  let search_url =
+    "https://html.duckduckgo.com/html/?q=" ^ Uri.pct_encode query
+  in
+  match Tool_local_runtime_http.http_get_text_with_status ~timeout_sec:15 search_url with
+  | Error e -> Error e
+  | Ok (status_opt, payload) -> (
+      match status_opt with
+      | Some 200 -> Ok (search_url, payload)
+      | None -> Error "search endpoint returned no HTTP status"
+      | Some status ->
+          Error
+            (Printf.sprintf "search endpoint returned HTTP %d" status))
+
+(* Legacy Bing RSS — kept as fallback *)
 let fetch_bing_rss ~query =
   let search_url =
     "https://www.bing.com/search?format=rss&q=" ^ Uri.pct_encode query
@@ -296,13 +337,29 @@ let handle_web_search _ctx args =
            max_web_search_query_length) )
   else
     let limit = max 1 (min 10 (get_int args "limit" 5)) in
-    match fetch_bing_rss ~query with
-    | Error e -> (false, json_error e)
-    | Ok (_search_url, payload) when not (looks_like_rss_payload payload) ->
-        (false, json_error "search endpoint returned a non-RSS payload")
+    (* Primary: DuckDuckGo HTML. Fallback: Bing RSS. *)
+    match fetch_ddg_html ~query with
     | Ok (search_url, payload) ->
-        let hits = parse_bing_rss_items payload |> take_results limit in
-        (true, web_search_result_json ~query ~search_url ~engine:"bing_rss" hits)
+        let hits = parse_ddg_html payload |> take_results limit in
+        if hits <> [] then
+          (true, web_search_result_json ~query ~search_url ~engine:"duckduckgo" hits)
+        else
+          (* DDG returned empty — try Bing RSS fallback *)
+          (match fetch_bing_rss ~query with
+           | Error e -> (false, json_error (Printf.sprintf "DDG empty, Bing fallback failed: %s" e))
+           | Ok (bing_url, rss_payload) when looks_like_rss_payload rss_payload ->
+               let bing_hits = parse_bing_rss_items rss_payload |> take_results limit in
+               (true, web_search_result_json ~query ~search_url:bing_url ~engine:"bing_rss" bing_hits)
+           | Ok _ -> (false, json_error "both DDG and Bing returned no results"))
+    | Error ddg_err ->
+        (* DDG failed — try Bing RSS fallback *)
+        (match fetch_bing_rss ~query with
+         | Error bing_err ->
+             (false, json_error (Printf.sprintf "DDG: %s; Bing: %s" ddg_err bing_err))
+         | Ok (bing_url, rss_payload) when looks_like_rss_payload rss_payload ->
+             let bing_hits = parse_bing_rss_items rss_payload |> take_results limit in
+             (true, web_search_result_json ~query ~search_url:bing_url ~engine:"bing_rss" bing_hits)
+         | Ok _ -> (false, json_error "Bing returned non-RSS payload"))
 
 let handle_keeper_tool_catalog _ctx args =
   let include_hidden = get_bool args "include_hidden" false in

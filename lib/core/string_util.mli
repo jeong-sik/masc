@@ -4,3 +4,6 @@ val contains_substring : string -> string -> bool
 (** [contains_substring haystack needle] returns [true] if [needle]
     appears anywhere inside [haystack].  Returns [true] when [needle]
     is empty. *)
+
+val contains_substring_ci : string -> string -> bool
+(** Case-insensitive version of [contains_substring]. *)

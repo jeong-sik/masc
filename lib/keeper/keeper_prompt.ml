@@ -4,13 +4,7 @@
 
 open Keeper_types
 
-(** Case-insensitive substring check. Local copy to break
-    Keeper_prompt -> Keeper_alerting -> Keeper_prompt cycle. *)
-let contains_ci (haystack : string) (needle : string) : bool =
-  let h = String.lowercase_ascii haystack in
-  let n = String.lowercase_ascii needle in
-  if n = "" then false
-  else Re.execp (Re.str n |> Re.compile) h
+let contains_ci = String_util.contains_substring_ci
 
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =

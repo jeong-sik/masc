@@ -21,11 +21,7 @@ let merge_usage
        | Some x, None | None, Some x -> Some x
        | None, None -> None) }
 
-let contains_ci (haystack : string) (needle : string) : bool =
-  let h = String.lowercase_ascii haystack in
-  let n = String.lowercase_ascii needle in
-  if n = "" then false
-  else Re.execp (Re.str n |> Re.compile) h
+let contains_ci = String_util.contains_substring_ci
 
 let alert_retryable_error (msg : string) : bool =
   let text = String.lowercase_ascii (String.trim msg) in

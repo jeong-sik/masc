@@ -10,6 +10,14 @@ open Keeper_status_bridge
 
 include Dashboard_http_keeper_detail
 
+(** Context-ratio thresholds for keeper health scoring.
+    These are distinct from Dashboard.ctx_* (compaction triggers) —
+    health scoring penalizes keepers approaching context limits. *)
+let health_ctx_critical = 0.9
+let health_ctx_warn = 0.8
+let health_penalty_critical = 20.0
+let health_penalty_warn = 10.0
+
 (** Compute keeper health score (0-100). Pure function.
     Inputs: restart_count, max_restarts, recent_crash_count,
             is_dead, context_ratio (0.0-1.0). *)
@@ -28,8 +36,8 @@ let compute_health_score
       Float.min 30.0 (float_of_int recent_crash_count *. 10.0)
     in
     let context_penalty =
-      if context_ratio > 0.9 then 20.0
-      else if context_ratio > 0.8 then 10.0
+      if context_ratio > health_ctx_critical then health_penalty_critical
+      else if context_ratio > health_ctx_warn then health_penalty_warn
       else 0.0
     in
     let raw = 100.0 -. budget_penalty -. crash_penalty -. context_penalty in

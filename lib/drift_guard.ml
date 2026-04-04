@@ -52,6 +52,21 @@ let weights () =
 
 let default_threshold () = Level2_config.Drift_guard.default_threshold ()
 
+(** {1 Drift Classification Thresholds}
+
+    Heuristic thresholds for determining drift type in handoff verification.
+    - Factual drift: low token coverage or large size difference indicates
+      content was replaced rather than edited.
+    - Structural drift: cosine-jaccard divergence indicates word order/phrasing
+      changed while vocabulary stayed similar.
+    - Semantic drift: default when neither structural nor factual patterns match.
+
+    These values are initial estimates, not empirically validated.
+    TODO(RFC-0001 Phase 3): Register in Runtime_params. *)
+let factual_coverage_floor = 0.55
+let factual_size_ratio_floor = 0.6
+let structural_divergence_threshold = 0.18
+
 let tokenize (s : string) : string list =
   let trimmed = String.trim s in
   if trimmed = "" then []
@@ -168,8 +183,8 @@ let classify_drift ~tokens_a ~tokens_b ~jacc ~cos =
     | 0 -> 1.0
     | max_len -> float_of_int (min len_a len_b) /. float_of_int max_len
   in
-  if coverage < 0.55 || size_ratio < 0.6 then Factual
-  else if cos -. jacc > 0.18 then Structural
+  if coverage < factual_coverage_floor || size_ratio < factual_size_ratio_floor then Factual
+  else if cos -. jacc > structural_divergence_threshold then Structural
   else Semantic
 
 let summarize ~original ~received ~threshold =

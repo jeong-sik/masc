@@ -50,6 +50,10 @@ let max_signal_scan = 500
 let runtime_stale_after_s = 30. *. 60.
 let evaluator_stale_after_s = 12. *. 3600.
 
+(** Runtime health warning thresholds. Distinct from compaction thresholds. *)
+let runtime_warning_ctx_ratio = 0.95
+let runtime_warning_token_count = 50_000
+
 let pre_compact_store_ref : Dated_jsonl.t option ref = ref None
 
 let status_to_string = function
@@ -306,7 +310,7 @@ let pre_compact_status (latest_event : pre_compact_event option) =
   | None -> Idle
   | Some event ->
       if is_stale ~threshold_s:runtime_stale_after_s event.timestamp then Stale
-      else if event.context_ratio >= 0.95 || event.token_count >= 50_000 then Warning
+      else if event.context_ratio >= runtime_warning_ctx_ratio || event.token_count >= runtime_warning_token_count then Warning
       else Healthy
 
 let handoff_status (latest_event : handoff_event option) =

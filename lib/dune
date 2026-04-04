@@ -497,6 +497,7 @@
    observability_redact
    oas_model_resolve
    context_compact_oas
+   verifier_core
    verifier_oas
    procedural_memory
    oas_events

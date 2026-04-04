@@ -29,8 +29,8 @@ mention_targets = ["sherlock", "log-analyzer"]
 
 # Proactive behavior
 proactive_enabled = true
-presence_keepalive = true
-presence_keepalive_sec = 30
+# presence_keepalive and presence_keepalive_sec have been removed;
+# keepalive is now managed by the heartbeat system.
 
 # Execution scope — controls what the keeper can modify.
 #   observe_only = read-only, no file writes (default for new keepers until #3886)

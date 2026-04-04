@@ -128,6 +128,43 @@ let test_parse_inline_comment () =
      | _ -> fail "expected Toml_string")
   | Error e -> fail e
 
+let test_parse_multiline_string () =
+  let input = "[keeper]\ngoal = \"test\"\ninstructions = \"\"\"\nLine one.\nLine two.\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "keeper.instructions" doc with
+     | Some (TL.Toml_string s) ->
+       check string "multiline content" "Line one.\nLine two." s
+     | _ -> fail "expected Toml_string for multiline")
+  | Error e -> fail e
+
+let test_parse_multiline_string_single_line_form () =
+  let input = {|key = """short"""|}  in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) -> check string "single-line triple" "short" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail e
+
+let test_parse_multiline_string_unterminated () =
+  let input = "key = \"\"\"\nno closing" in
+  match TL.parse_toml input with
+  | Ok _ -> fail "expected error for unterminated multiline"
+  | Error _ -> ()
+
+let test_parse_multiline_with_keys_after () =
+  let input = "[keeper]\ninstructions = \"\"\"\nDo stuff.\n\"\"\"\nroom_scope = \"all\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "keeper.instructions" doc with
+     | Some (TL.Toml_string s) -> check string "ml content" "Do stuff." s
+     | _ -> fail "expected instructions");
+    (match List.assoc_opt "keeper.room_scope" doc with
+     | Some (TL.Toml_string s) -> check string "key after ml" "all" s
+     | _ -> fail "expected room_scope after multiline")
+  | Error e -> fail e
+
 let test_parse_error_unterminated_table () =
   let input = "[missing_bracket" in
   match TL.parse_toml input with
@@ -499,6 +536,10 @@ let () =
           test_case "empty array" `Quick test_parse_empty_array;
           test_case "table" `Quick test_parse_table;
           test_case "inline comment" `Quick test_parse_inline_comment;
+          test_case "multiline string" `Quick test_parse_multiline_string;
+          test_case "multiline single-line form" `Quick test_parse_multiline_string_single_line_form;
+          test_case "multiline unterminated" `Quick test_parse_multiline_string_unterminated;
+          test_case "multiline with keys after" `Quick test_parse_multiline_with_keys_after;
           test_case "error: unterminated table" `Quick test_parse_error_unterminated_table;
           test_case "error: no equals" `Quick test_parse_error_no_equals;
         ] );

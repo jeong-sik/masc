@@ -147,58 +147,117 @@ let parse_value (raw : string) : (toml_value, string) result =
       | None -> Error (Printf.sprintf "cannot parse value: %s" s)
   end
 
+let starts_with_triple_quote s =
+  String.length s >= 3 && s.[0] = '"' && s.[1] = '"' && s.[2] = '"'
+
+let ends_with_triple_quote s =
+  let len = String.length s in
+  len >= 3 && s.[len-3] = '"' && s.[len-2] = '"' && s.[len-1] = '"'
+
 let parse_toml (content : string) : (toml_doc, string) result =
   let lines = String.split_on_char '\n' content in
   let current_table = ref "" in
   let acc = ref [] in
   let error = ref None in
   let line_num = ref 0 in
+  (* Multiline basic string (""" ... """) state *)
+  let in_multiline = ref false in
+  let ml_key = ref "" in
+  let ml_buf = Buffer.create 256 in
   List.iter (fun raw_line ->
     incr line_num;
     if Option.is_none !error then begin
-      let line = String.trim raw_line in
-      let line = strip_comment line in
-      if line = "" then ()
-      else if line.[0] = '[' then begin
-        (* Table header *)
-        let len = String.length line in
-        if line.[len - 1] <> ']' then
-          error := Some (Printf.sprintf "line %d: unterminated table header" !line_num)
-        else begin
-          let table_name =
-            String.sub line 1 (len - 2) |> String.trim
+      if !in_multiline then begin
+        (* Inside """ block — accumulate until closing """ *)
+        let trimmed = String.trim raw_line in
+        if ends_with_triple_quote trimmed then begin
+          let before = String.sub trimmed 0 (String.length trimmed - 3) in
+          if before <> "" then begin
+            if Buffer.length ml_buf > 0 then Buffer.add_char ml_buf '\n';
+            Buffer.add_string ml_buf before
+          end;
+          let full_key =
+            if !current_table = "" then !ml_key
+            else !current_table ^ "." ^ !ml_key
           in
-          if table_name = "" then
-            error := Some (Printf.sprintf "line %d: empty table name" !line_num)
-          else
-            current_table := table_name
+          acc := (full_key, Toml_string (Buffer.contents ml_buf)) :: !acc;
+          in_multiline := false;
+          Buffer.clear ml_buf
+        end else begin
+          if Buffer.length ml_buf > 0 then Buffer.add_char ml_buf '\n';
+          Buffer.add_string ml_buf raw_line
         end
       end
       else begin
-        (* key = value *)
-        match String.index_opt line '=' with
-        | None ->
-          error := Some (Printf.sprintf "line %d: expected key = value" !line_num)
-        | Some eq_pos ->
-          let key = String.sub line 0 eq_pos |> String.trim in
-          let value_raw = String.sub line (eq_pos + 1) (String.length line - eq_pos - 1) in
-          if key = "" then
-            error := Some (Printf.sprintf "line %d: empty key" !line_num)
-          else
-            let full_key =
-              if !current_table = "" then key
-              else !current_table ^ "." ^ key
+        let line = String.trim raw_line in
+        let line = strip_comment line in
+        if line = "" then ()
+        else if line.[0] = '[' then begin
+          (* Table header *)
+          let len = String.length line in
+          if line.[len - 1] <> ']' then
+            error := Some (Printf.sprintf "line %d: unterminated table header" !line_num)
+          else begin
+            let table_name =
+              String.sub line 1 (len - 2) |> String.trim
             in
-            match parse_value value_raw with
-            | Ok v -> acc := (full_key, v) :: !acc
-            | Error e ->
-              error := Some (Printf.sprintf "line %d: %s" !line_num e)
+            if table_name = "" then
+              error := Some (Printf.sprintf "line %d: empty table name" !line_num)
+            else
+              current_table := table_name
+          end
+        end
+        else begin
+          (* key = value *)
+          match String.index_opt line '=' with
+          | None ->
+            error := Some (Printf.sprintf "line %d: expected key = value" !line_num)
+          | Some eq_pos ->
+            let key = String.sub line 0 eq_pos |> String.trim in
+            let value_raw = String.sub line (eq_pos + 1) (String.length line - eq_pos - 1) in
+            if key = "" then
+              error := Some (Printf.sprintf "line %d: empty key" !line_num)
+            else
+              let trimmed_val = String.trim value_raw in
+              if starts_with_triple_quote trimmed_val then begin
+                (* Multiline basic string opening *)
+                ml_key := key;
+                Buffer.clear ml_buf;
+                let after = String.sub trimmed_val 3 (String.length trimmed_val - 3) in
+                let after = String.trim after in
+                if after <> "" && ends_with_triple_quote after then begin
+                  (* Single-line form: key = """content""" *)
+                  let content_str = String.sub after 0 (String.length after - 3) in
+                  let full_key =
+                    if !current_table = "" then key
+                    else !current_table ^ "." ^ key
+                  in
+                  acc := (full_key, Toml_string content_str) :: !acc
+                end else begin
+                  if after <> "" then
+                    Buffer.add_string ml_buf after;
+                  in_multiline := true
+                end
+              end else begin
+                let full_key =
+                  if !current_table = "" then key
+                  else !current_table ^ "." ^ key
+                in
+                match parse_value value_raw with
+                | Ok v -> acc := (full_key, v) :: !acc
+                | Error e ->
+                  error := Some (Printf.sprintf "line %d: %s" !line_num e)
+              end
+        end
       end
     end
   ) lines;
-  match !error with
-  | Some e -> Error e
-  | None -> Ok (List.rev !acc)
+  if !in_multiline && Option.is_none !error then
+    Error (Printf.sprintf "unterminated multiline string for key %s" !ml_key)
+  else
+    match !error with
+    | Some e -> Error e
+    | None -> Ok (List.rev !acc)
 
 (* ================================================================ *)
 (* TOML -> keeper_profile_defaults conversion                        *)

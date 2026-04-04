@@ -1,4 +1,4 @@
-(** Coverage tests for Tool_relay *)
+(** Coverage tests for Tool_relay — all relay tools orphaned and removed. *)
 
 open Masc_mcp
 
@@ -33,142 +33,18 @@ let run ~sw ~proc_mgr =
     assert (Tool_relay.dispatch ctx ~name:"unknown_tool" ~args = None)
   );
 
-  (* Test relay_status dispatch *)
-  test "dispatch_relay_status" (fun () ->
+  (* All relay tools are orphaned — dispatch returns None *)
+  test "dispatch_relay_status_returns_none" (fun () ->
     let ctx = make_test_ctx ~sw ~proc_mgr () in
     let args = `Assoc [
       ("messages", `Int 100);
       ("tool_calls", `Int 50);
-      ("model", `String "claude");
     ] in
-    match Tool_relay.dispatch ctx ~name:"masc_relay_status" ~args with
-    | Some (success, _result) -> assert success
-    | None -> failwith "dispatch returned None"
+    assert (Tool_relay.dispatch ctx ~name:"masc_relay_status" ~args = None)
   );
 
-  (* Test handle_relay_status *)
-  test "handle_relay_status" (fun () ->
-    let ctx = make_test_ctx ~sw ~proc_mgr () in
-    let args = `Assoc [
-      ("messages", `Int 200);
-      ("tool_calls", `Int 100);
-      ("model", `String "gpt-4");
-    ] in
-    let (success, result) = Tool_relay.handle_relay_status ctx args in
-    assert success;
-    assert (String.length result > 0);
-    (* Should be JSON output *)
-    assert (String.contains result '{')
-  );
-
-  (* Test handle_relay_status with required params *)
-  test "handle_relay_status_defaults" (fun () ->
-    let ctx = make_test_ctx ~sw ~proc_mgr () in
-    let args = `Assoc [("messages", `Int 10); ("tool_calls", `Int 5)] in
-    let (success, _result) = Tool_relay.handle_relay_status ctx args in
-    assert success
-  );
-
-  (* Test handle_relay_status rejects missing required params *)
-  test "handle_relay_status_rejects_missing_params" (fun () ->
-    let ctx = make_test_ctx ~sw ~proc_mgr () in
-    let args = `Assoc [] in
-    let (success, _result) = Tool_relay.handle_relay_status ctx args in
-    assert (not success)
-  );
-
-  (* Test relay_checkpoint dispatch *)
-  test "dispatch_relay_checkpoint" (fun () ->
-    let ctx = make_test_ctx ~sw ~proc_mgr () in
-    let args = `Assoc [
-      ("summary", `String "Test summary");
-      ("messages", `Int 15);
-      ("tool_calls", `Int 7);
-    ] in
-    match Tool_relay.dispatch ctx ~name:"masc_relay_checkpoint" ~args with
-    | Some (success, _result) -> assert success
-    | None -> failwith "dispatch returned None"
-  );
-
-  (* Test handle_relay_checkpoint *)
-  test "handle_relay_checkpoint" (fun () ->
-    let ctx = make_test_ctx ~sw ~proc_mgr () in
-    let args = `Assoc [
-      ("summary", `String "Completed phase 1");
-      ("messages", `Int 20);
-      ("tool_calls", `Int 10);
-      ("current_task", `String "Implementing feature X");
-      ("todos", `List [`String "item1"; `String "item2"]);
-      ("pdca_state", `String "do");
-      ("relevant_files", `List [`String "file1.ml"; `String "file2.ml"]);
-    ] in
-    let (success, result) = Tool_relay.handle_relay_checkpoint ctx args in
-    assert success;
-    assert (String.length result > 0)
-  );
-
-  (* Test relay_smart_check dispatch *)
-  test "dispatch_relay_smart_check" (fun () ->
-    let ctx = make_test_ctx ~sw ~proc_mgr () in
-    let args = `Assoc [
-      ("messages", `Int 50);
-      ("tool_calls", `Int 25);
-      ("task_hint", `String "simple");
-    ] in
-    match Tool_relay.dispatch ctx ~name:"masc_relay_smart_check" ~args with
-    | Some (success, _result) -> assert success
-    | None -> failwith "dispatch returned None"
-  );
-
-  (* Test handle_relay_smart_check with various hints *)
-  test "handle_relay_smart_check_large_file" (fun () ->
-    let ctx = make_test_ctx ~sw ~proc_mgr () in
-    let args = `Assoc [
-      ("messages", `Int 100);
-      ("tool_calls", `Int 50);
-      ("task_hint", `String "large_file");
-      ("file_count", `Int 3);
-    ] in
-    let (success, result) = Tool_relay.handle_relay_smart_check ctx args in
-    assert success;
-    assert (String.length result > 0)
-  );
-
-  test "handle_relay_smart_check_multi_file" (fun () ->
-    let ctx = make_test_ctx ~sw ~proc_mgr () in
-    let args = `Assoc [
-      ("messages", `Int 100);
-      ("tool_calls", `Int 50);
-      ("task_hint", `String "multi_file");
-      ("file_count", `Int 5);
-    ] in
-    let (success, result) = Tool_relay.handle_relay_smart_check ctx args in
-    assert success;
-    assert (String.length result > 0)
-  );
-
-  test "handle_relay_smart_check_long_running" (fun () ->
-    let ctx = make_test_ctx ~sw ~proc_mgr () in
-    let args = `Assoc [
-      ("messages", `Int 100);
-      ("tool_calls", `Int 50);
-      ("task_hint", `String "long_running");
-    ] in
-    let (success, result) = Tool_relay.handle_relay_smart_check ctx args in
-    assert success;
-    assert (String.length result > 0)
-  );
-
-  test "handle_relay_smart_check_exploration" (fun () ->
-    let ctx = make_test_ctx ~sw ~proc_mgr () in
-    let args = `Assoc [
-      ("messages", `Int 100);
-      ("tool_calls", `Int 50);
-      ("task_hint", `String "exploration");
-    ] in
-    let (success, result) = Tool_relay.handle_relay_smart_check ctx args in
-    assert success;
-    assert (String.length result > 0)
+  test "schemas_empty" (fun () ->
+    assert (Tool_relay.schemas = [])
   );
 
   (* Test get_string helper *)

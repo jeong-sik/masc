@@ -624,25 +624,6 @@ Pair with masc_team_session_compare to diff two sessions.";
           ];
     };
     {
-      name = "masc_team_session_compare";
-      description =
-        "Compare two team sessions side by side, returning throughput, policy, and communication deltas. \
-Use when evaluating whether a configuration change improved session outcomes. \
-After masc_team_session_list identifies the two session IDs.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("base_session_id", `Assoc [ ("type", `String "string") ]);
-                  ("target_session_id", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "base_session_id"; `String "target_session_id" ]);
-          ];
-    };
-    {
       name = "masc_team_session_events";
       description =
         "Read the team session event timeline with optional event type and timestamp filters. \
@@ -664,32 +645,6 @@ After masc_team_session_start; the most-called session tool for progress monitor
                       ] );
                   ("after_ts", `Assoc [ ("type", `String "number") ]);
                   ("limit", `Assoc [ ("type", `String "integer") ]);
-                ] );
-            ("required", `List [ `String "session_id" ]);
-          ];
-    };
-    {
-      name = "masc_team_session_prove";
-      description =
-        "Generate verifiable proof artifacts (proof.json/proof.md) for a team session based on timeline evidence. \
-Use when session work needs an auditable proof trail with evidence hashes. \
-After masc_team_session_stop or masc_team_session_report.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("session_id", `Assoc [ ("type", `String "string") ]);
-                  ( "generate_report_if_missing",
-                    `Assoc [ ("type", `String "boolean") ] );
-                  ( "proof_level",
-                    `Assoc
-                      [
-                        ("type", `String "string");
-                        ("enum", `List [ `String "standard"; `String "strong" ]);
-                      ] );
                 ] );
             ("required", `List [ `String "session_id" ]);
           ];

@@ -106,37 +106,6 @@ let schemas : tool_schema list = [
   };
 
   {
-    name = "masc_find_by_capability";
-    description = "Search for active (non-zombie) agents that have a specific capability tag.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("capability", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Capability to search for (e.g., 'typescript')");
-        ]);
-      ]);
-      ("required", `List [`String "capability"]);
-    ];
-  };
-
-  {
-    name = "masc_collaboration_graph";
-    description = "View the Hebbian collaboration graph showing learned agent-to-agent relationship strengths.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("format", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "text"; `String "json"]);
-          ("description", `String "Output format (default: text)");
-          ("default", `String "text");
-        ]);
-      ]);
-    ];
-  };
-
-  {
     name = "masc_consolidate_learning";
     description = "Apply decay to old collaboration patterns and prune weak Hebbian connections.";
     input_schema = `Assoc [

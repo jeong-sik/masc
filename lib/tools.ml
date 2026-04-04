@@ -10,12 +10,10 @@ open Types
     (avoids Tools -> Config -> Tools cycle) *)
 let raw_schemas : tool_schema list =
   Tool_schemas_room_core.schemas
-  @ Tool_schemas_room_extra.schemas
   @ Tool_schemas_inline.schemas
   @ Tool_schemas_plan.schemas
   @ Tool_schemas_agent.schemas
   @ Tool_schemas_auth.schemas
-  @ Tool_schemas_portal.schemas
   @ Tool_schemas_worktree.schemas
   @ Tool_run.schemas
   @ Tool_task.schemas

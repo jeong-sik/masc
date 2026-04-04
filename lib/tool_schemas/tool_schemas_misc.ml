@@ -19,74 +19,6 @@ Pass category to filter results to a single section.";
     ];
   };
   {
-    name = "masc_transport_status";
-    description = "Return the active transport surfaces and runtime counters for HTTP, gRPC, WebSocket, and WebRTC. \
-Use when selecting a client transport or debugging whether realtime transports are enabled and reachable.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  };
-  {
-    name = "masc_websocket_discovery";
-    description = "Return the standalone WebSocket discovery payload equivalent to GET /ws, including enablement, port, URL, and session count. \
-Use before opening a WebSocket client to discover the correct ws:// endpoint.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  };
-  {
-    name = "masc_webrtc_offer";
-    description = "Create a WebRTC signaling offer in the server registry and return an offer_id. \
-Use from the initiating side before calling masc_webrtc_answer from the answering side.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Name of the agent creating the offer");
-        ]);
-        ("ice_candidates", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "ICE candidates gathered by the offering peer");
-          ("default", `List []);
-        ]);
-        ("dtls_fingerprint", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional DTLS fingerprint for the offering peer");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
-    ];
-  };
-  {
-    name = "masc_webrtc_answer";
-    description = "Accept a pending WebRTC signaling offer by offer_id and return the peer_id plus server-side ICE credentials. \
-Use from the answering side after a prior masc_webrtc_offer call.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("offer_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Offer identifier returned by masc_webrtc_offer");
-        ]);
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Name of the agent accepting the offer");
-        ]);
-        ("ice_candidates", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional ICE candidates gathered by the answering peer");
-          ("default", `List []);
-        ]);
-      ]);
-      ("required", `List [`String "offer_id"; `String "agent_name"]);
-    ];
-  };
-  {
     name = "masc_dashboard";
     description = "Render the MASC dashboard summarizing rooms, agents, and tasks. Set scope='current' for this room only.";
     input_schema = `Assoc [
@@ -259,35 +191,6 @@ After masc_tool_admin_snapshot to review current state before making changes.";
         ]);
       ]);
       ("required", `List [`String "section"]);
-    ];
-  };
-  {
-    name = "masc_keeper_tool_catalog";
-    description = "List visible masc_* tools with keeper wrapper coverage, filterable by tier or visibility.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("tier", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional tier filter: essential, standard, full");
-        ]);
-        ("include_hidden", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include hidden tools in the catalog");
-        ]);
-        ("include_deprecated", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include deprecated tools in the catalog");
-        ]);
-        ("limit", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Max tools per page (default 50, max 500)");
-        ]);
-        ("offset", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Skip first N tools for pagination (default 0)");
-        ]);
-      ]);
     ];
   };
   {

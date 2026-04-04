@@ -15,5 +15,3 @@ val handle_portal_close : context -> Yojson.Safe.t -> result
 val handle_portal_status : context -> Yojson.Safe.t -> result
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
-
-val schemas : Types.tool_schema list

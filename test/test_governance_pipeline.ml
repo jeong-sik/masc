@@ -206,8 +206,9 @@ let test_risk_precedence_critical_over_high () =
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_metadata_destructive_override () =
-  let risk = Gp.assess_risk ~tool_name:"masc_operation_stop" ~input:no_args in
-  Alcotest.(check string) "operation_stop metadata marks destructive"
+  (* masc_operation_stop removed — use masc_room_delete which is still destructive *)
+  let risk = Gp.assess_risk ~tool_name:"masc_room_delete" ~input:no_args in
+  Alcotest.(check string) "room_delete metadata marks destructive"
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_metadata_admin_cleanup_override () =

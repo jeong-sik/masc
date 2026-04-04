@@ -33,7 +33,6 @@ let managed_agent_passthrough_tool_names =
                 "masc_status";
                 "masc_tasks";
                 "masc_transition";
-                "masc_a2a_delegate";
               ]))
 
 let dedupe_tool_schemas_by_name (schemas : Types.tool_schema list) =
@@ -161,7 +160,7 @@ let is_idempotent_tool_name name =
       let prefix_len = String.length prefix in
       String.length lowered >= prefix_len
       && String.sub lowered 0 prefix_len = prefix)
-    [ "masc_status"; "masc_get_"; "masc_list"; "masc_tool_"; "masc_keeper_tool_catalog" ]
+    [ "masc_status"; "masc_get_"; "masc_list"; "masc_tool_" ]
 
 let tool_annotations_for_profile _profile tool_name =
   let meta = Tool_catalog.metadata tool_name in
@@ -226,12 +225,9 @@ let custom_tool_titles : (string * string) list = [
   ("masc_claim_next", "Claim Next Task");
   ("masc_update_priority", "Update Task Priority");
   ("masc_task_history", "Task Event History");
-  ("masc_archive_view", "View Task Archive");
   (* Communication *)
   ("masc_broadcast", "Broadcast Message");
   ("masc_messages", "Read Messages");
-  ("masc_a2a_delegate", "Agent-to-Agent Delegate");
-  ("masc_a2a_subscribe", "Subscribe to Agent Events");
   (* Planning *)
   ("masc_plan_init", "Initialize Plan");
   ("masc_plan_get", "Get Plan");
@@ -241,13 +237,10 @@ let custom_tool_titles : (string * string) list = [
   ("masc_plan_clear_task", "Clear Current Task");
   ("masc_note_add", "Add Note");
   ("masc_deliver", "Deliver Result");
-  ("masc_error_add", "Record Error");
-  ("masc_error_resolve", "Resolve Error");
   (* Agents *)
   ("masc_agents", "List Agent Details");
   ("masc_agent_update", "Update Agent Profile");
   ("masc_register_capabilities", "Register Agent Capabilities");
-  ("masc_find_by_capability", "Find Agent by Capability");
   (* Heartbeat *)
   ("masc_heartbeat", "Send Heartbeat");
   ("masc_heartbeat_start", "Start Auto-Heartbeat");
@@ -266,14 +259,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_team_session_list", "List Team Sessions");
   ("masc_team_session_events", "Team Session Events");
   ("masc_team_session_finalize", "Finalize Team Session");
-  (* Command plane *)
-  ("masc_operation_start", "Start Operation");
-  ("masc_operation_status", "Operation Status");
-  ("masc_operation_stop", "Stop Operation");
-  ("masc_operation_pause", "Pause Operation");
-  ("masc_operation_resume", "Resume Operation");
-  ("masc_operation_finalize", "Finalize Operation");
-  ("masc_operation_checkpoint", "Operation Checkpoint");
   (* Room strategy *)
   ("masc_room_strategy_get", "Get Room Strategy");
   ("masc_room_strategy_set", "Set Room Strategy");
@@ -288,7 +273,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_keeper_status", "Keeper Status");
   ("masc_keeper_down", "Stop Keeper");
   ("masc_keeper_create_from_persona", "Create Keeper from Persona");
-  ("masc_keeper_tool_catalog", "Keeper Tool Catalog");
   (* SDK aliases *)
   ("masc_list_tasks", "List Tasks");
   ("masc_room_status", "Room Status");
@@ -482,14 +466,6 @@ let tool_output_schema_field = function
              ("agents", array_schema);
              ("tasks", array_schema);
              ("operations", array_schema);
-           ])
-  | "masc_operation_status" ->
-      Some
-        (permissive_object_schema
-           [
-             ("operation_id", string_schema);
-             ("status", string_schema);
-             ("progress", object_schema);
            ])
   | "masc_check" ->
       Some

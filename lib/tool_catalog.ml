@@ -158,8 +158,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_tool_help", readonly_tool);
     ("masc_keeper_list", readonly_tool);
     ("masc_keeper_status", readonly_tool);
-    ("masc_transport_status", deprecated "Pruned from all surfaces in #4999");
-    ("masc_websocket_discovery", deprecated "Pruned from all surfaces in #4999");
     ("masc_plan_get", readonly_tool);
     ("masc_worktree_list", readonly_tool);
     ( "masc_set_room",
@@ -198,36 +196,6 @@ let explicit_metadata : (string * metadata) list =
         (hidden_active "Direct execution can apply privileged side effects and should be treated as destructive.") );
     ("masc_tool_grant", destructive_tool);
     ("masc_tool_revoke", destructive_tool);
-    ( "masc_operation_stop",
-      destructive_tool );
-    ( "masc_operation_pause",
-      { default_metadata with destructive = Some false } );
-    (* Tools pruned from all surfaces in #4999 — registered as Deprecated
-       so the SSOT orphan check passes while handlers remain for backward compat.
-       Removed from System_internal surface; schema kept for in-flight sessions. *)
-    ("masc_episode_flush", deprecated "Pruned from all surfaces in #4999");
-    ("masc_episode_list", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_open", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_send", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_close", deprecated "Pruned from all surfaces in #4999");
-    ("masc_portal_status", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_discover", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_query_skill", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_delegate", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_subscribe", deprecated "Pruned from all surfaces in #4999");
-    ("masc_a2a_unsubscribe", deprecated "Pruned from all surfaces in #4999");
-    ("masc_webrtc_offer", deprecated "Pruned from all surfaces in #4999");
-    ("masc_webrtc_answer", deprecated "Pruned from all surfaces in #4999");
-    ("masc_board_migrate", deprecated "Pruned from all surfaces in #4999");
-    ("masc_board_reclassify", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_ping_pong", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_speak", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_session_start", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_session_end", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_sessions", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_agent", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_conference_start", deprecated "Pruned from all surfaces in #4999");
-    ("masc_voice_conference_end", deprecated "Pruned from all surfaces in #4999");
   ]
 
 (* ================================================================ *)

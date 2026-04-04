@@ -245,13 +245,6 @@ let dispatch (ctx : context) ~(name : string) : result option =
            in
            Some (result.Spawn.success, Spawn.result_to_string result))
 
-  (* ── Episodes (delegated) ───────────────────────────────────── *)
-  | "masc_episode_flush" ->
-      Tool_inline_dispatch_episode.handle_episode_flush ~config ~arguments ~state ~sw
-
-  | "masc_episode_list" ->
-      Tool_inline_dispatch_episode.handle_episode_list ~config ~arguments
-
   (* ── Tool discovery ─────────────────────────────────────────── *)
   | "masc_discover_tools" ->
       let query = String.lowercase_ascii (arg_get_string "query" "") in

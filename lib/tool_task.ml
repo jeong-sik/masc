@@ -605,7 +605,6 @@ let dispatch ctx ~name ~args : result option =
   | "masc_update_priority" -> Some (handle_update_priority ctx args)
   | "masc_tasks" -> Some (handle_tasks ctx args)
   | "masc_task_history" -> Some (handle_task_history ctx args)
-  | "masc_archive_view" -> Some (handle_archive_view ctx args)
   | _ -> None
 
 (* ================================================================ *)

@@ -2,66 +2,6 @@ open Types
 
 let schemas : tool_schema list = [
   {
-    name = "masc_heartbeat";
-    description = "Update your heartbeat timestamp to prove you are still active. Agents silent 5+ min become zombie candidates.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
-    ];
-  };
-  {
-    name = "masc_heartbeat_start";
-    description = "Start automatic background heartbeat pings at a given interval. Smart mode skips beats when busy.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("interval", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Interval in seconds between heartbeats (min: 5, max: 300)");
-          ("default", `Int 30);
-        ]);
-        ("message", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Heartbeat message content");
-          ("default", `String "🏓 heartbeat");
-        ]);
-        ("smart", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Enable smart mode: skip when busy, 3x interval when idle >5min");
-          ("default", `Bool false);
-        ]);
-      ]);
-    ];
-  };
-  {
-    name = "masc_heartbeat_stop";
-    description = "Stop a periodic heartbeat started by masc_heartbeat_start.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("heartbeat_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "ID of heartbeat to stop (from masc_heartbeat_start)");
-        ]);
-      ]);
-      ("required", `List [`String "heartbeat_id"]);
-    ];
-  };
-  {
-    name = "masc_heartbeat_list";
-    description = "List all active heartbeat timers in the room with interval and last beat time.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-    ];
-  };
-  {
     name = "masc_agents";
     description = "Get detailed status of all agents: zombie detection, current tasks, capabilities, last seen time.";
     input_schema = `Assoc [

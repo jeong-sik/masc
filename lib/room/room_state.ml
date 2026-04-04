@@ -457,6 +457,8 @@ let broadcast ?trace_context config ~from_agent ~content =
   (match backend_publish config ~channel:(broadcast_channel config)
       ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
    | Ok _ -> ()
+   | Error (Backend_types.BackendNotSupported msg) when String.starts_with ~prefix:"FileSystem backend" msg ->
+       Log.Misc.debug "broadcast publish skipped for %s: %s" room_id msg
    | Error e -> Log.Misc.error "broadcast publish failed for %s: %s" room_id (Backend_types.show_error e));
   emit_message_activity config ~from_agent:safe_agent ~content:safe_content
     ~mention ();

@@ -163,7 +163,7 @@ let run_named
       Llm_provider.Provider_config.make
         ~kind:Llm_provider.Provider_config.Glm
         ~model_id:"auto"
-        ~base_url:"https://api.z.ai/api/coding/paas/v4"
+        ~base_url:(Env_config_runtime.Glm.server_url ^ "/api/coding/paas/v4")
         ~request_path:"/chat/completions"
         ()
   in

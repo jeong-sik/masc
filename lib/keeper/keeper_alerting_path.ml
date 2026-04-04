@@ -35,6 +35,17 @@ let absolute_allowed_paths ~(config : Room.config) ~(allowed_paths : string list
   let root = project_root_of_config config in
   allowed_paths |> List.filter_map (normalize_allowed_path_for_check ~root)
 
+let absolute_allowed_paths_result ~(config : Room.config)
+    ~(allowed_paths : string list) : (string list, string) result =
+  let normalized = absolute_allowed_paths ~config ~allowed_paths in
+  if allowed_paths <> [] && normalized = [] then
+    Error
+      (Printf.sprintf
+         "allowed_paths_normalized_empty: [%s]"
+         (String.concat ", " allowed_paths))
+  else
+    Ok normalized
+
 let resolve_keeper_target_path ~(config : Room.config)
     ~(allowed_paths : string list) ~(raw_path : string)
     : (string, string) result =

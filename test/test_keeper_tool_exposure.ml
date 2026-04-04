@@ -427,6 +427,20 @@ let test_absolute_allowed_paths_slashes_only_rejected () =
     check bool "slashes-only allow path does not allow all" true
       (Result.is_error result))
 
+let test_absolute_allowed_paths_result_rejects_invalid_explicit_allowlist () =
+  let dir = make_path_test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    let result =
+      Keeper_alerting_path.absolute_allowed_paths_result
+        ~config
+        ~allowed_paths:["////"]
+    in
+    check bool "explicit invalid allowlist is rejected" true
+      (Result.is_error result))
+
 let test_path_allowed_paths_single_trailing_slash () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
@@ -550,6 +564,8 @@ let () =
         test_absolute_allowed_paths_normalization;
       test_case "slashes-only allowed_paths rejected" `Quick
         test_absolute_allowed_paths_slashes_only_rejected;
+      test_case "invalid explicit allowlist result rejected" `Quick
+        test_absolute_allowed_paths_result_rejects_invalid_explicit_allowlist;
       test_case "allowed_paths single trailing slash" `Quick
         test_path_allowed_paths_single_trailing_slash;
       test_case "empty path rejected" `Quick test_path_empty_rejected;

@@ -263,7 +263,7 @@ let test_hook_skips_on_verify_error () =
          accumulated_cost_usd = 0.0;
          turn = 1;
          schedule = { planned_index = 0; batch_index = 0;
-                      batch_size = 1; concurrency_class = "default" };
+                      batch_size = 1; batch_kind = "sequential"; concurrency_class = "default" };
        })
   in
   Alcotest.(check bool) "verify called" true !verify_called;
@@ -290,7 +290,7 @@ let test_hook_readonly_skips_verifier () =
          accumulated_cost_usd = 0.0;
          turn = 1;
          schedule = { planned_index = 0; batch_index = 0;
-                      batch_size = 1; concurrency_class = "default" };
+                      batch_size = 1; batch_kind = "sequential"; concurrency_class = "default" };
        })
   in
   Alcotest.(check bool) "verify skipped" false !verify_called;

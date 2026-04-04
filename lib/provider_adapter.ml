@@ -2,15 +2,6 @@ type runtime_kind =
   | Local
   | Direct_api
 
-type provider_family =
-  | Claude_family
-  | OpenAI_family
-  | Gemini_family
-  | Glm_family
-  | Llama_family
-  | OpenRouter_family
-  | Custom_family of string
-
 type auth_mode =
   | No_auth
   | Api_key of string
@@ -27,7 +18,6 @@ type voice_transport =
 type adapter = {
   canonical_name : string;
   runtime_kind : runtime_kind;
-  provider_family : provider_family;
   auth_mode : auth_mode;
   aliases : string list;
 }
@@ -35,7 +25,6 @@ type adapter = {
 type voice_adapter = {
   canonical_name : string;
   transport : voice_transport;
-  provider_family : provider_family;
   auth_mode : auth_mode;
   aliases : string list;
 }
@@ -68,15 +57,6 @@ let string_of_runtime_kind = function
   | Local -> "local"
   | Direct_api -> "direct_api"
 
-let string_of_provider_family = function
-  | Claude_family -> "claude"
-  | OpenAI_family -> "openai"
-  | Gemini_family -> "gemini"
-  | Glm_family -> "glm"
-  | Llama_family -> "llama"
-  | OpenRouter_family -> "openrouter"
-  | Custom_family name -> "custom:" ^ name
-
 let string_of_auth_mode = function
   | No_auth -> "none"
   | Api_key env_name -> "api_key:" ^ env_name
@@ -95,28 +75,24 @@ let direct_adapters =
     {
       canonical_name = "llama";
       runtime_kind = Local;
-      provider_family = Llama_family;
       auth_mode = No_auth;
       aliases = [ "llama"; "llama.cpp"; "llamacpp" ];
     };
     {
       canonical_name = "claude-api";
       runtime_kind = Direct_api;
-      provider_family = Claude_family;
       auth_mode = Api_key "ANTHROPIC_API_KEY";
       aliases = [ "claude-api"; "claude"; "anthropic" ];
     };
     {
       canonical_name = "codex-api";
       runtime_kind = Direct_api;
-      provider_family = OpenAI_family;
       auth_mode = Api_key "OPENAI_API_KEY";
       aliases = [ "codex-api"; "openai" ];
     };
     {
       canonical_name = "gemini-api";
       runtime_kind = Direct_api;
-      provider_family = Gemini_family;
       auth_mode =
         Vertex_adc
           {
@@ -128,14 +104,12 @@ let direct_adapters =
     {
       canonical_name = "glm";
       runtime_kind = Direct_api;
-      provider_family = Glm_family;
       auth_mode = Api_key "ZAI_API_KEY";
       aliases = [ "glm"; "glm_cloud"; "zai" ];
     };
     {
       canonical_name = "openrouter";
       runtime_kind = Direct_api;
-      provider_family = OpenRouter_family;
       auth_mode = Api_key "OPENROUTER_API_KEY";
       aliases = [ "openrouter" ];
     };
@@ -145,7 +119,6 @@ let voice_openai_compat_adapter =
   {
     canonical_name = "voice-openai-compat";
     transport = Voice_openai_compat;
-    provider_family = OpenAI_family;
     auth_mode = No_auth;
     aliases =
       [ "voice-openai-compat"; "openai_compat"; "openai"; "railway-elevenlabs-proxy" ];
@@ -155,7 +128,6 @@ let voice_elevenlabs_direct_adapter =
   {
     canonical_name = "elevenlabs-direct";
     transport = Voice_elevenlabs_direct;
-    provider_family = Custom_family "elevenlabs";
     auth_mode = Api_key "ELEVENLABS_API_KEY";
     aliases = [ "elevenlabs-direct"; "elevenlabs"; "tts-elevenlabs" ];
   }
@@ -164,7 +136,6 @@ let voice_mcp_adapter =
   {
     canonical_name = "voice-mcp";
     transport = Voice_mcp;
-    provider_family = Custom_family "voice_mcp";
     auth_mode = No_auth;
     aliases = [ "voice-mcp"; "voice_mcp"; "mcp"; "local-voice-mcp" ];
   }
@@ -600,18 +571,20 @@ let provider_model_label provider model =
   if model = "" then None
   else Some (Printf.sprintf "%s:%s" provider model)
 
-(** Family → model label. Uses "provider:auto" for cloud providers;
-    OAS cascade resolves the concrete model at runtime. *)
-let default_model_label_for_family = function
-  | Claude_family -> Ok "claude:auto"
-  | Gemini_family -> Ok "gemini:auto"
-  | OpenAI_family -> Ok "openai:auto"
-  | Glm_family -> Ok "glm:auto"
-  | Llama_family -> explicit_llama_model_label_result ()
-  | OpenRouter_family ->
+(** canonical_name → model label. Uses "provider:auto" for cloud providers;
+    OAS cascade resolves the concrete model at runtime.
+    MASC no longer knows vendor families — only canonical adapter names. *)
+let default_model_label_for_adapter (adapter : adapter) =
+  match adapter.canonical_name with
+  | "claude-api" -> Ok "claude:auto"
+  | "gemini-api" -> Ok "gemini:auto"
+  | "codex-api" -> Ok "openai:auto"
+  | "glm" -> Ok "glm:auto"
+  | "llama" -> explicit_llama_model_label_result ()
+  | "openrouter" ->
       Error "OpenRouter requires explicit runtime_model"
-  | Custom_family _ ->
-      Error "Custom provider requires explicit runtime_model"
+  | name ->
+      Error (Printf.sprintf "Provider '%s' requires explicit runtime_model" name)
 
 (** Build the "provider:auto" label for each adapter that has auth
     credentials present.  Used by preferred_*_model_labels to avoid
@@ -624,7 +597,7 @@ let auto_label_for_adapter (adapter : adapter) =
   in
   if not is_available then None
   else
-    match default_model_label_for_family adapter.provider_family with
+    match default_model_label_for_adapter adapter with
     | Ok label -> Some label
     | Error _ -> None
 
@@ -635,7 +608,7 @@ let auto_detect_adapters =
   List.filter
     (fun (adapter : adapter) ->
       adapter.runtime_kind = Direct_api
-      && adapter.provider_family <> OpenRouter_family)
+      && adapter.canonical_name <> "openrouter")
     direct_adapters
 
 let preferred_execution_model_labels () =

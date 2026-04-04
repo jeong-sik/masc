@@ -191,7 +191,6 @@ let () = test "dispatch_room_strategy_get" (fun () ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
-  Room.write_current_room ctx.config "focus-room";
   Room.ensure_room_bootstrap ctx.config "focus-room";
   match Tool_room.dispatch ctx ~name:"masc_room_strategy_get" ~args:(`Assoc []) with
   | Some (success, result) ->

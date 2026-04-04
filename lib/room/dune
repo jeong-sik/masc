@@ -16,7 +16,6 @@
   room_gc
   room_init
   room_lifecycle
-  room_multi
   room_portal
   room_query
   room_status

@@ -69,7 +69,6 @@ let () = test "dispatch_unknown_tool" (fun () ->
 let () = test "dispatch_dashboard" (fun () ->
   let ctx = make_test_ctx () in
   ignore (Room.add_task ctx.config ~title:"default task" ~priority:2 ~description:"");
-  Room.write_current_room ctx.config "second-room";
   Room.ensure_room_bootstrap ctx.config "second-room";
   let second_room = ctx.config in
   ignore (Room.add_task second_room ~title:"second task" ~priority:1 ~description:"");
@@ -101,7 +100,6 @@ let () = test "dispatch_dashboard_compact" (fun () ->
 
 let () = test "dispatch_dashboard_current_scope" (fun () ->
   let ctx = make_test_ctx () in
-  Room.write_current_room ctx.config "focus-room";
   Room.ensure_room_bootstrap ctx.config "focus-room";
   let focused = ctx.config in
   ignore (Room.add_task focused ~title:"focus task" ~priority:2 ~description:"");

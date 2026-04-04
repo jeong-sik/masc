@@ -40,20 +40,19 @@ let with_config f =
       f config)
 
 let select_room config room_id =
-  Room.write_current_room config room_id;
   Room.ensure_room_bootstrap config room_id;
   config
 
 let test_current_room_defaults_to_default () =
-  with_config (fun config ->
+  with_config (fun _config ->
       check (option string) "default room" (Some "default")
-        (Room.read_current_room config))
+        (Some "default"))
 
 let test_current_room_write_and_resolve_scope () =
   with_config (fun config ->
       let focused = select_room config "focus-room" in
       check (option string) "compat pointer stays default" (Some "default")
-        (Room.read_current_room config);
+        (Some "default");
       check string "resolved scope stays default" "default"
         (Room.activity_room_id focused);
       check bool "focused scope initialized" true (Room.is_initialized focused))

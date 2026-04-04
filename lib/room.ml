@@ -244,5 +244,4 @@ include Room_vote
 (* Tempo Control (Cluster Pace Management) *)
 include Room_tempo
 
-(* Current-room pointer helpers *)
-include Room_multi
+(* Room_multi removed — operational namespace is always "default" *)

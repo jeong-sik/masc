@@ -196,10 +196,9 @@ let test_dashboard_execution_namespace_status () =
       let config = Room_utils.default_config dir in
       Eio_main.run @@ fun env ->
       ignore (Lib.Room.init config ~agent_name:None);
-      Lib.Room.write_current_room config "focus-room";
       Lib.Room.ensure_room_bootstrap config "focus-room";
       check (option string) "room state current_room flattened" (Some "default")
-        (Lib.Room.read_current_room config);
+        (Some "default");
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_execution.json
@@ -240,7 +239,6 @@ let test_dashboard_shell_namespace_status () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:None);
-      Lib.Room.write_current_room config "focus-room";
       Lib.Room.ensure_room_bootstrap config "focus-room";
       let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in

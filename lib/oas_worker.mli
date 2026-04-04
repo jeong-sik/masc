@@ -77,6 +77,7 @@ val default_model_strings : cascade_name:string -> string list
 val run_named :
   cascade_name:string ->
   goal:string ->
+  ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->
   ?tools:Oas.Tool.t list ->
@@ -137,6 +138,7 @@ val run_model_by_label :
 val run_named_with_masc_tools :
   cascade_name:string ->
   goal:string ->
+  ?priority:Llm_provider.Request_priority.t ->
   ?system_prompt:string ->
   masc_tools:Types.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->

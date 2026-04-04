@@ -1220,9 +1220,7 @@ let record_keeper_crashed
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit
   =
-  if Eio_context.get_net_opt () = None then
-    Log.Keeper.info "start_keepalive: skipped %s (no Eio network context)" m.name
-  else if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
+  if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
   then Log.Keeper.info "start_keepalive: skipped %s (already running)" m.name
   else if not (Keeper_registry.spawn_slots_available ())
   then Log.Keeper.info "start_keepalive: skipped %s (no spawn slots)" m.name
@@ -1242,6 +1240,9 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
     let live_meta = bootstrap_live_keeper_meta ~ctx m in
     Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
     publish_keeper_started ~live_meta;
+    if Eio_context.get_net_opt () = None then
+      Log.Keeper.info "start_keepalive: skipped fiber for %s (no Eio network context)" m.name
+    else
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
       let record_crash failure_reason =
         record_keeper_crashed

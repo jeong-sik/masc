@@ -9,15 +9,14 @@ let estimate_tokens (s : string) : int =
 
 let tier_rank (name : string) : int =
   match Tool_catalog.tool_tier name with
-  | Tool_catalog.Essential -> 0
-  | Tool_catalog.Standard -> 1
-  | Tool_catalog.Full -> 2
+  | Tool_catalog.Core -> 0
+  | Tool_catalog.Extended -> 1
 
 let filter_by_budget ~budget_tokens ~usage_counts
     ~(tool_schemas : Types.tool_schema list) : Types.tool_schema list =
   if budget_tokens <= 0 then []
   else
-    (* Sort: tier ascending (Essential first), then usage descending *)
+    (* Sort: tier ascending (Core first), then usage descending *)
     let sorted =
       List.sort
         (fun (a : Types.tool_schema) (b : Types.tool_schema) ->

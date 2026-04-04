@@ -4,7 +4,7 @@
     1. Hidden tools do not leak into spawned agent passthrough lists
     2. Passthrough list entries correspond to real tool schemas (no dead entries)
     3. SDK alias tools have consistent visibility with Tool_catalog
-    4. Tier system maintains essential ⊂ standard ⊂ full inclusion
+    4. Tier system maintains core ⊂ extended inclusion
     5. Annotation overrides in Tool_catalog take precedence
     6. Public MCP surface is a valid subset of the full registry
     7. Non-public tools remain callable via dispatch *)
@@ -86,34 +86,14 @@ let () =
         ] );
       ( "tier_inclusion",
         [
-          test_case "essential ⊂ standard" `Quick (fun () ->
-              let essentials =
-                List.filter
-                  (fun name ->
-                    Tool_catalog.is_in_tier Tool_catalog.Essential name)
-                  Tool_catalog.essential_tools
-              in
+          test_case "core ⊂ extended" `Quick (fun () ->
               List.iter
                 (fun name ->
                   check bool
-                    (name ^ " essential should be in standard")
+                    (name ^ " core should be in extended")
                     true
-                    (Tool_catalog.is_in_tier Tool_catalog.Standard name))
-                essentials);
-          test_case "standard ⊂ full" `Quick (fun () ->
-              let standards =
-                List.filter
-                  (fun name ->
-                    Tool_catalog.is_in_tier Tool_catalog.Standard name)
-                  Tool_catalog.standard_tools
-              in
-              List.iter
-                (fun name ->
-                  check bool
-                    (name ^ " standard should be in full")
-                    true
-                    (Tool_catalog.is_in_tier Tool_catalog.Full name))
-                standards);
+                    (Tool_catalog.is_in_tier Tool_catalog.Extended name))
+                Tool_catalog.core_tools);
         ] );
       ( "annotation_overrides",
         [
@@ -146,8 +126,8 @@ let () =
                     (Tool_catalog.is_visible name);
                   check bool (name ^ " direct call blocked") false
                     (Tool_catalog.allow_direct_call name);
-                  check bool (name ^ " on keeper_internal surface") true
-                    (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name);
+                  check bool (name ^ " on keeper surface") true
+                    (Tool_catalog.is_on_surface Tool_catalog.Keeper name);
                   check bool (name ^ " reason present") true
                     (Option.is_some meta.reason))
                 [ "keeper_time_now"; "keeper_board_post"; "keeper_bash" ]);
@@ -184,8 +164,8 @@ let () =
                 (Tool_catalog.is_visible "masc_set_room");
               check bool "masc_set_room direct call allowed" true
                 (Tool_catalog.allow_direct_call "masc_set_room");
-              check bool "masc_set_room on system_internal surface" true
-                (Tool_catalog.is_on_surface Tool_catalog.System_internal
+              check bool "masc_set_room on system surface" true
+                (Tool_catalog.is_on_surface Tool_catalog.System
                    "masc_set_room");
               check (option string) "masc_set_room replacement" (Some "masc_start")
                 meta.replacement);

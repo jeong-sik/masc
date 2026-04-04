@@ -543,7 +543,7 @@ let run_turn
         String.starts_with ~prefix:"keeper_" n) candidates in
       let masc_std = List.filter (fun n ->
         String.starts_with ~prefix:"masc_" n
-        && Tool_catalog_tiers.is_in_tier Standard n
+        && Tool_catalog_tiers.is_in_tier Extended n
       ) candidates in
       let merged = keeper @ masc_std in
       if List.length merged > max_fallback_tools then

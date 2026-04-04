@@ -86,9 +86,9 @@ let register (spec : t) =
   (* 3. Requires-join set *)
   if spec.requires_join then
     Tool_dispatch.init_requires_join_set [ spec.name ];
-  (* 4. Catalog metadata — enforce Hidden for System_internal tools *)
+  (* 4. Catalog metadata — enforce Hidden for System tools *)
   let is_system_internal =
-    Tool_catalog_surfaces.is_on_surface System_internal spec.name
+    Tool_catalog_surfaces.is_on_surface System spec.name
   in
   let effective_visibility =
     if is_system_internal && spec.visibility = Tool_catalog.Default

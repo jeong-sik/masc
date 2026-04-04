@@ -66,11 +66,6 @@ let dispatch
 
   | Mod_plan ->
       Tool_plan.dispatch { config } ~name ~args
-  | Mod_local_runtime ->
-      Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name }
-        ~name ~args
-  | Mod_portal ->
-      Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args
   | Mod_worktree ->
       Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args
   | Mod_code ->
@@ -78,29 +73,10 @@ let dispatch
   | Mod_code_write ->
       Tool_code_write.dispatch { Tool_code_write.config; agent_name }
         ~name ~args
-  | Mod_a2a ->
-      Tool_a2a.dispatch { Tool_a2a.config; agent_name } ~name ~args
-  | Mod_auth ->
-      Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args
-  | Mod_run ->
-      Tool_run.dispatch { Tool_run.config } ~name ~args
   | Mod_agent ->
-      (* Review #4579: Mod_agent includes masc_agent_update, masc_register_capabilities etc.
-         Tool_agent.dispatch already validates per-tool; keeper agent_name is passed so
-         self-mutation is gated by the module's own checks. Observation-only tools
-         (masc_get_metrics, masc_collaboration_graph) are safe. *)
       Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
   | Mod_room ->
       Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args
-  | Mod_control ->
-      (* masc_pause_status is read-only — safe for keeper dispatch.
-         masc_pause/masc_resume modify room lifecycle — blocked. *)
-      if name = "masc_pause_status" then
-        Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args
-      else
-        Some (false,
-          Printf.sprintf
-            "tool '%s' is blocked in keeper context (lifecycle-mutating Mod_control tools are operator-only)" name)
   | Mod_agent_timeline ->
       Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name }
         ~name ~args
@@ -109,14 +85,6 @@ let dispatch
   | Mod_suspend ->
       Tool_suspend.dispatch { Tool_suspend.config; caller_agent = Some agent_name }
         ~name ~args
-  | Mod_library ->
-      Tool_library.dispatch { Tool_library.agent_name } ~name ~args
-
-  (* ── Tier A special: Tool_shard returns Yojson.Safe.t ──────── *)
-
-  | Mod_shard ->
-      let (ok, json) = Tool_shard.execute name args in
-      Some (ok, Yojson.Safe.to_string json)
 
   (* ── Tier B: Eio-dependent ─────────────────────────────────── *)
 
@@ -133,38 +101,12 @@ let dispatch
           sw = Eio_context.get_switch_opt () }
         ~name ~args
 
-  | Mod_relay ->
-      (match require_sw () with
-       | Ok sw ->
-           Tool_relay.dispatch
-             { Tool_relay.config; agent_name; sw;
-               proc_mgr = get_proc_mgr_opt () } ~name ~args
-       | Error e -> Some (false, e))
-
   | Mod_handover ->
       Tool_handover.dispatch
         { Tool_handover.config; agent_name;
           fs = get_fs_opt (); proc_mgr = get_proc_mgr_opt ();
           sw = Eio_context.get_switch_opt () }
         ~name ~args
-
-  | Mod_improve_loop ->
-      Tool_improve_loop.dispatch
-        { Tool_improve_loop.config; agent_name;
-          sw = Eio_context.get_switch_opt ();
-          clock = Eio_context.get_clock_opt ();
-          proc_mgr = get_proc_mgr_opt ();
-          net = get_net_opt () }
-        ~name ~args
-
-  | Mod_repair_loop ->
-      let ctx : _ Tool_repair_loop_types.context =
-        { config; agent_name;
-          sw = Eio_context.get_switch_opt ();
-          clock = Eio_context.get_clock_opt ();
-          proc_mgr = get_proc_mgr_opt () }
-      in
-      Tool_repair_loop.dispatch ctx ~name ~args
 
   | Mod_keeper ->
       (* Tool_keeper depends on Keeper_exec_status — dispatching it here
@@ -173,44 +115,6 @@ let dispatch
       Some (false,
         Printf.sprintf
           "tool '%s' is a keeper management tool (use MCP client)" name)
-
-  | Mod_operator ->
-      (* Tool_operator depends on Operator_control -> Keeper_exec_status.
-         Operator tools are admin-level and routed through MCP server. *)
-      Some (false,
-        Printf.sprintf
-          "tool '%s' is an operator tool (use MCP client)" name)
-
-  | Mod_team_session ->
-      (match require_sw (), require_clock () with
-       | Ok sw, Ok clock ->
-           Tool_team_session.dispatch
-             { Tool_team_session.config; agent_name; sw; clock;
-               proc_mgr = get_proc_mgr_opt ();
-               net = get_net_opt () }
-             ~name ~args
-       | Error e, _ | _, Error e -> Some (false, e))
-
-  | Mod_voice ->
-      (match require_sw (), require_clock () with
-       | Ok sw, Ok clock ->
-           Tool_voice.dispatch
-             { agent_name; sw; clock; net = get_net_opt () }
-             ~name ~args
-       | Error e, _ | _, Error e -> Some (false, e))
-
-  | Mod_autoresearch ->
-      (* Keeper already handles masc_autoresearch_* before reaching this path.
-         If we get here, provide a minimal context without team session starter. *)
-      Tool_autoresearch.dispatch
-        { Tool_autoresearch.base_path = config.base_path;
-          agent_name = Some agent_name;
-          start_operation = None;
-          start_team_session = None;
-          config = Some config;
-          sw = Eio_context.get_switch_opt ();
-          clock = Eio_context.get_clock_opt () }
-        ~name ~args
 
   (* ── Tier C: MCP-state-dependent ───────────────────────────── *)
 
@@ -230,18 +134,6 @@ let dispatch
       Some (false,
         Printf.sprintf
           "tool '%s' is an internal context tool (use MCP client)" name)
-
-  (* ── Tier E: Hybrid (option fields degrade gracefully) ─────── *)
-
-  | Mod_command_plane ->
-      let ctx : (_, _) Tool_command_plane.context =
-        { config; agent_name;
-          sw = Eio_context.get_switch_opt ();
-          clock = Eio_context.get_clock_opt ();
-          net = get_net_opt ();
-          mcp_state = None; mcp_session_id = None; auth_token = None }
-      in
-      Tool_command_plane.dispatch ctx ~name ~args
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

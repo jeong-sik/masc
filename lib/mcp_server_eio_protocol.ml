@@ -21,7 +21,7 @@ let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
 let jsonrpc_request_of_yojson = Mcp_transport_protocol.jsonrpc_request_of_yojson
 
 let unavailable_tool_message name =
-  if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name then
+  if Tool_catalog.is_on_surface Tool_catalog.Keeper name then
     let replacement_hint =
       match (Tool_catalog.metadata name).Tool_catalog.replacement with
       | Some replacement ->

@@ -3,7 +3,7 @@
     Central registry for tool access control:
     - Visibility: Default (public) vs Hidden (internal-only)
     - Lifecycle: Active, Deprecated, Placeholder
-    - Tier: Essential (~20) < Standard (~50) < Full (all) *)
+    - Tier: Core (~25) < Extended (all) *)
 
 (** {1 Types} *)
 
@@ -16,7 +16,7 @@ type implementation_status =
   | Simulation
   | Placeholder
 
-type tier = Essential | Standard | Full
+type tier = Core | Extended
 
 type metadata = {
   visibility : visibility;
@@ -51,7 +51,7 @@ val placeholder_tools_enabled : unit -> bool
 (** {1 Public tool surface} *)
 
 val public_mcp_tools : string list
-(** Alias for [Tool_catalog_surfaces.public_mcp_surface_tools].
+(** Alias for [Tool_catalog_surfaces.public_surface_tools].
     Prefer the surfaces module directly for new code. *)
 
 val is_public_mcp : string -> bool
@@ -82,8 +82,7 @@ val tool_tier : string -> tier
 val is_in_tier : tier -> string -> bool
 val tier_tool_count : tier -> int
 
-val essential_tools : string list
-val standard_tools : string list
+val core_tools : string list
 
 (** {1 JSON metadata} *)
 
@@ -110,14 +109,9 @@ val deprecated_tool_entries : (string * metadata) list
     membership checks. *)
 
 type surface =
-  | Public_mcp
-  | Spawned_agent
-  | Local_worker
-  | Session_min
-  | Admin
-  | Keeper_internal
-  | Keeper_denied
-  | System_internal
+  | Public
+  | Keeper
+  | System
 
 val tools_for_surface : surface -> string list
 (** Canonical tool name list for [surface]. *)

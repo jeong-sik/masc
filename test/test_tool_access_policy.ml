@@ -61,12 +61,12 @@ let test_union_single_element_unwraps () =
 let test_union_matches_any_member () =
   let selector =
     Tool_access_policy.union
-      [ Names [ "masc_status" ]; Surface Tool_catalog.Admin ]
+      [ Names [ "masc_status" ]; Surface Tool_catalog.System ]
   in
   check bool "status in union" true
     (Tool_access_policy.selector_matches_name selector "masc_status");
-  check bool "admin surface tool in union" true
-    (Tool_access_policy.selector_matches_name selector "masc_tool_admin_update")
+  check bool "system surface tool in union" true
+    (Tool_access_policy.selector_matches_name selector "masc_init")
 
 let test_union_of_empties_matches_nothing () =
   let sel = Tool_access_policy.union [ Empty; Empty; Empty ] in
@@ -203,7 +203,7 @@ let test_surface_resolution_respects_candidates () =
   in
   let policy =
     {
-      Tool_access_policy.allow = Surface Tool_catalog.Local_worker;
+      Tool_access_policy.allow = Surface Tool_catalog.Public;
       deny = Names [ "masc_add_task" ];
     }
   in
@@ -214,16 +214,16 @@ let test_surface_resolution_respects_candidates () =
     (List.mem "totally_unknown" resolved)
 
 let test_keeper_denied_surface_blocks_tools () =
-  let denied_tools = Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied in
+  let denied_tools = Tool_catalog.tools_for_surface Tool_catalog.Keeper in
   let policy = {
     Tool_access_policy.allow = All;
-    deny = Surface Tool_catalog.Keeper_denied;
+    deny = Surface Tool_catalog.Keeper;
   } in
-  check bool "keeper_denied surface has tools" true
+  check bool "keeper surface has tools" true
     (List.length denied_tools > 0);
   List.iter (fun tool_name ->
     check bool
-      (Printf.sprintf "%s denied by Keeper_denied surface" tool_name)
+      (Printf.sprintf "%s denied by Keeper surface" tool_name)
       false
       (Tool_access_policy.allows_name policy tool_name)
   ) denied_tools
@@ -351,7 +351,7 @@ let test_diff_with_surface () =
   let sel =
     Tool_access_policy.Diff
       {
-        base = Surface Tool_catalog.Public_mcp;
+        base = Surface Tool_catalog.Public;
         exclude = Names [ "masc_board_delete" ];
       }
   in
@@ -689,7 +689,7 @@ let () =
         [
           test_case "surface respects candidates" `Quick
             test_surface_resolution_respects_candidates;
-          test_case "Keeper_denied surface blocks" `Quick
+          test_case "Keeper surface blocks" `Quick
             test_keeper_denied_surface_blocks_tools;
         ] );
       ( "of_allowlist",

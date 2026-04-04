@@ -187,7 +187,7 @@ let test_shard_tools_overlap_with_agent_documented () =
    ============================================================ *)
 
 let test_research_admin_overlap_documented () =
-  let admin = Tool_catalog.tools_for_surface Tool_catalog.Admin in
+  let admin = Tool_catalog.tools_for_surface Tool_catalog.System in
   let meta = make_meta ~soul_profile:"research" () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
@@ -205,7 +205,7 @@ let test_research_admin_overlap_documented () =
    ============================================================ *)
 
 let test_non_research_admin_tools_documented () =
-  let admin = Tool_catalog.tools_for_surface Tool_catalog.Admin in
+  let admin = Tool_catalog.tools_for_surface Tool_catalog.System in
   let meta = make_meta ~policy_voice_enabled:true () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let overlap = List.filter (fun n -> List.mem n admin) keeper_names in

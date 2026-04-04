@@ -168,21 +168,14 @@ let is_mcp_context_required name =
     ~210 Hashtbl.replace ops. *)
 
 type module_tag =
-  | Mod_plan | Mod_operator | Mod_command_plane
-  | Mod_local_runtime | Mod_team_session | Mod_voice
-  | Mod_portal | Mod_worktree
+  | Mod_plan | Mod_worktree
   | Mod_code | Mod_code_write
-  | Mod_a2a | Mod_handover
-  | Mod_relay | Mod_heartbeat
-  | Mod_auth | Mod_run
+  | Mod_handover | Mod_heartbeat
   | Mod_compact
   | Mod_agent | Mod_task | Mod_room
-  | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
-  | Mod_library | Mod_keeper | Mod_repair_loop
+  | Mod_agent_timeline | Mod_misc | Mod_suspend
+  | Mod_keeper
   | Mod_inline
-  | Mod_improve_loop
-  | Mod_autoresearch
-  | Mod_shard
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
 let tag_registry_initialized = ref false

@@ -506,7 +506,7 @@ let test_denied_tools_excluded_from_injection () =
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
   let denied =
-    Masc_mcp.Tool_catalog.tools_for_surface Masc_mcp.Tool_catalog.Keeper_denied
+    Masc_mcp.Tool_catalog.tools_for_surface Masc_mcp.Tool_catalog.Keeper
   in
   List.iter
     (fun denied_name ->
@@ -530,7 +530,7 @@ let test_denied_excluded_from_allowed_names () =
   let meta = make_meta () in
   let names = KET.keeper_allowed_tool_names meta in
   let denied =
-    Masc_mcp.Tool_catalog.tools_for_surface Masc_mcp.Tool_catalog.Keeper_denied
+    Masc_mcp.Tool_catalog.tools_for_surface Masc_mcp.Tool_catalog.Keeper
   in
   List.iter
     (fun denied_name ->

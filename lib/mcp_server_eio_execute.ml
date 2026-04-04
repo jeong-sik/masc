@@ -25,7 +25,7 @@ let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name
   (not has_explicit_agent_name) && is_ephemeral_agent_name agent_name
 
 let direct_call_block_message name =
-  if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name then
+  if Tool_catalog.is_on_surface Tool_catalog.Keeper name then
     let replacement_hint =
       match (Tool_catalog.metadata name).Tool_catalog.replacement with
       | Some replacement ->
@@ -437,50 +437,19 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | (None, coerced_args) -> match tag with
     | Mod_plan ->
         Tool_plan.dispatch { config } ~name ~args:coerced_args
-    | Mod_operator ->
-        let ctx = { Tool_operator.config; agent_name; sw; clock;
-                    proc_mgr = state.Mcp_server.proc_mgr;
-                    net = state.Mcp_server.net; mcp_session_id } in
-        Tool_operator.dispatch ctx ~name ~args:coerced_args
-    | Mod_command_plane ->
-        let ctx : (_, _) Tool_command_plane.context =
-          { config; agent_name; sw = Some sw; clock = Some clock;
-            net = state.Mcp_server.net; mcp_state = Some state;
-            mcp_session_id; auth_token } in
-        Tool_command_plane.dispatch ctx ~name ~args:coerced_args
-    | Mod_local_runtime ->
-        Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name } ~name ~args:coerced_args
-    | Mod_team_session ->
-        let ctx = { Tool_team_session.config; agent_name; sw; clock;
-                    proc_mgr = state.Mcp_server.proc_mgr;
-                    net = state.Mcp_server.net } in
-        Tool_team_session.dispatch ctx ~name ~args:coerced_args
-    | Mod_voice ->
-        Tool_voice.dispatch { agent_name; sw; clock; net = state.Mcp_server.net } ~name ~args:coerced_args
-    | Mod_portal ->
-        Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args:coerced_args
     | Mod_worktree ->
         Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args:coerced_args
     | Mod_code ->
         Tool_code.dispatch { Tool_code.config; agent_name } ~name ~args:coerced_args
     | Mod_code_write ->
         Tool_code_write.dispatch { Tool_code_write.config; agent_name } ~name ~args:coerced_args
-    | Mod_a2a ->
-        Tool_a2a.dispatch { Tool_a2a.config; agent_name } ~name ~args:coerced_args
     | Mod_handover ->
         let ctx : Tool_handover.context = { config; agent_name;
           fs = state.Mcp_server.fs; proc_mgr = state.Mcp_server.proc_mgr;
           sw = Some sw } in
         Tool_handover.dispatch ctx ~name ~args:coerced_args
-    | Mod_relay ->
-        Tool_relay.dispatch { Tool_relay.config; agent_name; sw;
-          proc_mgr = state.Mcp_server.proc_mgr } ~name ~args:coerced_args
     | Mod_heartbeat ->
         Tool_heartbeat.dispatch { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args:coerced_args
-    | Mod_auth ->
-        Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args:coerced_args
-    | Mod_run ->
-        Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
     | Mod_compact ->
         Tool_compact.dispatch ~name ~args:coerced_args
     | Mod_agent ->
@@ -490,78 +459,14 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           ~name ~args:coerced_args
     | Mod_room ->
         Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args:coerced_args
-    | Mod_control ->
-        Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args:coerced_args
-    | Mod_improve_loop ->
-        Tool_improve_loop.dispatch
-          {
-            Tool_improve_loop.config;
-            agent_name;
-            sw = Some sw;
-            clock = Some clock;
-            proc_mgr = state.Mcp_server.proc_mgr;
-            net = state.Mcp_server.net;
-          }
-          ~name ~args:coerced_args
     | Mod_agent_timeline ->
         Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name } ~name ~args:coerced_args
     | Mod_misc ->
         Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args:coerced_args
     | Mod_suspend ->
         Tool_suspend.dispatch { Tool_suspend.config; caller_agent = Some agent_name } ~name ~args:coerced_args
-    | Mod_library ->
-        Tool_library.dispatch { Tool_library.agent_name } ~name ~args:coerced_args
     | Mod_keeper ->
         Tool_keeper.dispatch (make_keeper_ctx ()) ~name ~args:coerced_args
-    | Mod_repair_loop ->
-        let ctx : _ Tool_repair_loop_types.context =
-          {
-            config;
-            agent_name;
-            sw = Some sw;
-            clock = Some clock;
-            proc_mgr = state.Mcp_server.proc_mgr;
-          }
-        in
-        Tool_repair_loop.dispatch ctx ~name ~args:coerced_args
-    | Mod_autoresearch ->
-        let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_
-            ~program_note:_ =
-          match state.Mcp_server.proc_mgr, state.Mcp_server.net with
-          | None, _ -> Error "process_mgr not available"
-          | Some _process_mgr, None -> Error "net not available for team session"
-          | Some process_mgr, Some net ->
-              let env = object
-                method clock = clock
-                method process_mgr = process_mgr
-                method net = net
-              end in
-              Team_session_engine_eio.start_session ~sw ~env ~config
-                ~created_by:agent_name ~goal ~duration_seconds:900
-                ~execution_scope:Team_session_types.Limited_code_change
-                ~checkpoint_interval_sec:60 ~min_agents:1
-                ~scale_profile:Team_session_types.Scale_standard
-                ~control_profile:
-                  Team_session_types.Control_hierarchical_quality_v1
-                ~orchestration_mode:Team_session_types.Assist
-                ~communication_mode:Team_session_types.Comm_broadcast
-                ~model_cascade:[]
-                ~fallback_policy:Team_session_types.Fallback_cascade_then_task
-                ~instruction_profile:Team_session_types.Profile_strict
-                ~alert_channel:Team_session_types.Alert_broadcast
-                ~auto_resume:true
-                ~report_formats:
-                  [ Team_session_types.Markdown; Team_session_types.Json ]
-                ~agent_names:[] ~operation_id
-        in
-        let ctx : Tool_autoresearch.context = { base_path = config.base_path;
-          agent_name = Some agent_name; start_operation = None;
-          start_team_session = Some start_team_session;
-          config = Some config; sw = Some sw; clock = Some clock } in
-        Tool_autoresearch.dispatch ctx ~name ~args:coerced_args
-    | Mod_shard ->
-        let (ok, json) = Tool_shard.execute name coerced_args in
-        Some (ok, Yojson.Safe.to_string json)
     | Mod_inline ->
         let inline_ctx : Tool_inline_dispatch.context = {
           config; agent_name; registry; state; sw; clock; arguments = coerced_args;

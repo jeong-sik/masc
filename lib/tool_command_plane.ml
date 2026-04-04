@@ -33,7 +33,7 @@ let () =
         (Tool_spec.create
            ~name:s.name
            ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_command_plane
+           ~module_tag:Tool_dispatch.Mod_misc
            ~input_schema:s.input_schema
            ~is_destructive
            ()))

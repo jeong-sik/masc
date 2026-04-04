@@ -3,7 +3,7 @@
     Central registry for tool access control:
     - Visibility: Default (public) vs Hidden (internal-only)
     - Lifecycle: Active, Deprecated, Placeholder
-    - Tier: Essential (~20) < Standard (~50) < Full (all)
+    - Tier: Core (~25) < Extended (all)
     - Surface: Canonical per-surface tool name membership SSOT
 
     Sub-modules (private):
@@ -32,13 +32,12 @@ type implementation_status =
 
 (* Re-export tier type and surface type from sub-modules *)
 include (Tool_catalog_tiers : sig
-  type tier = Tool_catalog_tiers.tier = Essential | Standard | Full
+  type tier = Tool_catalog_tiers.tier = Core | Extended
 end)
 
 include (Tool_catalog_surfaces : sig
   type surface = Tool_catalog_surfaces.surface =
-    | Public_mcp | Spawned_agent | Local_worker | Session_min
-    | Admin | Keeper_internal | Keeper_denied | System_internal
+    | Public | Keeper | System
 end)
 
 type metadata = {
@@ -249,7 +248,7 @@ let keeper_internal_set = Tool_catalog_surfaces.keeper_internal_set
 
 let keeper_internal_replacement = Tool_catalog_surfaces.keeper_internal_replacement
 
-let public_mcp_tools = Tool_catalog_surfaces.public_mcp_surface_tools
+let public_mcp_tools = Tool_catalog_surfaces.public_surface_tools
 
 let keeper_internal_metadata name =
   let replacement = keeper_internal_replacement name in
@@ -268,7 +267,7 @@ let keeper_internal_metadata name =
 let public_mcp_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create 64 in
   List.iter (fun name -> Hashtbl.replace tbl name ())
-    Tool_catalog_surfaces.public_mcp_surface_tools;
+    Tool_catalog_surfaces.public_surface_tools;
   (* MASC_PUBLIC_TOOLS_EXTRA: comma-separated tool names to add at runtime.
      Example: MASC_PUBLIC_TOOLS_EXTRA=masc_board_search,masc_pause *)
   (match Env_config.Tools.public_tools_extra_opt () with
@@ -306,7 +305,7 @@ let metadata name =
       if is_public_mcp name then default_metadata
       else if Hashtbl.mem keeper_internal_set name then
         keeper_internal_metadata name
-      else if Tool_catalog_surfaces.is_on_surface System_internal name then
+      else if Tool_catalog_surfaces.is_on_surface System name then
         { default_metadata with
           visibility = Hidden;
           allow_direct_call_when_hidden = true;
@@ -319,7 +318,7 @@ let metadata name =
           allow_direct_call_when_hidden = true;
           reason = Some "Internal tool; not on public MCP surface." }
   in
-  if Tool_catalog_surfaces.is_on_surface System_internal name then
+  if Tool_catalog_surfaces.is_on_surface System name then
     (* Surface membership is the canonical "hidden but callable" contract for
        system-internal tools, even when a tool also carries explicit metadata
        for semantic hints like readonly/destructive. *)
@@ -372,8 +371,7 @@ let deprecated_tool_entries : (string * metadata) list =
 (* Re-export: Tier system (from Tool_catalog_tiers)                 *)
 (* ================================================================ *)
 
-let essential_tools = Tool_catalog_tiers.essential_tools
-let standard_tools = Tool_catalog_tiers.standard_tools
+let core_tools = Tool_catalog_tiers.core_tools
 let tier_to_string = Tool_catalog_tiers.tier_to_string
 let tier_of_string = Tool_catalog_tiers.tier_of_string
 let tool_tier = Tool_catalog_tiers.tool_tier

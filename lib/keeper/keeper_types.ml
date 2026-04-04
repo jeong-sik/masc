@@ -165,10 +165,10 @@ let normalize_tool_names names =
 ;;
 
 let legacy_keeper_internal_tool_names =
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+  Tool_catalog.tools_for_surface Tool_catalog.Keeper
 ;;
 
-let legacy_standard_tool_names = Tool_catalog.standard_tools
+let legacy_standard_tool_names = Tool_catalog.core_tools
 
 let migrate_legacy_restricted_tools names =
   Custom (normalize_tool_names (legacy_keeper_internal_tool_names @ names))

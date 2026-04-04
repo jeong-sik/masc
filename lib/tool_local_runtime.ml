@@ -162,7 +162,7 @@ let () =
         (Tool_spec.create
            ~name:s.name
            ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_local_runtime
+           ~module_tag:Tool_dispatch.Mod_misc
            ~input_schema:s.input_schema
            ()))
     schemas

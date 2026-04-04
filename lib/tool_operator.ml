@@ -355,7 +355,7 @@ let () =
         (Tool_spec.create
            ~name:s.name
            ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_operator
+           ~module_tag:Tool_dispatch.Mod_misc
            ~input_schema:s.input_schema
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)

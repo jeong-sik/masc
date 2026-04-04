@@ -97,8 +97,8 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
         let without_internal =
           List.filter
             (fun (schema : Types.tool_schema) ->
-              not (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name)
-              && not (Tool_catalog.is_on_surface Tool_catalog.System_internal schema.name))
+              not (Tool_catalog.is_on_surface Tool_catalog.Keeper schema.name)
+              && not (Tool_catalog.is_on_surface Tool_catalog.System schema.name))
             all
         in
         if show_all then without_internal
@@ -123,7 +123,7 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
 let tool_allowed_in_profile state profile tool_name =
   match profile with
   | Full ->
-      if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name then
+      if Tool_catalog.is_on_surface Tool_catalog.Keeper tool_name then
         false
       else if Tool_catalog.full_surface_override () then
         Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:true ()

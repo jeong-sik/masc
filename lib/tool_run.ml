@@ -216,7 +216,7 @@ let () =
         (Tool_spec.create
            ~name:s.name
            ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_run
+           ~module_tag:Tool_dispatch.Mod_misc
            ~input_schema:s.input_schema
            ~is_read_only:is_ro
            ~is_idempotent:is_ro

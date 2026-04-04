@@ -8,11 +8,11 @@
     @since 2.124.0 *)
 
 let supported_local_worker_tool_names =
-  Tool_catalog.tools_for_surface Tool_catalog.Local_worker
+  Tool_catalog.tools_for_surface Tool_catalog.Public
 
 let observe_only_policy : Tool_access_policy.t =
   {
-    allow = Surface Tool_catalog.Local_worker;
+    allow = Surface Tool_catalog.Public;
     deny = Names [
       "masc_add_task";
       "masc_claim_next";

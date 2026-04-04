@@ -12,7 +12,7 @@ open Keeper_tool_registry
 let keeper_denied_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create 32 in
   List.iter (fun name -> Hashtbl.replace tbl name ())
-    (Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied);
+    (Tool_catalog.tools_for_surface Tool_catalog.Keeper);
   tbl
 
 let dedupe_tool_schemas (schemas : Types.tool_schema list) =
@@ -49,9 +49,7 @@ let inject_masc_schemas (schemas : Types.tool_schema list) =
       match Tool_dispatch.lookup_tag name with
       | Some Tool_dispatch.Mod_inline
       | Some Tool_dispatch.Mod_compact
-      | Some Tool_dispatch.Mod_keeper
-      | Some Tool_dispatch.Mod_operator
-      | Some Tool_dispatch.Mod_control ->
+      | Some Tool_dispatch.Mod_keeper ->
           false
       | Some _ -> true
       | None -> false

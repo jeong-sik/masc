@@ -54,7 +54,7 @@ let keeper_autoresearch_tool_names =
 let keeper_coding_tool_names = Tool_code_write.tool_names
 
 let keeper_internal_candidate_tool_names =
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+  Tool_catalog.tools_for_surface Tool_catalog.Keeper
 
 let keeper_voice_tool_schemas =
   match Tool_shard.get_shard "voice" with

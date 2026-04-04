@@ -24,7 +24,7 @@ let prefixed_tool_names names =
   names |> List.map (fun name -> "mcp__masc__" ^ name)
 
 let spawned_agent_public_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent
+  Tool_catalog.tools_for_surface Tool_catalog.Public
 
 let spawned_agent_prefixed_tools : string list =
   prefixed_tool_names spawned_agent_public_tool_names
@@ -543,9 +543,9 @@ let local_worker_tool_schemas ?names () :
   | Some values -> resolve_named_schemas all_schemas values
 
 (** Admin tool names that should be excluded from autonomous agents.
-    SSOT: Tool_catalog.Admin surface. *)
+    SSOT: Tool_catalog.System surface. *)
 let admin_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Admin
+  Tool_catalog.tools_for_surface Tool_catalog.System
 
 (** Coordination tool names for coordinators and fleet leaders. *)
 let coordination_tool_names : string list =

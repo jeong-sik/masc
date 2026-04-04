@@ -131,7 +131,7 @@ let () =
         (Tool_spec.create
            ~name:s.name
            ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_a2a
+           ~module_tag:Tool_dispatch.Mod_misc
            ~input_schema:s.input_schema
            ()))
     schemas

@@ -23,7 +23,7 @@ let destructive_check_tools =
     by operators or through controlled workflows.
     Inspired by Trail of Bits' deny-rule pattern. *)
 let keeper_denied_tools =
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
+  Tool_catalog.tools_for_surface Tool_catalog.Keeper
 
 (** Percent-encode field value for structured [tool_skipped] output.
     Matches [Keeper_agent_run.escape_field_value] encoding.

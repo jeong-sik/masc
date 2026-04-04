@@ -74,10 +74,10 @@ export function collaborationEvidenceSupportRows(
     rows.push(`linked operation · ${data.linkage.selected_operation_id}`)
   }
   if (data.linkage.explicit_linked_activity_count > 0) {
-    rows.push(`linked namespace activity · ${data.linkage.explicit_linked_activity_count}`)
+    rows.push(`linked project activity · ${data.linkage.explicit_linked_activity_count}`)
   }
   if (data.linkage.unlinked_activity_count > 0) {
-    rows.push(`unlinked namespace activity · ${data.linkage.unlinked_activity_count}`)
+    rows.push(`unlinked project activity · ${data.linkage.unlinked_activity_count}`)
   }
   if (data.counts.message_broadcast_count > 0) {
     rows.push(`message broadcast count · ${data.counts.message_broadcast_count}`)
@@ -135,7 +135,7 @@ export function CollaborationEvidencePanel({
   if (data && data.recent_unlinked_activity.length > 0) {
     evidencePanels.push({
       key: 'recent-unlinked',
-      title: '최근 미연결 네임스페이스 활동',
+      title: '최근 미연결 프로젝트 활동',
       rows: data.recent_unlinked_activity.map(item => ({
         key: `${item.ts_iso ?? 'na'}:${item.kind}:${item.actor ?? 'na'}`,
         content: html`
@@ -157,7 +157,7 @@ export function CollaborationEvidencePanel({
               ? html`<span class="px-2 py-0.5 rounded-full border text-[10px] uppercase tracking-[0.06em] ${evidenceTone(data.evidence_status)}">${data.evidence_status}</span>`
               : null}
           </div>
-          <span class="text-[12px] text-[var(--text-body)]">${data?.headline ?? '세션/네임스페이스 상호작용 근거를 읽는 중입니다.'}</span>
+          <span class="text-[12px] text-[var(--text-body)]">${data?.headline ?? '세션/프로젝트 상호작용 근거를 읽는 중입니다.'}</span>
           <span class="text-[12px] text-[var(--text-muted)]">${data?.detail ?? ''}</span>
         </div>
         <div class="text-[11px] text-[var(--text-muted)] font-mono">

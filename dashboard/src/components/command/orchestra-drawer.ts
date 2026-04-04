@@ -36,7 +36,7 @@ function truncateText(value: string | null | undefined, maxLength: number): stri
 export function orchestraNodeKindLabel(kind?: string | null): string {
   switch ((kind ?? '').trim().toLowerCase()) {
     case 'namespace':
-      return '네임스페이스'
+      return '프로젝트'
     case 'session':
       return '세션'
     case 'operation':

@@ -22,7 +22,7 @@ let handle_pause ctx args =
 let handle_resume ctx _args =
   match Room.resume ctx.config ~by:ctx.agent_name with
   | `Resumed -> (true, Printf.sprintf "Resumed by %s" ctx.agent_name)
-  | `Already_running -> (true, "Default project namespace is not paused")
+  | `Already_running -> (true, "Default project scope is not paused")
 
 let handle_pause_status ctx args =
   let requested_namespace = get_string args "namespace_id" "" |> String.trim in
@@ -42,7 +42,7 @@ let handle_pause_status ctx args =
             ( "pause_reason",
               Json_util.string_opt_to_json reason );
             ("paused_at", Json_util.string_opt_to_json at);
-            ("message", `String "Default project namespace is paused");
+            ("message", `String "Default project scope is paused");
             ( "requested_namespace_id",
               if requested_namespace = "" then `Null
               else `String requested_namespace );
@@ -59,7 +59,7 @@ let handle_pause_status ctx args =
             ("paused_by", `Null);
             ("pause_reason", `Null);
             ("paused_at", `Null);
-            ("message", `String "Default project namespace is running (not paused)");
+            ("message", `String "Default project scope is running (not paused)");
             ( "requested_namespace_id",
               if requested_namespace = "" then `Null
               else `String requested_namespace );

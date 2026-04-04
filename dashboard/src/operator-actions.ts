@@ -99,7 +99,7 @@ export async function refreshOperatorRoomDigest(opts?: RefreshOptions): Promise<
   operatorDigestError.value = null
   roomDigestRefreshInflight = (async () => {
     try {
-      const raw = await fetchOperatorDigest({ targetType: 'room' })
+      const raw = await fetchOperatorDigest({ targetType: 'namespace' })
       operatorRoomDigest.value = normalizeOperatorDigest(raw)
       lastRoomDigestRefreshAt = Date.now()
     } catch (err) {

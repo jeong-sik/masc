@@ -29,14 +29,14 @@ export async function fetchPauseStatus(): Promise<void> {
 
 export async function pauseRoom(): Promise<void> {
   flowLoading.value = true
-  try { await callMcpTool('masc_pause', {}); flowState.value = 'paused'; showToast('네임스페이스 일시정지', 'success') }
+  try { await callMcpTool('masc_pause', {}); flowState.value = 'paused'; showToast('프로젝트 일시정지', 'success') }
   catch (err) { showToast(`일시정지 실패: ${err instanceof Error ? err.message : String(err)}`, 'error') }
   finally { flowLoading.value = false }
 }
 
 export async function resumeRoom(): Promise<void> {
   flowLoading.value = true
-  try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('네임스페이스 재개', 'success') }
+  try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('프로젝트 재개', 'success') }
   catch (err) { showToast(`재개 실패: ${err instanceof Error ? err.message : String(err)}`, 'error') }
   finally { flowLoading.value = false }
 }
@@ -47,7 +47,7 @@ export async function interruptRoom(reason?: string): Promise<void> {
     const args: Record<string, unknown> = {}
     if (reason) args.reason = reason
     await callMcpTool('masc_interrupt', args)
-    showToast('네임스페이스 인터럽트 전송', 'success')
+    showToast('프로젝트 인터럽트 전송', 'success')
     await fetchPauseStatus()
   } catch (err) {
     showToast(`인터럽트 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
@@ -61,7 +61,7 @@ export async function fetchRoomStrategy(): Promise<void> {
     const raw = await callMcpTool('masc_room_strategy_get', {})
     return JSON.parse(raw) as Record<string, unknown>
   }).catch(() => {
-    showToast('네임스페이스 전략 조회 실패', 'error')
+    showToast('프로젝트 전략 조회 실패', 'error')
   })
 }
 
@@ -69,10 +69,10 @@ export async function setRoomStrategy(updates: Record<string, unknown>): Promise
   roomStrategyMutating.value = true
   try {
     await callMcpTool('masc_room_strategy_set', updates)
-    showToast('네임스페이스 전략 업데이트 완료', 'success')
+    showToast('프로젝트 전략 업데이트 완료', 'success')
     await fetchRoomStrategy()
   } catch (err) {
-    showToast(`네임스페이스 전략 저장 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    showToast(`프로젝트 전략 저장 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
   } finally {
     roomStrategyMutating.value = false
   }

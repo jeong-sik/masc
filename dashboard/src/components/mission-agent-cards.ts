@@ -31,7 +31,7 @@ import {
 
 export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
   const info = extractAgentInfo(row.brief.agent_name)
-  const who = row.withWhom.length > 0 ? row.withWhom.slice(0, 3).join(', ') : '단독 또는 방 단위'
+  const who = row.withWhom.length > 0 ? row.withWhom.slice(0, 3).join(', ') : '단독 또는 프로젝트 범위'
   const recentToolsLabel =
     row.recentTools.length > 0
       ? row.recentTools.join(', ')

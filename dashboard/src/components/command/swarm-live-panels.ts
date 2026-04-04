@@ -59,7 +59,7 @@ export function SwarmLivePanels() {
                     이 화면은 swarm-live의 사회 truth 자체가 아니라, 실험적 오케스트레이션을 읽기 위한 파생 관찰면입니다.
                   </div>
                   <div class="command-summary-grid">
-                    <${CmdStatCard} label="실행 런" value=${swarm.run_id ?? runId ?? 'swarm-live'} detail=${swarm.room_id ?? 'namespace 정보 없음'} />
+                    <${CmdStatCard} label="실행 런" value=${swarm.run_id ?? runId ?? 'swarm-live'} detail=${swarm.room_id ?? 'scope 정보 없음'} />
                     <${CmdStatCard} label="워커" value=${`${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}`} detail=${`${swarm.summary?.live_workers ?? 0}개 가동 · ${swarm.summary?.completed_workers ?? 0}개 완료`} />
                     <${CmdStatCard} label="런타임" value=${runtimeState} detail=${`slots ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}`} />
                     <${CmdStatCard} label="고동시성" value=${swarm.summary?.pass_hot_concurrency ? '통과' : '확인 필요'} detail=${swarm.provider?.slot_url ?? 'slot 정보 없음'} />

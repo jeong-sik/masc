@@ -340,7 +340,7 @@ export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
 }
 
 export function fetchOperatorDigest(options: {
-  targetType?: 'room' | 'team_session'
+  targetType?: 'namespace' | 'room' | 'team_session'
   targetId?: string
   includeWorkers?: boolean
 } = {}): Promise<OperatorDigest> {

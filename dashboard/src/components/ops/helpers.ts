@@ -252,10 +252,10 @@ export function actionTypeLabel(value?: string | null): string {
       return '전체 공지'
     case 'namespace_pause':
     case 'room_pause':
-      return '네임스페이스 일시정지'
+      return '프로젝트 일시정지'
     case 'namespace_resume':
     case 'room_resume':
-      return '네임스페이스 재개'
+      return '프로젝트 재개'
     case 'team_turn':
       return '세션 업데이트'
     case 'team_note':
@@ -288,9 +288,9 @@ export function actionTypeLabel(value?: string | null): string {
 export function targetTypeLabel(value?: string | null): string {
   switch (value) {
     case 'namespace':
-      return '네임스페이스'
+      return '프로젝트 범위'
     case 'room':
-      return '네임스페이스'
+      return '프로젝트 범위'
     case 'team_session':
       return '세션'
     case 'keeper':
@@ -574,7 +574,7 @@ export async function submitBroadcast() {
   if (!message) return
   const result = await executeAction({
     action_type: 'broadcast',
-    target_type: 'room',
+    target_type: 'namespace',
     payload: { message },
     successMessage: '전체 공지를 보냈습니다',
   })
@@ -583,19 +583,19 @@ export async function submitBroadcast() {
 
 export async function submitPause() {
   await executeAction({
-    action_type: 'room_pause',
-    target_type: 'room',
+    action_type: 'namespace_pause',
+    target_type: 'namespace',
     payload: { reason: pauseReason.value.trim() || '운영 점검' },
-    successMessage: '네임스페이스 일시정지를 요청했습니다',
+    successMessage: '프로젝트 일시정지를 요청했습니다',
   })
 }
 
 export async function submitResume() {
   await executeAction({
-    action_type: 'room_resume',
-    target_type: 'room',
+    action_type: 'namespace_resume',
+    target_type: 'namespace',
     payload: {},
-    successMessage: '네임스페이스 재개를 요청했습니다',
+    successMessage: '프로젝트 재개를 요청했습니다',
   })
 }
 
@@ -604,7 +604,7 @@ export async function submitTaskInject() {
   if (!title) return
   const result = await executeAction({
     action_type: 'task_inject',
-    target_type: 'room',
+    target_type: 'namespace',
     payload: {
       title,
       description: taskDescription.value.trim() || '개입 화면에서 주입',

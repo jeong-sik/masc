@@ -58,7 +58,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: '모니터링',
     icon: '📡',
-    description: '세션, 네임스페이스 및 에이전트/키퍼 현황 관찰',
+    description: '세션, 프로젝트 범위, 에이전트/키퍼 현황 관찰',
     defaultTab: 'monitoring',
     defaultParams: { section: 'sessions' },
     tabs: ['monitoring'],
@@ -112,8 +112,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   monitoring: [
     {
       id: 'sessions',
-      label: '세션 & 네임스페이스',
-      description: '세션 = SSE로 연결된 실시간 작업 단위. 네임스페이스 = 같은 .masc/ 폴더를 공유하는 에이전트 조정 공간.',
+      label: '세션 & 프로젝트 범위',
+      description: '세션 = SSE로 연결된 실시간 작업 단위. 프로젝트 범위 = 같은 .masc/ 폴더를 공유하는 에이전트 조정 공간.',
       params: { section: 'sessions' },
     },
     {
@@ -133,7 +133,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'intervene',
       label: '실시간 개입',
-      description: '네임스페이스 일시정지, 세션 중단, 키퍼 재시작 등 운영 개입.',
+      description: '프로젝트 일시정지, 세션 중단, 키퍼 재시작 등 운영 개입.',
       params: { section: 'intervene' },
     },
     {

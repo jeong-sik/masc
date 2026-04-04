@@ -239,11 +239,11 @@ let handle_set_room (ctx : context) : result option =
       let root_note =
         if rc.workspace_path <> rc.base_path then
           Printf.sprintf
-            "MASC project scope set.\n   coordination root: %s\n   workspace: %s\n   namespace: default (flattened)\n   .masc/ status: %s"
+            "MASC project scope set.\n   coordination root: %s\n   workspace: %s\n   shared scope: default (flattened)\n   .masc/ status: %s"
             rc.base_path rc.workspace_path status
         else
           Printf.sprintf
-            "MASC project scope set to: %s\n   namespace: default (flattened)\n   .masc/ status: %s"
+            "MASC project scope set to: %s\n   shared scope: default (flattened)\n   .masc/ status: %s"
             rc.base_path status
       in
       Some (true, root_note)

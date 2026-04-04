@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { CountBadge } from '../common/badge'
 import { ActionButton } from '../common/button'
+import { JsonViewer } from '../common/json-viewer'
 
 interface ToolResultProps {
   success: boolean
@@ -10,14 +11,19 @@ interface ToolResultProps {
   timestamp: number
 }
 
-function tryFormatJson(text: string): { isJson: boolean; formatted: string } {
-  try { const parsed = JSON.parse(text); return { isJson: true, formatted: JSON.stringify(parsed, null, 2) } }
-  catch { return { isJson: false, formatted: text } }
+function tryParseJson(text: string): { isJson: boolean; parsed: unknown; formatted: string } {
+  try { 
+    const parsed = JSON.parse(text); 
+    return { isJson: true, parsed, formatted: JSON.stringify(parsed, null, 2) } 
+  }
+  catch { 
+    return { isJson: false, parsed: null, formatted: text } 
+  }
 }
 
 export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolResultProps) {
   const expanded = useSignal(true)
-  const { formatted } = tryFormatJson(text)
+  const { isJson, parsed, formatted } = tryParseJson(text)
   const timeStr = new Date(timestamp).toLocaleTimeString('ko-KR')
   const lines = formatted.split('\n').length
   return html`
@@ -36,8 +42,12 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
           <${ActionButton} variant="subtle" size="sm" onClick=${() => void navigator.clipboard.writeText(text)}>복사<//>
         </div>
         ${expanded.value ? html`
-          <pre class="px-3 py-2 text-[12px] font-mono overflow-x-auto max-h-[400px] overflow-y-auto
-            ${success ? 'text-[var(--text-body)]' : 'text-[#fda4af]'}">${formatted}</pre>
+          <div class="px-3 py-2 overflow-x-auto max-h-[400px] overflow-y-auto">
+            ${isJson 
+              ? html`<${JsonViewer} data=${parsed} />`
+              : html`<pre class="text-[12px] font-mono ${success ? 'text-[var(--text-body)]' : 'text-[#fda4af]'}">${formatted}</pre>`
+            }
+          </div>
         ` : null}
       </div>
     </div>

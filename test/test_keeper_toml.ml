@@ -128,6 +128,66 @@ let test_parse_inline_comment () =
      | _ -> fail "expected Toml_string")
   | Error e -> fail e
 
+let test_parse_multiline_basic_string () =
+  let input = "[keeper]\ninstructions = \"\"\"\nline one\nline two\nline three\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "keeper.instructions" doc with
+     | Some (TL.Toml_string s) ->
+       check string "multiline content" "line one\nline two\nline three" s
+     | _ -> fail "expected Toml_string for multiline")
+  | Error e -> fail ("multiline parse failed: " ^ e)
+
+let test_parse_multiline_single_line () =
+  let input = {|key = """inline multiline"""|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "inline multiline" "inline multiline" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("inline multiline failed: " ^ e)
+
+let test_parse_multiline_empty () =
+  let input = "key = \"\"\"\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "empty multiline" "" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("empty multiline failed: " ^ e)
+
+let test_parse_multiline_unterminated () =
+  let input = "key = \"\"\"\nunterminated content" in
+  match TL.parse_toml input with
+  | Ok _ -> fail "expected parse error for unterminated multiline"
+  | Error _ -> ()
+
+let test_parse_multiline_with_escapes () =
+  let input = "key = \"\"\"\nfirst\\nsecond\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "multiline with escape" "first\nsecond" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("multiline escape failed: " ^ e)
+
+let test_parse_multiline_with_values_after () =
+  let input = "[keeper]\ninstructions = \"\"\"\nsome text\n\"\"\"\ngoal = \"test\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "keeper.instructions" doc with
+     | Some (TL.Toml_string s) ->
+       check string "multiline" "some text" s
+     | _ -> fail "expected instructions");
+    (match List.assoc_opt "keeper.goal" doc with
+     | Some (TL.Toml_string s) ->
+       check string "goal after multiline" "test" s
+     | _ -> fail "expected goal after multiline")
+  | Error e -> fail ("multiline with values after failed: " ^ e)
+
 let test_parse_error_unterminated_table () =
   let input = "[missing_bracket" in
   match TL.parse_toml input with
@@ -533,6 +593,12 @@ let () =
           test_case "empty array" `Quick test_parse_empty_array;
           test_case "table" `Quick test_parse_table;
           test_case "inline comment" `Quick test_parse_inline_comment;
+          test_case "multiline basic string" `Quick test_parse_multiline_basic_string;
+          test_case "multiline single line" `Quick test_parse_multiline_single_line;
+          test_case "multiline empty" `Quick test_parse_multiline_empty;
+          test_case "multiline unterminated" `Quick test_parse_multiline_unterminated;
+          test_case "multiline with escapes" `Quick test_parse_multiline_with_escapes;
+          test_case "multiline with values after" `Quick test_parse_multiline_with_values_after;
           test_case "error: unterminated table" `Quick test_parse_error_unterminated_table;
           test_case "error: no equals" `Quick test_parse_error_no_equals;
         ] );

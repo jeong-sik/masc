@@ -7,13 +7,16 @@
     @since God file decomposition — extracted from oas_worker.ml *)
 
 (* ================================================================ *)
-(* Inference defaults — single definition point (ADR D2).            *)
-(* Callers override via optional params.                             *)
-(* Cascade config auto-resolution tracked in jeong-sik/me#915.      *)
+(* Inference defaults — delegated to OAS Constants.Inference_profile. *)
+(* SSOT: agent_sdk/lib/llm_provider/constants.ml                     *)
+(* See jeong-sik/oas#598, jeong-sik/me#915.                         *)
 (* ================================================================ *)
 
-let default_temperature = 0.7
-let default_max_tokens = 4096
+let default_temperature =
+  Llm_provider.Constants.Inference_profile.agent_default.temperature
+
+let default_max_tokens =
+  Llm_provider.Constants.Inference_profile.agent_default.max_tokens
 
 (* ================================================================ *)
 (* Cascade types                                                     *)

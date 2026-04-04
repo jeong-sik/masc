@@ -806,20 +806,9 @@ let handle_keeper_autoresearch_tool
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
-  let ctx : Tool_autoresearch.context =
-    { base_path = project_root_of_config config
-    ; agent_name = Some meta.name
-    ; start_operation = None
-    ; start_team_session = None
-    ; config = Some config
-    ; sw = None
-    ; clock = None
-    }
-  in
-  match Tool_autoresearch.dispatch ctx ~name ~args with
-  | Some (true, msg) -> msg
-  | Some (false, msg) -> error_json msg
-  | None -> error_json ~fields:[ "tool", `String name ] "unknown_autoresearch_tool"
+  (* Tool_autoresearch pruned in Phase 2 *)
+  ignore (config, meta, args);
+  error_json ~fields:[ "tool", `String name ] "autoresearch_tools_pruned"
 ;;
 
 let keeper_masc_path_blocked
@@ -939,15 +928,13 @@ let execute_keeper_tool_call
     | "keeper_context_status" -> keeper_context_status_json ~meta ~ctx_work
     | "keeper_memory_search" -> keeper_memory_search_json ~ctx_work ~args
     | "keeper_library_search" ->
-      let ok, msg =
-        Tool_library.handle_search Tool_library.{ agent_name = meta.name } args
-      in
-      if ok then msg else Yojson.Safe.to_string (`Assoc [ "error", `String msg ])
+      (* Tool_library pruned *)
+      ignore (meta, args);
+      Yojson.Safe.to_string (`Assoc [ "error", `String "library tools pruned" ])
     | "keeper_library_read" ->
-      let ok, msg =
-        Tool_library.handle_read Tool_library.{ agent_name = meta.name } args
-      in
-      tool_result_or_error (ok, msg)
+      (* Tool_library pruned *)
+      ignore (meta, args);
+      Yojson.Safe.to_string (`Assoc [ "error", `String "library tools pruned" ])
     | "keeper_board_post"
     | "keeper_board_list"
     | "keeper_board_get"

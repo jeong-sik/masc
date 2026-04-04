@@ -609,24 +609,15 @@ let run_turn
         in
         let use_fallback = top_score < confidence_threshold in
         let max_tools = max_tools_per_turn in
-        let portal_ctx : Tool_portal.context = {
-          config;
-          agent_name = meta.name;
-        } in
-        let visible_always_include_tools =
-          Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
-        in
-        let retrieved_names =
-          List.map fst retrieved
-          |> Tool_portal.filter_visible_tool_names portal_ctx
-        in
+        (* Tool_portal pruned — no visibility filtering *)
+        let visible_always_include_tools = always_include_tools in
+        let retrieved_names = List.map fst retrieved in
         let selected_tools =
           prioritized_disclosed_tool_names
             ~max_tools
             ~always_include_tools:visible_always_include_tools
             ~retrieved_names
-            ~fallback_tools:
-              (Tool_portal.filter_visible_tool_names portal_ctx fallback_tools)
+            ~fallback_tools
             ~use_fallback
         in
         let all_allowed =
@@ -636,7 +627,6 @@ let run_turn
               !tool_overlay_ref;
             ])
             all_tool_names
-          |> Tool_portal.filter_visible_tool_names portal_ctx
         in
         if Keeper_types_profile.keeper_debug then
           Log.Keeper.info

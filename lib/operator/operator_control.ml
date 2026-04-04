@@ -61,27 +61,9 @@ let dispatch_team_session_json_as (ctx : 'a context) ~session_id ~requested_acto
         else
           Ok session.created_by
   in
-  let args =
-    match args with
-    | `Assoc fields ->
-        `Assoc
-          (("actor", `String authorized_actor) :: List.remove_assoc "actor" fields)
-    | other -> other
-  in
-  let team_ctx : _ Tool_team_session.context =
-    {
-      config = ctx.config;
-      agent_name = authorized_actor;
-      sw = ctx.sw;
-      clock = ctx.clock;
-      proc_mgr = ctx.proc_mgr;
-      net = ctx.net;
-    }
-  in
-  match Tool_team_session.dispatch team_ctx ~name:tool_name ~args with
-  | Some (true, body) -> Ok (json_of_dispatch_output body)
-  | Some (false, err) -> Error err
-  | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
+  (* Tool_team_session pruned in Phase 2 *)
+  ignore (ctx, authorized_actor, args);
+  Error (Printf.sprintf "%s: team session tools pruned" tool_name)
 
 let keeper_diagnostic_health_state json =
   match U.member "health_state" json with

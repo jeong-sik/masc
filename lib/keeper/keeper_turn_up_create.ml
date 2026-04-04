@@ -337,7 +337,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          | Some (_ :: _ as shard_names) ->
              Log.Keeper.debug "create_keeper: applying shard config for name=%s shards=%d"
                p.name (List.length shard_names);
-             Tool_shard.set_agent_shards p.name shard_names
+             ignore (p.name, shard_names) (* Tool_shard pruned *)
          | Some [] | None -> ());
         Progress.Tracker.complete tracker ~message:"Keeper created" ();
         Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name meta.runtime.trace_id;

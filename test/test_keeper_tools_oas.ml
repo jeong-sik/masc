@@ -4,6 +4,22 @@ open Agent_sdk
 open Alcotest
 open Masc_mcp
 
+(* Tool_library pruned — stub for tests that reference it *)
+module Tool_library = struct
+  type context = { agent_name : string [@warning "-69"] }
+  let handle_search (_ctx : context) _args = (false, "library tools pruned")
+  let handle_read (_ctx : context) _args = (false, "library tools pruned")
+  let string_contains ~sub s =
+    let len_sub = String.length sub and len_s = String.length s in
+    if len_sub > len_s then false
+    else
+      let rec loop i =
+        if i > len_s - len_sub then false
+        else if String.sub s i len_sub = sub then true
+        else loop (i + 1)
+      in loop 0
+end
+
 let autoresearch_allowlist =
   ["masc_autoresearch_start"; "masc_autoresearch_cycle";
    "masc_autoresearch_status"; "masc_autoresearch_stop";

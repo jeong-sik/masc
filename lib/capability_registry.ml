@@ -251,7 +251,7 @@ let local_worker_internal_seeds : capability_seed list =
   base
 
 let keeper_projection_seeds : capability_seed list =
-  Tool_shard.keeper_model_tools
+  ([] : Types.tool_schema list) (* Tool_shard pruned *)
   |> List.concat_map (fun (tool : Types.tool_schema) ->
          let schema = tool in
          let backend_tool_name = keeper_backend_tool_name tool.name in
@@ -372,15 +372,10 @@ let local_worker_tool_schemas ?names () :
   Agent_tool_surfaces.local_worker_tool_schemas ?names ()
 
 let keeper_all_tool_names : string list =
-  Tool_shard.keeper_model_tools
-  |> List.map (fun tool -> tool.Types.name)
-  |> unique_preserve_order
+  [] (* Tool_shard pruned *)
 
 let keeper_safe_tool_names : string list =
-  Tool_shard.keeper_model_tools
-  |> List.map (fun tool -> tool.Types.name)
-  |> List.filter (fun name -> not (List.mem name privileged_keeper_tool_names))
-  |> unique_preserve_order
+  [] (* Tool_shard pruned *)
 
 let keeper_privileged_tool_names : string list =
   privileged_keeper_tool_names

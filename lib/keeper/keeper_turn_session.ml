@@ -78,20 +78,10 @@ let auto_team_session_spawn_batch (meta : keeper_meta) (message : string) =
         ];
     ]
 
-let team_session_ctx_of_keeper (ctx : _ context) : _ Tool_team_session.context =
-  {
-    Tool_team_session.config = ctx.config;
-    agent_name = ctx.agent_name;
-    sw = ctx.sw;
-    clock = ctx.clock;
-    proc_mgr = ctx.proc_mgr;
-    net = ctx.net;
-  }
-
-let dispatch_team_session (ctx : _ context) ~name ~args =
-  match Tool_team_session.dispatch (team_session_ctx_of_keeper ctx) ~name ~args with
-  | Some result -> result
-  | None -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String "team session dispatch unavailable") ]))
+(* Tool_team_session pruned in Phase 2 *)
+let dispatch_team_session (_ctx : _ context) ~name ~args:_ =
+  ignore name;
+  (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String "team session tools pruned") ]))
 
 let parse_result_json body =
   try

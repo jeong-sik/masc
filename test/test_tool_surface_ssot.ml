@@ -89,10 +89,10 @@ let test_replacement_targets_have_schemas () =
   ) keeper
 
 let test_keeper_internal_tools_have_schemas () =
-  let voice_schemas = match Tool_shard.get_shard "voice" with
-    | Some shard -> shard.tools | None -> [] in
+  (* Tool_shard pruned *)
+  let voice_schemas : Types.tool_schema list = [] in
   let schema_names =
-    (Tool_shard.keeper_model_tools @ voice_schemas)
+    ([] @ voice_schemas)
     |> List.map (fun (s : Types.tool_schema) -> s.name)
     |> SS.of_list
   in

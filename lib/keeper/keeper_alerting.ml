@@ -4,7 +4,7 @@
 open Keeper_types
 open Keeper_memory
 
-let keeper_model_tools = Tool_shard.keeper_model_tools
+let keeper_model_tools : Types.tool_schema list = [] (* Tool_shard pruned *)
 
 let merge_usage
     (a : Agent_sdk.Types.api_usage)

@@ -33,7 +33,7 @@
 ; Group 1: Pure synchronous tests
 ; ============================================================
 (tests
- (names test_room test_room_state_recovery test_types test_auth test_http_negotiation
+ (names test_room test_room_state_recovery test_types test_http_negotiation
         test_sse test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
@@ -67,8 +67,6 @@
         test_keeper_github_safety
         test_worktree_live_context
         test_tool_input_validation
-        test_autoresearch_codegen
-        test_autoresearch_oas_primitives
         test_contract_risk
         test_contract_composer
         test_cdal_conformance
@@ -89,9 +87,8 @@
         test_observability_redact
         test_observability_provider_contracts
         test_worker_oas_scope_gate
-        test_run_local_script
         test_tool_prefilter)
- (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
+ (modules test_room test_room_state_recovery test_types test_http_negotiation
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn
@@ -125,8 +122,6 @@
           test_keeper_github_safety
           test_worktree_live_context
           test_tool_input_validation
-          test_autoresearch_codegen
-          test_autoresearch_oas_primitives
           test_contract_risk
           test_contract_composer
           test_cdal_conformance
@@ -147,7 +142,6 @@
           test_observability_redact
           test_observability_provider_contracts
           test_worker_oas_scope_gate
-          test_run_local_script
           test_tool_prefilter)
  (libraries masc_test_deps))
 
@@ -174,7 +168,7 @@
 
 (test
  (name test_worker_run_evidence_summary)
- (modules test_worker_run_evidence_summary test_tool_team_session_support)
+ (modules test_worker_run_evidence_summary)
  (libraries masc_test_deps))
 
 ; ============================================================
@@ -189,9 +183,7 @@
         test_streamable_http
         test_dashboard_mission
         test_dashboard_mission_briefing
-        test_command_plane_help
         test_dashboard_proof
-        test_persist_worker_run_snapshot
         test_dashboard_cache
         test_dashboard_execution
         test_dashboard_http_core
@@ -211,17 +203,12 @@
         test_server_startup_takeover
         test_worker_runtime
         test_capability_registry
-        test_tool_local_runtime_verify
-        test_tool_voice
-        test_tool_improve_loop
         test_board_ttl
         test_worker_dev_tools
         test_oas_integration
         test_memory_oas_5tier
         test_verifier_oas_bridge
         test_oas_adapters
-        test_team_session_oas_bridge
-        test_team_session_swarm_runner
         test_cache_eio
         test_metrics_store_eio
         test_hebbian_eio
@@ -242,15 +229,11 @@
         test_cp_section_cache
         test_cp_jsonl_tail
         test_swarm_persistence
-        test_tool_repo_synthesis
-        test_local_runtime_pool
         test_tool_keeper
         test_keeper_tools_oas
         test_keeper_tool_exposure
-        test_keeper_voice_loop
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
-        test_autoresearch_knowledge
         test_mcp_server_eio
         test_mcp_server_eio_call_tool
         test_code_navigation_eio
@@ -262,7 +245,6 @@
         test_fs_compat
         test_concurrency_stress
         test_eio_mutex_concurrency
-        test_a2a_e2e
         test_board_dispatch
         test_room_vote
         test_task_dispatch
@@ -330,9 +312,7 @@
         test_streamable_http
         test_dashboard_mission
         test_dashboard_mission_briefing
-        test_command_plane_help
         test_dashboard_proof
-        test_persist_worker_run_snapshot
         test_dashboard_cache
         test_dashboard_execution
         test_dashboard_http_core
@@ -352,17 +332,12 @@
         test_server_startup_takeover
         test_worker_runtime
         test_capability_registry
-        test_tool_local_runtime_verify
-        test_tool_voice
-        test_tool_improve_loop
         test_board_ttl
         test_worker_dev_tools
         test_oas_integration
         test_memory_oas_5tier
         test_verifier_oas_bridge
         test_oas_adapters
-        test_team_session_oas_bridge
-        test_team_session_swarm_runner
         test_cache_eio
         test_metrics_store_eio
         test_hebbian_eio
@@ -383,15 +358,11 @@
         test_cp_section_cache
         test_cp_jsonl_tail
         test_swarm_persistence
-        test_tool_repo_synthesis
-        test_local_runtime_pool
         test_tool_keeper
         test_keeper_tools_oas
         test_keeper_tool_exposure
-        test_keeper_voice_loop
         test_keeper_task_dispatch
         test_keeper_tag_dispatch
-        test_autoresearch_knowledge
         test_mcp_server_eio
         test_mcp_server_eio_call_tool
         test_code_navigation_eio
@@ -403,7 +374,6 @@
         test_fs_compat
         test_concurrency_stress
         test_eio_mutex_concurrency
-        test_a2a_e2e
         test_board_dispatch
         test_room_vote
         test_task_dispatch
@@ -471,7 +441,7 @@
 ; ============================================================
 (tests
  (names test_backend_coverage test_tools_coverage test_types_utils_coverage
-        test_agent_card_coverage test_misc_coverage test_relay_coverage
+        test_agent_card_coverage test_misc_coverage
         test_tempo_coverage test_transport_coverage test_validation_coverage
         test_dashboard_resilience_coverage
         test_nickname_coverage test_level2_config_coverage
@@ -481,30 +451,29 @@
         test_mcp_session_coverage test_sse_coverage
         test_credits_dashboard_coverage test_room_utils_coverage
         test_orchestrator_coverage test_cancellation_coverage
-        test_web_dashboard_coverage test_auth_coverage
-        test_a2a_tools_coverage test_graphql_api_coverage
+        test_web_dashboard_coverage
+        test_graphql_api_coverage
         test_mention_coverage test_resilience_coverage
         test_level4_config_coverage test_error_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage
         test_rate_limit_coverage test_bounded_coverage test_session_coverage
-        test_cache_eio_coverage test_run_eio_coverage
+        test_cache_eio_coverage
         test_handover_eio_coverage test_mcp_server_eio_coverage
         test_http_server_eio_coverage test_telemetry_eio_coverage
         test_room_git_coverage test_prometheus_coverage
         test_auto_responder_coverage test_tool_plan_coverage
-        test_tool_portal_coverage test_tool_worktree_coverage
-        test_tool_a2a_coverage test_tool_handover_coverage
-        test_tool_relay_coverage test_tool_heartbeat_coverage
-        test_tool_auth_coverage test_tool_agent_coverage
+        test_tool_worktree_coverage
+        test_tool_handover_coverage
+        test_tool_heartbeat_coverage
+        test_tool_agent_coverage
         test_tool_task_coverage test_tool_room_coverage
-        test_tool_control_coverage test_tool_misc_coverage
+        test_tool_misc_coverage
         test_ag_ui_coverage test_tool_verification_coverage
         test_tool_suspend_coverage test_tool_code_coverage
-        test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
         test_anti_rationalization_coverage test_field_validation)
  (modules test_backend_coverage test_tools_coverage test_types_utils_coverage
-        test_agent_card_coverage test_misc_coverage test_relay_coverage
+        test_agent_card_coverage test_misc_coverage
         test_tempo_coverage test_transport_coverage test_validation_coverage
         test_dashboard_resilience_coverage
         test_nickname_coverage test_level2_config_coverage
@@ -514,26 +483,25 @@
         test_mcp_session_coverage test_sse_coverage
         test_credits_dashboard_coverage test_room_utils_coverage
         test_orchestrator_coverage test_cancellation_coverage
-        test_web_dashboard_coverage test_auth_coverage
-        test_a2a_tools_coverage test_graphql_api_coverage
+        test_web_dashboard_coverage
+        test_graphql_api_coverage
         test_mention_coverage test_resilience_coverage
         test_level4_config_coverage test_error_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage
         test_rate_limit_coverage test_bounded_coverage test_session_coverage
-        test_cache_eio_coverage test_run_eio_coverage
+        test_cache_eio_coverage
         test_handover_eio_coverage test_mcp_server_eio_coverage
         test_http_server_eio_coverage test_telemetry_eio_coverage
         test_room_git_coverage test_prometheus_coverage
         test_auto_responder_coverage test_tool_plan_coverage
-        test_tool_portal_coverage test_tool_worktree_coverage
-        test_tool_a2a_coverage test_tool_handover_coverage
-        test_tool_relay_coverage test_tool_heartbeat_coverage
-        test_tool_auth_coverage test_tool_agent_coverage
+        test_tool_worktree_coverage
+        test_tool_handover_coverage
+        test_tool_heartbeat_coverage
+        test_tool_agent_coverage
         test_tool_task_coverage test_tool_room_coverage
-        test_tool_control_coverage test_tool_misc_coverage
+        test_tool_misc_coverage
         test_ag_ui_coverage test_tool_verification_coverage
         test_tool_suspend_coverage test_tool_code_coverage
-        test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
         test_anti_rationalization_coverage test_field_validation)
  (libraries masc_test_deps))
@@ -542,47 +510,9 @@
 ; Special: Multi-module test suites
 ; ============================================================
 
-; Command Plane v2 (8 modules)
-(test
- (name test_command_plane_v2)
- (modules test_command_plane_v2
-          test_command_plane_v2_support
-          test_command_plane_v2_policy_inputs
-          test_command_plane_v2_traces
-          test_command_plane_v2_summary
-          test_command_plane_v2_scheduler_core_a
-          test_command_plane_v2_scheduler_core_b
-          test_command_plane_v2_scheduler_policy
-          test_command_plane_v2_search)
- (libraries masc_test_deps))
+; (pruned: Command Plane v2, Tool Team Session, Operator Control test suites)
 
-; Tool Team Session (8 modules)
-(test
- (name test_tool_team_session)
- (modules test_tool_team_session
-          test_tool_team_session_support
-          test_tool_team_session_lifecycle
-          test_tool_team_session_flow
-          test_tool_team_session_proof
-          test_tool_team_session_step_validation
-          test_tool_team_session_step_routing
-          test_tool_team_session_step_followup
-          test_tool_team_session_misc)
- (libraries masc_test_deps))
-
-; Operator Control (7 modules)
-(test
- (name test_operator_control)
- (modules test_operator_control
-          test_operator_control_support
-          test_operator_control_snapshot
-          test_operator_control_actions
-          test_operator_control_judgment
-          test_operator_control_swarm
-          test_operator_control_keeper)
- (libraries masc_test_deps))
-
-; Dashboard Collaboration Evidence (2 modules)
+; Dashboard Collaboration Evidence
 (test
  (name test_dashboard_collaboration_evidence)
  (modules test_dashboard_collaboration_evidence test_tool_team_session_support)
@@ -660,12 +590,7 @@
  (deps ../bin/main_eio.exe)
  (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
 
-(test
- (name test_operator_mcp_e2e)
- (modules test_operator_mcp_e2e)
- (libraries masc_test_deps)
- (deps ../bin/main_eio.exe)
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
+; (pruned: test_operator_mcp_e2e)
 
 (test
  (name test_dashboard_keeper_routes)
@@ -786,10 +711,7 @@
  (modules test_repo_synthesis_benchmark)
  (libraries masc_test_deps))
 
-(executable
- (name test_a2a_distributed)
- (modules test_a2a_distributed)
- (libraries masc_test_deps))
+; (pruned: test_a2a_distributed)
 
 (executable
  (name test_concurrent_distributed)

@@ -116,7 +116,7 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
         in
         dedupe_tool_schemas_by_name
           (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
-    | Operator_remote -> Tool_operator.remote_schemas
+    | Operator_remote -> [] (* Tool_operator pruned *)
   in
   apply_budget_filter ?budget_tokens schemas
 
@@ -138,7 +138,7 @@ let tool_allowed_in_profile state profile tool_name =
       || (tool_schemas_for_profile state Managed_agent
           |> List.exists (fun (schema : Types.tool_schema) ->
                  String.equal schema.name tool_name))
-  | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
+  | Operator_remote -> false (* Tool_operator pruned *)
 
 let is_destructive_tool_name name =
   let lowered = String.lowercase_ascii name in

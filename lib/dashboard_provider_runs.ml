@@ -179,9 +179,9 @@ let candidate_models_for_provider provider =
 
 let llama_snapshot () =
   let discovered_models, status, available, note =
-    match Tool_local_runtime_core.fetch_models_at Env_config_runtime.Llama.server_url with
-    | Ok (_url, models) -> (models, "online", true, None)
-    | Error message -> ([], "offline", false, Some message)
+    (* Tool_local_runtime_core pruned — cannot probe llama server *)
+    ignore Env_config_runtime.Llama.server_url;
+    ([], "pruned", false, Some "local runtime tools pruned")
   in
   let models =
     dedupe_keep_order

@@ -17,7 +17,6 @@ module Keeper_memory = Keeper_memory
 module Keeper_execution = Keeper_execution
 module Keeper_runtime = Keeper_runtime
 module Ag_ui = Ag_ui
-module Tool_operator = Tool_operator
 module Operator_control = Operator_control
 module Command_plane_v2 = Command_plane_v2
 module Dashboard_execution = Dashboard_execution

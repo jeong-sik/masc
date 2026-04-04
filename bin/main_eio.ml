@@ -21,7 +21,6 @@ module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_memory = Masc_mcp.Keeper_memory
 module Keeper_execution = Masc_mcp.Keeper_execution
 module Keeper_runtime = Masc_mcp.Keeper_runtime
-module Tool_operator = Masc_mcp.Tool_operator
 module Operator_control = Masc_mcp.Operator_control
 module Command_plane_v2 = Masc_mcp.Command_plane_v2
 module Dashboard_execution = Masc_mcp.Dashboard_execution

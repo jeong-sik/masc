@@ -11,7 +11,13 @@
 
 module Keeper_exec_tools = Masc_mcp.Keeper_exec_tools
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
-module Tool_shard = Masc_mcp.Tool_shard
+(* Tool_shard pruned — stub module *)
+module Tool_shard = struct
+  let governance_tools : Types.tool_schema list = []
+  let autoresearch_keeper_tools : Types.tool_schema list = []
+  let coding_tools : Types.tool_schema list = []
+  let keeper_model_tools : Types.tool_schema list = []
+end
 module Tool_catalog = Masc_mcp.Tool_catalog
 module Keeper_types = Masc_mcp.Keeper_types
 module Tool_code_write = Masc_mcp.Tool_code_write

@@ -403,7 +403,7 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
   let inference_cache_metrics = Prometheus.inference_cache_metrics_json () in
   let local_runtime =
     match session.scale_profile with
-    | Team_session_types.Scale_local64 -> Tool_local_runtime.runtime_status_json ()
+    | Team_session_types.Scale_local64 -> `Assoc [("status", `String "pruned")] (* Tool_local_runtime pruned *)
     | Team_session_types.Scale_standard -> `Null
   in
   let summary, team_health, communication_metrics, orchestration_state,

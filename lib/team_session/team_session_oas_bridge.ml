@@ -164,15 +164,12 @@ let dispatch_supported_tool ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.conf
              ~args)
     | "masc_run_init" | "masc_run_plan" | "masc_run_log"
     | "masc_run_deliverable" | "masc_run_get" | "masc_run_list" ->
-        result_of_option ~tool_name:name
-          (Tool_run.dispatch { Tool_run.config = config } ~name ~args)
+        (* Tool_run pruned *)
+        (false, Printf.sprintf "pruned tool: %s" name)
     | "masc_repair_loop_start" | "masc_repair_loop_status"
     | "masc_repair_loop_iterate" | "masc_repair_loop_stop" ->
-        let repair_ctx : _ Tool_repair_loop_types.context =
-          { config; agent_name; sw = Some sw; clock = Some clock; proc_mgr = None }
-        in
-        result_of_option ~tool_name:name
-          (Tool_repair_loop.dispatch repair_ctx ~name ~args)
+        (* Tool_repair_loop pruned *)
+        (false, Printf.sprintf "pruned tool: %s" name)
     | "masc_heartbeat" ->
         result_of_option ~tool_name:name
           (Tool_heartbeat.dispatch
@@ -207,7 +204,7 @@ let int_member_opt key json =
 
 let repair_loop_status_of_body body =
   match parse_tool_json body with
-  | Some json -> Tool_repair_loop_types.status_of_json json
+  | Some _json -> None (* Tool_repair_loop_types pruned *)
   | None -> None
 
 let repair_loop_iteration_budget body =
@@ -236,7 +233,7 @@ let run_repair_loop_until_terminal_with
       | `String loop_id ->
           let rec loop remaining last_ok last_body =
             match repair_loop_status_of_body last_body with
-            | Some status when Tool_repair_loop_types.is_terminal_status status ->
+            | Some _status when false (* Tool_repair_loop_types pruned *) ->
                 (last_ok, last_body)
             | Some _ when remaining <= 0 ->
                 ( false,

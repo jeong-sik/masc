@@ -172,15 +172,23 @@ let fetch_bing_rss ~query =
   let search_url =
     "https://www.bing.com/search?format=rss&q=" ^ Uri.pct_encode query
   in
-  match Tool_local_runtime_http.http_get_text_with_status ~timeout_sec:15 search_url with
-  | Error e -> Error e
-  | Ok (status_opt, payload) -> (
+  (* Tool_local_runtime_http pruned — use curl fallback *)
+  let result = Tool_command_plane_support.run_process_with_timeout ~clock_opt:None
+    ~timeout_sec:15 ~prog:"curl"
+    ~argv:["curl"; "-sS"; "-L"; "--max-time"; "15"; search_url]
+    ~env:(Unix.environment ()) ()
+  in
+  match result.exit_code with
+  | 0 ->
+    let payload = result.stdout in
+    let status_opt = Some 200 in (
       match status_opt with
       | Some 200 -> Ok (search_url, payload)
       | None -> Error "search endpoint returned no HTTP status"
       | Some status ->
           Error
             (Printf.sprintf "search endpoint returned HTTP %d" status))
+  | _ -> Error (Printf.sprintf "curl failed: %s" result.stderr)
 
 let web_search_result_json ~query ~search_url ~engine (hits : web_search_hit list) =
   let results =

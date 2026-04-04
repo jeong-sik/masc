@@ -296,8 +296,7 @@ let keeper_preset_universe_model_tools (meta : keeper_meta) : Types.tool_schema 
   let scoped = keeper_preset_universe_tool_names meta in
   let all_schemas =
     (keeper_default_model_tools meta)
-    @ Tool_shard.autoresearch_keeper_tools
-    @ Tool_shard.coding_tools
+    (* Tool_shard pruned *)
     @ Tool_code_write.schemas
     @ (keeper_universe_masc_tool_schemas meta)
   in
@@ -313,8 +312,7 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
   else
     let all_schemas =
       (keeper_default_model_tools meta)
-      @ Tool_shard.autoresearch_keeper_tools
-      @ Tool_shard.coding_tools
+      (* Tool_shard pruned *)
       @ Tool_code_write.schemas
       @ (keeper_masc_tool_schemas meta)
     in
@@ -338,8 +336,7 @@ let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
   let universe = keeper_universe_tool_names meta in
   let all_schemas =
     (keeper_default_model_tools meta)
-    @ Tool_shard.autoresearch_keeper_tools
-    @ Tool_shard.coding_tools
+    (* Tool_shard pruned *)
     @ Tool_code_write.schemas
     @ (keeper_universe_masc_tool_schemas meta)
   in

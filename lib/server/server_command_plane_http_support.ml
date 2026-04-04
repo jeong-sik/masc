@@ -18,38 +18,9 @@ let assoc_add key value = function
 let command_plane_actor deps request =
   Option.value ~default:"dashboard" (deps.operator_actor_hint request)
 
-let command_plane_tool_ctx ~deps ~state request :
-    (_, _) Tool_command_plane.context =
-  {
-    config = state.Mcp_server.room_config;
-    agent_name = command_plane_actor deps request;
-    sw = Some (deps.get_switch ());
-    clock = Some (deps.get_clock ());
-    net = Some (deps.get_net ());
-    mcp_state = Some state;
-    mcp_session_id = deps.get_session_id_any request;
-    auth_token = deps.auth_token_from_request request;
-  }
-
-let tool_command_plane_http_json ~deps ~state request ~name ~args =
-  match
-    Tool_command_plane.dispatch
-      (command_plane_tool_ctx ~deps ~state request)
-      ~name ~args
-  with
-  | Some (true, payload) -> (
-      try Ok (Yojson.Safe.from_string payload)
-      with Yojson.Json_error message -> Error ("invalid tool json: " ^ message))
-  | Some (false, payload) -> (
-      try
-        match Yojson.Safe.from_string payload with
-        | `Assoc fields -> (
-            match List.assoc_opt "message" fields with
-            | Some (`String message) -> Error message
-            | _ -> Error payload)
-        | _ -> Error payload
-      with Yojson.Json_error _ -> Error payload)
-  | None -> Error ("unsupported command-plane tool: " ^ name)
+(* Tool_command_plane pruned in Phase 2 — dispatch stub returns error *)
+let tool_command_plane_http_json ~deps:_ ~state:_ _request ~name ~args:_ =
+  Error ("pruned command-plane tool: " ^ name)
 
 (* --- Command-plane summary proactive cache ---
    Background refresh via start_cp_summary_refresh_loop.

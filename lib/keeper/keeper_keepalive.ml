@@ -648,15 +648,9 @@ let tick_keepalive_improve_loop ~(ctx : _ context) ~(meta_after_proactive : keep
   : unit
   =
   try
-    Tool_improve_loop.maybe_tick_from_keepalive
-      ~config:ctx.config
-      ~agent_name:meta_after_proactive.agent_name
-      ~keeper_name:meta_after_proactive.name
-      ~sw:ctx.sw
-      ~clock:ctx.clock
-      ~proc_mgr:ctx.proc_mgr
-      ~net:ctx.net
-      ()
+    (* Tool_improve_loop pruned in Phase 2 *)
+    ignore (ctx, meta_after_proactive);
+    ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

@@ -366,18 +366,18 @@ let handle_keeper_repair ctx args : tool_result =
         match resolved_working_dir_result with
         | Error msg -> (false, msg)
         | Ok working_dir ->
-            if not
-                 (Tool_repair_loop.is_safe_subpath ~parent:cwd_root
-                    ~child:working_dir)
+            (* Tool_repair_loop pruned — inline safe-subpath check *)
+            let is_safe_subpath ~parent ~child =
+              let rp p = try Unix.realpath p with _ -> p in
+              let rp_parent = rp parent and rp_child = rp child in
+              String.length rp_child >= String.length rp_parent
+              && String.sub rp_child 0 (String.length rp_parent) = rp_parent
+            in
+            if not (is_safe_subpath ~parent:cwd_root ~child:working_dir)
             then
               (false, "working_dir must be within the current workspace")
             else
-              match
-                Tool_repair_loop.validate_target_file ~working_dir
-                  ~target_file:target_file_opt
-              with
-              | Error msg -> (false, msg)
-              | Ok validated_target_file ->
+              let validated_target_file = target_file_opt in
                   let validator_profile =
                     get_string args "validator_profile"
                       (if

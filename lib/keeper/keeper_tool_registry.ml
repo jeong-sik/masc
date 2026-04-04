@@ -39,27 +39,17 @@ let keeper_voice_tool_names =
 
 let keeper_shell_readonly_tool_names = [ "keeper_shell_readonly" ]
 
-let keeper_governance_tool_names =
-  Tool_shard.governance_tools
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
-
-let keeper_coding_shard_tool_names =
-  Tool_shard.coding_tools
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
-
-let keeper_autoresearch_tool_names =
-  Tool_shard.autoresearch_keeper_tools
-  |> List.map (fun (t : Types.tool_schema) -> t.name)
+(* Tool_shard pruned in Phase 2 *)
+let keeper_governance_tool_names = []
+let keeper_coding_shard_tool_names = []
+let keeper_autoresearch_tool_names = []
 
 let keeper_coding_tool_names = Tool_code_write.tool_names
 
 let keeper_internal_candidate_tool_names =
   Tool_catalog.tools_for_surface Tool_catalog.Keeper
 
-let keeper_voice_tool_schemas =
-  match Tool_shard.get_shard "voice" with
-  | Some shard -> shard.tools
-  | None -> []
+let keeper_voice_tool_schemas : Types.tool_schema list = []
 
 let keeper_base_tool_names =
   [ "keeper_time_now"; "keeper_context_status"; "keeper_memory_search" ]

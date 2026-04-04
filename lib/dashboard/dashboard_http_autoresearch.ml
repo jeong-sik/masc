@@ -488,8 +488,7 @@ let delete_loop_json ~(base_path : string) ~(loop_id : string) :
       match state_or_persisted with
       | Error _ as error -> error
       | Ok state ->
-          Hashtbl.remove Tool_autoresearch_registry.pending_hypotheses loop_id;
-          Hashtbl.remove Tool_autoresearch_registry.custom_generators loop_id;
+          (* Tool_autoresearch_registry pruned — no in-memory state to clear *)
           delete_session_link ~base_path loop_id;
           (match
              Autoresearch.git_top_level ~workdir:state.source_workdir
@@ -526,18 +525,9 @@ let delete_loop_json ~(base_path : string) ~(loop_id : string) :
 
 let start_loop_json ~(base_path : string) ~(args : Yojson.Safe.t) :
     (Yojson.Safe.t, string) result =
-  let ctx : Tool_autoresearch.context =
-    {
-      base_path;
-      agent_name = None;
-      start_operation = None;
-      start_team_session = None;
-      config = None;
-      sw = None;
-      clock = None;
-    }
-  in
-  let result = Tool_autoresearch.handle_start ctx args in
+  (* Tool_autoresearch pruned in Phase 2 *)
+  ignore (base_path, args);
+  let result = `Assoc [("error", `String "autoresearch tools pruned")] in
   match result with
   | `Assoc fields when List.mem_assoc "error" fields ->
       let error_msg =

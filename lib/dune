@@ -294,6 +294,7 @@
    tool_args
    task_sandbox
    tool_plan
+   tool_command_plane_support
    tool_bridge
    tool_access_policy
    tool_access_role
@@ -524,6 +525,7 @@
  server_command_plane_http_support
  server_command_plane_http_mutations
  server_command_plane_http_help
+ tool_command_plane_support
   keeper_tool_registry
   keeper_tool_policy
   keeper_exec_tools

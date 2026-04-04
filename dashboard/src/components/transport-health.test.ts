@@ -196,4 +196,25 @@ describe('TransportHealthPanel', () => {
     expect(get).toHaveBeenCalledWith('/api/v1/dashboard/transport-health')
     expect(container.textContent).toContain('prod / namespace default')
   })
+
+  it('debounces SSE-driven transport refreshes through FetchScheduler', async () => {
+    const lastEvent = signal<unknown>(null)
+    const get = vi.fn<(path: string) => Promise<unknown>>().mockResolvedValue(sampleResponse())
+
+    const { TransportHealthPanel } = await loadComponentWithApi({ get, lastEvent })
+
+    render(html`<${TransportHealthPanel} />`, container)
+    await flushUi()
+    expect(get).toHaveBeenCalledTimes(1)
+
+    vi.useFakeTimers()
+    lastEvent.value = { type: 'agent_joined' }
+    lastEvent.value = { type: 'agent_left' }
+    lastEvent.value = { type: 'task_claimed' }
+    await vi.advanceTimersByTimeAsync(1_199)
+    expect(get).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(get).toHaveBeenCalledTimes(2)
+  })
 })

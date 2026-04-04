@@ -12,10 +12,71 @@ open Tool_inline_dispatch_types
 let arg_get_string ctx key default =
   Safe_ops.json_string ~default key ctx.arguments
 
-(** masc_start — set project root and optionally create+claim a task *)
+let extract_nickname_from_join_result ~fallback result =
+  try
+    let prefix = "  Nickname: " in
+    let start_idx =
+      let idx = ref 0 in
+      while !idx < String.length result - String.length prefix
+            && String.sub result !idx (String.length prefix) <> prefix
+      do
+        incr idx
+      done;
+      !idx + String.length prefix
+    in
+    let end_idx = String.index_from result start_idx '\n' in
+    String.sub result start_idx (end_idx - start_idx)
+  with Not_found | Invalid_argument _ ->
+    fallback
+
+let write_term_session_agent nickname =
+  match Sys.getenv_opt "TERM_SESSION_ID" with
+  | None -> ()
+  | Some sid ->
+      let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
+      (try Fs_compat.save_file file nickname
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | e ->
+           Log.Misc.error "Failed to write agent file %s: %s" file
+             (Printexc.to_string e))
+
+let cleanup_zombies_best_effort config ~label =
+  try
+    ignore (Room.cleanup_zombies config)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Log.Gc.warn "%s GC failed: %s" label (Printexc.to_string exn)
+
+let ensure_agent_presence (ctx : context) active_config =
+  let join_result = Room.join active_config ~agent_name:ctx.agent_name ~capabilities:[] () in
+  let fallback = Room.resolve_agent_name active_config ctx.agent_name in
+  let nickname = extract_nickname_from_join_result ~fallback join_result in
+  let _ = Session.register ctx.registry ~agent_name:nickname in
+  ctx.write_mcp_session_agent nickname;
+  if Option.is_none ctx.mcp_session_id then begin
+    Log.Misc.warn
+      "[deprecated] writing agent name to /tmp file for TERM session in masc_start — migrate to Agent_identity";
+    write_term_session_agent nickname
+  end;
+  let join_event =
+    `Assoc
+      [
+        ("type", `String "masc/agent_joined");
+        ("agent_name", `String nickname);
+        ("timestamp", `Float (Time_compat.now ()));
+      ]
+  in
+  let _ =
+    Session.push_notification_to_active_agents ctx.registry ~event:join_event
+  in
+  Mcp_server.sse_broadcast ctx.state join_event;
+  nickname
+
+(** masc_start — set project root, register the caller, and optionally create+claim a task *)
 let handle_start (ctx : context) : result option =
   let config = ctx.config in
-  let agent_name = ctx.agent_name in
+  let _agent_name = ctx.agent_name in
   let state = ctx.state in
   let path =
     let p = arg_get_string ctx "path" "" in
@@ -62,13 +123,29 @@ let handle_start (ctx : context) : result option =
         (false,
          Printf.sprintf "masc_start failed while setting project scope: %s" e)
   | Ok active_config ->
+      cleanup_zombies_best_effort active_config ~label:"masc_start";
+      let nickname =
+        try Ok (ensure_agent_presence ctx active_config)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            let msg = Printexc.to_string exn in
+            if msg = "" then Error "agent registration failed" else Error msg
+      in
+      match nickname with
+      | Error e ->
+          Some
+            (false,
+             Printf.sprintf
+               "masc_start failed while registering agent presence: %s" e)
+      | Ok nickname ->
       (* Step 2: add_task + claim + plan_set_task (if task_title provided) *)
       if task_title = "" then
         Some
           (true,
            Printf.sprintf
-             "masc_start complete (project scope set, agent: %s). No task created — use masc_add_task to create one."
-             agent_name)
+             "masc_start complete (project scope set, registered as %s). No task created — use masc_add_task to create one."
+             nickname)
       else begin
         let add_result = Room_task.add_task active_config ~title:task_title ~priority:3 ~description:"" in
         let task_id =
@@ -88,16 +165,18 @@ let handle_start (ctx : context) : result option =
           Some
             (true,
              Printf.sprintf
-               "masc_start partial: project scope set (agent: %s), but task creation failed: %s"
-               agent_name add_result)
+               "masc_start partial: project scope set and registered as %s, but task creation failed: %s"
+               nickname add_result)
         else begin
-          let _claim_msg = Room_task.claim_task active_config ~agent_name ~task_id in
+          let _claim_msg =
+            Room_task.claim_task active_config ~agent_name:nickname ~task_id
+          in
           Planning_eio.set_current_task active_config ~task_id;
           Some
             (true,
              Printf.sprintf
-               "masc_start complete: project scope set, agent: %s, task %s created+claimed+set as current."
-               agent_name task_id)
+               "masc_start complete: project scope set, registered as %s, task %s created+claimed+set as current."
+               nickname task_id)
         end
       end
 
@@ -213,6 +292,7 @@ let handle_set_project (ctx : context) : result option =
     else begin
       state.Mcp_server.room_config <- Room.default_config expanded;
       let rc = state.Mcp_server.room_config in
+      cleanup_zombies_best_effort rc ~label:"masc_set_project";
       let status = if Room.is_initialized rc then "ok" else "(not initialized)" in
       let root_note =
         if rc.workspace_path <> rc.base_path then

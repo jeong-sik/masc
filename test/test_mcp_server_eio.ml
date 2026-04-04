@@ -118,48 +118,6 @@ let int_field_exn label fields name =
   | Some (`Int value) -> value
   | _ -> Alcotest.failf "%s missing int field %s" label name
 
-let test_resolve_join_state_skips_read_only_lookup () =
-  let called = ref false in
-  let joined =
-    Masc_mcp.Mcp_server_eio_execute.resolve_join_state
-      ~room_initialized:true
-      ~join_required:false
-      ~agent_name:"codex"
-      ~check_join:(fun () ->
-        called := true;
-        true)
-  in
-  Alcotest.(check bool) "lookup skipped" false !called;
-  Alcotest.(check bool) "read-only defaults false" false joined
-
-let test_resolve_join_state_checks_join_required_tools () =
-  let called = ref false in
-  let joined =
-    Masc_mcp.Mcp_server_eio_execute.resolve_join_state
-      ~room_initialized:true
-      ~join_required:true
-      ~agent_name:"codex"
-      ~check_join:(fun () ->
-        called := true;
-        true)
-  in
-  Alcotest.(check bool) "lookup performed" true !called;
-  Alcotest.(check bool) "join result preserved" true joined
-
-let test_resolve_join_state_skips_unknown_agent () =
-  let called = ref false in
-  let joined =
-    Masc_mcp.Mcp_server_eio_execute.resolve_join_state
-      ~room_initialized:true
-      ~join_required:true
-      ~agent_name:"unknown"
-      ~check_join:(fun () ->
-        called := true;
-        true)
-  in
-  Alcotest.(check bool) "unknown agent skipped" false !called;
-  Alcotest.(check bool) "unknown agent treated unjoined" false joined
-
 let test_should_read_legacy_persisted_agent_name () =
   let should_read =
     Masc_mcp.Mcp_server_eio_execute.should_read_legacy_persisted_agent_name
@@ -2503,12 +2461,6 @@ let state_tests = [
   "type compatibility", `Quick, test_type_compatibility;
   "eio context delegation", `Quick, test_eio_context_delegation;
   "eio context scoped restore", `Quick, test_eio_context_with_test_env_restores;
-  "resolve_join_state skips read-only lookup", `Quick,
-    test_resolve_join_state_skips_read_only_lookup;
-  "resolve_join_state checks join-required tools", `Quick,
-    test_resolve_join_state_checks_join_required_tools;
-  "resolve_join_state skips unknown agent", `Quick,
-    test_resolve_join_state_skips_unknown_agent;
 ]
 
 let protocol_tests = [

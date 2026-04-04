@@ -488,10 +488,15 @@ let create_state ~base_path =
     env = None;
     net = None;
   } in
+  let is_active_session name =
+    let normalized = String.lowercase_ascii (String.trim name) in
+    Session.connected_agents registry
+    |> List.exists (fun agent ->
+           String.equal normalized
+             (String.lowercase_ascii (String.trim agent)))
+  in
   Tool_board.set_agent_lookup (fun name ->
-    (* Room join concept removed — use session registry for agent presence.
-       Board posts are valid from any active agent. *)
-    ignore name; true);
+    is_active_session name);
   state
 
 (** Create state with Eio context - required for PostgresNative backend *)
@@ -536,9 +541,14 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     env = Some env;
     net = Some net;
   } in
-  (* Board post kind auto-classification: room concept removed.
-     Board posts are valid from any active agent. *)
-  Tool_board.set_agent_lookup (fun name -> ignore name; true);
+  let is_active_session name =
+    let normalized = String.lowercase_ascii (String.trim name) in
+    Session.connected_agents registry
+    |> List.exists (fun agent ->
+           String.equal normalized
+             (String.lowercase_ascii (String.trim agent)))
+  in
+  Tool_board.set_agent_lookup (fun name -> is_active_session name);
   state
 
 (** Register SSE broadcast callback *)

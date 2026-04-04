@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.231.0] - 2026-04-04
+
+### Changed
+- **Dead keeper concepts removal** -- remove dead reward/policy model and unused config (-356 lines) (#5114).
+
 ## [2.230.0] - 2026-04-04
 
 ### Added

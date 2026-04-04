@@ -339,7 +339,7 @@ let test_permissions_admin () =
   let perms = Types.permissions_for_role Types.Admin in
   check bool "can init" true (List.mem Types.CanInit perms);
   check bool "can reset" true (List.mem Types.CanReset perms);
-  check bool "can approve" true (List.mem Types.CanApprove perms)
+  check bool "can admin" true (List.mem Types.CanAdmin perms)
 
 let test_has_permission () =
   check bool "reader can read" true (Types.has_permission Types.Reader Types.CanReadState);

@@ -141,27 +141,10 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_judgment_write",
       hidden_active
         "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    (* Dead features physically removed in #4709 and #4757:
-       operator_judgment_latest, hat_wear, hat_status, encryption_*,
-       generate_key, tempo*, cost_log, cost_report. *)
-    (* Broken tools: shell out to CLI binaries unavailable at runtime.
-       masc-checkpoint: removed from codebase (refactor #102).
-       Deprecated 2026-04-03. See #4709, #4734. *)
-    ("masc_interrupt",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_approve",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_reject",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_pending_interrupts",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_branch",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
+    (* Physically removed: masc_interrupt, masc_approve, masc_reject,
+       masc_pending_interrupts, masc_branch (masc-checkpoint CLI removed,
+       #4709/#4734), operator_judgment_latest, hat_wear, hat_status,
+       encryption_*, generate_key, tempo*, cost_log, cost_report (#4709/#4757). *)
     (* Semantic annotations for governance risk classification. *)
     ("masc_status", readonly_tool);
     ("masc_tasks", readonly_tool);
@@ -196,15 +179,9 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_room_delete",
       with_semantic_flags ~destructive:true
         (hidden_active "Namespace deletion removes persisted state and should be treated as destructive.") );
-    ( "masc_room_destroy",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Namespace destruction removes persisted state and should be treated as destructive.") );
     ( "masc_force_leave",
       with_semantic_flags ~destructive:true
         (hidden_active "Forced membership removal mutates namespace state and should be treated as destructive.") );
-    ( "masc_force_remove_agent",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Forced agent removal mutates namespace state and should be treated as destructive.") );
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
         (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );
@@ -219,8 +196,6 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_execute",
       with_semantic_flags ~destructive:true
         (hidden_active "Direct execution can apply privileged side effects and should be treated as destructive.") );
-    ("masc_neo4j_query", destructive_tool);
-    ("masc_pg_query", destructive_tool);
     ("masc_tool_grant", destructive_tool);
     ("masc_tool_revoke", destructive_tool);
     ( "masc_operation_stop",

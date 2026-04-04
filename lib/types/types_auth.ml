@@ -297,8 +297,6 @@ type permission =
   | CanCreateWorktree
   | CanRemoveWorktree
   | CanVote
-  | CanInterrupt
-  | CanApprove
   | CanAdmin
 [@@deriving show { with_path = false }]
 
@@ -320,7 +318,7 @@ let permissions_for_role = function
       CanBroadcast;
       CanOpenPortal; CanSendPortal;
       CanCreateWorktree; CanRemoveWorktree;
-      CanVote; CanInterrupt; CanApprove;
+      CanVote;
       CanAdmin;
     ]
 

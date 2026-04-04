@@ -248,36 +248,6 @@ let judgment_write_schema =
         ];
   }
 
-let judgment_latest_schema =
-  {
-    name = "masc_operator_judgment_latest";
-    description =
-      "Internal operator-judge read path. Returns the latest stored operator judgment for a namespace or team session. Hidden from the default catalog.";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ( "properties",
-            schema_properties
-              [
-                ( "surface",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List judgment_surface_enums);
-                    ] );
-                ( "target_type",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List digest_target_type_enums);
-                    ] );
-                ("target_id", `Assoc [ ("type", `String "string") ]);
-                ("require_fresh", `Assoc [ ("type", `String "boolean") ]);
-              ] );
-          ("required", `List [ `String "surface"; `String "target_type" ]);
-        ];
-  }
 let json_string_of_result = function
   | Ok json -> (true, Yojson.Safe.to_string json)
   | Error message -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String message) ]))

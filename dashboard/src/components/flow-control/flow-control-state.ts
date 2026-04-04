@@ -49,18 +49,6 @@ export async function resumeRoom(): Promise<void> {
   finally { flowLoading.value = false }
 }
 
-export async function interruptRoom(reason?: string): Promise<void> {
-  flowLoading.value = true
-  try {
-    const args: Record<string, unknown> = {}
-    if (reason) args.reason = reason
-    await callMcpTool('masc_interrupt', args)
-    showToast('프로젝트 인터럽트 전송', 'success')
-    await fetchPauseStatus()
-  } catch (err) {
-    showToast(`인터럽트 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
-  } finally { flowLoading.value = false }
-}
 
 // ── Room Strategy ───────────────────────────────
 

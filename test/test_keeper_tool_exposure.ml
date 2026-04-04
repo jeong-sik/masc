@@ -469,7 +469,7 @@ let () =
         List.iter (fun name ->
           check bool (name ^ " denied") true (List.mem name dl))
           [ "masc_room_delete"; "masc_spawn"; "masc_force_leave";
-            "masc_config_set"; "masc_neo4j_query"; "masc_pg_query";
+            "masc_config_set";
             "masc_operator_action"; "masc_operator_confirm"; "masc_execute" ]);
       test_case "safe tools not denied" `Quick (fun () ->
         let dl = Keeper_hooks_oas.keeper_denied_tools in

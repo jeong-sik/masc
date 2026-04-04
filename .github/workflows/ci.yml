@@ -324,6 +324,11 @@ jobs:
           chmod +x scripts/check-feature-flag-consistency.sh
           scripts/check-feature-flag-consistency.sh
 
+      - name: Check TOML syntax
+        run: |
+          chmod +x scripts/check-toml-syntax.sh
+          scripts/check-toml-syntax.sh
+
       - name: Check MASC/OAS boundary ratchet
         run: |
           chmod +x scripts/check-boundary-guard.sh

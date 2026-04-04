@@ -25,6 +25,10 @@ let worker_top_k = 20
 let worker_min_p = 0.0
 let worker_max_tool_calls_per_turn = 12
 
+(** GLM provider base URL — SSOT for fallback provider construction. *)
+let glm_base_url = "https://api.z.ai/api/coding/paas/v4"
+let glm_base_url_root = "https://api.z.ai"
+
 (* ================================================================ *)
 (* Cascade types                                                     *)
 (* ================================================================ *)

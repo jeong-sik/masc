@@ -11,6 +11,7 @@ open Keeper_execution
 
 let keepalive_interval_sec () =
   Runtime_params.get Governance_registry.keeper_keepalive_interval_sec
+;;
 
 (* ── Board-reactive policy constants ── *)
 
@@ -25,26 +26,32 @@ let get_bus () = !bus_ref
     [MASC_AGENT_TRANSPORT=grpc]. When set, heartbeat sends
     status pings over gRPC unary RPC. *)
 let grpc_client_ref : Masc_grpc_client.t option ref = ref None
+
 let grpc_env_ref : Eio_unix.Stdenv.base option ref = ref None
+
 let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
   grpc_client_ref := Some c;
   grpc_env_ref := env
+;;
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
 let interruptible_sleep ~clock ~stop ~wakeup duration =
   let chunk_sec = Env_config.KeeperKeepalive.sleep_chunk_sec in
   let rec wait remaining =
-    if Atomic.get stop then ()
-    else if Atomic.compare_and_set wakeup true false then ()
-    else if remaining <= 0.0 then ()
-    else begin
+    if Atomic.get stop
+    then ()
+    else if Atomic.compare_and_set wakeup true false
+    then ()
+    else if remaining <= 0.0
+    then ()
+    else (
       let chunk = Float.min chunk_sec remaining in
       Eio.Time.sleep clock chunk;
-      wait (remaining -. chunk)
-    end
+      wait (remaining -. chunk))
   in
   wait duration
+;;
 
 (** Wake up a specific keeper immediately, causing it to skip the rest of
     its sleep and run the next heartbeat cycle. Used by broadcast notification
@@ -52,573 +59,823 @@ let interruptible_sleep ~clock ~stop ~wakeup duration =
 let wakeup_keeper name =
   Keeper_registry.all ()
   |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
-         if String.equal entry.name name && entry.state = Keeper_registry.Running
-         then Keeper_registry.wakeup ~base_path:entry.base_path name)
+    if String.equal entry.name name && entry.state = Keeper_registry.Running
+    then Keeper_registry.wakeup ~base_path:entry.base_path name)
+;;
 
 (** Wake up all running keepers — used when a broadcast mentions @@all
     or when a system-wide event requires immediate attention. *)
-let wakeup_all_keepers () =
-  Keeper_registry.wakeup_all ()
+let wakeup_all_keepers () = Keeper_registry.wakeup_all ()
 
 let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
-  Keeper_registry.board_wakeup_allowed ~base_path keeper_name
-    ~post_id ~debounce_sec:board_reactive_debounce_sec
+  Keeper_registry.board_wakeup_allowed
+    ~base_path
+    keeper_name
+    ~post_id
+    ~debounce_sec:board_reactive_debounce_sec
+;;
 
 let wakeup_relevant_keeper_for_board_signal
-    ~(config : Room.config)
-    (signal : Board_dispatch.keeper_board_signal) =
+      ~(config : Room.config)
+      (signal : Board_dispatch.keeper_board_signal)
+  =
   let running_names =
     Keeper_registry.all ()
     |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
-           if e.state = Keeper_registry.Running then Some e.name else None)
+      if e.state = Keeper_registry.Running then Some e.name else None)
   in
   let candidates =
     running_names
     |> List.filter_map (fun name ->
-           match read_meta config name with
-           | Ok (Some meta) ->
-               let matched =
-                 Keeper_world_observation.board_signal_match
-                   ~continuity_summary:meta.continuity_summary
-                   ~meta
-                   ~signal
-               in
-               Some (meta, matched)
-           | _ -> None)
+      match read_meta config name with
+      | Ok (Some meta) ->
+        let matched =
+          Keeper_world_observation.board_signal_match
+            ~continuity_summary:meta.continuity_summary
+            ~meta
+            ~signal
+        in
+        Some (meta, matched)
+      | _ -> None)
   in
   let explicit =
     candidates
-    |> List.filter (fun (_meta, (matched : Keeper_world_observation.board_signal_match)) ->
-           matched.explicit_mention)
+    |> List.filter
+         (fun (_meta, (matched : Keeper_world_observation.board_signal_match)) ->
+            matched.explicit_mention)
   in
   let wake_meta (meta : keeper_meta) reason =
-    if board_reactive_wakeup_allowed
-         ~base_path:config.base_path
-         ~keeper_name:meta.name
-         ~post_id:signal.post_id
+    if
+      board_reactive_wakeup_allowed
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+        ~post_id:signal.post_id
     then (
       wakeup_keeper meta.name;
-      Log.Keeper.info "board signal wakeup: keeper=%s reason=%s post=%s"
-        meta.name reason signal.post_id)
+      Log.Keeper.info
+        "board signal wakeup: keeper=%s reason=%s post=%s"
+        meta.name
+        reason
+        signal.post_id)
   in
   match explicit with
-  | (_ :: _) ->
-      explicit
-      |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
+  | _ :: _ ->
+    explicit |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
   | [] -> ()
+;;
 
 let max_consecutive_heartbeat_failures () =
   Runtime_params.get Governance_registry.keeper_max_hb_failures
+;;
 
 let max_consecutive_turn_failures () =
   Runtime_params.get Governance_registry.keeper_max_turn_failures
+;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.
    In-memory ring of last 100 cycles. Flushed as aggregate at snapshot cadence.
    No additional file I/O — appended to existing snapshot JSON. *)
-type stage_timing = {
-  presence_ms : float;
-  snapshot_ms : float;
-  board_ms : float;
-  turn_ms : float;
-  recurring_ms : float;
-  improve_ms : float;
-}
+type stage_timing =
+  { presence_ms : float
+  ; snapshot_ms : float
+  ; board_ms : float
+  ; turn_ms : float
+  ; recurring_ms : float
+  ; improve_ms : float
+  }
 
 let stage_timing_ring_size () =
   Runtime_params.get Governance_registry.keeper_stage_timing_ring_size
+;;
 
 let percentile arr p =
   let n = Array.length arr in
-  if n = 0 then 0.0
-  else
+  if n = 0
+  then 0.0
+  else (
     let sorted = Array.copy arr in
     Array.sort Float.compare sorted;
     let idx = Float.to_int (Float.round (float_of_int (n - 1) *. p)) in
-    sorted.(min idx (n - 1))
+    sorted.(min idx (n - 1)))
+;;
 
 let stage_timing_to_json ~ring ~count =
   let n = min count (Array.length ring) in
-  if n = 0 then `Null
-  else
+  if n = 0
+  then `Null
+  else (
     let extract field =
       let arr = Array.init n (fun i -> field ring.(i)) in
-      `Assoc [
-        ("p50", `Float (percentile arr 0.5));
-        ("p95", `Float (percentile arr 0.95));
-        ("max", `Float (percentile arr 1.0));
-        ("samples", `Int n);
-      ]
+      `Assoc
+        [ "p50", `Float (percentile arr 0.5)
+        ; "p95", `Float (percentile arr 0.95)
+        ; "max", `Float (percentile arr 1.0)
+        ; "samples", `Int n
+        ]
     in
-    `Assoc [
-      ("presence", extract (fun t -> t.presence_ms));
-      ("snapshot", extract (fun t -> t.snapshot_ms));
-      ("board", extract (fun t -> t.board_ms));
-      ("turn", extract (fun t -> t.turn_ms));
-      ("recurring", extract (fun t -> t.recurring_ms));
-      ("improve", extract (fun t -> t.improve_ms));
-    ]
+    `Assoc
+      [ "presence", extract (fun t -> t.presence_ms)
+      ; "snapshot", extract (fun t -> t.snapshot_ms)
+      ; "board", extract (fun t -> t.board_ms)
+      ; "turn", extract (fun t -> t.turn_ms)
+      ; "recurring", extract (fun t -> t.recurring_ms)
+      ; "improve", extract (fun t -> t.improve_ms)
+      ])
+;;
 
-let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
-    (m : keeper_meta) (stop : bool Atomic.t) ~(wakeup : bool Atomic.t) : unit =
+let write_heartbeat_snapshot
+      ~(ctx : _ context)
+      ~(meta_current : keeper_meta)
+      ~(now_ts : float)
+      ~(timing_ring : stage_timing array)
+      ~(timing_filled : int)
+  : unit
+  =
+  let metrics_store = keeper_metrics_store ctx.config meta_current.name in
+  let cascade_models =
+    Oas_model_resolve.models_of_cascade_name meta_current.cascade_name
+  in
+  let primary_max_context =
+    Oas_model_resolve.resolve_primary_max_context cascade_models
+  in
+  let base_dir = session_base_dir ctx.config in
+  ignore (Keeper_fs.ensure_dir (Filename.concat base_dir meta_current.runtime.trace_id));
+  let _session, ctx_opt =
+    load_context_from_checkpoint
+      ~trace_id:meta_current.runtime.trace_id
+      ~primary_model_max_tokens:primary_max_context
+      ~base_dir
+  in
+  match ctx_opt with
+  | None -> ()
+  | Some c ->
+    let latest_user_message =
+      latest_message_content_by_role ~role:Agent_sdk.Types.User c.messages
+    in
+    let latest_assistant_message =
+      latest_message_content_by_role ~role:Agent_sdk.Types.Assistant c.messages
+    in
+    let continuity_snapshot = latest_state_snapshot_from_messages c.messages in
+    let continuity_summary =
+      match continuity_snapshot with
+      | Some s -> keeper_state_snapshot_to_summary_text s
+      | None ->
+        let trimmed = String.trim meta_current.continuity_summary in
+        if trimmed = "" then "No continuity snapshot available." else trimmed
+    in
+    let repetition_risk =
+      repetition_risk_score ~messages:c.messages ~candidate_reply:None
+    in
+    let goal_alignment =
+      goal_alignment_score
+        ~meta:meta_current
+        ~user_message:latest_user_message
+        ~assistant_reply:latest_assistant_message
+    in
+    let response_alignment =
+      match latest_user_message, latest_assistant_message with
+      | Some user_message, Some assistant_message ->
+        jaccard_similarity user_message assistant_message
+      | _ -> 0.0
+    in
+    let auto_rules =
+      evaluate_keeper_auto_rules
+        ~meta:meta_current
+        ~context_ratio:(Keeper_exec_context.context_ratio c)
+        ~message_count:(Keeper_exec_context.message_count c)
+        ~token_count:(Keeper_exec_context.token_count c)
+        ~repetition_risk
+        ~goal_alignment
+        ~response_alignment
+        ()
+    in
+    let snapshot =
+      `Assoc
+        [ "ts", `String (now_iso ())
+        ; "ts_unix", `Float now_ts
+        ; "channel", `String "heartbeat"
+        ; "name", `String meta_current.name
+        ; "agent_name", `String meta_current.agent_name
+        ; "trace_id", `String meta_current.runtime.trace_id
+        ; "generation", `Int meta_current.runtime.generation
+        ; "model_used", `String meta_current.runtime.usage.last_model_used
+        ; ( "usage"
+          , `Assoc
+              [ "input_tokens", `Int 0; "output_tokens", `Int 0; "total_tokens", `Int 0 ]
+          )
+        ; "latency_ms", `Int 0
+        ; "cost_usd", `Float 0.0
+        ; "context_ratio", `Float (Keeper_exec_context.context_ratio c)
+        ; "context_tokens", `Int (Keeper_exec_context.token_count c)
+        ; "context_max", `Int c.max_tokens
+        ; "message_count", `Int (Keeper_exec_context.message_count c)
+        ; ( "continuity_state"
+          , match continuity_snapshot with
+            | None -> `Null
+            | Some s -> keeper_state_snapshot_to_json s )
+        ; "continuity_summary", `String continuity_summary
+        ; "compacted", `Bool false
+        ; "compaction_before_tokens", `Int (Keeper_exec_context.token_count c)
+        ; "compaction_after_tokens", `Int (Keeper_exec_context.token_count c)
+        ; "work_kind", `String "status_tick"
+        ; "tool_call_count", `Int 0
+        ; "tools_used", `List []
+        ; "snapshot_source", `String "keeper_context_status"
+        ; "memory_check", memory_check_default_json ()
+        ; "auto_rules", keeper_auto_rule_eval_to_json auto_rules
+        ; "reflection", keeper_reflection_payload_of_auto_rules auto_rules
+        ; "auto_reflect", `Bool auto_rules.reflect
+        ; "auto_plan", `Bool auto_rules.plan
+        ; "auto_compact", `Bool auto_rules.compact
+        ; "auto_handoff", `Bool auto_rules.handoff
+        ; "repetition_risk", `Float repetition_risk
+        ; "goal_alignment", `Float goal_alignment
+        ; "response_alignment", `Float response_alignment
+        ; "goal_drift", `Float auto_rules.goal_drift
+        ; "guardrail_stop", `Bool auto_rules.guardrail_stop
+        ; ( "guardrail_stop_reason"
+          , match auto_rules.guardrail_reason with
+            | Some reason -> `String reason
+            | None -> `Null )
+        ; "handoff", `Assoc [ "performed", `Bool false ]
+        ; "stage_timing", stage_timing_to_json ~ring:timing_ring ~count:timing_filled
+        ]
+    in
+    Dated_jsonl.append metrics_store snapshot;
+    (try
+       Sse.broadcast
+         (`Assoc
+             [ "type", `String "keeper_heartbeat"
+             ; "name", `String meta_current.name
+             ; "generation", `Int meta_current.runtime.generation
+             ; "context_ratio", `Float (Keeper_exec_context.context_ratio c)
+             ; "ts_unix", `Float now_ts
+             ])
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.error "heartbeat SSE broadcast failed: %s" (Printexc.to_string exn));
+    (match !bus_ref with
+     | Some bus ->
+       Oas_events.publish_keeper_snapshot
+         bus
+         ~keeper_name:meta_current.name
+         ~generation:meta_current.runtime.generation
+         ~context_ratio:(Keeper_exec_context.context_ratio c)
+         ~message_count:(List.length c.messages)
+     | None -> ());
+    (try
+       Keeper_registry.flush_tool_usage ~base_path:ctx.config.base_path meta_current.name
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | _ -> ())
+;;
+
+let keeper_agent_status (meta : keeper_meta) =
+  if meta.paused
+  then Types.Inactive
+  else (
+    match meta.current_task_id with
+    | Some _ -> Types.Busy
+    | None -> Types.Active)
+;;
+
+let sync_keeper_presence
+      ~(ctx : _ context)
+      ~(meta_current : keeper_meta)
+      ~(t_presence_start : float)
+      ~(consecutive_failures : int ref)
+      ~(last_successful_heartbeat_ts : float ref)
+      ~(work_as_hb : unit -> bool)
+      ~(max_silence : unit -> float)
+  : keeper_meta
+  =
+  let presence_fresh =
+    work_as_hb () && t_presence_start -. !last_successful_heartbeat_ts < max_silence ()
+  in
+  if presence_fresh
+  then (
+    Log.Keeper.debug
+      "presence sync skipped: fresh heartbeat %.0fs ago"
+      (t_presence_start -. !last_successful_heartbeat_ts);
+    meta_current)
+  else (
+    try
+      let synced = ensure_keeper_room_presence ctx.config meta_current in
+      if synced.joined_room_ids = []
+      then (
+        incr consecutive_failures;
+        Log.Keeper.warn
+          "room presence returned empty rooms (%d/%d)"
+          !consecutive_failures
+          (max_consecutive_heartbeat_failures ()))
+      else (
+        consecutive_failures := 0;
+        last_successful_heartbeat_ts := Time_compat.now ());
+      match write_meta ctx.config synced with
+      | Ok () -> synced
+      | Error e ->
+        Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
+        synced
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      incr consecutive_failures;
+      Log.Keeper.error
+        "room heartbeat failed (%d/%d): %s"
+        !consecutive_failures
+        (max_consecutive_heartbeat_failures ())
+        (Printexc.to_string exn);
+      meta_current)
+;;
+
+let collect_keepalive_board_events
+      ~(ctx : _ context)
+      ~(meta_current : keeper_meta)
+      ~(proactive_warmup_elapsed : bool)
+  =
+  if not proactive_warmup_elapsed
+  then [], meta_current
+  else (
+    let pending_board_events =
+      try
+        let events, _new_count, _mention_count =
+          Keeper_world_observation.collect_board_events
+            ~base_path:ctx.config.base_path
+            ~meta:meta_current
+            ~continuity_summary:meta_current.continuity_summary
+        in
+        events
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Keeper.warn "keepalive: board count query failed: %s" (Printexc.to_string exn);
+        []
+    in
+    pending_board_events, meta_current)
+;;
+
+let run_keepalive_unified_turn
+      ~(ctx : _ context)
+      ~(meta_after_triage : keeper_meta)
+      ~pending_board_events
+      ~(stop : bool Atomic.t)
+      ~(proactive_warmup_elapsed : bool)
+  : keeper_meta
+  =
+  if not proactive_warmup_elapsed
+  then meta_after_triage
+  else (
+    try
+      let obs =
+        Keeper_world_observation.observe
+          ~pending_board_events:(Some pending_board_events)
+          ~config:ctx.config
+          ~meta:meta_after_triage
+      in
+      if Atomic.get stop
+      then meta_after_triage
+      else if Keeper_world_observation.should_run_unified_turn ~meta:meta_after_triage obs
+      then (
+        match
+          Keeper_unified_turn.run_unified_turn
+            ~config:ctx.config
+            ~meta:meta_after_triage
+            ~observation:obs
+            ~generation:meta_after_triage.runtime.generation
+        with
+        | Error e ->
+          Log.Keeper.error "unified turn failed: %s" e;
+          (match read_meta ctx.config meta_after_triage.name with
+           | Ok (Some latest) -> latest
+           | _ -> meta_after_triage)
+        | Ok updated -> updated)
+      else meta_after_triage
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Keeper.error "unified turn exception: %s" (Printexc.to_string exn);
+      meta_after_triage)
+;;
+
+let refresh_work_as_heartbeat
+      ~(ctx : _ context)
+      ~(meta_after_proactive : keeper_meta)
+      ~(proactive_warmup_elapsed : bool)
+      ~(work_as_hb : unit -> bool)
+      ~(last_successful_heartbeat_ts : float ref)
+      ~(consecutive_failures : int ref)
+  : unit
+  =
+  if work_as_hb () && proactive_warmup_elapsed
+  then (
+    let hb_ok =
+      List.exists
+        (fun room_id ->
+           try
+             ignore
+               (Room.heartbeat_in_room
+                  ctx.config
+                  ~room_id
+                  ~agent_name:meta_after_proactive.agent_name);
+             true
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             Log.Keeper.debug
+               "heartbeat_in_room failed for %s: %s"
+               meta_after_proactive.name
+               (Printexc.to_string exn);
+             false)
+        meta_after_proactive.joined_room_ids
+    in
+    if hb_ok
+    then (
+      last_successful_heartbeat_ts := Time_compat.now ();
+      consecutive_failures := 0))
+;;
+
+let dispatch_recurring_keepalive
+      ~(ctx : _ context)
+      ~(meta_after_proactive : keeper_meta)
+      ~(now_ts : float)
+  : int
+  =
+  try
+    Keeper_recurring.dispatch_due
+      ~keeper_name:meta_after_proactive.name
+      ~now_ts
+      ~dispatch:(fun task action ->
+        match action with
+        | Keeper_recurring.Broadcast msg ->
+          (try
+             let _ =
+               Room.broadcast
+                 ctx.config
+                 ~from_agent:meta_after_proactive.agent_name
+                 ~content:(Printf.sprintf "[loop:%s] %s" task.label msg)
+             in
+             Log.Keeper.info "[recurring] %s dispatched: %s" task.id task.label;
+             Ok ()
+           with
+           | exn ->
+             Log.Keeper.warn "[recurring] %s failed: %s" task.id (Printexc.to_string exn);
+             Error (Printexc.to_string exn)))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Keeper.warn "[recurring] dispatch error: %s" (Printexc.to_string exn);
+    0
+;;
+
+let run_smart_heartbeat_gate
+      ~(clock : _ Eio.Time.clock)
+      ~(stop : bool Atomic.t)
+      ~(wakeup : bool Atomic.t)
+      ~(meta_current : keeper_meta)
+      ~(smart_hb_enabled : unit -> bool)
+      ~(smart_hb_config : Heartbeat_smart.config)
+      ~(last_successful_heartbeat_ts : float ref)
+      ~(last_heartbeat_cycle_ts : float ref)
+  : bool
+  =
+  let smart_hb_decision =
+    if smart_hb_enabled ()
+    then (
+      let agent_status = keeper_agent_status meta_current in
+      Heartbeat_smart.should_emit
+        ~config:smart_hb_config
+        ~agent_status
+        ~last_activity:!last_successful_heartbeat_ts
+        ~last_heartbeat:!last_heartbeat_cycle_ts)
+    else Heartbeat_smart.Emit
+  in
+  match smart_hb_decision with
+  | Heartbeat_smart.Skip_busy ->
+    Log.Keeper.debug
+      "smart heartbeat: skip (busy, task=%s)"
+      (Option.value ~default:"?" meta_current.current_task_id);
+    let base =
+      Heartbeat_smart.effective_interval
+        ~config:smart_hb_config
+        ~last_activity:!last_successful_heartbeat_ts
+    in
+    let jitter = base *. 0.2 *. Random.float 1.0 in
+    interruptible_sleep ~clock ~stop ~wakeup (base +. jitter);
+    false
+  | Heartbeat_smart.Skip_idle next_time ->
+    let wait = Float.max 1.0 (next_time -. Time_compat.now ()) in
+    Log.Keeper.debug "smart heartbeat: skip (idle, next in %.1fs)" wait;
+    let jitter = wait *. 0.1 *. Random.float 1.0 in
+    interruptible_sleep ~clock ~stop ~wakeup (wait +. jitter);
+    false
+  | Heartbeat_smart.Emit ->
+    last_heartbeat_cycle_ts := Time_compat.now ();
+    true
+;;
+
+let maybe_write_heartbeat_snapshot
+      ~(ctx : _ context)
+      ~(meta_current : keeper_meta)
+      ~(now_ts : float)
+      ~(last_snapshot_ts : float ref)
+      ~(snapshot_interval_sec : int)
+      ~(timing_ring : stage_timing array)
+      ~(timing_filled : int)
+  : unit
+  =
+  if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
+  then (
+    (try
+       write_heartbeat_snapshot ~ctx ~meta_current ~now_ts ~timing_ring ~timing_filled
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.error "heartbeat snapshot write failed: %s" (Printexc.to_string exn));
+    last_snapshot_ts := now_ts)
+;;
+
+let tick_keepalive_improve_loop ~(ctx : _ context) ~(meta_after_proactive : keeper_meta)
+  : unit
+  =
+  try
+    Tool_improve_loop.maybe_tick_from_keepalive
+      ~config:ctx.config
+      ~agent_name:meta_after_proactive.agent_name
+      ~keeper_name:meta_after_proactive.name
+      ~sw:ctx.sw
+      ~clock:ctx.clock
+      ~proc_mgr:ctx.proc_mgr
+      ~net:ctx.net
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Keeper.warn "improve loop keepalive tick skipped: %s" (Printexc.to_string exn)
+;;
+
+let record_keepalive_stage_timing
+      ~(timing_ring : stage_timing array)
+      ~(timing_cursor : int ref)
+      ~(timing_filled : int ref)
+      ~(ring_sz : int)
+      ~(t_presence_start : float)
+      ~(t_presence_end : float)
+      ~(t_snapshot_start : float)
+      ~(t_snapshot_end : float)
+      ~(t_board_start : float)
+      ~(t_board_end : float)
+      ~(t_turn_start : float)
+      ~(t_turn_end : float)
+      ~(t_recurring_start : float)
+      ~(t_recurring_end : float)
+      ~(t_improve_start : float)
+      ~(t_improve_end : float)
+  : unit
+  =
+  let timing =
+    { presence_ms = (t_presence_end -. t_presence_start) *. 1000.0
+    ; snapshot_ms = (t_snapshot_end -. t_snapshot_start) *. 1000.0
+    ; board_ms = (t_board_end -. t_board_start) *. 1000.0
+    ; turn_ms = (t_turn_end -. t_turn_start) *. 1000.0
+    ; recurring_ms = (t_recurring_end -. t_recurring_start) *. 1000.0
+    ; improve_ms = (t_improve_end -. t_improve_start) *. 1000.0
+    }
+  in
+  timing_ring.(!timing_cursor) <- timing;
+  timing_cursor := (!timing_cursor + 1) mod ring_sz;
+  if !timing_filled < ring_sz then incr timing_filled
+;;
+
+let run_heartbeat_loop
+      ~proactive_warmup_sec
+      (ctx : _ context)
+      (m : keeper_meta)
+      (stop : bool Atomic.t)
+      ~(wakeup : bool Atomic.t)
+  : unit
+  =
   let keepalive_started_ts = Time_compat.now () in
   let snapshot_interval_sec () =
-    Runtime_params.get Governance_registry.keeper_snapshot_sec in
+    Runtime_params.get Governance_registry.keeper_snapshot_sec
+  in
   let last_snapshot_ts = ref 0.0 in
   let consecutive_failures = ref 0 in
   (* Phase 0: per-stage timing ring buffer.
      ring_size is read once at fiber start — mid-flight resize requires
      ring buffer reallocation, so new values apply on next fiber restart. *)
   let ring_sz = stage_timing_ring_size () in
-  let timing_ring = Array.make ring_sz
-    { presence_ms = 0.0; snapshot_ms = 0.0; board_ms = 0.0;
-      turn_ms = 0.0; recurring_ms = 0.0; improve_ms = 0.0 } in
+  let timing_ring =
+    Array.make
+      ring_sz
+      { presence_ms = 0.0
+      ; snapshot_ms = 0.0
+      ; board_ms = 0.0
+      ; turn_ms = 0.0
+      ; recurring_ms = 0.0
+      ; improve_ms = 0.0
+      }
+  in
   let timing_cursor = ref 0 in
   let timing_filled = ref 0 in
   (* Phase 1: work-as-heartbeat freshness tracking.
      Updated ONLY on Room.heartbeat_in_room success after turn. *)
   let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
-  let work_as_hb () =
-    Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
+  let work_as_hb () = Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
   let max_silence () =
-    Runtime_params.get Governance_registry.keeper_work_as_hb_max_silence_sec in
+    Runtime_params.get Governance_registry.keeper_work_as_hb_max_silence_sec
+  in
   (* Phase 2: smart heartbeat — adaptive scheduling via Heartbeat_smart *)
   let smart_hb_enabled () =
-    Runtime_params.get Governance_registry.keeper_smart_hb_enabled in
+    Runtime_params.get Governance_registry.keeper_smart_hb_enabled
+  in
   let smart_hb_config = Heartbeat_smart.default_config in
   let last_heartbeat_cycle_ts = ref 0.0 in
   let rec loop () =
-    if Atomic.get stop then ()
+    if Atomic.get stop
+    then ()
     else (
-            (* Yield before each heartbeat cycle to prevent N keeper fibers
+      (* Yield before each heartbeat cycle to prevent N keeper fibers
                from monopolizing the Eio scheduler during CPU-bound phases
                (tool filtering, snapshot construction, prompt building). *)
-            Eio.Fiber.yield ();
-            (* Phase 0: timing markers *)
-            let t_presence_start = Time_compat.now () in
-            let meta_current =
-              match read_meta ctx.config m.name with
-              | Ok (Some latest) -> latest
-              | _ -> m
-            in
-            (* Phase 2: smart heartbeat — skip cycle when busy or deeply idle *)
-            let smart_hb_decision =
-              if smart_hb_enabled () then
-                let agent_status =
-                  if meta_current.paused then Types.Inactive
-                  else match meta_current.current_task_id with
-                    | Some _ -> Types.Busy
-                    | None -> Types.Active
-                in
-                Heartbeat_smart.should_emit
-                  ~config:smart_hb_config
-                  ~agent_status
-                  ~last_activity:!last_successful_heartbeat_ts
-                  ~last_heartbeat:!last_heartbeat_cycle_ts
-              else
-                Heartbeat_smart.Emit
-            in
-            (match smart_hb_decision with
-             | Heartbeat_smart.Skip_busy ->
-               Log.Keeper.debug "smart heartbeat: skip (busy, task=%s)"
-                 (Option.value ~default:"?" meta_current.current_task_id);
-               let base = Heartbeat_smart.effective_interval
-                 ~config:smart_hb_config
-                 ~last_activity:!last_successful_heartbeat_ts in
-               let jitter = base *. 0.2 *. Random.float 1.0 in
-               interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
-               if Atomic.get stop then () else loop ()
-             | Heartbeat_smart.Skip_idle next_time ->
-               let wait = Float.max 1.0 (next_time -. Time_compat.now ()) in
-               Log.Keeper.debug "smart heartbeat: skip (idle, next in %.1fs)" wait;
-               let jitter = wait *. 0.1 *. Random.float 1.0 in
-               interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (wait +. jitter);
-               if Atomic.get stop then () else loop ()
-             | Heartbeat_smart.Emit ->
-               last_heartbeat_cycle_ts := Time_compat.now ());
-            (* Phase 1: skip presence sync when recent room heartbeat proves freshness *)
-            let presence_fresh =
-              work_as_hb ()
-              && t_presence_start -. !last_successful_heartbeat_ts < max_silence ()
-            in
-            let meta_current =
-              if presence_fresh then (
-                Log.Keeper.debug "presence sync skipped: fresh heartbeat %.0fs ago"
-                  (t_presence_start -. !last_successful_heartbeat_ts);
-                meta_current)
-              else
-                try
-                  let synced = ensure_keeper_room_presence ctx.config meta_current in
-                  if synced.joined_room_ids = [] then (
-                    incr consecutive_failures;
-                    Log.Keeper.warn "room presence returned empty rooms (%d/%d)"
-                      !consecutive_failures (max_consecutive_heartbeat_failures ()))
-                  else (
-                    consecutive_failures := 0;
-                    last_successful_heartbeat_ts := Time_compat.now ());
-                  (match write_meta ctx.config synced with
-                   | Ok () -> synced
-                   | Error e ->
-                     Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
-                     synced)
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | exn ->
-                  incr consecutive_failures;
-                  Log.Keeper.error "room heartbeat failed (%d/%d): %s"
-                    !consecutive_failures (max_consecutive_heartbeat_failures ())
-                    (Printexc.to_string exn);
-                  meta_current
-            in
-            (* Phase 2: structured exception instead of silent stop *)
-            if !consecutive_failures >= max_consecutive_heartbeat_failures () then
-              raise (Keeper_registry.Keeper_heartbeat_failure {
-                reason = Keeper_registry.Heartbeat_consecutive_failures !consecutive_failures;
-                keeper_name = m.name;
-              });
-            let t_presence_end = Time_compat.now () in
-            let now_ts = t_presence_end in
-            let t_snapshot_start = now_ts in
-            if now_ts -. !last_snapshot_ts >= float_of_int (snapshot_interval_sec ())
-            then (
-              (try
-                 let metrics_store =
-                   keeper_metrics_store ctx.config meta_current.name
-                 in
-                 let cascade_models = Oas_model_resolve.models_of_cascade_name meta_current.cascade_name in
-                 let primary_max_context =
-                   Oas_model_resolve.resolve_primary_max_context cascade_models
-                 in
-                 let base_dir = session_base_dir ctx.config in
-                 (* Ensure session directory tree for filesystem fallback (issue #3019) *)
-                 ignore (Keeper_fs.ensure_dir (Filename.concat base_dir meta_current.runtime.trace_id));
-                 let _session, ctx_opt =
-                   load_context_from_checkpoint
-                     ~trace_id:meta_current.runtime.trace_id
-                     ~primary_model_max_tokens:primary_max_context
-                     ~base_dir
-                 in
-                 (match ctx_opt with
-                 | None -> ()
-                 | Some c ->
-                     let latest_user_message =
-                       latest_message_content_by_role ~role:Agent_sdk.Types.User
-                         c.messages
-                     in
-                     let latest_assistant_message =
-                       latest_message_content_by_role
-                         ~role:Agent_sdk.Types.Assistant c.messages
-                     in
-                     let continuity_snapshot =
-                       latest_state_snapshot_from_messages c.messages
-                     in
-                     let continuity_summary =
-                       match continuity_snapshot with
-                       | Some s -> keeper_state_snapshot_to_summary_text s
-                       | None ->
-                           let trimmed =
-                             String.trim meta_current.continuity_summary
-                           in
-                           if trimmed = "" then
-                             "No continuity snapshot available."
-                           else trimmed
-                     in
-                     let repetition_risk =
-                       repetition_risk_score ~messages:c.messages
-                         ~candidate_reply:None
-                     in
-                     let goal_alignment =
-                       goal_alignment_score ~meta:meta_current
-                         ~user_message:latest_user_message
-                         ~assistant_reply:latest_assistant_message
-                     in
-                     let response_alignment =
-                       match latest_user_message, latest_assistant_message with
-                       | Some user_message, Some assistant_message ->
-                           jaccard_similarity user_message assistant_message
-                       | _ -> 0.0
-                     in
-                     let auto_rules =
-                       evaluate_keeper_auto_rules ~meta:meta_current
-                         ~context_ratio:(Keeper_exec_context.context_ratio c)
-                         ~message_count:(Keeper_exec_context.message_count c)
-                         ~token_count:(Keeper_exec_context.token_count c)
-                         ~repetition_risk
-                         ~goal_alignment ~response_alignment
-                         ()
-                     in
-                     let snapshot =
-                       `Assoc
-                         [
-                           ("ts", `String (now_iso ()));
-                           ("ts_unix", `Float now_ts);
-                           ("channel", `String "heartbeat");
-                           ("name", `String meta_current.name);
-                           ("agent_name", `String meta_current.agent_name);
-                           ("trace_id", `String meta_current.runtime.trace_id);
-                           ("generation", `Int meta_current.runtime.generation);
-                           ("model_used", `String meta_current.runtime.usage.last_model_used);
-                           ( "usage",
-                             `Assoc
-                               [
-                                 ("input_tokens", `Int 0);
-                                 ("output_tokens", `Int 0);
-                                 ("total_tokens", `Int 0);
-                               ] );
-                           ("latency_ms", `Int 0);
-                           ("cost_usd", `Float 0.0);
-                           ( "context_ratio",
-                             `Float (Keeper_exec_context.context_ratio c) );
-                           ("context_tokens", `Int (Keeper_exec_context.token_count c));
-                           ("context_max", `Int c.max_tokens);
-                           ("message_count", `Int (Keeper_exec_context.message_count c));
-                           ( "continuity_state",
-                             match continuity_snapshot with
-                             | None -> `Null
-                             | Some s -> keeper_state_snapshot_to_json s );
-                           ("continuity_summary", `String continuity_summary);
-                           ("compacted", `Bool false);
-                           ("compaction_before_tokens", `Int (Keeper_exec_context.token_count c));
-                           ("compaction_after_tokens", `Int (Keeper_exec_context.token_count c));
-                           ("work_kind", `String "status_tick");
-                           ("tool_call_count", `Int 0);
-                           ("tools_used", `List []);
-                           ("snapshot_source", `String "keeper_context_status");
-                           ("memory_check", memory_check_default_json ());
-                           ( "auto_rules",
-                             keeper_auto_rule_eval_to_json auto_rules );
-                           ( "reflection",
-                             keeper_reflection_payload_of_auto_rules auto_rules
-                           );
-                           ("auto_reflect", `Bool auto_rules.reflect);
-                           ("auto_plan", `Bool auto_rules.plan);
-                           ("auto_compact", `Bool auto_rules.compact);
-                           ("auto_handoff", `Bool auto_rules.handoff);
-                           ("repetition_risk", `Float repetition_risk);
-                           ("goal_alignment", `Float goal_alignment);
-                           ("response_alignment", `Float response_alignment);
-                           ("goal_drift", `Float auto_rules.goal_drift);
-                           ("guardrail_stop", `Bool auto_rules.guardrail_stop);
-                           ( "guardrail_stop_reason",
-                             match auto_rules.guardrail_reason with
-                             | Some reason -> `String reason
-                             | None -> `Null );
-                           ("handoff", `Assoc [ ("performed", `Bool false) ]);
-                           ("stage_timing",
-                             stage_timing_to_json ~ring:timing_ring ~count:!timing_filled);
-                         ]
-                     in
-                     Dated_jsonl.append metrics_store snapshot;
-                     (try
-                        Sse.broadcast
-                          (`Assoc
-                            [
-                              ("type", `String "keeper_heartbeat");
-                              ("name", `String meta_current.name);
-                              ("generation", `Int meta_current.runtime.generation);
-                              ( "context_ratio",
-                                `Float (Keeper_exec_context.context_ratio c) );
-                              ("ts_unix", `Float now_ts);
-                            ])
-                      with
-                      | Eio.Cancel.Cancelled _ as e -> raise e
-                      | exn ->
-                        Log.Keeper.error "heartbeat SSE broadcast failed: %s"
-                          (Printexc.to_string exn));
-                     (* OAS: publish keeper snapshot event *)
-                     (match !bus_ref with
-                      | Some bus ->
-                          Oas_events.publish_keeper_snapshot bus
-                            ~keeper_name:meta_current.name
-                            ~generation:meta_current.runtime.generation
-                            ~context_ratio:(Keeper_exec_context.context_ratio c)
-                            ~message_count:(List.length c.messages)
-                      | None -> ());
-                     (* Flush tool usage stats to disk for persistence *)
-                     (try
-                        Keeper_registry.flush_tool_usage
-                          ~base_path:ctx.config.base_path
-                          meta_current.name
-                      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()))
-               with
-               | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn ->
-                 Log.Keeper.error "heartbeat snapshot write failed: %s"
-                   (Printexc.to_string exn));
-              last_snapshot_ts := now_ts);
-            let t_snapshot_end = Time_compat.now () in
-            let t_board_start = t_snapshot_end in
-            (* Compute warmup state BEFORE board collection so cursor
-               is not advanced while keeper cannot act on events. *)
-            let proactive_warmup_elapsed =
-              proactive_warmup_sec <= 0
-              || now_ts -. keepalive_started_ts
-                 >= float_of_int proactive_warmup_sec
-            in
-            let pending_board_events, meta_after_triage =
-              if not proactive_warmup_elapsed then
-                (* During warmup: skip board collection to preserve cursor.
-                   First post-warmup cycle will pick up the full bootstrap
-                   window (300s) of board events. *)
-                ([], meta_current)
-              else
-                let pending_board_events =
-                  (try
-                     let events, _new_count, _mention_count =
-                       Keeper_world_observation.collect_board_events
-                         ~base_path:ctx.config.base_path
-                         ~meta:meta_current
-                         ~continuity_summary:meta_current.continuity_summary
-                     in
-                     events
-                   with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | exn ->
-                       Log.Keeper.warn "keepalive: board count query failed: %s"
-                         (Printexc.to_string exn);
-                       [])
-                in
-                (pending_board_events, meta_current)
-            in
-            let t_board_end = Time_compat.now () in
-            let t_turn_start = t_board_end in
-            let meta_after_proactive =
-              if proactive_warmup_elapsed then
-                (try
-                   let obs =
-                     Keeper_world_observation.observe
-                       ~pending_board_events:(Some pending_board_events)
-                       ~config:ctx.config ~meta:meta_after_triage
-                    in
-                   if Atomic.get stop then
-                     meta_after_triage
-                   else if
-                     Keeper_world_observation.should_run_unified_turn
-                       ~meta:meta_after_triage
-                       obs
-                   then
-                     match
-                       Keeper_unified_turn.run_unified_turn
-                         ~config:ctx.config ~meta:meta_after_triage
-                         ~observation:obs
-                         ~generation:meta_after_triage.runtime.generation
-                     with
-                     | Error e ->
-                         Log.Keeper.error "unified turn failed: %s" e;
-                         (match read_meta ctx.config meta_after_triage.name with
-                          | Ok (Some latest) -> latest
-                          | _ -> meta_after_triage)
-                     | Ok updated -> updated
-                   else
-                     meta_after_triage
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn ->
-                   Log.Keeper.error "unified turn exception: %s"
-                     (Printexc.to_string exn);
-                   meta_after_triage)
-              else meta_after_triage
-            in
-            (* Turn failure threshold: registry tracks count (via unified_turn),
-               keepalive raises to terminate the fiber for supervisor restart. *)
-            let turn_fail_count =
-              Keeper_registry.get_turn_failures
-                ~base_path:ctx.config.base_path m.name in
-            if turn_fail_count >= max_consecutive_turn_failures () then
-              raise (Keeper_registry.Keeper_heartbeat_failure {
-                reason = Keeper_registry.Turn_consecutive_failures turn_fail_count;
-                keeper_name = m.name;
-              });
-            (* Phase 1: work-as-heartbeat — renew point (b).
-               After turn, call Room.heartbeat_in_room to prove room I/O health.
-               On success: refresh freshness lease + reset consecutive_failures.
-               On failure: leave timestamp unchanged → presence sync resumes next cycle. *)
-            (if work_as_hb () && proactive_warmup_elapsed then
-               let hb_ok = List.exists (fun room_id ->
-                 try
-                   ignore
-                     (Room.heartbeat_in_room ctx.config ~room_id
-                        ~agent_name:meta_after_proactive.agent_name);
-                   true
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn ->
-                     Log.Keeper.debug "heartbeat_in_room failed for %s: %s"
-                       meta_after_proactive.name (Printexc.to_string exn);
-                     false
-               ) meta_after_proactive.joined_room_ids in
-               if hb_ok then (
-                 last_successful_heartbeat_ts := Time_compat.now ();
-                 consecutive_failures := 0));
-            let t_turn_end = Time_compat.now () in
-            let t_recurring_start = t_turn_end in
-            (* Recurring task dispatch (#3190) *)
-            let _recurring_dispatched =
-              try
-                Keeper_recurring.dispatch_due
-                  ~keeper_name:meta_after_proactive.name
-                  ~now_ts
-                  ~dispatch:(fun task action ->
-                    match action with
-                    | Keeper_recurring.Broadcast msg ->
-                      (try
-                         let _ = Room.broadcast ctx.config
-                           ~from_agent:meta_after_proactive.agent_name
-                           ~content:(Printf.sprintf "[loop:%s] %s" task.label msg) in
-                         Log.Keeper.info "[recurring] %s dispatched: %s"
-                           task.id task.label;
-                         Ok ()
-                       with exn ->
-                         Log.Keeper.warn "[recurring] %s failed: %s"
-                           task.id (Printexc.to_string exn);
-                         Error (Printexc.to_string exn)))
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Keeper.warn "[recurring] dispatch error: %s"
-                  (Printexc.to_string exn);
-                0
-            in
-            let t_recurring_end = Time_compat.now () in
-            let t_improve_start = t_recurring_end in
-            let base =
-              if smart_hb_enabled () then
-                Heartbeat_smart.effective_interval
-                  ~config:smart_hb_config
-                  ~last_activity:!last_successful_heartbeat_ts
-              else
-                float_of_int (keepalive_interval_sec ())
-            in
-            (try
-               Tool_improve_loop.maybe_tick_from_keepalive ~config:ctx.config
-                 ~agent_name:meta_after_proactive.agent_name
-                 ~keeper_name:meta_after_proactive.name
-                 ~sw:ctx.sw ~clock:ctx.clock ~proc_mgr:ctx.proc_mgr
-                 ~net:ctx.net ()
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Keeper.warn "improve loop keepalive tick skipped: %s"
-                 (Printexc.to_string exn));
-            let t_improve_end = Time_compat.now () in
-            (* Phase 0: push stage timing to ring buffer *)
-            let timing = {
-              presence_ms = (t_presence_end -. t_presence_start) *. 1000.0;
-              snapshot_ms = (t_snapshot_end -. t_snapshot_start) *. 1000.0;
-              board_ms = (t_board_end -. t_board_start) *. 1000.0;
-              turn_ms = (t_turn_end -. t_turn_start) *. 1000.0;
-              recurring_ms = (t_recurring_end -. t_recurring_start) *. 1000.0;
-              improve_ms = (t_improve_end -. t_improve_start) *. 1000.0;
-            } in
-            timing_ring.(!timing_cursor) <- timing;
-            timing_cursor := (!timing_cursor + 1) mod ring_sz;
-            if !timing_filled < ring_sz then incr timing_filled;
-            let jitter = base *. Env_config.KeeperKeepalive.jitter_factor *. Random.float 1.0 in
-            interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter);
-            if Atomic.get stop then ()
-            else loop ())
+      Eio.Fiber.yield ();
+      (* Phase 0: timing markers *)
+      let t_presence_start = Time_compat.now () in
+      let meta_current =
+        match read_meta ctx.config m.name with
+        | Ok (Some latest) -> latest
+        | _ -> m
+      in
+      if
+        run_smart_heartbeat_gate
+          ~clock:ctx.clock
+          ~stop
+          ~wakeup
+          ~meta_current
+          ~smart_hb_enabled
+          ~smart_hb_config
+          ~last_successful_heartbeat_ts
+          ~last_heartbeat_cycle_ts
+      then (
+        (* Phase 1: skip presence sync when recent room heartbeat proves freshness *)
+        let meta_current =
+          sync_keeper_presence
+            ~ctx
+            ~meta_current
+            ~t_presence_start
+            ~consecutive_failures
+            ~last_successful_heartbeat_ts
+            ~work_as_hb
+            ~max_silence
+        in
+        (* Phase 2: structured exception instead of silent stop *)
+        if !consecutive_failures >= max_consecutive_heartbeat_failures ()
+        then
+          raise
+            (Keeper_registry.Keeper_heartbeat_failure
+               { reason =
+                   Keeper_registry.Heartbeat_consecutive_failures !consecutive_failures
+               ; keeper_name = m.name
+               });
+        let t_presence_end = Time_compat.now () in
+        let now_ts = t_presence_end in
+        let t_snapshot_start = now_ts in
+        maybe_write_heartbeat_snapshot
+          ~ctx
+          ~meta_current
+          ~now_ts
+          ~last_snapshot_ts
+          ~snapshot_interval_sec:(snapshot_interval_sec ())
+          ~timing_ring
+          ~timing_filled:!timing_filled;
+        let t_snapshot_end = Time_compat.now () in
+        let t_board_start = t_snapshot_end in
+        (* Compute warmup state BEFORE board collection so cursor
+                 is not advanced while keeper cannot act on events. *)
+        let proactive_warmup_elapsed =
+          proactive_warmup_sec <= 0
+          || now_ts -. keepalive_started_ts >= float_of_int proactive_warmup_sec
+        in
+        let pending_board_events, meta_after_triage =
+          collect_keepalive_board_events ~ctx ~meta_current ~proactive_warmup_elapsed
+        in
+        let t_board_end = Time_compat.now () in
+        let t_turn_start = t_board_end in
+        let meta_after_proactive =
+          run_keepalive_unified_turn
+            ~ctx
+            ~meta_after_triage
+            ~pending_board_events
+            ~stop
+            ~proactive_warmup_elapsed
+        in
+        (* Turn failure threshold: registry tracks count (via unified_turn),
+                 keepalive raises to terminate the fiber for supervisor restart. *)
+        let turn_fail_count =
+          Keeper_registry.get_turn_failures ~base_path:ctx.config.base_path m.name
+        in
+        if turn_fail_count >= max_consecutive_turn_failures ()
+        then
+          raise
+            (Keeper_registry.Keeper_heartbeat_failure
+               { reason = Keeper_registry.Turn_consecutive_failures turn_fail_count
+               ; keeper_name = m.name
+               });
+        (* Phase 1: work-as-heartbeat — renew point (b).
+                 After turn, call Room.heartbeat_in_room to prove room I/O health.
+                 On success: refresh freshness lease + reset consecutive_failures.
+                 On failure: leave timestamp unchanged → presence sync resumes next cycle. *)
+        refresh_work_as_heartbeat
+          ~ctx
+          ~meta_after_proactive
+          ~proactive_warmup_elapsed
+          ~work_as_hb
+          ~last_successful_heartbeat_ts
+          ~consecutive_failures;
+        let t_turn_end = Time_compat.now () in
+        let t_recurring_start = t_turn_end in
+        (* Recurring task dispatch (#3190) *)
+        let _recurring_dispatched =
+          dispatch_recurring_keepalive ~ctx ~meta_after_proactive ~now_ts
+        in
+        let t_recurring_end = Time_compat.now () in
+        let t_improve_start = t_recurring_end in
+        let base =
+          if smart_hb_enabled ()
+          then
+            Heartbeat_smart.effective_interval
+              ~config:smart_hb_config
+              ~last_activity:!last_successful_heartbeat_ts
+          else float_of_int (keepalive_interval_sec ())
+        in
+        tick_keepalive_improve_loop ~ctx ~meta_after_proactive;
+        let t_improve_end = Time_compat.now () in
+        (* Phase 0: push stage timing to ring buffer *)
+        record_keepalive_stage_timing
+          ~timing_ring
+          ~timing_cursor
+          ~timing_filled
+          ~ring_sz
+          ~t_presence_start
+          ~t_presence_end
+          ~t_snapshot_start
+          ~t_snapshot_end
+          ~t_board_start
+          ~t_board_end
+          ~t_turn_start
+          ~t_turn_end
+          ~t_recurring_start
+          ~t_recurring_end
+          ~t_improve_start
+          ~t_improve_end;
+        let jitter =
+          base *. Env_config.KeeperKeepalive.jitter_factor *. Random.float 1.0
+        in
+        interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter));
+      if Atomic.get stop then () else loop ())
   in
   loop ()
+;;
+
+let with_keeper_entry_by_agent_name ~agent_name ~on_missing f =
+  match Keeper_registry.find_by_agent_name agent_name with
+  | Some entry -> f entry
+  | None -> on_missing ()
+;;
+
+let set_keeper_paused_state ~agent_name paused =
+  with_keeper_entry_by_agent_name
+    ~agent_name
+    ~on_missing:(fun () ->
+      let action = if paused then "pause" else "resume" in
+      Log.Keeper.warn "directive %s: agent %s not in registry" action agent_name)
+    (fun entry ->
+       Keeper_registry.update_meta
+         ~base_path:entry.base_path
+         entry.name
+         { entry.meta with paused })
+;;
+
+let wakeup_keeper_by_agent_name ~agent_name =
+  with_keeper_entry_by_agent_name
+    ~agent_name
+    ~on_missing:(fun () ->
+      Log.Keeper.warn "directive wakeup: agent %s not in registry" agent_name)
+    (fun entry -> wakeup_keeper entry.name)
+;;
+
+let assign_keeper_task_from_directive ~agent_name ~task_id =
+  with_keeper_entry_by_agent_name
+    ~agent_name
+    ~on_missing:(fun () ->
+      Log.Keeper.warn "directive claim: agent %s not in registry" agent_name)
+    (fun entry ->
+       Keeper_registry.update_meta
+         ~base_path:entry.base_path
+         entry.name
+         { entry.meta with current_task_id = Some task_id };
+       wakeup_keeper entry.name)
+;;
 
 (** Process a single directive received from a gRPC HeartbeatAck.
     Directives are string commands: "pause", "resume", "wakeup",
@@ -627,38 +884,92 @@ let process_directive ~agent_name directive =
   match directive with
   | "pause" ->
     Log.Keeper.info "directive: pausing keeper %s" agent_name;
-    (match Keeper_registry.find_by_agent_name agent_name with
-     | Some entry ->
-       Keeper_registry.update_meta ~base_path:entry.base_path entry.name
-         { entry.meta with paused = true }
-     | None ->
-       Log.Keeper.warn "directive pause: agent %s not in registry" agent_name)
+    set_keeper_paused_state ~agent_name true
   | "resume" ->
     Log.Keeper.info "directive: resuming keeper %s" agent_name;
-    (match Keeper_registry.find_by_agent_name agent_name with
-     | Some entry ->
-       Keeper_registry.update_meta ~base_path:entry.base_path entry.name
-         { entry.meta with paused = false }
-     | None ->
-       Log.Keeper.warn "directive resume: agent %s not in registry" agent_name)
+    set_keeper_paused_state ~agent_name false
   | "wakeup" ->
     Log.Keeper.debug "directive: waking up %s" agent_name;
-    (match Keeper_registry.find_by_agent_name agent_name with
-     | Some entry -> wakeup_keeper entry.name
-     | None ->
-       Log.Keeper.warn "directive wakeup: agent %s not in registry" agent_name)
+    wakeup_keeper_by_agent_name ~agent_name
   | s when String.length s > 6 && String.sub s 0 6 = "claim:" ->
     let task_id = String.sub s 6 (String.length s - 6) in
     Log.Keeper.info "directive: server assigned task %s to %s" task_id agent_name;
-    (match Keeper_registry.find_by_agent_name agent_name with
-     | Some entry ->
-       Keeper_registry.update_meta ~base_path:entry.base_path entry.name
-         { entry.meta with current_task_id = Some task_id };
-       wakeup_keeper entry.name
-     | None ->
-       Log.Keeper.warn "directive claim: agent %s not in registry" agent_name)
-  | unknown ->
-    Log.Keeper.warn "unknown gRPC directive for %s: %s" agent_name unknown
+    assign_keeper_task_from_directive ~agent_name ~task_id
+  | unknown -> Log.Keeper.warn "unknown gRPC directive for %s: %s" agent_name unknown
+;;
+
+let current_task_id_for_agent agent_name =
+  match Keeper_registry.find_by_agent_name agent_name with
+  | Some e -> Option.value ~default:"" e.meta.current_task_id
+  | None -> ""
+;;
+
+let make_grpc_heartbeat_ping ~agent_name ~session_id =
+  Masc_grpc_types.HeartbeatPing.
+    { agent_name
+    ; session_id
+    ; timestamp_ms = Int64.of_float (Time_compat.now () *. 1000.0)
+    ; current_task_id = current_task_id_for_agent agent_name
+    }
+;;
+
+let handle_grpc_heartbeat_ack ~agent_name (ack : Masc_grpc_types.HeartbeatAck.t) =
+  Log.Keeper.debug
+    "gRPC bidi heartbeat: agent=%s agents=%d tasks=%d directives=%d"
+    agent_name
+    ack.active_agent_count
+    ack.pending_task_count
+    (List.length ack.directives);
+  List.iter (process_directive ~agent_name) ack.directives
+;;
+
+let run_grpc_heartbeat_stream
+      ~stop
+      ~close_ref
+      ~clock
+      ~interval_sec
+      ~agent_name
+      ~session_id
+      send
+      recv
+  =
+  let rec tick () =
+    if Atomic.get stop || !close_ref
+    then ()
+    else (
+      (try
+         send (make_grpc_heartbeat_ping ~agent_name ~session_id);
+         match recv () with
+         | Ok ack -> handle_grpc_heartbeat_ack ~agent_name ack
+         | Error err -> Log.Keeper.warn "gRPC heartbeat recv: %s" err
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | End_of_file -> raise End_of_file
+       | exn -> Log.Keeper.error "gRPC heartbeat tick error: %s" (Printexc.to_string exn));
+      if not (Atomic.get stop || !close_ref)
+      then (
+        let no_wakeup = Atomic.make false in
+        interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec;
+        tick ()))
+  in
+  tick ()
+;;
+
+let log_grpc_heartbeat_stream_failure ~agent_name ~attempts = function
+  | `Closed ->
+    Log.Keeper.warn
+      "gRPC heartbeat stream closed for %s (attempt %d/%d)"
+      agent_name
+      (attempts + 1)
+      Env_config.KeeperGrpc.max_reconnect_attempts
+  | `Error exn ->
+    Log.Keeper.warn
+      "gRPC heartbeat stream error for %s: %s (attempt %d/%d)"
+      agent_name
+      (Printexc.to_string exn)
+      (attempts + 1)
+      Env_config.KeeperGrpc.max_reconnect_attempts
+;;
 
 (** Run a gRPC heartbeat sender in a background fiber.
     Opens a bidirectional [Heartbeat] stream and sends [HeartbeatPing]
@@ -669,99 +980,133 @@ let process_directive ~agent_name directive =
     Requires [grpc_client_ref] to be set (via [set_grpc_client])
     and Eio switch/env to be available in [Eio_context]. *)
 let max_reconnect_attempts = Env_config.KeeperGrpc.max_reconnect_attempts
+
 let reconnect_backoff_sec = Env_config.KeeperGrpc.reconnect_backoff_sec
 
-let run_grpc_heartbeat_fiber ~sw ~stop
-    ~(grpc_client : Masc_grpc_client.t)
-    ~(agent_name : string) ~(session_id : string)
-    ~(interval_sec : float) ~(clock : _ Eio.Time.clock) =
+let run_grpc_heartbeat_fiber
+      ~sw
+      ~stop
+      ~(grpc_client : Masc_grpc_client.t)
+      ~(agent_name : string)
+      ~(session_id : string)
+      ~(interval_sec : float)
+      ~(clock : _ Eio.Time.clock)
+  =
   match Eio_context.get_switch_opt (), !grpc_env_ref with
   | None, _ | _, None ->
     Log.Keeper.warn "gRPC heartbeat: Eio context or env not available";
     None
   | Some grpc_sw, Some env ->
-  let close_ref = ref false in
-  Eio.Fiber.fork ~sw (fun () ->
-    let make_ping () =
-      let current_task_id =
-        match Keeper_registry.find_by_agent_name agent_name with
-        | Some e -> Option.value ~default:"" e.meta.current_task_id
-        | None -> ""
-      in
-      Masc_grpc_types.HeartbeatPing.{
-        agent_name;
-        session_id;
-        timestamp_ms = Int64.of_float (Time_compat.now () *. 1000.0);
-        current_task_id;
-      }
-    in
-    (* Inner loop: send ping → recv ack → sleep → repeat on one stream *)
-    let run_stream send recv =
-      let rec tick () =
-        if Atomic.get stop || !close_ref then ()
+    let close_ref = ref false in
+    Eio.Fiber.fork ~sw (fun () ->
+      (* Outer loop: reconnect on stream failure *)
+      let rec connect_loop attempts =
+        if Atomic.get stop || !close_ref
+        then ()
+        else if attempts >= max_reconnect_attempts
+        then
+          Log.Keeper.error
+            "gRPC heartbeat: exceeded %d reconnect attempts for %s, stopping"
+            max_reconnect_attempts
+            agent_name
         else (
+          let send, recv, close_stream =
+            Masc_grpc_client.heartbeat_stream grpc_client ~sw:grpc_sw ~env
+          in
           (try
-            send (make_ping ());
-            (match recv () with
-             | Ok (ack : Masc_grpc_types.HeartbeatAck.t) ->
-               Log.Keeper.debug
-                 "gRPC bidi heartbeat: agent=%s agents=%d tasks=%d directives=%d"
-                 agent_name ack.active_agent_count ack.pending_task_count
-                 (List.length ack.directives);
-               List.iter (process_directive ~agent_name) ack.directives
-             | Error err ->
-               Log.Keeper.warn "gRPC heartbeat recv: %s" err)
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | End_of_file -> raise End_of_file
-          | exn ->
-            Log.Keeper.error "gRPC heartbeat tick error: %s"
-              (Printexc.to_string exn));
-          if not (Atomic.get stop || !close_ref) then (
-            let no_wakeup = Atomic.make false in
-            interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec;
-            tick ()))
+             run_grpc_heartbeat_stream
+               ~stop
+               ~close_ref
+               ~clock
+               ~interval_sec
+               ~agent_name
+               ~session_id
+               send
+               recv
+           with
+           | Eio.Cancel.Cancelled _ as e ->
+             close_stream ();
+             raise e
+           | End_of_file ->
+             log_grpc_heartbeat_stream_failure ~agent_name ~attempts `Closed;
+             close_stream ()
+           | exn ->
+             log_grpc_heartbeat_stream_failure ~agent_name ~attempts (`Error exn);
+             close_stream ());
+          if not (Atomic.get stop || !close_ref)
+          then (
+            Eio.Time.sleep clock reconnect_backoff_sec;
+            connect_loop (attempts + 1)))
       in
-      tick ()
-    in
-    (* Outer loop: reconnect on stream failure *)
-    let rec connect_loop attempts =
-      if Atomic.get stop || !close_ref then ()
-      else if attempts >= max_reconnect_attempts then
-        Log.Keeper.error
-          "gRPC heartbeat: exceeded %d reconnect attempts for %s, stopping"
-          max_reconnect_attempts agent_name
-      else (
-        let send, recv, close_stream =
-          Masc_grpc_client.heartbeat_stream grpc_client ~sw:grpc_sw ~env
-        in
-        (try run_stream send recv
-         with
-         | Eio.Cancel.Cancelled _ as e -> close_stream (); raise e
-         | End_of_file ->
-           Log.Keeper.warn
-             "gRPC heartbeat stream closed for %s (attempt %d/%d)"
-             agent_name (attempts + 1) max_reconnect_attempts;
-           close_stream ()
-         | exn ->
-           Log.Keeper.warn
-             "gRPC heartbeat stream error for %s: %s (attempt %d/%d)"
-             agent_name (Printexc.to_string exn)
-             (attempts + 1) max_reconnect_attempts;
-           close_stream ());
-        if not (Atomic.get stop || !close_ref) then (
-          Eio.Time.sleep clock reconnect_backoff_sec;
-          connect_loop (attempts + 1)))
-    in
-    connect_loop 0);
-  Some (fun () -> close_ref := true)
+      connect_loop 0);
+    Some (fun () -> close_ref := true)
+;;
 
-let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
-    (m : keeper_meta) : unit =
-  if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name then
-    Log.Keeper.info "start_keepalive: skipped %s (already running)" m.name
-  else if not (Keeper_registry.spawn_slots_available ()) then
-    Log.Keeper.info "start_keepalive: skipped %s (no spawn slots)" m.name
+let start_keeper_grpc_heartbeat
+      ~(ctx : _ context)
+      ~(m : keeper_meta)
+      ~(stop : bool Atomic.t)
+  : (unit -> unit) option
+  =
+  match Masc_grpc_transport.from_env (), !grpc_client_ref with
+  | Masc_grpc_transport.Grpc, Some client ->
+    Log.Keeper.info "keeper %s: starting gRPC heartbeat fiber" m.name;
+    let interval = float_of_int (keepalive_interval_sec ()) in
+    let session_id =
+      Printf.sprintf
+        "keeper-%s-%Ld"
+        m.name
+        (Int64.of_float (Time_compat.now () *. 1000.0))
+    in
+    run_grpc_heartbeat_fiber
+      ~sw:ctx.sw
+      ~stop
+      ~grpc_client:client
+      ~agent_name:m.agent_name
+      ~session_id
+      ~interval_sec:interval
+      ~clock:ctx.clock
+  | Masc_grpc_transport.Grpc, None ->
+    Log.Keeper.warn "keeper %s: gRPC transport requested but no client configured" m.name;
+    None
+  | _ -> None
+;;
+
+let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_meta =
+  try
+    if not (Room_utils.is_initialized ctx.config)
+    then (
+      let (_init_msg : string) = Room.init ctx.config ~agent_name:None in
+      ());
+    let synced = ensure_keeper_room_presence ctx.config m in
+    (match write_meta ctx.config synced with
+     | Ok () -> ()
+     | Error e -> Log.Keeper.warn "write_meta failed (bootstrap): %s" e);
+    synced
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Keeper.error "room presence bootstrap failed: %s" (Printexc.to_string exn);
+    m
+;;
+
+let publish_keeper_started ~(live_meta : keeper_meta) : unit =
+  match get_bus () with
+  | Some bus ->
+    Oas_events.publish_keeper_lifecycle
+      bus
+      ~event:"started"
+      ~keeper_name:live_meta.name
+      ~detail:"keepalive"
+  | None -> ()
+;;
+
+let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit
+  =
+  if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
+  then Log.Keeper.info "start_keepalive: skipped %s (already running)" m.name
+  else if not (Keeper_registry.spawn_slots_available ())
+  then Log.Keeper.info "start_keepalive: skipped %s (no spawn slots)" m.name
   else (
     (* Register in Keeper_registry first — single source of truth. *)
     let reg = Keeper_registry.register ~base_path:ctx.config.base_path m.name m in
@@ -770,77 +1115,47 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
     let stop = reg.fiber_stop in
     let wakeup = reg.fiber_wakeup in
     (* Start optional gRPC heartbeat fiber *)
-    let grpc_close =
-      match Masc_grpc_transport.from_env (), !grpc_client_ref with
-      | Masc_grpc_transport.Grpc, Some client ->
-        Log.Keeper.info "keeper %s: starting gRPC heartbeat fiber" m.name;
-        let interval = float_of_int (keepalive_interval_sec ()) in
-        let session_id =
-          Printf.sprintf "keeper-%s-%Ld" m.name
-            (Int64.of_float (Time_compat.now () *. 1000.0))
-        in
-        run_grpc_heartbeat_fiber ~sw:ctx.sw ~stop ~grpc_client:client
-          ~agent_name:m.agent_name ~session_id
-          ~interval_sec:interval ~clock:ctx.clock
-      | Masc_grpc_transport.Grpc, None ->
-        Log.Keeper.warn "keeper %s: gRPC transport requested but no client configured" m.name;
-        None
-      | _ -> None
-    in
+    let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
     (match grpc_close with
      | Some _ ->
-         Keeper_registry.set_grpc_close ~base_path:ctx.config.base_path m.name
-           grpc_close
+       Keeper_registry.set_grpc_close ~base_path:ctx.config.base_path m.name grpc_close
      | None -> ());
-    let live_meta =
-      try
-        (if not (Room_utils.is_initialized ctx.config) then
-           let (_init_msg : string) = Room.init ctx.config ~agent_name:None in ());
-        let synced = ensure_keeper_room_presence ctx.config m in
-        (match write_meta ctx.config synced with
-         | Ok () -> ()
-         | Error e -> Log.Keeper.warn "write_meta failed (bootstrap): %s" e);
-        synced
-      with
+    let live_meta = bootstrap_live_keeper_meta ~ctx m in
+    Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
+    publish_keeper_started ~live_meta;
+    Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+      try run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        Log.Keeper.error "room presence bootstrap failed: %s"
-          (Printexc.to_string exn);
-        m
-    in
-    Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
-    (match get_bus () with
-     | Some bus ->
-         Oas_events.publish_keeper_lifecycle bus ~event:"started"
-           ~keeper_name:live_meta.name ~detail:"keepalive"
-     | None -> ());
-    Eio.Fiber.fork ~sw:ctx.sw (fun () ->
-        try run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Keeper.error "heartbeat loop for %s crashed: %s"
-            live_meta.name (Printexc.to_string exn)))
+        Log.Keeper.error
+          "heartbeat loop for %s crashed: %s"
+          live_meta.name
+          (Printexc.to_string exn)))
+;;
 
 let stop_keepalive name =
   let entries =
     Keeper_registry.all ()
-    |> List.filter (fun (e : Keeper_registry.registry_entry) ->
-           String.equal e.name name)
+    |> List.filter (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name)
   in
-  List.iter (fun (entry : Keeper_registry.registry_entry) ->
-      Atomic.set entry.fiber_stop true;
-      (match Atomic.get entry.grpc_close with
-       | Some close_fn ->
-         (try close_fn ()
-          with Eio.Cancel.Cancelled _ as e -> raise e | _exn -> ())
-       | None -> ());
-      Keeper_registry.set_state ~base_path:entry.base_path name
-        Keeper_registry.Stopped;
-      Keeper_registry.cleanup_tracking ~base_path:entry.base_path name;
-      (match get_bus () with
+  List.iter
+    (fun (entry : Keeper_registry.registry_entry) ->
+       Atomic.set entry.fiber_stop true;
+       (match Atomic.get entry.grpc_close with
+        | Some close_fn ->
+          (try close_fn () with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | _exn -> ())
+        | None -> ());
+       Keeper_registry.set_state ~base_path:entry.base_path name Keeper_registry.Stopped;
+       Keeper_registry.cleanup_tracking ~base_path:entry.base_path name;
+       match get_bus () with
        | Some bus ->
-           Oas_events.publish_keeper_lifecycle bus ~event:"stopped"
-             ~keeper_name:name ~detail:"manual stop"
+         Oas_events.publish_keeper_lifecycle
+           bus
+           ~event:"stopped"
+           ~keeper_name:name
+           ~detail:"manual stop"
        | None -> ())
-  ) entries
+    entries
+;;

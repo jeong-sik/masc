@@ -100,6 +100,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           let last_proactive_ago_s =
             if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
           in
+          let last_visible_proactive_ago_s =
+            if m.runtime.proactive_rt.last_visible_ts <= 0.0 then 0.0
+            else now_ts -. m.runtime.proactive_rt.last_visible_ts
+          in
           (* C-3 fix: compute last_activity from the most recent activity timestamp
              to avoid showing misleading staleness when agent is actually active *)
           let last_activity_ts =
@@ -501,6 +505,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("last_handoff_ago_s", `Float last_handoff_ago_s);
               ("last_compaction_ago_s", `Float last_compaction_ago_s);
               ("last_proactive_ago_s", `Float last_proactive_ago_s);
+              ("last_visible_proactive_ago_s", `Float last_visible_proactive_ago_s);
               ("last_activity_ago_s", `Float last_activity_ago_s);
               ("handoff_count_total", `Int trace_history_count);
               ("total_turns", `Int m.runtime.usage.total_turns);
@@ -525,6 +530,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
+              ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
               ("social_model", `String m.social_model);
               ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
@@ -534,6 +540,11 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("noop_turn_count", `Int m.runtime.noop_turn_count);
               ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
               ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);
+              ("last_visible_proactive_ts", `Float m.runtime.proactive_rt.last_visible_ts);
+              ( "last_proactive_outcome"
+              , `String
+                  (Keeper_types.proactive_cycle_outcome_to_string
+                     m.runtime.proactive_rt.last_outcome) );
               ("last_proactive_reason",
                 if String.trim m.runtime.proactive_rt.last_reason = ""
                 then `Null

@@ -34,6 +34,7 @@ val update_metrics_from_result :
 val update_metrics_from_failure :
   Keeper_types.keeper_meta ->
   latency_ms:int ->
+  observation:Keeper_world_observation.world_observation ->
   reason:string ->
   ?social_state:Keeper_social_model.social_state ->
   unit ->

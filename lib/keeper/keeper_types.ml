@@ -21,6 +21,15 @@ type proactive_policy =
   ; cooldown_sec : int
   }
 
+type proactive_cycle_outcome =
+  | Proactive_never_started
+  | Proactive_unknown
+  | Proactive_silent
+  | Proactive_text_response
+  | Proactive_tool_use
+  | Proactive_mixed_response
+  | Proactive_error
+
 type tool_preset =
   | Minimal
   | Messaging
@@ -49,6 +58,9 @@ type compaction_runtime =
 type proactive_runtime =
   { count_total : int
   ; last_ts : float
+  ; visible_count_total : int
+  ; last_visible_ts : float
+  ; last_outcome : proactive_cycle_outcome
   ; last_reason : string
   ; last_preview : string
   }
@@ -178,6 +190,27 @@ let tool_preset_of_string raw =
   | "research" -> Some Research
   | "full" -> Some Full
   | _ -> None
+;;
+
+let proactive_cycle_outcome_to_string = function
+  | Proactive_never_started -> "never_started"
+  | Proactive_unknown -> "unknown"
+  | Proactive_silent -> "silent"
+  | Proactive_text_response -> "text_response"
+  | Proactive_tool_use -> "tool_use"
+  | Proactive_mixed_response -> "mixed_response"
+  | Proactive_error -> "error"
+;;
+
+let proactive_cycle_outcome_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "never_started" -> Proactive_never_started
+  | "silent" -> Proactive_silent
+  | "text_response" -> Proactive_text_response
+  | "tool_use" -> Proactive_tool_use
+  | "mixed_response" -> Proactive_mixed_response
+  | "error" -> Proactive_error
+  | _ -> Proactive_unknown
 ;;
 
 let normalize_tool_access = function
@@ -510,6 +543,10 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_compaction_after_tokens", `Int rt.compaction_rt.last_after_tokens
     ; "proactive_count_total", `Int rt.proactive_rt.count_total
     ; "last_proactive_ts", `Float rt.proactive_rt.last_ts
+    ; "proactive_visible_count_total", `Int rt.proactive_rt.visible_count_total
+    ; "last_visible_proactive_ts", `Float rt.proactive_rt.last_visible_ts
+    ; ( "last_proactive_outcome"
+      , `String (proactive_cycle_outcome_to_string rt.proactive_rt.last_outcome) )
     ; "last_proactive_reason", `String rt.proactive_rt.last_reason
     ; "last_proactive_preview", `String rt.proactive_rt.last_preview
     ; "last_compaction_check_ts", `Float rt.compaction_rt.last_check_ts
@@ -816,8 +853,24 @@ let parse_compaction_runtime (json : Yojson.Safe.t) : compaction_runtime =
 ;;
 
 let parse_proactive_runtime (json : Yojson.Safe.t) : proactive_runtime =
-  { count_total = Safe_ops.json_int ~default:0 "proactive_count_total" json
-  ; last_ts = Safe_ops.json_float ~default:0.0 "last_proactive_ts" json
+  let count_total = Safe_ops.json_int ~default:0 "proactive_count_total" json in
+  let last_ts = Safe_ops.json_float ~default:0.0 "last_proactive_ts" json in
+  { count_total
+  ; last_ts
+  ; visible_count_total =
+      Safe_ops.json_int
+        ~default:0
+        "proactive_visible_count_total"
+        json
+  ; last_visible_ts =
+      Safe_ops.json_float
+        ~default:0.0
+        "last_visible_proactive_ts"
+        json
+  ; last_outcome =
+      Safe_ops.json_string_opt "last_proactive_outcome" json
+      |> Option.value ~default:"unknown"
+      |> proactive_cycle_outcome_of_string
   ; last_reason = Safe_ops.json_string ~default:"" "last_proactive_reason" json
   ; last_preview = Safe_ops.json_string ~default:"" "last_proactive_preview" json
   }
@@ -1054,6 +1107,9 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_compaction_after_tokens"
   ; "proactive_count_total"
   ; "last_proactive_ts"
+  ; "proactive_visible_count_total"
+  ; "last_visible_proactive_ts"
+  ; "last_proactive_outcome"
   ; "last_proactive_reason"
   ; "last_proactive_preview"
   ; "last_compaction_check_ts"

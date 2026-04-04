@@ -141,6 +141,18 @@ let decision_channel_of_observation
   else
     "proactive"
 
+let is_proactive_cycle_of_observation
+    (observation : Keeper_world_observation.world_observation) : bool =
+  String.equal (decision_channel_of_observation observation) "proactive"
+
+let proactive_outcome_of_result ~(has_text : bool) ~(has_tool_calls : bool) :
+    proactive_cycle_outcome =
+  match has_text, has_tool_calls with
+  | false, false -> Proactive_silent
+  | true, false -> Proactive_text_response
+  | false, true -> Proactive_tool_use
+  | true, true -> Proactive_mixed_response
+
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
   if result.tools_used <> [] then "tool_use"
@@ -363,6 +375,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   in
   let has_tool_calls = result.tools_used <> [] in
   let has_text = String.trim result.response_text <> "" in
+  let is_proactive_cycle = is_proactive_cycle_of_observation observation in
   let is_board_reactive = observation.pending_board_events <> [] in
   let is_mention_reactive = observation.pending_mentions <> [] in
   let rt = meta.runtime in
@@ -399,23 +412,43 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         last_total_tokens = Keeper_exec_context.total_tokens result.usage;
         last_latency_ms = latency_ms;
       };
-      (* Proactive count: any turn that produced text or tools *)
+      (* Deterministic proactive cycle accounting is separated from
+         nondeterministic model output visibility. *)
       proactive_rt = {
         count_total =
           rt.proactive_rt.count_total
-          + (if update_proactive_rt && (has_text || has_tool_calls) then 1 else 0);
+          + (if update_proactive_rt && is_proactive_cycle then 1 else 0);
         last_ts =
-          (if update_proactive_rt && (has_text || has_tool_calls) then now_ts
+          (if update_proactive_rt && is_proactive_cycle then now_ts
            else rt.proactive_rt.last_ts);
+        visible_count_total =
+          rt.proactive_rt.visible_count_total
+          + (if update_proactive_rt
+               && is_proactive_cycle
+               && (has_text || has_tool_calls)
+             then 1
+             else 0);
+        last_visible_ts =
+          (if update_proactive_rt
+              && is_proactive_cycle
+              && (has_text || has_tool_calls)
+           then now_ts
+           else rt.proactive_rt.last_visible_ts);
+        last_outcome =
+          (if update_proactive_rt && is_proactive_cycle then
+             proactive_outcome_of_result ~has_text ~has_tool_calls
+           else rt.proactive_rt.last_outcome);
         last_reason =
-          (if not update_proactive_rt then rt.proactive_rt.last_reason
+          (if not update_proactive_rt || not is_proactive_cycle then rt.proactive_rt.last_reason
            else if has_tool_calls then
              Printf.sprintf "unified:tools=[%s]"
                (String.concat "," result.tools_used)
-           else if has_text then "unified:text_response"
-           else rt.proactive_rt.last_reason);
+           else if not has_text then
+             "unified:" ^ proactive_cycle_outcome_to_string Proactive_silent
+            else if has_text then "unified:text_response"
+            else rt.proactive_rt.last_reason);
         last_preview =
-          (if not update_proactive_rt then rt.proactive_rt.last_preview
+          (if not update_proactive_rt || not is_proactive_cycle then rt.proactive_rt.last_preview
            else if has_text then short_preview result.response_text
            else if has_tool_calls then
              Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
@@ -470,6 +503,14 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     else if String.trim result.response_text <> "" then "text_turn"
     else "noop"
   in
+  let proactive_outcome =
+    if String.equal channel "proactive" then
+      Some
+        (proactive_outcome_of_result
+           ~has_text:(String.trim result.response_text <> "")
+           ~has_tool_calls:(result.tools_used <> []))
+    else None
+  in
   let metrics_store = keeper_metrics_store config meta.name in
   let snapshot =
     `Assoc
@@ -507,6 +548,10 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
           | Some reason -> `String reason
           | None -> `Null);
         ("work_kind", `String work_kind);
+        ( "proactive_outcome",
+          match proactive_outcome with
+          | Some outcome -> `String (proactive_cycle_outcome_to_string outcome)
+          | None -> `Null );
         ("tool_call_count", `Int result.tool_calls_made);
         ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
         ( "action_source",
@@ -613,8 +658,10 @@ let broadcast_lifecycle_events ~(name : string)
   | _ -> ()
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
+    ~(observation : Keeper_world_observation.world_observation)
     ~(reason : string) ?social_state () : keeper_meta =
   let now_ts = Time_compat.now () in
+  let is_proactive_cycle = is_proactive_cycle_of_observation observation in
   let preview =
     let trimmed = String.trim reason in
     if trimmed = "" then "unified turn failed"
@@ -630,8 +677,21 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         last_latency_ms = latency_ms;
       };
       proactive_rt = { meta.runtime.proactive_rt with
-        last_reason = "unified:error:" ^ String.trim reason;
-        last_preview = preview;
+        count_total =
+          meta.runtime.proactive_rt.count_total
+          + (if is_proactive_cycle then 1 else 0);
+        last_ts =
+          if is_proactive_cycle then now_ts
+          else meta.runtime.proactive_rt.last_ts;
+        last_outcome =
+          if is_proactive_cycle then Proactive_error
+          else meta.runtime.proactive_rt.last_outcome;
+        last_reason =
+          if is_proactive_cycle then "unified:error:" ^ String.trim reason
+          else meta.runtime.proactive_rt.last_reason;
+        last_preview =
+          if is_proactive_cycle then preview
+          else meta.runtime.proactive_rt.last_preview;
       };
       last_speech_act =
         (match social_state with
@@ -759,7 +819,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Social.derive_failure_state ~meta ~observation ~reason:e
           in
           let updated_meta =
-            update_metrics_from_failure meta ~latency_ms ~reason:e
+            update_metrics_from_failure meta ~latency_ms ~observation ~reason:e
               ~social_state ()
           in
           append_decision_record ~config ~meta:updated_meta ~observation

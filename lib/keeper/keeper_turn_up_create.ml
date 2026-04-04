@@ -283,6 +283,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           proactive_rt = {
             count_total = 0;
             last_ts = 0.0;
+            visible_count_total = 0;
+            last_visible_ts = 0.0;
+            last_outcome = Proactive_never_started;
             last_reason = "";
             last_preview = "";
           };

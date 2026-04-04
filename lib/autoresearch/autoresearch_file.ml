@@ -30,6 +30,14 @@ let rec nearest_existing_path path =
     else
       nearest_existing_path parent
 
+let safe_realpath path =
+  try Result.ok (Unix.realpath path)
+  with
+  | Unix.Unix_error (code, _, _) ->
+      Result.error
+        (Printf.sprintf "realpath failed for %s: %s" path
+           (Unix.error_message code))
+
 (** Resolve [target_file] to an absolute path within [workdir] without
     requiring the file to already exist. Existing parent directories are
     resolved via [realpath] so symlink escapes are rejected before callers
@@ -43,18 +51,17 @@ let resolve_target_file_path ~workdir target_file =
     Result.error (Printf.sprintf "target_file contains '..': %s" target_file)
   else
     let abs = Filename.concat workdir target_file in
-    let real_workdir = Unix.realpath workdir in
     let parent = Filename.dirname abs in
-    let real_parent =
-      nearest_existing_path parent
-      |> Unix.realpath
-    in
-    if is_safe_subpath ~parent:real_workdir ~child:real_parent then
-      Result.ok abs
-    else
-      Result.error
-        (Printf.sprintf
-           "target_file escapes workdir via symlink: %s" target_file)
+    match safe_realpath workdir, safe_realpath (nearest_existing_path parent) with
+    | Error message, _ -> Result.error message
+    | _, Error message -> Result.error message
+    | Ok real_workdir, Ok real_parent ->
+        if is_safe_subpath ~parent:real_workdir ~child:real_parent then
+          Result.ok abs
+        else
+          Result.error
+            (Printf.sprintf
+               "target_file escapes workdir via symlink: %s" target_file)
 
 (** Validate target_file: must be relative, no path traversal, must exist,
     must not escape workdir via symlink.
@@ -68,13 +75,15 @@ let validate_target_file ~workdir target_file =
     else if Sys.is_directory abs then
       Result.error (Printf.sprintf "target_file is a directory: %s" target_file)
     else
-      let real_path = Unix.realpath abs in
-      let real_workdir = Unix.realpath workdir in
-      if is_safe_subpath ~parent:real_workdir ~child:real_path then
-        Result.ok real_path
-      else
-        Result.error (Printf.sprintf
-          "target_file escapes workdir via symlink: %s" target_file)
+      match safe_realpath abs, safe_realpath workdir with
+      | Error message, _ -> Result.error message
+      | _, Error message -> Result.error message
+      | Ok real_path, Ok real_workdir ->
+          if is_safe_subpath ~parent:real_workdir ~child:real_path then
+            Result.ok real_path
+          else
+            Result.error (Printf.sprintf
+              "target_file escapes workdir via symlink: %s" target_file)
 
 (** Read entire file contents. *)
 let read_file path =

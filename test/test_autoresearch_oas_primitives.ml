@@ -342,6 +342,20 @@ let test_start_seeds_source_only_target_file_into_managed_worktree () =
       check string "seeded content preserved" "print('seeded')\n"
         (Fs_compat.load_file (Filename.concat managed_workdir target_file))
 
+let test_resolve_target_file_path_reports_realpath_errors () =
+  let missing_root =
+    Filename.concat (temp_dir "masc_autoresearch_missing_root") "missing"
+  in
+  match
+    Lib.Autoresearch.resolve_target_file_path ~workdir:missing_root
+      ".masc/keepers/admin-keeper/test_ar.py"
+  with
+  | Ok path ->
+      failf "expected missing workdir to error, got %s" path
+  | Error message ->
+      check bool "realpath failure surfaced" true
+        (contains message "realpath failed")
+
 let test_cycle_restores_ignored_target_after_empty_diff () =
   with_temp_dir "masc_autoresearch_restore" @@ fun root ->
   with_me_root root @@ fun () ->
@@ -413,6 +427,8 @@ let () =
             test_build_verify_downgrade_rewrites_history;
           test_case "start seeds source-only target file" `Quick
             test_start_seeds_source_only_target_file_into_managed_worktree;
+          test_case "resolve target file reports realpath errors" `Quick
+            test_resolve_target_file_path_reports_realpath_errors;
           test_case "cycle restores ignored target after empty diff" `Quick
             test_cycle_restores_ignored_target_after_empty_diff;
         ] );

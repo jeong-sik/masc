@@ -70,28 +70,37 @@ let string_of_voice_transport = function
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
 
+(* ── Canonical adapter names (single definition point) ──────── *)
+
+let cn_llama = "llama"
+let cn_claude = "claude-api"
+let cn_codex = "codex-api"
+let cn_gemini = "gemini-api"
+let cn_glm = "glm"
+let cn_openrouter = "openrouter"
+
 let direct_adapters =
   [
     {
-      canonical_name = "llama";
+      canonical_name = cn_llama;
       runtime_kind = Local;
       auth_mode = No_auth;
       aliases = [ "llama"; "llama.cpp"; "llamacpp" ];
     };
     {
-      canonical_name = "claude-api";
+      canonical_name = cn_claude;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ANTHROPIC_API_KEY";
       aliases = [ "claude-api"; "claude"; "anthropic" ];
     };
     {
-      canonical_name = "codex-api";
+      canonical_name = cn_codex;
       runtime_kind = Direct_api;
       auth_mode = Api_key "OPENAI_API_KEY";
       aliases = [ "codex-api"; "openai" ];
     };
     {
-      canonical_name = "gemini-api";
+      canonical_name = cn_gemini;
       runtime_kind = Direct_api;
       auth_mode =
         Vertex_adc
@@ -102,13 +111,13 @@ let direct_adapters =
       aliases = [ "gemini-api"; "gemini"; "google" ];
     };
     {
-      canonical_name = "glm";
+      canonical_name = cn_glm;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ZAI_API_KEY";
       aliases = [ "glm"; "glm_cloud"; "zai" ];
     };
     {
-      canonical_name = "openrouter";
+      canonical_name = cn_openrouter;
       runtime_kind = Direct_api;
       auth_mode = Api_key "OPENROUTER_API_KEY";
       aliases = [ "openrouter" ];
@@ -576,12 +585,12 @@ let provider_model_label provider model =
     MASC no longer knows vendor families — only canonical adapter names. *)
 let default_model_label_for_adapter (adapter : adapter) =
   match adapter.canonical_name with
-  | "claude-api" -> Ok "claude:auto"
-  | "gemini-api" -> Ok "gemini:auto"
-  | "codex-api" -> Ok "openai:auto"
-  | "glm" -> Ok "glm:auto"
-  | "llama" -> explicit_llama_model_label_result ()
-  | "openrouter" ->
+  | s when s = cn_claude -> Ok "claude:auto"
+  | s when s = cn_gemini -> Ok "gemini:auto"
+  | s when s = cn_codex -> Ok "openai:auto"
+  | s when s = cn_glm -> Ok "glm:auto"
+  | s when s = cn_llama -> explicit_llama_model_label_result ()
+  | s when s = cn_openrouter ->
       Error "OpenRouter requires explicit runtime_model"
   | name ->
       Error (Printf.sprintf "Provider '%s' requires explicit runtime_model" name)
@@ -608,7 +617,7 @@ let auto_detect_adapters =
   List.filter
     (fun (adapter : adapter) ->
       adapter.runtime_kind = Direct_api
-      && adapter.canonical_name <> "openrouter")
+      && adapter.canonical_name <> cn_openrouter)
     direct_adapters
 
 let preferred_execution_model_labels () =

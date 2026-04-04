@@ -1220,7 +1220,9 @@ let record_keeper_crashed
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit
   =
-  if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
+  if Eio_context.get_net_opt () = None then
+    Log.Keeper.info "start_keepalive: skipped %s (no Eio network context)" m.name
+  else if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
   then Log.Keeper.info "start_keepalive: skipped %s (already running)" m.name
   else if not (Keeper_registry.spawn_slots_available ())
   then Log.Keeper.info "start_keepalive: skipped %s (no spawn slots)" m.name

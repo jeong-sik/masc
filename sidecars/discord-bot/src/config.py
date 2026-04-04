@@ -7,6 +7,7 @@ Fails fast at startup if any required config is missing.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Final, cast
 
 from pydantic import AliasChoices, Field, field_validator
@@ -44,6 +45,20 @@ class BotConfig(BaseSettings):
     discord_keeper_map: str = Field(
         default="{}",
         validation_alias=AliasChoices("DISCORD_KEEPER_MAP", "discord_keeper_map"),
+    )
+    discord_binding_store_path: str = Field(
+        default=".masc/discord_keeper_bindings.json",
+        validation_alias=AliasChoices(
+            "DISCORD_BINDING_STORE_PATH",
+            "discord_binding_store_path",
+        ),
+    )
+    discord_binding_audit_path: str = Field(
+        default=".masc/discord_keeper_binding_audit.jsonl",
+        validation_alias=AliasChoices(
+            "DISCORD_BINDING_AUDIT_PATH",
+            "discord_binding_audit_path",
+        ),
     )
 
     # Optional
@@ -117,6 +132,13 @@ class BotConfig(BaseSettings):
             raise ValueError(f"DISCORD_KEEPER_MAP is not valid JSON: {e}") from e
         return v
 
+    @field_validator("discord_binding_store_path", "discord_binding_audit_path")
+    @classmethod
+    def validate_non_empty_path(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("binding persistence paths must not be empty")
+        return v.strip()
+
     @field_validator("gate_timeout_sec")
     @classmethod
     def validate_positive_timeout(cls, v: int) -> int:
@@ -148,6 +170,23 @@ class BotConfig(BaseSettings):
             return {}
         typed_raw = cast(dict[object, object], raw)
         return {str(key): str(value) for key, value in typed_raw.items()}
+
+    def binding_store_path(self) -> Path:
+        """Return the durable binding store path.
+
+        Relative paths are resolved from the current working directory so the
+        bot can be started from the sidecar directory without extra flags.
+        """
+        path = Path(self.discord_binding_store_path).expanduser()
+        if path.is_absolute():
+            return path
+        return Path.cwd() / path
+
+    def binding_audit_path(self) -> Path:
+        path = Path(self.discord_binding_audit_path).expanduser()
+        if path.is_absolute():
+            return path
+        return Path.cwd() / path
 
     def gate_message_url(self) -> str:
         base = self.masc_mcp_url.rstrip("/")

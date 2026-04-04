@@ -44,4 +44,15 @@ describe('mission keeper runtime helpers', () => {
       ),
     ).toBe('마지막 턴 · 125초 전')
   })
+
+  it('shows paused-only runtime hint when keepalive is not running', () => {
+    const keeper = {
+      name: 'uranium666',
+      status: 'idle',
+      paused: true,
+      keepalive_running: false,
+    } as Keeper
+
+    expect(keeperRuntimeHint(keeper)).toBe('일시정지됨')
+  })
 })

@@ -77,14 +77,16 @@ function syncTimelineSelection(
   })
 }
 
-function spanColor(kind: string): string {
-  switch (kind) {
-    case 'task': return '#fbbf24'
-    case 'operation': return '#4ade80'
-    case 'autonomy': return '#22d3ee'
-    case 'presence': return 'rgba(148, 163, 184, 0.25)'
-    default: return '#94a3b8'
-  }
+const SPAN_STYLES: Record<string, { bg: string; text: string }> = {
+  task:      { bg: '#fbbf24', text: '#0f172a' },
+  operation: { bg: '#4ade80', text: '#0f172a' },
+  autonomy:  { bg: '#22d3ee', text: '#0f172a' },
+  presence:  { bg: 'rgba(148, 163, 184, 0.25)', text: '#e2e8f0' },
+}
+const SPAN_DEFAULT = { bg: '#94a3b8', text: '#0f172a' } as const
+
+function spanStyle(kind: string) {
+  return SPAN_STYLES[kind] ?? SPAN_DEFAULT
 }
 
 function loadSwimlane(since?: string) {
@@ -121,7 +123,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
     const itemIdsByAgent = new Map<string, TimelineItemId[]>()
     let idCounter = 1
     const items = new DataSet(data.spans.map(span => {
-      const color = spanColor(span.kind)
+      const { bg: color, text: textColor } = spanStyle(span.kind)
       const duration = formatDurationMs(span.end_ms - span.start_ms)
       const itemId = idCounter++
       const title = tooltipHtml([span.label || span.kind, `종류: ${span.kind}`, `지속: ${duration}`])
@@ -142,7 +144,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
         className: span.kind === 'presence'
           ? 'activity-swimlane-item activity-swimlane-item--presence'
           : 'activity-swimlane-item',
-        style: `background-color: ${color}; border-color: ${color}; color: #0f172a; font-size: 10px; border-radius: 3px; font-family: system-ui, sans-serif; overflow: hidden;`
+        style: `background-color: ${color}; border-color: ${color}; color: ${textColor}; font-size: 10px; border-radius: 3px; font-family: system-ui, sans-serif; overflow: hidden;`
       }
     }))
 

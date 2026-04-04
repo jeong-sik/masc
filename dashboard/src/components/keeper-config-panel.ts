@@ -479,7 +479,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         >취소</button>
       ` : html`
         <button type="button"
-          class="${btnBase} bg-[var(--purple)] text-[#000]"
+          class="${btnBase} bg-[var(--purple)] text-[#1e1b4b]"
           onClick=${enterEditMode}
         >편집</button>
       `}

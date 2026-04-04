@@ -1,11 +1,20 @@
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
 
-export function JsonViewer({ data, label, initialCollapsed = false, level = 0 }: { data: unknown; label?: string; initialCollapsed?: boolean; level?: number }) {
+export function JsonViewer({ data, label, initialCollapsed = false, level = 0, ancestors = [] }: { data: unknown; label?: string; initialCollapsed?: boolean; level?: number; ancestors?: object[] }) {
   const [collapsed, setCollapsed] = useState(initialCollapsed)
 
   const isObject = data !== null && typeof data === 'object'
   const isArray = Array.isArray(data)
+
+  if (isObject && ancestors.includes(data as object)) {
+    return html`
+      <div class="font-mono text-[13px] leading-relaxed flex items-start gap-1.5 py-0.5 min-w-0 max-w-full">
+        ${label ? html`<span class="text-[var(--text-body)] shrink-0 font-medium whitespace-nowrap">${label}:</span>` : null}
+        <span class="text-[var(--text-muted)] italic">[Circular]</span>
+      </div>
+    `
+  }
 
   if (!isObject) {
     let valueNode
@@ -31,6 +40,8 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0 }:
 
   const entries = isArray ? (data as unknown[]) : Object.entries(data as Record<string, unknown>)
   const isEmpty = isArray ? (data as unknown[]).length === 0 : entries.length === 0
+  const nextAncestors = isObject ? [...ancestors, data as object] : ancestors
+  const toggleLabel = label ?? (isArray ? 'JSON array' : 'JSON object')
 
   if (isEmpty) {
     return html`
@@ -43,19 +54,25 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0 }:
 
   return html`
     <div class="font-mono text-[13px] leading-relaxed flex flex-col py-0.5 w-full min-w-0">
-      <div class="flex items-center gap-1.5 cursor-pointer hover:bg-[var(--white-4)] rounded px-1 -mx-1 select-none w-max max-w-full" onClick=${() => setCollapsed(!collapsed)}>
-        <span class="text-[var(--text-muted)] shrink-0 w-4 inline-flex justify-center transition-transform duration-150 ${collapsed ? '-rotate-90' : ''}">▼</span>
+      <button
+        type="button"
+        class="flex items-center gap-1.5 cursor-pointer hover:bg-[var(--white-4)] rounded px-1 -mx-1 select-none w-max max-w-full text-left bg-transparent border-0"
+        onClick=${() => setCollapsed(!collapsed)}
+        aria-expanded=${!collapsed}
+        aria-label=${`${collapsed ? 'Expand' : 'Collapse'} ${toggleLabel}`}
+      >
+        <span aria-hidden="true" class="text-[var(--text-muted)] shrink-0 w-4 inline-flex justify-center transition-transform duration-150 ${collapsed ? '-rotate-90' : ''}">▼</span>
         ${label ? html`<span class="text-[var(--text-body)] font-medium truncate">${label}</span>` : null}
         <span class="text-[var(--text-muted)] text-[11px] ml-1 shrink-0">
           ${isArray ? `[${(data as unknown[]).length}]` : `{${entries.length}}`}
         </span>
-      </div>
+      </button>
       
       ${!collapsed && html`
         <div class="pl-4 ml-1.5 border-l border-[var(--white-4)] mt-1 flex flex-col gap-0.5 w-full min-w-0">
           ${isArray
-            ? (data as unknown[]).map((val, idx) => html`<${JsonViewer} key=${idx} data=${val} label=${String(idx)} level=${level + 1} initialCollapsed=${level >= 2} />`)
-            : (entries as [string, unknown][]).map(([k, v]) => html`<${JsonViewer} key=${k} data=${v} label=${k} level=${level + 1} initialCollapsed=${level >= 2} />`)
+            ? (data as unknown[]).map((val, idx) => html`<${JsonViewer} key=${idx} data=${val} label=${String(idx)} level=${level + 1} initialCollapsed=${level >= 2} ancestors=${nextAncestors} />`)
+            : (entries as [string, unknown][]).map(([k, v]) => html`<${JsonViewer} key=${k} data=${v} label=${k} level=${level + 1} initialCollapsed=${level >= 2} ancestors=${nextAncestors} />`)
           }
         </div>
       `}

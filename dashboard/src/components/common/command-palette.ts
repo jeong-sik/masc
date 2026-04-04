@@ -109,11 +109,11 @@ export function CommandPalette() {
     // Add Agents dynamically
     const agents = missionAgentBriefs.value || []
     const agentActions: CommandPaletteAction[] = agents.map(agent => ({
-      id: `nav-agent-${agent.name}`,
-      title: `에이전트 상세: ${agent.name}`,
+      id: `nav-agent-${agent.agent_name}`,
+      title: `에이전트 상세: ${agent.display_name || agent.agent_name}`,
       section: 'Agents',
-      keywords: `worker detail status ${agent.state || ''}`,
-      handler: () => navigate('overview', { section: 'worker', operation_id: agent.name })
+      keywords: `worker detail status ${agent.status || ''}`,
+      handler: () => navigate('overview', { section: 'worker', operation_id: agent.agent_name })
     }))
 
     // Add Keepers dynamically
@@ -122,18 +122,18 @@ export function CommandPalette() {
       id: `nav-keeper-${keeper.name}`,
       title: `키퍼 상세: ${keeper.name}`,
       section: 'Keepers',
-      keywords: `bot detail status ${keeper.state || ''}`,
+      keywords: `bot detail status ${keeper.status || ''}`,
       handler: () => navigate('overview', { section: 'keeper', operation_id: keeper.name })
     }))
 
     // Add Sessions dynamically
     const sessions = missionSnapshot.value?.sessions || missionSnapshot.value?.session_briefs || []
     const sessionActions: CommandPaletteAction[] = sessions.map(s => ({
-      id: `nav-session-${s.id}`,
-      title: `세션 확인: ${s.title || s.id}`,
+      id: `nav-session-${s.session_id}`,
+      title: `세션 확인: ${s.goal || s.session_id}`,
       section: 'Sessions',
       keywords: `task run ${s.status || ''}`,
-      handler: () => navigate('workspace', { section: 'session', session_id: s.id })
+      handler: () => navigate('workspace', { section: 'session', session_id: s.session_id })
     }))
 
     ref.current.data = [...baseActions, ...agentActions, ...keeperActions, ...sessionActions]
@@ -162,4 +162,3 @@ export function CommandPalette() {
     ></ninja-keys>
   `
 }
-

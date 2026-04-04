@@ -56,6 +56,7 @@
 
   /* Legacy Compatibility Variables */
   --bg-0: var(--bg-root);
+  --bg-1: var(--bg-panel-hover);
   --card: var(--bg-panel);
   --card-border: var(--border-base);
   --accent-8: var(--accent-10);
@@ -160,6 +161,7 @@
     --bg-root: #f8fafc;
     --bg-panel: rgba(255, 255, 255, 0.95);
     --bg-panel-hover: rgba(241, 245, 249, 0.95);
+    --bg-1: var(--bg-panel-hover);
     
     --text-strong: #0f172a;
     --text-body: #334155;
@@ -179,4 +181,3 @@
     --white-80: rgba(0, 0, 0, 0.80);
   }
 }
-

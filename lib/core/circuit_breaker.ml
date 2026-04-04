@@ -64,14 +64,20 @@ let failure_threshold_from_env () =
   |> Option.value ~default:default_failure_threshold
 
 let failure_window_from_env () =
-  Sys.getenv_opt "MASC_CIRCUIT_FAILURE_WINDOW_SEC"
-  |> Option.map float_of_string
-  |> Option.value ~default:default_failure_window
+  let v =
+    Sys.getenv_opt "MASC_CIRCUIT_FAILURE_WINDOW_SEC"
+    |> Option.map float_of_string
+    |> Option.value ~default:default_failure_window
+  in
+  Float.max 1.0 v  (* prevent zero-window disabling the breaker *)
 
 let cooldown_from_env () =
-  Sys.getenv_opt "MASC_CIRCUIT_COOLDOWN"
-  |> Option.map float_of_string
-  |> Option.value ~default:default_cooldown
+  let v =
+    Sys.getenv_opt "MASC_CIRCUIT_COOLDOWN"
+    |> Option.map float_of_string
+    |> Option.value ~default:default_cooldown
+  in
+  Float.max 1.0 v  (* prevent zero-cooldown instant retry loops *)
 
 (** {1 Creation} *)
 

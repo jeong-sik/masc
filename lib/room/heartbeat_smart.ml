@@ -42,7 +42,10 @@ let make_config
     ?(busy_skip = true)
     ?(idle_threshold_s = Env_config.SmartHeartbeatTuning.idle_threshold_s)
     () =
-  (* Clamp bounds are already applied by Env_config.SmartHeartbeatTuning *)
+  (* Clamp caller overrides to same bounds as Env_config defaults *)
+  let base_interval_s = Float.max 5.0 (Float.min 300.0 base_interval_s) in
+  let idle_multiplier = Float.max 1.0 (Float.min 10.0 idle_multiplier) in
+  let idle_threshold_s = Float.max 60.0 (Float.min 3600.0 idle_threshold_s) in
   { base_interval_s; idle_multiplier; busy_skip; idle_threshold_s }
 
 let effective_interval ~config ~last_activity =

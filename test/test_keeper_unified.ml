@@ -480,6 +480,38 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
   check bool "marks backlog cooldown elapsed" true
     (List.mem "task_reactive_cooldown_elapsed" decision.reasons)
 
+let test_task_reactive_cooldown_floor_never_hits_zero () =
+  with_env "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC" "0" (fun () ->
+    let meta =
+      {
+        minimal_meta with
+        proactive =
+          { minimal_meta.proactive with
+            enabled = true;
+            idle_sec = 60;
+            cooldown_sec = 900;
+          };
+        runtime =
+          {
+            minimal_meta.runtime with
+            proactive_rt =
+              { minimal_meta.runtime.proactive_rt with
+                last_ts = Time_compat.now () -. 320.0;
+              };
+          };
+      }
+    in
+    let obs =
+      {
+        base_observation with
+        idle_seconds = 120;
+        failed_task_count = 1;
+      }
+    in
+    let decision = WO.unified_turn_decision ~meta obs in
+    check (option int) "task reactive cooldown clamps to positive floor" (Some 300)
+      decision.task_reactive_cooldown)
+
 let test_prompt_contains_identity () =
   let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
   check bool "contains name" true (String.length sys > 0);
@@ -552,6 +584,18 @@ let test_prompt_includes_autonomous_trigger_section () =
     (contains_substring user "scheduled autonomous keepalive turn");
   check bool "includes cooldown detail" true
     (contains_substring user "effective cooldown")
+
+let test_prompt_omits_autonomous_trigger_for_reactive_turn () =
+  let obs =
+    {
+      base_observation with
+      pending_mentions = [ ("alice", "please check this") ];
+      idle_seconds = 999;
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
+  check bool "reactive turn omits autonomous trigger section" false
+    (contains_substring user "Autonomous Trigger")
 
 let test_prompt_omits_empty_sections () =
   let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
@@ -1484,13 +1528,15 @@ let test_prioritized_disclosed_tool_names_skips_fallback_when_disabled () =
 
 let test_tool_query_text_of_user_message_strips_continuity_noise () =
   let user_message =
-    "## Current World State\n\n### Room State\n- Failed tasks: 5\n\n### Actionable Routes\n- Failed tasks: audit them with keeper_tasks_audit before deciding there is nothing meaningful to do.\n\n### Continuity\nDONE: 하트비트 갱신\nNEXT: 대기 유지\n\n### Live Worktree Delta\n<git_status_change>\n?? lib/example.ml\n</git_status_change>\n"
+    "## Current World State\n\n### Namespace State\n- Failed tasks: 5\n\n### Actionable Routes\n- Failed tasks: audit them with keeper_tasks_audit before deciding there is nothing meaningful to do.\n\n### Autonomous Trigger\n- Scheduler: scheduled autonomous keepalive turn.\n\n### Continuity\nDONE: 하트비트 갱신\nNEXT: 대기 유지\n\n### Live Worktree Delta\n<git_status_change>\n?? lib/example.ml\n</git_status_change>\n"
   in
   let query = KAR.tool_query_text_of_user_message user_message in
   check bool "continuity heading stripped" false
     (contains_substring query "### Continuity");
   check bool "heartbeat residue stripped" false
     (contains_substring query "하트비트 갱신");
+  check bool "autonomous trigger stripped" false
+    (contains_substring query "Autonomous Trigger");
   check bool "actionable routes preserved" true
     (contains_substring query "keeper_tasks_audit");
   check bool "worktree section preserved" true
@@ -1693,6 +1739,8 @@ let () =
             test_idle_decay_triggers_turn;
           test_case "scheduled decision uses backlog acceleration" `Quick
             test_scheduled_turn_decision_uses_backlog_acceleration;
+          test_case "task reactive cooldown floor never hits zero" `Quick
+            test_task_reactive_cooldown_floor_never_hits_zero;
           test_case "with goals" `Quick test_observation_with_goals;
           test_case "economic modes" `Quick test_observation_economic_modes;
         ] );
@@ -1706,6 +1754,8 @@ let () =
             test_prompt_includes_operational_tool_guidance;
           test_case "includes autonomous trigger section" `Quick
             test_prompt_includes_autonomous_trigger_section;
+          test_case "omits autonomous trigger for reactive turn" `Quick
+            test_prompt_omits_autonomous_trigger_for_reactive_turn;
           test_case "omits empty sections" `Quick test_prompt_omits_empty_sections;
           test_case "includes mentions" `Quick test_prompt_includes_mentions_section;
           test_case "includes board activity" `Quick

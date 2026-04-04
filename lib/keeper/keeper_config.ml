@@ -345,7 +345,7 @@ let keeper_proactive_task_min_cooldown_sec () : int =
   int_of_env_default
     "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC"
     ~default:60
-    ~min_v:0
+    ~min_v:1
     ~max_v:1800
 
 let keeper_compaction_policy_from_env () : (float * int * int) =

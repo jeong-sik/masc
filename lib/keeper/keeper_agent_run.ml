@@ -93,6 +93,17 @@ let take n items =
     List.filteri (fun i _ -> i < n) items
 
 let tool_query_text_of_user_message (text : string) : string =
+  let allowed_sections =
+    [
+      "### Pending Mentions";
+      "### Scope Messages";
+      "### Active Goals";
+      "### Namespace State";
+      "### Board Activity";
+      "### Actionable Routes";
+      "### Live Worktree Delta";
+    ]
+  in
   let lines = String.split_on_char '\n' text in
   let rec loop current_section kept = function
     | [] ->
@@ -104,15 +115,17 @@ let tool_query_text_of_user_message (text : string) : string =
           if String.starts_with ~prefix:"### " trimmed then Some trimmed
           else current_section
         in
-        let skip_line =
+        let keep_line =
           match current_section with
-          | Some "### Continuity" -> true
-          | _ -> false
+          | None ->
+              String.starts_with ~prefix:"## Current World State" trimmed
+          | Some section ->
+              List.mem section allowed_sections
         in
-        if skip_line then
-          loop current_section kept rest
-        else
+        if keep_line then
           loop current_section (line :: kept) rest
+        else
+          loop current_section kept rest
   in
   loop None [] lines
 

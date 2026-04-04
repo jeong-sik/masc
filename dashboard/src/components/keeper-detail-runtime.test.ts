@@ -1,11 +1,22 @@
-import { describe, expect, it } from 'vitest'
+import { h } from 'preact'
+import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { afterEach, describe, expect, it } from 'vitest'
+import '@testing-library/jest-dom'
 
 import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
-import { resolveKeeperCurrentTaskLabel } from './keeper-detail-runtime'
+import {
+  AllowlistPreview,
+  resolveAllowlistPreview,
+  resolveKeeperCurrentTaskLabel,
+} from './keeper-detail-runtime'
 import {
   resolveKeeperObservedToolAudit,
   resolveKeeperToolPolicy,
 } from './keeper-detail-source'
+
+afterEach(() => {
+  cleanup()
+})
 
 describe('resolveKeeperToolPolicy', () => {
   it('uses keeper config as the authoritative policy source', () => {
@@ -218,5 +229,73 @@ describe('resolveKeeperCurrentTaskLabel', () => {
     }
 
     expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('not_collected')
+  })
+})
+
+describe('resolveAllowlistPreview', () => {
+  it('keeps only the requested prefix and reports the remainder', () => {
+    expect(resolveAllowlistPreview(['a', 'b', 'c', 'd'], 2)).toEqual({
+      visibleTools: ['a', 'b'],
+      hiddenCount: 2,
+    })
+  })
+
+  it('clamps zero and negative limits to an empty preview', () => {
+    expect(resolveAllowlistPreview(['a', 'b'], 0)).toEqual({
+      visibleTools: [],
+      hiddenCount: 2,
+    })
+    expect(resolveAllowlistPreview(['a', 'b'], -3)).toEqual({
+      visibleTools: [],
+      hiddenCount: 2,
+    })
+  })
+})
+
+describe('AllowlistPreview', () => {
+  it('renders the empty fallback when there are no tools', () => {
+    render(h(AllowlistPreview, {
+      tools: [],
+      emptyLabel: 'none',
+      previewLimit: 12,
+    }))
+
+    expect(screen.getByText('none')).toBeInTheDocument()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('does not show a toggle when the tool count is exactly at the preview limit', () => {
+    const tools = Array.from({ length: 12 }, (_, index) => `tool-${index + 1}`)
+    render(h(AllowlistPreview, {
+      tools,
+      emptyLabel: 'none',
+      previewLimit: 12,
+    }))
+
+    expect(screen.getByText('tool-12')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /허용된 도구/ })).not.toBeInTheDocument()
+  })
+
+  it('collapses long allowlists until explicitly expanded', () => {
+    const tools = Array.from({ length: 15 }, (_, index) => `tool-${index + 1}`)
+    render(h(AllowlistPreview, {
+      tools,
+      emptyLabel: 'none',
+      previewLimit: 12,
+    }))
+
+    expect(screen.getByText('tool-1')).toBeInTheDocument()
+    expect(screen.getByText('tool-12')).toBeInTheDocument()
+    expect(screen.queryByText('tool-13')).not.toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: '허용된 도구 나머지 3개 보기' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByText('나머지 3개 보기')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+
+    expect(screen.getByText('tool-13')).toBeInTheDocument()
+    expect(screen.getByText('tool-15')).toBeInTheDocument()
+    expect(screen.getByText('접기')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '허용된 도구 접기' })).toHaveAttribute('aria-expanded', 'true')
   })
 })

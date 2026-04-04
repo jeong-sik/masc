@@ -470,10 +470,7 @@ type server_state = {
 }
 
 let create_state ~base_path =
-  let config =
-    Room.default_config base_path
-   
-  in
+  let config = Room.default_config base_path in
   let registry = Session.create () in
   (* Wire notification harness: subscription events → session queues *)
   Subscriptions.set_session_push_fn (fun event ->
@@ -520,7 +517,6 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
           Board_dispatch.init_jsonl ()
         end)
       base_path
-   
   in
   let registry = Session.create () in
   (* Wire notification harness: subscription events → session queues *)

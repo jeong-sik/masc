@@ -265,11 +265,15 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
 
 (** Detect repeated tool calls: if the same tool is called N+ times
     consecutively, return Some(tool_name, count). *)
-let detect_entropy ?(threshold = 3) (acc : accumulator) (tool_name : string) : (string * int) option =
+let detect_entropy ?(threshold = 3) ?args_json (acc : accumulator) (tool_name : string) : (string * int) option =
   let recent =
     acc.entries
     |> List.to_seq
-    |> Seq.take_while (fun e -> e.tool_name = tool_name)
+    |> Seq.take_while (fun e ->
+         e.tool_name = tool_name &&
+         match args_json with
+         | Some args -> e.args_json = args
+         | None -> true)
     |> List.of_seq
   in
   let count = List.length recent + 1 in  (* +1 for the upcoming call *)

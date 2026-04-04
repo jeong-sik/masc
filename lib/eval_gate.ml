@@ -234,12 +234,17 @@ let pre_check
             calls_this_turn config.max_tool_calls_per_turn)
         else
           (* 5. Entropy detection *)
-          let entropy = Trajectory.detect_entropy ~threshold:config.entropy_threshold acc tool_name in
+          let entropy = Trajectory.detect_entropy ~threshold:config.entropy_threshold
+            ~args_json acc tool_name in
           begin match entropy with
           | Some (_name, count) ->
+              let args_preview =
+                if String.length args_json > 120 then String.sub args_json 0 120 ^ "..."
+                else args_json
+              in
               Trajectory.Reject (Printf.sprintf
-                "entropy detected: '%s' called %d consecutive times (threshold: %d)"
-                tool_name count config.entropy_threshold)
+                "entropy detected: '%s' called %d consecutive times with args=%s (threshold: %d)"
+                tool_name count args_preview config.entropy_threshold)
           | None ->
               (* 6. Destructive pattern check (bash tools only) *)
               if config.destructive_check_enabled

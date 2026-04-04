@@ -191,7 +191,7 @@ export function kindLabel(kind: string): string {
 export function kindBadgeColor(kind: string): string {
   switch (kind) {
     case 'direct': return 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)]'
-    case 'automation': return 'bg-[var(--cyan-16)] text-[#38bdf8] border-[rgba(34,211,238,0.3)]'
+    case 'automation': return 'bg-[var(--cyan-16)] text-[var(--accent)] border-[var(--cyan-16)]'
     case 'system': return 'bg-[var(--slate-gray-15)] text-[var(--text-slate)] border-[var(--border-slate-22)]'
     default: return 'bg-[var(--white-8)] text-[var(--text-muted)] border-[var(--border-slate-16)]'
   }
@@ -208,7 +208,7 @@ export function visibilityLabel(vis: string): string | null {
 }
 
 export function visibilityBadgeColor(vis: string): string {
-  if (vis === 'internal') return 'bg-[rgba(168,85,247,0.12)] text-[#a855f7] border-[rgba(168,85,247,0.25)]'
+  if (vis === 'internal') return 'bg-[var(--white-10)] text-[var(--purple)] border-[var(--white-20)]'
   return 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-16)]'
 }
 

@@ -14,9 +14,9 @@ const SIZE_CLASSES: Record<ButtonSize, string> = {
 }
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  primary: 'border border-solid border-[rgba(71,184,255,0.3)] bg-[var(--accent-12)] text-[#d7efff] hover:bg-[var(--accent-20)]',
+  primary: 'border border-solid border-[var(--accent-30)] bg-[var(--accent-12)] text-[var(--text-strong)] hover:bg-[var(--accent-20)]',
   ghost: 'border border-solid border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] hover:bg-[var(--white-8)]',
-  danger: 'border border-solid border-[rgba(251,113,133,0.3)] bg-[rgba(251,113,133,0.08)] text-[#fda4af] hover:bg-[rgba(251,113,133,0.15)]',
+  danger: 'border border-solid border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-20)]',
   subtle: 'border-none bg-transparent text-[var(--text-muted)] hover:text-[var(--text-body)] hover:bg-[var(--white-6)]',
 }
 

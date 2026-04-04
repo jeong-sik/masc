@@ -56,7 +56,7 @@ function TimeRangeSelector() {
         <button type="button" key=${value}
           class="px-3 py-1 text-xs rounded-full border cursor-pointer transition-all duration-150 ${
             current === value
-              ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
+              ? 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
               : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)]'
           }"
           onClick=${() => { selectedTimeRange.value = value; loadGraph() }}
@@ -111,15 +111,15 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 function actionCategoryClass(group: ActionTimelineGroup): string {
   switch (group.category) {
     case 'task':
-      return 'border-[#fbbf24]/35 bg-[#fbbf24]/10 text-[#fcd34d]'
+      return 'border-[#fbbf24]/35 bg-[#fbbf24]/10 text-[var(--warn)]'
     case 'session':
-      return 'border-[#4ade80]/35 bg-[#4ade80]/10 text-[#86efac]'
+      return 'border-[#4ade80]/35 bg-[var(--ok)]/10 text-[var(--ok-20)]'
     case 'message':
-      return 'border-[#22d3ee]/35 bg-[#22d3ee]/10 text-[#67e8f9]'
+      return 'border-[#22d3ee]/35 bg-[#22d3ee]/10 text-[var(--cyan)]'
     case 'board':
-      return 'border-[#c084fc]/35 bg-[#c084fc]/10 text-[#d8b4fe]'
+      return 'border-[#c084fc]/35 bg-[#c084fc]/10 text-[var(--purple)]'
     case 'governance':
-      return 'border-[#fb7185]/35 bg-[#fb7185]/10 text-[#fda4af]'
+      return 'border-[#fb7185]/35 bg-[var(--bad)]/10 text-[var(--bad-light)]'
     case 'lifecycle':
       return 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)]'
     default:

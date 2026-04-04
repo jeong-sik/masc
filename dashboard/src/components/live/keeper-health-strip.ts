@@ -4,10 +4,10 @@ import { html } from 'htm/preact'
 import { keeperHealthSummary, type KeeperPressure } from '../../live-store'
 
 function pressureColor(ratio: number): string {
-  if (ratio > 0.85) return 'bg-[#e05050]'
-  if (ratio > 0.70) return 'bg-[#e0a030]'
-  if (ratio > 0.50) return 'bg-[#c0b040]'
-  return 'bg-[#40a060]'
+  if (ratio > 0.85) return 'bg-[var(--bad)]'
+  if (ratio > 0.70) return 'bg-[var(--warn)]'
+  if (ratio > 0.50) return 'bg-[var(--warn)]'
+  return 'bg-[var(--ok)]'
 }
 
 function stageIndicator(stage: string): string {
@@ -52,11 +52,11 @@ export function KeeperHealthStrip() {
 
       <div class="flex items-center gap-2 ml-auto whitespace-nowrap">
         ${alertCount > 0
-          ? html`<span class="text-[12px] font-medium text-[#e0a030]">${alertCount} 주의</span>`
+          ? html`<span class="text-[12px] font-medium text-[var(--warn)]">${alertCount} 주의</span>`
           : html`<span class="text-[12px] text-[var(--text-muted)]">정상</span>`
         }
         ${summary.criticalCount > 0 && html`
-          <span class="text-[12px] font-medium text-[#e05050]">${summary.criticalCount} 위험</span>
+          <span class="text-[12px] font-medium text-[var(--bad)]">${summary.criticalCount} 위험</span>
         `}
       </div>
     </div>

@@ -25,12 +25,12 @@ import { ActivityRail, ParamAuditTrail } from './governance-strips'
 export function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['petitions'][number] }) {
   return html`
     <div class="flex flex-col gap-1.5 py-3 px-4 rounded-xl border border-card-border bg-card/40">
-      <div class="flex flex-wrap items-center gap-2 text-[#9ab3de] text-[11px]">
-        <span class="governance-badge rounded-full text-[#b7cbee]">청원</span>
+      <div class="flex flex-wrap items-center gap-2 text-[var(--text-muted)] text-[11px]">
+        <span class="governance-badge rounded-full text-[var(--text-body)]">청원</span>
         <strong>${petition.created_by || petition.origin || 'system'}</strong>
         ${petition.created_at ? html`<span><${TimeAgo} timestamp=${petition.created_at} /></span>` : html``}
       </div>
-      <div class="mt-2 text-[#d7e7ff] leading-[1.5] break-words">${petition.title}</div>
+      <div class="mt-2 text-[var(--text-strong)] leading-[1.5] break-words">${petition.title}</div>
       <div class="flex flex-wrap gap-1.5 mt-2">
         ${petition.source_refs.map(ref => html`<span class="governance-chip rounded-full">${ref}</span>`)}
       </div>
@@ -41,12 +41,12 @@ export function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['pe
 export function BriefEntry({ brief }: { brief: GovernanceCaseBrief }) {
   return html`
     <div class="flex flex-col gap-1.5 py-3 px-4 rounded-xl border border-card-border bg-card/40">
-      <div class="flex flex-wrap items-center gap-2 text-[#9ab3de] text-[11px]">
+      <div class="flex flex-wrap items-center gap-2 text-[var(--text-muted)] text-[11px]">
         <span class="governance-badge rounded-full ${governanceToneClass(brief.stance)}">${stanceLabel(brief.stance)}</span>
         <strong>${brief.author}</strong>
         ${brief.created_at ? html`<span><${TimeAgo} timestamp=${brief.created_at} /></span>` : html``}
       </div>
-      <div class="mt-2 text-[#d7e7ff] leading-[1.5] break-words">${brief.summary}</div>
+      <div class="mt-2 text-[var(--text-strong)] leading-[1.5] break-words">${brief.summary}</div>
       <div class="flex flex-wrap gap-1.5 mt-2">
         ${brief.evidence_refs.map(ref => html`<span class="governance-chip rounded-full">${ref}</span>`)}
       </div>
@@ -73,7 +73,7 @@ export function DecisionDetail() {
               <div class="flex justify-between items-start gap-4 mb-4">
                 <div>
                   <h3>${detail.case.title}</h3>
-                  <div class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[11px]">
+                  <div class="mt-1 flex flex-wrap gap-2 text-[var(--text-muted)] text-[11px]">
                     <span>${detail.case.id}</span>
                     <span>${caseStatusLabel(detail.case.status)}</span>
                     ${detail.case.updated_at
@@ -82,10 +82,10 @@ export function DecisionDetail() {
                   </div>
                 </div>
                 <div class="grid grid-cols-[repeat(2,minmax(90px,1fr))] gap-2">
-                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[#c8daf7] text-[13px]"><strong>${petitions.length}</strong>건 청원</span>
-                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[#c8daf7] text-[13px]"><strong>${briefs.length}</strong>건 의견</span>
-                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[#c8daf7] text-[13px]"><strong>${item.confidence != null ? Math.round(item.confidence * 100) : 0}</strong>% 확신도</span>
-                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[#c8daf7] text-[13px]"><strong>${orderStatusLabel(detail.execution_order?.status)}</strong></span>
+                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[var(--text-body)] text-[13px]"><strong>${petitions.length}</strong>건 청원</span>
+                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[var(--text-body)] text-[13px]"><strong>${briefs.length}</strong>건 의견</span>
+                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[var(--text-body)] text-[13px]"><strong>${item.confidence != null ? Math.round(item.confidence * 100) : 0}</strong>% 확신도</span>
+                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[var(--text-body)] text-[13px]"><strong>${orderStatusLabel(detail.execution_order?.status)}</strong></span>
                 </div>
               </div>
               <div class="flex flex-col gap-3">

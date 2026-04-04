@@ -552,8 +552,8 @@ export function ToolAllowlistEditor({
               ? html`
                 <div class="flex flex-col gap-2 px-3 py-2 rounded-lg bg-[rgba(239,68,68,0.12)] border border-[var(--bad-30)]">
                   <div class="flex items-start gap-2">
-                    <span class="text-red-400 text-[13px] shrink-0 font-bold">0</span>
-                    <span class="text-[11px] text-red-300 leading-snug">
+                    <span class="text-[var(--bad)] text-[13px] shrink-0 font-bold">0</span>
+                    <span class="text-[11px] text-[var(--bad)] leading-snug">
                       allowlist가 비어 있으면 이 키퍼는 <strong>도구를 하나도 사용할 수 없습니다</strong>.
                     </span>
                   </div>
@@ -617,8 +617,8 @@ export function ToolAllowlistEditor({
         <button type="button"
           class=${`py-1.5 px-4 rounded-lg text-[10px] font-medium transition-colors cursor-pointer disabled:opacity-50 ${
             isCustomEmpty
-              ? 'bg-red-500/80 text-white hover:bg-red-500'
-              : 'bg-[#4ade80] text-[#000] hover:bg-[#22c55e]'
+              ? 'bg-[var(--bad-light)] text-white hover:bg-[var(--bad)]'
+              : 'bg-[var(--ok)] text-[#000] hover:bg-[#22c55e]'
           }`}
           onClick=${applyChanges}
           disabled=${saving.value}
@@ -637,7 +637,7 @@ export function ToolAllowlistEditor({
       </div>
 
       ${lastError.value
-        ? html`<span class="text-[10px] text-red-400">${lastError.value}</span>`
+        ? html`<span class="text-[10px] text-[var(--bad)]">${lastError.value}</span>`
         : null}
       ${lastSuccess.value
         ? html`<span class="text-[10px] text-emerald-400">${lastSuccess.value}</span>`

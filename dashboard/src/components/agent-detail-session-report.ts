@@ -232,7 +232,7 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
             </div>
           ` : null}
           ${summary.tasks_claimed > 0 ? html`
-            <div class="flex items-center gap-1.5 text-[12px] font-medium text-accent bg-accent/10 border border-accent/20 px-3 py-1.5 rounded-lg">
+            <div class="flex items-center gap-1.5 text-[12px] font-medium text-accent bg-[var(--accent-10)] border border-accent/20 px-3 py-1.5 rounded-lg">
               <span class="font-bold">${summary.tasks_claimed}</span> 수임
             </div>
           ` : null}

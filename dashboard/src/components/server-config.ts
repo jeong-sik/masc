@@ -175,7 +175,7 @@ export function ServerConfig() {
       </div>
 
       ${error ? html`
-        <div class="text-sm text-red-400 mb-3">${error}</div>
+        <div class="text-sm text-[var(--bad)] mb-3">${error}</div>
       ` : null}
 
       ${loading && !data ? html`

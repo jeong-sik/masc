@@ -17,7 +17,7 @@ function ToolRow({ tool, isSelected }: { tool: McpToolSchema; isSelected: boolea
   const isDeprecated = tool.annotations?.deprecated === true
   return html`
     <button type="button" class="w-full text-left px-3 py-2 rounded-lg transition-colors cursor-pointer
-      ${isSelected ? 'bg-[var(--accent-12)] border border-[rgba(71,184,255,0.3)]' : 'hover:bg-[var(--white-6)] border border-transparent'}
+      ${isSelected ? 'bg-[var(--accent-12)] border border-[var(--accent-30)]' : 'hover:bg-[var(--white-6)] border border-transparent'}
       ${isDeprecated ? 'opacity-50' : ''}" onClick=${() => selectTool(tool)}>
       <div class="flex items-center gap-1.5">
         <span class="text-[12px] text-[var(--text-strong)] font-mono truncate flex-1">${tool.name}</span>
@@ -40,7 +40,7 @@ export function ToolPicker() {
         ${TIER_OPTIONS.map(opt => html`
           <button type="button" class="text-[10px] px-2 py-0.5 rounded-md transition-colors cursor-pointer
             ${tierFilter.value === opt.value
-              ? 'bg-[var(--accent-12)] text-[var(--text-strong)] border border-[rgba(71,184,255,0.3)]'
+              ? 'bg-[var(--accent-12)] text-[var(--text-strong)] border border-[var(--accent-30)]'
               : 'text-[var(--text-muted)] hover:text-[var(--text-body)] border border-transparent hover:bg-[var(--white-6)]'}"
             onClick=${() => { tierFilter.value = opt.value }}>${opt.label}</button>
         `)}

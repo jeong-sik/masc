@@ -15,11 +15,11 @@ import { TextArea } from '../common/input'
 function sourceBadgeClass(source: PromptSource): string {
   switch (source) {
     case 'override':
-      return 'text-[#facc15] bg-[rgba(250,204,21,0.12)] border-[rgba(250,204,21,0.28)]'
+      return 'text-[var(--warn)] bg-[rgba(250,204,21,0.12)] border-[rgba(250,204,21,0.28)]'
     case 'file':
-      return 'text-[#86efac] bg-[rgba(34,197,94,0.12)] border-[rgba(34,197,94,0.28)]'
+      return 'text-[var(--ok-20)] bg-[rgba(34,197,94,0.12)] border-[rgba(34,197,94,0.28)]'
     case 'missing':
-      return 'text-[#fda4af] bg-[rgba(244,63,94,0.12)] border-[rgba(244,63,94,0.28)]'
+      return 'text-[var(--bad-light)] bg-[rgba(244,63,94,0.12)] border-[rgba(244,63,94,0.28)]'
     default:
       return 'text-[var(--text-muted)] bg-[var(--white-6)] border-[var(--card-border)]'
   }
@@ -157,7 +157,7 @@ export function PromptRegistryPanel() {
               <div class="font-mono text-[13px] text-[var(--text-strong)]">${selectedPrompt.key}</div>
               <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${sourceBadgeClass(selectedPrompt.source)}">${selectedPrompt.source}</span>
               ${selectedPrompt.has_override
-                ? html`<span class="rounded-full border border-[rgba(250,204,21,0.28)] bg-[rgba(250,204,21,0.08)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[#fde68a]">오버라이드 활성</span>`
+                ? html`<span class="rounded-full border border-[rgba(250,204,21,0.28)] bg-[var(--warn-10)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[#fde68a]">오버라이드 활성</span>`
                 : null}
             </div>
 

@@ -252,11 +252,11 @@ function CharacterPlate({ name }: { name: string }) {
 
         <div class="flex gap-2 items-center flex-wrap">
           ${currentWork
-            ? html`<span class="text-base text-[#c8daf7]">${currentWork}</span>`
-            : html`<span class="text-base text-[#6b7fa0] italic">대기 중</span>`
+            ? html`<span class="text-base text-[var(--text-body)]">${currentWork}</span>`
+            : html`<span class="text-base text-[var(--text-dim)] italic">대기 중</span>`
           }
           ${workerState ? html`<span class="text-[11px] text-[var(--accent)] bg-[var(--accent-8)] px-[5px] py-px rounded-[3px]">${workerState}</span>` : null}
-          ${workerFocus ? html`<span class="text-[11px] text-[#9ab3de]">${workerFocus}</span>` : null}
+          ${workerFocus ? html`<span class="text-[11px] text-[var(--text-muted)]">${workerFocus}</span>` : null}
         </div>
 
         ${lastSeenAt || lastActivity != null ? html`
@@ -339,7 +339,7 @@ export function AgentProfile({ name }: { name: string }) {
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
                 <div class="flex items-center gap-2 border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 rounded-lg" key=${t.id}>
                   <span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">${t.id}</span>
-                  <span class="flex-1 text-[#d7e7ff]">${t.title}</span>
+                  <span class="flex-1 text-[var(--text-strong)]">${t.title}</span>
                   <${StatusBadge} status=${t.status} />
                 </div>
               `)}</div>`}
@@ -391,7 +391,7 @@ export function AgentProfile({ name }: { name: string }) {
                 return html`
                   <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-[13px] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
                     <span class="text-[11px] font-semibold text-[var(--ff-gold)] min-w-8">${timelineEventLabel(evt.type)}</span>
-                    ${title ? html`<span class="flex-1 text-[13px] text-[#c8daf7]">${trimText(title, 80)}</span>` : null}
+                    ${title ? html`<span class="flex-1 text-[13px] text-[var(--text-body)]">${trimText(title, 80)}</span>` : null}
                     ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
                   </div>
                 `
@@ -406,7 +406,7 @@ export function AgentProfile({ name }: { name: string }) {
           ${lines.length === 0
             ? html`<${EmptyState} message="관련 활동 없음" compact />`
             : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${lines.map((line: string, idx: number) =>
-                html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[13px] text-[#c8daf7] leading-[1.4] rounded-lg">${line}</div>`)}</div>`}
+                html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[13px] text-[var(--text-body)] leading-[1.4] rounded-lg">${line}</div>`)}</div>`}
         <//>
 
         ${(profileData?.taskHistories ?? []).length > 0 ? html`
@@ -414,7 +414,7 @@ export function AgentProfile({ name }: { name: string }) {
             <div class="agent-history-list">${(profileData?.taskHistories ?? []).map((row: TaskHistoryRow) => html`
               <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
                 <div class="mb-2"><span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">${row.taskId}</span></div>
-                <pre class="m-0 whitespace-pre-wrap text-[13px] leading-[1.5] text-[#cfe0ff] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
+                <pre class="m-0 whitespace-pre-wrap text-[13px] leading-[1.5] text-[var(--text-strong)] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
               </div>
             `)}</div>
           <//>

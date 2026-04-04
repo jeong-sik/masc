@@ -126,7 +126,7 @@ function ContractSection({ task }: { task: Task }) {
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
         <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">계약 게이트</div>
-        <span class=${`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${contract?.strict ? 'text-accent border-accent/25 bg-accent/10' : 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
+        <span class=${`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
       </div>
 
       <${GateSection} title="Done Gate" gate=${gate?.done} />

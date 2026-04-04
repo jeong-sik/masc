@@ -188,7 +188,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.2)] bg-[var(--accent-10)] px-2.5 py-1 text-[11px] font-medium text-[#bfe8ff]">
+          <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.2)] bg-[var(--accent-10)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-strong)]">
             ${entries.length}개 메시지
           </span>
         </div>
@@ -196,7 +196,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
 
       <div class="px-4 py-4">
         ${chatAccess.message
-          ? html`<div class="mb-4 rounded-[18px] border border-[rgba(245,158,11,0.18)] bg-[rgba(245,158,11,0.08)] px-3 py-2.5 text-[12px] leading-[1.6] text-[#f4d79e]">${chatAccess.message}</div>`
+          ? html`<div class="mb-4 rounded-[18px] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-[12px] leading-[1.6] text-[var(--warn-bright)]">${chatAccess.message}</div>`
           : null}
         <${ChatTranscript}
           entries=${transcriptEntries}
@@ -206,7 +206,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
       </div>
 
       ${chatError.value
-        ? html`<div class="mx-4 mb-4 rounded-[18px] border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.24)] px-3 py-2.5 text-[12px] leading-[1.6] text-[#ffb4b4]">${chatError.value}</div>`
+        ? html`<div class="mx-4 mb-4 rounded-[18px] border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.24)] px-3 py-2.5 text-[12px] leading-[1.6] text-[var(--bad-light)]">${chatError.value}</div>`
         : null}
 
       <div class="border-t border-[rgba(148,163,184,0.12)] bg-[var(--white-3)] px-4 py-4">

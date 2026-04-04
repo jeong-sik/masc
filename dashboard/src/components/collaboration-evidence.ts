@@ -42,7 +42,7 @@ function evidenceTone(value: string): string {
     case 'partial':
       return 'text-[var(--warn)] bg-[var(--warn-12)] border-[rgba(251,191,36,0.2)]'
     default:
-      return 'text-[var(--bad)] bg-[var(--bad-12)] border-[rgba(239,68,68,0.2)]'
+      return 'text-[var(--bad)] bg-[var(--bad-12)] border-[var(--bad-20)]'
   }
 }
 

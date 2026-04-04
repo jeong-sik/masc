@@ -152,7 +152,7 @@ function WarningBlock({
   if (warnings.length === 0) return null
 
   return html`
-    <div class="rounded-lg border border-[rgba(250,204,21,0.28)] bg-[rgba(250,204,21,0.08)] px-3 py-3">
+    <div class="rounded-lg border border-[rgba(250,204,21,0.28)] bg-[var(--warn-10)] px-3 py-3">
       <div class="mb-2 text-[11px] uppercase tracking-[0.08em] text-[#fde68a]">${title}</div>
       <div class="flex flex-col gap-2">
         ${warnings.map(warning => html`

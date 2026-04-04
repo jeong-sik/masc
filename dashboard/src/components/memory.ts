@@ -202,7 +202,7 @@ function SortBar() {
         <div class="ml-auto flex items-center gap-2">
           ${selectedPostIds.value.size > 0 ? html`
             <button type="button"
-              class="px-3 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-[var(--bad-10)] text-[#f87171] border-[var(--bad-30)] hover:bg-[rgba(239,68,68,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+              class="px-3 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-30)] hover:bg-[rgba(239,68,68,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
               onClick=${bulkDeleteSelected}
               disabled=${bulkDeleting.value}
             >
@@ -308,7 +308,7 @@ function PostCard({ post }: { post: BoardPost }) {
 
   return html`
     <div
-      class="board-post group flex gap-3 rounded-xl p-4 border border-[var(--card-border)] bg-[var(--card)] hover:bg-[var(--white-6)] hover:border-[rgba(71,184,255,0.26)] transition-all duration-200 cursor-pointer"
+      class="board-post group flex gap-3 rounded-xl p-4 border border-[var(--card-border)] bg-[var(--card)] hover:bg-[var(--white-6)] hover:border-[var(--accent-20)] transition-all duration-200 cursor-pointer"
       onClick=${() => navigateToPost(post.id)}
     >
       <!-- Select checkbox -->
@@ -323,12 +323,12 @@ function PostCard({ post }: { post: BoardPost }) {
       <!-- Vote column -->
       <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-[36px]">
         <button type="button"
-          class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[#ff4500] hover:bg-[rgba(255,69,0,0.1)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] transition-colors cursor-pointer border-0 bg-transparent"
           onClick=${(event: Event) => handleVote('up', event)}
         >▲</button>
         <span class="text-[13px] font-semibold tabular-nums text-[var(--text-strong)]">${post.votes ?? 0}</span>
         <button type="button"
-          class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[#7193ff] hover:bg-[rgba(113,147,255,0.1)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-10)] transition-colors cursor-pointer border-0 bg-transparent"
           onClick=${(event: Event) => handleVote('down', event)}
         >▼</button>
       </div>
@@ -368,7 +368,7 @@ function PostCard({ post }: { post: BoardPost }) {
 
           <!-- Delete button -->
           <button type="button"
-            class="ml-auto px-2 py-0.5 rounded text-[10px] font-semibold border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#f87171] hover:bg-[rgba(239,68,68,0.2)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="ml-auto px-2 py-0.5 rounded text-[10px] font-semibold border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[rgba(239,68,68,0.2)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${handleDelete}
             disabled=${isDeleting}
           >

@@ -61,8 +61,8 @@ export function OpsKeeperColumn() {
         ${keepers.length > 0 ? html`
           <div class="flex gap-3 text-[11px] font-mono">
             ${statusCounts.running ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--ok)]"></span>${statusCounts.running} running</span>` : null}
-            ${statusCounts.paused ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#f59e0b]"></span>${statusCounts.paused} paused</span>` : null}
-            ${statusCounts.crashed ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#ef4444]"></span>${statusCounts.crashed} crashed</span>` : null}
+            ${statusCounts.paused ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--warn)]"></span>${statusCounts.paused} paused</span>` : null}
+            ${statusCounts.crashed ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--bad)]"></span>${statusCounts.crashed} crashed</span>` : null}
             ${statusCounts.dead ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#6b7280]"></span>${statusCounts.dead} dead</span>` : null}
             ${statusCounts.offline ? html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[var(--text-muted)]"></span>${statusCounts.offline} offline</span>` : null}
           </div>

@@ -233,14 +233,25 @@ let test_pruned_tools_move_to_system_internal () =
       Alcotest.(check bool) (name ^ " hidden") false
         (Tool_catalog.is_visible name);
       Alcotest.(check bool) (name ^ " callable") true
-        (Tool_catalog.allow_direct_call name))
+        (Tool_catalog.allow_direct_call name);
+      Alcotest.(check (option string)) (name ^ " reason")
+        (Some "System-internal tool; callable but not listed in tools/list.")
+        (Tool_catalog.metadata name).Tool_catalog.reason)
     [
       "masc_a2a_delegate";
+      "masc_a2a_unsubscribe";
       "masc_board_migrate";
+      "masc_board_reclassify";
+      "masc_episode_flush";
       "masc_episode_list";
       "masc_portal_send";
+      "masc_portal_status";
       "masc_transport_status";
+      "masc_websocket_discovery";
+      "masc_webrtc_offer";
+      "masc_voice_agent";
       "masc_voice_speak";
+      "masc_voice_conference_start";
     ]
 
 let test_workspace_mutating_canonical_used () =

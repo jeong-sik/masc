@@ -294,6 +294,9 @@ let metadata name =
           reason = Some "Internal tool; not on public MCP surface." }
   in
   if Tool_catalog_surfaces.is_on_surface System_internal name then
+    (* Surface membership is the canonical "hidden but callable" contract for
+       system-internal tools, even when a tool also carries explicit metadata
+       for semantic hints like readonly/destructive. *)
     {
       base with
       visibility = Hidden;

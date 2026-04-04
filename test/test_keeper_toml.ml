@@ -134,7 +134,7 @@ let test_parse_multiline_basic_string () =
   | Ok doc ->
     (match List.assoc_opt "keeper.instructions" doc with
      | Some (TL.Toml_string s) ->
-       check string "multiline content" "line one\nline two\nline three" s
+       check string "multiline content" "line one\nline two\nline three\n" s
      | _ -> fail "expected Toml_string for multiline")
   | Error e -> fail ("multiline parse failed: " ^ e)
 
@@ -170,7 +170,7 @@ let test_parse_multiline_with_escapes () =
   | Ok doc ->
     (match List.assoc_opt "key" doc with
      | Some (TL.Toml_string s) ->
-       check string "multiline with escape" "first\nsecond" s
+       check string "multiline with escape" "first\nsecond\n" s
      | _ -> fail "expected Toml_string")
   | Error e -> fail ("multiline escape failed: " ^ e)
 
@@ -180,13 +180,57 @@ let test_parse_multiline_with_values_after () =
   | Ok doc ->
     (match List.assoc_opt "keeper.instructions" doc with
      | Some (TL.Toml_string s) ->
-       check string "multiline" "some text" s
+       check string "multiline" "some text\n" s
      | _ -> fail "expected instructions");
     (match List.assoc_opt "keeper.goal" doc with
      | Some (TL.Toml_string s) ->
        check string "goal after multiline" "test" s
      | _ -> fail "expected goal after multiline")
   | Error e -> fail ("multiline with values after failed: " ^ e)
+
+let test_parse_multiline_preserves_leading_spaces () =
+  let input = "key = \"\"\"  keep-leading-space\nnext line\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "multiline preserves spaces" "  keep-leading-space\nnext line\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("multiline whitespace preservation failed: " ^ e)
+
+let test_parse_multiline_allows_escaped_triple_quotes () =
+  let input = "key = \"\"\"\ncontains \\\"\\\"\\\" quotes\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "escaped triple quotes" "contains \"\"\" quotes\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("escaped triple quotes failed: " ^ e)
+
+let test_parse_multiline_rejects_trailing_garbage () =
+  let inputs =
+    [
+      "key = \"\"\"inline\"\"\" garbage";
+      "key = \"\"\"\nline\n\"\"\" garbage";
+    ]
+  in
+  List.iter
+    (fun input ->
+      match TL.parse_toml input with
+      | Ok _ -> fail "expected parse error for trailing garbage after multiline close"
+      | Error _ -> ())
+    inputs
+
+let test_parse_multiline_normalizes_crlf () =
+  let input = "key = \"\"\"\r\nfirst\r\nsecond\r\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "crlf normalized" "first\nsecond\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("multiline CRLF failed: " ^ e)
 
 let test_parse_error_unterminated_table () =
   let input = "[missing_bracket" in
@@ -599,6 +643,14 @@ let () =
           test_case "multiline unterminated" `Quick test_parse_multiline_unterminated;
           test_case "multiline with escapes" `Quick test_parse_multiline_with_escapes;
           test_case "multiline with values after" `Quick test_parse_multiline_with_values_after;
+          test_case "multiline preserves leading spaces" `Quick
+            test_parse_multiline_preserves_leading_spaces;
+          test_case "multiline allows escaped triple quotes" `Quick
+            test_parse_multiline_allows_escaped_triple_quotes;
+          test_case "multiline rejects trailing garbage" `Quick
+            test_parse_multiline_rejects_trailing_garbage;
+          test_case "multiline normalizes CRLF" `Quick
+            test_parse_multiline_normalizes_crlf;
           test_case "error: unterminated table" `Quick test_parse_error_unterminated_table;
           test_case "error: no equals" `Quick test_parse_error_no_equals;
         ] );

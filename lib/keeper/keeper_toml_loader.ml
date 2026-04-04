@@ -19,6 +19,39 @@ type toml_doc = (string * toml_value) list
 
 let is_ws c = c = ' ' || c = '\t'
 
+let strip_trailing_cr s =
+  let len = String.length s in
+  if len > 0 && s.[len - 1] = '\r' then String.sub s 0 (len - 1) else s
+
+let trim_leading_ws s =
+  let len = String.length s in
+  let rec scan i =
+    if i >= len then len
+    else if is_ws s.[i] then scan (i + 1)
+    else i
+  in
+  let start = scan 0 in
+  String.sub s start (len - start)
+
+let trim_initial_multiline_newline s =
+  let len = String.length s in
+  if len >= 2 && s.[0] = '\r' && s.[1] = '\n' then
+    String.sub s 2 (len - 2)
+  else if len >= 1 && s.[0] = '\n' then
+    String.sub s 1 (len - 1)
+  else
+    s
+
+let multiline_suffix_is_valid suffix =
+  let len = String.length suffix in
+  let rec skip_ws i =
+    if i >= len then len
+    else if is_ws suffix.[i] then skip_ws (i + 1)
+    else i
+  in
+  let i = skip_ws 0 in
+  i >= len || suffix.[i] = '#'
+
 let strip_comment (line : string) : string =
   (* Find # that is not inside a quoted string. *)
   let len = String.length line in
@@ -151,11 +184,20 @@ let starts_with_triple_quote s =
   let len = String.length s in
   len >= 3 && s.[0] = '"' && s.[1] = '"' && s.[2] = '"'
 
+let is_escaped_quote s idx =
+  let rec count_backslashes i count =
+    if i < 0 then count
+    else if s.[i] = '\\' then count_backslashes (i - 1) (count + 1)
+    else count
+  in
+  (count_backslashes (idx - 1) 0) mod 2 = 1
+
 let find_closing_triple_quote s start =
   let len = String.length s in
   let rec scan i =
     if i + 2 >= len then None
-    else if s.[i] = '"' && s.[i+1] = '"' && s.[i+2] = '"' then Some i
+    else if s.[i] = '"' && s.[i+1] = '"' && s.[i+2] = '"'
+            && not (is_escaped_quote s i) then Some i
     else scan (i + 1)
   in
   scan start
@@ -173,38 +215,48 @@ let parse_toml (content : string) : (toml_doc, string) result =
   let ml_start_line = ref 0 in
   List.iter (fun raw_line ->
     incr line_num;
+    let raw_line = strip_trailing_cr raw_line in
     if Option.is_none !error then begin
       if !ml_active then begin
         (* Inside a multiline string -- look for closing triple-quote *)
         match find_closing_triple_quote raw_line 0 with
         | Some close_pos ->
           let prefix = String.sub raw_line 0 close_pos in
-          if prefix <> "" then begin
+          let suffix =
+            String.sub raw_line (close_pos + 3)
+              (String.length raw_line - close_pos - 3)
+          in
+          if not (multiline_suffix_is_valid suffix) then
+            error := Some
+              (Printf.sprintf "line %d: unexpected content after closing multiline string"
+                 !line_num)
+          else begin
             if Buffer.length !ml_buf > 0 then Buffer.add_char !ml_buf '\n';
-            Buffer.add_string !ml_buf prefix
-          end;
-          let raw_str = Buffer.contents !ml_buf in
-          (match parse_basic_string raw_str with
-           | Ok v -> acc := (!ml_key, Toml_string v) :: !acc
-           | Error e ->
-             error := Some (Printf.sprintf "line %d: multiline string: %s" !ml_start_line e));
-          ml_active := false
+            Buffer.add_string !ml_buf prefix;
+            let raw_str = Buffer.contents !ml_buf in
+            (match parse_basic_string raw_str with
+             | Ok v -> acc := (!ml_key, Toml_string v) :: !acc
+             | Error e ->
+               error := Some
+                 (Printf.sprintf "line %d: multiline string: %s" !ml_start_line e));
+            ml_active := false
+          end
         | None ->
           if Buffer.length !ml_buf > 0 then Buffer.add_char !ml_buf '\n';
           Buffer.add_string !ml_buf raw_line
       end
       else begin
-        let line = String.trim raw_line in
-        let line = strip_comment line in
-        if line = "" then ()
-        else if line.[0] = '[' then begin
+        let line = strip_comment raw_line in
+        let trimmed_line = String.trim line in
+        if trimmed_line = "" then ()
+        else if trimmed_line.[0] = '[' then begin
           (* Table header *)
-          let len = String.length line in
-          if line.[len - 1] <> ']' then
+          let len = String.length trimmed_line in
+          if trimmed_line.[len - 1] <> ']' then
             error := Some (Printf.sprintf "line %d: unterminated table header" !line_num)
           else begin
             let table_name =
-              String.sub line 1 (len - 2) |> String.trim
+              String.sub trimmed_line 1 (len - 2) |> String.trim
             in
             if table_name = "" then
               error := Some (Printf.sprintf "line %d: empty table name" !line_num)
@@ -227,7 +279,7 @@ let parse_toml (content : string) : (toml_doc, string) result =
                 if !current_table = "" then key
                 else !current_table ^ "." ^ key
               in
-              let trimmed = String.trim value_raw in
+              let trimmed = trim_leading_ws value_raw in
               if starts_with_triple_quote trimmed then begin
                 (* Start of multiline basic string *)
                 let after_open = String.sub trimmed 3 (String.length trimmed - 3) in
@@ -235,17 +287,26 @@ let parse_toml (content : string) : (toml_doc, string) result =
                 | Some close_pos ->
                   (* Single-line: triple-quoted on one line *)
                   let inner = String.sub after_open 0 close_pos in
-                  (match parse_basic_string inner with
-                   | Ok v -> acc := (full_key, Toml_string v) :: !acc
-                   | Error e ->
-                     error := Some (Printf.sprintf "line %d: %s" !line_num e))
+                  let suffix =
+                    String.sub after_open (close_pos + 3)
+                      (String.length after_open - close_pos - 3)
+                  in
+                  if not (multiline_suffix_is_valid suffix) then
+                    error := Some
+                      (Printf.sprintf "line %d: unexpected content after closing multiline string"
+                         !line_num)
+                  else
+                    (match parse_basic_string inner with
+                     | Ok v -> acc := (full_key, Toml_string v) :: !acc
+                     | Error e ->
+                       error := Some (Printf.sprintf "line %d: %s" !line_num e))
                 | None ->
                   (* Multiline continues on next lines.
                      TOML spec: newline after opening delimiter is trimmed,
                      so we start with empty buffer. *)
                   ml_key := full_key;
                   ml_buf := Buffer.create 256;
-                  let stripped = String.trim after_open in
+                  let stripped = trim_initial_multiline_newline after_open in
                   if stripped <> "" then
                     Buffer.add_string !ml_buf stripped;
                   ml_active := true;

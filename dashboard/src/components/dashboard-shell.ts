@@ -178,7 +178,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
           </div>
         ` : null}
         <button type="button"
-          class="flex size-7 items-center justify-center rounded-lg text-[var(--text-muted)] cursor-pointer transition-colors duration-200 hover:bg-[var(--white-10)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
+          class="flex size-7 items-center justify-center rounded-lg text-[var(--text-muted)] cursor-pointer transition-colors duration-200 hover:bg-[var(--white-10)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
           aria-label=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
           onClick=${onToggle}
           title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
@@ -224,7 +224,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <//>
 
                 ${sections.length > 0 ? html`
-                  <div class="ml-7 flex flex-col gap-0.5 border-l border-[rgba(255,255,255,0.05)] pl-3" role="list">
+                  <div class="ml-7 flex flex-col gap-0.5 border-l border-[var(--border-subtle)] pl-3" role="list">
                     ${sections.map(item => {
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id
                       return html`
@@ -306,7 +306,7 @@ function SurfaceLead() {
     <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
       <h2 class="flex items-center gap-2 text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
         ${currentSection?.label ?? currentView?.label ?? '홈'}
-        ${description ? html`<span class="text-[13px] font-normal text-[rgba(255,255,255,0.44)] truncate min-w-0">${description}</span>` : null}
+        ${description ? html`<span class="text-[13px] font-normal text-[var(--text-dim)] truncate min-w-0">${description}</span>` : null}
       </h2>
     </div>
   `

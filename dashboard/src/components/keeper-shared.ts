@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { Markdown } from "./common/markdown"
 import { useState } from 'preact/hooks'
 import { requestConfirm } from './common/confirm-dialog'
 import { isOfflineStatus } from '../lib/status-utils'
@@ -226,7 +227,7 @@ export function KeeperDiagnosticSummary({
         ? html`<div class="text-xs text-[#ffb4b4] leading-relaxed mt-1">${diagnostic.last_error}</div>`
         : null}
       ${showRawStatus
-        ? html`<pre class="mt-3 py-3 px-4 rounded-lg border border-[var(--card-border)] bg-[rgba(2,10,24,0.82)] text-[#9ad8b6] text-[11px] leading-relaxed whitespace-pre-wrap break-words font-mono max-h-[240px] overflow-auto">${detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.'}</pre>`
+        ? html`<div class="mt-3 max-h-[240px] overflow-auto rounded-lg border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
         : null}
     </div>
   `

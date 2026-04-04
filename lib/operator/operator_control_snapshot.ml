@@ -796,11 +796,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
            ("keepers", !keepers_ref);
            ("persistent_agents", !persistent_ref);
            ("command_plane", !command_plane_ref);
+           ("swarm_status", !swarm_status_ref);
          ]
       )
-      @ [
-         ("swarm_status", !swarm_status_ref);
-       ]
       @ (let (role_census, runtime_pools, lane_census, controller_census,
               control_domains, task_profiles, escalation_count) =
            timed "aggregates" (fun () -> aggregate_all_worker_metrics tracked_sessions)

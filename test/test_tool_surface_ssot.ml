@@ -225,6 +225,46 @@ let test_system_internal_callable () =
       (String.concat ", " uncallable);
   Alcotest.(check bool) "all system_internal callable" true (uncallable = [])
 
+let test_pruned_tools_move_to_system_internal () =
+  List.iter
+    (fun name ->
+      Alcotest.(check bool) (name ^ " on System_internal") true
+        (Tool_catalog.is_on_surface Tool_catalog.System_internal name);
+      Alcotest.(check bool) (name ^ " hidden") false
+        (Tool_catalog.is_visible name);
+      Alcotest.(check bool) (name ^ " callable") true
+        (Tool_catalog.allow_direct_call name);
+      Alcotest.(check (option string)) (name ^ " reason")
+        (Some "System-internal tool; callable but not listed in tools/list.")
+        (Tool_catalog.metadata name).Tool_catalog.reason)
+    [
+      "masc_a2a_delegate";
+      "masc_a2a_discover";
+      "masc_a2a_query_skill";
+      "masc_a2a_subscribe";
+      "masc_a2a_unsubscribe";
+      "masc_board_migrate";
+      "masc_board_reclassify";
+      "masc_episode_flush";
+      "masc_episode_list";
+      "masc_portal_close";
+      "masc_portal_open";
+      "masc_portal_send";
+      "masc_portal_status";
+      "masc_transport_status";
+      "masc_websocket_discovery";
+      "masc_webrtc_answer";
+      "masc_webrtc_offer";
+      "masc_voice_agent";
+      "masc_voice_conference_end";
+      "masc_voice_speak";
+      "masc_voice_conference_start";
+      "masc_voice_ping_pong";
+      "masc_voice_session_end";
+      "masc_voice_session_start";
+      "masc_voice_sessions";
+    ]
+
 let test_workspace_mutating_canonical_used () =
   (* workspace_mutating_tool_names in tool_catalog_surfaces is the canonical list.
      Verify no empty or phantom entries. *)
@@ -282,5 +322,7 @@ let () =
             test_system_internal_not_visible;
           Alcotest.test_case "System_internal callable" `Quick
             test_system_internal_callable;
+          Alcotest.test_case "pruned tools move to System_internal" `Quick
+            test_pruned_tools_move_to_system_internal;
         ] );
     ]

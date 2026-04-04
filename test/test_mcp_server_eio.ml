@@ -563,16 +563,16 @@ let test_handle_request_tools_list () =
     true
     (List.mem "masc_board_post" names);
   Alcotest.(check bool)
-    "contains masc_voice_agent (public surface)"
-    true
+    "omits masc_voice_agent (public surface)"
+    false
     (List.mem "masc_voice_agent" names);
   Alcotest.(check bool)
-    "contains masc_voice_speak (public surface)"
-    true
+    "omits masc_voice_speak (public surface)"
+    false
     (List.mem "masc_voice_speak" names);
   Alcotest.(check bool)
-    "contains masc_voice_ping_pong (public surface)"
-    true
+    "omits masc_voice_ping_pong (public surface)"
+    false
     (List.mem "masc_voice_ping_pong" names);
   Alcotest.(check bool)
     "board_search hidden from public surface"
@@ -812,11 +812,11 @@ let test_handle_request_tools_list_managed_profile () =
                    (List.mem "masc_status" names);
                  Alcotest.(check bool) "omits raw masc_transition" false
                    (List.mem "masc_transition" names);
-                 Alcotest.(check bool) "includes managed voice agent" true
+                 Alcotest.(check bool) "omits managed voice agent" false
                    (List.mem "masc_voice_agent" names);
-                 Alcotest.(check bool) "includes managed voice speak" true
+                 Alcotest.(check bool) "omits managed voice speak" false
                    (List.mem "masc_voice_speak" names);
-                 Alcotest.(check bool) "includes managed voice ping pong" true
+                 Alcotest.(check bool) "omits managed voice ping pong" false
                    (List.mem "masc_voice_ping_pong" names)
              | _ -> Alcotest.fail "tools not a list")
         | _ -> Alcotest.fail "result not an object")
@@ -1063,6 +1063,31 @@ let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
                | _ -> false)
         | _ -> Alcotest.fail "error missing")
    | _ -> Alcotest.fail "response not an object");
+  cleanup_dir base_path
+
+let test_handle_request_tools_call_system_internal_transport_status () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 14);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "masc_transport_status");
+      ("arguments", `Assoc []);
+    ]);
+  ]) in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let _ = result_fields_exn response in
+  let structured = structured_content_exn response in
+  Alcotest.(check bool) "transport status includes http block" true
+    Yojson.Safe.Util.(structured |> member "http" <> `Null);
+  Alcotest.(check bool) "transport status includes websocket block" true
+    Yojson.Safe.Util.(structured |> member "websocket" <> `Null);
   cleanup_dir base_path
 
 let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
@@ -2568,6 +2593,8 @@ let eio_tests = [
     test_handle_request_jsonrpc_response_returns_null;
   "reject non-operator tool on operator profile", `Quick,
   test_handle_request_tools_call_operator_profile_rejects_non_operator;
+  "handle tools/call system_internal transport_status", `Quick,
+    test_handle_request_tools_call_system_internal_transport_status;
   "handle tools/call managed profile sdk alias claim", `Quick,
     test_handle_request_tools_call_managed_profile_sdk_alias_claim;
   "handle tools/call transition claim guidance", `Quick,

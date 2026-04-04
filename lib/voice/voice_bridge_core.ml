@@ -27,13 +27,9 @@ let default_max_retries = 3
 let default_initial_backoff_seconds = 1.0
 let default_backoff_multiplier = 2.0
 
-let default_agent_voices =
-  [
-    ("claude", "Sarah");
-    ("gemini", "Roger");
-    ("codex", "George");
-    ("llama", "Laura");
-  ]
+(** Default agent voices from Provider_adapter registry (SSOT).
+    Hardcoded list removed — voices defined in Provider_adapter.direct_adapters. *)
+let default_agent_voices () = Provider_adapter.all_agent_voices ()
 
 let load_voice_config () = Voice_config.load ()
 
@@ -45,7 +41,7 @@ let backoff_multiplier () = default_backoff_multiplier
 let agent_voices () =
   match load_voice_config () with
   | Ok config -> config.tts.agent_voices
-  | Error _ -> default_agent_voices
+  | Error _ -> default_agent_voices ()
 
 let tuning_for_agent agent_id =
   match load_voice_config () with

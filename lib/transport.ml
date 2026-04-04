@@ -439,7 +439,9 @@ module Rest = struct
                ] )
          :: request_fields ))
 
-  let generate_openapi_document ?(host = "127.0.0.1") ?(port = 8935) () :
+  let generate_openapi_document
+      ?(host = Env_config_core.masc_host ())
+      ?(port = Env_config_core.masc_http_port_int ()) () :
       Yojson.Safe.t =
     let operation_entries =
       Sdk_tool_contract.core_remote_operation_names

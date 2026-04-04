@@ -17,8 +17,8 @@ export function ListItem({ title, subtitle, detail, onClick, class: className }:
 
   const content = html`
     <strong class="text-[var(--text-strong)]">${title}</strong>
-    ${subtitle != null ? html`<span class="text-[rgba(255,255,255,0.72)] leading-snug">${subtitle}</span>` : null}
-    ${detail != null ? html`<small class="text-[rgba(255,255,255,0.72)] leading-snug">${detail}</small>` : null}
+    ${subtitle != null ? html`<span class="text-[var(--text-body)] leading-snug">${subtitle}</span>` : null}
+    ${detail != null ? html`<small class="text-[var(--text-muted)] leading-snug">${detail}</small>` : null}
   `
 
   if (onClick) {

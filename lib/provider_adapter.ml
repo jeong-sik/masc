@@ -20,6 +20,8 @@ type adapter = {
   runtime_kind : runtime_kind;
   auth_mode : auth_mode;
   aliases : string list;
+  spawn_key : string option;       (** Key into Spawn.default_configs. None = not spawnable via CLI. *)
+  default_voice : string option;   (** Default TTS voice name. None = no voice assignment. *)
 }
 
 type voice_adapter = {
@@ -79,6 +81,10 @@ let cn_gemini = "gemini-api"
 let cn_glm = "glm"
 let cn_openrouter = "openrouter"
 
+(** Single source of truth for all agent adapters.
+    spawn_key maps to Spawn.default_configs keys.
+    default_voice maps to TTS voice names.
+    Adding a new agent = adding one entry here. *)
 let direct_adapters =
   [
     {
@@ -86,18 +92,24 @@ let direct_adapters =
       runtime_kind = Local;
       auth_mode = No_auth;
       aliases = [ cn_llama; "llama.cpp"; "llamacpp" ];
+      spawn_key = Some "llama";
+      default_voice = Some "Laura";
     };
     {
       canonical_name = cn_claude;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ANTHROPIC_API_KEY";
-      aliases = [ cn_claude; "claude"; "anthropic" ];
+      aliases = [ cn_claude; "claude"; "anthropic"; "claude-code"; "claude-api" ];
+      spawn_key = Some "claude";
+      default_voice = Some "Sarah";
     };
     {
       canonical_name = cn_codex;
       runtime_kind = Direct_api;
       auth_mode = Api_key "OPENAI_API_KEY";
-      aliases = [ cn_codex; "openai" ];
+      aliases = [ cn_codex; "openai"; "codex-cli"; "codex-api" ];
+      spawn_key = Some "codex";
+      default_voice = Some "George";
     };
     {
       canonical_name = cn_gemini;
@@ -108,19 +120,25 @@ let direct_adapters =
             project_env = google_cloud_project_env;
             location_env = google_cloud_location_env;
           };
-      aliases = [ cn_gemini; "gemini"; "google" ];
+      aliases = [ cn_gemini; "gemini"; "google"; "gemini-cli"; "gemini-api" ];
+      spawn_key = Some "gemini";
+      default_voice = Some "Roger";
     };
     {
       canonical_name = cn_glm;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ZAI_API_KEY";
       aliases = [ cn_glm; "glm_cloud"; "zai" ];
+      spawn_key = None;
+      default_voice = None;
     };
     {
       canonical_name = cn_openrouter;
       runtime_kind = Direct_api;
       auth_mode = Api_key "OPENROUTER_API_KEY";
       aliases = [ cn_openrouter ];
+      spawn_key = None;
+      default_voice = None;
     };
   ]
 
@@ -165,6 +183,33 @@ let resolve_direct_adapter label =
 
 let resolve_direct_canonical_name label =
   Option.map (fun (adapter : adapter) -> adapter.canonical_name) (resolve_direct_adapter label)
+
+(** Resolve spawn_key for an agent label.
+    Returns the key to look up in Spawn.default_configs. *)
+let resolve_spawn_key label =
+  match resolve_direct_adapter label with
+  | Some adapter -> adapter.spawn_key
+  | None -> None
+
+(** Resolve default TTS voice for an agent label. *)
+let resolve_default_voice label =
+  match resolve_direct_adapter label with
+  | Some adapter -> adapter.default_voice
+  | None -> None
+
+(** All agents that are spawnable via CLI. *)
+let spawnable_canonical_names () =
+  direct_adapters
+  |> List.filter_map (fun a -> if a.spawn_key <> None then Some a.canonical_name else None)
+
+(** All agent voices as (canonical_name, voice_name) pairs.
+    For backward compatibility with voice_bridge_core. *)
+let all_agent_voices () =
+  direct_adapters
+  |> List.filter_map (fun a ->
+    match a.default_voice with
+    | Some v -> Some (a.canonical_name, v)
+    | None -> None)
 
 let resolve_voice_adapter label =
   let normalized = normalize_label label in
@@ -259,8 +304,8 @@ let legacy_voice_base_url_opt () =
   | None, None -> None
   | _ ->
       warn_legacy_voice_env_once ();
-      let host = Option.value host_opt ~default:"127.0.0.1" in
-      let port = Option.value port_opt ~default:"8936" in
+      let host = Option.value host_opt ~default:(Env_config.Voice.default_host) in
+      let port = Option.value port_opt ~default:(string_of_int Env_config.Voice.default_port) in
       Some (Printf.sprintf "http://%s:%s" host port)
 
 let http_listener_env_explicit () =

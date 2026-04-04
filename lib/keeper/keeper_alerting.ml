@@ -126,6 +126,58 @@ let is_alert_deduplicated ~(keeper_name : string) ~(reasons : string list) : boo
     Hashtbl.replace alert_dedup_table key now;
     false
 
+(** {1 Alert Signal Weights}
+
+    Keyword weights and signal bonuses for keeper alert scoring.
+    These are heuristic values — not empirically calibrated.
+
+    Keyword weights represent severity estimates for each term.
+    Higher weight = stronger indicator of an incident requiring escalation.
+    The score is the sum of matched weights, capped at 1.0.
+
+    Signal bonuses are additive modifiers for structural indicators
+    (guardrail stops, context pressure, alignment drops, tool usage).
+
+    TODO(RFC-0001 Phase 3): Register in Runtime_params for runtime tuning. *)
+
+let alert_keyword_weights : (string * float) list = [
+  ("장애",     0.35);  (* Korean: outage/failure *)
+  ("사고",     0.30);  (* Korean: incident *)
+  ("롤백",     0.30);  (* Korean: rollback *)
+  ("긴급",     0.25);  (* Korean: urgent *)
+  ("critical", 0.30);
+  ("urgent",   0.22);
+  ("incident", 0.25);
+  ("outage",   0.38);
+  ("oncall",   0.18);
+  ("p0",       0.32);
+  ("sev1",     0.32);
+  ("security", 0.35);
+  ("breach",   0.45);
+  ("data loss", 0.45);
+  ("failover", 0.22);
+  ("hotfix",   0.20);
+  ("downtime", 0.28);
+]
+
+(** Additive bonus when a guardrail stop was triggered. *)
+let signal_bonus_guardrail_stop = 0.45
+(** Additive bonus when handoff is active and context is near limit. *)
+let signal_bonus_handoff_pressure = 0.16
+(** Additive bonus when both goal and response alignment are low. *)
+let signal_bonus_low_alignment = 0.12
+(** Additive bonus when multiple tool calls occurred. *)
+let signal_bonus_multi_tool = 0.06
+
+(** Context ratio above which handoff pressure is flagged. *)
+let handoff_pressure_threshold = 0.88
+(** Goal alignment below which low-alignment signal fires. *)
+let goal_alignment_floor = 0.20
+(** Response alignment below which low-alignment signal fires. *)
+let response_alignment_floor = 0.16
+(** Minimum tool call count to trigger multi-tool signal. *)
+let multi_tool_min_count = 2
+
 let keeper_alert_signal
     ~(message : string)
     ~(reply : string)
@@ -135,27 +187,8 @@ let keeper_alert_signal
     ~(tool_call_count : int)
     ~(auto_rules : keeper_auto_rule_eval) : float * string list * string list =
   let corpus = String.lowercase_ascii (message ^ "\n" ^ reply) in
-  let keyword_weights = [
-    ("장애", 0.35);
-    ("사고", 0.30);
-    ("롤백", 0.30);
-    ("긴급", 0.25);
-    ("critical", 0.30);
-    ("urgent", 0.22);
-    ("incident", 0.25);
-    ("outage", 0.38);
-    ("oncall", 0.18);
-    ("p0", 0.32);
-    ("sev1", 0.32);
-    ("security", 0.35);
-    ("breach", 0.45);
-    ("data loss", 0.45);
-    ("failover", 0.22);
-    ("hotfix", 0.20);
-    ("downtime", 0.28);
-  ] in
   let keyword_hits =
-    keyword_weights
+    alert_keyword_weights
     |> List.filter_map (fun (kw, w) ->
          if contains_ci corpus kw then Some (kw, w) else None)
   in
@@ -169,19 +202,19 @@ let keeper_alert_signal
   if keyword_hits <> [] then
     reasons := "critical_keywords" :: !reasons;
   if auto_rules.guardrail_stop then begin
-    score := !score +. 0.45;
+    score := !score +. signal_bonus_guardrail_stop;
     reasons := "guardrail_stop" :: !reasons
   end;
-  if auto_rules.handoff && context_ratio >= 0.88 then begin
-    score := !score +. 0.16;
+  if auto_rules.handoff && context_ratio >= handoff_pressure_threshold then begin
+    score := !score +. signal_bonus_handoff_pressure;
     reasons := "handoff_pressure" :: !reasons
   end;
-  if goal_alignment < 0.20 && response_alignment < 0.16 then begin
-    score := !score +. 0.12;
+  if goal_alignment < goal_alignment_floor && response_alignment < response_alignment_floor then begin
+    score := !score +. signal_bonus_low_alignment;
     reasons := "low_alignment" :: !reasons
   end;
-  if tool_call_count >= 2 then begin
-    score := !score +. 0.06;
+  if tool_call_count >= multi_tool_min_count then begin
+    score := !score +. signal_bonus_multi_tool;
     reasons := "multi_tool_action" :: !reasons
   end;
   let score = max 0.0 (min 1.0 !score) in

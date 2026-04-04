@@ -6,15 +6,19 @@
     No LLM calls, no heuristics, no fuzzy matching.
 
     Consumers talk to the gate via HTTP ([/api/v1/gate/*]).
-    The gate talks to keepers via [Tool_keeper.dispatch].
+    The gate dispatches to keepers through an injected [dispatch]
+    function, keeping it decoupled from [Tool_keeper] internals.
 
-    @since 2.217.0 *)
+    Wire types live in {!Gate_protocol}.
+    Keeper dispatch adapter lives in {!Gate_keeper_backend}.
 
-(** {1 Inbound / Outbound Types} *)
+    @since 2.217.0
+    @modified 2.222.0 Decoupled from Agent_identity and Tool_keeper *)
 
-(** Message arriving from an external channel consumer. *)
-type inbound_message = {
-  channel : Agent_identity.channel;
+(** {1 Re-exported Wire Types} *)
+
+type inbound_message = Gate_protocol.inbound_message = {
+  channel : string;
   channel_user_id : string;
   channel_user_name : string;
   channel_room_id : string;
@@ -24,22 +28,21 @@ type inbound_message = {
   metadata : (string * string) list;
 }
 
-(** Successful response to send back to the consumer. *)
-type outbound_message = {
-  keeper_name : string;
-  content : string;
-  turn_stats : turn_stats option;
-}
-
-and turn_stats = {
+type turn_stats = Gate_protocol.turn_stats = {
   model_used : string;
   duration_ms : int;
   tokens_used : int;
 }
 
+type outbound_message = Gate_protocol.outbound_message = {
+  keeper_name : string;
+  content : string;
+  turn_stats : turn_stats option;
+}
+
 (** {1 Validation} *)
 
-type validation_error =
+type validation_error = Gate_protocol.validation_error =
   | Empty_content
   | Content_too_long of int
   | Empty_keeper_name
@@ -67,9 +70,7 @@ val dedup_table_size : unit -> int
 
 (** {1 Dispatch} *)
 
-(** {1 Dispatch errors (typed, not string)} *)
-
-type gate_error =
+type gate_error = Gate_protocol.gate_error =
   | Validation of validation_error
   | Keeper_error of string
   | Dispatch_unavailable
@@ -77,17 +78,22 @@ type gate_error =
 
 val gate_error_to_string : gate_error -> string
 
+(** Dispatch function signature.  Provided by the wiring layer
+    (typically a partial application of {!Gate_keeper_backend.dispatch}). *)
+type dispatch_fn =
+  channel:string ->
+  channel_user_id:string ->
+  keeper_name:string ->
+  content:string ->
+  Gate_protocol.dispatch_result
+
 val handle_inbound :
-  sw:Eio.Switch.t ->
-  clock:_ Eio.Time.clock ->
-  proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
-  config:Room.config ->
+  dispatch:dispatch_fn ->
   inbound_message ->
   (outbound_message, gate_error) result
 (** Validate, dedup, dispatch to keeper, return response.
     The only non-deterministic step is the keeper turn itself
-    (which is on the other side of the boundary). *)
+    (which is on the other side of the [dispatch] boundary). *)
 
 (** {1 JSON helpers} *)
 

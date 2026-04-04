@@ -446,4 +446,55 @@ module Memory_oas = struct
   let default_importance = max 1 (min 10 (get_int ~default:5 "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE"))
 end
 
+(** {1 Smart Heartbeat Tuning} *)
+
+module SmartHeartbeatTuning = struct
+  (** Base heartbeat interval (seconds), clamped [5, 300]. Default: 30. *)
+  let base_interval_s =
+    let v = get_float ~default:30.0 "MASC_SMART_HB_BASE_INTERVAL_SEC" in
+    Float.max 5.0 (Float.min 300.0 v)
+
+  (** Idle multiplier for interval, clamped [1, 10]. Default: 3. *)
+  let idle_multiplier =
+    let v = get_float ~default:3.0 "MASC_SMART_HB_IDLE_MULTIPLIER" in
+    Float.max 1.0 (Float.min 10.0 v)
+
+  (** Idle threshold (seconds) before multiplier kicks in, clamped [60, 3600]. Default: 300. *)
+  let idle_threshold_s =
+    let v = get_float ~default:300.0 "MASC_SMART_HB_IDLE_THRESHOLD_SEC" in
+    Float.max 60.0 (Float.min 3600.0 v)
+end
+
+(** {1 Dashboard Signal Thresholds} *)
+
+module Dashboard = struct
+  (** Signal-age guardrail thresholds (seconds).
+      Configurable via environment for runtime tuning without recompilation. *)
+
+  (** Duration (seconds) after which a signal is considered stale. Default: 1200 (20 min). *)
+  let signal_stale_sec =
+    get_float ~default:1200.0 "MASC_DASHBOARD_SIGNAL_STALE_SEC"
+
+  (** Duration (seconds) for borderline "quiet" warning. Default: 600 (10 min). *)
+  let signal_quiet_sec =
+    get_float ~default:600.0 "MASC_DASHBOARD_SIGNAL_QUIET_SEC"
+
+  (** Duration (seconds) for a signal to count as "live". Default: 300 (5 min). *)
+  let signal_live_sec =
+    get_float ~default:300.0 "MASC_DASHBOARD_SIGNAL_LIVE_SEC"
+
+  (** Keeper action-age threshold (seconds). Default: 3600 (1 hour). *)
+  let keeper_action_stale_sec =
+    get_float ~default:3600.0 "MASC_DASHBOARD_KEEPER_ACTION_STALE_SEC"
+
+  (** Keeper context-ratio lifecycle thresholds.
+      Higher ratio = closer to context limit = more urgency. *)
+  let ctx_handoff_imminent =
+    get_float ~default:0.85 "MASC_DASHBOARD_CTX_HANDOFF_IMMINENT"
+  let ctx_preparing =
+    get_float ~default:0.70 "MASC_DASHBOARD_CTX_PREPARING"
+  let ctx_compacting =
+    get_float ~default:0.50 "MASC_DASHBOARD_CTX_COMPACTING"
+end
+
 (** {1 Internal Safety Configuration} *)

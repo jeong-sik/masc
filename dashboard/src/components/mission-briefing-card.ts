@@ -333,7 +333,7 @@ export function MissionBriefingCard() {
                       ${section.evidence_quality ? html`<${StatusChip} label=${section.evidence_quality} />` : null}
                     </div>
                   </div>
-                  <p class="m-0 text-[rgba(255,255,255,0.8)] leading-normal">${section.summary}</p>
+                  <p class="m-0 text-[var(--text-body)] leading-normal">${section.summary}</p>
                   ${section.evidence.length > 0
                     ? html`
                         <details class="pt-2 border-t border-[var(--white-6)] mt-3">
@@ -367,7 +367,7 @@ export function MissionBriefingCard() {
                       <strong>${missionTargetTypeLabel(item.scope_type)}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
                       <${StatusChip} label=${statusLabel(item.severity)} tone=${item.severity === 'watch' ? 'warn' : ''} />
                     </div>
-                    <p class="m-0 text-[rgba(255,255,255,0.78)] leading-snug">${item.summary}</p>
+                    <p class="m-0 text-[var(--text-body)] leading-snug">${item.summary}</p>
                   </article>
                 `)}
               </div>

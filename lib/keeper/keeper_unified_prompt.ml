@@ -17,6 +17,16 @@ let format_goals (goal_ids : string list) : string =
   String.concat "\n"
     (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
 
+let format_scope_messages
+    (messages : (string * string) list) : string =
+  String.concat "\n"
+    (List.map
+       (fun (from_agent, content) ->
+         Printf.sprintf "- %s: %s"
+           from_agent
+           (Keeper_types.short_preview ~max_len:200 content))
+       messages)
+
 let format_board_events
     (events : Keeper_world_observation.pending_board_event list) : string =
   String.concat "\n"
@@ -153,6 +163,13 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
       (Printf.sprintf "### Pending Mentions (%d)\n"
          (List.length observation.pending_mentions));
     Buffer.add_string ubuf (format_mentions observation.pending_mentions);
+    Buffer.add_string ubuf "\n\n");
+  if observation.pending_scope_messages <> [] then (
+    Buffer.add_string ubuf
+      (Printf.sprintf "### Scope Messages (%d recent)\n"
+         (List.length observation.pending_scope_messages));
+    Buffer.add_string ubuf
+      (format_scope_messages observation.pending_scope_messages);
     Buffer.add_string ubuf "\n\n");
   (* Active goals *)
   if observation.active_goals <> [] then (

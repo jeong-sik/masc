@@ -34,6 +34,8 @@
    cancellation
    channel_gate
    channel_gate_metrics
+   gate_protocol
+   gate_keeper_backend
    command_plane_v2
    command_plane_orchestra
    cp_orchestra_helpers

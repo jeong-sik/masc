@@ -476,7 +476,9 @@ let append_worker_completion_log ~base_path ~team_session_id ~worker_name
     Accepts [~provider] + [~model_id] as resolved values. *)
 let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
     ~max_turns ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
-    ?(guardrails : Oas.Guardrails.t option) () =
+    ?(guardrails : Oas.Guardrails.t option)
+    ?(tool_retry_policy : Oas.Tool_retry_policy.t option)
+    () =
   let config =
     {
       Oas.Types.default_config with
@@ -509,6 +511,7 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       hooks;
       guardrails = effective_guardrails;
       raw_trace = Some raw_trace;
+      tool_retry_policy;
       periodic_callbacks;
     }
   in

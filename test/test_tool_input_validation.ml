@@ -59,6 +59,18 @@ let make_schema ?(required = []) (props : (string * string) list) : Yojson.Safe.
     ("required", `List (List.map (fun s -> `String s) required));
   ]
 
+let run_registered_hook ?schema ~tool_name ~(args : Yojson.Safe.t) () =
+  Tool_dispatch.clear_hooks ();
+  (match schema with
+   | Some input_schema ->
+     let schema_def : Types.tool_schema =
+       { name = tool_name; description = "test"; input_schema }
+     in
+     Tool_dispatch.register_module_tag ~schemas:[schema_def] ~tag:Mod_misc
+   | None -> ());
+  Tool_input_validation.register_pre_hook ();
+  Tool_dispatch.run_pre_hooks ~name:tool_name ~args
+
 (* ================================================================ *)
 (* Test: required field validation                                   *)
 (* ================================================================ *)
@@ -236,6 +248,64 @@ let test_empty_schema_passes () =
   | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
 
 (* ================================================================ *)
+(* Test: registered pre-hook path                                    *)
+(* ================================================================ *)
+
+let test_registered_hook_coerces_args () =
+  let args = `Assoc [("count", `String "42")] in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:(make_schema [("count", "integer")])
+      ~tool_name:"__tool_input_validation_registered_coerce"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check bool) "coercion changed args" false
+    (Yojson.Safe.equal forwarded args);
+  match Yojson.Safe.Util.member "count" forwarded with
+  | `Int 42 -> ()
+  | _ -> Alcotest.fail "expected integer coercion through registered pre-hook"
+
+let test_registered_hook_keeps_noop_as_pass () =
+  let args = `Assoc [("count", `Int 42)] in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:(make_schema [("count", "integer")])
+      ~tool_name:"__tool_input_validation_registered_noop"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check bool) "args unchanged" true
+    (Yojson.Safe.equal forwarded args)
+
+let test_registered_hook_bypasses_unknown_tool () =
+  let args = `Assoc [("count", `String "42")] in
+  let blocked, forwarded =
+    run_registered_hook
+      ~tool_name:"__tool_input_validation_registered_unknown"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check bool) "args unchanged" true
+    (Yojson.Safe.equal forwarded args)
+
+let test_registered_hook_bypasses_empty_schema () =
+  let args = `Assoc [("anything", `String "goes")] in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:(`Assoc [])
+      ~tool_name:"__tool_input_validation_registered_empty"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check bool) "args unchanged" true
+    (Yojson.Safe.equal forwarded args)
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -265,5 +335,15 @@ let () =
       Alcotest.test_case "null args with required" `Quick test_null_args_with_required;
       Alcotest.test_case "extra fields allowed" `Quick test_extra_fields_allowed;
       Alcotest.test_case "empty schema passes" `Quick test_empty_schema_passes;
+    ]);
+    ("registered_hook", [
+      Alcotest.test_case "coercion flows through registered hook" `Quick
+        test_registered_hook_coerces_args;
+      Alcotest.test_case "no-op coercion stays pass" `Quick
+        test_registered_hook_keeps_noop_as_pass;
+      Alcotest.test_case "unknown tool bypasses validation" `Quick
+        test_registered_hook_bypasses_unknown_tool;
+      Alcotest.test_case "empty schema bypasses validation" `Quick
+        test_registered_hook_bypasses_empty_schema;
     ]);
   ]

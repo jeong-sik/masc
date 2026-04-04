@@ -1,6 +1,11 @@
 /* MASC Dashboard — CSS Custom Properties (Semantic Theme System) */
 
 :root {
+  /* The dashboard shell is still authored against dark surfaces.
+     Keep the browser chrome and semantic tokens aligned until
+     a full light-theme token migration lands. */
+  color-scheme: dark;
+
   /* Base & Backgrounds */
   --bg-root: #0b1220;
   --bg-panel: rgba(16, 24, 42, 0.92);
@@ -154,30 +159,4 @@
   --z-layout: 1;
   --z-tab-sticky: 30;
   --z-header: 40;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg-root: #f8fafc;
-    --bg-panel: rgba(255, 255, 255, 0.95);
-    --bg-panel-hover: rgba(241, 245, 249, 0.95);
-    --bg-1: var(--bg-panel-hover);
-    
-    --text-strong: #0f172a;
-    --text-body: #334155;
-    --text-muted: #64748b;
-    --text-dim: #94a3b8;
-    
-    --border-subtle: rgba(15, 23, 42, 0.08);
-    --border-base: rgba(15, 23, 42, 0.15);
-    --border-strong: rgba(15, 23, 42, 0.25);
-
-    /* Overlays */
-    --white-3: rgba(0, 0, 0, 0.03);
-    --white-5: rgba(0, 0, 0, 0.05);
-    --white-10: rgba(0, 0, 0, 0.10);
-    --white-20: rgba(0, 0, 0, 0.20);
-    --white-50: rgba(0, 0, 0, 0.50);
-    --white-80: rgba(0, 0, 0, 0.80);
-  }
 }

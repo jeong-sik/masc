@@ -276,6 +276,17 @@ let list_posts t ?(visibility_filter=None) ?hearth ?author_filter ?(sort_by=Hot)
       Log.BoardPg.error "list_posts error: %s" (Caqti_error.show err);
       []
 
+let list_posts_updated_since t ~since_ts =
+  match Caqti_eio.Pool.use (fun conn ->
+    let module C = (val conn : Caqti_eio.CONNECTION) in
+    C.collect_list list_updated_since_q since_ts
+  ) t.pool with
+  | Ok rows -> List.filter_map post_of_row rows
+  | Error err ->
+      Log.BoardPg.error "list_posts_updated_since error: %s"
+        (Caqti_error.show err);
+      []
+
 (** {1 Comment Operations} *)
 
 let add_comment t ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.default_ttl_hours) () =
@@ -495,4 +506,3 @@ let vote_comment t ~voter ~comment_id ~direction =
         direction = vote_direction_to_string direction
       });
       Ok score
-

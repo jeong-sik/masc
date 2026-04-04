@@ -90,6 +90,8 @@ let direct_turn_observation (meta : keeper_meta) :
   {
     pending_mentions = [];
     pending_board_events = [];
+    pending_scope_messages = [];
+    message_cursor_updates = [];
     idle_seconds = 0;
     active_goals = meta.active_goal_ids;
     continuity_summary = meta.continuity_summary;

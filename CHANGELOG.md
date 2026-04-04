@@ -1,6 +1,44 @@
 # Changelog
 
 
+## [2.225.0] - 2026-04-04
+
+### Added
+- **Task goal decomposition** -- extend task schema with goal decomposition metadata (#5070).
+
+### Fixed
+- **Vendor/model hardcoding** -- remove 7 HIGH vendor/model hardcoding violations from MASC layer (#5064).
+- **Harness tool_matrix path** -- resolve tool_matrix runner path from build context (#5065).
+- **Dashboard stagnation_score** -- make stagnation_score optional in meta-cognition parse (#5071).
+
+### Changed
+- **SSOT batch 2** -- configurable thresholds and named constants across 4 files (#5063).
+- **Provider_adapter SSOT** -- consolidate 3 agent maps into Provider_adapter SSOT (#5060).
+- **Precompile regex** -- precompile regex patterns in keeper_text_processing (#5062).
+
+## [2.224.0] - 2026-04-04
+
+### Added
+- **SSOT consolidation** -- consolidate SSOT violations and mark Det/NonDet boundaries (#5038).
+- **OAS Tool_middleware** -- use OAS Tool_middleware, remove duplicate schema conversion (#5007).
+- **Keeper voice tools** -- add keeper voice tools to internal SSOT surface (#5059).
+
+### Fixed
+- **Route constants** -- extract keeper route constants and reject unknown actions (#5037).
+- **Dashboard contrast** -- improve text contrast readability on dark backgrounds (#5033).
+- **Orphaned tools** -- register 25 orphaned tool schemas as Deprecated (#5052).
+
+## [2.223.0] - 2026-04-04
+
+### Fixed
+- **OAS SDK pin bump** -- bump to v0.100.7 to resolve `Cdal_proof.Context_overflow` compilation failure on main (#5034).
+- **Context_overflow matches** -- remove direct pattern matches that depended on missing OAS variant (#5025).
+- **Operator judge room key** -- clarify operator judge room key compatibility (#5000).
+
+### Changed
+- **Dead proactive code removal** -- remove 475 lines of unused proactive generation code (#5003).
+- **OAS tool retry policy** -- wire internal OAS tool retry policy (#5009).
+
 ## [2.222.0] - 2026-04-04
 
 ### Added
@@ -29,6 +67,7 @@
 - **OAS capacity-aware backoff** -- restore capacity-aware local backoff for provider adapter (#4986).
 - **Keeper autoboot** -- fix keeper autoboot for declarative janitor cleanup (#4987).
 - **Cascade config local-first** -- make cascade config local-first with llama:auto (#4981).
+- **OAS SDK pin truth** -- bump the `agent_sdk` floor to `0.100.7` and sync CI/runtime pin + docs for internal tool retry policy wiring (#5009, #5012).
 
 ## [2.220.0] - 2026-04-04
 

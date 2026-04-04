@@ -130,6 +130,11 @@ let belief_summary_of_observation
          Some (Printf.sprintf "board_events=%d"
                  (List.length observation.pending_board_events))
        else None);
+      (if observation.pending_scope_messages <> [] then
+         Some
+           (Printf.sprintf "scope_messages=%d"
+              (List.length observation.pending_scope_messages))
+       else None);
       (if observation.unclaimed_task_count > 0 then
          Some (Printf.sprintf "unclaimed_tasks=%d" observation.unclaimed_task_count)
        else None);

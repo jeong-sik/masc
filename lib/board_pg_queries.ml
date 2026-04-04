@@ -169,6 +169,14 @@ let list_recent_q = mk_list_q "created_at DESC"
 let list_updated_q = mk_list_q "updated_at DESC"
 let list_discussed_q = mk_list_q "reply_count DESC, created_at DESC"
 
+let list_updated_since_q =
+  (Caqti_type.float ->* post_row_t)
+  (Printf.sprintf
+     "SELECT %s FROM masc_board_posts \
+      WHERE %s AND updated_at >= $1 \
+      ORDER BY updated_at ASC, id ASC"
+     post_columns ttl_where)
+
 (* Trending: engagement / sqrt(age_in_hours) *)
 let list_trending_q = mk_list_q
   "((votes_up - votes_down + reply_count * 2)::float / \

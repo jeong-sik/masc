@@ -75,6 +75,8 @@ let base_observation : WO.world_observation =
   {
     pending_mentions = [];
     pending_board_events = [];
+    pending_scope_messages = [];
+    message_cursor_updates = [];
     idle_seconds = 0;
     active_goals = [];
     continuity_summary = "";

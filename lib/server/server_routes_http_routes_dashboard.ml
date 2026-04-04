@@ -176,12 +176,25 @@ let classify_keeper_post_route req_path =
   else if ends_with "/shutdown" then Keeper_post_shutdown
   else Keeper_post_unknown
 
+let is_valid_keeper_name name =
+  String.length name > 0
+  && String.length name <= 128
+  && String.to_seq name
+     |> Seq.for_all (fun c ->
+          (c >= 'a' && c <= 'z')
+          || (c >= 'A' && c <= 'Z')
+          || (c >= '0' && c <= '9')
+          || c = '_' || c = '-')
+
 let extract_keeper_name_for_post req_path suffix =
   let prefix = "/api/v1/keepers/" in
   let plen = String.length prefix in
   let slen = String.length suffix in
-  String.trim
-    (String.sub req_path plen (String.length req_path - plen - slen))
+  let raw =
+    String.trim
+      (String.sub req_path plen (String.length req_path - plen - slen))
+  in
+  if is_valid_keeper_name raw then raw else ""
 
 let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in

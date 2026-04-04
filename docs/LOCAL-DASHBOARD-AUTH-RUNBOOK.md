@@ -90,7 +90,9 @@ cp "$HOME/me/.masc/auth/config.json" "$HOME/me/.masc/auth/config.json.bak"
 TOKEN="$(openssl rand -hex 32)"
 HASH="$(printf '%s' "$TOKEN" | shasum -a 256 | awk '{print $1}')"
 CREATED="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-EXPIRES="$(date -u -v+72H +"%Y-%m-%dT%H:%M:%SZ")"
+EXPIRES="$(date -u -v+72H +"%Y-%m-%dT%H:%M:%SZ")"  # BSD (macOS)
+# GNU/Linux alternative:
+# EXPIRES="$(date -u -d '+72 hours' +"%Y-%m-%dT%H:%M:%SZ")"
 printf 'token=%s\nhash=%s\n' "$TOKEN" "$HASH"
 ```
 

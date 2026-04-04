@@ -74,6 +74,7 @@ type registry_entry = {
   last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
   board_cursor_ts : float;
+  board_cursor_post_id : string option;
   tool_usage : (string, tool_call_entry) Hashtbl.t;
 }
 
@@ -132,6 +133,7 @@ let register ~base_path name meta =
     last_agent_count = 0;
     board_wakeups = Hashtbl.create 8;
     board_cursor_ts = 0.0;
+    board_cursor_post_id = None;
     tool_usage = Hashtbl.create 16;
   } in
   put_entry key entry;
@@ -367,7 +369,12 @@ let cleanup_tracking ~base_path name =
   | Some entry ->
       Hashtbl.reset entry.board_wakeups;
       Hashtbl.reset entry.tool_usage;
-      put_entry key { entry with last_agent_count = 0; board_cursor_ts = 0.0 }
+      put_entry key
+        { entry with
+          last_agent_count = 0;
+          board_cursor_ts = 0.0;
+          board_cursor_post_id = None;
+        }
   | None -> ()
 
 let clear () =
@@ -382,7 +389,21 @@ let get_board_cursor_ts ~base_path name =
   | None -> 0.0
 
 let set_board_cursor_ts ~base_path name ts =
-  update_entry ~base_path name (fun e -> { e with board_cursor_ts = ts })
+  update_entry ~base_path name (fun e ->
+    let board_cursor_post_id =
+      if Float.compare ts e.board_cursor_ts = 0 then e.board_cursor_post_id
+      else None
+    in
+    { e with board_cursor_ts = ts; board_cursor_post_id })
+
+let get_board_cursor ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  | Some entry -> (entry.board_cursor_ts, entry.board_cursor_post_id)
+  | None -> (0.0, None)
+
+let set_board_cursor ~base_path name ts post_id =
+  update_entry ~base_path name (fun e ->
+    { e with board_cursor_ts = ts; board_cursor_post_id = post_id })
 
 (* -- Tool usage tracking ------------------------------------------- *)
 

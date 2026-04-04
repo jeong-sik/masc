@@ -200,6 +200,16 @@ let select_recent_message_names ~since_seq ~limit names =
        []
   |> List.map snd
 
+let select_all_message_names ~since_seq names =
+  names
+  |> List.filter_map (fun name ->
+       let seq = extract_seq_from_filename name in
+       if seq <= since_seq then None else Some (seq, name))
+  |> List.sort (fun (seq_a, name_a) (seq_b, name_b) ->
+       let cmp = compare seq_a seq_b in
+       if cmp <> 0 then cmp else String.compare name_a name_b)
+  |> List.map snd
+
 let message_name_from_key key =
   match List.rev (String.split_on_char ':' key) with
   | name :: _ -> name
@@ -241,6 +251,44 @@ let collect_recent_messages_from_pg config ~msgs_path ~since_seq ~limit =
               Some messages
           | Error err ->
               Log.Room.warn "collect_recent_messages_from_pg failed: %s"
+                (Backend.show_error err);
+              None))
+  | Memory _ | FileSystem _ -> None
+
+let collect_all_messages_from_pg config ~msgs_path ~since_seq =
+  match config.backend with
+  | PostgresNative backend -> (
+      match key_of_path config msgs_path with
+      | None -> None
+      | Some key_prefix -> (
+          match Backend.Postgres.get_all backend ~prefix:(key_prefix ^ ":") with
+          | Ok pairs ->
+              let messages =
+                pairs
+                |> List.filter_map (fun (key, value) ->
+                     let name = message_name_from_key key in
+                     if not (is_valid_filename name) then
+                       None
+                     else if extract_seq_from_filename name <= since_seq then
+                       None
+                     else
+                       match
+                         Safe_ops.parse_json_safe
+                           ~context:"collect_all_messages_from_pg" value
+                       with
+                       | Ok json -> (
+                           match message_of_yojson json with
+                           | Ok msg when msg.seq > since_seq -> Some msg
+                           | _ -> None)
+                       | Error _ -> None)
+                |> List.sort (fun (a : message) (b : message) ->
+                     let cmp = compare a.seq b.seq in
+                     if cmp <> 0 then cmp
+                     else String.compare a.timestamp b.timestamp)
+              in
+              Some messages
+          | Error err ->
+              Log.Room.warn "collect_all_messages_from_pg failed: %s"
                 (Backend.show_error err);
               None))
   | Memory _ | FileSystem _ -> None
@@ -294,6 +342,44 @@ let get_messages_raw_in_room config ~room_id ~since_seq ~limit =
   else
     let msgs_path = messages_dir_in_room config room_id in
     collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"room message"
+
+let get_all_messages_raw_in_room config ~room_id ~since_seq =
+  if not (root_is_initialized config) then []
+  else
+    let msgs_path = messages_dir_in_room config room_id in
+    match config.backend with
+    | PostgresNative _ -> (
+        match collect_all_messages_from_pg config ~msgs_path ~since_seq with
+        | Some rows -> rows
+        | None -> [])
+    | Memory _ | FileSystem _ ->
+        if not (Sys.file_exists msgs_path) then []
+        else
+          let names =
+            Sys.readdir msgs_path
+            |> Array.to_list
+            |> List.filter is_valid_filename
+            |> select_all_message_names ~since_seq
+          in
+          let rec loop acc = function
+            | [] -> List.rev acc
+            | name :: rest ->
+                safe_yield ();
+                let path = Filename.concat msgs_path name in
+                match read_json config path with
+                | json ->
+                    (match message_of_yojson json with
+                     | Ok msg when msg.seq > since_seq -> loop (msg :: acc) rest
+                     | _ -> loop acc rest)
+                | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+                | exception e ->
+                    Log.legacy_traceln ~level:Log.Warn ~module_name:"Room"
+                      (Printf.sprintf
+                         "[WARN] Failed to read room message %s: %s"
+                         name (Printexc.to_string e));
+                    loop acc rest
+          in
+          loop [] names
 
 (** List tasks *)
 let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status config =

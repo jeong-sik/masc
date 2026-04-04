@@ -367,6 +367,7 @@ let proof_result_status_to_string = function
   | Oas.Cdal_proof.Errored -> "errored"
   | Oas.Cdal_proof.Timed_out -> "timed_out"
   | Oas.Cdal_proof.Cancelled -> "cancelled"
+  | Oas.Cdal_proof.Context_overflow -> "context_overflow"
 
 let worker_name_of_planned_worker ~(fallback : string)
     (pw : Team_session_types.planned_worker) =

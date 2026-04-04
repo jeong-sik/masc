@@ -335,7 +335,8 @@ let run
             | Oas.Cdal_proof.Completed -> "completed"
             | Oas.Cdal_proof.Errored -> "errored"
             | Oas.Cdal_proof.Timed_out -> "timed_out"
-            | Oas.Cdal_proof.Cancelled -> "cancelled")
+            | Oas.Cdal_proof.Cancelled -> "cancelled"
+            | Oas.Cdal_proof.Context_overflow -> "context_overflow")
        | None -> ());
       Error (Printf.sprintf "Agent run failed: %s" (Oas.Error.to_string err)))
   with

@@ -121,6 +121,7 @@ let preset_allowlist = function
       dedupe_tool_names
         ( keeper_base_tool_names
         @ keeper_filesystem_tool_names
+        @ keeper_filesystem_write_tool_names
         @ keeper_library_tool_names
         @ keeper_shell_readonly_tool_names
         @ keeper_coordination_tool_names

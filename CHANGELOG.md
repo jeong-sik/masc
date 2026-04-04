@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.228.0] - 2026-04-04
+
+### Changed
+- **Spawned-agent lifecycle prompt** -- align the spawned-agent lifecycle prompt with the handover flow so the merged prompt/tool-surface update from #5029 ships on the next release.
+
 ## [2.227.0] - 2026-04-04
 
 ### Added

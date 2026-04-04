@@ -272,6 +272,10 @@ let backend_name config =
   | FileSystem _ -> "filesystem"
   | PostgresNative _ -> "postgres-native"
 
+let backend_supports_local_dir = function
+  | FileSystem _ -> true
+  | Memory _ | PostgresNative _ -> false
+
 (** Cleanup pubsub messages - only effective for PostgreSQL backend.
     Other backends use FS cleanup in gc or are ephemeral.
     Returns the number of deleted messages. *)
@@ -329,7 +333,7 @@ let list_dir config path =
       else
         []
   | Some _ when
-      (match config.backend with FileSystem _ -> true | Memory _ | PostgresNative _ -> false)
+      backend_supports_local_dir config.backend
       && Sys.file_exists path && Sys.is_directory path ->
       Sys.readdir path |> Array.to_list
   | Some key_prefix ->

@@ -49,6 +49,26 @@ let test_keeper_surface_status_maps_degraded_to_inactive () =
   in
   check string "degraded keeper is not surfaced as listening" "inactive" status
 
+let test_keeper_surface_status_maps_zombie_to_inactive () =
+  let status =
+    ES.keeper_surface_status
+      ~agent_status:
+        (`Assoc
+          [ ("exists", `Bool true); ("status", `String "active") ])
+      ~diagnostic:(`Assoc [ ("health_state", `String "zombie") ])
+  in
+  check string "zombie keeper is not surfaced as active" "inactive" status
+
+let test_keeper_surface_status_maps_dead_to_inactive () =
+  let status =
+    ES.keeper_surface_status
+      ~agent_status:
+        (`Assoc
+          [ ("exists", `Bool true); ("status", `String "busy") ])
+      ~diagnostic:(`Assoc [ ("health_state", `String "dead") ])
+  in
+  check string "dead keeper is not surfaced as busy" "inactive" status
+
 let test_derive_pipeline_stage_treats_inactive_as_offline () =
   let meta =
     let base = make_meta () in
@@ -79,6 +99,10 @@ let () =
             test_keeper_surface_status_maps_stale_to_inactive;
           test_case "maps degraded to inactive" `Quick
             test_keeper_surface_status_maps_degraded_to_inactive;
+          test_case "maps zombie to inactive" `Quick
+            test_keeper_surface_status_maps_zombie_to_inactive;
+          test_case "maps dead to inactive" `Quick
+            test_keeper_surface_status_maps_dead_to_inactive;
           test_case "inactive pipeline stage becomes offline" `Quick
             test_derive_pipeline_stage_treats_inactive_as_offline;
         ] );

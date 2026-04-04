@@ -177,10 +177,12 @@ let proactive_outcome_of_result ~(has_text : bool) ~(has_tool_calls : bool) :
   | false, true -> Proactive_tool_use
   | true, true -> Proactive_mixed_response
 
+let has_substantive_tool_calls (tools_used : string list) : bool =
+  List.exists (fun tool_name -> tool_name <> "masc_heartbeat") tools_used
+
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
-  if List.exists (fun tool_name -> tool_name <> "masc_heartbeat") result.tools_used
-  then "tool_use"
+  if has_substantive_tool_calls result.tools_used then "tool_use"
   else if text = "" then "noop"
   else if String.starts_with ~prefix:"SKIP:" text then "skip_text"
   else "text_response"
@@ -210,9 +212,6 @@ let observed_affordances_of_observation
   if observation.failed_task_count > 0 then add "task_audit";
   if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
   List.rev !affordances
-
-let has_substantive_tool_calls (tools_used : string list) : bool =
-  List.exists (fun tool_name -> tool_name <> "masc_heartbeat") tools_used
 
 let response_requests_confirmation (text : string) : bool =
   let trimmed = String.trim text in

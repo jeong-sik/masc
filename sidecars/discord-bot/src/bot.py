@@ -403,6 +403,12 @@ async def keeper_ask(
             embed = format_keeper_embed(response)
             await interaction.followup.send(embed=embed)
     else:
+        if response.error == "duplicate message":
+            await interaction.followup.send(
+                "이미 접수된 요청입니다. 잠시 기다린 뒤 새 요청으로 다시 시도해 주세요.",
+                ephemeral=True,
+            )
+            return
         embed = format_error_embed(response.error)
         await interaction.followup.send(embed=embed, ephemeral=True)
 

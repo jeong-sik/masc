@@ -96,7 +96,7 @@ async def test_list_keepers_uses_cached_names_when_breaker_is_open() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_message_uses_retry_count_after_first_attempt() -> None:
+async def test_send_message_does_not_retry_non_replay_safe_post() -> None:
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -105,8 +105,6 @@ async def test_send_message_uses_retry_count_after_first_attempt() -> None:
         return httpx.Response(503, json={"ok": False, "error": "down"})
 
     client = make_client(httpx.MockTransport(handler))
-    client._max_retries = 2  # pyright: ignore[reportPrivateUsage]
-
     response = await client.send_message(
         keeper_name="luna",
         content="hello",
@@ -118,7 +116,7 @@ async def test_send_message_uses_retry_count_after_first_attempt() -> None:
 
     assert response.ok is False
     assert response.error == "gate returned 503"
-    assert attempts == 3
+    assert attempts == 1
 
     await client.aclose()
 

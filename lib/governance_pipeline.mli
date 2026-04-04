@@ -51,10 +51,10 @@ val decide :
 val make_pre_hook :
   config:Room.config ->
   governance_level:string ->
-  (name:string -> args:Yojson.Safe.t -> Tool_result.t option)
+  Tool_dispatch.pre_hook
 (** Create a Tool_dispatch pre_hook closure for the given governance level.
-    Returns [None] (proceed) for allowed calls,
-    [Some result] (short-circuit) for confirm-required or denied calls. *)
+    Returns [Pass] (proceed) for allowed calls,
+    [Reject result] (short-circuit) for confirm-required or denied calls. *)
 
 val install : config:Room.config -> governance_level:string -> unit
 (** Register the governance pipeline as a Tool_dispatch pre_hook.

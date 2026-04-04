@@ -304,7 +304,7 @@ let make_pre_hook ~config ~governance_level =
     if should_audit ~governance_level decision.risk then
       audit_decision config decision;
     match decision.action with
-    | `Allow -> None  (* proceed to handler *)
+    | `Allow -> Tool_dispatch.Pass  (* proceed to handler *)
     | `Require_confirm reason ->
         maybe_create_petition ~config ~decision;
         Log.Governance.info "[%s] tool=%s risk=%s -> require_confirm (trace=%s)"
@@ -317,7 +317,7 @@ let make_pre_hook ~config ~governance_level =
           ("reason", `String reason);
           ("tool_name", `String name);
         ] in
-        Some {
+        Tool_dispatch.Reject {
           Tool_result.success = false;
           data = response;
           tool_name = name;
@@ -335,7 +335,7 @@ let make_pre_hook ~config ~governance_level =
           ("reason", `String reason);
           ("tool_name", `String name);
         ] in
-        Some {
+        Tool_dispatch.Reject {
           Tool_result.success = false;
           data = response;
           tool_name = name;

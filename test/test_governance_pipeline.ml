@@ -216,9 +216,11 @@ let test_risk_metadata_admin_cleanup_override () =
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_metadata_pg_query_override () =
+  (* masc_pg_query removed — no handler, no catalog metadata.
+     assess_risk for unknown tool defaults to low. *)
   let risk = Gp.assess_risk ~tool_name:"masc_pg_query" ~input:no_args in
-  Alcotest.(check string) "pg_query metadata marks destructive"
-    "critical" (Gp.risk_level_to_string risk)
+  Alcotest.(check string) "pg_query (removed) defaults to low"
+    "low" (Gp.risk_level_to_string risk)
 
 let test_risk_payload_empty_overwrite () =
   let risk =
@@ -611,8 +613,9 @@ let test_hook_development_allows () =
   let config = Room.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"development" in
   let result = hook ~name:"__gov_test_delete" ~args:`Null in
-  Alcotest.(check bool) "development allows critical"
-    true (Option.is_none result);
+  (match result with
+   | Tool_dispatch.Pass -> ()
+   | _ -> Alcotest.fail "development should allow critical");
   cleanup_tmpdir tmpdir
 
 let test_hook_production_blocks_critical () =
@@ -627,13 +630,13 @@ let test_hook_production_blocks_critical () =
   let hook = Gp.make_pre_hook ~config ~governance_level:"production" in
   let result = hook ~name:"__gov_test_delete2" ~args:`Null in
   (match result with
-   | Some r ->
+   | Tool_dispatch.Reject r ->
        Alcotest.(check bool) "blocked" false r.Tool_result.success;
        let status = Yojson.Safe.Util.(r.data |> member "status" |> to_string) in
        Alcotest.(check string) "awaiting_approval" "awaiting_approval" status;
        let trace = Yojson.Safe.Util.(r.data |> member "trace_id" |> to_string) in
        Alcotest.(check bool) "has trace_id" true (String.length trace > 0)
-   | None -> Alcotest.fail "production should block critical tool");
+   | _ -> Alcotest.fail "production should block critical tool");
   cleanup_tmpdir tmpdir
 
 let test_hook_production_allows_low () =
@@ -644,8 +647,9 @@ let test_hook_production_allows_low () =
   let config = Room.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"production" in
   let result = hook ~name:"masc_status" ~args:`Null in
-  Alcotest.(check bool) "production allows low"
-    true (Option.is_none result);
+  (match result with
+   | Tool_dispatch.Pass -> ()
+   | _ -> Alcotest.fail "production should allow low risk");
   cleanup_tmpdir tmpdir
 
 let test_hook_enterprise_blocks_high () =
@@ -657,11 +661,11 @@ let test_hook_enterprise_blocks_high () =
   let hook = Gp.make_pre_hook ~config ~governance_level:"enterprise" in
   let result = hook ~name:"masc_create_room" ~args:`Null in
   (match result with
-   | Some r ->
+   | Tool_dispatch.Reject r ->
        Alcotest.(check bool) "blocked" false r.Tool_result.success;
        let status = Yojson.Safe.Util.(r.data |> member "status" |> to_string) in
        Alcotest.(check string) "awaiting_approval" "awaiting_approval" status
-   | None -> Alcotest.fail "enterprise should block high tool");
+   | _ -> Alcotest.fail "enterprise should block high tool");
   cleanup_tmpdir tmpdir
 
 let test_hook_paranoid_blocks_medium () =
@@ -673,11 +677,11 @@ let test_hook_paranoid_blocks_medium () =
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
   let result = hook ~name:"masc_join" ~args:`Null in
   (match result with
-   | Some r ->
+   | Tool_dispatch.Reject r ->
        Alcotest.(check bool) "blocked" false r.Tool_result.success;
        let status = Yojson.Safe.Util.(r.data |> member "status" |> to_string) in
        Alcotest.(check string) "awaiting_approval" "awaiting_approval" status
-   | None -> Alcotest.fail "paranoid should block medium tool");
+   | _ -> Alcotest.fail "paranoid should block medium tool");
   cleanup_tmpdir tmpdir
 
 (* ── Response structure tests ───────────────────────────────── *)
@@ -690,7 +694,7 @@ let test_blocked_response_structure () =
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
   let result = hook ~name:generic_transition_tool ~args:transition_claim_input in
   (match result with
-   | Some r ->
+   | Tool_dispatch.Reject r ->
        let module U = Yojson.Safe.Util in
        let data = r.Tool_result.data in
        let _status = data |> U.member "status" |> U.to_string in
@@ -702,7 +706,7 @@ let test_blocked_response_structure () =
        Alcotest.(check string) "governance_level" "paranoid" _gov;
        Alcotest.(check string) "risk_level" "medium" _risk;
        Alcotest.(check string) "tool_name" generic_transition_tool _tool
-   | None -> Alcotest.fail "paranoid should block medium");
+   | _ -> Alcotest.fail "paranoid should block medium");
   cleanup_tmpdir tmpdir
 
 let test_blocked_response_structure_claim_next () =
@@ -713,14 +717,14 @@ let test_blocked_response_structure_claim_next () =
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
   let result = hook ~name:explicit_claim_tool ~args:`Null in
   (match result with
-   | Some r ->
+   | Tool_dispatch.Reject r ->
        let module U = Yojson.Safe.Util in
        let data = r.Tool_result.data in
        let _risk = data |> U.member "risk_level" |> U.to_string in
        let _tool = data |> U.member "tool_name" |> U.to_string in
        Alcotest.(check string) "risk_level" "medium" _risk;
        Alcotest.(check string) "tool_name" explicit_claim_tool _tool
-   | None -> Alcotest.fail "paranoid should block claim_next");
+   | _ -> Alcotest.fail "paranoid should block claim_next");
   cleanup_tmpdir tmpdir
 
 (* ── Unknown governance level defaults to development ──────── *)

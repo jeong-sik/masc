@@ -2417,14 +2417,14 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
       Tool_dispatch.register_pre_hook
         (fun ~name ~args:_ ->
           if String.equal name "masc_tool_help" then
-            Some
+            Tool_dispatch.Reject
               {
                 Tool_result.success = false;
                 data = `String "blocked-by-pre-hook";
                 tool_name = name;
                 duration_ms = 0.0;
               }
-          else None);
+          else Tool_dispatch.Pass);
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       let _room_path = Masc_mcp.Room.masc_dir state.room_config in
       let ok, msg =

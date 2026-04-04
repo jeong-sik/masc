@@ -922,7 +922,7 @@ let test_has_permission_worker () =
 
 let test_has_permission_admin () =
   check bool "admin can init" true (Types.has_permission Types.Admin Types.CanInit);
-  check bool "admin can approve" true (Types.has_permission Types.Admin Types.CanApprove)
+  check bool "admin can admin" true (Types.has_permission Types.Admin Types.CanAdmin)
 
 (* ============================================================
    rate_limit role integration Tests

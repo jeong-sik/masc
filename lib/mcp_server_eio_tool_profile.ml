@@ -49,7 +49,7 @@ let dedupe_tool_schemas_by_name (schemas : Types.tool_schema list) =
 
 let default_instructions =
   "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
-ROOM: Agents sharing the same base path (.masc/ folder) or PostgreSQL cluster coordinate together. \
+NAMESPACE: Agents sharing the same base path (.masc/ folder) or PostgreSQL cluster coordinate together. \
 CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (defaults to basename of ME_ROOT). \
 READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
 WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \

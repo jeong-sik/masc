@@ -75,8 +75,7 @@ let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
     depend on Tool_spec. *)
 
 let read_only_tools_inline =
-  ["masc_status"; "masc_who"; "masc_messages";
-   "masc_pending_interrupts"]
+  ["masc_status"; "masc_who"; "masc_messages"]
 
 let requires_join_tools_inline =
   ["masc_broadcast"; "masc_listen"; "masc_leave"]

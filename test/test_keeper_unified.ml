@@ -569,9 +569,12 @@ let test_prompt_room_state_section () =
     }
   in
   let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
-  check bool "has room state" true
+  check bool "has namespace state" true
     (let found =
-       try ignore (Str.search_forward (Str.regexp_string "Room State") user 0); true
+       try
+         ignore
+           (Str.search_forward (Str.regexp_string "Namespace State") user 0);
+         true
        with Not_found -> false
      in found)
 
@@ -603,8 +606,8 @@ let test_prompt_omits_room_signal_when_flag_disabled () =
     }
   in
   let _sys, user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
-  check bool "room signal section omitted" true
-    (not (contains_substring user "Room Signal Interpretation"))
+  check bool "namespace signal section omitted" true
+    (not (contains_substring user "Namespace Signal Interpretation"))
 
 let test_prompt_includes_room_signal_when_flag_enabled () =
   let interpretation : Masc_mcp.Meta_cognition.interpretation =
@@ -638,18 +641,18 @@ let test_prompt_includes_room_signal_when_flag_enabled () =
     }
   in
   let _sys, user = UP.build_prompt ~meta:room_signal_meta ~observation:obs in
-  check bool "room signal section included" true
-    (contains_substring user "Room Signal Interpretation");
-  check bool "room signal primary included" true
-    (contains_substring user "room_signal_primary: contested_belief");
-  check bool "room signal secondary included" true
-    (contains_substring user "room_signal_secondary: operator_tension, stagnant_room");
-  check bool "room signal evidence refs included" true
-    (contains_substring user "room_signal_evidence_refs: post:p-root, comment:c-1");
-  check bool "room signal guard included" true
-    (contains_substring user "room_signal_guard:");
-  check bool "room digest ref included" true
-    (contains_substring user "room_digest_post_id: post-digest-1")
+  check bool "namespace signal section included" true
+    (contains_substring user "Namespace Signal Interpretation");
+  check bool "namespace signal primary included" true
+    (contains_substring user "namespace_signal_primary: contested_belief");
+  check bool "namespace signal secondary included" true
+    (contains_substring user "namespace_signal_secondary: operator_tension, stagnant_room");
+  check bool "namespace signal evidence refs included" true
+    (contains_substring user "namespace_signal_evidence_refs: post:p-root, comment:c-1");
+  check bool "namespace signal guard included" true
+    (contains_substring user "namespace_signal_guard:");
+  check bool "namespace digest ref included" true
+    (contains_substring user "namespace_digest_post_id: post-digest-1")
 
 (* ---------- Config tests ---------- *)
 
@@ -1180,6 +1183,16 @@ let test_overflow_detection_and_limit_parsing () =
   check bool "unrelated error not overflow" false
     (UT.should_attempt_context_overflow_retry "Network error: timeout")
 
+let test_overflow_retry_history_budget_reserves_headroom () =
+  let system_prompt = String.make 2400 's' in
+  let user_message = String.make 1800 'u' in
+  let budget =
+    UT.overflow_retry_history_budget ~available_context:8192
+      ~system_prompt ~user_message
+  in
+  check bool "budget is reduced below raw context" true (budget < 8192);
+  check bool "budget leaves meaningful history room" true (budget >= 256)
+
 let test_metrics_mixed_response () =
   let result =
     make_run_result ~text:"Done." ~tools:["keeper_fs_read"]
@@ -1679,5 +1692,7 @@ let () =
             test_context_overflow_limit_parses_common_oas_errors;
           test_case "overflow retry gate only opens for overflow errors" `Quick
             test_should_attempt_context_overflow_retry_only_for_overflow_errors;
+          test_case "overflow retry history budget reserves headroom" `Quick
+            test_overflow_retry_history_budget_reserves_headroom;
         ] );
     ]

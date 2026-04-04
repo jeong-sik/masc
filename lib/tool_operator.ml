@@ -135,6 +135,7 @@ let collaboration_evidence_schema ~remote =
             schema_properties
               [
                 ("session_id", `Assoc [ ("type", `String "string") ]);
+                ("namespace_id", `Assoc [ ("type", `String "string") ]);
                 ("room_id", `Assoc [ ("type", `String "string") ]);
               ] );
         ];
@@ -248,36 +249,6 @@ let judgment_write_schema =
         ];
   }
 
-let judgment_latest_schema =
-  {
-    name = "masc_operator_judgment_latest";
-    description =
-      "Internal operator-judge read path. Returns the latest stored operator judgment for a namespace or team session. Hidden from the default catalog.";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ( "properties",
-            schema_properties
-              [
-                ( "surface",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List judgment_surface_enums);
-                    ] );
-                ( "target_type",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List digest_target_type_enums);
-                    ] );
-                ("target_id", `Assoc [ ("type", `String "string") ]);
-                ("require_fresh", `Assoc [ ("type", `String "boolean") ]);
-              ] );
-          ("required", `List [ `String "surface"; `String "target_type" ]);
-        ];
-  }
 let json_string_of_result = function
   | Ok json -> (true, Yojson.Safe.to_string json)
   | Error message -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String message) ]))
@@ -324,7 +295,11 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
       Some (true, Yojson.Safe.to_string (Dashboard_surface_readiness.json ?surface_id ()))
   | "masc_collaboration_evidence" ->
       let session_id = get_string_opt args "session_id" in
-      let room_id = get_string_opt args "room_id" in
+      let room_id =
+        match get_string_opt args "namespace_id" with
+        | Some value when String.trim value <> "" -> Some value
+        | _ -> get_string_opt args "room_id"
+      in
       Some
         ( true,
           Yojson.Safe.to_string

@@ -16,7 +16,7 @@ Detected triggers that require your attention:
 
 Available actions (pick exactly one):
 - noop: Do nothing. Use when triggers do not warrant action.
-- reply_in_room: Send a message to a specific room. Requires room_id and content.
+- reply_in_room: Compatibility action name for replying in the current namespace conversation. Requires room_id and content.
 - task_claim: Claim an unclaimed task. Requires task_id and reason.
 - broadcast: Send a broadcast message to all agents. Requires message.
 - board_post: Post to the community board. Requires content and optional hearth.
@@ -29,6 +29,6 @@ Respond with ONLY the tool input object for schema `keeper_deliberation_decision
 
 Examples:
 {"action":"noop","params":{"reason":"No urgent triggers"},"reasoning":"All triggers are low priority","confidence":0.9}
-{"action":"reply_in_room","params":{"room_id":"default","content":"I see a new task available."},"reasoning":"Direct mention needs response","confidence":0.8}
+{"action":"reply_in_room","params":{"room_id":"default","content":"I see a new task available."},"reasoning":"Direct mention in the namespace conversation needs a reply","confidence":0.8}
 {"action":"task_claim","params":{"task_id":"task-123","reason":"Matches my goal"},"reasoning":"Unclaimed task aligns with keeper goal","confidence":0.7}
 {"action":"broadcast","params":{"message":"Status update: monitoring active goals"},"reasoning":"Team needs coordination update","confidence":0.6}{{multi_step_example}}

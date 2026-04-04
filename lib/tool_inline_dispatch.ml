@@ -178,52 +178,6 @@ let dispatch (ctx : context) ~(name : string) : result option =
       Progress.set_sse_callback (Mcp_server.sse_broadcast state);
       Some (Progress.handle_progress_tool arguments)
 
-  | "masc_interrupt" ->
-      let task_id = arg_get_string "task_id" "" in
-      let action = arg_get_string "action" "" in
-      if task_id = "" || action = "" then
-        Some (false, "task_id and action are required")
-      else
-      let step = arg_get_int "step" 1 in
-      let message = arg_get_string "message" "" in
-      Notify.notify_interrupt ~agent:agent_name ~action;
-      Some (safe_exec ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config;
-                 "--task-id"; task_id; "--step"; string_of_int step;
-                 "--action"; action; "--agent"; agent_name; "--interrupt"; message])
-
-  | "masc_approve" ->
-      let task_id = arg_get_string "task_id" "" in
-      if task_id = "" then Some (false, "task_id is required")
-      else
-      Some (safe_exec ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config;
-                 "--task-id"; task_id; "--approve"])
-
-  | "masc_reject" ->
-      let task_id = arg_get_string "task_id" "" in
-      if task_id = "" then Some (false, "task_id is required")
-      else
-      let reason = arg_get_string "reason" "" in
-      let args = if reason = "" then
-        ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config; "--task-id"; task_id; "--reject"]
-      else
-        ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config; "--task-id"; task_id; "--reject"; "--reason"; reason]
-      in
-      Some (safe_exec args)
-
-  | "masc_pending_interrupts" ->
-      Some (safe_exec ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config; "--pending"])
-
-  | "masc_branch" ->
-      let task_id = arg_get_string "task_id" "" in
-      let source_step = arg_get_int "source_step" 0 in
-      let branch_name = arg_get_string "branch_name" "" in
-      if task_id = "" || source_step = 0 || branch_name = "" then
-        Some (false, "task_id, source_step, and branch_name are required")
-      else
-        Some (safe_exec ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config;
-                   "--task-id"; task_id; "--branch"; string_of_int source_step;
-                   "--branch-name"; branch_name; "--agent"; agent_name])
-
   | "masc_governance_set" ->
       let level = arg_get_string "level" "production" in
       let defaults = ctx.governance_defaults level in

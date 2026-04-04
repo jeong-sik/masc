@@ -240,7 +240,7 @@ let admin_surface_tools =
     "masc_observe_swarm"; "masc_observe_topology"; "masc_observe_traces";
     "masc_operation_checkpoint"; "masc_operation_finalize"; "masc_operation_pause";
     "masc_operation_resume"; "masc_operation_start"; "masc_operation_status";
-    "masc_operation_stop"; "masc_operator_digest"; "masc_operator_judgment_latest";
+    "masc_operation_stop"; "masc_operator_digest";
     "masc_pause"; "masc_resume";
     "masc_policy_approve"; "masc_policy_deny"; "masc_policy_status"; "masc_policy_update";
     "masc_runtime_verify"; "masc_tool_list";
@@ -251,16 +251,15 @@ let keeper_internal_surface_tools = keeper_internal_tools
 
 let keeper_denied_surface_tools =
   [
-    "masc_room_delete"; "masc_room_destroy";
-    "masc_force_leave"; "masc_force_remove_agent";
+    "masc_room_delete";
+    "masc_force_leave";
     "masc_admin_reset"; "masc_admin_cleanup";
-    "masc_gc_force"; "masc_config_set"; "masc_config_reset";
+    "masc_gc_force"; "masc_config_set";
     "masc_reset";
     "masc_spawn";
     "masc_operator_action"; "masc_operator_confirm";
     "masc_operator_judgment_write";
     "masc_execute"; "masc_execute_dry_run";
-    "masc_neo4j_query"; "masc_pg_query";
   ]
 
 let system_internal_surface_tools =

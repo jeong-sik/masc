@@ -99,10 +99,27 @@ type overflow_retry_plan = {
   retry_generation : int;
 }
 
+let overflow_retry_history_budget
+    ~(available_context : int)
+    ~(system_prompt : string)
+    ~(user_message : string) : int =
+  let prompt_tokens =
+    Agent_sdk.Context_reducer.estimate_char_tokens system_prompt
+    + Agent_sdk.Context_reducer.estimate_char_tokens user_message
+  in
+  let prompt_reserve = max 1024 prompt_tokens in
+  let tool_reserve =
+    Keeper_config.keeper_retry_max_tools_per_turn () * 220
+  in
+  let safety_reserve = 512 in
+  max 256 (available_context - (prompt_reserve + tool_reserve + safety_reserve))
+
 let recover_context_overflow_retry
     ~(meta : keeper_meta)
     ~(base_dir : string)
     ~(primary_max_context : int)
+    ~(system_prompt : string)
+    ~(user_message : string)
     ~(error : string) : overflow_retry_plan option =
   match context_overflow_limit error with
   | None -> None
@@ -111,18 +128,22 @@ let recover_context_overflow_retry
         if primary_max_context <= 0 then actual_limit
         else min primary_max_context actual_limit
       in
+      let retry_history_budget =
+        overflow_retry_history_budget ~available_context:retry_max_context
+          ~system_prompt ~user_message
+      in
       let model = Keeper_exec_context.checkpoint_model_of_meta meta in
       match
         Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
           ~base_dir ~meta ~model
-          ~primary_model_max_tokens:retry_max_context
+          ~primary_model_max_tokens:retry_history_budget
       with
       | Some recovery ->
           Log.Keeper.warn
-            "%s: context overflow retry prepared with compacted checkpoint (%d->%d tokens, max_context=%d, generation=%d)"
+            "%s: context overflow retry prepared with compacted checkpoint (%d->%d tokens, max_context=%d, history_budget=%d, generation=%d)"
             meta.name recovery.compaction.before_tokens
             recovery.compaction.after_tokens
-            retry_max_context recovery.turn_generation;
+            retry_max_context retry_history_budget recovery.turn_generation;
           Some
             {
               retry_max_context;
@@ -789,7 +810,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                            && should_attempt_context_overflow_retry e -> (
                 match
                   recover_context_overflow_retry ~meta ~base_dir
-                    ~primary_max_context ~error:e
+                    ~primary_max_context ~system_prompt ~user_message ~error:e
                 with
                 | Some retry_plan ->
                     let retry_meta =

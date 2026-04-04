@@ -673,7 +673,7 @@ let test_overflow_retry_legacy_restore_failure_falls_back_to_oas () =
       match
         Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
           ~base_dir ~meta ~model:"llama:auto"
-          ~primary_model_max_tokens:256
+          ~primary_model_max_tokens:512
       with
       | None ->
           Alcotest.fail
@@ -681,7 +681,7 @@ let test_overflow_retry_legacy_restore_failure_falls_back_to_oas () =
       | Some recovery ->
           let recovered_ctx =
             Keeper_exec_context.context_of_oas_checkpoint recovery.checkpoint
-              ~primary_model_max_tokens:256
+              ~primary_model_max_tokens:512
           in
           Alcotest.(check int) "fallback uses OAS generation" 11
             recovery.turn_generation;
@@ -780,17 +780,19 @@ let test_overflow_retry_saves_compacted_checkpoint () =
       match
         Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
           ~base_dir ~meta ~model:"llama:auto"
-          ~primary_model_max_tokens:256
+          ~primary_model_max_tokens:512
       with
       | None -> Alcotest.fail "expected overflow retry recovery to compact"
       | Some recovery ->
           let recovered_ctx =
             Keeper_exec_context.context_of_oas_checkpoint recovery.checkpoint
-              ~primary_model_max_tokens:256
+              ~primary_model_max_tokens:512
           in
           Alcotest.(check bool) "token count reduced" true
             (Keeper_exec_context.token_count recovered_ctx < before_tokens);
-          Alcotest.(check int) "max tokens clamped" 256 recovered_ctx.max_tokens)
+          Alcotest.(check bool) "token count fits retry budget" true
+            (Keeper_exec_context.token_count recovered_ctx <= 512);
+          Alcotest.(check int) "max tokens clamped" 512 recovered_ctx.max_tokens)
 
 (* ================================================================ *)
 (* Same-trace checkpoint continuity regression (OAS #467)            *)

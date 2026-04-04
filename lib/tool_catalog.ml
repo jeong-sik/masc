@@ -273,24 +273,40 @@ let implementation_allows_public_visibility = function
   | Simulation | Placeholder -> false
 
 let metadata name =
-  match Hashtbl.find_opt metadata_table name with
-  | Some meta -> meta
-  | None ->
-    if is_public_mcp name then default_metadata
-    else if Hashtbl.mem keeper_internal_set name then
-      keeper_internal_metadata name
-    else if Tool_catalog_surfaces.is_on_surface System_internal name then
-      { default_metadata with
-        visibility = Hidden;
-        allow_direct_call_when_hidden = true;
-        reason = Some "System-internal tool; callable but not listed in tools/list." }
-    else
-      (* Non-public, non-explicit tools are internal: hidden from tools/list
-         but callable via tools/call (tool_allowed_in_profile uses include_hidden). *)
-      { default_metadata with
-        visibility = Hidden;
-        allow_direct_call_when_hidden = true;
-        reason = Some "Internal tool; not on public MCP surface." }
+  let base =
+    match Hashtbl.find_opt metadata_table name with
+    | Some meta -> meta
+    | None ->
+      if is_public_mcp name then default_metadata
+      else if Hashtbl.mem keeper_internal_set name then
+        keeper_internal_metadata name
+      else if Tool_catalog_surfaces.is_on_surface System_internal name then
+        { default_metadata with
+          visibility = Hidden;
+          allow_direct_call_when_hidden = true;
+          reason = Some "System-internal tool; callable but not listed in tools/list." }
+      else
+        (* Non-public, non-explicit tools are internal: hidden from tools/list
+           but callable via tools/call (tool_allowed_in_profile uses include_hidden). *)
+        { default_metadata with
+          visibility = Hidden;
+          allow_direct_call_when_hidden = true;
+          reason = Some "Internal tool; not on public MCP surface." }
+  in
+  if Tool_catalog_surfaces.is_on_surface System_internal name then
+    {
+      base with
+      visibility = Hidden;
+      allow_direct_call_when_hidden = true;
+      reason =
+        (match base.reason with
+        | Some _ -> base.reason
+        | None ->
+            Some
+              "System-internal tool; callable but not listed in tools/list.");
+    }
+  else
+    base
 
 let implementation_status name =
   let meta = metadata name in

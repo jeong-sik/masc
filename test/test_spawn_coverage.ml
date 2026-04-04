@@ -154,8 +154,8 @@ let test_masc_mcp_tools_has_team_session_finalize () =
   check bool "has team_session_finalize" true
     (List.mem "mcp__masc__masc_team_session_finalize" Spawn.masc_mcp_tools)
 
-let test_masc_mcp_tools_has_a2a_delegate () =
-  check bool "has a2a_delegate" true
+let test_masc_mcp_tools_omits_a2a_delegate () =
+  check bool "omits a2a_delegate" false
     (List.mem "mcp__masc__masc_a2a_delegate" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_run_deliverable () =
@@ -729,7 +729,7 @@ let () =
       test_case "has relay_status" `Quick test_masc_mcp_tools_has_relay_status;
       test_case "has team_session_step" `Quick test_masc_mcp_tools_has_team_session_step;
       test_case "has team_session_finalize" `Quick test_masc_mcp_tools_has_team_session_finalize;
-      test_case "has a2a_delegate" `Quick test_masc_mcp_tools_has_a2a_delegate;
+      test_case "omits a2a_delegate" `Quick test_masc_mcp_tools_omits_a2a_delegate;
       test_case "has run_deliverable" `Quick test_masc_mcp_tools_has_run_deliverable;
       test_case "omits tool_stats" `Quick test_masc_mcp_tools_has_tool_stats;
       test_case "has tool_help" `Quick test_masc_mcp_tools_has_tool_help;

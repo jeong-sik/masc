@@ -225,6 +225,24 @@ let test_system_internal_callable () =
       (String.concat ", " uncallable);
   Alcotest.(check bool) "all system_internal callable" true (uncallable = [])
 
+let test_pruned_tools_move_to_system_internal () =
+  List.iter
+    (fun name ->
+      Alcotest.(check bool) (name ^ " on System_internal") true
+        (Tool_catalog.is_on_surface Tool_catalog.System_internal name);
+      Alcotest.(check bool) (name ^ " hidden") false
+        (Tool_catalog.is_visible name);
+      Alcotest.(check bool) (name ^ " callable") true
+        (Tool_catalog.allow_direct_call name))
+    [
+      "masc_a2a_delegate";
+      "masc_board_migrate";
+      "masc_episode_list";
+      "masc_portal_send";
+      "masc_transport_status";
+      "masc_voice_speak";
+    ]
+
 let test_workspace_mutating_canonical_used () =
   (* workspace_mutating_tool_names in tool_catalog_surfaces is the canonical list.
      Verify no empty or phantom entries. *)
@@ -282,5 +300,7 @@ let () =
             test_system_internal_not_visible;
           Alcotest.test_case "System_internal callable" `Quick
             test_system_internal_callable;
+          Alcotest.test_case "pruned tools move to System_internal" `Quick
+            test_pruned_tools_move_to_system_internal;
         ] );
     ]

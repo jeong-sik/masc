@@ -52,7 +52,7 @@ type unified_turn_decision = {
   should_run : bool;
   channel : unified_turn_channel;
   reasons : string list;
-  since_last_proactive : int option;
+  since_last_scheduled_autonomous : int option;
   effective_cooldown : int option;
   task_reactive_cooldown : int option;
   idle_gate_sec : int option;
@@ -589,11 +589,12 @@ let observe ~(pending_board_events : pending_board_event list option)
     last_turn_budget = None;
   }
 
-(** Compute effective proactive cooldown with idle decay.
+(** Compute effective scheduled autonomous cooldown with idle decay.
     After extended idle (> base cooldown), halve the cooldown each
     additional period, down to a configurable floor.  This prevents
     permanent silence when no external events arrive. *)
-let effective_proactive_cooldown ~(base_cooldown : int) ~(since_last : int) : int =
+let effective_scheduled_autonomous_cooldown
+    ~(base_cooldown : int) ~(since_last : int) : int =
   let min_cooldown = Keeper_config.keeper_proactive_min_cooldown_sec () in
   (* Floor must not exceed the base cooldown — otherwise decay would
      paradoxically increase a short cooldown. *)
@@ -604,6 +605,9 @@ let effective_proactive_cooldown ~(base_cooldown : int) ~(since_last : int) : in
     let capped_periods = min decay_periods 4 in
     let factor = 1.0 /. (Float.pow 2.0 (float_of_int capped_periods)) in
     max floor (int_of_float (float_of_int base_cooldown *. factor))
+
+let effective_proactive_cooldown =
+  effective_scheduled_autonomous_cooldown
 
 let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation) =
   let reactive_reasons =
@@ -620,13 +624,13 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
         should_run = true;
         channel = Reactive;
         reasons = reactive_reasons;
-        since_last_proactive = None;
+        since_last_scheduled_autonomous = None;
         effective_cooldown = None;
         task_reactive_cooldown = None;
         idle_gate_sec = None;
       }
   | [] ->
-      let since_last_proactive =
+      let since_last_scheduled_autonomous =
         if meta.runtime.proactive_rt.last_ts <= 0.0 then max_int
         else
           int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
@@ -636,17 +640,17 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
         {
           should_run = false;
           channel = Scheduled_autonomous;
-          reasons = [ "proactive_disabled" ];
-          since_last_proactive = Some since_last_proactive;
+          reasons = [ "scheduled_autonomous_disabled" ];
+          since_last_scheduled_autonomous = Some since_last_scheduled_autonomous;
           effective_cooldown = None;
           task_reactive_cooldown = None;
           idle_gate_sec = Some idle_gate_sec;
         }
       else
         let effective_cooldown =
-          effective_proactive_cooldown
+          effective_scheduled_autonomous_cooldown
             ~base_cooldown:meta.proactive.cooldown_sec
-            ~since_last:since_last_proactive
+            ~since_last:since_last_scheduled_autonomous
         in
         let task_cooldown_divisor =
           Keeper_config.keeper_proactive_task_cooldown_divisor ()
@@ -662,15 +666,18 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
           observation.unclaimed_task_count > 0 || observation.failed_task_count > 0
         in
         let idle_gate_elapsed = observation.idle_seconds >= idle_gate_sec in
-        let cooldown_elapsed = since_last_proactive >= effective_cooldown in
+        let cooldown_elapsed =
+          since_last_scheduled_autonomous >= effective_cooldown
+        in
         let backlog_elapsed =
           has_actionable_tasks
-          && since_last_proactive >= task_reactive_cooldown
+          && since_last_scheduled_autonomous >= task_reactive_cooldown
         in
         let reasons =
           [
             Some "scheduled_autonomous_turn";
-            (if since_last_proactive = max_int then Some "never_started" else None);
+            (if since_last_scheduled_autonomous = max_int then Some "never_started"
+             else None);
             (if idle_gate_elapsed then Some "idle_gate_elapsed" else Some "idle_gate_wait");
             (if cooldown_elapsed then Some "cooldown_elapsed" else None);
             (if has_actionable_tasks then Some "actionable_backlog" else None);
@@ -684,7 +691,7 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
           should_run = idle_gate_elapsed && (cooldown_elapsed || backlog_elapsed);
           channel = Scheduled_autonomous;
           reasons;
-          since_last_proactive = Some since_last_proactive;
+          since_last_scheduled_autonomous = Some since_last_scheduled_autonomous;
           effective_cooldown = Some effective_cooldown;
           task_reactive_cooldown = Some task_reactive_cooldown;
           idle_gate_sec = Some idle_gate_sec;

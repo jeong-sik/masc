@@ -21,6 +21,8 @@ type proactive_policy =
   ; cooldown_sec : int
   }
 
+type scheduled_autonomous_policy = proactive_policy
+
 type proactive_cycle_outcome =
   | Proactive_never_started
   | Proactive_unknown
@@ -29,6 +31,8 @@ type proactive_cycle_outcome =
   | Proactive_tool_use
   | Proactive_mixed_response
   | Proactive_error
+
+type scheduled_autonomous_cycle_outcome = proactive_cycle_outcome
 
 type tool_preset =
   | Minimal
@@ -64,6 +68,8 @@ type proactive_runtime =
   ; last_reason : string
   ; last_preview : string
   }
+
+type scheduled_autonomous_runtime = proactive_runtime
 
 type usage_metrics =
   { total_turns : int
@@ -224,6 +230,14 @@ let proactive_cycle_outcome_of_string raw =
   | "mixed_response" -> Proactive_mixed_response
   | "error" -> Proactive_error
   | _ -> Proactive_unknown
+;;
+
+let scheduled_autonomous_cycle_outcome_to_string =
+  proactive_cycle_outcome_to_string
+;;
+
+let scheduled_autonomous_cycle_outcome_of_string =
+  proactive_cycle_outcome_of_string
 ;;
 
 let normalize_tool_access = function
@@ -403,6 +417,10 @@ let map_proactive_rt (f : proactive_runtime -> proactive_runtime) (m : keeper_me
   : keeper_meta
   =
   { m with runtime = { m.runtime with proactive_rt = f m.runtime.proactive_rt } }
+;;
+
+let map_scheduled_autonomous_rt =
+  map_proactive_rt
 ;;
 
 let now_iso () = Types.now_iso ()

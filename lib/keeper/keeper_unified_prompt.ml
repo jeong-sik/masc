@@ -141,7 +141,7 @@ let autonomous_trigger_lines
                  (Printf.sprintf "- Idle gate: %ds (current idle: %ds)"
                     idle_gate observation.idle_seconds)
            | None -> None);
-          (match decision.since_last_proactive, decision.effective_cooldown with
+          (match decision.since_last_scheduled_autonomous, decision.effective_cooldown with
            | Some since_last, Some cooldown ->
                Some
                  (Printf.sprintf

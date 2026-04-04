@@ -277,36 +277,48 @@ module FileSystem = struct
     | _ -> acc
 
   let ensure_key_index t =
-    if ki_length t > 0 then ()
-    else
-      match t.key_index_promise with
-      | Some p ->
-        (* Another fiber is populating — wait for it rather than
-           proceeding with an empty index or starting a duplicate. *)
-        (match Eio.Promise.await p with
-         | Ok () -> ()
-         | Error _ -> ())
-      | None ->
-        let p, r = Eio.Promise.create () in
-        t.key_index_promise <- Some p;
-        (try
-           let keys =
-             collect_keys_under ~requested_prefix:"" ~logical_prefix:"" t.fs []
-           in
-           ki_replace_bulk t (List.map (fun k -> (k, ())) keys);
-           let len = ki_length t in
-           if len > 0 then
-             Log.legacy_traceln ~level:Log.Info ~module_name:"Backend"
-               (Printf.sprintf "key_index populated: %d keys" len);
-           Eio.Promise.resolve_ok r ()
-         with exn ->
-           t.key_index_promise <- None;
-           Eio.Promise.resolve_error r exn;
-           match exn with
-           | Eio.Cancel.Cancelled _ -> raise exn
-           | _ ->
-             Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-               (Printf.sprintf "key_index population failed: %s" (Printexc.to_string exn)))
+    (* Domain-safe check-and-populate.  Stdlib.Mutex serializes the
+       check of key_index length + key_index_promise so that two
+       Executor_pool domains cannot both start a population traverse.
+       The mutex is released BEFORE Eio.Promise.await (which needs Eio
+       fiber context and would deadlock under a held Stdlib.Mutex). *)
+    let action =
+      Mutex.lock t.key_index_mu;
+      Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu) (fun () ->
+        if Hashtbl.length t.key_index > 0 then `Done
+        else match t.key_index_promise with
+          | Some p -> `Wait p
+          | None ->
+            let p, r = Eio.Promise.create () in
+            t.key_index_promise <- Some p;
+            `Populate r)
+    in
+    match action with
+    | `Done -> ()
+    | `Wait p ->
+      (match Eio.Promise.await p with Ok () -> () | Error _ -> ())
+    | `Populate r ->
+      (try
+         let keys =
+           collect_keys_under ~requested_prefix:"" ~logical_prefix:"" t.fs []
+         in
+         ki_replace_bulk t (List.map (fun k -> (k, ())) keys);
+         let len = ki_length t in
+         if len > 0 then
+           Log.legacy_traceln ~level:Log.Info ~module_name:"Backend"
+             (Printf.sprintf "key_index populated: %d keys" len);
+         Eio.Promise.resolve_ok r ()
+       with exn ->
+         Mutex.lock t.key_index_mu;
+         Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu) (fun () ->
+           t.key_index_promise <- None);
+         Eio.Promise.resolve_error r exn;
+         match exn with
+         | Eio.Cancel.Cancelled _ -> raise exn
+         | _ ->
+           Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
+             (Printf.sprintf "key_index population failed: %s"
+                (Printexc.to_string exn)))
 
   (** Check if key exists (in-memory index first, filesystem fallback) *)
   let exists t key =

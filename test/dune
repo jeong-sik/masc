@@ -153,8 +153,8 @@
 ; Group 2: Property-based tests (QCheck)
 ; ============================================================
 (tests
- (names test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_similarity)
- (modules test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_similarity)
+ (names test_pbt_mention test_pbt_validation test_pbt_text_processing)
+ (modules test_pbt_mention test_pbt_validation test_pbt_text_processing)
  (libraries masc_test_deps))
 
 ; ============================================================

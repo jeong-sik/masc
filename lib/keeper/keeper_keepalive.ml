@@ -28,16 +28,14 @@ let keeper_turn_throttle_limit () =
 ;;
 
 let turn_semaphore_ref : Eio.Semaphore.t option ref = ref None
-let turn_semaphore_limit_ref : int option ref = ref None
 
 let keeper_turn_semaphore () =
-  let limit = keeper_turn_throttle_limit () in
-  match !turn_semaphore_ref, !turn_semaphore_limit_ref with
-  | Some sem, Some current when current = limit -> sem
+  match !turn_semaphore_ref with
+  | Some sem -> sem
   | _ ->
+    let limit = keeper_turn_throttle_limit () in
     let sem = Eio.Semaphore.make limit in
     turn_semaphore_ref := Some sem;
-    turn_semaphore_limit_ref := Some limit;
     Log.Keeper.info
       "keeper turn throttle semaphore created (limit=%d, env=MASC_KEEPER_AUTOBOOT_MAX)"
       limit;

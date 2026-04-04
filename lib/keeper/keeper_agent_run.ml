@@ -523,7 +523,7 @@ let run_turn
      Full-preset keepers can have 300+ policy-allowed tools; sending all
      of them as fallback produces ~39K tokens which exceeds 8K model
      context windows.  Cap to max_fallback_tools, prioritizing keeper_*
-     tools (preset-scoped, always relevant) then standard-tier MASC
+     tools (preset-scoped, always relevant) then session-min MASC
      tools (coordination essentials).  See #4592. *)
   let policy_allowed =
     Keeper_exec_tools.keeper_allowed_tool_names !meta_ref
@@ -547,7 +547,7 @@ let run_turn
         String.starts_with ~prefix:"keeper_" n) candidates in
       let masc_std = List.filter (fun n ->
         String.starts_with ~prefix:"masc_" n
-        && Tool_catalog_tiers.is_in_tier Standard n
+        && Tool_catalog.is_on_surface Tool_catalog.Session_min n
       ) candidates in
       let merged = keeper @ masc_std in
       if List.length merged > max_fallback_tools then

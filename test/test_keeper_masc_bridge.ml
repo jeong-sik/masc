@@ -191,10 +191,29 @@ let test_tool_access_missing_migrates_legacy_standard_policy () =
           ("trace_id", `String "legacy-standard-trace");
         ])
   in
+  let legacy_masc_names =
+    names
+    |> List.filter (fun name -> String.starts_with ~prefix:"masc_" name)
+    |> List.sort_uniq String.compare
+  in
+  let expected_legacy_masc_names =
+    [
+      "masc_status";
+      "masc_tasks";
+      "masc_claim_next";
+      "masc_plan_set_task";
+      "masc_transition";
+      "masc_add_task";
+      "masc_heartbeat";
+    ]
+    |> List.sort_uniq String.compare
+  in
   Alcotest.(check bool) "keeps keeper internal tool" true
     (List.mem "keeper_time_now" names);
   Alcotest.(check bool) "keeps legacy standard masc tool" true
     (List.mem "masc_status" names);
+  Alcotest.(check (list string)) "legacy migration keeps expected masc set"
+    expected_legacy_masc_names legacy_masc_names;
   Alcotest.(check bool) "does not silently expand to full" false
     (List.mem "masc_autoresearch_cycle" names)
 

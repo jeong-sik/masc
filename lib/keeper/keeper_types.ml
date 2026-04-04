@@ -168,7 +168,20 @@ let legacy_keeper_internal_tool_names =
   Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
 ;;
 
-let legacy_standard_tool_names = Tool_catalog.standard_tools
+let legacy_session_min_tool_names =
+  (* Legacy keepers historically received canonical masc_* coordination tools,
+     not the SDK alias-heavy Session_min surface. Keep this compatibility list
+     explicit so missing tool_access migration remains stable after tier removal. *)
+  [
+    "masc_status";
+    "masc_tasks";
+    "masc_claim_next";
+    "masc_plan_set_task";
+    "masc_transition";
+    "masc_add_task";
+    "masc_broadcast";
+    "masc_heartbeat";
+  ]
 
 let migrate_legacy_restricted_tools names =
   Custom (normalize_tool_names (legacy_keeper_internal_tool_names @ names))
@@ -313,7 +326,7 @@ let tool_access_projection_of_meta_json (json : Yojson.Safe.t) =
     match string_list_field_result ~field_name:"tool_allowlist" json with
     | Ok names -> Ok (migrate_legacy_restricted_tools names)
     | Error msg -> Error msg)
-  else Ok (migrate_legacy_restricted_tools legacy_standard_tool_names)
+  else Ok (migrate_legacy_restricted_tools legacy_session_min_tool_names)
 ;;
 
 let tool_access_of_meta_json (json : Yojson.Safe.t) =

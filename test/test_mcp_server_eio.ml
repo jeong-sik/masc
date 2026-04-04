@@ -1850,7 +1850,7 @@ let test_handle_request_tools_list_rejects_empty_cursor () =
     (error_message_exn response);
   cleanup_dir base_path
 
-let test_handle_request_tools_list_rejects_invalid_tier () =
+let test_handle_request_tools_list_rejects_tier_field () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
@@ -1869,8 +1869,8 @@ let test_handle_request_tools_list_rejects_invalid_tier () =
   in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
-  Alcotest.(check bool) "invalid tier error" true
-    (contains_substring (error_message_exn response) "tier must be one of");
+  Alcotest.(check bool) "unsupported tier error" true
+    (contains_substring (error_message_exn response) "unsupported field(s): tier");
   cleanup_dir base_path
 
 let test_handle_request_resources_list_rejects_unknown_field () =
@@ -2543,8 +2543,8 @@ let eio_tests = [
   "handle tools/list", `Quick, test_handle_request_tools_list;
   "handle tools/list rejects empty cursor", `Quick,
     test_handle_request_tools_list_rejects_empty_cursor;
-  "handle tools/list rejects invalid tier", `Quick,
-    test_handle_request_tools_list_rejects_invalid_tier;
+  "handle tools/list rejects tier field", `Quick,
+    test_handle_request_tools_list_rejects_tier_field;
   "handle prompts/list non-empty", `Quick, test_handle_request_prompts_list_non_empty;
   "handle prompts/list cursor", `Quick, test_handle_request_prompts_list_cursor;
   "handle prompts/list rejects invalid cursor", `Quick,

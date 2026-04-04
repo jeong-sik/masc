@@ -1,14 +1,12 @@
-(** Tool_catalog — Visibility, lifecycle, and tier metadata for MCP tools.
+(** Tool_catalog — Visibility and lifecycle metadata for MCP tools.
 
     Central registry for tool access control:
     - Visibility: Default (public) vs Hidden (internal-only)
     - Lifecycle: Active, Deprecated, Placeholder
-    - Tier: Essential (~20) < Standard (~50) < Full (all)
     - Surface: Canonical per-surface tool name membership SSOT
 
     Sub-modules (private):
     - Tool_catalog_surfaces: surface type, canonical tool lists, keeper-internal
-    - Tool_catalog_tiers: tier type, essential/standard tool lists
 
     @since 2.188.0 — Decomposed from monolithic tool_catalog.ml *)
 
@@ -29,11 +27,6 @@ type implementation_status =
   | Adapter
   | Simulation
   | Placeholder
-
-(* Re-export tier type and surface type from sub-modules *)
-include (Tool_catalog_tiers : sig
-  type tier = Tool_catalog_tiers.tier = Essential | Standard | Full
-end)
 
 include (Tool_catalog_surfaces : sig
   type surface = Tool_catalog_surfaces.surface =
@@ -369,18 +362,6 @@ let deprecated_tool_entries : (string * metadata) list =
   List.filter (fun (_name, meta) -> meta.lifecycle = Deprecated) explicit_metadata
 
 (* ================================================================ *)
-(* Re-export: Tier system (from Tool_catalog_tiers)                 *)
-(* ================================================================ *)
-
-let essential_tools = Tool_catalog_tiers.essential_tools
-let standard_tools = Tool_catalog_tiers.standard_tools
-let tier_to_string = Tool_catalog_tiers.tier_to_string
-let tier_of_string = Tool_catalog_tiers.tier_of_string
-let tool_tier = Tool_catalog_tiers.tool_tier
-let is_in_tier = Tool_catalog_tiers.is_in_tier
-let tier_tool_count = Tool_catalog_tiers.tier_tool_count
-
-(* ================================================================ *)
 (* JSON metadata helpers                                            *)
 (* ================================================================ *)
 
@@ -391,7 +372,6 @@ let metadata_to_fields name =
       ("visibility", `String (visibility_to_string meta.visibility));
       ("lifecycle", `String (lifecycle_to_string meta.lifecycle));
       ("implementationStatus", `String (implementation_status_to_string meta.implementation_status));
-      ("tier", `String (tier_to_string (tool_tier name)));
     ]
   in
   let with_canonical =

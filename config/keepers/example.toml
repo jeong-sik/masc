@@ -29,8 +29,6 @@ mention_targets = ["sherlock", "log-analyzer"]
 
 # Proactive behavior
 proactive_enabled = true
-presence_keepalive = true
-presence_keepalive_sec = 30
 
 # Execution scope — controls what the keeper can modify.
 #   observe_only = read-only, no file writes (default for new keepers until #3886)

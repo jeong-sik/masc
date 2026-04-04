@@ -147,55 +147,124 @@ let parse_value (raw : string) : (toml_value, string) result =
       | None -> Error (Printf.sprintf "cannot parse value: %s" s)
   end
 
+let starts_with_triple_quote (s : string) : bool =
+  let t = String.trim s in
+  String.length t >= 3
+  && t.[0] = '"' && t.[1] = '"' && t.[2] = '"'
+
+let extract_after_triple_quote (s : string) : string =
+  let t = String.trim s in
+  String.sub t 3 (String.length t - 3)
+
 let parse_toml (content : string) : (toml_doc, string) result =
   let lines = String.split_on_char '\n' content in
   let current_table = ref "" in
   let acc = ref [] in
   let error = ref None in
   let line_num = ref 0 in
+  (* Multiline string accumulation state *)
+  let ml_key = ref "" in
+  let ml_buf = Buffer.create 256 in
+  let ml_active = ref false in
+  let emit_kv full_key v =
+    acc := (full_key, v) :: !acc
+  in
   List.iter (fun raw_line ->
     incr line_num;
     if Option.is_none !error then begin
-      let line = String.trim raw_line in
-      let line = strip_comment line in
-      if line = "" then ()
-      else if line.[0] = '[' then begin
-        (* Table header *)
-        let len = String.length line in
-        if line.[len - 1] <> ']' then
-          error := Some (Printf.sprintf "line %d: unterminated table header" !line_num)
-        else begin
-          let table_name =
-            String.sub line 1 (len - 2) |> String.trim
+      if !ml_active then begin
+        (* Inside a multiline basic string: accumulate until closing triple-quote *)
+        let trimmed = String.trim raw_line in
+        (* Check if this line contains the closing triple-quote *)
+        match String.index_opt trimmed '"' with
+        | Some _ when String.length trimmed >= 3 ->
+          (* Look for triple-quote anywhere in the line *)
+          let len = String.length raw_line in
+          let rec find_close i =
+            if i + 2 >= len then None
+            else if raw_line.[i] = '"' && raw_line.[i+1] = '"' && raw_line.[i+2] = '"' then
+              Some i
+            else find_close (i + 1)
           in
-          if table_name = "" then
-            error := Some (Printf.sprintf "line %d: empty table name" !line_num)
-          else
-            current_table := table_name
-        end
+          (match find_close 0 with
+           | Some pos ->
+             if Buffer.length ml_buf > 0 then Buffer.add_char ml_buf '\n';
+             Buffer.add_string ml_buf (String.sub raw_line 0 pos);
+             let value = Buffer.contents ml_buf in
+             emit_kv !ml_key (Toml_string value);
+             ml_active := false;
+             Buffer.clear ml_buf
+           | None ->
+             if Buffer.length ml_buf > 0 then Buffer.add_char ml_buf '\n';
+             Buffer.add_string ml_buf raw_line)
+        | _ ->
+          if Buffer.length ml_buf > 0 then Buffer.add_char ml_buf '\n';
+          Buffer.add_string ml_buf raw_line
       end
       else begin
-        (* key = value *)
-        match String.index_opt line '=' with
-        | None ->
-          error := Some (Printf.sprintf "line %d: expected key = value" !line_num)
-        | Some eq_pos ->
-          let key = String.sub line 0 eq_pos |> String.trim in
-          let value_raw = String.sub line (eq_pos + 1) (String.length line - eq_pos - 1) in
-          if key = "" then
-            error := Some (Printf.sprintf "line %d: empty key" !line_num)
-          else
-            let full_key =
-              if !current_table = "" then key
-              else !current_table ^ "." ^ key
+        let line = String.trim raw_line in
+        let line = strip_comment line in
+        if line = "" then ()
+        else if line.[0] = '[' then begin
+          (* Table header *)
+          let len = String.length line in
+          if line.[len - 1] <> ']' then
+            error := Some (Printf.sprintf "line %d: unterminated table header" !line_num)
+          else begin
+            let table_name =
+              String.sub line 1 (len - 2) |> String.trim
             in
-            match parse_value value_raw with
-            | Ok v -> acc := (full_key, v) :: !acc
-            | Error e ->
-              error := Some (Printf.sprintf "line %d: %s" !line_num e)
+            if table_name = "" then
+              error := Some (Printf.sprintf "line %d: empty table name" !line_num)
+            else
+              current_table := table_name
+          end
+        end
+        else begin
+          (* key = value *)
+          match String.index_opt line '=' with
+          | None ->
+            error := Some (Printf.sprintf "line %d: expected key = value" !line_num)
+          | Some eq_pos ->
+            let key = String.sub line 0 eq_pos |> String.trim in
+            let value_raw = String.sub line (eq_pos + 1) (String.length line - eq_pos - 1) in
+            if key = "" then
+              error := Some (Printf.sprintf "line %d: empty key" !line_num)
+            else
+              let full_key =
+                if !current_table = "" then key
+                else !current_table ^ "." ^ key
+              in
+              if starts_with_triple_quote value_raw then begin
+                (* Start multiline basic string *)
+                let after = extract_after_triple_quote value_raw in
+                (* Check if closing triple-quote is on the same line *)
+                let rec find_close_in s i =
+                  if i + 2 >= String.length s then None
+                  else if s.[i] = '"' && s.[i+1] = '"' && s.[i+2] = '"' then Some i
+                  else find_close_in s (i + 1)
+                in
+                match find_close_in after 0 with
+                | Some pos ->
+                  let value = String.sub after 0 pos in
+                  emit_kv full_key (Toml_string value)
+                | None ->
+                  ml_key := full_key;
+                  ml_active := true;
+                  Buffer.clear ml_buf;
+                  Buffer.add_string ml_buf after
+              end
+              else
+                match parse_value value_raw with
+                | Ok v -> emit_kv full_key v
+                | Error e ->
+                  error := Some (Printf.sprintf "line %d: %s" !line_num e)
+        end
       end
     end
   ) lines;
+  if !ml_active && Option.is_none !error then
+    error := Some (Printf.sprintf "unterminated multiline string for key '%s'" !ml_key);
   match !error with
   | Some e -> Error e
   | None -> Ok (List.rev !acc)

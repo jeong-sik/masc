@@ -140,6 +140,48 @@ let test_parse_error_no_equals () =
   | Ok _ -> fail "expected parse error"
   | Error _ -> ()
 
+let test_parse_multiline_string () =
+  let input = "[keeper]\ngoal = \"test\"\ninstructions = \"\"\"\nYou are a helper.\n\nDo things.\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "keeper.instructions" doc with
+     | Some (TL.Toml_string s) ->
+       check string "multiline content" "You are a helper.\n\nDo things.\n" s
+     | _ -> fail "expected Toml_string for multiline")
+  | Error e -> fail e
+
+let test_parse_multiline_string_same_line () =
+  let input = {|key = """inline"""  |} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) -> check string "inline multiline" "inline" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail e
+
+let test_parse_multiline_string_unterminated () =
+  let input = "key = \"\"\"\nunterminated content" in
+  match TL.parse_toml input with
+  | Ok _ -> fail "expected error for unterminated multiline"
+  | Error e ->
+    check bool "mentions unterminated" true
+      (String.length e > 0)
+
+let test_parse_multiline_with_other_keys () =
+  let input = "[sec]\na = \"before\"\nb = \"\"\"\nmulti\nline\n\"\"\"\nc = \"after\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "sec.a" doc with
+     | Some (TL.Toml_string s) -> check string "before" "before" s
+     | _ -> fail "expected sec.a");
+    (match List.assoc_opt "sec.b" doc with
+     | Some (TL.Toml_string s) -> check string "multiline" "multi\nline\n" s
+     | _ -> fail "expected sec.b");
+    (match List.assoc_opt "sec.c" doc with
+     | Some (TL.Toml_string s) -> check string "after" "after" s
+     | _ -> fail "expected sec.c")
+  | Error e -> fail e
+
 (* ================================================================ *)
 (* Profile defaults conversion tests                                 *)
 (* ================================================================ *)
@@ -534,6 +576,10 @@ let () =
           test_case "inline comment" `Quick test_parse_inline_comment;
           test_case "error: unterminated table" `Quick test_parse_error_unterminated_table;
           test_case "error: no equals" `Quick test_parse_error_no_equals;
+          test_case "multiline string" `Quick test_parse_multiline_string;
+          test_case "multiline string same line" `Quick test_parse_multiline_string_same_line;
+          test_case "multiline string unterminated" `Quick test_parse_multiline_string_unterminated;
+          test_case "multiline with other keys" `Quick test_parse_multiline_with_other_keys;
         ] );
       ( "profile_defaults",
         [

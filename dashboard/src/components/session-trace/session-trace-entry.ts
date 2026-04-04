@@ -35,7 +35,7 @@ const TOOL_CATEGORIES: Array<{ match: (n: string) => boolean; icon: string; colo
   { match: n => n.includes('bash'),                          icon: '>', color: 'text-[#4ade80]' },
   { match: n => n.includes('edit') || n.includes('fs'),      icon: 'E', color: 'text-[#fbbf24]' },
   { match: n => n.includes('board') || n.includes('social'), icon: 'B', color: 'text-[#a78bfa]' },
-  { match: n => n.includes('github'),                        icon: 'G', color: 'text-[#9ad9ff]' },
+  { match: n => n.includes('github'),                        icon: 'G', color: 'text-[var(--accent)]' },
   { match: n => n.includes('search') || n.includes('read'),  icon: 'R', color: 'text-[#60a5fa]' },
 ]
 
@@ -98,7 +98,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
         <div class="max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]"><${Markdown} text=${typeof (event.error ?? event.toolResult) === 'string' && String(event.error ?? event.toolResult).includes('```') ? String(event.error ?? event.toolResult) : '```json\n' + JSON.stringify((event.error ?? event.toolResult), null, 2) + '\n```'} /></div>
       ` : null}
       ${gateRejected ? html`
-        <div class="text-[10px] px-2 py-1 rounded bg-[rgba(239,68,68,0.1)] text-[#ef4444] inline-block">
+        <div class="text-[10px] px-2 py-1 rounded bg-[var(--bad-10)] text-[#ef4444] inline-block">
           거부: ${event.gate?.reason ?? ''}
         </div>
       ` : null}
@@ -171,8 +171,8 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
               ${taskIcon(String(event.detail.type))}
             </span>
           ` : null}
-          ${event.error ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[rgba(239,68,68,0.1)] text-[#ef4444]">오류</span>` : null}
-          ${gateRejected ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[rgba(239,68,68,0.1)] text-[#ef4444]">거부</span>` : null}
+          ${event.error ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[#ef4444]">오류</span>` : null}
+          ${gateRejected ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[#ef4444]">거부</span>` : null}
         </div>
         <div class="mt-0.5 text-[11px] text-[var(--text-muted)] font-mono truncate max-w-full" title=${event.summary}>
           ${summaryText}

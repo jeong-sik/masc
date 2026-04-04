@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { Markdown } from "../common/markdown"
+import { JsonViewerCard } from '../common/json-viewer'
 import { useEffect } from 'preact/hooks'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
@@ -51,9 +51,9 @@ import { FlowControlPanel } from '../flow-control/flow-control-panel'
 function severityClass(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {
     case 'bad':
-      return 'border-[rgba(239,68,68,0.26)] bg-[rgba(239,68,68,0.08)]'
+      return 'border-[var(--bad-30)] bg-[var(--bad-10)]'
     case 'warn':
-      return 'border-[rgba(251,191,36,0.26)] bg-[rgba(251,191,36,0.08)]'
+      return 'border-[var(--warn-30)] bg-[var(--warn-10)]'
     default:
       return 'border-[var(--card-border)] bg-[var(--white-3)]'
   }
@@ -359,7 +359,7 @@ function renderFriction(item: OperatorReviewItem | null) {
       ` : null}
       <details class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
         <summary class="cursor-pointer text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Raw Friction</summary>
-        <div class=\"max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]\"><${Markdown} text=${'```json\n' + JSON.stringify(item.friction, null, 2) + '\n```'} /></div>
+        <${JsonViewerCard} data=${item.friction} />
       </details>
     </div>
   `
@@ -597,7 +597,7 @@ export function Ops() {
 
                   ${confirmToken
                     ? html`
-                        <article class="p-3 rounded-xl border border-[rgba(251,191,36,0.26)] bg-[rgba(251,191,36,0.08)] grid gap-2">
+                        <article class="p-3 rounded-xl border border-[var(--warn-30)] bg-[var(--warn-10)] grid gap-2">
                           <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">승인 대기</div>
                           <div class="text-[13px] text-[var(--text-body)]">${confirmToken}</div>
                           <div class="flex gap-2 flex-wrap">

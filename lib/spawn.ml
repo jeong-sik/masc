@@ -196,30 +196,15 @@ let default_configs = [
   });
 ]
 
-(** Map CLI tool names and provider aliases to default_configs keys. *)
-let spawn_alias_map = [
-  ("claude-code", "claude");
-  ("claude-api", "claude");
-  ("anthropic", "claude");
-  ("gemini-cli", "gemini");
-  ("gemini-api", "gemini");
-  ("google", "gemini");
-  ("codex-cli", "codex");
-  ("codex-api", "codex");
-  ("openai", "codex");
-  ("llama.cpp", "llama");
-  ("llamacpp", "llama");
-]
-
 (** Get spawn config for agent.
-    Resolves CLI tool names (e.g. "claude-code") and provider canonical names
-    (e.g. "claude-api") to the short keys used in default_configs. *)
+    Resolves all aliases via Provider_adapter registry (SSOT).
+    spawn_alias_map removed — aliases are now in Provider_adapter.direct_adapters. *)
 let get_config agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
   match List.assoc_opt normalized default_configs with
   | Some _ as result -> result
   | None ->
-    match List.assoc_opt normalized spawn_alias_map with
+    match Provider_adapter.resolve_spawn_key normalized with
     | Some key -> List.assoc_opt key default_configs
     | None -> None
 

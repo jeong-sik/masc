@@ -14,7 +14,7 @@
 - **Dashboard keeper lifecycle** -- fix dashboard keeper lifecycle routes (#4988).
 
 ### Changed
-- **Lenient_json for autoresearch** -- use `Llm_provider.Lenient_json.parse` with deterministic recovery for parsing (#4945).
+- **Lenient_json for autoresearch** -- replace `Safe_ops.parse_json_safe` with `Llm_provider.Lenient_json.parse` for deterministic recovery parsing (#4945).
 
 ## [2.221.0] - 2026-04-04
 

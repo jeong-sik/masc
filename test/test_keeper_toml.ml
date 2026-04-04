@@ -164,8 +164,13 @@ let test_parse_multiline_string_unterminated () =
   match TL.parse_toml input with
   | Ok _ -> fail "expected error for unterminated multiline"
   | Error e ->
-    check bool "mentions unterminated" true
-      (String.length e > 0)
+    let contains s sub =
+      try
+        let _ = Re.exec (Re.compile (Re.str sub)) s in true
+      with Not_found -> false
+    in
+    check bool "mentions unterminated" true (contains e "unterminated");
+    check bool "includes line number" true (contains e "line")
 
 let test_parse_multiline_with_other_keys () =
   let input = "[sec]\na = \"before\"\nb = \"\"\"\nmulti\nline\n\"\"\"\nc = \"after\"" in

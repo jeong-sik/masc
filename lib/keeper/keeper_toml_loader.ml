@@ -156,6 +156,10 @@ let extract_after_triple_quote (s : string) : string =
   let t = String.trim s in
   String.sub t 3 (String.length t - 3)
 
+let strip_trailing_cr (s : string) : string =
+  let len = String.length s in
+  if len > 0 && s.[len - 1] = '\r' then String.sub s 0 (len - 1) else s
+
 let parse_toml (content : string) : (toml_doc, string) result =
   let lines = String.split_on_char '\n' content in
   let current_table = ref "" in
@@ -166,6 +170,7 @@ let parse_toml (content : string) : (toml_doc, string) result =
   let ml_key = ref "" in
   let ml_buf = Buffer.create 256 in
   let ml_active = ref false in
+  let ml_start_line = ref 0 in
   let emit_kv full_key v =
     acc := (full_key, v) :: !acc
   in
@@ -174,32 +179,39 @@ let parse_toml (content : string) : (toml_doc, string) result =
     if Option.is_none !error then begin
       if !ml_active then begin
         (* Inside a multiline basic string: accumulate until closing triple-quote *)
-        let trimmed = String.trim raw_line in
+        let line_cr = strip_trailing_cr raw_line in
+        let trimmed = String.trim line_cr in
         (* Check if this line contains the closing triple-quote *)
         match String.index_opt trimmed '"' with
         | Some _ when String.length trimmed >= 3 ->
           (* Look for triple-quote anywhere in the line *)
-          let len = String.length raw_line in
+          let len = String.length line_cr in
           let rec find_close i =
             if i + 2 >= len then None
-            else if raw_line.[i] = '"' && raw_line.[i+1] = '"' && raw_line.[i+2] = '"' then
+            else if line_cr.[i] = '"' && line_cr.[i+1] = '"' && line_cr.[i+2] = '"' then
               Some i
             else find_close (i + 1)
           in
           (match find_close 0 with
            | Some pos ->
              if Buffer.length ml_buf > 0 then Buffer.add_char ml_buf '\n';
-             Buffer.add_string ml_buf (String.sub raw_line 0 pos);
+             Buffer.add_string ml_buf (String.sub line_cr 0 pos);
              let value = Buffer.contents ml_buf in
-             emit_kv !ml_key (Toml_string value);
-             ml_active := false;
-             Buffer.clear ml_buf
+             (* Validate no unexpected content after closing triple-quote *)
+             let trailing = String.sub line_cr (pos + 3) (len - pos - 3) |> String.trim in
+             if trailing <> "" && (String.length trailing = 0 || trailing.[0] <> '#') then
+               error := Some (Printf.sprintf "line %d: unexpected characters after closing multiline delimiter" !line_num)
+             else begin
+               emit_kv !ml_key (Toml_string value);
+               ml_active := false;
+               Buffer.clear ml_buf
+             end
            | None ->
              if Buffer.length ml_buf > 0 then Buffer.add_char ml_buf '\n';
-             Buffer.add_string ml_buf raw_line)
+             Buffer.add_string ml_buf line_cr)
         | _ ->
           if Buffer.length ml_buf > 0 then Buffer.add_char ml_buf '\n';
-          Buffer.add_string ml_buf raw_line
+          Buffer.add_string ml_buf line_cr
       end
       else begin
         let line = String.trim raw_line in
@@ -247,10 +259,16 @@ let parse_toml (content : string) : (toml_doc, string) result =
                 match find_close_in after 0 with
                 | Some pos ->
                   let value = String.sub after 0 pos in
-                  emit_kv full_key (Toml_string value)
+                  let trailing_start = pos + 3 in
+                  let trailing = String.sub after trailing_start (String.length after - trailing_start) |> String.trim in
+                  if trailing <> "" && (String.length trailing = 0 || trailing.[0] <> '#') then
+                    error := Some (Printf.sprintf "line %d: unexpected characters after closing multiline delimiter" !line_num)
+                  else
+                    emit_kv full_key (Toml_string value)
                 | None ->
                   ml_key := full_key;
                   ml_active := true;
+                  ml_start_line := !line_num;
                   Buffer.clear ml_buf;
                   Buffer.add_string ml_buf after
               end
@@ -264,7 +282,7 @@ let parse_toml (content : string) : (toml_doc, string) result =
     end
   ) lines;
   if !ml_active && Option.is_none !error then
-    error := Some (Printf.sprintf "unterminated multiline string for key '%s'" !ml_key);
+    error := Some (Printf.sprintf "line %d: unterminated multiline string for key '%s'" !ml_start_line !ml_key);
   match !error with
   | Some e -> Error e
   | None -> Ok (List.rev !acc)

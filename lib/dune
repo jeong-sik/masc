@@ -18,9 +18,13 @@
    auth
    board
    board_core
+   board_core_classify
+   board_core_payload
    board_votes
    board_pg
    board_pg_queries
+   board_pg_notify
+   board_pg_admin
    board_dispatch
    board_listener
    capability_registry
@@ -32,6 +36,8 @@
    channel_gate_metrics
    command_plane_v2
    command_plane_orchestra
+   cp_orchestra_helpers
+   cp_orchestra_nodes
    cp_types
    cp_paths
    cp_serde
@@ -190,6 +196,12 @@
    memory_jsonl
    memory_oas_bridge
    meta_cognition
+   meta_cognition_types
+   meta_cognition_rules
+   meta_cognition_snapshot
+   meta_cognition_parse
+   meta_cognition_interpret
+   meta_cognition_digest
    relation_materializer
    prometheus
    rate_limit
@@ -315,6 +327,7 @@
    tool_auth
    tool_agent
    tool_task
+   tool_task_schemas
    task_dispatch
    tool_room
    workflow_guide
@@ -644,7 +657,25 @@
   ;; godsplit-oas-worker: oas_worker decomposition
   oas_worker_cascade
   oas_worker_exec
-  oas_worker_named)
+  oas_worker_named
+  ;; godsplit-meta-cognition: meta_cognition decomposition
+  meta_cognition_types
+  meta_cognition_rules
+  meta_cognition_snapshot
+  meta_cognition_parse
+  meta_cognition_interpret
+  meta_cognition_digest
+  ;; godsplit-board-pg: board_pg decomposition
+  board_pg_notify
+  board_pg_admin
+  ;; godsplit-tool-task: schema extraction
+  tool_task_schemas
+  ;; godsplit-board-core: board_core decomposition
+  board_core_classify
+  board_core_payload
+  ;; godsplit-cp-orchestra: command_plane_orchestra decomposition
+  cp_orchestra_helpers
+  cp_orchestra_nodes)
  (libraries
    mcp_protocol
    mcp_protocol.eio

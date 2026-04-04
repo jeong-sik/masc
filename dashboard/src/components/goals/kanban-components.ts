@@ -100,7 +100,7 @@ export function KanbanCard({ task }: { task: Task }) {
         </div>
         <button
           type="button"
-          class="rounded-lg border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] px-2 py-1 text-[10px] font-semibold text-[#f87171] transition-colors hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-50 disabled:cursor-not-allowed"
+          class="rounded-lg border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-[10px] font-semibold text-[#f87171] transition-colors hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-50 disabled:cursor-not-allowed"
           onClick=${handleDelete}
           disabled=${isDeleting}
         >

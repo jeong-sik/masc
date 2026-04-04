@@ -181,7 +181,7 @@ function GovernanceToolbar() {
           active=${governanceFilter}
           onChange=${() => { void refreshGovernance() }}
         />
-        ${governanceError.value ? html`<div class="mt-2 rounded-lg border border-[rgba(239,68,68,0.35)] bg-[var(--bad-8)] p-2.5 text-[12px] text-[#f7b6b6]">${governanceError.value}</div>` : null}
+        ${governanceError.value ? html`<div class="mt-2 rounded-lg border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-[12px] text-[#f7b6b6]">${governanceError.value}</div>` : null}
       </div>
       <//>
     </div>

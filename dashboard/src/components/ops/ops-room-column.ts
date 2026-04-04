@@ -1,7 +1,7 @@
 // Ops — Project-scope column: broadcast, pause/resume, task inject, recommended actions, pending confirmations, shared feed
 
 import { html } from 'htm/preact'
-import { Markdown } from "../common/markdown"
+import { JsonViewerCard } from '../common/json-viewer'
 import { signal } from '@preact/signals'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
@@ -192,7 +192,7 @@ export function OpsRoomColumn() {
                   <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
                   <span>owner ${item.actor ?? 'unknown'}</span>
                 </div>
-                ${item.preview ? html`<div class=\"max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]\"><${Markdown} text=${'```json\n' + JSON.stringify(item.preview, null, 2) + '\n```'} /></div>` : null}
+                ${item.preview ? html`<${JsonViewerCard} data=${item.preview} title="Preview" />` : null}
                 <div class="mt-2 text-[12px] leading-[1.45] text-[var(--text-muted)]">
                   ${canManage ? '' : '읽기 전용'}
                 </div>

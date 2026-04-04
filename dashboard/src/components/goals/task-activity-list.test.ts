@@ -5,8 +5,9 @@ import '@testing-library/jest-dom'
 import type { UnifiedTraceEvent } from '../session-trace/session-trace-state'
 import { activeFilter } from './task-detail-state'
 
-vi.mock('../common/markdown', () => ({
-  Markdown: ({ text }: { text: string }) => h('div', { 'data-testid': 'markdown' }, text),
+vi.mock('../common/json-viewer', () => ({
+  JsonViewerCard: ({ data, title }: { data: unknown; title?: string }) =>
+    h('div', { 'data-testid': 'json-viewer-card', 'data-title': title ?? '' }, typeof data === 'string' ? data : JSON.stringify(data)),
 }))
 
 vi.mock('../common/time-ago', () => ({
@@ -40,7 +41,7 @@ describe('TaskActivityList', () => {
     vi.clearAllMocks()
   })
 
-  it('renders markdown lazily and preserves raw string payloads inside code fences', async () => {
+  it('renders the structured viewer lazily and preserves raw string payloads', async () => {
     const { container } = render(h(TaskActivityList, {
       events: [sampleToolCallEvent()],
       loading: false,
@@ -48,7 +49,7 @@ describe('TaskActivityList', () => {
       showToolCalls: true,
     }))
 
-    expect(screen.queryByTestId('markdown')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('json-viewer-card')).not.toBeInTheDocument()
 
     const details = container.querySelector('details')
     expect(details).not.toBeNull()
@@ -58,20 +59,19 @@ describe('TaskActivityList', () => {
     fireEvent(details, new Event('toggle', { bubbles: true }))
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('markdown')).toHaveLength(1)
+      expect(screen.getAllByTestId('json-viewer-card')).toHaveLength(1)
     })
-    const blocks = screen.getAllByTestId('markdown')
+    const blocks = screen.getAllByTestId('json-viewer-card')
     expect(blocks).toHaveLength(1)
     const firstBlock = blocks[0]
     expect(firstBlock).toBeDefined()
     if (!firstBlock) return
     const text = firstBlock.textContent ?? ''
-    expect(text.startsWith('```')).toBe(true)
     expect(text).toContain('*literal* `ticks`')
-    expect(text.endsWith('```')).toBe(true)
+    expect(firstBlock).toHaveAttribute('data-title', 'Args')
   })
 
-  it('formats object args as fenced json when expanded', async () => {
+  it('passes object args into the structured viewer when expanded', async () => {
     const { container } = render(h(TaskActivityList, {
       events: [sampleToolCallEvent({ toolArgs: { ok: true } })],
       loading: false,
@@ -87,12 +87,10 @@ describe('TaskActivityList', () => {
     fireEvent(details, new Event('toggle', { bubbles: true }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('markdown')).toBeInTheDocument()
+      expect(screen.getByTestId('json-viewer-card')).toBeInTheDocument()
     })
-    const text = screen.getByTestId('markdown').textContent ?? ''
-    expect(text.startsWith('```json')).toBe(true)
-    expect(text).toContain('"ok": true')
-    expect(text.endsWith('```')).toBe(true)
+    const text = screen.getByTestId('json-viewer-card').textContent ?? ''
+    expect(text).toContain('"ok":true')
   })
 
   it('marks decorative icons as hidden from assistive tech', () => {

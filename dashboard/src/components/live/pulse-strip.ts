@@ -7,7 +7,7 @@ import { openAgentDetail, selectedAgentName } from '../agent-detail'
 function pulseStateClass(state: PulseState): string {
   switch (state) {
     case 'working': return 'pulse-working'
-    case 'stale': return 'border-[rgba(239,68,68,0.3)] opacity-60'
+    case 'stale': return 'border-[var(--bad-30)] opacity-60'
     default: return 'border-[var(--white-10)]'
   }
 }

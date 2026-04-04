@@ -43,7 +43,7 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
         </div>
         ${expanded.value ? html`
           <div class="px-3 py-2 overflow-x-auto max-h-[400px] overflow-y-auto">
-            ${isJson 
+            ${isJson
               ? html`<${JsonViewer} data=${parsed} />`
               : html`<pre class="text-[12px] font-mono ${success ? 'text-[var(--text-body)]' : 'text-[#fda4af]'}">${formatted}</pre>`
             }

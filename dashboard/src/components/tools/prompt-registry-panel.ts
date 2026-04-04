@@ -131,7 +131,7 @@ export function PromptRegistryPanel() {
               <button
                 type="button"
                 class="rounded-lg border px-3 py-2 text-left transition-colors ${selectedPrompt?.key === prompt.key
-                  ? 'border-[rgba(71,184,255,0.35)] bg-[rgba(71,184,255,0.12)]'
+                  ? 'border-[var(--accent-30)] bg-[var(--accent-10)]'
                   : 'border-[var(--card-border)] bg-[var(--white-2)] hover:bg-[var(--white-4)]'}"
                 onClick=${() => {
                   setSelectedKey(prompt.key)

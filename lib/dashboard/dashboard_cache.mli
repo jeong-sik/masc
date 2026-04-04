@@ -10,8 +10,8 @@
     This prevents slow endpoints from blocking HTTP responses. *)
 
 val set_clock : _ Eio.Time.clock -> unit
-(** Register the Eio clock for bounded-wait poll loops.
-    Call once inside [Eio_main.run] after {!Eio_guard.enable}. *)
+(** No-op since #4948 (Time_compat.sleep is the sole sleep path).
+    Retained for backward compatibility with existing callers. *)
 
 val set_sw : Eio.Switch.t -> unit
 (** Register the server switch for background revalidation fibers.

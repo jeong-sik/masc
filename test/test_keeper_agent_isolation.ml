@@ -124,8 +124,8 @@ let test_no_overlap_heuristic_vs_agent () =
   let meta = make_meta () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
-  (* Mode removal: all keepers now get worktree tools that overlap with agent surface.
-     This is the same approved overlap as for research keepers. *)
+  (* Mode removal: all keepers now get the approved shared agent/keeper tools,
+     which include worktree and masc_code_* tools. *)
   let overlap =
     List.filter
       (fun n ->
@@ -134,7 +134,7 @@ let test_no_overlap_heuristic_vs_agent () =
       keeper_names
   in
   Alcotest.(check (list string))
-    "heuristic keeper only shares approved worktree tools with agent surface"
+    "heuristic keeper only shares approved worktree/code tools with agent surface"
     [] overlap
 
 let test_no_overlap_research_vs_agent () =
@@ -150,12 +150,12 @@ let test_no_overlap_research_vs_agent () =
       keeper_names
   in
   Alcotest.(check (list string))
-    "research keeper only shares approved worktree tools with agent surface"
+    "research keeper only shares approved worktree/code tools with agent surface"
     [] overlap
 
 let test_shard_tools_overlap_with_agent_documented () =
-  (* Mode removal: coding shard (now in defaults) includes worktree tools
-     that also appear in the agent surface. This is the approved overlap. *)
+  (* Mode removal: coding shard (now in defaults) includes the approved shared
+     worktree/code tools that also appear in the agent surface. *)
   let keeper_tools = Tool_shard.keeper_model_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name) in
   let agent_tools = Agent_tool_surfaces.spawned_agent_public_tool_names in

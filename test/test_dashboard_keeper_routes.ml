@@ -333,6 +333,8 @@ let with_seeded_server f =
       [ "MASC_AUTONOMY_ENABLED", "0"
       ; "GRAPHQL_API_KEY", ""
       ; "GRAPHQL_URL", "http://127.0.0.1:9/graphql"
+      ; "MASC_BASE_PATH", base_path
+      ; "MASC_ALLOW_INHERITED_BASE_PATH", "1"
       ; "MASC_POSTGRES_URL", ""
       ; "DATABASE_URL", ""
       ; "SUPABASE_DB_URL", ""

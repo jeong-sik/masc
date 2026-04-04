@@ -304,6 +304,7 @@ let legacy_permission_for_tool = function
       Some CanCompleteTask
   | "masc_broadcast" | "masc_listen" | "masc_heartbeat"
   | "masc_webrtc_offer" | "masc_webrtc_answer"
+  | "channel_gate"
   | "masc_register_capabilities" | "masc_find_by_capability"
   | "masc_agent_update" | "masc_operator_action"
   | "masc_keeper_up" | "masc_keeper_down" | "masc_keeper_msg"

@@ -6,7 +6,6 @@ The gate is the only interface; no direct keeper access.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -17,6 +16,8 @@ import httpx
 from .config import get_config
 
 logger = logging.getLogger(__name__)
+
+CONNECTOR_AGENT_NAME = "discord-gate-bot"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,10 +90,7 @@ class GateClient:
         self._keeper_cache_ttl = cfg.keeper_cache_ttl_sec
         self._breaker_failure_threshold = cfg.gate_breaker_failure_threshold
         self._breaker_reset_sec = cfg.gate_breaker_reset_sec
-        self._headers = {
-            "Authorization": f"Bearer {cfg.gate_api_token}",
-            "Content-Type": "application/json",
-        }
+        self._headers = self._build_headers(cfg)
         self._client: httpx.AsyncClient | None = None
         self._consecutive_failures = 0
         self._breaker_open_until = 0.0
@@ -100,6 +98,17 @@ class GateClient:
         self._status_cache: tuple[float, dict[str, Any]] | None = None
         self._keeper_names_cache: tuple[float, list[str]] | None = None
         self._keeper_status_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+    def _build_headers(self, cfg: Any) -> dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "X-MASC-Agent": CONNECTOR_AGENT_NAME,
+        }
+        if cfg.gate_api_token:
+            headers["Authorization"] = f"Bearer {cfg.gate_api_token}"
+        else:
+            headers["Origin"] = cfg.gate_origin()
+        return headers
 
     def _now(self) -> float:
         return time.monotonic()
@@ -246,47 +255,38 @@ class GateClient:
         }
 
         client = self._get_client()
-        max_attempts = self._max_attempts()
-        for attempt in range(1, max_attempts + 1):
-            try:
-                resp = await client.post(self._url, json=payload)
-                if resp.status_code == 409:
-                    self._note_success()
-                    logger.info("Duplicate message (idempotency): %s", message_id)
-                    return GateResponse.from_error("duplicate message")
-
-                if resp.status_code >= 500:
-                    if attempt < max_attempts:
-                        await asyncio.sleep(min(0.25 * attempt, 1.0))
-                        continue
-                    self._note_transport_failure(f"gate returned {resp.status_code}")
-                    return GateResponse.from_error(f"gate returned {resp.status_code}")
-
-                raw_data = resp.json()
-                if not isinstance(raw_data, dict):
-                    self._note_success()
-                    return GateResponse.from_error("gate returned invalid json")
-                data = cast(dict[str, Any], raw_data)
-
+        try:
+            # POST /gate/message is currently not replay-safe across 5xx/timeouts.
+            # Retrying with the same idempotency key only converts the first
+            # transport error into a noisy duplicate response for slash commands.
+            resp = await client.post(self._url, json=payload)
+            if resp.status_code == 409:
                 self._note_success()
-                return GateResponse.from_json(data)
+                logger.info("Duplicate message (idempotency): %s", message_id)
+                return GateResponse.from_error("duplicate message")
 
-            except httpx.TimeoutException:
-                if attempt < max_attempts:
-                    await asyncio.sleep(min(0.25 * attempt, 1.0))
-                    continue
-                self._note_transport_failure(f"gate timeout after {self._timeout}s")
-                return GateResponse.from_error(f"gate timeout after {self._timeout}s")
-            except httpx.HTTPError as e:
-                self._note_transport_failure(f"gate http error: {e}")
-                return GateResponse.from_error(f"gate http error: {e}")
-            except Exception as e:  # pragma: no cover - defensive logging
-                self._note_transport_failure(f"gate error: {e}")
-                return GateResponse.from_error(f"gate error: {e}")
+            if resp.status_code >= 500:
+                self._note_transport_failure(f"gate returned {resp.status_code}")
+                return GateResponse.from_error(f"gate returned {resp.status_code}")
 
-        return GateResponse.from_error(
-            f"gate retries exhausted after {max_attempts} attempts"
-        )
+            raw_data = resp.json()
+            if not isinstance(raw_data, dict):
+                self._note_success()
+                return GateResponse.from_error("gate returned invalid json")
+            data = cast(dict[str, Any], raw_data)
+
+            self._note_success()
+            return GateResponse.from_json(data)
+
+        except httpx.TimeoutException:
+            self._note_transport_failure(f"gate timeout after {self._timeout}s")
+            return GateResponse.from_error(f"gate timeout after {self._timeout}s")
+        except httpx.HTTPError as e:
+            self._note_transport_failure(f"gate http error: {e}")
+            return GateResponse.from_error(f"gate http error: {e}")
+        except Exception as e:  # pragma: no cover - defensive logging
+            self._note_transport_failure(f"gate error: {e}")
+            return GateResponse.from_error(f"gate error: {e}")
 
     async def health_check(self) -> bool:
         """Check if the gate is reachable."""

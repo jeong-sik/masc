@@ -246,6 +246,11 @@ let test_permission_for_tool_webrtc_answer () =
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
+let test_permission_for_tool_channel_gate () =
+  match Auth.permission_for_tool "channel_gate" with
+  | Some Types.CanBroadcast -> ()
+  | _ -> fail "expected CanBroadcast"
+
 let test_permission_for_tool_board_list () =
   match Auth.permission_for_tool "masc_board_list" with
   | Some Types.CanReadState -> ()
@@ -732,6 +737,7 @@ let () =
       test_case "broadcast" `Quick test_permission_for_tool_broadcast;
       test_case "webrtc_offer" `Quick test_permission_for_tool_webrtc_offer;
       test_case "webrtc_answer" `Quick test_permission_for_tool_webrtc_answer;
+      test_case "channel_gate" `Quick test_permission_for_tool_channel_gate;
       test_case "board_list" `Quick test_permission_for_tool_board_list;
       test_case "board_post" `Quick test_permission_for_tool_board_post;
       test_case "board_reclassify" `Quick test_permission_for_tool_board_reclassify;

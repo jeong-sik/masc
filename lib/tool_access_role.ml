@@ -68,6 +68,7 @@ let worker_only_tools =
     (* CanBroadcast — transport *)
     "masc_webrtc_offer";
     "masc_webrtc_answer";
+    "channel_gate";
     (* CanBroadcast — capability registry *)
     "masc_register_capabilities";
     "masc_find_by_capability";

@@ -96,7 +96,7 @@ async def test_list_keepers_uses_cached_names_when_breaker_is_open() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_message_uses_retry_count_after_first_attempt() -> None:
+async def test_send_message_does_not_retry_non_replay_safe_post() -> None:
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -105,8 +105,6 @@ async def test_send_message_uses_retry_count_after_first_attempt() -> None:
         return httpx.Response(503, json={"ok": False, "error": "down"})
 
     client = make_client(httpx.MockTransport(handler))
-    client._max_retries = 2  # pyright: ignore[reportPrivateUsage]
-
     response = await client.send_message(
         keeper_name="luna",
         content="hello",
@@ -118,7 +116,72 @@ async def test_send_message_uses_retry_count_after_first_attempt() -> None:
 
     assert response.ok is False
     assert response.error == "gate returned 503"
-    assert attempts == 3
+    assert attempts == 1
+
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_loopback_client_uses_origin_fallback_when_token_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_headers: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.update({key.lower(): value for key, value in request.headers.items()})
+        return httpx.Response(
+            200,
+            json={"ok": True, "keeper_name": "luna", "reply": "pong"},
+        )
+
+    monkeypatch.setenv("GATE_API_TOKEN", "")
+    monkeypatch.setenv("GATE_BASE_URL", "http://127.0.0.1:8935")
+    config_module.reset_config_cache()
+    client = make_client(httpx.MockTransport(handler))
+
+    response = await client.send_message(
+        keeper_name="luna",
+        content="hello",
+        channel_user_id="u1",
+        channel_user_name="user",
+        channel_room_id="room",
+        message_id="origin-fallback",
+    )
+
+    assert response.ok is True
+    assert "authorization" not in seen_headers
+    assert seen_headers["origin"] == "http://127.0.0.1:8935"
+    assert seen_headers["x-masc-agent"] == "discord-gate-bot"
+
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_client_uses_bearer_auth_when_token_configured() -> None:
+    seen_headers: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.update({key.lower(): value for key, value in request.headers.items()})
+        return httpx.Response(
+            200,
+            json={"ok": True, "keeper_name": "luna", "reply": "pong"},
+        )
+
+    client = make_client(httpx.MockTransport(handler))
+
+    response = await client.send_message(
+        keeper_name="luna",
+        content="hello",
+        channel_user_id="u1",
+        channel_user_name="user",
+        channel_room_id="room",
+        message_id="bearer-auth",
+    )
+
+    assert response.ok is True
+    assert seen_headers["authorization"] == "Bearer test-api-token"
+    assert seen_headers["x-masc-agent"] == "discord-gate-bot"
+    assert "origin" not in seen_headers
 
     await client.aclose()
 
@@ -145,6 +208,27 @@ def test_config_allows_zero_disable_values(monkeypatch: pytest.MonkeyPatch) -> N
     assert cfg.keeper_cache_ttl_sec == 0
     assert cfg.gate_breaker_failure_threshold == 0
     assert cfg.gate_breaker_reset_sec == 0
+
+
+def test_config_allows_blank_token_for_loopback_url() -> None:
+    cfg = BotConfig(
+        discord_bot_token="test-token",
+        masc_api_token="",
+        masc_mcp_url="http://127.0.0.1:8935",
+    )
+
+    assert cfg.gate_api_token == ""
+    assert cfg.gate_base_url_is_loopback() is True
+    assert cfg.gate_origin() == "http://127.0.0.1:8935"
+
+
+def test_config_rejects_blank_token_for_non_loopback_url() -> None:
+    with pytest.raises(ValueError, match="MASC_API_TOKEN is required"):
+        BotConfig(
+            discord_bot_token="test-token",
+            masc_api_token="",
+            masc_mcp_url="https://masc.example.com",
+        )
 
 
 def test_legacy_env_aliases_still_work(monkeypatch: pytest.MonkeyPatch) -> None:

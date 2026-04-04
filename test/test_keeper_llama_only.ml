@@ -45,12 +45,12 @@ let make_meta ?(last_model_used = "glm-5.1") () =
 let test_stale_last_model_is_not_reused_outside_current_cascade () =
   let labels = labels_for_turn (make_meta ()) in
   check (list string) "llama-only cascade excludes stale glm pin"
-    [ "llama:auto" ] labels
+    [ Printf.sprintf "llama:%s" Masc_mcp.Env_config_runtime.Llama.default_model ] labels
 
 let test_matching_last_model_is_preserved_when_still_in_cascade () =
-  let labels = labels_for_turn (make_meta ~last_model_used:"llama:auto" ()) in
+  let labels = labels_for_turn (make_meta ~last_model_used:(Printf.sprintf "llama:%s" Masc_mcp.Env_config_runtime.Llama.default_model) ()) in
   check (list string) "llama label stays first when still allowed"
-    [ "llama:auto" ] labels
+    [ Printf.sprintf "llama:%s" Masc_mcp.Env_config_runtime.Llama.default_model ] labels
 
 let () =
   run "keeper_llama_only"

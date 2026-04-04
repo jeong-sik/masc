@@ -86,6 +86,7 @@ val run_named :
   ?max_idle_turns:int ->
   ?temperature:float ->
   ?max_tokens:int ->
+  ?max_input_tokens:int ->
   ?accept:(Oas_response.api_response -> bool) ->
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->

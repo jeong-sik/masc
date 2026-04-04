@@ -20,6 +20,7 @@ type config = {
   max_turns : int;
   max_idle_turns : int;
   max_tokens : int;
+  max_input_tokens : int option;
   temperature : float;
   hooks : Oas.Hooks.hooks option;
   context_reducer : Oas.Context_reducer.t option;
@@ -46,6 +47,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     max_turns = 20;
     max_idle_turns = 3;
     max_tokens = Oas_worker_cascade.default_max_tokens;
+    max_input_tokens = None;
     temperature = Oas_worker_cascade.default_temperature;
     hooks = None;
     context_reducer = None;
@@ -221,6 +223,11 @@ let build
   let builder =
     match config.priority with
     | Some priority -> Oas.Builder.with_priority priority builder
+    | None -> builder
+  in
+  let builder =
+    match config.max_input_tokens with
+    | Some max_in -> Oas.Builder.with_max_input_tokens max_in builder
     | None -> builder
   in
   let builder =

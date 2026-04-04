@@ -455,19 +455,31 @@ let run_keepalive_unified_turn
           ~config:ctx.config
           ~meta:meta_after_triage
       in
+      let has_message_signal =
+        obs.pending_mentions <> [] || obs.pending_scope_messages <> []
+      in
+      let should_run_turn =
+        (not (Atomic.get stop))
+        && Keeper_world_observation.should_run_unified_turn
+             ~meta:meta_after_triage
+             obs
+      in
       let meta_after_observe =
         Keeper_world_observation.apply_message_cursor_updates
           meta_after_triage
           obs.message_cursor_updates
       in
-      if obs.message_cursor_updates <> [] then
+      if (not should_run_turn)
+         && (not has_message_signal)
+         && obs.message_cursor_updates <> []
+      then
         match write_meta ctx.config meta_after_observe with
         | Ok () -> ()
         | Error e ->
             Log.Keeper.warn "write_meta failed (message cursor update): %s" e;
       if Atomic.get stop
-      then meta_after_observe
-      else if Keeper_world_observation.should_run_unified_turn ~meta:meta_after_observe obs
+      then meta_after_triage
+      else if should_run_turn
       then (
         with_keeper_turn_slot (fun () ->
           match
@@ -483,7 +495,10 @@ let run_keepalive_unified_turn
              | Ok (Some latest) -> latest
              | _ -> meta_after_observe)
           | Ok updated -> updated))
-      else meta_after_observe
+      else if (not has_message_signal) && obs.message_cursor_updates <> [] then
+        meta_after_observe
+      else
+        meta_after_triage
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

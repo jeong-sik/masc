@@ -95,7 +95,7 @@ let collect_message_scope ~(config : Room.config) ~(meta : keeper_meta) :
        let cursor_acc =
          if max_seq > since_seq then (room_id, max_seq) :: cursor_acc else cursor_acc
        in
-       let mentions_acc, scope_acc =
+       let room_mentions, room_scope_messages =
          List.fold_left
            (fun (mentions_inner, scope_inner) (msg : Types.message) ->
               let author =
@@ -104,20 +104,22 @@ let collect_message_scope ~(config : Room.config) ~(meta : keeper_meta) :
               if author = "" || List.mem author self_tokens then
                 (mentions_inner, scope_inner)
               else if exact_direct_mention_present ~targets msg.content then
-                ((msg.from_agent, msg.content) :: mentions_inner, scope_inner)
+                (mentions_inner @ [ (msg.from_agent, msg.content) ], scope_inner)
               else if scope_message_feed_enabled meta then
-                (mentions_inner, (msg.from_agent, msg.content) :: scope_inner)
+                (mentions_inner, scope_inner @ [ (msg.from_agent, msg.content) ])
               else
                 (mentions_inner, scope_inner))
-           (mentions_acc, scope_acc)
+           ([], [])
            messages
        in
-       (mentions_acc, scope_acc, cursor_acc))
+       ( mentions_acc @ room_mentions,
+         scope_acc @ room_scope_messages,
+         cursor_acc ))
     ([], [], [])
     meta.joined_room_ids
   |> fun (mentions, scope_messages, cursor_updates) ->
-  ( List.rev mentions,
-    List.rev scope_messages |> take_first batch_limit,
+  ( take_first batch_limit mentions,
+    take_first batch_limit scope_messages,
     List.rev cursor_updates )
 
 let apply_message_cursor_updates (meta : keeper_meta)

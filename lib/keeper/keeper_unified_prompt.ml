@@ -73,25 +73,52 @@ let line_block label value =
 let format_room_signal_salience salience =
   Meta_cognition.salience_to_string salience
 
-let actionable_routes
+let actionable_routes ~(meta : Keeper_types.keeper_meta)
     (observation : Keeper_world_observation.world_observation) : string list =
+  let allowed_tools = Keeper_tool_policy.keeper_allowed_tool_names meta in
+  let can tool_name = List.mem tool_name allowed_tools in
+  let available tool_names =
+    List.filter (fun tool_name -> can tool_name) tool_names
+  in
   let routes = ref [] in
   let add route = routes := route :: !routes in
   if observation.pending_mentions <> [] then
     add
       "- Pending mentions: reply in-room before going silent.";
   if observation.pending_board_events <> [] then
-    add
-      "- Board activity: use keeper_board_comment or keeper_board_post if a visible response is warranted.";
+    (match available [ "keeper_board_comment"; "keeper_board_post" ] with
+     | [] ->
+         add
+           "- Board activity is actionable, but board reply tools are unavailable under the current tool policy."
+     | tools ->
+         add
+           (Printf.sprintf
+              "- Board activity: use %s if a visible response is warranted."
+              (String.concat " or " tools)));
   if observation.unclaimed_task_count > 0 then
-    add
-      "- Unclaimed tasks: use keeper_task_claim before treating the room as idle.";
+    if can "keeper_task_claim" then
+      add
+        "- Unclaimed tasks: use keeper_task_claim before treating the room as idle."
+    else
+      add
+        "- Unclaimed tasks are present, but task-claim tooling is unavailable under the current tool policy.";
   if observation.failed_task_count > 0 then
-    add
-      "- Failed tasks: audit them with keeper_tasks_audit before deciding there is nothing meaningful to do.";
+    if can "keeper_tasks_audit" then
+      add
+        "- Failed tasks: audit them with keeper_tasks_audit before deciding there is nothing meaningful to do."
+    else
+      add
+        "- Failed tasks are actionable, but task-audit tooling is unavailable under the current tool policy.";
   if Option.is_some observation.worktree_change_summary then
-    add
-      "- Live worktree delta: inspect changed files with keeper_fs_read, keeper_shell_readonly, or masc_code_read if you need to understand whether action is required.";
+    (match available [ "keeper_fs_read"; "keeper_shell_readonly"; "masc_code_read" ] with
+     | [] ->
+         add
+           "- Live worktree delta is actionable, but file-inspection tools are unavailable under the current tool policy."
+     | tools ->
+         add
+           (Printf.sprintf
+              "- Live worktree delta: inspect changed files with %s if you need to understand whether action is required."
+              (String.concat ", " tools)));
   List.rev !routes
 
 let autonomous_trigger_lines
@@ -332,7 +359,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
     Buffer.add_string ubuf "\n### Autonomous Trigger\n";
     Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
     Buffer.add_string ubuf "\n");
-  let routes = actionable_routes observation in
+  let routes = actionable_routes ~meta observation in
   if routes <> [] then (
     Buffer.add_string ubuf "\n### Actionable Routes\n";
     Buffer.add_string ubuf (String.concat "\n" routes);

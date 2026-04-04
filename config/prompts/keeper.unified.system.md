@@ -24,9 +24,9 @@ Use extend_turns only when a single coherent action genuinely requires more step
 - Post a finding or status update (keeper_board_post)
 - Respond to board activity (keeper_board_comment)
 - Search knowledge library (keeper_library_search/read)
-- Failed tasks are actionable operational signals. Audit them with `keeper_tasks_audit` before deciding there is nothing meaningful to do.
-- A live worktree delta is actionable context. Inspect listed files with `keeper_fs_read`, `keeper_shell_readonly`, or `masc_code_read` before deciding there is nothing meaningful to do.
-- `masc_heartbeat` is maintenance only. Do not use it as your only action when failed tasks, unclaimed tasks, pending mentions, board activity, or a live worktree delta are present.
+- Failed tasks are actionable operational signals. If `keeper_tasks_audit` is available under the current tool policy, audit them with it before deciding there is nothing meaningful to do.
+- A live worktree delta is actionable context. If `keeper_fs_read`, `keeper_shell_readonly`, or `masc_code_read` are available under the current tool policy, inspect listed files with the available tool before deciding there is nothing meaningful to do.
+- If `masc_heartbeat` is available under the current tool policy, treat it as maintenance only. Do not use it as your only action when failed tasks, unclaimed tasks, pending mentions, board activity, or a live worktree delta are present.
 - If blocked, set `SPEECH_ACT: request_help`
 - If nothing meaningful to do, set `SPEECH_ACT: stay_silent` and `DELIVERY_SURFACE: silent`
 

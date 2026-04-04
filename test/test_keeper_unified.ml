@@ -69,6 +69,15 @@ let contains_disallowed_control_char s =
   in
   loop 0
 
+let with_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect ~finally:(fun () ->
+    match old with
+    | Some v -> Unix.putenv name v
+    | None -> (try Unix.putenv name "" with _ -> ()))
+    f
+
 (* ---------- World Observation type tests ---------- *)
 
 let base_observation : WO.world_observation =
@@ -153,6 +162,13 @@ let minimal_meta : Masc_mcp.Keeper_types.keeper_meta =
   match Masc_mcp.Keeper_types.meta_of_json json with
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
+
+let minimal_policy_meta =
+  {
+    minimal_meta with
+    tool_access =
+      Preset { preset = Minimal; also_allow = [] };
+  }
 
 let room_signal_meta =
   { minimal_meta with room_signal_prompt_enabled = true }
@@ -327,11 +343,7 @@ let test_scheduled_turn_uses_cooldown_only () =
   let meta =
     { minimal_meta with
       proactive =
-        { minimal_meta.proactive with
-          enabled = true;
-          idle_sec = 0;
-          cooldown_sec = 60;
-        };
+        { enabled = true; idle_sec = 0; cooldown_sec = 60 };
       runtime =
         { minimal_meta.runtime with
           proactive_rt =
@@ -349,11 +361,7 @@ let test_scheduled_turn_respects_cooldown () =
   let meta =
     { minimal_meta with
       proactive =
-        { minimal_meta.proactive with
-          enabled = true;
-          idle_sec = 0;
-          cooldown_sec = 300;
-        };
+        { enabled = true; idle_sec = 0; cooldown_sec = 300 };
       runtime =
         { minimal_meta.runtime with
           proactive_rt =
@@ -371,11 +379,7 @@ let test_scheduled_turn_requires_idle_gate () =
     {
       minimal_meta with
       proactive =
-        { minimal_meta.proactive with
-          enabled = true;
-          idle_sec = 300;
-          cooldown_sec = 60;
-        };
+        { enabled = true; idle_sec = 300; cooldown_sec = 60 };
       runtime =
         {
           minimal_meta.runtime with
@@ -429,11 +433,7 @@ let test_idle_decay_triggers_turn () =
   let meta =
     { minimal_meta with
       proactive =
-        { minimal_meta.proactive with
-          enabled = true;
-          idle_sec = 0;
-          cooldown_sec = 1800;
-        };
+        { enabled = true; idle_sec = 0; cooldown_sec = 1800 };
       runtime =
         { minimal_meta.runtime with
           proactive_rt =
@@ -451,11 +451,7 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
     {
       minimal_meta with
       proactive =
-        { minimal_meta.proactive with
-          enabled = true;
-          idle_sec = 60;
-          cooldown_sec = 900;
-        };
+        { enabled = true; idle_sec = 60; cooldown_sec = 900 };
       runtime =
         {
           minimal_meta.runtime with
@@ -486,11 +482,7 @@ let test_task_reactive_cooldown_floor_never_hits_zero () =
       {
         minimal_meta with
         proactive =
-          { minimal_meta.proactive with
-            enabled = true;
-            idle_sec = 60;
-            cooldown_sec = 900;
-          };
+          { enabled = true; idle_sec = 60; cooldown_sec = 900 };
         runtime =
           {
             minimal_meta.runtime with
@@ -552,6 +544,8 @@ let test_prompt_includes_operational_tool_guidance () =
   let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:base_observation in
   check bool "mentions task audit guidance" true
     (contains_substring sys "keeper_tasks_audit");
+  check bool "mentions policy-aware availability" true
+    (contains_substring sys "current tool policy");
   check bool "mentions worktree inspection guidance" true
     (contains_substring sys "masc_code_read");
   check bool "mentions heartbeat maintenance guidance" true
@@ -562,11 +556,7 @@ let test_prompt_includes_autonomous_trigger_section () =
     {
       minimal_meta with
       proactive =
-        { minimal_meta.proactive with
-          enabled = true;
-          idle_sec = 0;
-          cooldown_sec = 60;
-        };
+        { enabled = true; idle_sec = 0; cooldown_sec = 60 };
       runtime =
         {
           minimal_meta.runtime with
@@ -741,9 +731,31 @@ let test_prompt_includes_actionable_routes_for_operational_signals () =
   check bool "includes task audit route" true
     (contains_substring user "keeper_tasks_audit");
   check bool "includes worktree inspection route" true
-    (contains_substring user "masc_code_read");
+    (contains_substring user "inspect changed files with");
   check bool "includes fs inspection route" true
     (contains_substring user "keeper_fs_read")
+
+let test_prompt_actionable_routes_respect_tool_policy () =
+  let obs =
+    {
+      base_observation with
+      failed_task_count = 2;
+      worktree_change_summary =
+        Some
+          "<git_status_change>\nWorking tree changed since last keeper turn (1 files):\n?? lib/example.ml\n</git_status_change>";
+    }
+  in
+  let _sys, user = UP.build_prompt ~meta:minimal_policy_meta ~observation:obs in
+  check bool "keeps actionable routes section" true
+    (contains_substring user "Actionable Routes");
+  check bool "does not recommend unavailable task audit tool" false
+    (contains_substring user "keeper_tasks_audit");
+  check bool "does not recommend unavailable file inspection tool" false
+    (contains_substring user "keeper_fs_read");
+  check bool "explains task audit unavailable" true
+    (contains_substring user "task-audit tooling is unavailable");
+  check bool "explains file inspection unavailable" true
+    (contains_substring user "file-inspection tools are unavailable")
 
 let test_prompt_omits_room_signal_when_flag_disabled () =
   let interpretation : Masc_mcp.Meta_cognition.interpretation =
@@ -822,15 +834,6 @@ let test_prompt_includes_room_signal_when_flag_enabled () =
     (contains_substring user "namespace_digest_post_id: post-digest-1")
 
 (* ---------- Config tests ---------- *)
-
-let with_env name value f =
-  let old = Sys.getenv_opt name in
-  Unix.putenv name value;
-  Fun.protect ~finally:(fun () ->
-    match old with
-    | Some v -> Unix.putenv name v
-    | None -> (try Unix.putenv name "" with _ -> ()))
-    f
 
 let test_unified_turn_runtime_defaults () =
   with_env "MASC_KEEPER_UNIFIED_TEMP" "" (fun () ->
@@ -1769,6 +1772,8 @@ let () =
           test_case "room state section" `Quick test_prompt_room_state_section;
           test_case "includes actionable routes for operational signals" `Quick
             test_prompt_includes_actionable_routes_for_operational_signals;
+          test_case "actionable routes respect tool policy" `Quick
+            test_prompt_actionable_routes_respect_tool_policy;
           test_case "omits room signal when disabled" `Quick
             test_prompt_omits_room_signal_when_flag_disabled;
           test_case "includes room signal when enabled" `Quick

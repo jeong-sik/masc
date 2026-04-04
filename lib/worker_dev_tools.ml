@@ -96,6 +96,34 @@ let forbidden_shell_chars =
 let contains_forbidden_shell_chars cmd =
   String.exists (fun ch -> List.mem ch forbidden_shell_chars) cmd
 
+(** Relaxed metacharacter set for Coding/Full preset keepers.
+    Allows [|] (pipes) and [>] [<] (redirects including [2>&1]).
+    Still blocks [;] [`] [$] and control chars.
+    [&] is checked at pattern level: [>&] (redirect) is allowed,
+    [&&] (chaining) and standalone [&] (background) are blocked. *)
+let forbidden_shell_chars_coding_base =
+  [ ';'; '`'; '$'; '\n'; '\r' ]
+
+(** Returns [true] if [cmd] contains a dangerous [&] usage.
+    [>&] in redirect context (e.g. [2>&1]) is safe; [&&] and standalone [&]
+    are command chaining/background operators. *)
+let has_dangerous_ampersand cmd =
+  let len = String.length cmd in
+  let rec check i =
+    if i >= len then false
+    else if cmd.[i] <> '&' then check (i + 1)
+    else if i > 0 && cmd.[i - 1] = '>' then
+      (* Part of >& redirect syntax — safe *)
+      check (i + 1)
+    else
+      true
+  in
+  check 0
+
+let contains_forbidden_shell_chars_coding cmd =
+  String.exists (fun ch -> List.mem ch forbidden_shell_chars_coding_base) cmd
+  || has_dangerous_ampersand cmd
+
 let extract_command_name cmd =
   let trimmed = String.trim cmd in
   if trimmed = "" then None
@@ -130,6 +158,27 @@ let validate_command_with_allowlist ~allowed_commands cmd =
 let validate_command cmd =
   validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
 
+(** Relaxed command validation for Coding/Full preset keepers.
+    Allows pipes and redirects; validates the first command in the pipeline
+    against [dev_allowed_commands]. *)
+let validate_command_coding cmd =
+  let trimmed = String.trim cmd in
+  if trimmed = "" then Error "command must not be empty"
+  else if contains_forbidden_shell_chars_coding trimmed then
+    Error "Shell injection syntax (;, &, `, $) not allowed."
+  else
+    let first_cmd =
+      String.split_on_char '|' trimmed |> List.hd |> String.trim
+    in
+    match extract_command_name first_cmd with
+    | None -> Error "command must not be empty"
+    | Some name when List.mem name dev_allowed_commands -> Ok ()
+    | Some name ->
+      Error
+        (Printf.sprintf
+           "Command blocked: %s is not in the approved dev command allowlist"
+           name)
+
 (** Check if a command performs write/mutating operations.
     Returns [true] for commands like [git push], [git commit],
     [make deploy], [npm publish], [mv], [cp], etc.
@@ -149,6 +198,33 @@ let is_write_operation cmd =
   | cmd_name :: _ ->
     List.mem cmd_name ["mv"; "cp"; "mkdir"; "touch"; "chmod"]
   | [] -> false
+
+(** Detect truly destructive commands that must be blocked even for
+    Coding/Full preset keepers. Delegates to [Eval_gate.detect_destructive]
+    for the full 19-pattern check as a fallback. *)
+let is_destructive_bash_operation cmd =
+  let parts =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+  in
+  match parts with
+  | "git" :: "push" :: rest ->
+    List.mem "--force" rest || List.mem "-f" rest
+    || List.exists (fun a ->
+         a = "main" || a = "master"
+         || a = "origin/main" || a = "origin/master") rest
+  | "git" :: "reset" :: rest ->
+    List.mem "--hard" rest
+  | "rm" :: rest ->
+    List.exists (fun a -> a = "-rf" || a = "-fr") rest
+    || (List.length rest >= 2
+        && List.exists (fun a -> String.contains a 'r') rest
+        && List.exists (fun a -> String.contains a 'f') rest
+        && List.exists (fun a -> a.[0] = '-') rest)
+  | _ ->
+    (match Eval_gate.detect_destructive cmd with
+     | Some _ -> true
+     | None -> false)
 
 (* --- gh CLI validation for keeper_github --- *)
 

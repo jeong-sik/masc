@@ -58,6 +58,7 @@
     "listen_duration_min": 2.0
   },
   "keeper": {
+    "tool_preset": "coding",
     "goal": "상수라는 페르소나로 사용자와 여러 room에서 장기적인 맥락을 유지한다.",
     "short_goal": "현재 room들의 직접 호출에 상수 톤으로 정확히 반응한다.",
     "mid_goal": "여러 room에 흩어진 사용자 맥락과 미해결 질문을 상수 시점에서 이어받는다.",

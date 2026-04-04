@@ -472,4 +472,70 @@ let () =
     "workdir", [
       Alcotest.test_case "workdir enforcement" `Quick test_workdir_enforcement;
     ];
+    "validate_command_coding", [
+      Alcotest.test_case "allows pipe" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "git log | head -5" with
+        | Ok () -> ()
+        | Error e -> Alcotest.fail ("should allow pipe: " ^ e));
+      Alcotest.test_case "allows redirect" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "dune build 2>&1" with
+        | Ok () -> ()
+        | Error e -> Alcotest.fail ("should allow redirect: " ^ e));
+      Alcotest.test_case "blocks semicolon" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "ls; rm -rf /" with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "should block semicolon");
+      Alcotest.test_case "blocks backtick" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "echo `whoami`" with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "should block backtick");
+      Alcotest.test_case "blocks dollar" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "echo $HOME" with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "should block dollar");
+      Alcotest.test_case "validates first command in pipe" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "evil_cmd | head" with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "should block unknown first command");
+      Alcotest.test_case "blocks ampersand chaining" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "git log && rm -rf /" with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "should block && chaining");
+      Alcotest.test_case "allows 2>&1 redirect" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "dune test 2>&1" with
+        | Ok () -> ()
+        | Error e -> Alcotest.fail ("should allow 2>&1: " ^ e));
+    ];
+    "is_destructive_bash_operation", [
+      Alcotest.test_case "blocks force push" `Quick (fun () ->
+        Alcotest.(check bool) "force push" true
+          (Worker_dev_tools.is_destructive_bash_operation "git push --force"));
+      Alcotest.test_case "blocks push -f" `Quick (fun () ->
+        Alcotest.(check bool) "push -f" true
+          (Worker_dev_tools.is_destructive_bash_operation "git push -f origin feature"));
+      Alcotest.test_case "blocks push to main" `Quick (fun () ->
+        Alcotest.(check bool) "push main" true
+          (Worker_dev_tools.is_destructive_bash_operation "git push origin main"));
+      Alcotest.test_case "blocks push to master" `Quick (fun () ->
+        Alcotest.(check bool) "push master" true
+          (Worker_dev_tools.is_destructive_bash_operation "git push origin master"));
+      Alcotest.test_case "allows push to feature branch" `Quick (fun () ->
+        Alcotest.(check bool) "push feature" false
+          (Worker_dev_tools.is_destructive_bash_operation "git push origin feature/fix-1"));
+      Alcotest.test_case "blocks git reset --hard" `Quick (fun () ->
+        Alcotest.(check bool) "reset hard" true
+          (Worker_dev_tools.is_destructive_bash_operation "git reset --hard HEAD~1"));
+      Alcotest.test_case "allows git reset (soft)" `Quick (fun () ->
+        Alcotest.(check bool) "reset soft" false
+          (Worker_dev_tools.is_destructive_bash_operation "git reset HEAD~1"));
+      Alcotest.test_case "blocks rm -rf" `Quick (fun () ->
+        Alcotest.(check bool) "rm -rf" true
+          (Worker_dev_tools.is_destructive_bash_operation "rm -rf /"));
+      Alcotest.test_case "allows rm single file" `Quick (fun () ->
+        Alcotest.(check bool) "rm single" false
+          (Worker_dev_tools.is_destructive_bash_operation "rm foo.txt"));
+      Alcotest.test_case "allows git commit" `Quick (fun () ->
+        Alcotest.(check bool) "git commit" false
+          (Worker_dev_tools.is_destructive_bash_operation "git commit -m 'fix'"));
+    ];
   ]

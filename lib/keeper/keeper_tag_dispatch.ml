@@ -100,7 +100,7 @@ let dispatch
       else
         Some (false,
           Printf.sprintf
-            "tool '%s' is blocked in keeper context (Mod_control is operator-only)" name)
+            "tool '%s' is blocked in keeper context (lifecycle-mutating Mod_control tools are operator-only)" name)
   | Mod_agent_timeline ->
       Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name }
         ~name ~args

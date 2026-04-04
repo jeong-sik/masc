@@ -22,6 +22,18 @@ let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
 let set_bus bus = bus_ref := Some bus
 let get_bus () = !bus_ref
 
+let keeper_turn_throttle_limit =
+  Keeper_config.int_of_env_default
+    "MASC_KEEPER_AUTOBOOT_MAX" ~default:3 ~min_v:1 ~max_v:20
+;;
+
+let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
+
+let with_keeper_turn_slot f =
+  Eio.Semaphore.acquire turn_semaphore;
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release turn_semaphore) f
+;;
+
 (** Optional gRPC client + env — set at server bootstrap when
     [MASC_AGENT_TRANSPORT=grpc]. When set, heartbeat sends
     status pings over gRPC unary RPC. *)
@@ -437,19 +449,20 @@ let run_keepalive_unified_turn
       then meta_after_triage
       else if Keeper_world_observation.should_run_unified_turn ~meta:meta_after_triage obs
       then (
-        match
-          Keeper_unified_turn.run_unified_turn
-            ~config:ctx.config
-            ~meta:meta_after_triage
-            ~observation:obs
-            ~generation:meta_after_triage.runtime.generation
-        with
-        | Error e ->
-          Log.Keeper.error "unified turn failed: %s" e;
-          (match read_meta ctx.config meta_after_triage.name with
-           | Ok (Some latest) -> latest
-           | _ -> meta_after_triage)
-        | Ok updated -> updated)
+        with_keeper_turn_slot (fun () ->
+          match
+            Keeper_unified_turn.run_unified_turn
+              ~config:ctx.config
+              ~meta:meta_after_triage
+              ~observation:obs
+              ~generation:meta_after_triage.runtime.generation
+          with
+          | Error e ->
+            Log.Keeper.error "unified turn failed: %s" e;
+            (match read_meta ctx.config meta_after_triage.name with
+             | Ok (Some latest) -> latest
+             | _ -> meta_after_triage)
+          | Ok updated -> updated))
       else meta_after_triage
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

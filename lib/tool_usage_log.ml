@@ -25,8 +25,11 @@ let store_ref : Dated_jsonl.t option ref = ref None
 
 let init ~base_path =
   let dir = Filename.concat base_path ".masc/tool_usage" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
-  store_ref := Some store
+  (try
+     let store = Dated_jsonl.create ~base_dir:dir () in
+     store_ref := Some store
+   with exn ->
+     Log.Misc.warn "tool_usage_log: init failed: %s" (Printexc.to_string exn))
 
 (* -- Record format -- *)
 

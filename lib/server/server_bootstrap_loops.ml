@@ -220,13 +220,9 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"
         config.base_path masc_root keeper_dir all_count;
       let names = Keeper_types.keepalive_keeper_names config in
-      let turn_limit =
-        Keeper_config.int_of_env_default
-          "MASC_KEEPER_AUTOBOOT_MAX" ~default:3 ~min_v:1 ~max_v:20
-      in
       Log.Keeper.info
         "autoboot: %d keeper(s) to boot; concurrent keeper turns throttled to %d via MASC_KEEPER_AUTOBOOT_MAX"
-        (List.length names) turn_limit;
+        (List.length names) Keeper_keepalive.keeper_turn_throttle_limit;
       Log.Keeper.info "autoboot: keeper set [%s]" (String.concat ", " names);
       let booted = ref 0 in
       let base_warmup = Keeper_config.keeper_bootstrap_proactive_warmup_sec () in

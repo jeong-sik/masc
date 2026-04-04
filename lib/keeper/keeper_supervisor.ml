@@ -116,8 +116,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
         if not !resolved then begin
           if Shutdown.is_shutting_down_global () then begin
             Log.Keeper.warn "%s: fiber unresolved during shutdown (not a crash)" meta.name;
-            Keeper_registry.set_state ~base_path meta.name
-              Keeper_registry.Dead;
+            Keeper_registry.mark_dead ~base_path meta.name
+              ~at:(Time_compat.now ());
             resolve_done (`Crashed "shutdown")
           end else begin
             let reason =

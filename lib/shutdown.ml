@@ -80,8 +80,12 @@ type hook = {
   action : unit -> unit;
 }
 
-(** Global shutdown flag — set to true when shutdown begins.
-    Readable from any module without passing [state]. *)
+(** Global shutdown-started flag.  Set to [true] on the first [initiate]
+    call.  This flag is sticky: it is never cleared, so it indicates that
+    shutdown has started at least once, not that shutdown is currently in
+    progress.  In production the process exits shortly after shutdown, so
+    the sticky semantics are safe.  In tests where [exit_fn] is a no-op,
+    callers must be aware that the flag stays [true]. *)
 let shutting_down_flag = Atomic.make false
 
 let is_shutting_down_global () = Atomic.get shutting_down_flag

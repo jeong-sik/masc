@@ -53,11 +53,11 @@ let get_lock path =
 let run_blocking_lock_op f = Eio_guard.run_in_systhread f
 
 (** Acquire a non-blocking Unix file lock (F_TLOCK) with retry.
-    Must be called from a systhread — the caller is responsible for
-    wrapping in [run_blocking_lock_op] or [Eio_unix.run_in_systhread].
-    On success, returns the open file descriptor with the lock held.
-    On timeout, closes the fd and raises [Failure]. *)
-let acquire_flock_retry ~lock_path ~mode ~perm
+    This is the blocking variant for callers that already run in a systhread
+    (for example backend and Hebbian file I/O paths). On success, returns the
+    open file descriptor with the lock held. On timeout, closes the fd and
+    raises [Failure]. *)
+let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
     ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
   let fd = Unix.openfile lock_path mode perm in
   let rec acquire attempts =
@@ -65,25 +65,65 @@ let acquire_flock_retry ~lock_path ~mode ~perm
       raise (Failure (Printf.sprintf "%s: flock timeout on %s after %d attempts"
                         caller lock_path max_attempts))
     else
-      try
-        Unix.lockf fd Unix.F_TLOCK 0;
-        fd
-      with
-      | Unix.Unix_error (Unix.EAGAIN, _, _)
-      | Unix.Unix_error (Unix.EACCES, _, _) ->
-          Unix.sleepf sleep_sec;
-          acquire (attempts - 1)
+      let success =
+        try
+          Unix.lockf fd Unix.F_TLOCK 0;
+          true
+        with
+        | Unix.Unix_error (Unix.EAGAIN, _, _)
+        | Unix.Unix_error (Unix.EACCES, _, _) -> false
+      in
+      if success then fd
+      else begin
+        Unix.sleepf sleep_sec;
+        acquire (attempts - 1)
+      end
   in
   try acquire max_attempts
   with exn ->
     (try Unix.close fd with Unix.Unix_error _ -> ());
     raise exn
 
-let acquire_flock_fd lock_path =
-  run_blocking_lock_op (fun () ->
-      acquire_flock_retry ~lock_path
-        ~mode:[ Unix.O_CREAT; Unix.O_WRONLY ] ~perm:0o644
-        ~caller:"File_lock_eio" ())
+(** Fiber-friendly wrapper around [acquire_flock_retry].
+    Opening/closing the descriptor uses a systhread, and the F_TLOCK attempt
+    also runs in a systhread to avoid blocking the Eio domain on filesystems
+    that do not honor the non-blocking contract reliably. Retry sleep yields
+    to the Eio scheduler when a clock is available and otherwise sleeps in a
+    systhread so the calling fiber does not block the domain. *)
+let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
+    ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
+  let fd = run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm) in
+  let rec acquire attempts =
+    if attempts <= 0 then
+      raise (Failure (Printf.sprintf "%s: flock timeout on %s after %d attempts"
+                        caller lock_path max_attempts))
+    else
+      let success =
+        run_blocking_lock_op (fun () ->
+            try
+              Unix.lockf fd Unix.F_TLOCK 0;
+              true
+            with
+            | Unix.Unix_error (Unix.EAGAIN, _, _)
+            | Unix.Unix_error (Unix.EACCES, _, _) -> false)
+      in
+      if success then fd
+      else begin
+        (match clock with
+         | Some c -> Eio.Time.sleep c sleep_sec
+         | None -> run_blocking_lock_op (fun () -> Unix.sleepf sleep_sec));
+        acquire (attempts - 1)
+      end
+  in
+  try acquire max_attempts
+  with exn ->
+    run_blocking_lock_op (fun () -> try Unix.close fd with Unix.Unix_error _ -> ());
+    raise exn
+
+let acquire_flock_fd ?clock lock_path =
+  acquire_flock_retry_cooperative ?clock ~lock_path
+    ~mode:[ Unix.O_CREAT; Unix.O_WRONLY ] ~perm:0o644
+    ~caller:"File_lock_eio" ()
 
 let release_flock_fd fd =
   run_blocking_lock_op (fun () ->
@@ -98,16 +138,16 @@ let with_mutex path f =
   Eio_guard.with_mutex mu f
 
 (** Run [f] while holding both the cooperative Eio.Mutex and an
-    OS-level flock on [path].lock.  The flock is acquired with F_TLOCK
-    (non-blocking) from a system thread so the Eio scheduler stays free.
-    Max 200 attempts (~2s with sleeps). *)
-let with_lock path f =
+    OS-level flock on [path].lock. The flock uses non-blocking F_TLOCK
+    retries; sleep/yield stays scheduler-friendly whether or not a clock
+    is provided. Max 200 attempts (~2s with sleeps). *)
+let with_lock ?clock path f =
   let run_with_flock () =
     let lock_path = path ^ ".lock" in
     let dir = Filename.dirname lock_path in
     if not (Sys.file_exists dir) then
       (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-    let fd = acquire_flock_fd lock_path in
+    let fd = acquire_flock_fd ?clock lock_path in
     Common.protect ~module_name:"file_lock_eio" ~finally_label:"finalizer"
       ~finally:(fun () -> release_flock_fd fd)
       f

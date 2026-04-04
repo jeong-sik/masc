@@ -35,7 +35,7 @@ let with_ctx f =
       in
       Unix.mkdir tmp 0o755;
       let config = Room.default_config tmp in
-      let _ = Room.init config ~agent_name:(Some "test-agent") in
+      ignore (Room.init config ~agent_name:(Some "test-agent"));
       f { Tool_control.config; agent_name = "test-agent" })
 
 let () =

@@ -221,12 +221,11 @@ let triage_result_to_json = function
             `List (List.map deliberation_trigger_to_json triggers) );
         ]
 
-(* ---------- Triage function: cheap gate before MODEL deliberation ---------- *)
+(* ---------- Triage function: cheap gate before deliberation ---------- *)
 
-(** Evaluate a world observation and return triggers that warrant deliberation.
-    This is a pure heuristic — no MODEL calls, no I/O.
+(** Evaluate a world observation and return triggers that warrant action.
     Returns [Skip _] when nothing interesting happened,
-    [Triggered triggers] when the keeper should deliberate. *)
+    [Triggered triggers] when the keeper should evaluate further. *)
 let triage (obs : world_observation) : triage_result =
   let triggers = ref [] in
   let add t = triggers := t :: !triggers in
@@ -301,7 +300,7 @@ let deterministic_baseline_action (obs : world_observation) : deliberation_actio
     Noop "no_trigger"
 
 (* ================================================================ *)
-(* Phase 2: MODEL-Driven Deliberation (L1 Reactive)                  *)
+(* Phase 2: Deliberation Evaluation (L1 Reactive)                    *)
 (* ================================================================ *)
 
 (* ---------- Budget check ---------- *)

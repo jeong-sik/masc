@@ -135,7 +135,7 @@ val deliberation_meta_of_json : Yojson.Safe.t -> deliberation_meta
     Equivalent to the old [if direct_mention then "reply_in_room" else "noop"]. *)
 val deterministic_baseline_action : world_observation -> deliberation_action
 
-(** {1 Phase 2: MODEL-Driven Deliberation} *)
+(** {1 Phase 2: Deliberation Evaluation} *)
 
 (** Read the daily budget from [MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD]
     env var (default: 0.10). *)

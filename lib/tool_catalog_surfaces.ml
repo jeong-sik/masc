@@ -240,7 +240,7 @@ let admin_surface_tools =
     "masc_observe_swarm"; "masc_observe_topology"; "masc_observe_traces";
     "masc_operation_checkpoint"; "masc_operation_finalize"; "masc_operation_pause";
     "masc_operation_resume"; "masc_operation_start"; "masc_operation_status";
-    "masc_operation_stop"; "masc_operator_digest"; "masc_operator_judgment_latest";
+    "masc_operation_stop"; "masc_operator_digest";
     "masc_pause"; "masc_resume";
     "masc_policy_approve"; "masc_policy_deny"; "masc_policy_status"; "masc_policy_update";
     "masc_runtime_verify"; "masc_tool_list";

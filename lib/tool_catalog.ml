@@ -141,27 +141,10 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_judgment_write",
       hidden_active
         "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
-    (* Dead features physically removed in #4709 and #4757:
-       operator_judgment_latest, hat_wear, hat_status, encryption_*,
-       generate_key, tempo*, cost_log, cost_report. *)
-    (* Broken tools: shell out to CLI binaries unavailable at runtime.
-       masc-checkpoint: removed from codebase (refactor #102).
-       Deprecated 2026-04-03. See #4709, #4734. *)
-    ("masc_interrupt",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_approve",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_reject",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_pending_interrupts",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
-    ("masc_branch",
-     deprecated ~implementation_status:Real
-       "Shells out to masc-checkpoint CLI which was removed from the codebase. Always fails at runtime.");
+    (* Physically removed: masc_interrupt, masc_approve, masc_reject,
+       masc_pending_interrupts, masc_branch (masc-checkpoint CLI removed,
+       #4709/#4734), operator_judgment_latest, hat_wear, hat_status,
+       encryption_*, generate_key, tempo*, cost_log, cost_report (#4709/#4757). *)
     (* Semantic annotations for governance risk classification. *)
     ("masc_status", readonly_tool);
     ("masc_tasks", readonly_tool);

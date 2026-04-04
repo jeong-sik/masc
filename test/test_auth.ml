@@ -216,8 +216,8 @@ let test_admin_permissions () =
     (Types.has_permission Types.Admin Types.CanInit);
   check bool "admin can reset" true
     (Types.has_permission Types.Admin Types.CanReset);
-  check bool "admin can approve" true
-    (Types.has_permission Types.Admin Types.CanApprove)
+  check bool "admin can admin" true
+    (Types.has_permission Types.Admin Types.CanAdmin)
 
 (* ============================================ *)
 (* Authorization tests                          *)

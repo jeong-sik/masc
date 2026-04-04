@@ -108,15 +108,20 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       ("params", params)
     ]));
   (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
-     can react to new tasks, mentions, or room activity immediately. *)
-  Room_eio.on_broadcast_mention := (fun mention ->
+     can react to new tasks, mentions, or room activity immediately.
+     Room_state.on_broadcast_mention is the active path (Room.broadcast uses
+     Room_state.broadcast); Room_eio.on_broadcast_mention is kept in sync as
+     a safety net for any legacy callers. *)
+  let broadcast_mention_handler = (fun mention ->
     match mention with
     | Some target ->
         Keeper_keepalive.wakeup_keeper target;
         Log.Keeper.info "broadcast mention → wakeup keeper %s" target
     | None ->
         Keeper_keepalive.wakeup_all_keepers ();
-        Log.Keeper.info "broadcast → wakeup all keepers (reactive push)");
+        Log.Keeper.info "broadcast → wakeup all keepers (reactive push)") in
+  Room_state.on_broadcast_mention := broadcast_mention_handler;
+  Room_eio.on_broadcast_mention := broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try
     let cancel_orchestrator =

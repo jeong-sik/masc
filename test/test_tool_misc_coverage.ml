@@ -78,7 +78,7 @@ let () = test "dispatch_dashboard" (fun () ->
   | Some (success, result) ->
       assert success;
       assert (str_contains result "MASC Dashboard");
-      assert (str_contains result "Scope: default (flattened)");
+      assert (str_contains result "Namespace: default (flattened)");
       assert (not (str_contains result "second-room"));
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
@@ -110,7 +110,7 @@ let () = test "dispatch_dashboard_current_scope" (fun () ->
   | Some (success, result) ->
       assert success;
       assert (str_contains result "MASC Dashboard");
-      assert (str_contains result "Scope: default (flattened)");
+      assert (str_contains result "Namespace: default (flattened)");
       assert (not (str_contains result "focus-room"))
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->

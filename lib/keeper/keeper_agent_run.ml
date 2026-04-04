@@ -351,7 +351,7 @@ let run_turn
     Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
   (* 7. Set up agent *)
   let ctx_ref = ref ctx_work in
-  let agent_name = Printf.sprintf "keeper-%s" meta.name in
+  let agent_name = meta.agent_name in
   let meta_ref = ref meta in
   let agent_ref : Agent_sdk.Agent.t option ref = ref None in
   let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in

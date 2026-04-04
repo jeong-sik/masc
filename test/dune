@@ -33,7 +33,7 @@
 ; Group 1: Pure synchronous tests
 ; ============================================================
 (tests
- (names test_room test_room_state_recovery test_types test_auth test_http_negotiation
+ (names test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
         test_sse test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
@@ -90,7 +90,7 @@
         test_worker_oas_scope_gate
         test_run_local_script
         test_tool_prefilter)
- (modules test_room test_room_state_recovery test_types test_auth test_http_negotiation
+ (modules test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn

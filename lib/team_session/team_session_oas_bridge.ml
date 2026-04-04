@@ -558,7 +558,7 @@ let budget_of_session_timeout timeout_sec =
   | None -> Swarm.Swarm_types.no_budget
 
 let session_runtime_health ~(config : Room.config)
-    ~(session : Team_session_types.session) : Team_context.runtime_health =
+    ~(session : Team_session_types.session) : Team_context_oas_adapter.runtime_health =
   let base_path_ok =
     String.trim config.base_path <> "" && Sys.file_exists config.base_path
   in
@@ -572,7 +572,7 @@ let session_runtime_health ~(config : Room.config)
     | None -> false
   in
   {
-    Team_context.base_path_exists = base_path_ok;
+    Team_context_oas_adapter.base_path_exists = base_path_ok;
     room_initialized = room_ready;
     session_running = session_ready;
   }
@@ -580,7 +580,7 @@ let session_runtime_health ~(config : Room.config)
 let session_runtime_health_check ~(config : Room.config)
     ~(session : Team_session_types.session) () =
   let health = session_runtime_health ~config ~session in
-  health.Team_context.base_path_exists
+  health.Team_context_oas_adapter.base_path_exists
   && health.room_initialized
   && health.session_running
 
@@ -742,8 +742,8 @@ let session_to_swarm_config
   let mode = mode_of_orchestration session.orchestration_mode in
   let runtime_health = session_runtime_health ~config ~session in
   let collaboration =
-    Team_context.collaboration_of_session ~base_path:config.base_path session
-    |> fun collab -> Team_context.with_runtime_health collab runtime_health
+    Team_context_oas_adapter.collaboration_of_session ~base_path:config.base_path session
+    |> fun collab -> Team_context_oas_adapter.with_runtime_health collab runtime_health
   in
   let entry_count = List.length entries in
   let timeout_sec =

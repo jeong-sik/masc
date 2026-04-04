@@ -117,6 +117,8 @@ let test_join_in_room_sanitizes_invalid_room_id () =
           in
           check bool "result uses sanitized namespace label" true
             (str_contains result "namespace default");
+          check bool "result omits legacy room label" false
+            (str_contains result "room default");
           check (option string) "hook sees sanitized room label" (Some "default")
             !captured_room_id;
           let event_log =

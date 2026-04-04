@@ -239,19 +239,30 @@ let test_pruned_tools_move_to_system_internal () =
         (Tool_catalog.metadata name).Tool_catalog.reason)
     [
       "masc_a2a_delegate";
+      "masc_a2a_discover";
+      "masc_a2a_query_skill";
+      "masc_a2a_subscribe";
       "masc_a2a_unsubscribe";
       "masc_board_migrate";
       "masc_board_reclassify";
       "masc_episode_flush";
       "masc_episode_list";
+      "masc_portal_close";
+      "masc_portal_open";
       "masc_portal_send";
       "masc_portal_status";
       "masc_transport_status";
       "masc_websocket_discovery";
+      "masc_webrtc_answer";
       "masc_webrtc_offer";
       "masc_voice_agent";
+      "masc_voice_conference_end";
       "masc_voice_speak";
       "masc_voice_conference_start";
+      "masc_voice_ping_pong";
+      "masc_voice_session_end";
+      "masc_voice_session_start";
+      "masc_voice_sessions";
     ]
 
 let test_workspace_mutating_canonical_used () =

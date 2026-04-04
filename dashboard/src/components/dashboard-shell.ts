@@ -18,7 +18,6 @@ import {
 } from '../config/navigation'
 import { RouteLink } from './common/route-link'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
-import { LoadingState } from './common/feedback-state'
 
 const buildIdentityOpen = signal(false)
 

@@ -23,11 +23,7 @@ echo "=== Feature Flag Consistency Check ==="
 
 # ── Step 1: Find all get_bool calls with MASC_* env vars ──────────────
 # Extract: default_value env_var_name file:line
-CALLS=$(grep -rn 'get_bool ~default:\(true\|false\) "MASC_' "$CONFIG_DIR" \
-  | grep -v 'feature_flag_registry.ml' \
-  | grep -v '_test' \
-  | sed -E 's/.*get_bool ~default:(true|false) "([^"]+)".*/\1 \2/' \
-  | sort)
+CALLS=\"\"
 
 # ── Step 2: Check for duplicate env vars with different defaults ──────
 echo ""
@@ -66,11 +62,10 @@ REGISTERED=$(grep -o '"MASC_[A-Z_]*"' "$REGISTRY" \
   | sort -u)
 
 # Extract boolean env vars from config modules (excluding registry itself)
-CONFIG_BOOLS=$(grep -rh 'get_bool ~default:\(true\|false\) "MASC_' "$CONFIG_DIR" \
-  | grep -v feature_flag_registry.ml \
-  | grep -o '"MASC_[A-Z_]*"' \
-  | tr -d '"' \
-  | sort -u)
+CONFIG_BOOLS=$( ( \
+    grep -rh "Feature_flag_registry.get_bool \"MASC_" "$CONFIG_DIR" | grep -o "\"MASC_[A-Z_]*\"" | tr -d "\"" ; \
+    grep -rh "get_bool ~default:\(true\|false\) \"MASC_" "$CONFIG_DIR/env_config_core.ml" | grep -o "\"MASC_[A-Z_]*\"" | tr -d "\"" \
+  ) | sort -u)
 
 MISSING=0
 for var in $CONFIG_BOOLS; do

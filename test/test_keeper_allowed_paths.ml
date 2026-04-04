@@ -99,7 +99,7 @@ let test_computed_default_uses_keeper_name () =
 let test_playground_path_sanitizes_name () =
   let path = KAP.playground_path_of_keeper "my keeper/../../etc" in
   check string "special chars sanitized"
-    ".masc/playground/my_keeper_.._.._.._etc/" path
+    ".masc/playground/my_keeper_.._.._etc/" path
 
 let test_playground_always_present () =
   let scopes = ["observe_only"; "workspace"; "local"] in

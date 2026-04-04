@@ -424,12 +424,15 @@ done
 if [ "$BASE_PATH_EXPLICIT" != "1" ] && \
    [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && \
    [ -n "$BASE_PATH" ] && \
-   [ "$BASE_PATH" != "$SCRIPT_DIR" ] && \
    ! is_truthy "${MASC_ALLOW_INHERITED_BASE_PATH:-0}"; then
     # Use the same git-root-aware resolution that will be used for the
     # final MASC_BASE_PATH export so this guard sees the effective path.
     RESOLVED_BASE="$(resolve_base_path "$BASE_PATH")"
-    if [ -d "$SCRIPT_DIR/.masc" ] && [ -d "$RESOLVED_BASE/.masc" ]; then
+    # Canonicalize to an absolute path so that relative forms like '.' or
+    # './' don't cause a false mismatch against the already-absolute SCRIPT_DIR.
+    RESOLVED_BASE="$(cd "$RESOLVED_BASE" 2>/dev/null && pwd || echo "$RESOLVED_BASE")"
+    if [ "$RESOLVED_BASE" != "$SCRIPT_DIR" ] && \
+       [ -d "$SCRIPT_DIR/.masc" ] && [ -d "$RESOLVED_BASE/.masc" ]; then
         echo "WARN: Ignoring inherited MASC_BASE_PATH=$BASE_PATH because both $SCRIPT_DIR and $RESOLVED_BASE have .masc. Use --base-path or MASC_ALLOW_INHERITED_BASE_PATH=1 to keep the inherited root." >&2
         BASE_PATH="$SCRIPT_DIR"
     fi

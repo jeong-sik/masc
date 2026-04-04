@@ -135,6 +135,7 @@ let collaboration_evidence_schema ~remote =
             schema_properties
               [
                 ("session_id", `Assoc [ ("type", `String "string") ]);
+                ("namespace_id", `Assoc [ ("type", `String "string") ]);
                 ("room_id", `Assoc [ ("type", `String "string") ]);
               ] );
         ];
@@ -294,7 +295,11 @@ let dispatch (ctx : 'a context) ~name ~args : result option =
       Some (true, Yojson.Safe.to_string (Dashboard_surface_readiness.json ?surface_id ()))
   | "masc_collaboration_evidence" ->
       let session_id = get_string_opt args "session_id" in
-      let room_id = get_string_opt args "room_id" in
+      let room_id =
+        match get_string_opt args "namespace_id" with
+        | Some value when String.trim value <> "" -> Some value
+        | _ -> get_string_opt args "room_id"
+      in
       Some
         ( true,
           Yojson.Safe.to_string

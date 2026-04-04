@@ -63,9 +63,14 @@ let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
     - Post-hook transforms the result.  Identity function when observing only.
       Use case: tracing spans (Sprint 2), metrics collection. *)
 
-(** Pre-hook: receives tool name and args before handler runs.
-    Return [None] to proceed, [Some result] to short-circuit. *)
-type pre_hook = name:string -> args:Yojson.Safe.t -> Tool_result.t option
+(** Pre-hook action: determines how dispatch proceeds after a hook runs. *)
+type pre_hook_action =
+  | Pass                        (** This hook has no opinion — continue *)
+  | Proceed of Yojson.Safe.t   (** Replace args (e.g. type coercion) and continue *)
+  | Reject of Tool_result.t    (** Short-circuit with error result *)
+
+(** Pre-hook: receives tool name and args before handler runs. *)
+type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 
 (** Post-hook: receives result after handler completes.
     Return the (possibly transformed) result. *)
@@ -83,16 +88,19 @@ let register_post_hook (hook : post_hook) =
 let clear_hooks () =
   with_dispatch_rw (fun () -> pre_hooks := []; post_hooks := [])
 
-(** Run pre-hooks in order.  First [Some] wins (short-circuit). *)
+(** Run pre-hooks in order, threading coerced args through the chain.
+    First [Reject] wins (short-circuit). [Proceed] replaces args for
+    subsequent hooks and the final handler. *)
 let run_pre_hooks ~name ~args =
-  let rec go = function
-    | [] -> None
+  let rec go current_args = function
+    | [] -> (None, current_args)
     | hook :: rest ->
-      (match hook ~name ~args with
-       | Some _ as result -> result
-       | None -> go rest)
+      (match hook ~name ~args:current_args with
+       | Reject result -> (Some result, current_args)
+       | Proceed new_args -> go new_args rest
+       | Pass -> go current_args rest)
   in
-  go !pre_hooks
+  go args !pre_hooks
 
 (** Run post-hooks in order, threading the result through. *)
 let run_post_hooks result =
@@ -108,12 +116,12 @@ let run_post_hooks result =
     Returns [None] when the tool is unknown to the registry. *)
 let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
   let name = token.name in
-  (* Pre-hooks: may short-circuit *)
+  (* Pre-hooks: may short-circuit or coerce args *)
   match run_pre_hooks ~name ~args with
-  | Some _ as blocked -> blocked
-  | None ->
+  | (Some _ as blocked, _) -> blocked
+  | (None, coerced_args) ->
     let start_time = Time_compat.now () in
-    (match dispatch ~token ~args with
+    (match dispatch ~token ~args:coerced_args with
      | Some (success, message) ->
        let result = Tool_result.wrap ~tool_name:name ~start_time (success, message) in
        Some (run_post_hooks result)

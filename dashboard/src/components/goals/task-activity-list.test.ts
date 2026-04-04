@@ -9,7 +9,6 @@ vi.mock('../common/json-viewer', () => ({
   JsonViewerCard: ({ data, title }: { data: unknown; title?: string }) =>
     h('div', { 'data-testid': 'json-viewer-card', 'data-title': title ?? '' }, typeof data === 'string' ? data : JSON.stringify(data)),
 }))
-
 vi.mock('../common/time-ago', () => ({
   TimeAgo: ({ timestamp }: { timestamp: string }) => h('span', {}, timestamp),
 }))

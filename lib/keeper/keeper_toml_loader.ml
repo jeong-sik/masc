@@ -218,7 +218,7 @@ let parse_toml (content : string) : (toml_doc, string) result =
              let value = Buffer.contents ml_buf in
              (* Validate no unexpected content after closing triple-quote *)
              let trailing = String.sub line_cr (pos + 3) (len - pos - 3) |> String.trim in
-             if trailing <> "" && (String.length trailing = 0 || trailing.[0] <> '#') then
+             if trailing <> "" && trailing.[0] <> '#' then
                error := Some (Printf.sprintf "line %d: unexpected characters after closing multiline delimiter" !line_num)
              else begin
                emit_kv !ml_key (Toml_string value);
@@ -280,7 +280,7 @@ let parse_toml (content : string) : (toml_doc, string) result =
                   let value = String.sub after 0 pos in
                   let trailing_start = pos + 3 in
                   let trailing = String.sub after trailing_start (String.length after - trailing_start) |> String.trim in
-                  if trailing <> "" && (String.length trailing = 0 || trailing.[0] <> '#') then
+                  if trailing <> "" && trailing.[0] <> '#' then
                     error := Some (Printf.sprintf "line %d: unexpected characters after closing multiline delimiter" !line_num)
                   else
                     emit_kv full_key (Toml_string value)

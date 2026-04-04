@@ -234,7 +234,7 @@ let test_parse_multiline_normalizes_crlf () =
 
 (* TOML spec: up to two `"` immediately after closing `"""` are content. *)
 let test_parse_multiline_single_trailing_quote_inline () =
-  (* key = """"one quote"""" → content is `"one quote"` *)
+  (* Inline multiline string with one trailing quote kept as content. *)
   let input = {|key = """"one quote""""|} in
   match TL.parse_toml input with
   | Ok doc ->
@@ -245,7 +245,7 @@ let test_parse_multiline_single_trailing_quote_inline () =
   | Error e -> fail ("single trailing quote inline failed: " ^ e)
 
 let test_parse_multiline_double_trailing_quote_inline () =
-  (* key = """""two quotes""""" → content is `""two quotes""` *)
+  (* Inline multiline string with two trailing quotes kept as content. *)
   let input = {|key = """""two quotes"""""|} in
   match TL.parse_toml input with
   | Ok doc ->
@@ -256,7 +256,7 @@ let test_parse_multiline_double_trailing_quote_inline () =
   | Error e -> fail ("double trailing quote inline failed: " ^ e)
 
 let test_parse_multiline_trailing_quote_on_close_line () =
-  (* Multiline with one extra `"` on the closing line *)
+  (* Multiline string with one trailing quote on the closing line. *)
   let input = "key = \"\"\"\nsome content\n\"\"\"\"" in
   match TL.parse_toml input with
   | Ok doc ->
@@ -267,8 +267,7 @@ let test_parse_multiline_trailing_quote_on_close_line () =
   | Error e -> fail ("trailing quote multiline failed: " ^ e)
 
 let test_parse_multiline_line_ending_backslash () =
-  (* TOML line-ending backslash: `\` at end of line trims newline and following
-     indentation, joining with the next non-whitespace content. *)
+  (* Line-ending backslash joins the next non-whitespace content. *)
   let input = "key = \"\"\"\nfirst \\\n    second\n\"\"\"" in
   match TL.parse_toml input with
   | Ok doc ->

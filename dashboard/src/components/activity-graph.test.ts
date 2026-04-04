@@ -4,6 +4,7 @@ import { visibleNamespaceLabel } from './activity-graph'
 
 describe('visibleNamespaceLabel', () => {
   it('hides empty and default namespaces', () => {
+    expect(visibleNamespaceLabel(null)).toBeNull()
     expect(visibleNamespaceLabel(undefined)).toBeNull()
     expect(visibleNamespaceLabel('')).toBeNull()
     expect(visibleNamespaceLabel('   ')).toBeNull()

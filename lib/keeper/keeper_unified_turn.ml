@@ -157,7 +157,10 @@ let recover_context_overflow_retry
 
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
-  if observation.pending_mentions <> [] || observation.pending_board_events <> [] then
+  if observation.pending_mentions <> []
+     || observation.pending_board_events <> []
+     || observation.pending_scope_messages <> []
+  then
     "turn"
   else
     "proactive"
@@ -187,6 +190,7 @@ let observed_triggers_of_observation
   let add trigger = triggers := trigger :: !triggers in
   if observation.pending_mentions <> [] then add "direct_mention";
   if observation.pending_board_events <> [] then add "board_activity";
+  if observation.pending_scope_messages <> [] then add "scope_message";
   if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
   if observation.failed_task_count > 0 then add "failed_task";
   if observation.active_goals <> [] && observation.idle_seconds > 0 then
@@ -200,10 +204,14 @@ let observed_affordances_of_observation
   let add affordance = affordances := affordance :: !affordances in
   if observation.pending_mentions <> [] then add "reply_in_room";
   if observation.pending_board_events <> [] then add "board_post_or_comment";
+  if observation.pending_scope_messages <> [] then add "message_sweep";
   if observation.unclaimed_task_count > 0 then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";
   if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
   List.rev !affordances
+
+let has_substantive_tool_calls (tools_used : string list) : bool =
+  List.exists (fun tool_name -> tool_name <> "masc_heartbeat") tools_used
 
 let response_requests_confirmation (text : string) : bool =
   let trimmed = String.trim text in
@@ -308,6 +316,7 @@ let append_decision_record
             [
               ("pending_mentions", `Int (List.length observation.pending_mentions));
               ("pending_board_events", `Int (List.length observation.pending_board_events));
+              ("pending_scope_messages", `Int (List.length observation.pending_scope_messages));
               ("active_goals", `Int (List.length observation.active_goals));
               ("idle_seconds", `Int observation.idle_seconds);
               ("context_ratio", `Float observation.context_ratio);
@@ -395,6 +404,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ~output_tokens:result.usage.output_tokens ()
   in
   let has_tool_calls = result.tools_used <> [] in
+  let has_substantive_tools = has_substantive_tool_calls result.tools_used in
   let has_text = String.trim result.response_text <> "" in
   let is_proactive_cycle = is_proactive_cycle_of_observation observation in
   let is_board_reactive = observation.pending_board_events <> [] in
@@ -446,13 +456,13 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.proactive_rt.visible_count_total
           + (if update_proactive_rt
                && is_proactive_cycle
-               && (has_text || has_tool_calls)
+               && (has_text || has_substantive_tools)
              then 1
              else 0);
         last_visible_ts =
           (if update_proactive_rt
               && is_proactive_cycle
-              && (has_text || has_tool_calls)
+              && (has_text || has_substantive_tools)
            then now_ts
            else rt.proactive_rt.last_visible_ts);
         last_outcome =
@@ -461,7 +471,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            else rt.proactive_rt.last_outcome);
         last_reason =
           (if not update_proactive_rt || not is_proactive_cycle then rt.proactive_rt.last_reason
-           else if has_tool_calls then
+           else if has_substantive_tools then
              Printf.sprintf "unified:tools=[%s]"
                (String.concat "," result.tools_used)
            else if not has_text then
@@ -471,7 +481,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         last_preview =
           (if not update_proactive_rt || not is_proactive_cycle then rt.proactive_rt.last_preview
            else if has_text then short_preview result.response_text
-           else if has_tool_calls then
+           else if has_substantive_tools then
              Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
            else rt.proactive_rt.last_preview);
       };
@@ -926,7 +936,10 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           in
           (try
              let channel =
-               if observation.pending_mentions <> [] || observation.pending_board_events <> [] then
+               if observation.pending_mentions <> []
+                  || observation.pending_board_events <> []
+                  || observation.pending_scope_messages <> []
+               then
                  "turn"
                else
                  "proactive"

@@ -28,6 +28,8 @@ type pending_board_event = {
 type world_observation = {
   pending_mentions : (string * string) list;
   pending_board_events : pending_board_event list;
+  pending_scope_messages : (string * string) list;
+  message_cursor_updates : (string * int) list;
   idle_seconds : int;
   active_goals : string list;
   continuity_summary : string;
@@ -48,33 +50,81 @@ type board_signal_match = {
   score : int;
 }
 
-(** Collect pending direct mentions from joined rooms since last cursor. *)
-let collect_pending_mentions ~(config : Room.config) ~(meta : keeper_meta)
-    : (string * string) list =
-  let targets =
-    if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
+let take_first n xs =
+  if n <= 0 then []
+  else
+    let rec loop acc remaining = function
+      | [] -> List.rev acc
+      | _ when remaining <= 0 -> List.rev acc
+      | x :: rest -> loop (x :: acc) (remaining - 1) rest
+    in
+    loop [] n xs
+
+let scope_message_feed_enabled (meta : keeper_meta) : bool =
+  match Keeper_contract.scope_kind_of_string meta.scope_kind with
+  | Keeper_contract.Global -> true
+  | Keeper_contract.Local ->
+      Keeper_contract.room_scope_of_string meta.room_scope = Keeper_contract.All
+
+let message_feed_targets (meta : keeper_meta) =
+  if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
+
+let collect_message_scope ~(config : Room.config) ~(meta : keeper_meta) :
+    ((string * string) list * (string * string) list * (string * int) list) =
+  let targets = message_feed_targets meta in
+  let self_tokens =
+    [ meta.name; meta.agent_name ]
+    |> List.map (fun value -> String.lowercase_ascii (String.trim value))
   in
   let batch_limit = Keeper_config.keeper_batch_limit () in
   List.fold_left
-    (fun acc room_id ->
-      let since_seq = room_cursor_for meta room_id in
-      let messages =
-        try
-          Room.get_messages_raw_in_room config ~room_id ~since_seq
-            ~limit:batch_limit
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | _ -> []
-      in
-      List.fold_left
-        (fun inner_acc (msg : Types.message) ->
-          if msg.from_agent = meta.agent_name then inner_acc
-          else if not (exact_direct_mention_present ~targets msg.content) then
-            inner_acc
-          else (msg.from_agent, msg.content) :: inner_acc)
-        acc messages)
-    [] meta.joined_room_ids
-  |> List.rev
+    (fun (mentions_acc, scope_acc, cursor_acc) room_id ->
+       let since_seq = room_cursor_for meta room_id in
+       let messages =
+         try
+           Room.get_messages_raw_in_room config ~room_id ~since_seq ~limit:batch_limit
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | _ -> []
+       in
+       let max_seq =
+         List.fold_left
+           (fun acc (msg : Types.message) -> max acc msg.seq)
+           since_seq messages
+       in
+       let cursor_acc =
+         if max_seq > since_seq then (room_id, max_seq) :: cursor_acc else cursor_acc
+       in
+       let mentions_acc, scope_acc =
+         List.fold_left
+           (fun (mentions_inner, scope_inner) (msg : Types.message) ->
+              let author =
+                String.lowercase_ascii (String.trim msg.from_agent)
+              in
+              if author = "" || List.mem author self_tokens then
+                (mentions_inner, scope_inner)
+              else if exact_direct_mention_present ~targets msg.content then
+                ((msg.from_agent, msg.content) :: mentions_inner, scope_inner)
+              else if scope_message_feed_enabled meta then
+                (mentions_inner, (msg.from_agent, msg.content) :: scope_inner)
+              else
+                (mentions_inner, scope_inner))
+           (mentions_acc, scope_acc)
+           messages
+       in
+       (mentions_acc, scope_acc, cursor_acc))
+    ([], [], [])
+    meta.joined_room_ids
+  |> fun (mentions, scope_messages, cursor_updates) ->
+  ( List.rev mentions,
+    List.rev scope_messages |> take_first batch_limit,
+    List.rev cursor_updates )
+
+let apply_message_cursor_updates (meta : keeper_meta)
+    (updates : (string * int) list) : keeper_meta =
+  List.fold_left
+    (fun acc (room_id, seq) -> set_room_cursor acc room_id seq)
+    meta updates
 
 (** Read room backlog counts. *)
 let read_backlog_counts ~(config : Room.config) : int * int =
@@ -113,8 +163,10 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
     |> Option.value ~default:0.0
   in
   let activity_ts =
-    let base = max meta.runtime.usage.last_turn_ts meta.runtime.proactive_rt.last_ts in
-    if base > 0.0 then base else created_ts
+    if meta.runtime.proactive_rt.last_ts > 0.0 then
+      meta.runtime.proactive_rt.last_ts
+    else
+      created_ts
   in
   if activity_ts <= 0.0 then 0
   else int_of_float (max 0.0 (now_ts -. activity_ts))
@@ -282,6 +334,7 @@ let read_room_signal ~(config : Room.config) ~(meta : keeper_meta) =
 let collect_board_events ~(base_path : string) ~(continuity_summary : string)
     ~(meta : keeper_meta) : pending_board_event list * int * int =
   try
+    let broad_scope = scope_message_feed_enabled meta in
     let since_ts =
       let ts = Keeper_registry.get_board_cursor_ts ~base_path meta.name in
       if ts > 0.0 then ts
@@ -353,7 +406,7 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
                 }
               in
               let matched = board_signal_match ~continuity_summary ~meta ~signal in
-              if matched.explicit_mention then
+              if matched.explicit_mention || broad_scope then
                 Some
                   {
                     post_id;
@@ -422,7 +475,9 @@ let observe ~(pending_board_events : pending_board_event list option)
     ~(config : Room.config)
     ~(meta : keeper_meta) :
     world_observation =
-  let pending_mentions = collect_pending_mentions ~config ~meta in
+  let pending_mentions, pending_scope_messages, message_cursor_updates =
+    collect_message_scope ~config ~meta
+  in
   let unclaimed_task_count, failed_task_count =
     read_backlog_counts ~config
   in
@@ -453,6 +508,8 @@ let observe ~(pending_board_events : pending_board_event list option)
   {
     pending_mentions;
     pending_board_events;
+    pending_scope_messages;
+    message_cursor_updates;
     idle_seconds;
     active_goals = meta.active_goal_ids;
     continuity_summary;
@@ -485,7 +542,9 @@ let effective_proactive_cooldown ~(base_cooldown : int) ~(since_last : int) : in
 
 let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observation) =
   let has_external_event =
-    observation.pending_mentions <> [] || observation.pending_board_events <> []
+    observation.pending_mentions <> []
+    || observation.pending_board_events <> []
+    || observation.pending_scope_messages <> []
   in
   if has_external_event then
     true

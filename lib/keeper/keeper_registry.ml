@@ -390,7 +390,11 @@ let get_board_cursor_ts ~base_path name =
 
 let set_board_cursor_ts ~base_path name ts =
   update_entry ~base_path name (fun e ->
-    { e with board_cursor_ts = ts; board_cursor_post_id = None })
+    let board_cursor_post_id =
+      if Float.compare ts e.board_cursor_ts = 0 then e.board_cursor_post_id
+      else None
+    in
+    { e with board_cursor_ts = ts; board_cursor_post_id })
 
 let get_board_cursor ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) !registry with

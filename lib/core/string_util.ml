@@ -12,6 +12,7 @@ let contains_substring haystack needle =
     loop 0
 
 let contains_substring_ci haystack needle =
+  needle <> "" &&
   contains_substring
     (String.lowercase_ascii haystack)
     (String.lowercase_ascii needle)

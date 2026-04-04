@@ -165,12 +165,11 @@ let make_session ?(orchestration_mode = Team_session_types.Auto)
     updated_at_iso = Types.now_iso ();
   }
 
-let test_cascade_ignores_worker_binding_for_session_policy () =
+let test_cascade_worker_binding_wins () =
   let pw = make_pw ~runtime_binding_ref:(Some "local/worker") () in
   let c = Team_session_oas_bridge.cascade_of_worker
     ~session_cascade:["llama:qwen3.5"] pw in
-  Alcotest.(check string) "session cascade stays authoritative"
-    "llama:qwen3.5" c
+  Alcotest.(check string) "worker binding wins" "local/worker" c
 
 let test_cascade_session_fallback () =
   let pw = make_pw () in
@@ -627,8 +626,8 @@ let () =
         test_mode_assist;
     ];
     "cascade_resolution", [
-      Alcotest.test_case "worker binding does not override session policy" `Quick
-        test_cascade_ignores_worker_binding_for_session_policy;
+      Alcotest.test_case "worker binding wins" `Quick
+        test_cascade_worker_binding_wins;
       Alcotest.test_case "session fallback" `Quick
         test_cascade_session_fallback;
       Alcotest.test_case "default cascade" `Quick

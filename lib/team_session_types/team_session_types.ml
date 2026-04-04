@@ -60,9 +60,7 @@ let effective_runtime_policy_ref (session : session) =
              if trimmed = "" then None else Some trimmed)
 
 let legacy_model_cascade_for_export (session : session) =
-  match effective_runtime_policy_ref session with
-  | Some _ -> []
-  | None -> session.model_cascade
+  session.model_cascade
 
 let planned_worker_key (w : planned_worker) =
   match w.runtime_actor with

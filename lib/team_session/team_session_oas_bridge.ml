@@ -313,13 +313,15 @@ let mode_of_orchestration
 let cascade_of_worker ?session_runtime_policy_ref
     ~(session_cascade : string list)
     (pw : Team_session_types.planned_worker) : string =
-  let _ = pw in
-  match session_runtime_policy_ref with
+  match pw.runtime_binding_ref with
+  | Some value when String.trim value <> "" -> String.trim value
+  | _ -> (
+      match session_runtime_policy_ref with
   | Some value when String.trim value <> "" -> String.trim value
   | _ -> (
       match session_cascade with
       | first :: _ when first <> "" -> first
-      | _ -> "keeper_turn")
+      | _ -> "keeper_turn"))
 
 let telemetry_of_run_result (result : Oas_worker.run_result) :
     Swarm.Swarm_types.agent_telemetry =
@@ -765,13 +767,11 @@ let session_to_swarm_config
       entry_count
     else
       let all_selections =
-        match session_runtime_policy_ref with
-        | Some value -> [ value ]
-        | None ->
-            session.planned_workers
-            |> List.map (fun pw ->
-                   cascade_of_worker ~session_cascade:session.model_cascade pw)
-            |> List.sort_uniq String.compare
+        session.planned_workers
+        |> List.map (fun pw ->
+               cascade_of_worker ?session_runtime_policy_ref
+                 ~session_cascade:session.model_cascade pw)
+        |> List.sort_uniq String.compare
       in
       match all_selections with
       | [] -> entry_count

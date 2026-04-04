@@ -82,11 +82,12 @@ let test_mode_assist () =
 (* Cascade resolution tests                                         *)
 (* ================================================================ *)
 
-let make_pw ?(spawn_model = None) () : Team_session_types.planned_worker =
+let make_pw ?(runtime_binding_ref = None) () : Team_session_types.planned_worker =
   { spawn_agent = "test-agent";
     runtime_actor = None;
     spawn_role = Some "execute";
-    spawn_model;
+    runtime_binding_ref;
+    spawn_model = None;
     execution_scope = None;
     thinking_enabled = None;
     thinking_budget = None;
@@ -102,6 +103,7 @@ let make_pw ?(spawn_model = None) () : Team_session_types.planned_worker =
     supervisor_actor = None;
     task_profile = None;
     risk_level = None;
+    artifact_scope = [];
     routing_confidence = None;
     routing_reason = None;
     routing_escalated = false;
@@ -127,6 +129,7 @@ let make_session ?(orchestration_mode = Team_session_types.Auto)
     control_profile = Team_session_types.Control_flat;
     orchestration_mode;
     communication_mode = Team_session_types.Comm_broadcast;
+    runtime_policy_ref = Some "llama:qwen3.5";
     model_cascade = [ "llama:qwen3.5" ];
     fallback_policy = Team_session_types.Fallback_none;
     instruction_profile = Team_session_types.Profile_standard;
@@ -162,11 +165,12 @@ let make_session ?(orchestration_mode = Team_session_types.Auto)
     updated_at_iso = Types.now_iso ();
   }
 
-let test_cascade_explicit_model () =
-  let pw = make_pw ~spawn_model:(Some "glm:auto") () in
+let test_cascade_ignores_worker_binding_for_session_policy () =
+  let pw = make_pw ~runtime_binding_ref:(Some "local/worker") () in
   let c = Team_session_oas_bridge.cascade_of_worker
     ~session_cascade:["llama:qwen3.5"] pw in
-  Alcotest.(check string) "explicit model wins" "glm:auto" c
+  Alcotest.(check string) "session cascade stays authoritative"
+    "llama:qwen3.5" c
 
 let test_cascade_session_fallback () =
   let pw = make_pw () in
@@ -180,11 +184,11 @@ let test_cascade_default () =
     ~session_cascade:[] pw in
   Alcotest.(check string) "default cascade" "keeper_turn" c
 
-let test_cascade_empty_model_string () =
-  let pw = make_pw ~spawn_model:(Some "") () in
+let test_cascade_empty_session_entry_falls_back_to_default () =
+  let pw = make_pw ~runtime_binding_ref:(Some "local/lead") () in
   let c = Team_session_oas_bridge.cascade_of_worker
-    ~session_cascade:["llama:qwen3.5"] pw in
-  Alcotest.(check string) "empty model falls through" "llama:qwen3.5" c
+    ~session_cascade:[""] pw in
+  Alcotest.(check string) "empty session cascade falls through" "keeper_turn" c
 
 let test_session_to_swarm_config_health_contract () =
   let worker_a = make_pw () in
@@ -623,14 +627,14 @@ let () =
         test_mode_assist;
     ];
     "cascade_resolution", [
-      Alcotest.test_case "explicit model" `Quick
-        test_cascade_explicit_model;
+      Alcotest.test_case "worker binding does not override session policy" `Quick
+        test_cascade_ignores_worker_binding_for_session_policy;
       Alcotest.test_case "session fallback" `Quick
         test_cascade_session_fallback;
       Alcotest.test_case "default cascade" `Quick
         test_cascade_default;
-      Alcotest.test_case "empty model string" `Quick
-        test_cascade_empty_model_string;
+      Alcotest.test_case "empty session entry falls back to default" `Quick
+        test_cascade_empty_session_entry_falls_back_to_default;
       Alcotest.test_case "session swarm health contract" `Quick
         test_session_to_swarm_config_health_contract;
       Alcotest.test_case "telemetry carries trace_ref" `Quick

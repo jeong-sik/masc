@@ -182,6 +182,7 @@ let sample_session config ~session_id ~started_at ~updated_at_iso =
     communication_mode = Team_session_types.Comm_broadcast;
     scale_profile = Team_session_types.Scale_standard;
     control_profile = Team_session_types.Control_flat;
+    runtime_policy_ref = Some "glm:auto";
     model_cascade = [ "glm:auto" ];
     fallback_policy = Team_session_types.Fallback_cascade_then_task;
     instruction_profile = Team_session_types.Profile_standard;

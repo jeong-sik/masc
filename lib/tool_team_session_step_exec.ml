@@ -56,6 +56,42 @@ let tool_surface_source_of_mode = function
 let dedup_tool_names values =
   Team_session_types.dedup_strings values |> List.sort String.compare
 
+let local_default_binding_ref = "local/default"
+let local_lead_binding_ref = "local/lead"
+let local_middle_binding_ref = "local/middle"
+let local_worker_binding_ref = "local/worker"
+
+let trim_nonempty value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+
+let default_local_model_id () =
+  let _label, model_id = Oas_model_resolve.default_local_model_label_and_id () in
+  model_id
+
+let env_model_opt var = Option.bind (Sys.getenv_opt var) trim_nonempty
+
+let resolve_runtime_binding_ref_to_model_id = function
+  | Some binding when String.equal binding local_lead_binding_ref ->
+      Option.value ~default:(default_local_model_id ())
+        (env_model_opt "MASC_TEAM_SESSION_MODEL_35B")
+  | Some binding when String.equal binding local_middle_binding_ref ->
+      Option.value ~default:(default_local_model_id ())
+        (match env_model_opt "MASC_TEAM_SESSION_MODEL_27B" with
+        | Some _ as value -> value
+        | None -> env_model_opt "MASC_TEAM_SESSION_MODEL_35B")
+  | Some binding when String.equal binding local_worker_binding_ref ->
+      Option.value ~default:(default_local_model_id ())
+        (match env_model_opt "MASC_TEAM_SESSION_MODEL_9B" with
+        | Some _ as value -> value
+        | None -> (
+            match env_model_opt "MASC_TEAM_SESSION_MODEL_27B" with
+            | Some _ as value -> value
+            | None -> env_model_opt "MASC_TEAM_SESSION_MODEL_35B"))
+  | Some binding when String.equal binding local_default_binding_ref ->
+      default_local_model_id ()
+  | Some _ | None -> default_local_model_id ()
+
 let tool_surface_fields ~mode ?execution_scope ?(proof : Oas.Cdal_proof.t option)
     () =
   let tool_surface_masc_names =
@@ -226,7 +262,7 @@ let record_delivery_verdict_for_worker_run ~(config : Room.config)
             ])
 
 let append_spawn_event (env : _ step_env) ?worker_run_id ?spawn_agent ?runtime_actor ?spawn_role
-    ?spawn_model ?execution_scope ?worker_class
+    ?runtime_binding_ref ?artifact_scope ?execution_scope ?worker_class
     ?worker_backend ?wait_mode ?trace_capability
     ?parent_actor ?capsule_mode
     ?runtime_pool ?lane_id ?controller_level ?control_domain
@@ -235,7 +271,7 @@ let append_spawn_event (env : _ step_env) ?worker_run_id ?spawn_agent ?runtime_a
     ?spawn_selection_note ?tool_names ?tool_call_count ~success
     ?exit_code
     ?elapsed_ms ?output_preview ?error () =
-  let _ = spawn_agent and _ = spawn_model in
+  let _ = spawn_agent in
   let detail =
     `Assoc
       [
@@ -247,6 +283,15 @@ let append_spawn_event (env : _ step_env) ?worker_run_id ?spawn_agent ?runtime_a
         ( "spawn_role",
           Option.fold ~none:`Null ~some:(fun s -> `String s)
             spawn_role );
+        ( "runtime_binding_ref",
+          Option.fold ~none:`Null ~some:(fun s -> `String s)
+            runtime_binding_ref );
+        ( "artifact_scope",
+          `List
+            (Option.value ~default:[]
+               (Option.map
+                  (List.map (fun value -> `String value))
+                  artifact_scope)) );
         ( "execution_scope",
           Option.fold ~none:`Null
             ~some:(fun scope ->
@@ -346,8 +391,8 @@ let append_spawn_event (env : _ step_env) ?worker_run_id ?spawn_agent ?runtime_a
     ~event_type:"team_step_spawn" ~detail
 
 let append_delegate_event (env : _ step_env) ~worker_run_id ~worker_name ~delegate_prompt ~success
-    ?execution_scope ?wait_mode ?trace_capability
-    ?resolved_runtime ?resolved_model ?routing_reason
+    ?execution_scope ?wait_mode ?trace_capability ?runtime_binding_ref
+    ?resolved_runtime ?routing_reason
     ?tool_names ?tool_call_count ?output_preview ?error () =
   Team_session_store.append_event env.ctx.config env.session_id
     ~event_type:"team_step_delegate"
@@ -362,8 +407,8 @@ let append_delegate_event (env : _ step_env) ~worker_run_id ~worker_name ~delega
           ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
           ("wait_mode", Option.fold ~none:`Null ~some:(fun mode -> `String mode) wait_mode);
           ("trace_capability", Option.fold ~none:`Null ~some:(fun s -> `String s) trace_capability);
+          ("runtime_binding_ref", Option.fold ~none:`Null ~some:(fun s -> `String s) runtime_binding_ref);
           ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
-          ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_model);
           ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
           ("success", `Bool success);
           ( "tool_names",
@@ -410,8 +455,8 @@ and append_spawn_requested_event_with_backend (env : _ step_env) ~worker_run_id
                   `String "local"
                 else `Null );
           ("wait_mode", `String (Team_session_types.wait_mode_to_string env.wait_mode));
+          ("runtime_binding_ref", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.runtime_binding_ref);
           ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
-          ("resolved_model", `String prepared.runtime_model_label);
           ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
           ("ts_iso", `String (Types.now_iso ()));
         ])
@@ -451,7 +496,7 @@ let append_delegate_denied_event (env : _ step_env) ~worker_name ~delegate_promp
 
 let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
     ~mode ~wait_mode ?execution_scope ?tool_names ?tool_call_count
-    ?requested_worker_class
+    ?requested_worker_class ?runtime_binding_ref ?artifact_scope
     ?resolved_runtime ?resolved_model ?routing_reason
     ~status
     ~success ?output_preview ?error ?trace_capability ?trace_ref
@@ -565,6 +610,13 @@ let persist_worker_run_snapshot (env : _ step_env) ~worker_run_id ~worker_name
         ("success", `Bool success);
         ("execution_scope", Option.fold ~none:`Null ~some:(fun scope -> `String (Team_session_types.execution_scope_to_string scope)) execution_scope);
         ("requested_worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) requested_worker_class);
+        ("runtime_binding_ref", Option.fold ~none:`Null ~some:(fun s -> `String s) runtime_binding_ref);
+        ( "artifact_scope",
+          `List
+            (Option.value ~default:[]
+               (Option.map
+                  (List.map (fun value -> `String value))
+                  artifact_scope)) );
         ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) resolved_runtime);
         ("resolved_model", Option.fold ~none:`Null ~some:(fun s -> `String s) effective_resolved_model);
         ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) routing_reason);
@@ -612,7 +664,8 @@ let fail_all_prepared (env : _ step_env) ?(include_worker_run_id = true)
         ~spawn_agent:prepared.spec.spawn_agent
         ?runtime_actor:prepared.runtime_actor_name
         ?spawn_role:prepared.spec.spawn_role
-        ?spawn_model:prepared.spec.spawn_model
+        ?runtime_binding_ref:prepared.runtime_binding_ref
+        ~artifact_scope:prepared.spec.artifact_scope
         ?execution_scope:
           (env.deps.effective_execution_scope_of_spec prepared.spec)
         ?worker_class:prepared.spec.worker_class
@@ -646,16 +699,11 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
     else
       None
   in
-  let runtime_result =
+      let runtime_result =
     if env.deps.is_local_spawn_agent spec.spawn_agent then
       let model_name =
-        match spec.spawn_model with
-        | Some model_name -> Some model_name
-        | None ->
-            let _label, model_id =
-              Oas_model_resolve.default_local_model_label_and_id ()
-            in
-            Some model_id
+        Some
+          (resolve_runtime_binding_ref_to_model_id spec.runtime_binding_ref)
       in
       match model_name with
       | None -> Error "local worker model resolution failed"
@@ -705,6 +753,7 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
           worker_run_id = env.deps.make_worker_run_id ();
           spec;
           runtime_actor_name;
+          runtime_binding_ref = spec.runtime_binding_ref;
           runtime_model_label;
           runtime_lease;
           assigned_runtime;

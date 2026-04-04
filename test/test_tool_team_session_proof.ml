@@ -15,7 +15,7 @@ let test_proof_exposes_spawn_selection_rationale () =
     start_session_exn ctx ~goal:"prove selection rationale visibility"
   in
   let session_id = get_session_id start_json in
-  let spawn_model = "qwen3.5-35b-a3b-ud-q8-xl" in
+  let runtime_binding_ref = "local/lead" in
   let selection_note =
     "[model-selection] leader selected qwen3.5-35b-a3b-ud-q8-xl from inventory"
   in
@@ -27,7 +27,7 @@ let test_proof_exposes_spawn_selection_rationale () =
           ("spawn_agent", `String "llama");
           ("runtime_actor", `String "llama-local-proof");
           ("spawn_role", `String "planner");
-          ("spawn_model", `String spawn_model);
+          ("runtime_binding_ref", `String runtime_binding_ref);
           ("spawn_selection_note", `String selection_note);
           ("success", `Bool true);
           ("exit_code", `Int 0);
@@ -46,7 +46,8 @@ let test_proof_exposes_spawn_selection_rationale () =
                    Team_session_types.spawn_agent = "llama";
                    runtime_actor = Some "llama-local-proof";
                    spawn_role = Some "planner";
-                   spawn_model = Some spawn_model;
+                   runtime_binding_ref = Some runtime_binding_ref;
+                   spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
                    execution_scope = Some Team_session_types.Observe_only;
                    worker_class = None;
                    parent_actor = None;
@@ -58,6 +59,7 @@ let test_proof_exposes_spawn_selection_rationale () =
                    supervisor_actor = None;
                    task_profile = Some Team_session_types.Profile_decide;
                    risk_level = Some Team_session_types.Risk_high;
+                   artifact_scope = [];
                    routing_confidence = Some 0.97;
                    routing_reason = Some "explicit:lead";
                    thinking_enabled = None;
@@ -123,24 +125,26 @@ let test_proof_exposes_spawn_selection_rationale () =
     evidence |> Yojson.Safe.Util.member "task_profile_counts"
     |> Yojson.Safe.Util.member "decide" |> Yojson.Safe.Util.to_int
   in
-  let recorded_models =
-    evidence |> Yojson.Safe.Util.member "spawn_models"
+  let recorded_bindings =
+    evidence |> Yojson.Safe.Util.member "runtime_binding_refs"
     |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string
   in
   Alcotest.(check string) "selection note summary" selection_note recorded_note;
   Alcotest.(check int) "planned worker count" 1 planned_worker_count;
   Alcotest.(check int) "runtime actor count" 1 runtime_actor_count;
   Alcotest.(check int) "proof decide count" 1 decide_count;
-  Alcotest.(check bool) "spawn model included" true
-    (List.mem spawn_model recorded_models);
+  Alcotest.(check bool) "runtime binding included" true
+    (List.mem runtime_binding_ref recorded_bindings);
   let proof_md_path =
     prove_result |> Yojson.Safe.Util.member "proof_md_path"
     |> Yojson.Safe.Util.to_string
   in
   let proof_md = Team_session_store.read_artifact_text config proof_md_path in
-  Alcotest.(check bool) "markdown includes model" true
+  Alcotest.(check bool) "markdown includes runtime binding" true
     (try
-       let _ = Str.search_forward (Str.regexp_string spawn_model) proof_md 0 in
+       let _ =
+         Str.search_forward (Str.regexp_string runtime_binding_ref) proof_md 0
+       in
        true
      with Not_found -> false);
   Alcotest.(check bool) "markdown includes rationale" true
@@ -194,6 +198,7 @@ let test_report_and_proof_expose_spawn_tool_usage () =
                    Team_session_types.spawn_agent = "default";
                    runtime_actor = Some "llama-local-coder";
                    spawn_role = Some "implementer";
+                   runtime_binding_ref = Some "local/lead";
                    spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
                    execution_scope = Some Team_session_types.Limited_code_change;
                    worker_class = Some Team_session_types.Worker_executor;
@@ -206,6 +211,7 @@ let test_report_and_proof_expose_spawn_tool_usage () =
                    supervisor_actor = Some "tester";
                    task_profile = Some Team_session_types.Profile_extract;
                    risk_level = Some Team_session_types.Risk_medium;
+                   artifact_scope = [];
                    routing_confidence = Some 0.9;
                    routing_reason = Some "coding quick win";
                    thinking_enabled = None;

@@ -4,6 +4,9 @@
 include Tool_team_session_step_spawn
 open Tool_args
 
+let proof_ref_of_run_result (run_result : Worker_container_types.run_result) =
+  Tool_team_session_step_spawn_impl.proof_ref_of_proof run_result.proof
+
 
 (** Execute the delegate pipeline: validate target → continue worker → emit events.
     Returns [Some json] with result/error, or [None] if no delegate requested. *)
@@ -90,6 +93,24 @@ let execute_delegate_pipeline
                 Team_session_engine_status.worker_delegate_readiness
                   ctx.config session worker_name
               in
+              let worker_runtime_binding_ref =
+                List.find_map
+                  (fun w ->
+                    match w.Team_session_types.runtime_actor with
+                    | Some actor when String.equal actor worker_name ->
+                        w.runtime_binding_ref
+                    | _ -> None)
+                  session.planned_workers
+              in
+              let worker_artifact_scope =
+                session.planned_workers
+                |> List.find_map (fun w ->
+                       match w.Team_session_types.runtime_actor with
+                       | Some actor when String.equal actor worker_name ->
+                           Some w.artifact_scope
+                       | _ -> None)
+                |> Option.value ~default:[]
+              in
               let contract : Oas.Risk_contract.t option =
                 let delivery_contract =
                   Tool_team_session_step_exec.delivery_contract_for_session
@@ -153,6 +174,8 @@ let execute_delegate_pipeline
                       ~worker_run_id ~worker_name
                       ~mode:"delegate"
                       ~wait_mode ?execution_scope
+                      ?runtime_binding_ref:worker_runtime_binding_ref
+                      ~artifact_scope:worker_artifact_scope
                       ~status:`Completed
                       ~resolved_model:run_result.model_used
                       ~resolved_runtime:"local"
@@ -175,13 +198,13 @@ let execute_delegate_pipeline
                     append_delegate_event ~worker_run_id
                       ~worker_name ~delegate_prompt
                       ?execution_scope
+                      ?runtime_binding_ref:worker_runtime_binding_ref
                       ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
                       ~trace_capability:
                         (if Option.is_some run_result.raw_trace_run
                          then "raw"
                          else "summary_only")
                       ~resolved_runtime:"local"
-                      ~resolved_model:run_result.model_used
                       ~success:true
                       ~tool_names:run_result.tool_names
                       ~tool_call_count:
@@ -207,8 +230,18 @@ let execute_delegate_pipeline
                         ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
                         ("status", `String "completed");
                         ("trace_capability", `String (if Option.is_some run_result.raw_trace_run then "raw" else "summary_only"));
+                        ( "runtime_binding_ref",
+                          Option.fold ~none:`Null ~some:(fun s -> `String s)
+                            worker_runtime_binding_ref );
+                        ( "artifact_scope",
+                          `List
+                            (List.map
+                               (fun value -> `String value)
+                               worker_artifact_scope) );
+                        ( "proof_ref",
+                          Option.fold ~none:`Null ~some:(fun s -> `String s)
+                            (proof_ref_of_run_result run_result) );
                         ("resolved_runtime", `String "local");
-                        ("resolved_model", `String run_result.model_used);
                         ( "output",
                           `String run_result.output );
                         ( "output_preview",
@@ -529,7 +562,8 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
                           append_spawn_event ~spawn_agent:failed_spec.spawn_agent
                             ?runtime_actor:runtime_actor_name
                             ?spawn_role:failed_spec.spawn_role
-                            ?spawn_model:failed_spec.spawn_model
+                            ?runtime_binding_ref:failed_spec.runtime_binding_ref
+                            ~artifact_scope:failed_spec.artifact_scope
                             ?execution_scope:
                               (deps.effective_execution_scope_of_spec failed_spec)
                             ?worker_class:failed_spec.worker_class

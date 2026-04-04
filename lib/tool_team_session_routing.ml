@@ -24,6 +24,10 @@ let is_local_spawn_agent agent_name =
   | _ -> false
 
 let legacy_spawn_fields = [ "spawn_agent"; "spawn_model" ]
+let local_default_binding_ref = "local/default"
+let local_lead_binding_ref = "local/lead"
+let local_middle_binding_ref = "local/middle"
+let local_worker_binding_ref = "local/worker"
 
 let find_present_json_key keys json =
   List.find_opt (fun key -> Yojson.Safe.Util.member key json <> `Null) keys
@@ -54,8 +58,7 @@ type routing_decision = {
 type spawn_spec = Tool_team_session_step.spawn_spec = {
   spawn_agent : string;
   spawn_prompt : string;
-  spawn_model : string option;
-  spawn_model_explicit : bool;
+  runtime_binding_ref : string option;
   spawn_role : string option;
   execution_scope : Team_session_types.execution_scope option;
   thinking_enabled : bool option;
@@ -70,6 +73,7 @@ type spawn_spec = Tool_team_session_step.spawn_spec = {
   supervisor_actor : string option;
   task_profile : Team_session_types.task_profile option;
   risk_level : Team_session_types.risk_level option;
+  artifact_scope : string list;
   routing_confidence : float option;
   routing_reason : string option;
   spawn_selection_note : string option;
@@ -80,6 +84,7 @@ type prepared_spawn = Tool_team_session_step.prepared_spawn = {
   worker_run_id : string;
   spec : spawn_spec;
   runtime_actor_name : string option;
+  runtime_binding_ref : string option;
   runtime_model_label : string;
   runtime_lease : Local_runtime_pool.lease option;
   assigned_runtime : string option;
@@ -93,6 +98,14 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
 
 let env_trim_opt name = Sys.getenv_opt name |> trim_opt
+
+let normalize_artifact_scope values =
+  values
+  |> List.filter_map (fun raw ->
+         let trimmed = String.trim raw in
+         if trimmed = "" then None else Some trimmed)
+  |> Team_session_types.dedup_strings
+  |> List.sort String.compare
 
 let effective_execution_scope_of_spec spec =
   Some
@@ -175,6 +188,30 @@ let inferred_worker_model () =
   | None ->
       runtime_inventory_models ()
       |> List.find_opt (fun model -> contains_size_token_ci model "9b")
+
+let default_local_model_id () =
+  let _label, model_id = Oas_model_resolve.default_local_model_label_and_id () in
+  model_id
+
+let resolve_runtime_binding_ref_to_model_id = function
+  | Some binding when String.equal binding local_lead_binding_ref ->
+      Option.value ~default:(default_local_model_id ()) (inferred_lead_model ())
+  | Some binding when String.equal binding local_middle_binding_ref ->
+      Option.value ~default:(default_local_model_id ())
+        (match inferred_middle_model () with
+        | Some _ as value -> value
+        | None -> inferred_lead_model ())
+  | Some binding when String.equal binding local_worker_binding_ref ->
+      Option.value ~default:(default_local_model_id ())
+        (match inferred_worker_model () with
+        | Some _ as value -> value
+        | None -> (
+            match inferred_middle_model () with
+            | Some _ as value -> value
+            | None -> inferred_lead_model ()))
+  | Some binding when String.equal binding local_default_binding_ref ->
+      default_local_model_id ()
+  | Some _ | None -> default_local_model_id ()
 
 let default_risk_for_profile = function
   | Team_session_types.Profile_extract
@@ -410,15 +447,13 @@ let merge_selection_note selection_note routing_note =
   | Some note, Some routing when String.equal note routing -> Some note
   | Some note, Some routing -> Some (note ^ " | " ^ routing)
 
-(* Explicit spawn_model takes precedence; otherwise default to the
-   inferred lead model from environment/runtime configuration. *)
-let finalize_routing_decision ~spawn_model ~(decision : routing_decision) =
-  let resolved_model =
-    match trim_opt spawn_model with
+let finalize_routing_decision ~runtime_binding_ref ~(decision : routing_decision) =
+  let resolved_binding =
+    match trim_opt runtime_binding_ref with
     | Some _ as explicit -> explicit
-    | None -> inferred_lead_model ()
+    | None -> Some local_lead_binding_ref
   in
-  (resolved_model, decision.escalated, decision.reason)
+  (resolved_binding, decision.escalated, decision.reason)
 
 let resolve_routing_for_spec (spec : spawn_spec) =
   if not (is_local_spawn_agent spec.spawn_agent) then
@@ -471,8 +506,9 @@ let resolve_routing_for_spec (spec : spawn_spec) =
                 escalated = true;
               })
     in
-    let spawn_model, routing_escalated, routing_reason =
-      finalize_routing_decision ~spawn_model:spec.spawn_model ~decision
+    let runtime_binding_ref, routing_escalated, routing_reason =
+      finalize_routing_decision
+        ~runtime_binding_ref:spec.runtime_binding_ref ~decision
     in
     let routing_confidence =
       match spec.routing_confidence with
@@ -485,7 +521,7 @@ let resolve_routing_for_spec (spec : spawn_spec) =
     {
       spec with
       spawn_agent = normalize_spawn_agent spec.spawn_agent;
-      spawn_model;
+      runtime_binding_ref;
       task_profile = Some decision.task_profile;
       risk_level = Some decision.risk_level;
       routing_confidence;
@@ -566,14 +602,12 @@ let annotate_control_hierarchy_for_session
         let supervisor_actor =
           inferred_supervisor_actor_of_spec ~lane_id ~control_domain spec
         in
-        let spawn_model =
-          match (spec.spawn_model_explicit, trim_opt spec.spawn_model) with
-          | true, (Some _ as explicit) -> explicit
-          | _ -> inferred_lead_model ()
-        in
         {
           spec with
-          spawn_model;
+          runtime_binding_ref =
+            (match trim_opt spec.runtime_binding_ref with
+            | Some _ as explicit -> explicit
+            | None -> Some local_lead_binding_ref);
           lane_id;
           control_domain;
           supervisor_actor;

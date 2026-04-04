@@ -15,6 +15,7 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
     ~(control_profile : Team_session_types.control_profile)
     ~(orchestration_mode : Team_session_types.orchestration_mode)
     ~(communication_mode : Team_session_types.communication_mode)
+    ~(runtime_policy_ref : string option)
     ~(model_cascade : string list)
     ~(fallback_policy : Team_session_types.fallback_policy)
     ~(instruction_profile : Team_session_types.instruction_profile)
@@ -53,7 +54,23 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
     let baseline_done_counts =
       Team_session_types.done_counts_from_backlog (Room.read_backlog config)
     in
+    let runtime_policy_ref =
+      match runtime_policy_ref with
+      | Some raw ->
+          let trimmed = String.trim raw in
+          if trimmed = "" then None else Some trimmed
+      | None -> None
+    in
     let model_cascade = Team_session_types.dedup_strings model_cascade in
+    let runtime_policy_ref =
+      match runtime_policy_ref with
+      | Some _ as value -> value
+      | None ->
+          model_cascade
+          |> List.find_map (fun value ->
+                 let trimmed = String.trim value in
+                 if trimmed = "" then None else Some trimmed)
+    in
     let session : Team_session_types.session =
       {
         session_id;
@@ -73,6 +90,7 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
         control_profile;
         orchestration_mode;
         communication_mode;
+        runtime_policy_ref;
         model_cascade;
         fallback_policy;
         instruction_profile;
@@ -165,7 +183,12 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
               `String
                 (Team_session_types.communication_mode_to_string communication_mode)
             );
-            ("model_cascade", `List (List.map (fun m -> `String m) model_cascade));
+            ("runtime_policy_ref", Option.fold ~none:`Null ~some:(fun value -> `String value) runtime_policy_ref);
+            ( "model_cascade",
+              `List
+                (List.map
+                   (fun m -> `String m)
+                   (match runtime_policy_ref with Some _ -> [] | None -> model_cascade)) );
             ( "fallback_policy",
               `String
                 (Team_session_types.fallback_policy_to_string fallback_policy) );
@@ -275,10 +298,15 @@ let start_session ~sw ~(env : < clock : _ Eio.Time.clock ; process_mgr : _ Eio.P
             `String
               (Team_session_types.communication_mode_to_string communication_mode)
           );
+          ("runtime_policy_ref", Option.fold ~none:`Null ~some:(fun value -> `String value) runtime_policy_ref);
           ( "control_profile",
             `String
               (Team_session_types.control_profile_to_string control_profile) );
-          ("model_cascade", `List (List.map (fun m -> `String m) model_cascade));
+          ( "model_cascade",
+            `List
+              (List.map
+                 (fun m -> `String m)
+                 (match runtime_policy_ref with Some _ -> [] | None -> model_cascade)) );
         ])
   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 

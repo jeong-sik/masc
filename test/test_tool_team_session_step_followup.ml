@@ -65,6 +65,7 @@ let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
                         [
                           ("spawn_role", `String "explicit-worker");
                           ("worker_class", `String "executor");
+                          ("artifact_scope", `List [ `String "artifacts/worker-output.json" ]);
                           ("lane_id", `String "lane-q");
                           ("control_domain", `String "execution");
                           ("supervisor_actor", `String "ctrl-worker-custom");
@@ -194,7 +195,7 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
           ("spawn_agent", `String "llama");
           ("runtime_actor", `String "local-failed");
           ("spawn_role", `String "implementer-a");
-          ("spawn_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
+          ("runtime_binding_ref", `String "qwen3.5-35b-a3b-ud-q8-xl");
           ("success", `Bool false);
           ("exit_code", `Int 1);
           ("elapsed_ms", `Int 25);

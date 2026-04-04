@@ -27,6 +27,7 @@ let execute_spawn_pipeline
         List.map
           (fun prepared ->
             deps.planned_worker_of_spec ?runtime_actor:prepared.runtime_actor_name
+              ?runtime_binding_ref:prepared.runtime_binding_ref
               prepared.spec)
           prepared_spawns
       in

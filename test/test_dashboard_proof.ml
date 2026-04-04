@@ -40,6 +40,7 @@ let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ])
     control_profile = Control_hierarchical_quality_v1;
     orchestration_mode = Assist;
     communication_mode = Comm_hybrid;
+    runtime_policy_ref = Some "qwen3.5-35b-a3b-ud-q8-xl";
     model_cascade = [ "qwen3.5-35b-a3b-ud-q8-xl" ];
     fallback_policy = Fallback_cascade_then_task;
     instruction_profile = Profile_strict;
@@ -54,6 +55,7 @@ let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ])
           spawn_agent = "llama";
           runtime_actor = Some "worker-a";
           spawn_role = Some "implementer";
+          runtime_binding_ref = None;
           spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
           execution_scope = Some Limited_code_change;
           worker_class = Some Worker_executor;
@@ -66,6 +68,7 @@ let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ])
           supervisor_actor = Some "supervisor";
           task_profile = Some Profile_synthesize;
           risk_level = Some Risk_medium;
+          artifact_scope = [];
           routing_confidence = Some 0.9;
           routing_reason = Some "worker-a implements proof surface";
           thinking_enabled = None;
@@ -242,6 +245,8 @@ let seed_worker_run_meta config session_id =
           `List [ `String "masc_status"; `String "masc_team_session_step" ] );
         ( "tool_surface_shell_names",
           `List [ `String "file_read"; `String "file_write"; `String "shell_exec" ] );
+        ("runtime_binding_ref", `String "local/lead");
+        ("artifact_scope", `List [ `String "lib/calc.py"; `String "test/calc_test.py" ]);
         ("resolved_runtime", `String "llama-8085");
         ("resolved_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
         ("routing_reason", `String "explicit_task_profile");
@@ -384,10 +389,15 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
         (worker |> U.member "trace_capability" |> U.to_string);
       check bool "worker run validated" true
         (worker |> U.member "trace_validated" |> U.to_bool);
+      check string "worker runtime binding" "local/lead"
+        (worker |> U.member "runtime_binding_ref" |> U.to_string);
+      check (list string) "worker artifact scope"
+        [ "lib/calc.py"; "test/calc_test.py" ]
+        (worker |> U.member "artifact_scope" |> U.to_list |> List.map U.to_string);
       check string "worker resolved runtime" "llama-8085"
         (worker |> U.member "resolved_runtime" |> U.to_string);
-      check string "worker resolved model" "qwen3.5-35b-a3b-ud-q8-xl"
-        (worker |> U.member "resolved_model" |> U.to_string);
+      check string "worker proof ref" "proof-store://proof-run-123/manifest.json"
+        (worker |> U.member "proof_ref" |> U.to_string);
       check string "worker tool surface status" "available"
         (worker |> U.member "tool_surface_status" |> U.to_string);
       check int "worker tool surface count" 5

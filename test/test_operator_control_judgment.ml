@@ -283,6 +283,7 @@ let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn ()
                     Team_session_types.spawn_agent = "llama";
                     runtime_actor = Some "llama-local-deadbeef";
                     spawn_role = Some "implementer-a";
+                    runtime_binding_ref = None;
                     spawn_model = Some "qwen3.5";
                     execution_scope = Some Team_session_types.Limited_code_change;
                     worker_class = None;
@@ -295,6 +296,7 @@ let test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn ()
                     supervisor_actor = Some "ctrl-lane-a";
                     task_profile = Some Team_session_types.Profile_normalize;
                     risk_level = Some Team_session_types.Risk_low;
+                    artifact_scope = [];
                     routing_confidence = Some 0.82;
                     routing_reason = Some "rule:machine_checkable";
                     thinking_enabled = None;

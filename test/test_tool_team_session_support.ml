@@ -21,6 +21,12 @@ let parse_json_exn s =
   try Yojson.Safe.from_string s
   with Yojson.Json_error e -> failwith ("invalid json: " ^ e)
 
+let runtime_policy_ref_of_cascade model_cascade =
+  model_cascade
+  |> List.find_map (fun value ->
+         let trimmed = String.trim value in
+         if trimmed = "" then None else Some trimmed)
+
 let dispatch_exn ctx ~name ~args =
   match Tool_team_session.dispatch ctx ~name ~args with
   | Some result -> result
@@ -156,6 +162,7 @@ and start_session_custom_exn ctx ~goal ~min_agents ~agents ~operation_id =
       ("min_agents", `Int min_agents);
       ("orchestration_mode", `String "assist");
       ("communication_mode", `String "hybrid");
+      ("runtime_policy_ref", `String "glm:auto");
       ("model_cascade", `List [ `String "glm:auto" ]);
       ("fallback_policy", `String "cascade_then_task");
       ("instruction_profile", `String "strict");
@@ -199,6 +206,7 @@ let make_manual_session config ~goal ~created_by ~agent_names ~min_agents
       communication_mode = Team_session_types.Comm_broadcast;
       scale_profile = Team_session_types.Scale_standard;
       control_profile = Team_session_types.Control_flat;
+      runtime_policy_ref = runtime_policy_ref_of_cascade model_cascade;
       model_cascade;
       fallback_policy;
       instruction_profile = Team_session_types.Profile_strict;

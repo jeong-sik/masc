@@ -101,7 +101,7 @@ let proof_markdown ~(session : Team_session_types.session)
     ~(score_pct : float) ~(verdict : string) ~(criteria : Yojson.Safe.t list)
     ~(checkpoints_count : int) ~(events_count : int) ~(turn_events : int)
     ~(report_exists : bool) ~(unique_turn_actors_count : int)
-    ~(required_turn_actors : int) ~(spawn_models : string list)
+    ~(required_turn_actors : int) ~(runtime_binding_refs : string list)
     ~(spawn_failure_count : int) ~(detached_agent_count : int)
     ~(empty_note_turn_count : int)
     ~(failed_spawn_roster : Yojson.Safe.t list)
@@ -137,9 +137,9 @@ let proof_markdown ~(session : Team_session_types.session)
              Option.value ~default:"(unspecified)"
                (Option.map String.trim worker.Team_session_types.spawn_role)
            in
-           let model =
+           let binding =
              Option.value ~default:"(default)"
-               (Option.map String.trim worker.Team_session_types.spawn_model)
+               (Option.map String.trim worker.Team_session_types.runtime_binding_ref)
            in
            let actor =
              Option.value ~default:"(pending)"
@@ -164,10 +164,15 @@ let proof_markdown ~(session : Team_session_types.session)
              Option.value ~default:"(not recorded)"
                worker.Team_session_types.routing_reason
            in
+           let artifact_scope =
+             match worker.Team_session_types.artifact_scope with
+             | [] -> "(unbounded)"
+             | xs -> String.concat "," xs
+           in
            Printf.sprintf
-             "- %s | role=%s | model=%s | runtime_actor=%s | profile=%s | risk=%s | confidence=%s | reason=%s"
-             worker.Team_session_types.spawn_agent role model actor
-             profile risk confidence reason)
+             "- %s | role=%s | binding=%s | runtime_actor=%s | profile=%s | risk=%s | confidence=%s | artifacts=%s | reason=%s"
+             worker.Team_session_types.spawn_agent role binding actor
+             profile risk confidence artifact_scope reason)
   in
   let failed_spawn_lines =
     failed_spawn_roster
@@ -185,8 +190,8 @@ let proof_markdown ~(session : Team_session_types.session)
              item |> member "spawn_role" |> to_string_option
              |> Option.value ~default:"(unspecified)"
            in
-           let spawn_model =
-             item |> member "spawn_model" |> to_string_option
+           let runtime_binding_ref =
+             item |> member "runtime_binding_ref" |> to_string_option
              |> Option.value ~default:"(unknown)"
            in
            let error =
@@ -199,8 +204,8 @@ let proof_markdown ~(session : Team_session_types.session)
              |> Option.value ~default:"?"
            in
            Printf.sprintf
-             "- %s | agent=%s | role=%s | model=%s | elapsed_ms=%s | error=%s"
-             runtime_actor spawn_agent spawn_role spawn_model elapsed_ms error)
+             "- %s | agent=%s | role=%s | binding=%s | elapsed_ms=%s | error=%s"
+             runtime_actor spawn_agent spawn_role runtime_binding_ref elapsed_ms error)
   in
   let detached_actor_lines =
     detached_actor_roster
@@ -299,8 +304,8 @@ let proof_markdown ~(session : Team_session_types.session)
       Printf.sprintf "- Empty note turns: %d" empty_note_turn_count;
       Printf.sprintf "- Escalations: %d"
         (Team_session_types.escalation_count planned_workers);
-      Printf.sprintf "- Spawn models: %s"
-        (match spawn_models with
+      Printf.sprintf "- Runtime bindings: %s"
+        (match runtime_binding_refs with
         | [] -> "(not recorded)"
        | xs -> String.concat ", " xs);
       Printf.sprintf "- Task profile counts: %s"
@@ -418,7 +423,7 @@ let generate_proof ?(proof_level = default_proof_level) config
     let unique_spawn_runtime_actors_count =
       List.length unique_spawn_runtime_actors
     in
-    let spawn_models = collect_spawn_models events in
+    let runtime_binding_refs = collect_runtime_binding_refs events in
     let spawn_selection_notes = collect_spawn_selection_notes events in
     let spawn_selection_note_summary =
       match spawn_selection_notes with
@@ -529,7 +534,8 @@ let generate_proof ?(proof_level = default_proof_level) config
                     (List.map Team_session_types.planned_worker_to_yojson
                        session.planned_workers) );
                 ("planned_worker_count", `Int (List.length session.planned_workers));
-                ("spawn_models", `List (List.map (fun m -> `String m) spawn_models));
+                ( "runtime_binding_refs",
+                  `List (List.map (fun value -> `String value) runtime_binding_refs) );
                 ( "spawn_tool_names",
                   `List (List.map (fun value -> `String value) spawn_tool_names)
                 );
@@ -580,7 +586,7 @@ let generate_proof ?(proof_level = default_proof_level) config
       proof_markdown ~session ~proof_level ~score_pct ~verdict ~criteria
         ~checkpoints_count ~events_count:(List.length events) ~turn_events
         ~report_exists:(report_json_exists && report_md_exists)
-        ~unique_turn_actors_count ~required_turn_actors ~spawn_models
+        ~unique_turn_actors_count ~required_turn_actors ~runtime_binding_refs
         ~spawn_failure_count ~detached_agent_count ~empty_note_turn_count
         ~failed_spawn_roster ~empty_note_turn_actors ~detached_actor_roster
         ~planned_workers:session.planned_workers

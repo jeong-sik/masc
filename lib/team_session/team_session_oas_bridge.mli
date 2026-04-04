@@ -5,7 +5,7 @@
     {b planned_worker (23 fields) -> agent_entry (4 fields)}
 
     Direct: [spawn_agent] -> [name], [spawn_role]/[worker_class] -> [role].
-    Closure-captured: [max_turns], [spawn_model] (cascade selection).
+    Closure-captured: [max_turns], session cascade selection.
     Preserved in Collaboration.t.metadata["worker_specs"]: the full
     [planned_worker] record as JSON per worker.
     Metadata-only at the OAS boundary: 18 fields (runtime_actor,
@@ -21,7 +21,7 @@
     [planned_workers] -> [participants].
     Preserved in Collaboration.t.metadata: 21+ session fields as JSON
     (room_id, created_by, origin_kind, execution_scope, control_profile,
-    scale_profile, model_cascade, fallback_policy, etc.).
+    scale_profile, runtime_policy_ref, model_cascade, fallback_policy, etc.).
     Dropped: [operation_id], [report_formats], runtime metrics
     (broadcast_count..cascade_failed), outcome metrics
     (baseline_done_counts..final_done_delta_by_agent),
@@ -86,6 +86,7 @@ val mode_of_orchestration :
   Team_session_types.orchestration_mode -> Swarm.Swarm_types.orchestration_mode
 
 val cascade_of_worker :
+  ?session_runtime_policy_ref:string ->
   session_cascade:string list ->
   Team_session_types.planned_worker -> string
 
@@ -97,6 +98,7 @@ val is_safe_worker_run_id : string -> bool
 val planned_worker_to_entry :
   config:Room.config ->
   session_id:string ->
+  session_runtime_policy_ref:string option ->
   session_cascade:string list ->
   masc_tools:Types.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->

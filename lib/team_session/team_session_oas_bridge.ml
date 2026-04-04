@@ -310,15 +310,16 @@ let mode_of_orchestration
 
 (* ── Cascade name resolution ───────────────────────────────────── *)
 
-let cascade_of_worker
+let cascade_of_worker ?session_runtime_policy_ref
     ~(session_cascade : string list)
     (pw : Team_session_types.planned_worker) : string =
-  match pw.spawn_model with
-  | Some m when m <> "" -> m
-  | _ ->
-    match session_cascade with
-    | first :: _ when first <> "" -> first
-    | _ -> "keeper_turn"
+  let _ = pw in
+  match session_runtime_policy_ref with
+  | Some value when String.trim value <> "" -> String.trim value
+  | _ -> (
+      match session_cascade with
+      | first :: _ when first <> "" -> first
+      | _ -> "keeper_turn")
 
 let telemetry_of_run_result (result : Oas_worker.run_result) :
     Swarm.Swarm_types.agent_telemetry =
@@ -466,6 +467,14 @@ let persist_worker_run_proof_if_present ~(config : Room.config)
                     `String
                       (Team_session_types.worker_class_to_string kind))
                   planned_worker.worker_class );
+              ( "runtime_binding_ref",
+                Option.fold ~none:`Null ~some:(fun value -> `String value)
+                  planned_worker.runtime_binding_ref );
+              ( "artifact_scope",
+                `List
+                  (List.map
+                     (fun value -> `String value)
+                     planned_worker.artifact_scope) );
               ("resolved_runtime", `String "oas_swarm");
               ( "resolved_model",
                 Option.fold ~none:`Null ~some:(fun value -> `String value)
@@ -579,6 +588,7 @@ let session_runtime_health_check ~(config : Room.config)
 let planned_worker_to_entry_with_state
     ~(config : Room.config)
     ~(session_id : string)
+    ~(session_runtime_policy_ref : string option)
     ~(session_cascade : string list)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
@@ -588,7 +598,9 @@ let planned_worker_to_entry_with_state
   : Swarm.Swarm_types.agent_entry =
   let name = pw.spawn_agent in
   let role = role_of_spawn_role ~worker_class:pw.worker_class pw.spawn_role in
-  let cascade_name = cascade_of_worker ~session_cascade pw in
+  let cascade_name =
+    cascade_of_worker ?session_runtime_policy_ref ~session_cascade pw
+  in
   let max_turns = Option.value ~default:10 pw.max_turns in
   let telemetry_ref = ref Swarm.Swarm_types.empty_telemetry in
   let effective_execution_scope =
@@ -698,13 +710,15 @@ let planned_worker_to_entry_with_state
 let planned_worker_to_entry
     ~(config : Room.config)
     ~(session_id : string)
+    ~(session_runtime_policy_ref : string option)
     ~(session_cascade : string list)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     (pw : Team_session_types.planned_worker)
   : Swarm.Swarm_types.agent_entry =
   let success_by_agent = Hashtbl.create 1 in
-  planned_worker_to_entry_with_state ~config ~session_id ~session_cascade ~masc_tools
+  planned_worker_to_entry_with_state ~config ~session_id
+    ~session_runtime_policy_ref ~session_cascade ~masc_tools
     ~dispatch ~success_by_agent ?delivery_contract:None pw
 
 (* ── session -> swarm_config ───────────────────────────────────── *)
@@ -718,10 +732,14 @@ let session_to_swarm_config
     (session : Team_session_types.session)
   : Swarm.Swarm_types.swarm_config =
   let success_by_agent = Hashtbl.create 8 in
+  let session_runtime_policy_ref =
+    Team_session_types.effective_runtime_policy_ref session
+  in
   let entries =
     List.map
       (planned_worker_to_entry_with_state ~config ~session_id:session.session_id
-         ~session_cascade:session.model_cascade ~masc_tools ~dispatch
+         ~session_runtime_policy_ref ~session_cascade:session.model_cascade
+         ~masc_tools ~dispatch
          ~success_by_agent ?delivery_contract:session.delivery_contract)
       session.planned_workers
   in
@@ -747,10 +765,13 @@ let session_to_swarm_config
       entry_count
     else
       let all_selections =
-        session.planned_workers
-        |> List.map (fun pw ->
-             cascade_of_worker ~session_cascade:session.model_cascade pw)
-        |> List.sort_uniq String.compare
+        match session_runtime_policy_ref with
+        | Some value -> [ value ]
+        | None ->
+            session.planned_workers
+            |> List.map (fun pw ->
+                   cascade_of_worker ~session_cascade:session.model_cascade pw)
+            |> List.sort_uniq String.compare
       in
       match all_selections with
       | [] -> entry_count

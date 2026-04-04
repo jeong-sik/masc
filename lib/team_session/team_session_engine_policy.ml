@@ -112,7 +112,8 @@ let maybe_add_fallback_task ~(config : Room.config)
     | Team_session_types.Fallback_none -> false
     | Team_session_types.Fallback_task_only -> true
     | Team_session_types.Fallback_cascade_then_task ->
-        session.model_cascade = [] || session.cascade_failed > 0
+        Option.is_none (Team_session_types.effective_runtime_policy_ref session)
+        || session.cascade_failed > 0
   in
   if not should_create then
     session
@@ -398,16 +399,22 @@ let apply_runtime_policy ~(config : Room.config)
         with_violation
     in
     let after_cascade =
+      let runtime_policy_ref =
+        Team_session_types.effective_runtime_policy_ref after_alert
+      in
       if alert_tick
          && after_alert.fallback_policy
             = Team_session_types.Fallback_cascade_then_task
-         && after_alert.model_cascade <> []
+         && Option.is_some runtime_policy_ref
       then (
         Team_session_store.append_event config session.session_id
           ~event_type:"cascade_attempted"
           ~detail:
             (`Assoc
               [
+                ( "runtime_policy_ref",
+                  Option.fold ~none:`Null ~some:(fun value -> `String value)
+                    runtime_policy_ref );
                 ( "models",
                   `List
                     (List.map (fun m -> `String m) after_alert.model_cascade) );

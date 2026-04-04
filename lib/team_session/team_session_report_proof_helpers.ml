@@ -332,7 +332,8 @@ let parse_spawn_agent json = parse_event_detail json |> parse_event_string "spaw
 
 let parse_spawn_success json = parse_event_detail json |> parse_event_bool "success"
 
-let parse_spawn_model json = parse_event_detail json |> parse_event_string "spawn_model"
+let parse_runtime_binding_ref json =
+  parse_event_detail json |> parse_event_string "runtime_binding_ref"
 
 let parse_spawn_execution_scope json =
   parse_event_detail json |> parse_event_string "execution_scope"
@@ -377,8 +378,9 @@ let spawn_runtime_actor_of_event json =
 let spawn_success_of_event json =
   if has_event_type json "team_step_spawn" then parse_spawn_success json else None
 
-let spawn_model_of_event json =
-  if has_event_type json "team_step_spawn" then parse_spawn_model json else None
+let runtime_binding_ref_of_event json =
+  if has_event_type json "team_step_spawn" then parse_runtime_binding_ref json
+  else None
 
 let spawn_selection_note_of_event json =
   if has_event_type json "team_step_spawn" then parse_spawn_selection_note json
@@ -391,8 +393,10 @@ let collect_spawn_runtime_actors events =
   events |> List.filter_map spawn_runtime_actor_of_event
   |> Team_session_types.dedup_strings
 
-let collect_spawn_models events =
-  events |> List.filter_map spawn_model_of_event |> Team_session_types.dedup_strings
+let collect_runtime_binding_refs events =
+  events
+  |> List.filter_map runtime_binding_ref_of_event
+  |> Team_session_types.dedup_strings
 
 let collect_spawn_selection_notes events =
   events |> List.filter_map spawn_selection_note_of_event
@@ -452,9 +456,9 @@ let failed_spawn_roster_of_events events =
                    ( "spawn_role",
                      Option.fold ~none:`Null ~some:(fun s -> `String s)
                        (parse_spawn_role json) );
-                   ( "spawn_model",
+                   ( "runtime_binding_ref",
                      Option.fold ~none:`Null ~some:(fun s -> `String s)
-                       (parse_spawn_model json) );
+                       (parse_runtime_binding_ref json) );
                    ( "error",
                      Option.fold ~none:`Null ~some:(fun s -> `String s)
                        (parse_spawn_error json) );
@@ -521,4 +525,3 @@ let proof_metadata ~proof_level ~required_spawn_agents ~min_turn_events
       ("profile", proof_profile proof_level);
       ("thresholds", proof_profile_summary ~proof_level ~required_spawn_agents ~min_turn_events ~min_communication);
     ]
-

@@ -166,8 +166,9 @@ let summary_json json =
       ("execution_scope", U.member "execution_scope" json);
       ("requested_worker_class", U.member "requested_worker_class" json);
       ("requested_worker_size", U.member "requested_worker_size" json);
+      ("runtime_binding_ref", U.member "runtime_binding_ref" json);
+      ("artifact_scope", U.member "artifact_scope" json);
       ("resolved_runtime", U.member "resolved_runtime" json);
-      ("resolved_model", U.member "resolved_model" json);
       ("routing_reason", U.member "routing_reason" json);
       ( "tool_surface_status",
         Option.fold ~none:`Null ~some:(fun value -> `String value)
@@ -224,9 +225,11 @@ let summary_json json =
   in
   let proof_fields =
     match U.member "proof_run_id" json with
-    | `String _ ->
+    | `String run_id ->
         [
           ("proof_run_id", U.member "proof_run_id" json);
+          ( "proof_ref",
+            `String (Agent_sdk.Proof_store.make_ref ~run_id ~subpath:"manifest.json") );
           ("proof_status", U.member "proof_status" json);
           ("proof_risk_class", U.member "proof_risk_class" json);
           ("proof_execution_mode", U.member "proof_execution_mode" json);

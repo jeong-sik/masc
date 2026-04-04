@@ -86,6 +86,8 @@ let sample_meta ?(trace_capability = `String "raw")
         `List [ `String "masc_status"; `String "masc_team_session_step" ] );
       ( "tool_surface_shell_names",
         `List [ `String "file_read"; `String "file_write"; `String "shell_exec" ] );
+      ("runtime_binding_ref", `String "local/lead");
+      ("artifact_scope", `List [ `String "lib/calc.py"; `String "test/calc_test.py" ]);
       ("resolved_runtime", `String "llama-8085");
       ("resolved_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
       ("routing_reason", `String "explicit_task_profile");
@@ -143,7 +145,15 @@ let test_summary_projects_tool_surface_visibility () =
     U.(summary |> member "tool_surface_count" |> to_int);
   check (list string) "tool surface names"
     [ "file_read"; "file_write"; "shell_exec"; "masc_status"; "masc_team_session_step" ]
-    U.(summary |> member "tool_surface_names" |> to_list |> List.map to_string)
+    U.(summary |> member "tool_surface_names" |> to_list |> List.map to_string);
+  check string "runtime binding" "local/lead"
+    U.(summary |> member "runtime_binding_ref" |> to_string);
+  check (list string) "artifact scope"
+    [ "lib/calc.py"; "test/calc_test.py" ]
+    U.(summary |> member "artifact_scope" |> to_list |> List.map to_string);
+  check string "proof ref" "proof-store://proof-run-123/manifest.json"
+    U.(summary |> member "proof_ref" |> to_string);
+  check bool "resolved_model hidden" false (has_key "resolved_model" summary)
 
 let test_summary_distinguishes_missing_vs_unavailable_evidence () =
   let missing_trace =

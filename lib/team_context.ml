@@ -176,7 +176,7 @@ type projected_worker_spec = {
   spawn_agent : string;
   runtime_actor : string option;
   spawn_role : string option;
-  spawn_model : string option;
+  runtime_binding_ref : string option;
   execution_scope : string option;
   thinking_enabled : bool option;
   thinking_budget : int option;
@@ -192,6 +192,7 @@ type projected_worker_spec = {
   supervisor_actor : string option;
   task_profile : string option;
   risk_level : string option;
+  artifact_scope : string list;
   routing_confidence : float option;
   routing_reason : string option;
   routing_escalated : bool;
@@ -214,6 +215,7 @@ type projected_session_metadata = {
   min_agents : int;
   auto_resume : bool;
   planned_worker_count : int;
+  runtime_policy_ref : string option;
   model_cascade : string list;
   worker_class_counts : (string * int) list;
   runtime_pool_counts : (string * int) list;
@@ -235,7 +237,7 @@ let projected_worker_spec_of_planned_worker
     spawn_agent = pw.spawn_agent;
     runtime_actor = pw.runtime_actor;
     spawn_role = pw.spawn_role;
-    spawn_model = pw.spawn_model;
+    runtime_binding_ref = pw.runtime_binding_ref;
     execution_scope =
       Option.map Team_session_types.execution_scope_to_string pw.execution_scope;
     thinking_enabled = pw.thinking_enabled;
@@ -259,6 +261,7 @@ let projected_worker_spec_of_planned_worker
       Option.map Team_session_types.task_profile_to_string pw.task_profile;
     risk_level =
       Option.map Team_session_types.risk_level_to_string pw.risk_level;
+    artifact_scope = pw.artifact_scope;
     routing_confidence = pw.routing_confidence;
     routing_reason = pw.routing_reason;
     routing_escalated = pw.routing_escalated;
@@ -295,7 +298,8 @@ let projected_session_metadata_of_session
     min_agents = session.min_agents;
     auto_resume = session.auto_resume;
     planned_worker_count = List.length session.planned_workers;
-    model_cascade = session.model_cascade;
+    runtime_policy_ref = Team_session_types.effective_runtime_policy_ref session;
+    model_cascade = Team_session_types.legacy_model_cascade_for_export session;
     worker_class_counts =
       Team_session_types.worker_class_counts session.planned_workers;
     runtime_pool_counts =
@@ -315,7 +319,7 @@ let projected_worker_spec_to_json (spec : projected_worker_spec) :
     []
     |> add_json_string_if_present "runtime_actor" spec.runtime_actor
     |> add_json_string_if_present "spawn_role" spec.spawn_role
-    |> add_json_string_if_present "spawn_model" spec.spawn_model
+    |> add_json_string_if_present "runtime_binding_ref" spec.runtime_binding_ref
     |> add_json_string_if_present "execution_scope" spec.execution_scope
     |> add_json_string_if_present "worker_class" spec.worker_class
     |> add_json_string_if_present "parent_actor" spec.parent_actor
@@ -337,6 +341,7 @@ let projected_worker_spec_to_json (spec : projected_worker_spec) :
   `Assoc
     (List.rev
        (("spawn_agent", `String spec.spawn_agent)
+        :: ("artifact_scope", `List (List.map (fun value -> `String value) spec.artifact_scope))
         :: ("routing_escalated", `Bool spec.routing_escalated)
         :: fields))
 
@@ -359,6 +364,9 @@ let metadata_of_session_projection (projection : projected_session_metadata) :
     ("min_agents", `Int projection.min_agents);
     ("auto_resume", `Bool projection.auto_resume);
     ("planned_worker_count", `Int projection.planned_worker_count);
+    ( "runtime_policy_ref",
+      Option.fold ~none:`Null ~some:(fun value -> `String value)
+        projection.runtime_policy_ref );
     ("model_cascade", `List (List.map (fun model -> `String model) projection.model_cascade));
     ("worker_class_counts", count_assoc_to_json projection.worker_class_counts);
     ("runtime_pool_counts", count_assoc_to_json projection.runtime_pool_counts);
@@ -406,7 +414,7 @@ let planned_worker_summary (pw : Team_session_types.planned_worker) : string opt
   in
   add "role" (Option.value ~default:"" pw.spawn_role);
   add "actor" (Option.value ~default:"" pw.runtime_actor);
-  add "model" (Option.value ~default:"" pw.spawn_model);
+  add "binding" (Option.value ~default:"" pw.runtime_binding_ref);
   add "scope"
     (match pw.execution_scope with
     | Some scope -> Team_session_types.execution_scope_to_string scope
@@ -429,6 +437,8 @@ let planned_worker_summary (pw : Team_session_types.planned_worker) : string opt
     (match pw.risk_level with
      | Some risk -> Team_session_types.risk_level_to_string risk
      | None -> "");
+  if pw.artifact_scope <> [] then
+    add "artifacts" (String.concat "," pw.artifact_scope);
   add "routing"
     (match pw.routing_confidence with
      | Some confidence -> Printf.sprintf "%.2f" confidence

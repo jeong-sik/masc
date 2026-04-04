@@ -28,6 +28,18 @@ let parse_spawn_spec_from_object ?(default_timeout = 300)
         if trimmed = "" then None else Some trimmed
     | _ -> None
   in
+  let get_optional_string_list key =
+    match member key json with
+    | `List xs ->
+        xs
+        |> List.filter_map (function
+               | `String s ->
+                   let trimmed = String.trim s in
+                   if trimmed = "" then None else Some trimmed
+               | _ -> None)
+        |> normalize_artifact_scope
+    | _ -> []
+  in
   let get_optional_worker_class key =
     Option.bind
       (get_optional_string key)
@@ -121,8 +133,7 @@ let parse_spawn_spec_from_object ?(default_timeout = 300)
         {
           spawn_agent = "default";
           spawn_prompt;
-          spawn_model = None;
-          spawn_model_explicit = false;
+          runtime_binding_ref = get_optional_string "runtime_binding_ref";
           spawn_role = get_optional_string "spawn_role";
           execution_scope =
             (match get_optional_execution_scope "execution_scope" with
@@ -143,6 +154,7 @@ let parse_spawn_spec_from_object ?(default_timeout = 300)
           supervisor_actor = get_optional_string "supervisor_actor";
           task_profile = get_optional_task_profile "task_profile";
           risk_level = get_optional_risk_level "risk_level";
+          artifact_scope = get_optional_string_list "artifact_scope";
           routing_confidence = get_optional_float "routing_confidence";
           routing_reason = get_optional_string "routing_reason";
           spawn_selection_note = get_optional_string "spawn_selection_note";
@@ -226,8 +238,7 @@ let parse_step_spawn_specs args =
                 {
                   spawn_agent = "default";
                   spawn_prompt;
-                  spawn_model = None;
-                  spawn_model_explicit = false;
+                  runtime_binding_ref = get_string_opt args "runtime_binding_ref";
                   spawn_role = get_string_opt args "spawn_role";
                   execution_scope =
                     (match
@@ -274,6 +285,9 @@ let parse_step_spawn_specs args =
                       (fun raw ->
                         Team_session_types.risk_level_of_string
                           (String.lowercase_ascii (String.trim raw)));
+                  artifact_scope =
+                    normalize_artifact_scope
+                      (get_string_list args "artifact_scope");
                   routing_confidence = get_float_opt args "routing_confidence";
                   routing_reason = get_string_opt args "routing_reason";
                   spawn_selection_note = get_string_opt args "spawn_selection_note";
@@ -283,13 +297,17 @@ let parse_step_spawn_specs args =
                 };
               ]
 
-let planned_worker_of_spec ?runtime_actor (spec : spawn_spec) :
+let planned_worker_of_spec ?runtime_actor ?runtime_binding_ref (spec : spawn_spec) :
     Team_session_types.planned_worker =
   {
     spawn_agent = spec.spawn_agent;
     runtime_actor;
     spawn_role = spec.spawn_role;
-    spawn_model = spec.spawn_model;
+    runtime_binding_ref =
+      (match runtime_binding_ref with
+      | Some _ as value -> value
+      | None -> spec.runtime_binding_ref);
+    spawn_model = None;
     execution_scope = effective_execution_scope_of_spec spec;
     thinking_enabled = spec.thinking_enabled;
     thinking_budget = spec.thinking_budget;
@@ -305,6 +323,7 @@ let planned_worker_of_spec ?runtime_actor (spec : spawn_spec) :
     supervisor_actor = spec.supervisor_actor;
     task_profile = spec.task_profile;
     risk_level = spec.risk_level;
+    artifact_scope = normalize_artifact_scope spec.artifact_scope;
     routing_confidence = spec.routing_confidence;
     routing_reason = spec.routing_reason;
     routing_escalated =
@@ -352,54 +371,144 @@ let resolve_target_worker_name config (session : Team_session_types.session)
       | _ -> if fallback_worker_container_exists () then Some trimmed else None)
 
 let register_planned_workers config session_id workers =
-  match Team_session_store.update_session config session_id (fun session ->
-            {
-              session with
-              planned_workers =
-                Team_session_types.dedup_planned_workers
-                  (session.planned_workers @ workers);
-              updated_at_iso = Types.now_iso ();
-            })
-  with
-  | Ok updated ->
-      Team_session_store.append_event config session_id
-        ~event_type:"session_planned_workers_updated"
-        ~detail:
-          (`Assoc
-            [
-              ("planned_worker_count", `Int (List.length updated.planned_workers));
-              ( "worker_class_counts",
-                Team_session_types.worker_class_counts updated.planned_workers
-                |> Team_session_types.counts_to_json );
-              ( "runtime_pool_counts",
-                Team_session_types.runtime_pool_counts updated.planned_workers
-                |> Team_session_types.counts_to_json );
-              ( "lane_counts",
-                Team_session_types.lane_counts updated.planned_workers
-                |> Team_session_types.counts_to_json );
-              ( "controller_counts",
-                Team_session_types.controller_level_counts updated.planned_workers
-                |> Team_session_types.counts_to_json );
-              ( "control_domain_counts",
-                Team_session_types.control_domain_counts updated.planned_workers
-                |> Team_session_types.counts_to_json );
-              ( "task_profile_counts",
-                Team_session_types.task_profile_counts updated.planned_workers
-                |> Team_session_types.counts_to_json );
-              ( "escalation_count",
-                `Int
-                  (Team_session_types.escalation_count updated.planned_workers)
-              );
-              ( "runtime_actors",
-                `List
-                  (workers
-                  |> List.filter_map (fun worker ->
-                         worker.Team_session_types.runtime_actor)
-                  |> List.map (fun actor -> `String actor)) );
-              ("ts_iso", `String (Types.now_iso ()));
-            ]);
-      Ok ()
-  | Error e -> Error e
+  let describe_worker (worker : Team_session_types.planned_worker) =
+    match worker.runtime_actor with
+    | Some actor when String.trim actor <> "" -> String.trim actor
+    | _ -> (
+        match worker.spawn_role with
+        | Some role when String.trim role <> "" -> String.trim role
+        | _ -> worker.spawn_agent)
+  in
+  let write_capable worker =
+    match Team_session_types.effective_execution_scope_of_planned_worker worker with
+    | Team_session_types.Observe_only -> false
+    | Team_session_types.Limited_code_change
+    | Team_session_types.Autonomous -> true
+  in
+  let has_overlap left right =
+    List.exists
+      (fun lhs ->
+        List.exists
+          (fun rhs ->
+            String.equal lhs rhs
+            || String.starts_with ~prefix:(lhs ^ "/") rhs
+            || String.starts_with ~prefix:(rhs ^ "/") lhs)
+          right)
+      left
+  in
+  let normalized_workers =
+    List.map
+      (fun worker ->
+        {
+          worker with
+          Team_session_types.artifact_scope =
+            normalize_artifact_scope worker.Team_session_types.artifact_scope;
+        })
+      workers
+  in
+  let conflict_in workers_a workers_b =
+    List.find_map
+      (fun left ->
+        let left_scope = left.Team_session_types.artifact_scope in
+        if left_scope = [] || not (write_capable left) then None
+        else
+          workers_b
+          |> List.find_opt (fun right ->
+                 left != right
+                 && write_capable right
+                 && right.Team_session_types.artifact_scope <> []
+                 && has_overlap left_scope right.Team_session_types.artifact_scope)
+          |> Option.map (fun right -> (left, right)))
+      workers_a
+  in
+  let missing_scope =
+    normalized_workers
+    |> List.find_opt (fun worker ->
+           write_capable worker
+           && worker.Team_session_types.artifact_scope = [])
+  in
+  match Team_session_store.load_session config session_id with
+  | None -> Error "team session not found"
+  | Some session -> (
+      match missing_scope with
+      | Some worker ->
+          Error
+            (Printf.sprintf
+               "artifact_scope is required for write-capable worker %s"
+               (describe_worker worker))
+      | None -> (
+      match
+        ( conflict_in normalized_workers normalized_workers,
+          conflict_in normalized_workers session.Team_session_types.planned_workers )
+      with
+      | Some (left, right), _
+      | None, Some (left, right) ->
+          Error
+            (Printf.sprintf
+               "artifact_scope overlaps between planned workers %s and %s"
+               (describe_worker left) (describe_worker right))
+      | None, None ->
+          match Team_session_store.update_session config session_id (fun session ->
+                    {
+                      session with
+                      planned_workers =
+                        Team_session_types.dedup_planned_workers
+                          (session.planned_workers @ normalized_workers);
+                      updated_at_iso = Types.now_iso ();
+                    })
+          with
+          | Ok updated ->
+              Team_session_store.append_event config session_id
+                ~event_type:"session_planned_workers_updated"
+                ~detail:
+                  (`Assoc
+                    [
+                      ("planned_worker_count", `Int (List.length updated.planned_workers));
+                      ( "worker_class_counts",
+                        Team_session_types.worker_class_counts updated.planned_workers
+                        |> Team_session_types.counts_to_json );
+                      ( "runtime_pool_counts",
+                        Team_session_types.runtime_pool_counts updated.planned_workers
+                        |> Team_session_types.counts_to_json );
+                      ( "lane_counts",
+                        Team_session_types.lane_counts updated.planned_workers
+                        |> Team_session_types.counts_to_json );
+                      ( "controller_counts",
+                        Team_session_types.controller_level_counts updated.planned_workers
+                        |> Team_session_types.counts_to_json );
+                      ( "control_domain_counts",
+                        Team_session_types.control_domain_counts updated.planned_workers
+                        |> Team_session_types.counts_to_json );
+                      ( "task_profile_counts",
+                        Team_session_types.task_profile_counts updated.planned_workers
+                        |> Team_session_types.counts_to_json );
+                      ( "escalation_count",
+                        `Int
+                          (Team_session_types.escalation_count updated.planned_workers)
+                      );
+                      ( "runtime_actors",
+                        `List
+                          (normalized_workers
+                          |> List.filter_map (fun worker ->
+                                 worker.Team_session_types.runtime_actor)
+                          |> List.map (fun actor -> `String actor)) );
+                      ( "runtime_binding_refs",
+                        `List
+                          (normalized_workers
+                          |> List.filter_map (fun worker ->
+                                 worker.Team_session_types.runtime_binding_ref)
+                          |> List.map (fun value -> `String value)) );
+                      ( "artifact_scope",
+                        `List
+                          (normalized_workers
+                          |> List.concat_map (fun worker ->
+                                 worker.Team_session_types.artifact_scope)
+                          |> Team_session_types.dedup_strings
+                          |> List.map (fun value -> `String value)) );
+                      ("ts_iso", `String (Types.now_iso ()));
+                    ]);
+              Ok ()
+          | Error e -> Error e))
 
 let ensure_session_actor config session_id actor_name =
   match Team_session_store.update_session config session_id (fun session ->

@@ -545,6 +545,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
                   Team_session_types.Control_hierarchical_quality_v1
                 ~orchestration_mode:Team_session_types.Assist
                 ~communication_mode:Team_session_types.Comm_broadcast
+                ~runtime_policy_ref:None
                 ~model_cascade:[]
                 ~fallback_policy:Team_session_types.Fallback_cascade_then_task
                 ~instruction_profile:Team_session_types.Profile_strict

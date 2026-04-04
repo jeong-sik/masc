@@ -33,6 +33,8 @@ let handle_unexpected_failure (env : _ Tool_team_session_step_exec.step_env)
     ~worker_run_id:prepared.worker_run_id ~worker_name ~mode:"spawn" ~wait_mode
     ~status:`Failed ?execution_scope
     ?requested_worker_class:prepared.spec.worker_class
+    ?runtime_binding_ref:prepared.runtime_binding_ref
+    ~artifact_scope:prepared.spec.artifact_scope
     ?resolved_runtime:prepared.assigned_runtime
     ~resolved_model:prepared.runtime_model_label
     ?routing_reason:prepared.spec.routing_reason ~tool_names:[]
@@ -45,7 +47,9 @@ let handle_unexpected_failure (env : _ Tool_team_session_step_exec.step_env)
     ~worker_run_id:prepared.worker_run_id
     ~spawn_agent:prepared.spec.spawn_agent
     ?runtime_actor:prepared.runtime_actor_name
-    ?spawn_role:prepared.spec.spawn_role ?spawn_model:prepared.spec.spawn_model
+    ?spawn_role:prepared.spec.spawn_role
+    ?runtime_binding_ref:prepared.runtime_binding_ref
+    ~artifact_scope:prepared.spec.artifact_scope
     ?execution_scope ?worker_class:prepared.spec.worker_class ?worker_backend
     ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
     ~trace_capability:"summary_only"
@@ -76,8 +80,8 @@ let handle_unexpected_failure (env : _ Tool_team_session_step_exec.step_env)
     ~max_turns:prepared.spec.max_turns
     ~worker_class:prepared.spec.worker_class ~worker_backend ~wait_mode
     ~status:"failed" ~trace_capability:"summary_only"
+    ~runtime_binding_ref:prepared.runtime_binding_ref
     ~assigned_runtime:prepared.assigned_runtime
-    ~resolved_model:prepared.runtime_model_label
     ~routing_reason:prepared.spec.routing_reason ~tool_call_count:0
     ~tool_names:[] ~success:false ~elapsed_ms ~output_preview ~exit_code:1
     ~error ~delivery_verdict_json:None ()
@@ -126,6 +130,8 @@ let process_spawn_result (env : _ Tool_team_session_step_exec.step_env)
     ~status:(if spawn_result.success then `Completed else `Failed)
     ?execution_scope
     ?requested_worker_class:prepared.spec.worker_class
+    ?runtime_binding_ref:prepared.runtime_binding_ref
+    ~artifact_scope:prepared.spec.artifact_scope
     ?resolved_runtime:prepared.assigned_runtime
     ~resolved_model:oas.resolved_model
     ?routing_reason:prepared.spec.routing_reason
@@ -142,7 +148,9 @@ let process_spawn_result (env : _ Tool_team_session_step_exec.step_env)
     ~worker_run_id:prepared.worker_run_id
     ~spawn_agent:prepared.spec.spawn_agent
     ?runtime_actor:prepared.runtime_actor_name
-    ?spawn_role:prepared.spec.spawn_role ?spawn_model:prepared.spec.spawn_model
+    ?spawn_role:prepared.spec.spawn_role
+    ?runtime_binding_ref:prepared.runtime_binding_ref
+    ~artifact_scope:prepared.spec.artifact_scope
     ?execution_scope ?worker_class:prepared.spec.worker_class ?worker_backend
     ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
     ~trace_capability:oas.trace_capability
@@ -173,8 +181,9 @@ let process_spawn_result (env : _ Tool_team_session_step_exec.step_env)
     ~worker_class:prepared.spec.worker_class ~worker_backend ~wait_mode
     ~status:(if spawn_result.success then "completed" else "failed")
     ~trace_capability:oas.trace_capability
+    ~runtime_binding_ref:prepared.runtime_binding_ref
     ~assigned_runtime:prepared.assigned_runtime
-    ~resolved_model:oas.resolved_model
+    ?proof_ref:(Tool_team_session_step_spawn_impl.proof_ref_of_proof oas.proof)
     ~routing_reason:prepared.spec.routing_reason
     ~tool_call_count:oas.oas_tool_call_count ~tool_names:oas.oas_tool_names
     ~success:spawn_result.success ~elapsed_ms:spawn_result.elapsed_ms

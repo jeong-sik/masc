@@ -21,7 +21,7 @@ type worker_card = {
   actor : string option;
   spawn_agent : string option;
   spawn_role : string option;
-  spawn_model : string option;
+  runtime_binding_ref : string option;
   execution_scope : string option;
   worker_class : string option;
   parent_actor : string option;
@@ -33,6 +33,7 @@ type worker_card = {
   supervisor_actor : string option;
   task_profile : string option;
   risk_level : string option;
+  artifact_scope : string list;
   routing_confidence : float option;
   routing_reason : string option;
   status : string;
@@ -50,6 +51,7 @@ type session_digest = {
   status : string;
   health : string;
   scale_profile : string;
+  runtime_policy_ref : string option;
   planned_worker_count : int;
   active_agent_count : int;
   last_turn_age_sec : int option;

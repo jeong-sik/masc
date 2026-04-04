@@ -170,7 +170,9 @@ let test_step_spawn_batch_applies_hybrid_routing () =
           (fun worker -> worker.Team_session_types.spawn_role = Some "normalizer")
           session.planned_workers
       in
-      Alcotest.(check (option string)) "normalizer model" (Some "qwen35-lead")
+      Alcotest.(check (option string)) "normalizer binding" (Some "local/lead")
+        normalizer.runtime_binding_ref;
+      Alcotest.(check (option string)) "normalizer leaves spawn_model empty" None
         normalizer.spawn_model;
       Alcotest.(check (option string)) "normalizer profile" (Some "normalize")
         (Option.map Team_session_types.task_profile_to_string
@@ -182,7 +184,9 @@ let test_step_spawn_batch_applies_hybrid_routing () =
           (fun worker -> worker.Team_session_types.spawn_role = Some "final-writer")
           session.planned_workers
       in
-      Alcotest.(check (option string)) "final writer model" (Some "qwen35-lead")
+      Alcotest.(check (option string)) "final writer binding" (Some "local/lead")
+        final_writer.runtime_binding_ref;
+      Alcotest.(check (option string)) "final writer leaves spawn_model empty" None
         final_writer.spawn_model;
       Alcotest.(check (option string)) "final writer profile" (Some "synthesize")
         (Option.map Team_session_types.task_profile_to_string
@@ -296,6 +300,7 @@ let test_status_reports_worker_run_progress_summary () =
       Team_session_types.spawn_agent = "default";
       runtime_actor = Some runtime_actor;
       spawn_role = Some spawn_role;
+      runtime_binding_ref = None;
       spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
       execution_scope = Some Team_session_types.Limited_code_change;
       thinking_enabled = None;
@@ -312,6 +317,7 @@ let test_status_reports_worker_run_progress_summary () =
       supervisor_actor = None;
       task_profile = Some Team_session_types.Profile_normalize;
       risk_level = Some Team_session_types.Risk_low;
+      artifact_scope = [];
       routing_confidence = Some 0.9;
       routing_reason = Some "test-routing";
       routing_escalated = false;

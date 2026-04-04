@@ -27,7 +27,8 @@ let fail_all_prepared_executions (env : _ Tool_team_session_step_exec.step_env)
         ~spawn_agent:prepared.spec.spawn_agent
         ?runtime_actor:prepared.runtime_actor_name
         ?spawn_role:prepared.spec.spawn_role
-        ?spawn_model:prepared.spec.spawn_model
+        ?runtime_binding_ref:prepared.runtime_binding_ref
+        ~artifact_scope:prepared.spec.artifact_scope
         ~execution_scope:execution.execution_scope
         ?worker_class:prepared.spec.worker_class
         ~worker_backend:
@@ -106,6 +107,18 @@ type oas_run_fields = {
   proof : Agent_sdk.Cdal_proof.t option;
   trace_capability : string;
 }
+
+let proof_ref_of_proof = function
+  | None -> None
+  | Some (proof : Agent_sdk.Cdal_proof.t) -> (
+      match Repo_synthesis_benchmark.validate_run_id proof.run_id with
+      | Ok run_id ->
+          Some (Agent_sdk.Proof_store.make_ref ~run_id ~subpath:"manifest.json")
+      | Error msg ->
+          Log.Misc.warn
+            "team_session_step_spawn: dropping invalid proof_run_id %S: %s"
+            proof.run_id msg;
+          None)
 
 (** Extract OAS-related fields from a worker run result. *)
 let extract_oas_fields ~(deps : step_deps) ~config ~session_id
@@ -226,7 +239,8 @@ let record_post_spawn_effects ~(deps : step_deps) ~config ~session_id
 (** Build the result JSON for a single spawn worker. *)
 let build_spawn_result_json ~worker_run_id ~runtime_actor_name ~spawn_role
     ~execution_scope ~thinking_enabled ~max_turns ~worker_class ~worker_backend
-    ~wait_mode ~status ~trace_capability ~assigned_runtime ~resolved_model
+    ~wait_mode ~status ~trace_capability ~runtime_binding_ref ~assigned_runtime
+    ?proof_ref
     ~routing_reason ~tool_call_count ~tool_names ~success ~elapsed_ms
     ~output_preview ?exit_code ?error
     ~(delivery_verdict_json : Yojson.Safe.t option) () =
@@ -257,8 +271,9 @@ let build_spawn_result_json ~worker_run_id ~runtime_actor_name ~spawn_role
          `String (Team_session_types.wait_mode_to_string wait_mode) );
        ("status", `String status);
        ("trace_capability", `String trace_capability);
+       opt_string "runtime_binding_ref" runtime_binding_ref;
        opt_string "resolved_runtime" assigned_runtime;
-       ("resolved_model", `String resolved_model);
+       opt_string "proof_ref" proof_ref;
        opt_string "routing_reason" routing_reason;
        ("tool_call_count", `Int tool_call_count);
        ("tool_names", `List (List.map (fun name -> `String name) tool_names));
@@ -294,10 +309,12 @@ let build_accepted_json (execution : prepared_execution) =
           prepared.spec.worker_class );
       ( "worker_backend",
         `String (Worker_execution_backend.to_string execution.worker_backend) );
+      ( "runtime_binding_ref",
+        Option.fold ~none:`Null ~some:(fun s -> `String s)
+          prepared.runtime_binding_ref );
       ( "resolved_runtime",
         Option.fold ~none:`Null ~some:(fun s -> `String s)
           prepared.assigned_runtime );
-      ("resolved_model", `String prepared.runtime_model_label);
       ( "routing_reason",
         Option.fold ~none:`Null ~some:(fun s -> `String s)
           prepared.spec.routing_reason );

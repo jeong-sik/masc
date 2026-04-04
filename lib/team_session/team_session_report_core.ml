@@ -47,7 +47,14 @@ let cascade_metrics_json (session : Team_session_types.session) =
   in
   `Assoc
     [
-      ("model_cascade", `List (List.map (fun m -> `String m) session.model_cascade));
+      ( "runtime_policy_ref",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          (Team_session_types.effective_runtime_policy_ref session) );
+      ( "model_cascade",
+        `List
+          (List.map
+             (fun m -> `String m)
+             (Team_session_types.legacy_model_cascade_for_export session)) );
       ("attempted", `Int attempted);
       ("success", `Int success);
       ("failed", `Int (max 0 session.cascade_failed));
@@ -313,7 +320,8 @@ let failed_spawn_roster_for_report events =
                        ("runtime_actor", member "detail" json |> member "runtime_actor");
                        ("spawn_agent", member "detail" json |> member "spawn_agent");
                        ("spawn_role", member "detail" json |> member "spawn_role");
-                       ("spawn_model", member "detail" json |> member "spawn_model");
+                       ( "runtime_binding_ref",
+                         member "detail" json |> member "runtime_binding_ref" );
                        ("error", member "detail" json |> member "error");
                        ("elapsed_ms", member "detail" json |> member "elapsed_ms");
                        ("ts_iso", member "ts_iso" json);

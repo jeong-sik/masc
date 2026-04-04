@@ -35,6 +35,7 @@ let make_test_session ?(orchestration_mode = Team_session_types.Auto)
      control_profile = Team_session_types.Control_flat;
      orchestration_mode;
      communication_mode = Team_session_types.Comm_broadcast;
+     runtime_policy_ref = Test_tool_team_session_support.runtime_policy_ref_of_cascade model_cascade;
      model_cascade;
      fallback_policy = Team_session_types.Fallback_none;
      instruction_profile = Team_session_types.Profile_standard;

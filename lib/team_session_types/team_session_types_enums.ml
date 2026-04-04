@@ -122,6 +122,7 @@ type planned_worker = {
   spawn_agent : string;
   runtime_actor : string option;
   spawn_role : string option;
+  runtime_binding_ref : string option;
   spawn_model : string option;
   execution_scope : execution_scope option;
   thinking_enabled : bool option;
@@ -138,6 +139,7 @@ type planned_worker = {
   supervisor_actor : string option;
   task_profile : task_profile option;
   risk_level : risk_level option;
+  artifact_scope : string list;
   routing_confidence : float option;
   routing_reason : string option;
   routing_escalated : bool;
@@ -185,6 +187,7 @@ type session = {
   control_profile : control_profile;
   orchestration_mode : orchestration_mode;
   communication_mode : communication_mode;
+  runtime_policy_ref : string option;
   model_cascade : string list;
   fallback_policy : fallback_policy;
   instruction_profile : instruction_profile;

@@ -24,7 +24,7 @@ type worker_card = {
   actor : string option;
   spawn_agent : string option;
   spawn_role : string option;
-  spawn_model : string option;
+  runtime_binding_ref : string option;
   execution_scope : string option;
   worker_class : string option;
   parent_actor : string option;
@@ -36,6 +36,7 @@ type worker_card = {
   supervisor_actor : string option;
   task_profile : string option;
   risk_level : string option;
+  artifact_scope : string list;
   routing_confidence : float option;
   routing_reason : string option;
   status : string;
@@ -53,6 +54,7 @@ type session_digest = {
   status : string;
   health : string;
   scale_profile : string;
+  runtime_policy_ref : string option;
   planned_worker_count : int;
   active_agent_count : int;
   last_turn_age_sec : int option;
@@ -183,7 +185,7 @@ let worker_card_to_yojson (card : worker_card) =
       ("actor", string_option_to_json card.actor);
       ("spawn_agent", string_option_to_json card.spawn_agent);
       ("spawn_role", string_option_to_json card.spawn_role);
-      ("spawn_model", string_option_to_json card.spawn_model);
+      ("runtime_binding_ref", string_option_to_json card.runtime_binding_ref);
       ("execution_scope", string_option_to_json card.execution_scope);
       ("worker_class", string_option_to_json card.worker_class);
       ("parent_actor", string_option_to_json card.parent_actor);
@@ -195,6 +197,8 @@ let worker_card_to_yojson (card : worker_card) =
       ("supervisor_actor", string_option_to_json card.supervisor_actor);
       ("task_profile", string_option_to_json card.task_profile);
       ("risk_level", string_option_to_json card.risk_level);
+      ( "artifact_scope",
+        `List (List.map (fun value -> `String value) card.artifact_scope) );
       ( "routing_confidence",
         option_to_json (fun value -> `Float value) card.routing_confidence );
       ("routing_reason", string_option_to_json card.routing_reason);
@@ -357,6 +361,7 @@ let session_card_to_yojson ~actor (digest : session_digest) =
       ("status", `String digest.status);
       ("health", `String digest.health);
       ("scale_profile", `String digest.scale_profile);
+      ("runtime_policy_ref", string_option_to_json digest.runtime_policy_ref);
       ("control_profile", `String digest.control_profile);
       ("planned_worker_count", `Int digest.planned_worker_count);
       ("active_agent_count", `Int digest.active_agent_count);

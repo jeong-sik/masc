@@ -7,8 +7,7 @@
 type spawn_spec = {
   spawn_agent : string;
   spawn_prompt : string;
-  spawn_model : string option;
-  spawn_model_explicit : bool;
+  runtime_binding_ref : string option;
   spawn_role : string option;
   execution_scope : Team_session_types.execution_scope option;
   thinking_enabled : bool option;
@@ -23,6 +22,7 @@ type spawn_spec = {
   supervisor_actor : string option;
   task_profile : Team_session_types.task_profile option;
   risk_level : Team_session_types.risk_level option;
+  artifact_scope : string list;
   routing_confidence : float option;
   routing_reason : string option;
   spawn_selection_note : string option;
@@ -34,6 +34,7 @@ type prepared_spawn = {
   worker_run_id : string;
   spec : spawn_spec;
   runtime_actor_name : string option;
+  runtime_binding_ref : string option;
   runtime_model_label : string;
   runtime_lease : Local_runtime_pool.lease option;
   assigned_runtime : string option;
@@ -97,6 +98,7 @@ type step_deps = {
     spawn_spec -> Team_session_types.controller_level option;
   planned_worker_of_spec :
     ?runtime_actor:string ->
+    ?runtime_binding_ref:string ->
     spawn_spec ->
     Team_session_types.planned_worker;
   register_planned_workers :

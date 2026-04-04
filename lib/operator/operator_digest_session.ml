@@ -11,7 +11,7 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
              ( worker.runtime_actor,
                Some worker.spawn_agent,
                worker.spawn_role,
-               worker.spawn_model,
+               worker.runtime_binding_ref,
                Option.map Team_session_types.execution_scope_to_string
                  worker.execution_scope,
                Option.map Team_session_types.worker_class_to_string
@@ -30,6 +30,7 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
                  worker.task_profile,
                Option.map Team_session_types.risk_level_to_string
                  worker.risk_level,
+               worker.artifact_scope,
                worker.routing_confidence,
                worker.routing_reason ))
     else
@@ -47,11 +48,12 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
                None,
                None,
                None,
-               None,
-               None,
-               None,
-               None,
-               None ))
+                 None,
+                 None,
+                 None,
+                 [],
+                 None,
+                 None ))
   in
   worker_keys
   |> List.map
@@ -59,7 +61,7 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
          ( actor,
            spawn_agent,
            spawn_role,
-           spawn_model,
+           runtime_binding_ref,
            execution_scope,
            worker_class,
            parent_actor,
@@ -71,6 +73,7 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            supervisor_actor,
            task_profile,
            risk_level,
+           artifact_scope,
            routing_confidence,
            routing_reason ) ->
          let turn_count =
@@ -121,7 +124,7 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            actor;
            spawn_agent;
            spawn_role;
-           spawn_model;
+           runtime_binding_ref;
            execution_scope;
            worker_class;
            parent_actor;
@@ -133,6 +136,7 @@ let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson
            supervisor_actor;
            task_profile;
            risk_level;
+           artifact_scope;
            routing_confidence;
            routing_reason;
            status;
@@ -600,6 +604,10 @@ let build_session_digest ?status_json:cached_status config (session : Team_sessi
       (match U.member "scale_profile" summary with
       | `String value -> value
       | _ -> Team_session_types.scale_profile_to_string session.scale_profile);
+    runtime_policy_ref =
+      (match U.member "runtime_policy_ref" summary with
+      | `String value -> Some value
+      | _ -> Team_session_types.effective_runtime_policy_ref session);
     control_profile =
       (match U.member "control_profile" summary with
       | `String value -> value
@@ -679,4 +687,3 @@ let build_session_digest ?status_json:cached_status config (session : Team_sessi
     worker_cards;
     risk_digest = Risk_digest.(compute ~session ~worker_cards |> to_yojson);
   }
-

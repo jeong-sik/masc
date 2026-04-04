@@ -114,6 +114,14 @@ Pair with masc_team_session_step to record turns and masc_team_session_finalize 
 	                        ("type", `String "string");
 	                        ("enum", `List [ `String "flat"; `String "hierarchical_quality_v1" ]);
 	                      ] );
+	                  ( "runtime_policy_ref",
+	                    `Assoc
+	                      [
+	                        ("type", `String "string");
+	                        ( "description",
+	                          `String
+	                            "Opaque runtime policy or binding profile reference. Preferred over model_cascade for new callers." );
+	                      ] );
 	                  ( "model_cascade",
 	                    `Assoc
 	                      [

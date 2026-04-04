@@ -14,15 +14,15 @@ let worker_step_id (w : Team_session_types.planned_worker) : string =
       (Option.value ~default:"worker" w.spawn_role)
 
 let worker_description (w : Team_session_types.planned_worker) : string =
-  let model_part = match w.spawn_model with
-    | Some m -> Printf.sprintf " [%s]" m
+  let binding_part = match w.runtime_binding_ref with
+    | Some binding -> Printf.sprintf " [%s]" binding
     | None -> ""
   in
   let role_part = match w.spawn_role with
     | Some r -> Printf.sprintf " (%s)" r
     | None -> ""
   in
-  Printf.sprintf "%s%s%s" w.spawn_agent role_part model_part
+  Printf.sprintf "%s%s%s" w.spawn_agent role_part binding_part
 
 let step_status_of_worker
     (active_agents : string list)

@@ -25,6 +25,7 @@ let handle_start ctx args : result =
   let execution_scope = parse_execution_scope args in
   let orchestration_mode = parse_orchestration_mode args in
   let communication_mode = parse_communication_mode args in
+  let runtime_policy_ref = get_string_opt args "runtime_policy_ref" in
   let model_cascade = get_string_list args "model_cascade" in
   let fallback_policy = parse_fallback_policy args in
   let instruction_profile = parse_instruction_profile args in
@@ -40,7 +41,8 @@ let handle_start ctx args : result =
           ~config:ctx.config ~created_by:ctx.agent_name ~goal ~duration_seconds
           ~execution_scope ~checkpoint_interval_sec ~min_agents
           ~scale_profile ~control_profile
-          ~orchestration_mode ~communication_mode ~model_cascade ~fallback_policy
+          ~orchestration_mode ~communication_mode ~runtime_policy_ref
+          ~model_cascade ~fallback_policy
           ~instruction_profile ~alert_channel ~auto_resume ~report_formats
           ~agent_names:agents ~operation_id
       with

@@ -250,6 +250,7 @@ let test_step_spawn_default_local_without_spawn_model () =
             ("spawn_prompt", `String "normalize evidence into strict JSON schema");
             ("spawn_role", `String "normalizer");
             ("worker_class", `String "executor");
+            ("artifact_scope", `List [ `String "artifacts/normalize.json" ]);
             ("spawn_selection_note", `String selection_note);
           ])
   in
@@ -302,6 +303,8 @@ let test_step_spawn_default_local_without_spawn_model () =
   let worker = List.hd session.planned_workers in
   Alcotest.(check string) "spawn agent normalized" "default"
     worker.Team_session_types.spawn_agent;
+  Alcotest.(check (option string)) "spawn_model compatibility stays empty" None
+    worker.Team_session_types.spawn_model;
   Alcotest.(check (option string)) "single worker defaults to write scope"
     (Some "limited_code_change")
     (Option.map Team_session_types.execution_scope_to_string
@@ -435,6 +438,7 @@ let test_step_spawn_batch_defaults_execution_scope_by_worker_class () =
                     [
                       ("spawn_role", `String "implementer");
                       ("worker_class", `String "executor");
+                      ("artifact_scope", `List [ `String "lib/failing_test.ml" ]);
                       ("spawn_prompt", `String "fix the failing test");
                     ];
                 ] );

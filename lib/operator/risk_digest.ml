@@ -58,17 +58,20 @@ let compute_evidence_gap (session : Team_session_types.session) : evidence_gap =
 let compute_drift_risk (session : Team_session_types.session)
     (_worker_cards : Operator_digest_types.worker_card list) : drift_signal list =
   let signals = ref [] in
-  (* Cascade length change detection is retained as a structural check. *)
-  let original_cascade_len = List.length session.model_cascade in
+  let original_policy_width =
+    match Team_session_types.effective_runtime_policy_ref session with
+    | Some _ -> 1
+    | None -> List.length session.model_cascade
+  in
   let planned_count = List.length session.planned_workers in
   if
-    original_cascade_len > 0
+    original_policy_width > 0
     && planned_count > 0
-    && planned_count > original_cascade_len
+    && planned_count > original_policy_width
   then
     signals :=
       Cascade_length_change
-        { original = original_cascade_len; current = planned_count }
+        { original = original_policy_width; current = planned_count }
       :: !signals;
   List.rev !signals
 

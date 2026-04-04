@@ -107,7 +107,7 @@ let with_snapshot_env f =
           effective_execution_scope_of_spec = (fun _ -> None);
           inferred_controller_level_of_spec = (fun _ -> None);
           planned_worker_of_spec =
-            (fun ?runtime_actor:_ _ ->
+            (fun ?runtime_actor:_ ?runtime_binding_ref:_ _ ->
               failwith "planned_worker_of_spec unused");
           register_planned_workers = (fun _ _ _ -> Ok ());
           ensure_session_actor = (fun _ _ _ -> Ok ());
@@ -183,7 +183,8 @@ let test_persist_worker_run_snapshot_with_proof () =
     ((json |> U.member "evidence_refs" |> U.to_list) <> []);
   check string "proof run id" "proof-run-123"
     (json |> U.member "proof_run_id" |> U.to_string);
-  check string "proof status" "completed"
+  check string "proof status"
+    (Oas.Cdal_proof.show_result_status Oas.Cdal_proof.Completed)
     (json |> U.member "proof_status" |> U.to_string);
   check string "proof risk class" "medium"
     (json |> U.member "proof_risk_class" |> U.to_string);

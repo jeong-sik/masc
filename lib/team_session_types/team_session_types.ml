@@ -40,6 +40,30 @@ let effective_execution_scope_of_planned_worker (worker : planned_worker) =
   effective_execution_scope ~worker_class:worker.worker_class
     worker.execution_scope
 
+let normalize_artifact_scope values =
+  values
+  |> List.filter_map (fun value ->
+         let trimmed = String.trim value in
+         if trimmed = "" then None else Some trimmed)
+  |> dedup_strings
+  |> List.sort String.compare
+
+let effective_runtime_policy_ref (session : session) =
+  match session.runtime_policy_ref with
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | None ->
+      session.model_cascade
+      |> List.find_map (fun value ->
+             let trimmed = String.trim value in
+             if trimmed = "" then None else Some trimmed)
+
+let legacy_model_cascade_for_export (session : session) =
+  match effective_runtime_policy_ref session with
+  | Some _ -> []
+  | None -> session.model_cascade
+
 let planned_worker_key (w : planned_worker) =
   match w.runtime_actor with
   | Some actor when String.trim actor <> "" -> "actor:" ^ String.trim actor
@@ -49,8 +73,8 @@ let planned_worker_key (w : planned_worker) =
           "agent:" ^ w.spawn_agent;
           "role:"
           ^ Option.value ~default:"" (Option.map String.trim w.spawn_role);
-          "model:"
-          ^ Option.value ~default:"" (Option.map String.trim w.spawn_model);
+          "binding:"
+          ^ Option.value ~default:"" (Option.map String.trim w.runtime_binding_ref);
           "scope:"
           ^ Option.value ~default:""
               (Option.map execution_scope_to_string w.execution_scope);
@@ -82,6 +106,7 @@ let planned_worker_key (w : planned_worker) =
           "profile:"
           ^ Option.value ~default:""
               (Option.map task_profile_to_string w.task_profile);
+          "artifacts:" ^ String.concat "," (normalize_artifact_scope w.artifact_scope);
         ]
 
 let dedup_planned_workers xs =
@@ -421,7 +446,8 @@ let planned_worker_to_yojson (w : planned_worker) =
       ( "runtime_actor",
         Option.fold ~none:`Null ~some:(fun s -> `String s) w.runtime_actor );
       ("spawn_role", Option.fold ~none:`Null ~some:(fun s -> `String s) w.spawn_role);
-      ("spawn_model", Option.fold ~none:`Null ~some:(fun s -> `String s) w.spawn_model);
+      ( "runtime_binding_ref",
+        Option.fold ~none:`Null ~some:(fun s -> `String s) w.runtime_binding_ref );
       ( "execution_scope",
         Option.fold ~none:`Null
           ~some:(fun scope -> `String (execution_scope_to_string scope))
@@ -460,6 +486,7 @@ let planned_worker_to_yojson (w : planned_worker) =
         Option.fold ~none:`Null
           ~some:(fun level -> `String (risk_level_to_string level))
           w.risk_level );
+      ("artifact_scope", string_list_to_json (normalize_artifact_scope w.artifact_scope));
       ("routing_confidence", Option.fold ~none:`Null ~some:(fun value -> `Float value) w.routing_confidence);
       ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) w.routing_reason);
       ("routing_escalated", `Bool w.routing_escalated);
@@ -481,6 +508,10 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
             spawn_agent;
             runtime_actor = member "runtime_actor" json |> to_string_option;
             spawn_role = member "spawn_role" json |> to_string_option;
+            runtime_binding_ref =
+              (match member "runtime_binding_ref" json |> to_string_option with
+              | Some _ as value -> value
+              | None -> member "spawn_model" json |> to_string_option);
             spawn_model = member "spawn_model" json |> to_string_option;
             execution_scope =
               Option.map
@@ -535,6 +566,9 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
                 (fun value ->
                   risk_level_of_string
                     (String.lowercase_ascii (String.trim value)));
+            artifact_scope =
+              normalize_artifact_scope
+                (non_empty_strings_of_json (member "artifact_scope" json));
             routing_confidence =
               (match member "routing_confidence" json with
               | `Float value -> Some value
@@ -568,6 +602,7 @@ let session_to_yojson (s : session) =
       ("control_profile", `String (control_profile_to_string s.control_profile));
       ("orchestration_mode", `String (orchestration_mode_to_string s.orchestration_mode));
       ("communication_mode", `String (communication_mode_to_string s.communication_mode));
+      ("runtime_policy_ref", Option.fold ~none:`Null ~some:(fun v -> `String v) s.runtime_policy_ref);
       ("model_cascade", `List (List.map (fun m -> `String m) s.model_cascade));
       ("fallback_policy", `String (fallback_policy_to_string s.fallback_policy));
       ("instruction_profile", `String (instruction_profile_to_string s.instruction_profile));
@@ -665,6 +700,12 @@ let session_of_yojson json =
           json |> member "communication_mode" |> to_string_option
           |> Option.value ~default:"broadcast"
           |> communication_mode_of_string;
+        runtime_policy_ref =
+          (match member "runtime_policy_ref" json |> to_string_option with
+          | Some raw ->
+              let trimmed = String.trim raw in
+              if trimmed = "" then None else Some trimmed
+          | None -> None);
         model_cascade =
           (match member "model_cascade" json with
            | `List xs -> List.filter_map (function `String s -> Some s | _ -> None) xs

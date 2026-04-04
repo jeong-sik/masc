@@ -540,7 +540,11 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
         ; "context_tokens", `Int ctx_tokens
         ; "context_max", `Int ctx_work.max_tokens
         ; "message_count", `Int (List.length ctx_work.messages)
+        ; "run_profile_ref", `String meta.cascade_name
         ; "last_model_used", `String meta.runtime.usage.last_model_used
+        ; ( "last_runtime_binding_ref"
+          , let trimmed = String.trim meta.runtime.usage.last_model_used in
+            if trimmed = "" then `Null else `String trimmed )
         ; ( "continuity_state"
           , match continuity with
             | None -> `Null

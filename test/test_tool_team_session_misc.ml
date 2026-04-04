@@ -400,6 +400,7 @@ let test_delegate_rejects_not_ready_worker_with_guidance () =
                  Team_session_types.spawn_agent = "default";
                  runtime_actor = Some "llama-local-pending";
                  spawn_role = Some "implementer";
+                 runtime_binding_ref = None;
                  spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
                  execution_scope = Some Team_session_types.Limited_code_change;
                  thinking_enabled = None;
@@ -416,6 +417,7 @@ let test_delegate_rejects_not_ready_worker_with_guidance () =
                  supervisor_actor = None;
                  task_profile = Some Team_session_types.Profile_normalize;
                  risk_level = Some Team_session_types.Risk_low;
+                 artifact_scope = [];
                  routing_confidence = Some 0.9;
                  routing_reason = Some "test-pending";
                  routing_escalated = false;
@@ -505,6 +507,7 @@ let test_delegate_ready_worker_accepts_background () =
                  Team_session_types.spawn_agent = "default";
                  runtime_actor = Some "llama-local-ready";
                  spawn_role = Some "implementer";
+                 runtime_binding_ref = None;
                  spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
                  execution_scope = Some Team_session_types.Limited_code_change;
                  thinking_enabled = None;
@@ -521,6 +524,7 @@ let test_delegate_ready_worker_accepts_background () =
                  supervisor_actor = None;
                  task_profile = Some Team_session_types.Profile_normalize;
                  risk_level = Some Team_session_types.Risk_low;
+                 artifact_scope = [];
                  routing_confidence = Some 0.9;
                  routing_reason = Some "test-ready";
                  routing_escalated = false;
@@ -597,6 +601,7 @@ let test_delegate_rejects_corrupt_checkpoint_worker () =
                  Team_session_types.spawn_agent = "default";
                  runtime_actor = Some "llama-local-ready";
                  spawn_role = Some "implementer";
+                 runtime_binding_ref = None;
                  spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
                  execution_scope = Some Team_session_types.Limited_code_change;
                  thinking_enabled = None;
@@ -613,6 +618,7 @@ let test_delegate_rejects_corrupt_checkpoint_worker () =
                  supervisor_actor = None;
                  task_profile = Some Team_session_types.Profile_normalize;
                  risk_level = Some Team_session_types.Risk_low;
+                 artifact_scope = [];
                  routing_confidence = Some 0.9;
                  routing_reason = Some "test-ready";
                  routing_escalated = false;
@@ -726,6 +732,7 @@ let test_status_marks_corrupt_meta_worker_blocked () =
                  Team_session_types.spawn_agent = "default";
                  runtime_actor = Some "llama-local-meta";
                  spawn_role = Some "implementer";
+                 runtime_binding_ref = None;
                  spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
                  execution_scope = Some Team_session_types.Limited_code_change;
                  thinking_enabled = None;
@@ -742,6 +749,7 @@ let test_status_marks_corrupt_meta_worker_blocked () =
                  supervisor_actor = None;
                  task_profile = Some Team_session_types.Profile_normalize;
                  risk_level = Some Team_session_types.Risk_low;
+                 artifact_scope = [];
                  routing_confidence = Some 0.9;
                  routing_reason = Some "test-corrupt-meta";
                  routing_escalated = false;
@@ -856,12 +864,14 @@ let make_pw ?(worker_class : Team_session_types.worker_class option)
     ?(task_profile : Team_session_types.task_profile option)
     (name : string) : Team_session_types.planned_worker =
   { spawn_agent = name; runtime_actor = None; spawn_role = None;
+    runtime_binding_ref = None;
     spawn_model = None; execution_scope = None; thinking_enabled = None;
     thinking_budget = None; max_turns = None; timeout_seconds = None;
     worker_class; parent_actor = None; capsule_mode = None;
     runtime_pool = None; lane_id = None; controller_level = None;
     control_domain = None; supervisor_actor = None;
-    task_profile; risk_level = None; routing_confidence = None;
+    task_profile; risk_level = None; artifact_scope = [];
+    routing_confidence = None;
     routing_reason = None; routing_escalated = false }
 
 let test_decomposability_single_worker () =

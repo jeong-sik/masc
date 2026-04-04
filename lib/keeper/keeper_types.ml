@@ -481,6 +481,10 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in
+  let last_runtime_binding_ref =
+    let trimmed = String.trim rt.usage.last_model_used in
+    if trimmed = "" then `Null else `String trimmed
+  in
   `Assoc
     [ "name", `String m.name
     ; "agent_name", `String m.agent_name
@@ -493,6 +497,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "soul_profile", `String m.soul_profile
     ; "social_model", `String m.social_model
     ; "cascade_name", `String m.cascade_name
+    ; "run_profile_ref", `String m.cascade_name
     ; "will", `String m.will
     ; "needs", `String m.needs
     ; "desires", `String m.desires
@@ -533,6 +538,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "total_cost_usd", `Float rt.usage.total_cost_usd
     ; "last_turn_ts", `Float rt.usage.last_turn_ts
     ; "last_model_used", `String rt.usage.last_model_used
+    ; "last_runtime_binding_ref", last_runtime_binding_ref
     ; "last_input_tokens", `Int rt.usage.last_input_tokens
     ; "last_output_tokens", `Int rt.usage.last_output_tokens
     ; "last_total_tokens", `Int rt.usage.last_total_tokens
@@ -1057,6 +1063,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "soul_profile"
   ; "social_model"
   ; "cascade_name"
+  ; "run_profile_ref"
   ; "will"
   ; "needs"
   ; "desires"
@@ -1097,6 +1104,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "total_cost_usd"
   ; "last_turn_ts"
   ; "last_model_used"
+  ; "last_runtime_binding_ref"
   ; "last_input_tokens"
   ; "last_output_tokens"
   ; "last_total_tokens"

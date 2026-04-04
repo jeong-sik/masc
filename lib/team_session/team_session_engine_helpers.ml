@@ -547,6 +547,9 @@ let orchestration_state_json (session : Team_session_types.session) =
         `String
           (Team_session_types.fallback_policy_to_string
              session.fallback_policy) );
+      ( "runtime_policy_ref",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          (Team_session_types.effective_runtime_policy_ref session) );
       ( "policy_violations",
         `List (List.map (fun v -> `String v) session.policy_violations) );
     ]
@@ -562,7 +565,14 @@ let cascade_metrics_json (session : Team_session_types.session) =
   in
   `Assoc
     [
-      ("model_cascade", `List (List.map (fun m -> `String m) session.model_cascade));
+      ( "runtime_policy_ref",
+        Option.fold ~none:`Null ~some:(fun value -> `String value)
+          (Team_session_types.effective_runtime_policy_ref session) );
+      ( "model_cascade",
+        `List
+          (List.map
+             (fun m -> `String m)
+             (Team_session_types.legacy_model_cascade_for_export session)) );
       ("attempted", `Int attempted);
       ("success", `Int success);
       ("failed", `Int (max 0 session.cascade_failed));

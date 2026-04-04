@@ -170,6 +170,39 @@ let protocol_violation_state ~(meta : keeper_meta)
     delivery_surface = Silent;
   }
 
+let inferred_tool_surface tools =
+  if List.mem "keeper_board_comment" tools then
+    Some (Comment_board, Board_comment)
+  else if List.mem "keeper_board_post" tools then
+    Some (Post_board, Board_post)
+  else if List.mem "keeper_broadcast" tools then
+    Some (Broadcast, Broadcast_surface)
+  else if List.mem "keeper_task_claim" tools || List.mem "masc_claim_next" tools then
+    Some (Claim_task, Task_claim_surface)
+  else
+    None
+
+let tool_only_state ~(meta : keeper_meta)
+    ~(observation : Keeper_world_observation.world_observation)
+    ~(result : Keeper_agent_run.run_result) =
+  let speech_act, delivery_surface =
+    match inferred_tool_surface result.tools_used with
+    | Some routed -> routed
+    | None ->
+        if String.trim result.response_text <> "" then (Inform, Visible_reply)
+        else (Defer, Silent)
+  in
+  {
+    social_model = meta.social_model;
+    belief_summary = belief_summary_of_observation observation;
+    active_desire = None;
+    current_intention = None;
+    blocker = None;
+    need = None;
+    speech_act;
+    delivery_surface;
+  }
+
 let social_state_of_headers ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation) headers =
   match nonempty_header_opt headers "SPEECH_ACT", header_assoc_opt headers "DELIVERY_SURFACE" with
@@ -271,7 +304,13 @@ let apply_to_result ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result) =
   let headers, response_body = parse_header_block result.response_text in
   let state =
-    social_state_of_headers ~meta ~observation headers
+    if headers <> [] then
+      social_state_of_headers ~meta ~observation headers
+    else if result.tools_used <> [] then
+      tool_only_state ~meta ~observation ~result
+    else
+      protocol_violation_state ~meta ~observation
+        ~reason:"missing social headers"
   in
   match state.speech_act, state.delivery_surface with
   | Request_help, Board_post when result.tools_used = [] ->

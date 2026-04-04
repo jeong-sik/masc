@@ -65,12 +65,25 @@ let _cp_summary_refresh_interval_s =
 
 let compute_cp_summary ~state =
   let config = state.Mcp_server.room_config in
+  let t0 = Time_compat.now () in
+  (* Build full snapshot once to share filesystem reads between summary
+     and swarm-status.  Previously Swarm_status.build_json re-read
+     operations/detachments/alerts/decisions/traces from disk, doubling
+     total I/O and causing the 60s timeout to trip ~58x/day (#5091). *)
+  let snapshot = Command_plane_v2.snapshot_json config in
+  let dt_snapshot = Time_compat.now () -. t0 in
   let summary = Command_plane_v2.summary_json config in
+  let dt_summary = Time_compat.now () -. t0 -. dt_snapshot in
   let swarm_status =
     if Room.is_initialized config then
-      Swarm_status.build_json ~timeline_limit_override:6 config
+      Swarm_status.build_json_from_snapshot ~timeline_limit_override:6 config snapshot
     else Swarm_status.empty_json
   in
+  let dt_total = Time_compat.now () -. t0 in
+  if dt_total >= 5.0 then
+    Log.CmdPlane.info
+      "cp-summary compute breakdown: snapshot=%.1fs summary=%.1fs total=%.1fs"
+      dt_snapshot dt_summary dt_total;
   assoc_add "swarm_status" swarm_status summary
 
 let start_cp_summary_refresh_loop ~state ~sw ~clock =
@@ -81,7 +94,8 @@ let start_cp_summary_refresh_loop ~state ~sw ~clock =
               with timeout_s =
                      Dashboard_http_helpers.float_of_env_default
                        "MASC_CP_SUMMARY_TIMEOUT_S"
-                       ~default:60.0 ~min_v:10.0 ~max_v:120.0;
+                       ~default:90.0 ~min_v:10.0 ~max_v:180.0;
+                   max_backoff_s = 300.0;
                    warm_delay_s =
                      Dashboard_http_helpers.float_of_env_default
                        "MASC_WARM_DELAY_CP_SUMMARY_S"

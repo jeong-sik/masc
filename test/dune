@@ -41,7 +41,6 @@
         test_dashboard
         test_dashboard_perf
         test_dashboard_tool_host_events
-        test_dashboard_keeper_routes
         test_transport_read_model
         test_multi_room test_worktree_detection test_bounded test_mention
         test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
@@ -100,7 +99,6 @@
           test_dashboard
           test_dashboard_perf
           test_dashboard_tool_host_events
-          test_dashboard_keeper_routes
           test_transport_read_model
           test_multi_room test_worktree_detection test_bounded test_mention
           test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
@@ -660,6 +658,12 @@
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe)
  (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
+
+(test
+ (name test_dashboard_keeper_routes)
+ (modules test_dashboard_keeper_routes)
+ (libraries masc_test_deps)
+ (deps ../bin/main_eio.exe))
 
 (test
  (name test_compression_boundary)

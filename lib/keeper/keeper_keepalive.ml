@@ -1173,12 +1173,15 @@ let record_keeper_stopped
       ~base_path
       ~keeper_name
       ~detail
-  : unit
+  : bool
   =
   if resolve_registry_done entry `Stopped
   then (
     Keeper_registry.set_state ~base_path keeper_name Keeper_registry.Stopped;
-    publish_keeper_lifecycle ~event:"stopped" ~keeper_name ~detail)
+    publish_keeper_lifecycle ~event:"stopped" ~keeper_name ~detail;
+    true)
+  else
+    false
 ;;
 
 let record_keeper_crashed
@@ -1229,11 +1232,12 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
           ~failure_reason
       in
       let record_stopped detail =
-        record_keeper_stopped
-          reg
-          ~base_path:ctx.config.base_path
-          ~keeper_name:live_meta.name
-          ~detail
+        ignore
+          (record_keeper_stopped
+             reg
+             ~base_path:ctx.config.base_path
+             ~keeper_name:live_meta.name
+             ~detail)
       in
       Fun.protect
         (fun () ->
@@ -1276,10 +1280,16 @@ let stop_keepalive name =
            | Eio.Cancel.Cancelled _ as e -> raise e
            | _exn -> ())
         | None -> ());
-       record_keeper_stopped
-         entry
-         ~base_path:entry.base_path
-         ~keeper_name:entry.name
-         ~detail:"manual stop")
+       (match entry.state with
+        | Keeper_registry.Crashed | Keeper_registry.Dead -> ()
+        | _ ->
+          if
+            record_keeper_stopped
+              entry
+              ~base_path:entry.base_path
+              ~keeper_name:entry.name
+              ~detail:"manual stop"
+          then
+            Keeper_registry.cleanup_tracking ~base_path:entry.base_path entry.name))
     entries
 ;;

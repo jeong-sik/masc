@@ -116,7 +116,7 @@ let test_join_in_room_sanitizes_invalid_room_id () =
               ~capabilities:[ "debug" ] ()
           in
           check bool "result uses sanitized room label" true
-            (str_contains result "room default");
+            (str_contains result "namespace default");
           check (option string) "hook sees sanitized room label" (Some "default")
             !captured_room_id;
           let event_log =

@@ -162,51 +162,86 @@ let parse_case_result ~tool_name output =
           })
 
 let run_tool_case_process tool_name =
+  let tmp_root = Filename.temp_file "keeper-tool-matrix-base" "" in
+  Sys.remove tmp_root;
+  Unix.mkdir tmp_root 0o700;
   let out_file = Filename.temp_file "keeper-tool-matrix-out" ".txt" in
   let err_file = Filename.temp_file "keeper-tool-matrix-err" ".txt" in
+  let cleanup_file path =
+    if Sys.file_exists path then Sys.remove path
+  in
+  let cleanup_dir path =
+    if Sys.file_exists path then Cases.cleanup_dir path
+  in
   let timeout_prefix =
     match timeout_command () with
     | Some bin ->
         Printf.sprintf "%s -k 1s %ds " bin (tool_case_timeout_sec ())
     | None -> ""
   in
+  let env_prefix =
+    Printf.sprintf "TMPDIR=%s TEMP=%s TMP=%s " (quote tmp_root)
+      (quote tmp_root) (quote tmp_root)
+  in
   let cmd =
-    Printf.sprintf "%s%s %s" timeout_prefix (quote (runner_path ()))
-      (quote tool_name)
+    Printf.sprintf "%s%s%s %s" env_prefix timeout_prefix
+      (quote (runner_path ())) (quote tool_name)
   in
   let wrapped =
     Printf.sprintf "%s > %s 2> %s" cmd (quote out_file) (quote err_file)
   in
-  let status = Sys.command wrapped in
-  let output =
-    String.concat "\n" [ read_file out_file; read_file err_file ]
-  in
-  Sys.remove out_file;
-  Sys.remove err_file;
-  let parsed = parse_case_result ~tool_name output in
-  (match parsed.base_path with
-  | Some path -> Cases.cleanup_dir path
-  | None -> ());
-  match status with
-  | 0 -> parsed.outcome
-  | 124 ->
-      Error
-        (Printf.sprintf "%s timed out after %ds\n%s" tool_name
-           (tool_case_timeout_sec ()) output)
-  | _ -> (
-      match parsed.outcome with
-      | Ok () ->
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_file out_file;
+      cleanup_file err_file;
+      cleanup_dir tmp_root)
+    (fun () ->
+      let status = Sys.command wrapped in
+      let output =
+        String.concat "\n" [ read_file out_file; read_file err_file ]
+      in
+      let parsed = parse_case_result ~tool_name output in
+      (match parsed.base_path with
+      | Some path when path <> tmp_root -> cleanup_dir path
+      | Some _ | None -> ());
+      match status with
+      | 0 -> parsed.outcome
+      | 124 ->
           Error
-            (Printf.sprintf
-               "%s exited nonzero without failure payload\n%s"
-               tool_name output)
-      | Error message -> Error message)
+            (Printf.sprintf "%s timed out after %ds\n%s" tool_name
+               (tool_case_timeout_sec ()) output)
+      | _ -> (
+          match parsed.outcome with
+          | Ok () ->
+              Error
+                (Printf.sprintf
+                   "%s exited nonzero without failure payload\n%s"
+                   tool_name output)
+          | Error message -> Error message))
 
 let test_keeper_inventory_is_unique () =
   let names = Cases.all_keeper_tool_names in
-  let unique = List.sort_uniq String.compare names in
-  check int "keeper inventory unique count" (List.length unique)
-    (List.length names)
+  let counts = Hashtbl.create (max 16 (List.length names)) in
+  List.iter
+    (fun name ->
+      let count =
+        match Hashtbl.find_opt counts name with
+        | Some n -> n
+        | None -> 0
+      in
+      Hashtbl.replace counts name (count + 1))
+    names;
+  let duplicates =
+    Hashtbl.fold
+      (fun name count acc -> if count > 1 then (name, count) :: acc else acc)
+      counts []
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  in
+  if duplicates <> [] then
+    failf "keeper inventory contains duplicate tool names:\n%s"
+      (duplicates
+      |> List.map (fun (name, count) -> Printf.sprintf "  - %s (%d)" name count)
+      |> String.concat "\n")
 
 let test_keeper_inventory_has_cases () =
   let names = Cases.all_keeper_tool_names in

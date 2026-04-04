@@ -99,15 +99,18 @@ let make_meta ?(name = "keeper-tool-matrix") () =
   | Ok meta -> meta
   | Error err -> failwith ("make_meta failed: " ^ err)
 
-let all_keeper_tool_schemas () =
+let all_keeper_tool_schemas_raw () =
   init_keeper_bridge ();
   KET.keeper_allowed_model_tools (make_meta ())
-  |> dedupe_tool_schemas
   |> List.sort (fun (left : Types.tool_schema) right ->
          String.compare left.name right.name)
 
+let all_keeper_tool_schemas () =
+  all_keeper_tool_schemas_raw ()
+  |> dedupe_tool_schemas
+
 let all_keeper_tool_names =
-  all_keeper_tool_schemas ()
+  all_keeper_tool_schemas_raw ()
   |> List.map (fun (schema : Types.tool_schema) -> schema.name)
 
 let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =

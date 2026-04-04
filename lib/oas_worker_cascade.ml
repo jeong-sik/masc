@@ -18,6 +18,13 @@ let default_temperature =
 let default_max_tokens =
   Llm_provider.Constants.Inference_profile.agent_default.max_tokens
 
+(** Worker defaults — SSOT for worker_oas.ml + worker_container.ml. *)
+let worker_temperature = 0.2
+let worker_top_p = 0.95
+let worker_top_k = 20
+let worker_min_p = 0.0
+let worker_max_tool_calls_per_turn = 12
+
 (* ================================================================ *)
 (* Cascade types                                                     *)
 (* ================================================================ *)

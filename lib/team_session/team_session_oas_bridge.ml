@@ -362,17 +362,8 @@ let preview_text_opt text =
   let trimmed = String.trim text in
   if trimmed = "" then None else Some (preview_text trimmed)
 
-let lowercase_enum_case_name raw =
-  let raw =
-    match String.rindex_opt raw '.' with
-    | Some idx when idx + 1 < String.length raw ->
-        String.sub raw (idx + 1) (String.length raw - idx - 1)
-    | _ -> raw
-  in
-  String.lowercase_ascii raw
-
-let proof_result_status_to_string status =
-  Oas.Cdal_proof.show_result_status status |> lowercase_enum_case_name
+let proof_result_status_to_string =
+  Oas_worker_exec.proof_result_status_to_string
 
 let worker_name_of_planned_worker ~(fallback : string)
     (pw : Team_session_types.planned_worker) =

@@ -487,10 +487,10 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       system_prompt = Some system_prompt;
       max_tokens = local_worker_max_tokens ();
       max_turns;
-      temperature = Some 0.2;
-      top_p = Some 0.95;
-      top_k = Some 20;
-      min_p = Some 0.0;
+      temperature = Some Oas_worker_cascade.worker_temperature;
+      top_p = Some Oas_worker_cascade.worker_top_p;
+      top_k = Some Oas_worker_cascade.worker_top_k;
+      min_p = Some Oas_worker_cascade.worker_min_p;
       enable_thinking = Some thinking_enabled;
       tool_choice = Some Oas.Types.Auto;
     }
@@ -501,7 +501,7 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
     | None ->
         { Oas.Guardrails.tool_filter =
             Oas.Guardrails.AllowList (oas_tool_names tools);
-          max_tool_calls_per_turn = Some 12;
+          max_tool_calls_per_turn = Some Oas_worker_cascade.worker_max_tool_calls_per_turn;
         }
   in
   let options =

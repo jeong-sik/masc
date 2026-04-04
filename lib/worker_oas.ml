@@ -38,17 +38,8 @@ let max_turns_cap_of_scope (scope : Team_session_types.execution_scope) : int =
   | Limited_code_change -> 20
   | Autonomous -> 30
 
-let lowercase_enum_case_name raw =
-  let raw =
-    match String.rindex_opt raw '.' with
-    | Some idx when idx + 1 < String.length raw ->
-        String.sub raw (idx + 1) (String.length raw - idx - 1)
-    | _ -> raw
-  in
-  String.lowercase_ascii raw
-
-let proof_result_status_to_string status =
-  Oas.Cdal_proof.show_result_status status |> lowercase_enum_case_name
+let proof_result_status_to_string =
+  Oas_worker_exec.proof_result_status_to_string
 
 (** Derive max_turns from worker meta, applying the scope cap.
     When max_turns_override is set, it is clamped to [1, cap].
@@ -78,10 +69,10 @@ let agent_config_of_worker_meta
     system_prompt = Some system_prompt;
     max_tokens;
     max_turns = effective_max_turns meta;
-    temperature = Some 0.2;
-    top_p = Some 0.95;
-    top_k = Some 20;
-    min_p = Some 0.0;
+    temperature = Some Oas_worker_cascade.worker_temperature;
+    top_p = Some Oas_worker_cascade.worker_top_p;
+    top_k = Some Oas_worker_cascade.worker_top_k;
+    min_p = Some Oas_worker_cascade.worker_min_p;
     enable_thinking = Some (Option.value ~default:false meta.thinking_enabled);
     tool_choice = Some Oas.Types.Auto;
   }
@@ -255,7 +246,7 @@ let build_agent
     | None ->
         {
           Oas.Guardrails.tool_filter = AllowList tool_names;
-          max_tool_calls_per_turn = Some 12;
+          max_tool_calls_per_turn = Some Oas_worker_cascade.worker_max_tool_calls_per_turn;
         }
   in
   let builder =
@@ -264,10 +255,10 @@ let build_agent
     |> Oas.Builder.with_system_prompt system_prompt
     |> Oas.Builder.with_max_tokens config.max_tokens
     |> Oas.Builder.with_max_turns config.max_turns
-    |> Oas.Builder.with_temperature 0.2
-    |> Oas.Builder.with_top_p 0.95
-    |> Oas.Builder.with_top_k 20
-    |> Oas.Builder.with_min_p 0.0
+    |> Oas.Builder.with_temperature Oas_worker_cascade.worker_temperature
+    |> Oas.Builder.with_top_p Oas_worker_cascade.worker_top_p
+    |> Oas.Builder.with_top_k Oas_worker_cascade.worker_top_k
+    |> Oas.Builder.with_min_p Oas_worker_cascade.worker_min_p
     |> Oas.Builder.with_enable_thinking
          (Option.value ~default:false meta.thinking_enabled)
     |> Oas.Builder.with_tool_choice Oas.Types.Auto

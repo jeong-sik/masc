@@ -4,7 +4,6 @@
     Handles reply markup stripping, proactive text normalisation,
     quality checks, and fragment detection. *)
 
-open Keeper_types
 open Keeper_memory_policy
 
 let strip_state_blocks_text (s : string) : string =
@@ -112,54 +111,6 @@ let proactive_looks_fragmentary (s : string) : bool =
   t = ""
   || Re.execp (Re.Pcre.re {|["'(\[{]$|} |> Re.compile) t
   || Re.execp (Re.Pcre.re "[:;,\\-]$" |> Re.compile) t
-
-let proactive_fallback_reply ~(meta : keeper_meta) ~(idle_seconds : int) : string =
-  let goal =
-    let g = String.trim meta.goal in
-    if g = "" then "현재 목표" else g
-  in
-  let goal_phrase =
-    goal
-    |> Re.replace_string (Re.Pcre.re "[.!?。！？]+$" |> Re.compile) ~by:""
-    |> String.trim
-    |> fun s -> if s = "" then goal else s
-  in
-  let soul_hint =
-    match String.lowercase_ascii (String.trim meta.soul_profile) with
-    | "safety" -> "리스크 우선 점검을 마쳤고"
-    | "delivery" -> "실행 단위로 정리해 두었고"
-    | "research" -> "가설 검증 포인트를 갱신했고"
-    | _ -> "진행 상태를 점검했고"
-  in
-  let templates =
-    [|
-      Printf.sprintf
-        "%s %s, 다음 지시를 받으면 즉시 진행하겠습니다."
-        goal soul_hint;
-      Printf.sprintf
-        "현재는 %s에 맞춰 대기 중이며, 새 입력이 오면 바로 실행 단계로 전환하겠습니다."
-        goal_phrase;
-      Printf.sprintf
-        "%s 기준으로 우선순위를 업데이트했습니다. 다음 턴에서 바로 이어가겠습니다."
-        goal;
-      Printf.sprintf
-        "idle %ds 동안 %s 관련 체크를 유지했습니다. 후속 요청에 맞춰 계속 진행하겠습니다."
-        idle_seconds goal_phrase;
-    |]
-  in
-  let idx =
-    (Hashtbl.hash (meta.name, meta.runtime.proactive_rt.count_total, idle_seconds) land max_int)
-    mod Array.length templates
-  in
-  templates.(idx)
-
-let proactive_quality_check (raw : string) : (string, string) result =
-  match extract_checkin_text raw with
-  | None -> Error "empty"
-  | Some text ->
-      if proactive_looks_fragmentary text then Error "fragmentary"
-      else if not (proactive_has_terminal_ending text) then Error "missing_terminal_ending"
-      else Ok text
 
 let looks_fragmentary_history_text (raw : string) : bool =
   let t = normalize_proactive_text raw in

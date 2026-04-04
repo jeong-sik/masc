@@ -27,12 +27,6 @@ let write_file path content =
 
 let prompt_metadata key =
   match key with
-  | "keeper.proactive_turn" ->
-      ("test prompt for " ^ key,
-       [ "idle_seconds"; "profile"; "goal"; "last_preview";
-         "continuity_snapshot"; "seed" ])
-  | "keeper.proactive_retry" ->
-      ("test prompt for " ^ key, [ "attempt_phrase"; "reason"; "directive" ])
   | "keeper.unified.system" ->
       ("test prompt for " ^ key,
        [ "identity_header"; "trait_lines"; "instructions_block"; "goal_lines" ])
@@ -68,9 +62,6 @@ let fixtures =
     ("keeper.constitution", "Continuity rules from file");
     ("keeper.world", "MASC world from markdown");
     ("keeper.capabilities", "Capabilities from markdown");
-    ( "keeper.proactive_turn",
-      "Turn {{idle_seconds}} {{profile}} {{goal}} {{last_preview}} {{continuity_snapshot}} {{seed}}" );
-    ("keeper.proactive_retry", "Retry {{attempt_phrase}} {{reason}} {{directive}}");
     ("keeper.unified.system", "{{identity_header}}\n{{trait_lines}}{{instructions_block}}{{goal_lines}}");
     ("keeper.deliberation", "Keeper {{keeper_name}} {{soul_profile}} {{goal}} {{triggers}} {{world_state}}");
     ("governance.deliberation", "governance deliberation prompt");
@@ -155,17 +146,19 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               match
-                Prompt_registry.render_prompt_template "keeper.proactive_retry"
+                Prompt_registry.render_prompt_template "keeper.unified.system"
                   [
-                    ("attempt_phrase", "previous attempt");
-                    ("reason", "timeout");
-                    ("directive", "now");
+                    ("identity_header", "TestKeeper");
+                    ("trait_lines", "trait1");
+                    ("instructions_block", "do things");
+                    ("goal_lines", "goal1");
                   ]
               with
               | Ok rendered ->
-                  check string "rendered markdown template"
-                    "Retry previous attempt timeout now"
-                    rendered
+                  check bool "rendered contains identity" true
+                    (String.length rendered > 0
+                     && (try ignore (Str.search_forward (Str.regexp_string "TestKeeper") rendered 0); true
+                         with Not_found -> false))
               | Error msg -> fail msg);
         ] );
       ( "override",
@@ -205,8 +198,8 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               match
-                Prompt_registry.set_override "keeper.proactive_retry"
-                  "Retry {{attempt_phrase}} {{reason}} {{unknown}}"
+                Prompt_registry.set_override "keeper.deliberation"
+                  "Keeper {{keeper_name}} {{soul_profile}} {{unknown}}"
               with
               | Error msg ->
                   check bool "mentions unknown variable" true

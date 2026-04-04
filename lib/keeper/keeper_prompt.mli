@@ -32,29 +32,7 @@ val apply_self_model_drift :
   work_kind:string ->
   Keeper_types.keeper_meta * bool * string option
 
-val proactive_prompt_for_keeper :
-  meta:Keeper_types.keeper_meta ->
-  idle_seconds:int ->
-  Keeper_memory.keeper_state_snapshot option ->
-  string ->
-  string
-
-type proactive_generation_result = {
-  reply: string;
-  usage: Agent_sdk.Types.api_usage;
-  model_used: string;
-  latency_ms: int;
-  attempts: int;
-  total_cost_usd: float;
-  fallback_applied: bool;
-  tools_used: string list;
-}
-
-val proactive_retry_instruction : int -> reason:string -> string
-
-val proactive_temperature : cascade_name:string -> int -> float
-
-(** {1 Text Processing and Proactive Quality Checks}
+(** {1 Text Processing}
 
     Re-exported from [Keeper_text_processing]. *)
 

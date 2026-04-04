@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [2.229.0] - 2026-04-04
+
+### Added
+- **Task contract loop** -- task-centered contract loop with deterministic gating (#5099).
+
+### Changed
+- **Deduplicate contains_ci** -- extract contains_ci into String_util module (#5098).
+
 ## [2.228.0] - 2026-04-04
 
 ### Changed

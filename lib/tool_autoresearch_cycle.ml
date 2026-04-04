@@ -574,6 +574,13 @@ let handle_cycle (ctx : Tool_autoresearch_repo_synthesis.context) args =
                            { record with decision = Autoresearch.Discard }
                          else record
                        in
+                       let state =
+                         if build_gate_override then
+                           match state.history with
+                           | _ :: rest -> { state with history = effective_record :: rest }
+                           | [] -> { state with history = [ effective_record ] }
+                         else state
+                       in
                        Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id effective_record;
                        let state = { state with
                          current_cycle = state.current_cycle + 1 } in

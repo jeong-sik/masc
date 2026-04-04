@@ -12,7 +12,7 @@ const fetchRoomStrategy = vi.fn().mockResolvedValue(undefined)
 const runGarbageCollection = vi.fn().mockResolvedValue(undefined)
 const cleanupZombies = vi.fn().mockResolvedValue(undefined)
 
-const flowState = { value: 'running' as 'running' | 'paused' | 'unknown' }
+const flowState = { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' }
 const flowLoading = { value: false }
 const roomStrategy = { value: null as Record<string, unknown> | null }
 const roomStrategyLoading = { value: false }

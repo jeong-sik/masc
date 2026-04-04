@@ -15,8 +15,19 @@ import {
 const showInterruptConfirm = signal(false)
 const interruptReason = signal('')
 
-function stateLabel(s: string): string { return s === 'running' ? '실행 중' : s === 'paused' ? '일시정지' : '알 수 없음' }
-function stateTone(s: string): string { return s === 'running' ? 'ok' : s === 'paused' ? 'warn' : 'default' }
+function stateLabel(s: string): string {
+  return s === 'running'
+    ? '실행 중'
+    : s === 'paused'
+      ? '일시정지'
+      : s === 'initializing'
+        ? '초기화 중'
+        : '알 수 없음'
+}
+
+function stateTone(s: string): string {
+  return s === 'running' ? 'ok' : s === 'paused' ? 'warn' : 'default'
+}
 
 export function FlowControlPanel() {
   useEffect(() => { void fetchPauseStatus() }, [])
@@ -24,6 +35,7 @@ export function FlowControlPanel() {
   const state = flowState.value
   const isPaused = state === 'paused'
   const isRunning = state === 'running'
+  const isInitializing = state === 'initializing'
   return html`
     <${SurfaceCard} variant="compact" class="mb-4">
       <div class="flex items-center gap-3 mb-3">
@@ -31,9 +43,9 @@ export function FlowControlPanel() {
         <${CountBadge} tone=${stateTone(state)}>${stateLabel(state)}<//>
       </div>
       <div class="flex flex-wrap gap-2">
-        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused} onClick=${() => void pauseRoom()}>
+        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused || isInitializing} onClick=${() => void pauseRoom()}>
           ${loading && !isPaused ? '...' : '일시정지'}<//>
-        <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning} onClick=${() => void resumeRoom()}>
+        <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning || isInitializing} onClick=${() => void resumeRoom()}>
           ${loading && isPaused ? '...' : '재개'}<//>
         <${ActionButton} variant="danger" size="md" disabled=${loading}
           onClick=${() => { showInterruptConfirm.value = !showInterruptConfirm.value }}>인터럽트<//>

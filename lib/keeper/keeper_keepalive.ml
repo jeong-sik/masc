@@ -22,30 +22,16 @@ let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
 let set_bus bus = bus_ref := Some bus
 let get_bus () = !bus_ref
 
-let keeper_turn_throttle_limit () =
+let keeper_turn_throttle_limit =
   Keeper_config.int_of_env_default
     "MASC_KEEPER_AUTOBOOT_MAX" ~default:3 ~min_v:1 ~max_v:20
 ;;
 
-let turn_semaphore_ref : Eio.Semaphore.t option ref = ref None
-
-let keeper_turn_semaphore () =
-  match !turn_semaphore_ref with
-  | Some sem -> sem
-  | _ ->
-    let limit = keeper_turn_throttle_limit () in
-    let sem = Eio.Semaphore.make limit in
-    turn_semaphore_ref := Some sem;
-    Log.Keeper.info
-      "keeper turn throttle semaphore created (limit=%d, env=MASC_KEEPER_AUTOBOOT_MAX)"
-      limit;
-    sem
-;;
+let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
 
 let with_keeper_turn_slot f =
-  let sem = keeper_turn_semaphore () in
-  Eio.Semaphore.acquire sem;
-  Fun.protect ~finally:(fun () -> Eio.Semaphore.release sem) f
+  Eio.Semaphore.acquire turn_semaphore;
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release turn_semaphore) f
 ;;
 
 (** Optional gRPC client + env — set at server bootstrap when

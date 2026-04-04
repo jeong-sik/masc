@@ -1,6 +1,7 @@
 // Ops — Session column: session list, selected session digest, session actions
 
 import { signal } from '@preact/signals'
+import { Markdown } from "../common/markdown"
 import { html } from 'htm/preact'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
@@ -26,7 +27,7 @@ import {
   isSessionTerminal,
   deliveryModeLabel,
   pickPreferredSession,
-  prettyJson,
+  
   runtimeJudgeLabel,
   selectedSessionId,
   sessionActionLabel,
@@ -293,7 +294,7 @@ export function OpsSessionColumn() {
                 : null}
             ` : null}
             ${selectedSession.recent_events && selectedSession.recent_events.length > 0 ? html`
-              <pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[11px] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
+              <div class=\"max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]\"><${Markdown} text=${'```json\n' + JSON.stringify(selectedSession.recent_events.slice(-3), null, 2) + '\n```'} /></div>
             ` : null}
           </div>
         ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">먼저 세션을 하나 고르세요.</div>`}

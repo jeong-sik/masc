@@ -1,7 +1,8 @@
 import { html } from 'htm/preact'
+import { Markdown } from "../common/markdown"
 import { StatusChip } from '../common/status-chip'
 import type { CommandPlaneTraceEvent } from '../../types'
-import { prettyJson, relativeTime } from './helpers'
+import { relativeTime } from './helpers'
 
 export function TraceRow({ event }: { event: CommandPlaneTraceEvent }) {
   return html`
@@ -18,7 +19,7 @@ export function TraceRow({ event }: { event: CommandPlaneTraceEvent }) {
           ${event.actor ? ` · ${event.actor}` : ''}
         </div>
       </div>
-      <pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[13px] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${prettyJson(event.detail)}</pre>
+      <div class=\"max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]\"><${Markdown} text=${'```json\n' + JSON.stringify(event.detail, null, 2) + '\n```'} /></div>
     </article>
   `
 }

@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { Markdown } from "./common/markdown"
 import { useEffect } from 'preact/hooks'
 import { Card, CARD_STANDARD } from './common/card'
 import { EmptyState } from './common/empty-state'
@@ -12,7 +13,7 @@ import type {
   DashboardProofToolEvidence,
   DashboardProofWorkerRunEvidence,
 } from '../types'
-import { prettyJson, relativeTime } from './command/helpers'
+import { relativeTime } from './command/helpers'
 import {
   asRecord,
   dedupeTimeline,
@@ -213,7 +214,7 @@ export function Proof() {
           <${KeyValueGrid} rows=${goalBindingRows} />
           <details class="pt-1 border-t border-[var(--white-6)] mt-2">
             <summary class="cursor-pointer text-[12px] text-[var(--text-muted)] py-1.5 hover:text-[var(--text-body)] transition-colors">원본 목표 연결 JSON</summary>
-            <pre class="command-json-block">${prettyJson(snapshot?.goal_binding ?? {})}</pre>
+            <div class=\"max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]\"><${Markdown} text=${'```json\n' + JSON.stringify(snapshot?.goal_binding ?? {}, null, 2) + '\n```'} /></div>
           </details>
         <//>
       </div>
@@ -279,7 +280,7 @@ export function Proof() {
           <${KeyValueGrid} rows=${backingSummaryRows} />
           <details class="pt-1 border-t border-[var(--white-6)] mt-2">
             <summary class="cursor-pointer text-[12px] text-[var(--text-muted)] py-1.5 hover:text-[var(--text-body)] transition-colors">원본 CPv2 backing JSON</summary>
-            <pre class="command-json-block">${prettyJson(cpEvidence ?? {})}</pre>
+            <div class=\"max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]\"><${Markdown} text=${'```json\n' + JSON.stringify(cpEvidence ?? {}, null, 2) + '\n```'} /></div>
           </details>
         <//>
       </div>

@@ -100,7 +100,7 @@ function SignalRow({ label, value }: { label: string; value: string | number }) 
 function ToolChip({ name }: { name: string }) {
   return html`
     <button type="button"
-      class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)] hover:bg-[rgba(71,184,255,0.18)] cursor-pointer transition-colors"
+      class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)] hover:bg-[var(--accent-20)] cursor-pointer transition-colors"
       title="클릭하여 도구 상세 보기"
       onClick=${() => openToolsInventory(name)}
     >${name}</button>

@@ -414,7 +414,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           ${showExecutionFallbackState
             ? html`
-                <div class="rounded-2xl border ${executionError.value ? 'border-[rgba(251,191,36,0.28)] bg-[rgba(251,191,36,0.08)]' : 'border-[rgba(71,184,255,0.18)] bg-[rgba(71,184,255,0.08)]'} px-4 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.12)]">
+                <div class="rounded-2xl border ${executionError.value ? 'border-[rgba(251,191,36,0.28)] bg-[var(--warn-10)]' : 'border-[var(--accent-20)] bg-[var(--accent-10)]'} px-4 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.12)]">
                   <div class="flex flex-col gap-2">
                     <div class="flex flex-wrap items-center gap-2">
                       <strong class="text-[12px] font-semibold text-[var(--text-strong)]">${fallbackStateTitle}</strong>
@@ -479,7 +479,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <span class="text-[11px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-2 py-0.5 rounded-full">${isKeeper ? '키퍼 런타임' : '일반 에이전트'}</span>
                     ${agent.synthetic ? html`<span class="text-[10px] text-[var(--text-muted)] bg-[var(--white-6)] border border-dashed border-[var(--card-border)] px-1.5 py-px rounded italic" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">파생</span>` : null}
                     ${keeper?.model ? html`<span class="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-1.5 py-px rounded">${keeper.model}</span>` : null}
-                    ${keeper?.generation != null ? html`<span class="text-[11px] text-[var(--accent)] font-medium bg-[var(--accent-10)] px-1.5 py-px rounded border border-[rgba(71,184,255,0.15)]" title="키퍼 핸드오프가 일어날 때 올라가는 런타임 세대입니다.">세대 ${keeper.generation}</span>` : null}
+                    ${keeper?.generation != null ? html`<span class="text-[11px] text-[var(--accent)] font-medium bg-[var(--accent-10)] px-1.5 py-px rounded border border-[var(--accent-10)]" title="키퍼 핸드오프가 일어날 때 올라가는 런타임 세대입니다.">세대 ${keeper.generation}</span>` : null}
                   </div>
                 </div>
               </div>

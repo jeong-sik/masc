@@ -229,12 +229,12 @@ function CharacterPlate({ name }: { name: string }) {
             ${displayName}
           </h2>
           ${koreanName ? html`<span class="text-base text-[var(--text-muted)]">(${koreanName})</span>` : ''}
-          ${generation != null ? html`<span class="text-sm font-bold text-[var(--accent)] bg-[var(--accent-10)] border border-[rgba(71,184,255,0.25)] px-1.5 py-px tabular-nums rounded" title="세대 번호 — 핸드오프마다 증가 (레벨/등급 아님)">Gen.${generation}</span>` : null}
+          ${generation != null ? html`<span class="text-sm font-bold text-[var(--accent)] bg-[var(--accent-10)] border border-[var(--accent-30)] px-1.5 py-px tabular-nums rounded" title="세대 번호 — 핸드오프마다 증가 (레벨/등급 아님)">Gen.${generation}</span>` : null}
         </div>
 
         <div class="flex items-center gap-1.5 flex-wrap">
           <${StatusBadge} status=${headerStatus} />
-          ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-[11px] text-[var(--text-muted)] bg-[var(--accent-8)] border border-[rgba(71,184,255,0.15)] px-[5px] py-px rounded">${model}</span>` : null}
+          ${model ? html`<span class="font-[family-name:'IBM_Plex_Mono',monospace] text-[11px] text-[var(--text-muted)] bg-[var(--accent-8)] border border-[var(--accent-10)] px-[5px] py-px rounded">${model}</span>` : null}
         </div>
 
         ${ctxPct != null ? html`
@@ -324,7 +324,7 @@ export function AgentProfile({ name }: { name: string }) {
       </div>
 
       ${ps.status === 'error'
-        ? html`<div class="rounded-lg border border-[rgba(239,68,68,0.35)] bg-[rgba(239,68,68,0.08)] px-3 py-2">${ps.message}</div>`
+        ? html`<div class="rounded-lg border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2">${ps.message}</div>`
         : null}
 
       <${CharacterPlate} name=${name} />
@@ -338,7 +338,7 @@ export function AgentProfile({ name }: { name: string }) {
             ? html`<${EmptyState} message="할당된 태스크 없음" compact />`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
                 <div class="flex items-center gap-2 border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 rounded-lg" key=${t.id}>
-                  <span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${t.id}</span>
+                  <span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">${t.id}</span>
                   <span class="flex-1 text-[#d7e7ff]">${t.title}</span>
                   <${StatusBadge} status=${t.status} />
                 </div>
@@ -413,7 +413,7 @@ export function AgentProfile({ name }: { name: string }) {
           <${Card} title="태스크 이력" class="ff-card rounded-xl col-span-full">
             <div class="agent-history-list">${(profileData?.taskHistories ?? []).map((row: TaskHistoryRow) => html`
               <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
-                <div class="mb-2"><span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${row.taskId}</span></div>
+                <div class="mb-2"><span class="text-[10px] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[var(--accent)] whitespace-nowrap rounded-full">${row.taskId}</span></div>
                 <pre class="m-0 whitespace-pre-wrap text-[13px] leading-[1.5] text-[#cfe0ff] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || '이력 없음'}</pre>
               </div>
             `)}</div>

@@ -88,7 +88,7 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
           : null}
       </div>
       ${lane.blockers.length > 0
-        ? html`<div class="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.25)] py-1.5 px-2.5 text-[0.78rem] text-[var(--bad)] mt-1 rounded-md">막힘: ${lane.blockers.join(' · ')}</div>`
+        ? html`<div class="bg-[var(--bad-10)] border border-[rgba(239,68,68,0.25)] py-1.5 px-2.5 text-[0.78rem] text-[var(--bad)] mt-1 rounded-md">막힘: ${lane.blockers.join(' · ')}</div>`
         : null}
       ${lane.hard_flags.length > 0
         ? html`

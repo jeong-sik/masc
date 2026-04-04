@@ -21,11 +21,30 @@ let rec rm_rf path =
     end else
       Sys.remove path
 
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/" then
+    ()
+  else if Sys.file_exists path then
+    ()
+  else begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
+let with_cwd path f =
+  let saved = Sys.getcwd () in
+  Unix.chdir path;
+  Fun.protect ~finally:(fun () -> Unix.chdir saved) f
+
+let canonical_path path =
+  try Unix.realpath path with
+  | Unix.Unix_error _ -> path
 
 let test_detects_dual_masc_roots () =
   with_temp_dir "base-path-diag" @@ fun root ->
@@ -88,6 +107,36 @@ let test_to_yojson_exposes_effective_paths () =
   Alcotest.(check bool) "roots diverge field" true
     (json |> member "roots_diverge" |> to_bool)
 
+let test_default_base_path_sanitizes_inherited_dual_roots () =
+  with_temp_dir "base-path-default" @@ fun root ->
+  let me_root = Filename.concat root "me" in
+  let repo = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
+  mkdir_p repo;
+  Unix.mkdir (Filename.concat me_root ".masc") 0o755;
+  Unix.mkdir (Filename.concat repo ".masc") 0o755;
+  with_cwd repo @@ fun () ->
+  with_env "ME_ROOT" (Some me_root) @@ fun () ->
+  with_env "MASC_BASE_PATH" (Some me_root) @@ fun () ->
+  with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "") @@ fun () ->
+  Alcotest.(check string) "default base path prefers checkout root"
+    (canonical_path repo)
+    (Server_mcp_transport_http.default_base_path () |> canonical_path)
+
+let test_default_base_path_respects_opt_in_for_inherited_root () =
+  with_temp_dir "base-path-default-optin" @@ fun root ->
+  let me_root = Filename.concat root "me" in
+  let repo = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
+  mkdir_p repo;
+  Unix.mkdir (Filename.concat me_root ".masc") 0o755;
+  Unix.mkdir (Filename.concat repo ".masc") 0o755;
+  with_cwd repo @@ fun () ->
+  with_env "ME_ROOT" (Some me_root) @@ fun () ->
+  with_env "MASC_BASE_PATH" (Some me_root) @@ fun () ->
+  with_env "MASC_ALLOW_INHERITED_BASE_PATH" (Some "1") @@ fun () ->
+  Alcotest.(check string) "opt-in keeps inherited root"
+    (canonical_path me_root)
+    (Server_mcp_transport_http.default_base_path () |> canonical_path)
+
 let () =
   Alcotest.run "Server_base_path_diagnostics"
     [
@@ -99,5 +148,9 @@ let () =
             test_strict_violation_respects_env;
           Alcotest.test_case "json exposes effective paths" `Quick
             test_to_yojson_exposes_effective_paths;
+          Alcotest.test_case "default base path sanitizes inherited dual roots"
+            `Quick test_default_base_path_sanitizes_inherited_dual_roots;
+          Alcotest.test_case "default base path honors inherited opt-in" `Quick
+            test_default_base_path_respects_opt_in_for_inherited_root;
         ] );
     ]

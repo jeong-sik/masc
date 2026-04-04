@@ -490,6 +490,9 @@ let test_keeper_msg_auto_team_session_bridge () =
     Alcotest.skip ()
   else
   ensure_fs env;
+  if Masc_mcp.Local_runtime_pool.healthy_runtime_count () <= 0 then
+    Alcotest.skip ()
+  else
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect

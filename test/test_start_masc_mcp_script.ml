@@ -292,6 +292,38 @@ let test_parent_project_base_path_with_dual_masc_roots_is_sanitized () =
       check bool "parent root inheritance corrected to repo root" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ repo)))
 
+let test_zshenv_inherited_base_path_with_dual_roots_is_sanitized () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let parent = Filename.concat dir "parent-root" in
+      let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
+      let home_dir = Filename.concat dir "home" in
+      mkdir_p repo;
+      mkdir_p home_dir;
+      mkdir_p (Filename.concat parent ".masc");
+      mkdir_p (Filename.concat repo ".masc");
+      write_file (Filename.concat home_dir ".zshenv")
+        (Printf.sprintf "export MASC_BASE_PATH=%s\n" parent);
+      let script = Filename.concat repo "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe repo;
+      let capture = Filename.concat dir "captured-zshenv-sanitized.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:repo
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("HOME", home_dir);
+              ("MASC_ALLOW_INHERITED_BASE_PATH", "");
+            ]
+          (Printf.sprintf "%s --http --port 9965" (quote script))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "zshenv inherited base path corrected to repo root" true
+        (contains_substring captured ("MASC_BASE_PATH=" ^ repo)))
+
 let test_dual_masc_roots_opt_in_preserves_inherited_base_path () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
@@ -424,6 +456,8 @@ let () =
             test_inherited_base_path_with_dual_masc_roots_is_sanitized;
           test_case "parent project inherited base path is sanitized" `Quick
             test_parent_project_base_path_with_dual_masc_roots_is_sanitized;
+          test_case "zshenv inherited base path is sanitized" `Quick
+            test_zshenv_inherited_base_path_with_dual_roots_is_sanitized;
           test_case "dual roots opt-in preserves inherited base path" `Quick
             test_dual_masc_roots_opt_in_preserves_inherited_base_path;
           test_case "worktree prefers local build over workspace build" `Quick

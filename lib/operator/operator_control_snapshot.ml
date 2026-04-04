@@ -657,7 +657,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       | `Wait ->
         (* Another fiber is computing this key — poll-retry outside mutex
            to remain cancellable. *)
-        Eio.Fiber.yield ();
+        Eio.Time.sleep ctx.clock _poll_interval_s;
         cache_lookup ~waited:(waited +. _poll_interval_s)
       | `Compute cond ->
         (match compute_snapshot () with

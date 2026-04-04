@@ -211,10 +211,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
     | `Timed_out -> raise (Compute_timeout (key, true))
     | `Wait slot_cond ->
       (* Sleep briefly outside the mutex — this IS cancellable since
-         Eio.Time.sleep is a cooperative suspension point. *)
-      (match !clock_ref with
-       | Some (Clock clk) -> Eio.Time.sleep clk wait_poll_interval_sec
-       | None -> Eio.Fiber.yield ());
+         Time_compat.sleep delegates to Eio.Time.sleep which is a cooperative suspension point. *)
+      Time_compat.sleep wait_poll_interval_sec;
       try_get ~waited:(waited +. wait_poll_interval_sec)
         ~watching_cond:(Some slot_cond)
     | `Stale (stale_value, cond) ->

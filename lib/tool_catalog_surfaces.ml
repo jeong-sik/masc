@@ -46,12 +46,6 @@ let keeper_internal_tools =
     "keeper_shell_readonly";
     "keeper_bash";
     "keeper_github";
-    "keeper_voice_speak";
-    "keeper_voice_listen";
-    "keeper_voice_agent";
-    "keeper_voice_sessions";
-    "keeper_voice_session_start";
-    "keeper_voice_session_end";
     (* keeper_deliberation_decision: Agent_sdk.Structured result schema, not
        a regular tool — does not need a keeper shard entry.
        keeper_unified: cascade name, not a tool. *)
@@ -70,11 +64,6 @@ let keeper_internal_replacement = function
   | "keeper_board_vote" -> Some "masc_board_vote"
   | "keeper_board_stats" -> Some "masc_board_stats"
   | "keeper_board_search" -> Some "masc_board_search"
-  | "keeper_voice_speak" -> Some "masc_voice_speak"
-  | "keeper_voice_agent" -> Some "masc_voice_agent"
-  | "keeper_voice_sessions" -> Some "masc_voice_sessions"
-  | "keeper_voice_session_start" -> Some "masc_voice_session_start"
-  | "keeper_voice_session_end" -> Some "masc_voice_session_end"
   | "keeper_tasks_list" -> Some "masc_tasks"
   | "keeper_broadcast" -> Some "masc_broadcast"
   | _ -> None
@@ -119,19 +108,11 @@ let public_mcp_surface_tools =
     (* Keeper interaction *)
     "masc_keeper_msg"; "masc_keeper_list"; "masc_keeper_status";
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_down";
-    (* Voice *)
-    "masc_voice_agent"; "masc_voice_sessions"; "masc_voice_speak";
-    "masc_voice_session_start"; "masc_voice_session_end";
-    "masc_voice_conference_start"; "masc_voice_conference_end";
-    "masc_voice_ping_pong";
     (* Board *)
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote"; "masc_board_delete";
     (* Agent discovery *)
     "masc_agents"; "masc_dashboard"; "masc_agent_card";
-    (* Transport *)
-    "masc_transport_status"; "masc_websocket_discovery";
-    "masc_webrtc_offer"; "masc_webrtc_answer";
     (* Utility *)
     "masc_tool_help"; "masc_web_search"; "masc_check";
     (* Board extended *)
@@ -140,8 +121,7 @@ let public_mcp_surface_tools =
     (* Agent discovery *)
     "masc_agent_timeline";
     (* Phase 2: surface SSOT *)
-    "masc_board_migrate"; "masc_board_reclassify"; "masc_bounded_run";
-    "masc_episode_flush"; "masc_episode_list";
+    "masc_bounded_run";
     "masc_recall_search";
     "masc_verify_auto"; "masc_verify_handoff"; "masc_verify_pending";
     "masc_verify_request"; "masc_verify_status"; "masc_verify_submit";
@@ -153,10 +133,6 @@ let spawned_agent_surface_tools =
     "masc_task_history"; "masc_broadcast"; "masc_join"; "masc_leave";
     "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
     "masc_messages";
-    "masc_voice_agent"; "masc_voice_sessions"; "masc_voice_speak";
-    "masc_voice_session_start"; "masc_voice_session_end";
-    "masc_voice_conference_start"; "masc_voice_conference_end";
-    "masc_voice_ping_pong";
     "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
     "masc_handover_create"; "masc_handover_list"; "masc_handover_claim";
     "masc_handover_get";
@@ -164,13 +140,10 @@ let spawned_agent_surface_tools =
     "masc_board_list"; "masc_board_post"; "masc_board_comment";
     "masc_board_vote"; "masc_board_get";
     "masc_tool_help"; "masc_web_search";
-    "masc_portal_open"; "masc_portal_send"; "masc_portal_status";
     "masc_team_session_start"; "masc_team_session_step";
     "masc_team_session_status"; "masc_team_session_events";
     "masc_team_session_finalize"; "masc_team_session_stop";
     "masc_team_session_report"; "masc_team_session_list";
-    "masc_a2a_delegate"; "masc_a2a_subscribe";
-    "masc_a2a_discover"; "masc_a2a_query_skill"; "masc_a2a_unsubscribe";
     "masc_poll_events"; "masc_spawn";
     "masc_note_add";
     (* Phase 2: surface SSOT *)
@@ -181,7 +154,6 @@ let spawned_agent_surface_tools =
     "masc_find_by_capability";
     "masc_keeper_tool_catalog";
     "masc_plan_clear_task"; "masc_plan_get_task";
-    "masc_portal_close";
     "masc_room_strategy_get"; "masc_room_strategy_set";
     "masc_team_session_compare"; "masc_team_session_prove";
     "masc_update_priority";
@@ -270,9 +242,7 @@ let system_internal_surface_tools =
     "masc_init"; "masc_reset"; "masc_register_capabilities";
     (* Namespace onboarding compatibility alias *)
     "masc_set_room";
-    (* Governance pipeline — auto-executed (active tools only;
-       masc_approve/reject/branch/interrupt/pending_interrupts are Deprecated
-       in Tool_catalog — they shell out to the removed masc-checkpoint CLI) *)
+    (* Governance pipeline — auto-executed *)
     "masc_governance_set";
     (* Concurrency control *)
     "masc_lock"; "masc_unlock";

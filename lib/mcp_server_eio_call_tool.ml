@@ -225,11 +225,13 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        (* Never let a tool exception crash the MCP server. *)
        let err = Printexc.to_string exn in
+       let trace = Printexc.get_backtrace () in
+       let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
        if contains_casefold err "Invalid_argument(\"MASC not initialized" then
          (false, Types.masc_error_to_string Types.NotInitialized)
        else
-         (Log.Mcp.error "tools/call crashed: %s" err;
-          false, Printf.sprintf "Internal error: %s" err)
+         (Log.Mcp.error "tools/call crashed: %s" err_detail;
+          false, Printf.sprintf "Internal error: %s" err_detail)
     in
     if !local_timeout_hit then timeout_hit := true;
     result

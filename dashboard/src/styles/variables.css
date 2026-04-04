@@ -2,6 +2,7 @@
 
 :root {
   --bg-0: #0b1220;
+  --bg-1: rgba(30, 41, 59, 0.95);
   --card: rgba(16, 24, 42, 0.92);
   --card-border: rgba(138, 163, 211, 0.2);
   --text-strong: #eaf1ff;

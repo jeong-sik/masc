@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [2.224.0] - 2026-04-04
+
+### Added
+- **SSOT consolidation** -- consolidate SSOT violations and mark Det/NonDet boundaries (#5038).
+- **OAS Tool_middleware** -- use OAS Tool_middleware, remove duplicate schema conversion (#5007).
+- **Keeper voice tools** -- add keeper voice tools to internal SSOT surface (#5059).
+
+### Fixed
+- **Route constants** -- extract keeper route constants and reject unknown actions (#5037).
+- **Dashboard contrast** -- improve text contrast readability on dark backgrounds (#5033).
+- **Orphaned tools** -- register 25 orphaned tool schemas as Deprecated (#5052).
+
 ## [2.223.0] - 2026-04-04
 
 ### Fixed

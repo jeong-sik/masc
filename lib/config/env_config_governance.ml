@@ -26,7 +26,7 @@ module Inference = struct
 
   (** Enable inference response cache (L1+L2). *)
   let cache_enabled =
-    get_bool ~default:true "MASC_INFERENCE_CACHE_ENABLED"
+    Feature_flag_registry.get_bool "MASC_INFERENCE_CACHE_ENABLED"
 
   (** Default TTL for inference response cache (seconds). *)
   let cache_ttl_seconds =
@@ -122,7 +122,7 @@ end
 
 module Operator = struct
   (** Whether operator judge background loop is enabled. Default: true. *)
-  let judge_enabled = get_bool ~default:true "MASC_OPERATOR_JUDGE_ENABLED"
+  let judge_enabled = Feature_flag_registry.get_bool "MASC_OPERATOR_JUDGE_ENABLED"
 
   (** Operator judge interval, clamped to >= 15s. Default: 60. *)
   let judge_interval_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_INTERVAL_SEC")
@@ -142,13 +142,13 @@ end
 module Dashboard_config = struct
   (** Whether dashboard fixtures are enabled. Default: false.
       Runtime-readable (tests change this via putenv). *)
-  let fixtures_enabled () = get_bool ~default:false "MASC_DASHBOARD_FIXTURES_ENABLED"
+  let fixtures_enabled () = Feature_flag_registry.get_bool "MASC_DASHBOARD_FIXTURES_ENABLED"
 
   (** Whether the proactive command-plane snapshot cache should run.
       Default: false because large roots can make the full snapshot too heavy
       for always-on background refresh. *)
   let command_plane_snapshot_refresh_enabled () =
-    get_bool ~default:false "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED"
+    Feature_flag_registry.get_bool "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED"
 
   (** Max age for an on-demand command-plane snapshot cache hit. *)
   let command_plane_snapshot_cache_ttl_s () =
@@ -164,7 +164,7 @@ module Dashboard_config = struct
     max 15 (get_int ~default:60 "MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC")
 
   (** Whether governance judge is enabled. Default: true. *)
-  let governance_judge_enabled = get_bool ~default:true "MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED"
+  let governance_judge_enabled = Feature_flag_registry.get_bool "MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED"
 end
 
 (** {1 Model Routing Defaults} *)

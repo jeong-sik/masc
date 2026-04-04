@@ -236,6 +236,15 @@ let runtime_source flag =
   | Some _ -> "env"
   | None -> "default"
 
+
+(** Lookup the runtime value of a flag using its registry default. *)
+let get_bool env_name =
+  match find_opt env_name with
+  | Some flag -> runtime_value flag
+  | None ->
+      Printf.eprintf "WARNING: feature flag %s not found in registry\n%!" env_name;
+      Env_config_core.get_bool ~default:false env_name
+
 let lifecycle_to_string = function
   | Active -> "active"
   | Deprecated reason -> "deprecated: " ^ reason

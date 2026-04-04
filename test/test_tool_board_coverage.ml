@@ -100,14 +100,18 @@ let test_is_agent () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check bool) "lowercase no space = agent" true
+  (* is_agent uses agent_lookup_hook — returns false when no hook installed *)
+  Alcotest.(check bool) "no hook = not agent" false
     (Tool_board.is_agent "dreamer");
-  Alcotest.(check bool) "with space = not agent" false
-    (Tool_board.is_agent "John Smith");
-  Alcotest.(check bool) "uppercase = not agent" false
-    (Tool_board.is_agent "Dreamer");
-  Alcotest.(check bool) "empty = not agent" false
-    (Tool_board.is_agent "")
+  (* Install a mock hook that recognises "dreamer" *)
+  Tool_board.set_agent_lookup (fun name -> name = "dreamer");
+  Fun.protect ~finally:Tool_board.set_agent_lookup_none (fun () ->
+    Alcotest.(check bool) "registered agent" true
+      (Tool_board.is_agent "dreamer");
+    Alcotest.(check bool) "unregistered agent" false
+      (Tool_board.is_agent "unknown");
+    Alcotest.(check bool) "empty = not agent" false
+      (Tool_board.is_agent ""))
 
 let test_format_timestamp_relative () =
   Eio_main.run @@ fun env ->

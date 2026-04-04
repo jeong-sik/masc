@@ -929,10 +929,18 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~primary_model_max_tokens:primary_max_context
               ~checkpoint:result.checkpoint
           in
+          let scope_only_reactive =
+            observation.pending_scope_messages <> []
+            && observation.pending_mentions = []
+            && observation.pending_board_events = []
+          in
           (* 6. Observe result and update metrics *)
           let updated_meta =
             update_metrics_from_result lifecycle.updated_meta ~latency_ms
-              ~observation ~social_state result
+              ~observation
+              ~social_state
+              ~update_proactive_rt:(not scope_only_reactive)
+              result
           in
           (try
              let channel =

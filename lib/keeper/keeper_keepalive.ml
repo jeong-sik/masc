@@ -1183,8 +1183,10 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
       let resolve_done value =
         if not !resolved && Option.is_none (Eio.Promise.peek reg.done_p) then begin
           resolved := true;
-          Eio.Promise.resolve reg.done_r value
-        end
+          Eio.Promise.resolve reg.done_r value;
+          true
+        end else
+          false
       in
       let record_crash failure_reason =
         let reason = Keeper_registry.failure_reason_to_string failure_reason in
@@ -1196,29 +1198,39 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
           (Time_compat.now ()) reason;
         Keeper_registry.record_error ~base_path:ctx.config.base_path live_meta.name
           reason;
-        resolve_done (`Crashed reason);
-        publish_keeper_lifecycle ~event:"crashed" ~keeper_name:live_meta.name
-          ~detail:reason
+        if resolve_done (`Crashed reason) then
+          publish_keeper_lifecycle ~event:"crashed" ~keeper_name:live_meta.name
+            ~detail:reason
+      in
+      let record_stopped detail =
+        Keeper_registry.set_state ~base_path:ctx.config.base_path live_meta.name
+          Keeper_registry.Stopped;
+        if resolve_done `Stopped then
+          publish_keeper_lifecycle ~event:"stopped" ~keeper_name:live_meta.name
+            ~detail
       in
       Fun.protect
         (fun () ->
           try
             run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup;
-            Keeper_registry.set_state ~base_path:ctx.config.base_path live_meta.name
-              Keeper_registry.Stopped;
-            resolve_done `Stopped;
-            publish_keeper_lifecycle ~event:"stopped" ~keeper_name:live_meta.name
-              ~detail:"normal exit"
+            record_stopped "normal exit"
           with
           | Keeper_registry.Keeper_heartbeat_failure info ->
-            record_crash info.reason
+            if Atomic.get stop then
+              record_stopped "manual stop"
+            else
+              record_crash info.reason
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
-            Log.Keeper.error
-              "heartbeat loop for %s crashed: %s"
-              live_meta.name
-              (Printexc.to_string exn);
-            record_crash (Keeper_registry.Exception (Printexc.to_string exn)))
+            if Atomic.get stop then
+              record_stopped "manual stop"
+            else begin
+              Log.Keeper.error
+                "heartbeat loop for %s crashed: %s"
+                live_meta.name
+                (Printexc.to_string exn);
+              record_crash (Keeper_registry.Exception (Printexc.to_string exn))
+            end)
         ~finally:(fun () ->
           Keeper_registry.cleanup_tracking ~base_path:ctx.config.base_path live_meta.name)))
 ;;
@@ -1231,23 +1243,13 @@ let stop_keepalive name =
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
        Atomic.set entry.fiber_stop true;
+       Atomic.set entry.fiber_wakeup true;
        (match Atomic.get entry.grpc_close with
        | Some close_fn ->
           (try close_fn () with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | _exn -> ())
         | None -> ());
-       Keeper_registry.set_state ~base_path:entry.base_path name Keeper_registry.Stopped;
-       if Option.is_none (Eio.Promise.peek entry.done_p) then
-         Eio.Promise.resolve entry.done_r `Stopped;
-       Keeper_registry.cleanup_tracking ~base_path:entry.base_path name;
-       match get_bus () with
-       | Some bus ->
-         Oas_events.publish_keeper_lifecycle
-           bus
-           ~event:"stopped"
-           ~keeper_name:name
-           ~detail:"manual stop"
-       | None -> ())
+       Keeper_registry.set_state ~base_path:entry.base_path name Keeper_registry.Stopped)
     entries
 ;;

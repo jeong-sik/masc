@@ -1,6 +1,3 @@
-module Oas = Agent_sdk
-module Llm_provider = Llm_provider
-
 type error_kind =
   | Spec_parse
   | Runtime

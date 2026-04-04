@@ -79,7 +79,7 @@ let room_strategy_json config =
   let state = Room.read_state config in
   `Assoc
     [
-      ("namespace_id", `String (Room.current_room_id config));
+      ("namespace_id", `String Room.default_namespace_id);
       ("room_id", `String (Room.current_room_id config));
       ("search_strategy_default",
        Json_util.string_opt_to_json state.search_strategy_default);

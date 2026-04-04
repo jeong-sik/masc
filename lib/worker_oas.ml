@@ -16,8 +16,6 @@
 open Printf
 open Result_syntax
 
-module Oas = Agent_sdk
-
 (* ================================================================ *)
 (* worker_container_meta -> OAS Types.model                          *)
 (* ================================================================ *)
@@ -260,7 +258,6 @@ let build_agent
     |> Oas.Builder.with_tools tools
     |> Oas.Builder.with_hooks hooks
     |> Oas.Builder.with_guardrails guardrails
-    |> Oas.Builder.with_tool_retry_policy Oas.Tool_retry_policy.default_internal
     |> Oas.Builder.with_raw_trace raw_trace
     |> Oas.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Oas.Builder.with_description (description_of_meta meta)

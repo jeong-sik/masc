@@ -5,8 +5,6 @@
 
     @since OAS integration Phase F *)
 
-module Oas = Agent_sdk
-
 let high_risk_actions =
   [ "namespace_pause"; "room_pause"; "team_stop"; "team_task_inject"; "team_worker_spawn_batch" ]
 

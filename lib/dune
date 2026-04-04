@@ -207,6 +207,7 @@
    mcp_server_eio_tool_profile
    mcp_server_eio_protocol
    metrics_store_eio
+   oas
    verification
    operator_approval
    operator_pending_confirm
@@ -240,6 +241,7 @@
    goal_guard
    goal_orchestrator
    goal_scheduler
+   swarm
    swarm_goal_loop
    worker_run_evidence_summary
    room
@@ -303,6 +305,8 @@
    tool_team_session_routing_workers
    tool_team_session_step
    tool_team_session_step_spawn
+   tool_team_session_step_spawn_impl
+   tool_team_session_step_spawn_run
    tool_team_session_step_exec
    tool_team_session_step_types
    team_session_plan
@@ -699,6 +703,7 @@
    agent_sdk
    agent_sdk.llm_provider
    agent_sdk.swarm
+
    uri
    tls
    tls-eio

@@ -8,6 +8,8 @@ import type {
   AutoresearchLoopsResponse,
 } from '../api/autoresearch'
 
+void vi
+
 function cycleRecord(cycle: number): AutoresearchCycleRecord {
   return {
     cycle,

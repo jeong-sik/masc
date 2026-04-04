@@ -1,6 +1,3 @@
-
-module Oas = Agent_sdk
-
 type provider_snapshot = {
   provider : string;
   kind : string;

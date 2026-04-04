@@ -14,13 +14,13 @@ val of_delivery_contract :
   execution_scope:Team_session_types.execution_scope option ->
   delivery_contract:Team_session_types.delivery_contract ->
   tool_names:string list ->
-  Agent_sdk.Risk_contract.t
+  Oas.Risk_contract.t
 
 val of_keeper :
   keeper_name:string ->
   goal:string ->
   scope_kind:string ->
   execution_scope:string ->
-  Agent_sdk.Risk_contract.t
+  Oas.Risk_contract.t
 
-val of_keeper_meta : Keeper_types.keeper_meta -> Agent_sdk.Risk_contract.t
+val of_keeper_meta : Keeper_types.keeper_meta -> Oas.Risk_contract.t

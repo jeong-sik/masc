@@ -508,13 +508,34 @@ let parse_snapshot_view = function
       | _ -> Full)
   | None -> Full
 
-(* Snapshot TTL cache: avoids redundant DB queries on repeated calls
-   (dashboard SSE polling, multiple MCP clients). *)
-let _snapshot_cache : (string * Yojson.Safe.t * float) option ref = ref None
+(* Snapshot TTL cache with same-key deduplication (singleflight).
+   When multiple fibers hit a cache miss for the same key concurrently,
+   only one computes; the rest wait for its result via Eio.Condition.
+   This prevents memory bursts during keeper autoboot where many
+   concurrent dashboard polls would each build heavy keeper snapshots. *)
+
+type snapshot_slot =
+  | Cached of { value : Yojson.Safe.t; expires_at : float }
+  | Computing of { cond : Eio.Condition.t }
+
+let _snapshot_table : (string, snapshot_slot) Hashtbl.t = Hashtbl.create 4
+let _snapshot_mu = Eio.Mutex.create ()
 
 let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
 
-let invalidate_snapshot_cache () = _snapshot_cache := None
+let invalidate_snapshot_cache () =
+  if Eio_guard.is_ready () then begin
+    let conds =
+      Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
+        let cs = Hashtbl.fold (fun _key slot acc ->
+          match slot with Computing { cond } -> cond :: acc | _ -> acc
+        ) _snapshot_table [] in
+        Hashtbl.clear _snapshot_table;
+        cs)
+    in
+    List.iter Eio.Condition.broadcast conds
+  end else
+    Hashtbl.clear _snapshot_table
 
 let namespace_scope_cache_segment (_config : Room_utils.config) = "default"
 
@@ -531,11 +552,78 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       include_messages include_sessions include_keepers include_summary_fields
       include_command_plane lightweight_summary
   in
-  let now = Time_compat.now () in
-  (match !_snapshot_cache with
-   | Some (k, json, ts) when k = cache_key && now -. ts < _snapshot_ttl_s ->
-       json
-   | _ ->
+  (* Singleflight cache lookup: check for fresh hit, in-flight compute,
+     or start a new compute.  Uses Eio.Mutex for safe Hashtbl access.
+     Waiters use poll-retry (not Condition.await inside protect:true)
+     to stay cancellable — same pattern as Dashboard_cache. *)
+  let _max_wait_s = 60.0 in
+  let _poll_interval_s = 0.25 in
+  let rec cache_lookup ~waited =
+    if not (Eio_guard.is_ready ()) then
+      (* Pre-Eio: no concurrency, compute directly *)
+      let now = Time_compat.now () in
+      match Hashtbl.find_opt _snapshot_table cache_key with
+      | Some (Cached { value; expires_at }) when now < expires_at -> value
+      | _ ->
+        let result = compute_snapshot () in
+        let ts = Time_compat.now () in
+        Hashtbl.replace _snapshot_table cache_key
+          (Cached { value = result; expires_at = ts +. _snapshot_ttl_s });
+        result
+    else
+      let action =
+        Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
+          match Hashtbl.find_opt _snapshot_table cache_key with
+          | Some (Cached { value; expires_at }) when Time_compat.now () < expires_at ->
+            `Hit value
+          | Some (Computing { cond }) ->
+            if waited >= _max_wait_s then begin
+              (* Stuck compute — evict and take over *)
+              Log.Dashboard.warn
+                "[snapshot_json] evicting stuck Computing slot for %s (%.1fs waited)"
+                cache_key waited;
+              Hashtbl.remove _snapshot_table cache_key;
+              Eio.Condition.broadcast cond;
+              let new_cond = Eio.Condition.create () in
+              Hashtbl.replace _snapshot_table cache_key (Computing { cond = new_cond });
+              `Compute new_cond
+            end else
+              `Wait
+          | _ ->
+            let cond = Eio.Condition.create () in
+            Hashtbl.replace _snapshot_table cache_key (Computing { cond });
+            `Compute cond)
+      in
+      match action with
+      | `Hit value -> value
+      | `Wait ->
+        (* Another fiber is computing this key — poll-retry outside mutex
+           to remain cancellable. *)
+        Eio.Fiber.yield ();
+        cache_lookup ~waited:(waited +. _poll_interval_s)
+      | `Compute cond ->
+        (match compute_snapshot () with
+         | result ->
+           let ts = Time_compat.now () in
+           Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
+             (* Only write back if we still own the slot *)
+             match Hashtbl.find_opt _snapshot_table cache_key with
+             | Some (Computing { cond = c }) when c == cond ->
+               Hashtbl.replace _snapshot_table cache_key
+                 (Cached { value = result; expires_at = ts +. _snapshot_ttl_s })
+             | _ -> ());
+           Eio.Condition.broadcast cond;
+           result
+         | exception exn ->
+           let bt = Printexc.get_raw_backtrace () in
+           Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
+             match Hashtbl.find_opt _snapshot_table cache_key with
+             | Some (Computing { cond = c }) when c == cond ->
+               Hashtbl.remove _snapshot_table cache_key
+             | _ -> ());
+           Eio.Condition.broadcast cond;
+           Printexc.raise_with_backtrace exn bt)
+  and compute_snapshot () =
   let t0 = Time_compat.now () in
   let timing_records = ref [] in
   let timed label f =
@@ -762,5 +850,6 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
         Log.Dashboard.info "[snapshot_json]   %s: %.0fms" label (dt *. 1000.0))
       (List.rev !timing_records)
   end;
-  _snapshot_cache := Some (cache_key, result, now);
-  result)
+  result
+  in
+  cache_lookup ~waited:0.0

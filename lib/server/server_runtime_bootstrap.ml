@@ -63,6 +63,9 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     end
   in
   Unix.putenv "MASC_BASE_PATH" base_path;
+  (* RFC-0001 Gate A: initialize instrumentation stores *)
+  Heuristic_metrics.init ~base_path;
+  Agent_stress.init ~base_path;
   let state =
     Mcp_eio.create_state_eio ~sw ~env:caqti_env ~proc_mgr ~fs ~clock
       ~mono_clock ~net

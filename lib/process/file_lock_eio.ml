@@ -85,9 +85,10 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
     raise exn
 
 (** Fiber-friendly wrapper around [acquire_flock_retry].
-    Opening/closing the descriptor uses a systhread, but the F_TLOCK attempt
-    itself runs directly because it is non-blocking. Retry sleep yields to the
-    Eio scheduler when a clock is available and otherwise sleeps in a
+    Opening/closing the descriptor uses a systhread, and the F_TLOCK attempt
+    also runs in a systhread to avoid blocking the Eio domain on filesystems
+    that do not honor the non-blocking contract reliably. Retry sleep yields
+    to the Eio scheduler when a clock is available and otherwise sleeps in a
     systhread so the calling fiber does not block the domain. *)
 let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
     ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
@@ -98,12 +99,13 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
                         caller lock_path max_attempts))
     else
       let success =
-        try
-          Unix.lockf fd Unix.F_TLOCK 0;
-          true
-        with
-        | Unix.Unix_error (Unix.EAGAIN, _, _)
-        | Unix.Unix_error (Unix.EACCES, _, _) -> false
+        run_blocking_lock_op (fun () ->
+            try
+              Unix.lockf fd Unix.F_TLOCK 0;
+              true
+            with
+            | Unix.Unix_error (Unix.EAGAIN, _, _)
+            | Unix.Unix_error (Unix.EACCES, _, _) -> false)
       in
       if success then fd
       else begin

@@ -47,6 +47,8 @@ let keeper_internal_tools =
     "keeper_bash";
     "keeper_github";
     "keeper_voice_speak";
+    (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
+       counterpart on MCP surfaces. *)
     "keeper_voice_listen";
     "keeper_voice_agent";
     "keeper_voice_sessions";

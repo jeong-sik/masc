@@ -795,7 +795,7 @@ let test_keeper_list_items_expose_runtime_config_summary () =
         Yojson.Safe.Util.(row |> member "runtime_class" |> to_string);
       check string "scope kind" "global"
         Yojson.Safe.Util.(row |> member "scope_kind" |> to_string);
-      check string "room scope" "all"
+      check string "room scope normalized to current" "current"
         Yojson.Safe.Util.(row |> member "room_scope" |> to_string);
       check bool "presence keepalive removed" true
         Yojson.Safe.Util.(row |> member "presence_keepalive" = `Null);
@@ -2174,7 +2174,7 @@ mid_goal = "Stay bootable from declarative config."
 long_goal = "Remain durable."
 soul_profile = "delivery"
 instructions = "Bootstrap from TOML only."
-room_scope = "all"
+room_scope = "current"
 scope_kind = "global"
 mention_targets = ["janitor"]
 proactive_enabled = false

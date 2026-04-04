@@ -48,12 +48,12 @@ State that describes the coordination domain — not how an agent thinks, but wh
 
 | Category | Data | Current Owner | Target Owner |
 |----------|------|---------------|--------------|
-| Room membership | `joined_room_ids`, `room_scope`, agents.json | MASC | MASC (single-room compatibility state) |
+| Room membership | `joined_room_ids`, `room_scope` (`current` only), agents.json | MASC | MASC (single-room compatibility state) |
 | Task claims | task files, `assignee`, `status` | MASC | MASC (correct) |
 | Board posts | `board_posts`, `board_comments`, `board_votes` | MASC | MASC (correct) |
 | Governance | petitions, cases, rulings, execution orders | MASC (`governance_v2`) | MASC (correct) |
 | Room votes | vote proposals, vote casts | MASC (`room_vote`) | MASC (correct) |
-| Keeper profile | `name`, `goal`, `soul_profile`, `instructions`, `proactive_*`, `room_scope`, `scope_kind`, `mention_targets` | MASC (`keeper_meta`) | MASC (correct) |
+| Keeper profile | `name`, `goal`, `soul_profile`, `instructions`, `proactive_*`, `room_scope` (`current` only), `scope_kind`, `mention_targets` | MASC (`keeper_meta`) | MASC (correct) |
 | Agent economy | token economy, reputation | MASC (`agent_economy`, `agent_reputation`) | MASC (correct) |
 | Broadcasts | room event log, SSE events | MASC | MASC (correct) |
 | Institution rules | institution.json, norms | MASC (`institution_eio`) | MASC (correct) |
@@ -83,7 +83,7 @@ So the flattened operational surface is roughly 83 fields. Approximately 29-30 o
 
 **Domain state fields in keeper_meta (correct placement):**
 - `name`, `agent_name`, `goal`, `soul_profile`, `instructions` — keeper identity/profile
-- `scope_kind`, `room_scope`, `mention_targets`, `proactive_*` — operational coordination policy
+- `scope_kind`, `room_scope` (`current` only compatibility), `mention_targets`, `proactive_*` — operational coordination policy
 - `joined_room_ids`, `last_seen_seq_by_room` — current-room compatibility state (single-room canonical model)
 - `autonomy_level`, `active_goal_ids` — coordination state
 

@@ -96,7 +96,6 @@ let normalize_tool_preset_raw raw =
 let first_some = Dashboard_utils.first_some
 
 let canonical_room_scope = function
-  | "all" -> "all"
   | _ -> "current"
 
 let canonical_scope_kind = function

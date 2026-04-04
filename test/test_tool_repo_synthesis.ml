@@ -25,6 +25,30 @@ let with_temp_base f =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () -> f dir)
 
+let saturate_repo_synthesis_platoon config ~actor =
+  match
+    Lib.Tool_autoresearch_repo_synthesis.ensure_repo_synthesis_units config
+      ~actor ~active_roster:[ actor ]
+  with
+  | Error message -> fail message
+  | Ok _ ->
+      for idx = 1 to 8 do
+        match
+          Lib.Command_plane_v2.start_operation config ~actor
+            (`Assoc
+              [
+                ("assigned_unit_id", `String "platoon-repo-synthesis");
+                ("objective", `String (Printf.sprintf "Warm repo synthesis slot %d" idx));
+                ("policy_class", `String "guarded");
+                ("budget_class", `String "standard");
+                ("workload_profile", `String "coding_task");
+                ("stage", `String "inspect");
+              ])
+        with
+        | Ok _ -> ()
+        | Error message -> fail message
+      done
+
 let test_repo_synthesis_swarm_start_creates_operation_session_and_run () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -112,6 +136,77 @@ let test_repo_synthesis_swarm_start_creates_operation_session_and_run () =
           session_json |> member "session" |> member "planned_workers" |> to_list
           |> List.length)
 
+let test_repo_synthesis_swarm_start_avoids_saturated_platoon_cap () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  with_temp_base @@ fun base_path ->
+  let config = Lib.Room.default_config base_path in
+  ignore (Lib.Room.init config ~agent_name:(Some "owner"));
+  ignore (Lib.Room.join config ~agent_name:"owner" ~capabilities:[ "ocaml"; "docs" ] ());
+  saturate_repo_synthesis_platoon config ~actor:"owner";
+  let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_ ~program_note:_ =
+    Lib.Team_session_engine_eio.start_session
+      ~sw
+      ~env
+      ~config
+      ~created_by:"owner"
+      ~goal
+      ~duration_seconds:300
+      ~execution_scope:Team_session_types.Limited_code_change
+      ~checkpoint_interval_sec:30
+      ~min_agents:1
+      ~scale_profile:Team_session_types.Scale_standard
+      ~control_profile:Team_session_types.Control_hierarchical_quality_v1
+      ~orchestration_mode:Team_session_types.Assist
+      ~communication_mode:Team_session_types.Comm_broadcast
+      ~model_cascade:[]
+      ~fallback_policy:Team_session_types.Fallback_cascade_then_task
+      ~instruction_profile:Team_session_types.Profile_strict
+      ~alert_channel:Team_session_types.Alert_broadcast
+      ~auto_resume:true
+      ~report_formats:[ Team_session_types.Markdown; Team_session_types.Json ]
+      ~agent_names:[]
+      ~operation_id
+  in
+  let ctx : Lib.Tool_autoresearch.context =
+    {
+      base_path;
+      agent_name = Some "owner";
+      start_operation = None;
+      start_team_session = Some start_team_session;
+      config = Some config;
+      sw = Some sw;
+      clock = Some clock;
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("goal", `String "Avoid platoon cap");
+        ("question", `String "How is repo synthesis routed?");
+        ("repo_root", `String base_path);
+      ]
+  in
+  match
+    Lib.Tool_autoresearch.dispatch ctx ~name:"masc_repo_synthesis_swarm_start"
+      ~args
+  with
+  | None -> fail "dispatch returned None"
+  | Some (false, msg) -> fail msg
+  | Some (true, payload) ->
+      let open Yojson.Safe.Util in
+      let json = Yojson.Safe.from_string payload in
+      let operation_id = json |> member "operation_id" |> to_string in
+      let operations =
+        Lib.Command_plane_v2.operation_status_json config ~operation_id ()
+      in
+      check string "repo synthesis assigns company unit"
+        "company-repo-synthesis"
+        (operations |> member "operations" |> index 0 |> member "operation"
+         |> member "assigned_unit_id" |> to_string)
+
 let () =
   run "tool_repo_synthesis"
     [
@@ -119,5 +214,7 @@ let () =
        [
          test_case "swarm_start creates operation session and run" `Quick
            test_repo_synthesis_swarm_start_creates_operation_session_and_run;
+         test_case "swarm_start avoids saturated platoon cap" `Quick
+           test_repo_synthesis_swarm_start_avoids_saturated_platoon_cap;
        ]);
     ]

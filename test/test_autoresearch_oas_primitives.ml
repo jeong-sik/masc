@@ -296,6 +296,105 @@ let test_build_verify_downgrade_rewrites_history () =
     "discard"
     (Lib.Autoresearch.decision_to_string next_history_head.decision)
 
+let test_start_seeds_source_only_target_file_into_managed_worktree () =
+  with_temp_dir "masc_autoresearch_seed" @@ fun root ->
+  with_me_root root @@ fun () ->
+  with_eio @@ fun ~sw ~clock ->
+  with_clean_state @@ fun () ->
+  let repo = Filename.concat root "repo" in
+  Unix.mkdir repo 0o755;
+  init_git_repo repo;
+  let target_file = ".masc/keepers/admin-keeper/test_ar.py" in
+  let source_path = Filename.concat repo target_file in
+  write_file source_path "print('seeded')\n";
+  let ctx : Lib.Tool_autoresearch.context =
+    {
+      base_path = root;
+      agent_name = Some "test";
+      start_operation = None;
+      start_team_session = None;
+      config = None;
+      sw = Some sw;
+      clock = Some clock;
+    }
+  in
+  match
+    Lib.Tool_autoresearch.dispatch ctx ~name:"masc_autoresearch_start"
+      ~args:
+        (`Assoc
+          [
+            ("goal", `String "Improve keeper helper");
+            ("metric_fn", `String "/usr/bin/printf 1.0");
+            ("target_file", `String target_file);
+            ("workdir", `String repo);
+            ("max_cycles", `Int 1);
+          ])
+  with
+  | None -> fail "dispatch returned None"
+  | Some (false, msg) -> fail msg
+  | Some (true, payload) ->
+      let open Yojson.Safe.Util in
+      let json = Yojson.Safe.from_string payload in
+      let managed_workdir = json |> member "workdir" |> to_string in
+      check bool "seed warning present" true
+        (json |> member "warnings" |> to_list
+         |> List.exists (fun value -> to_string value = "target_file_seeded_from_source"));
+      check string "seeded content preserved" "print('seeded')\n"
+        (Fs_compat.load_file (Filename.concat managed_workdir target_file))
+
+let test_cycle_restores_ignored_target_after_empty_diff () =
+  with_temp_dir "masc_autoresearch_restore" @@ fun root ->
+  with_me_root root @@ fun () ->
+  with_eio @@ fun ~sw ~clock ->
+  with_clean_state @@ fun () ->
+  let repo = Filename.concat root "repo" in
+  Unix.mkdir repo 0o755;
+  init_git_repo repo;
+  run_in_dir repo "git checkout -q -b ignored-target-loop";
+  write_file (Filename.concat repo ".gitignore") ".ignored/\n";
+  run_in_dir repo "git add .gitignore";
+  run_in_dir repo "git commit -q -m ignore";
+  let target_file = ".ignored/target.txt" in
+  let target_path = Filename.concat repo target_file in
+  write_file target_path "original\n";
+  let state =
+    Lib.Autoresearch.create_state
+      ~goal:"Try ignored file"
+      ~metric_fn:"/usr/bin/printf 1.0"
+      ~model_model:"glm:test"
+      ~target_file
+      ~cycle_timeout_s:5.0
+      ~max_cycles:3
+      ~workdir:repo
+      ()
+  in
+  Lib.Autoresearch.with_loops_rw (fun () ->
+      Hashtbl.replace Lib.Autoresearch.active_loops state.loop_id state;
+      Lib.Autoresearch.latest_loop_id := Some state.loop_id);
+  let ctx : Lib.Tool_autoresearch_repo_synthesis.context =
+    {
+      base_path = root;
+      agent_name = Some "test";
+      start_operation = None;
+      start_team_session = None;
+      config = None;
+      sw = Some sw;
+      clock = Some clock;
+    }
+  in
+  Lib.Tool_autoresearch_registry.set_generator state.loop_id
+    (fun ~goal:_ ~baseline:_ ~history:_ ~insights:_ ~target_file:_ ~file_content:_ ->
+       Ok ("ignored file edit", "changed\n"));
+  let result =
+    Lib.Tool_autoresearch_cycle.handle_cycle ctx
+      (`Assoc [ ("loop_id", `String state.loop_id) ])
+  in
+  let open Yojson.Safe.Util in
+  check string "ignored file discarded" "discard"
+    (result |> member "decision" |> to_string);
+  check string "ignored file restored" "original\n"
+    (Fs_compat.load_file target_path)
+
 let () =
   run "autoresearch_oas_primitives"
     [
@@ -312,5 +411,9 @@ let () =
             test_cycle_reinjects_diff_guard_lesson;
           test_case "build verify downgrade rewrites history" `Quick
             test_build_verify_downgrade_rewrites_history;
+          test_case "start seeds source-only target file" `Quick
+            test_start_seeds_source_only_target_file_into_managed_worktree;
+          test_case "cycle restores ignored target after empty diff" `Quick
+            test_cycle_restores_ignored_target_after_empty_diff;
         ] );
     ]

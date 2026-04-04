@@ -90,7 +90,7 @@ let to_string = function
       | RoomFull max -> Printf.sprintf "Room full (max %d agents)" max)
   | Task e -> (
       match e with
-      | TaskNotFound id -> Printf.sprintf "Task not found: %s" id
+      | TaskNotFound id -> Printf.sprintf "Task not found: %s. Call masc_status to refresh your task list." id
       | TaskAlreadyClaimed owner -> Printf.sprintf "Task already claimed by: %s" owner
       | TaskInvalidState (current, expected) ->
           Printf.sprintf "Invalid task state: %s (expected %s)" current expected

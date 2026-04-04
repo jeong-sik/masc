@@ -57,7 +57,6 @@
         test_tool_access_policy
         test_tool_access_role
         test_tool_token
-
         test_tool_exposure
         test_autonomy_liberation
         test_keeper_unified
@@ -114,7 +113,6 @@
           test_tool_access_policy
           test_tool_access_role
           test_tool_token
-  
           test_tool_exposure
           test_autonomy_liberation
           test_keeper_unified

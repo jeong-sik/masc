@@ -184,6 +184,40 @@ let () =
                     (List.mem name all_names))
                 [ "masc_rooms_list"; "masc_room_create"; "masc_room_enter" ]);
         ] );
+      ( "description_budget_audit",
+        [
+          test_case "no single tool description exceeds 2000 chars" `Quick (fun () ->
+              let max_chars = 2000 in
+              let schemas = Config.raw_all_tool_schemas in
+              let violations =
+                List.filter_map
+                  (fun (s : Types.tool_schema) ->
+                    let len = String.length s.description in
+                    if len > max_chars then
+                      Some (Printf.sprintf "%s: %d chars" s.name len)
+                    else None)
+                  schemas
+              in
+              if violations <> [] then
+                Alcotest.fail
+                  (Printf.sprintf "%d tools exceed %d chars:\n%s"
+                     (List.length violations) max_chars
+                     (String.concat "\n" violations)));
+          test_case "public MCP surface total under 60K chars" `Quick (fun () ->
+              let max_total = 60000 in
+              let schemas = Config.visible_tool_schemas () in
+              let total =
+                List.fold_left
+                  (fun acc (s : Types.tool_schema) ->
+                    acc + String.length s.description)
+                  0 schemas
+              in
+              if total > max_total then
+                Alcotest.fail
+                  (Printf.sprintf
+                     "public surface total = %d chars (limit %d)"
+                     total max_total));
+        ] );
       ( "public_mcp_surface",
         [
           test_case "all public_mcp_tools exist in schema registry" `Quick

@@ -11,6 +11,14 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
+(* ── Keeper route constants (SSOT) ────────────────────────────── *)
+
+let keeper_api_prefix = "/api/v1/keepers/"
+let keeper_suffix_tools = "/tools"
+let keeper_suffix_config = "/config"
+let keeper_suffix_boot = "/boot"
+let keeper_suffix_shutdown = "/shutdown"
+
 let dedupe_tool_names names =
   Json_util.dedupe_keep_order
     (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
@@ -54,8 +62,8 @@ let keeper_tools_response_json (meta : Keeper_types.keeper_meta) =
 let handle_keeper_tools_post state req reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let req_path = Http.Request.path req in
-    let prefix = "/api/v1/keepers/" in
-    let suffix = "/tools" in
+    let prefix = keeper_api_prefix in
+    let suffix = keeper_suffix_tools in
     let plen = String.length prefix in
     let slen = String.length suffix in
     let tlen = String.length req_path in
@@ -161,7 +169,7 @@ type keeper_post_route_kind =
   | Keeper_post_unknown
 
 let classify_keeper_post_route req_path =
-  let prefix = "/api/v1/keepers/" in
+  let prefix = keeper_api_prefix in
   let plen = String.length prefix in
   let tlen = String.length req_path in
   let ends_with suffix =
@@ -170,10 +178,10 @@ let classify_keeper_post_route req_path =
     && String.sub req_path 0 plen = prefix
     && String.sub req_path (tlen - slen) slen = suffix
   in
-  if ends_with "/tools" then Keeper_post_tools
-  else if ends_with "/config" then Keeper_post_config
-  else if ends_with "/boot" then Keeper_post_boot
-  else if ends_with "/shutdown" then Keeper_post_shutdown
+  if ends_with keeper_suffix_tools then Keeper_post_tools
+  else if ends_with keeper_suffix_config then Keeper_post_config
+  else if ends_with keeper_suffix_boot then Keeper_post_boot
+  else if ends_with keeper_suffix_shutdown then Keeper_post_shutdown
   else Keeper_post_unknown
 
 let is_valid_keeper_name name =
@@ -187,8 +195,7 @@ let is_valid_keeper_name name =
           || c = '_' || c = '-')
 
 let extract_keeper_name_for_post req_path suffix =
-  let prefix = "/api/v1/keepers/" in
-  let plen = String.length prefix in
+  let plen = String.length keeper_api_prefix in
   let slen = String.length suffix in
   let raw =
     String.trim
@@ -198,7 +205,7 @@ let extract_keeper_name_for_post req_path suffix =
 
 let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in
-  let name = extract_keeper_name_for_post req_path "/config" in
+  let name = extract_keeper_name_for_post req_path keeper_suffix_config in
   if String.length name = 0 then
     Http.Response.json ~status:`Bad_request
       {|{"error":"keeper name is required"}|} reqd
@@ -288,12 +295,18 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
 
 let handle_keeper_lifecycle_post ~sw ~clock ~tool_name ~action state agent_name req reqd =
   let req_path = Http.Request.path req in
-  let suffix =
+  let suffix_result =
     match action with
-    | "boot" -> "/boot"
-    | "shutdown" -> "/shutdown"
-    | _ -> ""
+    | "boot" -> Ok keeper_suffix_boot
+    | "shutdown" -> Ok keeper_suffix_shutdown
+    | unknown ->
+        Error (Printf.sprintf "unknown keeper lifecycle action: %s" unknown)
   in
+  match suffix_result with
+  | Error msg ->
+      Http.Response.json ~status:`Bad_request
+        (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg)) reqd
+  | Ok suffix ->
   let name = extract_keeper_name_for_post req_path suffix in
   if String.length name = 0 then
     Http.Response.json ~status:`Bad_request
@@ -647,7 +660,7 @@ let rec add_routes ~sw ~clock router =
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let req_path = Http.Request.path req in
-         let prefix = "/api/v1/keepers/" in
+         let prefix = keeper_api_prefix in
          let plen = String.length prefix in
          let tlen = String.length req_path in
          let ends_with suffix =

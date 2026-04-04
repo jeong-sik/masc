@@ -33,12 +33,8 @@ let latest_delivery_verdict_json_for_session config session_id =
   Option.map Team_session_types.delivery_verdict_to_yojson
     (latest_delivery_verdict_for_session config session_id)
 
-let proof_result_status_to_string = function
-  | Oas.Cdal_proof.Completed -> "completed"
-  | Oas.Cdal_proof.Errored -> "errored"
-  | Oas.Cdal_proof.Timed_out -> "timed_out"
-  | Oas.Cdal_proof.Cancelled -> "cancelled"
-  | Oas.Cdal_proof.Context_overflow -> "context_overflow"
+let proof_result_status_to_string status =
+  Oas.Cdal_proof.show_result_status status |> String.lowercase_ascii
 
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)

@@ -83,6 +83,9 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
+let proof_result_status_to_string status =
+  Oas.Cdal_proof.show_result_status status |> String.lowercase_ascii
+
 (* ================================================================ *)
 (* Internal: resolve provider                                        *)
 (* ================================================================ *)
@@ -331,12 +334,7 @@ let run
        | Some p ->
          Log.Misc.warn "oas_worker: agent errored with CDAL proof: run_id=%s status=%s"
            p.run_id
-           (match p.result_status with
-            | Oas.Cdal_proof.Completed -> "completed"
-            | Oas.Cdal_proof.Errored -> "errored"
-            | Oas.Cdal_proof.Timed_out -> "timed_out"
-            | Oas.Cdal_proof.Cancelled -> "cancelled"
-            | Oas.Cdal_proof.Context_overflow -> "context_overflow")
+           (proof_result_status_to_string p.result_status)
        | None -> ());
       Error (Printf.sprintf "Agent run failed: %s" (Oas.Error.to_string err)))
   with

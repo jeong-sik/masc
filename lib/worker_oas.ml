@@ -38,6 +38,9 @@ let max_turns_cap_of_scope (scope : Team_session_types.execution_scope) : int =
   | Limited_code_change -> 20
   | Autonomous -> 30
 
+let proof_result_status_to_string status =
+  Oas.Cdal_proof.show_result_status status |> String.lowercase_ascii
+
 (** Derive max_turns from worker meta, applying the scope cap.
     When max_turns_override is set, it is clamped to [1, cap].
     When absent, timeout_seconds / 20 is used as a heuristic. *)
@@ -535,12 +538,7 @@ and run_existing_worker_agent
              Log.LocalWorker.warn
                "worker %s errored with CDAL proof: run_id=%s status=%s (proof persisted by Proof_store)"
                worker_name p.run_id
-               (match p.result_status with
-                | Oas.Cdal_proof.Completed -> "completed"
-                | Oas.Cdal_proof.Errored -> "errored"
-                | Oas.Cdal_proof.Timed_out -> "timed_out"
-                | Oas.Cdal_proof.Cancelled -> "cancelled"
-                | Oas.Cdal_proof.Context_overflow -> "context_overflow")
+               (proof_result_status_to_string p.result_status)
            | None -> ());
           let* () =
             Worker_container.append_worker_completion_log

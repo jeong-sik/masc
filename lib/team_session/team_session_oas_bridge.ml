@@ -362,12 +362,8 @@ let preview_text_opt text =
   let trimmed = String.trim text in
   if trimmed = "" then None else Some (preview_text trimmed)
 
-let proof_result_status_to_string = function
-  | Oas.Cdal_proof.Completed -> "completed"
-  | Oas.Cdal_proof.Errored -> "errored"
-  | Oas.Cdal_proof.Timed_out -> "timed_out"
-  | Oas.Cdal_proof.Cancelled -> "cancelled"
-  | Oas.Cdal_proof.Context_overflow -> "context_overflow"
+let proof_result_status_to_string status =
+  Oas.Cdal_proof.show_result_status status |> String.lowercase_ascii
 
 let worker_name_of_planned_worker ~(fallback : string)
     (pw : Team_session_types.planned_worker) =

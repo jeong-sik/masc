@@ -95,6 +95,9 @@ let empty_tool_audit_snapshot =
     tool_audit_at = None;
   }
 
+let is_scheduled_autonomous_channel (channel : string) : bool =
+  channel = "scheduled_autonomous" || channel = "proactive"
+
 let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
   let interaction_points = s.turn_points + s.proactive_points in
   let intervention_share =
@@ -232,8 +235,10 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
         let channel = Safe_ops.json_string ~default:"turn" "channel" j in
         let is_turn = channel = "turn" in
         let is_heartbeat = channel = "heartbeat" in
-        let is_proactive = channel = "proactive" in
-        let is_interaction = is_turn || is_proactive in
+        let is_scheduled_autonomous =
+          is_scheduled_autonomous_channel channel
+        in
+        let is_interaction = is_turn || is_scheduled_autonomous in
         let compacted = Safe_ops.json_bool ~default:false "compacted" j in
         let before_tokens =
           Safe_ops.json_int ~default:0 "compaction_before_tokens" j
@@ -357,7 +362,8 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           sample_points = acc.sample_points + 1;
           turn_points = acc.turn_points + (if is_turn then 1 else 0);
           heartbeat_points = acc.heartbeat_points + (if is_heartbeat then 1 else 0);
-          proactive_points = acc.proactive_points + (if is_proactive then 1 else 0);
+          proactive_points =
+            acc.proactive_points + (if is_scheduled_autonomous then 1 else 0);
           auto_reflect_count =
             acc.auto_reflect_count + (if is_interaction && auto_reflect_now then 1 else 0);
           auto_plan_count =

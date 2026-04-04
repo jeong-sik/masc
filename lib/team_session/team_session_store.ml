@@ -644,7 +644,11 @@ let list_sessions ?(since_unix = 0.0) ?(limit = 0) config : Team_session_types.s
           (if pg_recent_attempted then "pg_recent_failed"
            else "pg_recent_unavailable")
           err;
-        match backend_get_all config ~prefix:query_prefix with
+        match
+          (match config.backend with
+           | FileSystem _ -> Error (Backend_types.BackendNotSupported "force optimized filesystem scan")
+           | _ -> backend_get_all config ~prefix:query_prefix)
+        with
         | Ok rows -> Ok ("backend_get_all", rows)
         | Error err ->
             set_fallback "backend_get_all_failed" err;

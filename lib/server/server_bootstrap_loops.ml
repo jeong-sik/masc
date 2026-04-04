@@ -219,29 +219,18 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       Log.Keeper.info
         "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"
         config.base_path masc_root keeper_dir all_count;
-      let all_names = Keeper_types.keepalive_keeper_names config in
-      let all_count_names = List.length all_names in
-    (* Cap concurrent keepers to prevent Eio event loop starvation.
-       Each keeper heartbeat cycle does CPU-bound snapshot construction +
-       LLM API calls.  With 9+ concurrent keepers, the single-domain Eio
-       scheduler cannot service HTTP handlers between keeper fibers.
-       Configurable via MASC_KEEPER_AUTOBOOT_MAX (default 3). *)
-    let max_boot =
-      Keeper_config.int_of_env_default
-        "MASC_KEEPER_AUTOBOOT_MAX" ~default:3 ~min_v:1 ~max_v:20
-    in
-    let names =
-      if all_count_names > max_boot then begin
-        Log.Keeper.warn "autoboot: capping %d keepers to max %d (MASC_KEEPER_AUTOBOOT_MAX)"
-          all_count_names max_boot;
-        List.filteri (fun i _ -> i < max_boot) all_names
-      end else all_names
-    in
-    Log.Keeper.info "autoboot: %d keeper(s) to boot: [%s]"
-      (List.length names) (String.concat ", " names);
-    let booted = ref 0 in
-    let base_warmup = Keeper_config.keeper_bootstrap_proactive_warmup_sec () in
-    let stagger_step = Keeper_config.keeper_bootstrap_stagger_step_sec () in
+      let names = Keeper_types.keepalive_keeper_names config in
+      let turn_limit =
+        Keeper_config.int_of_env_default
+          "MASC_KEEPER_AUTOBOOT_MAX" ~default:3 ~min_v:1 ~max_v:20
+      in
+      Log.Keeper.info
+        "autoboot: %d keeper(s) to boot; concurrent keeper turns throttled to %d via MASC_KEEPER_AUTOBOOT_MAX"
+        (List.length names) turn_limit;
+      Log.Keeper.info "autoboot: keeper set [%s]" (String.concat ", " names);
+      let booted = ref 0 in
+      let base_warmup = Keeper_config.keeper_bootstrap_proactive_warmup_sec () in
+      let stagger_step = Keeper_config.keeper_bootstrap_stagger_step_sec () in
     List.iteri (fun idx name ->
         try
           Log.Keeper.info "autoboot: loading meta for %s" name;

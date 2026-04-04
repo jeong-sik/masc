@@ -386,6 +386,13 @@ let sync_keeper_presence
       if synced.joined_room_ids = []
       then (
         incr consecutive_failures;
+        (* RFC-0001 Gate A: record failure streak *)
+        Agent_stress.record {
+          agent_name = meta_current.name;
+          room_id = (match meta_current.joined_room_ids with r :: _ -> r | [] -> "");
+          kind = Failure_streak !consecutive_failures;
+          timestamp = Unix.gettimeofday ();
+        };
         Log.Keeper.warn
           "room presence returned empty rooms (%d/%d)"
           !consecutive_failures

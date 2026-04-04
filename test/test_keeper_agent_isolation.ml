@@ -60,7 +60,10 @@ let known_non_keeper_tool_names : string list =
   |> List.sort_uniq String.compare
 
 let known_shared_agent_keeper_tool_names : string list =
-  [ "masc_worktree_create"; "masc_worktree_list" ]
+  List.sort_uniq String.compare
+    ([ "masc_worktree_create"; "masc_worktree_list" ]
+     @ Tool_code_write.tool_names
+     @ [ "masc_keeper_tool_catalog"; "masc_team_session_prove" ])
 
 (* ============================================================
    Invariant 1: Non-research keepers only get keeper_* tools plus
@@ -123,8 +126,8 @@ let test_no_overlap_heuristic_vs_agent () =
   let meta = make_meta () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
-  (* Mode removal: all keepers now get worktree tools that overlap with agent surface.
-     This is the same approved overlap as for research keepers. *)
+  (* Mode removal: keepers now share worktree and code-write bridge tools
+     with spawned agents. Guard against overlap drift outside that list. *)
   let overlap =
     List.filter
       (fun n ->
@@ -153,8 +156,8 @@ let test_no_overlap_research_vs_agent () =
     [] overlap
 
 let test_shard_tools_overlap_with_agent_documented () =
-  (* Mode removal: coding shard (now in defaults) includes worktree tools
-     that also appear in the agent surface. This is the approved overlap. *)
+  (* Mode removal: coding shard tools overlap with the agent surface by
+     design; the approved shared set is tracked above. *)
   let keeper_tools = Tool_shard.keeper_model_tools
     |> List.map (fun (t : Types.tool_schema) -> t.name) in
   let agent_tools = Agent_tool_surfaces.spawned_agent_public_tool_names in

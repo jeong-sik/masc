@@ -164,11 +164,15 @@ let spawned_agent_surface_tools =
     "masc_board_list"; "masc_board_post"; "masc_board_comment";
     "masc_board_vote"; "masc_board_get";
     "masc_tool_help"; "masc_web_search";
+    (* Spawned agents rely on these read-only diagnostics/proof tools in the
+       lifecycle and team-session workflows. Keep them on the contract. *)
+    "masc_keeper_tool_catalog";
     "masc_portal_open"; "masc_portal_send"; "masc_portal_status";
     "masc_team_session_start"; "masc_team_session_step";
     "masc_team_session_status"; "masc_team_session_events";
     "masc_team_session_finalize"; "masc_team_session_stop";
     "masc_team_session_report"; "masc_team_session_list";
+    "masc_team_session_prove";
     "masc_a2a_delegate"; "masc_a2a_subscribe";
     "masc_a2a_discover"; "masc_a2a_query_skill"; "masc_a2a_unsubscribe";
     "masc_poll_events"; "masc_spawn";
@@ -179,9 +183,6 @@ let spawned_agent_surface_tools =
     "masc_code_shell"; "masc_code_write";
     "masc_deliver"; "masc_error_add"; "masc_error_resolve";
     "masc_find_by_capability";
-    (* Keep internal diagnostics/proof tools off the spawned-agent contract.
-       Agents still have workflow_guide/tool_help for guidance, while
-       keeper catalogs and final session proof stay on operator/admin paths. *)
     "masc_plan_clear_task"; "masc_plan_get_task";
     "masc_portal_close";
     "masc_room_strategy_get"; "masc_room_strategy_set";

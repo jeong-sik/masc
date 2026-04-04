@@ -1,6 +1,9 @@
 /* MASC Dashboard — CSS Custom Properties (Semantic Theme System) */
 
 :root {
+  /* The dashboard shell is still authored against dark surfaces.
+     Keep the browser chrome and semantic tokens aligned until
+     a full light-theme token migration lands. */
   color-scheme: dark;
 
   /* Base & Backgrounds */

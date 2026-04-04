@@ -219,7 +219,7 @@ export function ChatMessageBubble({
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
             ${detailItems.map(item => html`
-              <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.16)] bg-[var(--accent-10)] px-2.5 py-1 text-[10px] font-medium text-[#bfe8ff]">
+              <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.16)] bg-[var(--accent-10)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-strong)]">
                 ${item}
               </span>
             `)}
@@ -231,7 +231,7 @@ export function ChatMessageBubble({
       </div>
       ${entry.error
         ? html`
-            <div class="rounded-2xl border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.28)] px-3 py-2 text-[12px] leading-[1.55] text-[#ffb4b4]">
+            <div class="rounded-2xl border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.28)] px-3 py-2 text-[12px] leading-[1.55] text-[var(--bad-light)]">
               ${entry.error}
             </div>
           `

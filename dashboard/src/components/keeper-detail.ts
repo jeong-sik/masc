@@ -91,21 +91,21 @@ function statusColor(status: string): { bg: string; text: string; dot: string } 
   switch (status.trim().toLowerCase()) {
     case 'active':
     case 'running':
-      return { bg: 'bg-[rgba(74,222,128,0.12)]', text: 'text-[#4ade80]', dot: 'bg-[#4ade80]' }
+      return { bg: 'bg-[var(--ok-10)]', text: 'text-[var(--ok)]', dot: 'bg-[var(--ok)]' }
     case 'working':
-      return { bg: 'bg-[rgba(74,222,128,0.12)]', text: 'text-[#7ae09a]', dot: 'bg-[#7ae09a]' }
+      return { bg: 'bg-[var(--ok-10)]', text: 'text-[#7ae09a]', dot: 'bg-[#7ae09a]' }
     case 'idle':
     case 'quiet':
-      return { bg: 'bg-[rgba(251,191,36,0.12)]', text: 'text-[#fbbf24]', dot: 'bg-[#fbbf24]' }
+      return { bg: 'bg-[rgba(251,191,36,0.12)]', text: 'text-[var(--warn)]', dot: 'bg-[#fbbf24]' }
     case 'paused':
     case 'blocked':
-      return { bg: 'bg-[rgba(251,191,36,0.12)]', text: 'text-[#fbbf24]', dot: 'bg-[#fbbf24]' }
+      return { bg: 'bg-[rgba(251,191,36,0.12)]', text: 'text-[var(--warn)]', dot: 'bg-[#fbbf24]' }
     case 'offline':
     case 'inactive':
       return { bg: 'bg-[rgba(148,163,184,0.12)]', text: 'text-[#94a3b8]', dot: 'bg-[#64748b]' }
     case 'error':
     case 'critical':
-      return { bg: 'bg-[rgba(239,68,68,0.12)]', text: 'text-[#ef4444]', dot: 'bg-[#ef4444]' }
+      return { bg: 'bg-[rgba(239,68,68,0.12)]', text: 'text-[var(--bad)]', dot: 'bg-[var(--bad)]' }
     default:
       return { bg: 'bg-[rgba(138,163,211,0.1)]', text: 'text-[#86a0cf]', dot: 'bg-[#86a0cf]' }
   }
@@ -134,7 +134,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     <div class="px-6 pt-4">
       <div class="rounded-xl border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[12px] text-[var(--text-body)]">
         ${keeper.paused
-          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[#fbbf24]">일시정지</span>`
+          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>`
           : null}
         ${keeper.paused && keeper.keepalive_running
           ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
@@ -211,11 +211,11 @@ function SectionCard({ title, children }: { title: string; children: preact.Comp
 function registryStateBadge(state: string | null) {
   if (!state) return null
   const colors: Record<string, { bg: string; text: string }> = {
-    Running: { bg: 'bg-[rgba(34,197,94,0.12)]', text: 'text-[#4ade80]' },
-    Crashed: { bg: 'bg-[rgba(239,68,68,0.15)]', text: 'text-[#ef4444]' },
+    Running: { bg: 'bg-[rgba(34,197,94,0.12)]', text: 'text-[var(--ok)]' },
+    Crashed: { bg: 'bg-[rgba(239,68,68,0.15)]', text: 'text-[var(--bad)]' },
     Dead: { bg: 'bg-[rgba(100,116,139,0.15)]', text: 'text-[#94a3b8]' },
-    Stopped: { bg: 'bg-[rgba(234,179,8,0.12)]', text: 'text-[#facc15]' },
-    Paused: { bg: 'bg-[rgba(168,85,247,0.12)]', text: 'text-[#c084fc]' },
+    Stopped: { bg: 'bg-[rgba(234,179,8,0.12)]', text: 'text-[var(--warn)]' },
+    Paused: { bg: 'bg-[var(--white-10)]', text: 'text-[var(--purple)]' },
   }
   const c = colors[state] ?? { bg: 'bg-[rgba(138,163,211,0.1)]', text: 'text-[#86a0cf]' }
   return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold ${c.bg} ${c.text}">${state}</span>`
@@ -389,7 +389,7 @@ export function KeeperDetailOverlay() {
               const isRunning = ['active', 'running', 'idle', 'busy', 'listening', 'working'].includes(keeper.status)
               if (isOffline) return html`
                 <button type="button"
-                  class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[#4ade80] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
+                  class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(34,197,94,0.4)] bg-[rgba(34,197,94,0.08)] text-[var(--ok)] hover:bg-[rgba(34,197,94,0.15)] transition-colors"
                   onClick=${() => {
                     void (async () => {
                       try {

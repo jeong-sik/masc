@@ -51,10 +51,10 @@ export function resetAutoresearchState(): void {
 
 function statusColor(status: string): string {
   switch (status) {
-    case 'running': return 'text-green-400'
-    case 'completed': return 'text-blue-400'
-    case 'stopped': return 'text-yellow-400'
-    case 'error': return 'text-red-400'
+    case 'running': return 'text-[var(--ok)]'
+    case 'completed': return 'text-[var(--accent)]'
+    case 'stopped': return 'text-[var(--warn)]'
+    case 'error': return 'text-[var(--bad)]'
     default: return 'text-[var(--text-muted)]'
   }
 }
@@ -88,7 +88,7 @@ function LoopSelector() {
       ${loops.map(loop => {
         const isSelected = loop.loop_id === selectedLoopId.value
         const cls = isSelected
-          ? 'px-3 py-1.5 rounded-lg text-xs font-medium border border-accent/60 bg-accent/10 text-[var(--text-strong)] cursor-pointer'
+          ? 'px-3 py-1.5 rounded-lg text-xs font-medium border border-accent/60 bg-[var(--accent-10)] text-[var(--text-strong)] cursor-pointer'
           : 'px-3 py-1.5 rounded-lg text-xs font-medium border border-card-border bg-card/60 text-[var(--text-muted)] cursor-pointer hover:border-accent/30 transition-colors'
         return html`
           <button type="button" key=${loop.loop_id} class=${cls} onClick=${() => selectLoop(loop.loop_id)}>
@@ -150,25 +150,25 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
           </div>
           <div>
             <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">최고 점수</div>
-            <div class="text-green-400 text-sm font-mono font-semibold">${loop.best_score.toFixed(4)}</div>
+            <div class="text-[var(--ok)] text-sm font-mono font-semibold">${loop.best_score.toFixed(4)}</div>
           </div>
         </div>
         <div>
           <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1">유지 / 삭제</div>
           <div class="flex items-center gap-2">
-            <span class="text-green-400 text-sm font-mono font-semibold">${loop.total_keeps}</span>
+            <span class="text-[var(--ok)] text-sm font-mono font-semibold">${loop.total_keeps}</span>
             <span class="text-[var(--text-muted)] text-xs">/</span>
-            <span class="text-red-400 text-sm font-mono font-semibold">${loop.total_discards}</span>
+            <span class="text-[var(--bad)] text-sm font-mono font-semibold">${loop.total_discards}</span>
             <span class="text-[var(--text-muted)] text-xs ml-1">(${keepPct}% keep)</span>
           </div>
           ${totalCycles > 0 ? html`
             <div class="mt-1.5 h-2 rounded-full bg-[var(--white-6)] overflow-hidden flex">
               <div
-                class="h-full bg-green-500/70 transition-[width] duration-300"
+                class="h-full bg-[var(--ok-48)] transition-[width] duration-300"
                 style=${{ width: `${(loop.total_keeps / totalCycles) * 100}%` }}
               />
               <div
-                class="h-full bg-red-500/40 transition-[width] duration-300"
+                class="h-full bg-[var(--bad-30)] transition-[width] duration-300"
                 style=${{ width: `${(loop.total_discards / totalCycles) * 100}%` }}
               />
             </div>
@@ -186,7 +186,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
     </div>
 
     ${loop.error ? html`
-      <div class="mt-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+      <div class="mt-3 px-3 py-2 rounded-lg bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
         ${loop.error}
       </div>
     ` : null}
@@ -219,12 +219,12 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
               <td class="py-2 px-3 text-[var(--text-body)] max-w-[200px] truncate" title=${c.hypothesis}>${c.hypothesis}</td>
               <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_before.toFixed(4)}</td>
               <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_after.toFixed(4)}</td>
-              <td class="py-2 px-3 text-right font-mono ${c.delta >= 0 ? 'text-green-400' : 'text-red-400'}">${formatDelta(c.delta)}</td>
+              <td class="py-2 px-3 text-right font-mono ${c.delta >= 0 ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}">${formatDelta(c.delta)}</td>
               <td class="py-2 px-3 text-center">
                 <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                   c.decision === 'keep'
-                    ? 'bg-green-500/15 text-green-400 border border-green-500/20'
-                    : 'bg-red-500/15 text-red-400 border border-red-500/20'
+                    ? 'bg-[var(--ok-soft)] text-[var(--ok)] border border-[var(--ok-20)]'
+                    : 'bg-[var(--bad-soft)] text-[var(--bad)] border border-[var(--bad-20)]'
                 }">${decisionLabel(c.decision)}</span>
               </td>
               <td class="py-2 px-3 text-right text-[var(--text-muted)] font-mono">${formatTimestamp(c.timestamp)}</td>
@@ -259,7 +259,7 @@ function WarningsList({ warnings }: { warnings: string[] }) {
   return html`
     <div class="flex flex-col gap-1.5">
       ${warnings.map((w, i) => html`
-        <div key=${i} class="px-3 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-xs">
+        <div key=${i} class="px-3 py-1.5 rounded-lg bg-[var(--warn-10)] border border-[var(--warn-20)] text-[var(--warn)] text-xs">
           ${w}
         </div>
       `)}
@@ -365,7 +365,7 @@ function LoopDetailView() {
 
   if (detailError.value) {
     return html`
-      <div class="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+      <div class="px-3 py-2 rounded-lg bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
         ${detailError.value}
       </div>
     `
@@ -395,7 +395,7 @@ function LoopDetailView() {
               </button>
               <button
                 type="button"
-                class="px-2.5 py-1 rounded text-[11px] text-red-400 border border-red-500/30 hover:border-red-400/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                class="px-2.5 py-1 rounded text-[11px] text-[var(--bad)] border border-[var(--bad-30)] hover:border-[var(--bad)] opacity-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled=${loopActionBusy.value}
                 onClick=${() => { void deleteSelectedLoop() }}
               >
@@ -406,7 +406,7 @@ function LoopDetailView() {
         </div>
         <${LoopOverview} loop=${loop} />
         ${loopActionError.value ? html`
-          <div class="mt-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+          <div class="mt-3 px-3 py-2 rounded-lg bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
             ${loopActionError.value}
           </div>
         ` : null}
@@ -414,7 +414,7 @@ function LoopDetailView() {
 
       ${warnings.length > 0 ? html`
         <${SurfaceCard} variant="compact">
-          <div class="text-[10px] uppercase tracking-wider text-yellow-400/80 mb-3 font-medium">경고</div>
+          <div class="text-[10px] uppercase tracking-wider text-[var(--warn)]/80 mb-3 font-medium">경고</div>
           <${WarningsList} warnings=${warnings} />
         <//>
       ` : null}
@@ -453,7 +453,7 @@ export function Autoresearch() {
   if (state.status === 'error') {
     return html`
       <div class="flex flex-col gap-4">
-        <div class="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+        <div class="px-4 py-3 rounded-lg bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-sm">
           ${state.message}
         </div>
         <button type="button"
@@ -491,7 +491,7 @@ export function Autoresearch() {
         </div>
         <div class="flex items-center gap-2">
           <${StartFormButton}
-            class="px-2.5 py-1 rounded text-[11px] text-accent border border-accent/40 hover:bg-accent/10 transition-colors"
+            class="px-2.5 py-1 rounded text-[11px] text-accent border border-accent/40 hover:bg-[var(--accent-10)] transition-colors"
           />
           <button type="button"
             class="px-2.5 py-1 rounded text-[11px] text-[var(--text-muted)] border border-card-border hover:text-[var(--text-body)] hover:border-accent/40 transition-colors"

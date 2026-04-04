@@ -131,7 +131,7 @@ export function OpsSessionColumn() {
     >
       <div class="flex justify-between items-center gap-3 max-[880px]:flex-col max-[880px]:items-start">
         <strong>${session.session_id}</strong>
-        <span class="border border-solid border-[var(--card-border)] ${session.status ?? 'idle'} ${session.status === 'offline' ? 'text-[#8da4cc]' : ''}">${displayStatus(session.status)}</span>
+        <span class="border border-solid border-[var(--card-border)] ${session.status ?? 'idle'} ${session.status === 'offline' ? 'text-[var(--text-dim)]' : ''}">${displayStatus(session.status)}</span>
       </div>
       <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
         <span>${Math.round(session.progress_pct ?? 0)}%</span>
@@ -305,7 +305,7 @@ export function OpsSessionColumn() {
 
         <details class="ops-control-disclosure mt-0.5 border border-[var(--white-8)] rounded-xl bg-[var(--white-2)]">
           <summary class="ops-control-summary list-none cursor-pointer grid gap-1 p-3 px-3.5">
-            <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 세션 개입</span>
+            <span class="text-[var(--ok-20)] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 세션 개입</span>
             <strong>${selectedSessionActionable ? '노트, 방송, 작업 주입, worker 교체, 중지' : '읽기 전용 세션은 여기서도 실행되지 않습니다.'}</strong>
             <span>${selectedSessionActionable ? '선택한 live 세션에만 적용합니다.' : '실제 개입은 위 live 세션을 다시 선택한 뒤 진행하세요.'}</span>
           </summary>

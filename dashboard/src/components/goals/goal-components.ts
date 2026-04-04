@@ -61,7 +61,7 @@ export function GoalRow({ goal }: { goal: Goal }) {
             ${priorityStars(goal.priority)}
           </span>
           ${goal.metric ? html`
-            <span class="rounded-md border border-accent/20 bg-accent/10 px-2 py-1 text-accent">
+            <span class="rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-1 text-accent">
               ${goal.metric}${goal.target_value ? ` \u2192 ${goal.target_value}` : ''}
             </span>
           ` : null}

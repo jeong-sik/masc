@@ -80,7 +80,7 @@ export function ConfirmDialogOverlay() {
     IconComponent = AlertCircle
   } else if (state.tone === 'info') {
     iconColor = 'text-accent'
-    iconBg = 'bg-accent/10 border-accent/20'
+    iconBg = 'bg-[var(--accent-10)] border-accent/20'
     confirmBtnClass = 'bg-[var(--accent)] text-[var(--bg-0)] hover:bg-[var(--accent)]/90'
     IconComponent = Info
   }

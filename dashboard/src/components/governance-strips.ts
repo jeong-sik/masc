@@ -166,7 +166,7 @@ export function RuntimeParamsPanel() {
                                 }}
                               />
                               <button type="button"
-                                class="text-[10px] py-0.5 px-1.5 rounded bg-accent/10 text-accent hover:bg-accent/20 cursor-pointer border-none"
+                                class="text-[10px] py-0.5 px-1.5 rounded bg-[var(--accent-10)] text-accent hover:bg-accent/20 cursor-pointer border-none"
                                 onClick=${() => {
                                   const val = meta?.value_type === 'float' ? parseFloat(editValue.value) : parseInt(editValue.value, 10)
                                   if (!isNaN(val)) {

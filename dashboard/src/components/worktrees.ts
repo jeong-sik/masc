@@ -211,12 +211,12 @@ export function Worktrees() {
           <div key=${wt.id || wt.branch} class="group flex flex-col gap-2.5 rounded-xl border border-card-border bg-card/55 p-4 shadow-sm shadow-black/8 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/32 hover:shadow-md">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-3">
-                <div class="flex size-6.5 items-center justify-center rounded-lg border border-accent/20 bg-accent/10">
+                <div class="flex size-6.5 items-center justify-center rounded-lg border border-accent/20 bg-[var(--accent-10)]">
                   <span class="text-[14px]">🌿</span>
                 </div>
                 <span class="font-semibold text-[14px] text-text-strong truncate group-hover:text-accent transition-colors" title=${wt.branch}>${wt.branch}</span>
               </div>
-              ${wt.agent ? html`<span class="rounded-md border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">${wt.agent}</span>` : null}
+              ${wt.agent ? html`<span class="rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-[10px] font-medium text-accent">${wt.agent}</span>` : null}
             </div>
             
             <div class="mt-0.5 flex items-center gap-2 rounded-lg border border-white/5 bg-bg-0/45 px-2.5 py-1.5 font-mono text-[11px] text-text-muted/90">

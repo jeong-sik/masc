@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { Markdown } from "./common/markdown"
 import { AlertTriangle } from 'lucide-preact'
 import { ActionButton } from './common/button'
 import { TextArea } from './common/input'
@@ -148,7 +149,7 @@ export function ActionRequestCard({ order }: { order: GovernanceExecutionOrder |
       </div>
       ${request.target_type ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">대상 ${request.target_type}${request.target_id ? `:${request.target_id}` : ''}</div>` : null}
       ${request.reason ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">${request.reason}</div>` : null}
-      ${request.payload_preview ? html`<pre class="mt-0 max-h-[180px] overflow-auto whitespace-pre-wrap rounded-[9px] border border-[var(--card-border)] bg-[rgba(0,0,0,0.26)] p-2.5 text-[11px] leading-[1.5] text-[#d3e3ff] font-mono">${serializePreview(request.payload_preview)}</pre>` : null}
+      ${request.payload_preview ? html`<div class="mt-0 max-h-[180px] overflow-auto rounded-[9px] border border-[var(--card-border)] bg-[var(--bg-0)] custom-scrollbar"><${Markdown} text=${'```json\n' + serializePreview(request.payload_preview) + '\n```'} /></div>` : null}
       ${order.execution_ref ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">결과 참조 ${order.execution_ref}</div>` : null}
       ${order.result_summary ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">${order.result_summary}</div>` : null}
     </div>

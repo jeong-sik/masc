@@ -50,16 +50,6 @@ type board_signal_match = {
   score : int;
 }
 
-let take_first n xs =
-  if n <= 0 then []
-  else
-    let rec loop acc remaining = function
-      | [] -> List.rev acc
-      | _ when remaining <= 0 -> List.rev acc
-      | x :: rest -> loop (x :: acc) (remaining - 1) rest
-    in
-    loop [] n xs
-
 let scope_message_feed_enabled (meta : keeper_meta) : bool =
   match Keeper_contract.scope_kind_of_string meta.scope_kind with
   | Keeper_contract.Global -> true

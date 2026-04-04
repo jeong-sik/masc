@@ -472,11 +472,11 @@ let run_keepalive_unified_turn
       if (not should_run_turn)
          && (not has_message_signal)
          && obs.message_cursor_updates <> []
-      then
+      then (
         match write_meta ctx.config meta_after_observe with
         | Ok () -> ()
         | Error e ->
-            Log.Keeper.warn "write_meta failed (message cursor update): %s" e;
+            Log.Keeper.warn "write_meta failed (message cursor update): %s" e);
       if Atomic.get stop
       then meta_after_triage
       else if should_run_turn

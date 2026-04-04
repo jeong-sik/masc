@@ -68,11 +68,8 @@ let parse_required_string_field ~field json =
   | Some _ ->
     Result.error (Printf.sprintf "\"%s\" field must be a string in MODEL response" field)
 
-(** Parse MODEL response containing a strict JSON object with hypothesis and
-    modified_code string fields. Returns Ok (hypothesis, modified_code) or
-    Error reason. *)
-(** Parse MODEL response containing a strict JSON object with hypothesis and
-    modified_code string fields. Uses Lenient_json for 6-stage recovery
+(** Parse MODEL response expected to contain a JSON object with hypothesis and
+    modified_code string fields. Uses Lenient_json for deterministic recovery
     (strip fences, unwrap double-stringify, trailing commas, close brackets).
     Returns Ok (hypothesis, modified_code) or Error reason. *)
 let parse_model_code_response response =
@@ -85,6 +82,13 @@ let parse_model_code_response response =
        keyword completion, bracket closure — then standard parse.
        Falls back to {raw: string} if all transforms fail. *)
     match Llm_provider.Lenient_json.parse trimmed_response with
+    | `Assoc [("raw", `String _)] ->
+      (* Lenient_json fallback: all recovery transforms failed, raw string returned *)
+      let preview = if String.length trimmed_response > 80
+        then String.sub trimmed_response 0 80 ^ "..."
+        else trimmed_response
+      in
+      Result.error (Printf.sprintf "MODEL response is not valid JSON after lenient recovery: %s" preview)
     | `Assoc _ as json ->
       (match parse_required_string_field ~field:"hypothesis" json with
       | Error _ as e -> e
@@ -97,13 +101,6 @@ let parse_model_code_response response =
             Result.error "Empty \"modified_code\" field in MODEL response"
           else
             Result.ok (String.trim hypothesis, normalized_code))
-    | `Assoc [("raw", `String _)] ->
-      (* Lenient_json fallback: all recovery failed *)
-      let preview = if String.length trimmed_response > 80
-        then String.sub trimmed_response 0 80 ^ "..."
-        else trimmed_response
-      in
-      Result.error (Printf.sprintf "MODEL response is not valid JSON after lenient recovery: %s" preview)
     | _ ->
       Result.error "MODEL response must be a JSON object"
 

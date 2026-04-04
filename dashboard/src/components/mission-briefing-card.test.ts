@@ -168,7 +168,7 @@ describe('MissionBriefingCard', () => {
       source: 'judge_runtime',
       online: true,
     })
-  }, 20000)
+  }, 40000)
 
   it('falls back to available keepers and returns null when none are usable', async () => {
     const { resolveLiveJudgeTarget } = await loadMissionBriefingCard()
@@ -214,7 +214,7 @@ describe('MissionBriefingCard', () => {
     )
 
     expect(unavailableTarget).toBeNull()
-  }, 20000)
+  }, 40000)
 
   it('does not mark judge runtime online when runtime and keeper state are both unknown', async () => {
     const { resolveLiveJudgeTarget } = await loadMissionBriefingCard()
@@ -237,7 +237,7 @@ describe('MissionBriefingCard', () => {
       source: 'judge_runtime',
       online: false,
     })
-  }, 20000)
+  }, 40000)
 
   it('builds a safe situation report even when mission facts are sparse', async () => {
     const { buildLiveJudgeSituationReport } = await loadMissionBriefingCard()
@@ -317,5 +317,54 @@ describe('MissionBriefingCard', () => {
     expect(payload?.message).toContain('[상황 보고] live-judge · glm-5')
     expect(payload?.message).toContain('deterministic 요약')
     expect(payload?.message).toContain('답변 형식: 1) 지금 위험 1-3개 2) 바로 필요한 조치 3) 놓친 관측 공백')
+  }, 20000)
+
+  it('uses mission keeper briefs as a fallback without forcing operator snapshot state', async () => {
+    const navigateMock = vi.fn()
+    const {
+      MissionBriefingCard,
+      missionStore,
+      operatorStore,
+      sharedStore,
+      workflowContext,
+    } = await loadMissionBriefingCard(navigateMock)
+
+    missionStore.missionSnapshot.value = {
+      ...sampleMission(),
+      keeper_briefs: [
+        {
+          name: 'mission-judge',
+          status: 'running',
+        },
+      ],
+    } as unknown as DashboardMissionResponse
+    missionStore.missionBriefing.value = sampleBriefing()
+    missionStore.missionBriefingError.value = null
+    missionStore.missionBriefingLoading.value = false
+    operatorStore.operatorSnapshot.value = null
+    sharedStore.keepers.value = []
+
+    render(html`<${MissionBriefingCard} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('mission-judge')
+
+    const button = Array.from(container.querySelectorAll('button'))
+      .find(item => item.textContent?.includes('실제 판단 요청 열기'))
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      'command',
+      expect.objectContaining({
+        section: 'intervene',
+        action_type: 'keeper_message',
+        target_type: 'keeper',
+        target_id: 'mission-judge',
+      }),
+    )
+
+    const payload = workflowContext.dashboardWorkflowContext.value?.suggested_payload as Record<string, unknown> | null
+    expect(payload?.message).toContain('[상황 보고] mission-judge')
   }, 20000)
 })

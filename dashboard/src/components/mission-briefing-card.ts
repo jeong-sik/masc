@@ -14,7 +14,7 @@ import {
   refreshMissionBriefing,
 } from '../mission-store'
 import { keepers } from '../store'
-import { operatorSnapshot, refreshOperatorSnapshot } from '../operator-store'
+import { operatorSnapshot } from '../operator-store'
 import { navigate } from '../router'
 import {
   missionTargetTypeLabel,
@@ -31,6 +31,7 @@ import {
 import type { DashboardWorkflowContext } from '../workflow-context'
 import type {
   DashboardMissionBriefingResponse,
+  DashboardMissionKeeperBrief,
   DashboardMissionResponse,
   Keeper,
   OperatorSnapshot,
@@ -137,6 +138,15 @@ export function resolveLiveJudgeTarget(
   }
 }
 
+function fallbackKeepersFromMission(
+  mission: DashboardMissionResponse | null | undefined,
+): Keeper[] {
+  return (mission?.keeper_briefs ?? []).map((keeper: DashboardMissionKeeperBrief) => ({
+    name: keeper.name,
+    status: keeper.status ?? 'unknown',
+  }))
+}
+
 export function buildLiveJudgeSituationReport({
   mission,
   briefing,
@@ -206,7 +216,10 @@ function createLiveJudgeWorkflowContext(
 export function MissionBriefingCard() {
   const mission = missionSnapshot.value
   const briefing = missionBriefing.value
-  const liveJudge = resolveLiveJudgeTarget(operatorSnapshot.value, keepers.value)
+  const liveJudge = resolveLiveJudgeTarget(
+    operatorSnapshot.value,
+    keepers.value.length > 0 ? keepers.value : fallbackKeepersFromMission(mission),
+  )
   const liveJudgeTone = toneClass(liveJudge?.online ? 'ok' : 'warn')
   const liveJudgeReport =
     mission && liveJudge
@@ -223,12 +236,6 @@ export function MissionBriefingCard() {
       void refreshMissionBriefing()
     }
   }, [briefing, missionBriefingLoading.value, missionBriefingError.value])
-
-  useEffect(() => {
-    if (!operatorSnapshot.value) {
-      void refreshOperatorSnapshot({ force: true })
-    }
-  }, [])
 
   const openLiveJudgeIntervene = () => {
     if (!liveJudge) return

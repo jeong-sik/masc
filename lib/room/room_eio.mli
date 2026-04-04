@@ -82,7 +82,15 @@ type task_status =
   | Completed of string   (** agent_id *)
   | Failed of string * string  (** agent_id, reason *)
 
-(** A coordination task. *)
+(** Task complexity estimate for goal decomposition.
+    @since 2.223.0 *)
+type complexity = {
+  estimated_turns: int;
+  reversibility: float;
+}
+
+(** A coordination task with optional goal decomposition metadata.
+    New fields default to None for backward-compatible JSON deserialization. *)
 type task = {
   id: string;
   description: string;
@@ -90,6 +98,9 @@ type task = {
   created_at: float;
   updated_at: float;
   priority: int;
+  parent_task_id: string option;
+  goal_id: string option;
+  complexity_estimate: complexity option;
 }
 
 (** {1 Helpers} *)
@@ -243,7 +254,9 @@ val task_of_json : Yojson.Safe.t -> (task, string) result
 
 (** Create a new task with the given description and optional priority. *)
 val create_task :
-  config -> description:string -> ?priority:int -> unit ->
+  config -> description:string -> ?priority:int ->
+  ?parent_task_id:string -> ?goal_id:string ->
+  ?complexity_estimate:complexity -> unit ->
   (task, string) result
 
 (** Claim a pending task for [agent].  Fails if already claimed. *)

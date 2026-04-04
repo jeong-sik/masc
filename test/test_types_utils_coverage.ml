@@ -888,10 +888,54 @@ let test_room_eio_task_roundtrip () =
     created_at = 1704067200.0;
     updated_at = 1704070800.0;
     priority = 2;
+    parent_task_id = None;
+    goal_id = None;
+    complexity_estimate = None;
   } in
   let json = Room_eio.task_to_json task in
   let result = Room_eio.task_of_json json in
   check bool "roundtrip ok" true (is_ok result)
+
+let test_room_eio_task_with_goal_metadata () =
+  let task = Room_eio.{
+    id = "task-456";
+    description = "Sub-task: implement login";
+    status = Pending;
+    created_at = 1704067200.0;
+    updated_at = 1704067200.0;
+    priority = 1;
+    parent_task_id = Some "task-123";
+    goal_id = Some "goal-auth";
+    complexity_estimate = Some { estimated_turns = 5; reversibility = 0.8 };
+  } in
+  let json = Room_eio.task_to_json task in
+  let result = Room_eio.task_of_json json in
+  match result with
+  | Ok t ->
+    check bool "parent preserved" true (t.parent_task_id = Some "task-123");
+    check bool "goal preserved" true (t.goal_id = Some "goal-auth");
+    check bool "complexity preserved" true
+      (match t.complexity_estimate with
+       | Some c -> c.estimated_turns = 5 && c.reversibility = 0.8
+       | None -> false)
+  | Error e -> fail (Printf.sprintf "unexpected error: %s" e)
+
+let test_room_eio_task_backward_compat () =
+  (* Old JSON without new fields should still parse *)
+  let old_json = `Assoc [
+    ("id", `String "task-old");
+    ("description", `String "legacy task");
+    ("status", `Assoc [("type", `String "pending")]);
+    ("created_at", `Float 1704067200.0);
+    ("updated_at", `Float 1704067200.0);
+    ("priority", `Int 1);
+  ] in
+  match Room_eio.task_of_json old_json with
+  | Ok t ->
+    check bool "parent is none" true (t.parent_task_id = None);
+    check bool "goal is none" true (t.goal_id = None);
+    check bool "complexity is none" true (t.complexity_estimate = None)
+  | Error e -> fail (Printf.sprintf "backward compat failed: %s" e)
 
 (* ============================================================ *)
 (* Test Suite                                                    *)
@@ -1079,6 +1123,8 @@ let room_eio_task_status_tests = [
 
 let room_eio_task_tests = [
   "task roundtrip", `Quick, test_room_eio_task_roundtrip;
+  "task with goal metadata", `Quick, test_room_eio_task_with_goal_metadata;
+  "task backward compat", `Quick, test_room_eio_task_backward_compat;
 ]
 
 let () =

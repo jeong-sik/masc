@@ -185,7 +185,6 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
   let activity_ts =
     List.fold_left max created_ts
       [
-        meta.runtime.usage.last_turn_ts;
         meta.runtime.proactive_rt.last_ts;
       ]
   in

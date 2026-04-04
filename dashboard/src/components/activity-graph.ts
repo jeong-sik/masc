@@ -41,7 +41,7 @@ const TIME_RANGES: Array<{ value: string; label: string }> = [
   { value: 'all', label: '전체' },
 ]
 
-function visibleNamespaceLabel(namespaceId: string | null | undefined): string | null {
+export function visibleNamespaceLabel(namespaceId: string | null | undefined): string | null {
   const value = typeof namespaceId === 'string' ? namespaceId.trim() : ''
   if (!value || value === 'default') return null
   return value

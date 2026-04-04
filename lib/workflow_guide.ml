@@ -472,7 +472,7 @@ let current_state_guidance ~room_set ~joined ~task_claimed
     ~current_task_set ~worktree_active ~session_active =
   if not room_set then
     { next_steps =
-        [ s "masc_start" "Set the project coordination root and join the shared namespace";
+        [ s "masc_start" "Set the project coordination root and join the default namespace";
           s "masc_init" "Initialize MASC if this is a fresh setup" ];
       preconditions = [];
       common_mistakes =

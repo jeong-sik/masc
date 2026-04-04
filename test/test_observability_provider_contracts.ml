@@ -98,6 +98,17 @@ let test_max_context_of_label () =
       "nonexistent:model" in
   check int "fallback 128000" 128_000 fallback
 
+let test_labels_require_local_discovery () =
+  check bool "llama labels refresh local discovery" true
+    (Masc_mcp.Oas_model_resolve.labels_require_local_discovery
+       [ "llama:auto"; "glm:auto" ]);
+  check bool "mixed non-local labels skip refresh" false
+    (Masc_mcp.Oas_model_resolve.labels_require_local_discovery
+       [ "glm:auto"; "claude:auto" ]);
+  check bool "malformed labels skip refresh" false
+    (Masc_mcp.Oas_model_resolve.labels_require_local_discovery
+       [ "default"; "glm:auto" ])
+
 (* ── Section 3: Dashboard schema contracts ── *)
 
 let test_heartbeat_snapshot_has_required_fields () =
@@ -190,6 +201,8 @@ let () =
             test_default_registry_populated;
           test_case "provider name of label" `Quick test_provider_name_of_label;
           test_case "max context of label" `Quick test_max_context_of_label;
+          test_case "local discovery label detection" `Quick
+            test_labels_require_local_discovery;
         ] );
       ( "dashboard_schema",
         [

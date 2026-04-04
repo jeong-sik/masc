@@ -354,9 +354,12 @@ let handle_keeper_shell_readonly
   match op with
   | "pwd" -> render_process_result ~cmd:"pwd" [ "/bin/pwd" ]
   | "git_status" ->
-    render_process_result
-      ~cmd:"git -C <root> status --short --branch"
-      [ "git"; "-C"; root; "status"; "--short"; "--branch" ]
+    if not (Room_git.is_git_repo ~base_path:root) then
+      error_json ~fields:[ "op", `String op ] "not_a_git_repository"
+    else
+      render_process_result
+        ~cmd:"git -C <root> status --short --branch"
+        [ "git"; "-C"; root; "status"; "--short"; "--branch" ]
   | "ls" ->
     (match read_target () with
      | Error e -> error_json ~fields:[ "op", `String op ] e

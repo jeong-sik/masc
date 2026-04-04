@@ -10,6 +10,10 @@
 
     @since Phase 5 — Keeper Agent.run encapsulation *)
 
+(** BM25 confidence threshold below which tool selection falls back to
+    the full policy-allowed preset. *)
+let bm25_confidence_threshold = 0.5
+
 (** Structured prompt result from [build_turn_prompt] callback.
     [system_prompt] contains hard constraints (identity, policy guards,
     tool guidance, direct-reply mode) that must stay in the system prompt.
@@ -550,7 +554,7 @@ let run_turn
         List.filteri (fun i _ -> i < max_fallback_tools) merged
       else merged
   in
-  let confidence_threshold = 0.5 in
+  let confidence_threshold = bm25_confidence_threshold in
   (* Runtime tool overlay: external callers (masc_tool_grant/revoke)
      push Tool_op.t values here. The hook applies them each turn.
      If caller provides one, use it; otherwise create a local one. *)

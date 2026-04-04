@@ -12,6 +12,10 @@
     Storage: .masc/cache/
 *)
 
+(** Eviction sample threshold: if >50% of sampled entries are expired,
+    run a full eviction pass. *)
+let eviction_sample_threshold = 0.5
+
 (** Cache entry *)
 type cache_entry = {
   key: string;
@@ -184,7 +188,7 @@ let maybe_evict_expired config =
               | _ -> acc
         ) 0 sample in
         let ratio = float_of_int expired_count /. float_of_int sample_size in
-        if ratio > 0.5 then
+        if ratio > eviction_sample_threshold then
           evict_expired config
         else
           0

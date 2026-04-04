@@ -134,18 +134,19 @@ class GateClient:
         if breaker_enabled and self._consecutive_failures >= self._breaker_failure_threshold:
             self._breaker_open_until = self._now() + self._breaker_reset_sec
         if breaker_enabled:
-            logger.warning(
-                "Gate transport failure %d/%d: %s",
+            msg = "Gate transport failure %d/%d: %s"
+            args = (
                 self._consecutive_failures,
                 self._breaker_failure_threshold,
                 reason,
             )
         else:
-            logger.warning(
-                "Gate transport failure %d (breaker disabled): %s",
+            msg = "Gate transport failure %d (breaker disabled): %s"
+            args = (
                 self._consecutive_failures,
                 reason,
             )
+        logger.warning(msg, *args)
 
     def breaker_snapshot(self) -> BreakerSnapshot:
         remaining = max(0, int(round(self._breaker_open_until - self._now())))

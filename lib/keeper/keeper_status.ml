@@ -52,6 +52,10 @@ let handle_keeper_list ctx args : tool_result =
             let last_proactive_ago_s =
               if m.runtime.proactive_rt.last_ts <= 0.0 then 0.0 else now_ts -. m.runtime.proactive_rt.last_ts
             in
+            let last_visible_proactive_ago_s =
+              if m.runtime.proactive_rt.last_visible_ts <= 0.0 then 0.0
+              else now_ts -. m.runtime.proactive_rt.last_visible_ts
+            in
             let active_model = active_model_of_meta m in
             let next_model_hint = next_model_hint_of_meta m in
             let trace_history_count = List.length m.runtime.trace_history in
@@ -195,11 +199,18 @@ let handle_keeper_list ctx args : tool_result =
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
+              ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
               ("last_compaction_check_ts", `Float m.runtime.compaction_rt.last_check_ts);
               ("last_compaction_decision",
                 if String.trim m.runtime.compaction_rt.last_decision = "" then `Null
                 else `String m.runtime.compaction_rt.last_decision);
               ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);
+              ("last_visible_proactive_ts", `Float m.runtime.proactive_rt.last_visible_ts);
+              ("last_visible_proactive_ago_s", `Float last_visible_proactive_ago_s);
+              ( "last_proactive_outcome"
+              , `String
+                  (proactive_cycle_outcome_to_string
+                     m.runtime.proactive_rt.last_outcome) );
               ("last_proactive_reason",
                 if String.trim m.runtime.proactive_rt.last_reason = ""
                 then `Null

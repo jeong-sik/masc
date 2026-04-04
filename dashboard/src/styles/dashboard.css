@@ -380,3 +380,15 @@
   box-shadow: 0 0 5px rgba(251, 191, 36, 0.5);
   z-index: 10;
 }
+
+
+/* ── Card Subtle Hover Lift ── */
+.card {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.25s;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(71, 184, 255, 0.08);
+  border-color: rgba(71, 184, 255, 0.25);
+}

@@ -7,8 +7,6 @@
 
     Depends on parent module via [step_deps] record to avoid circular deps. *)
 
-module Oas = Agent_sdk
-
 (** Spawn specification parsed from MCP tool arguments. *)
 type spawn_spec = {
   spawn_agent : string;

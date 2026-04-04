@@ -4,8 +4,6 @@
 
     @since 2.125.0 *)
 
-module Swarm = Agent_sdk_swarm
-
 let preview_text text =
   String.sub text 0 (min 200 (String.length text))
 

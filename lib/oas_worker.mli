@@ -16,8 +16,6 @@
     @since Phase 8 — Cascade module deleted, defaults moved here
     @since Phase 9 — gRPC transport option added (#2381) *)
 
-module Oas = Agent_sdk
-
 type cascade_attempt = {
   attempt_index : int;
   model_id : string;
@@ -92,7 +90,6 @@ val run_named :
   ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
-
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
@@ -126,7 +123,6 @@ val run_model_by_label :
   ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
-
   ?enable_thinking:bool ->
   ?contract:Oas.Risk_contract.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
@@ -148,7 +144,6 @@ val run_named_with_masc_tools :
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
-
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
@@ -174,7 +169,6 @@ val run_model_with_masc_tools :
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
-
   ?enable_thinking:bool ->
   ?contract:Oas.Risk_contract.t ->
   ?raw_trace:Oas.Raw_trace.t ->

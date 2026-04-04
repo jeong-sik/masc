@@ -189,13 +189,15 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
       ~min_v:10
       ~max_v:86400
   in
+  let canonical_namespace = Room.default_namespace_id in
   let status_json =
     `Assoc [
-      ("namespace_id", `String "default");
-      ("namespace", `String "default");
-      ("current_namespace", `String room_id);
+      ("namespace_id", `String canonical_namespace);
+      ("namespace", `String canonical_namespace);
+      ("current_namespace", `String canonical_namespace);
       ("namespace_mode", `String "flattened");
       ("room", `Null);
+      ("current_room", `String room_id);
       ("room_base_path", `Null);
       ("coordination_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);
@@ -827,15 +829,16 @@ let dashboard_proof_http_json ~state request =
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let current_room =
-    Room.read_current_room config |> Option.value ~default:"default"
+    Room.read_current_room config |> Option.value ~default:Room.default_namespace_id
   in
+  let canonical_namespace = Room.default_namespace_id in
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in
   `Assoc
     [
-      ("namespace_id", `String "default");
-      ("namespace", `String "default");
-      ("current_namespace", `String current_room);
+      ("namespace_id", `String canonical_namespace);
+      ("namespace", `String canonical_namespace);
+      ("current_namespace", `String canonical_namespace);
       ("namespace_mode", `String "flattened");
       ("room", `Null);
       ("current_room", `String current_room);
@@ -928,6 +931,7 @@ let dashboard_shell_timeout_s =
 
 let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   let current_room = dashboard_current_room_id config in
+  let canonical_namespace = Room.default_namespace_id in
   let started_at = Unix.gettimeofday () in
   let measure_ms f =
     let t0 = Unix.gettimeofday () in
@@ -962,7 +966,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   |> with_projection_diagnostics ~surface:"shell" ~started_at
        ~extra:
          [
-           ("current_namespace", `String current_room);
+           ("current_namespace", `String canonical_namespace);
            ("current_room", `String current_room);
            ("coordination_root", `String config.base_path);
            ("workspace_path", `String config.workspace_path);

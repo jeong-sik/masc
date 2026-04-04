@@ -3,6 +3,8 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ErrorBoundary } from './error-boundary'
 
+void vi
+
 function Boom() {
   throw new Error('boom')
 }

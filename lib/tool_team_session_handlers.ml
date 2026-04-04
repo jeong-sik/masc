@@ -5,7 +5,6 @@
 
 open Tool_args
 open Tool_team_session_support
-module Oas = Agent_sdk
 
 let handle_start ctx args : result =
   let*! goal = get_string_required args "goal" in

@@ -6,8 +6,6 @@
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
-module Oas = Agent_sdk
-
 (* ================================================================ *)
 (* Configuration                                                     *)
 (* ================================================================ *)

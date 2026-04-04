@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.233.0] - 2026-04-04
+
+### Added
+- **Discord connector durability** -- persist Discord channel bindings across bot restarts and expose operator audit history for bind/unbind changes (#5125).
+
 ## [2.232.0] - 2026-04-04
 
 ### Changed

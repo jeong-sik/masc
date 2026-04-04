@@ -165,10 +165,11 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
     |> Option.value ~default:0.0
   in
   let activity_ts =
-    if meta.runtime.proactive_rt.last_ts > 0.0 then
-      meta.runtime.proactive_rt.last_ts
-    else
-      created_ts
+    List.fold_left max created_ts
+      [
+        meta.runtime.usage.last_turn_ts;
+        meta.runtime.proactive_rt.last_ts;
+      ]
   in
   if activity_ts <= 0.0 then 0
   else int_of_float (max 0.0 (now_ts -. activity_ts))

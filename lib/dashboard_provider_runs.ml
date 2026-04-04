@@ -36,7 +36,7 @@ type run_record = {
 
 let provider_runs : (string, run_record) Hashtbl.t = Hashtbl.create 32
 let provider_runs_mutex = Eio.Mutex.create ()
-let finished_run_ttl_seconds = 3600.0
+let finished_run_ttl_seconds = Env_config.InternalTimers.provider_run_ttl_sec
 let max_finished_runs = 128
 
 let trim_nonempty value =

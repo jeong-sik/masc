@@ -497,4 +497,47 @@ module Dashboard = struct
     get_float ~default:0.50 "MASC_DASHBOARD_CTX_COMPACTING"
 end
 
+(** {1 Internal Timers and TTLs}
+
+    Internal cache/GC/flush intervals. Low operational impact but
+    centralized here to eliminate scattered magic 300.0/3600.0 literals. *)
+
+module InternalTimers = struct
+  (** Tool metrics flush interval (seconds). Default: 300 (5 min). *)
+  let metrics_flush_sec =
+    get_float ~default:300.0 "MASC_METRICS_FLUSH_SEC"
+
+  (** Team session live turn window (seconds). Default: 300 (5 min). *)
+  let session_live_turn_window_sec =
+    get_float ~default:300.0 "MASC_SESSION_LIVE_TURN_WINDOW_SEC"
+
+  (** Dashboard label "quiet" threshold (seconds). Default: 300 (5 min). *)
+  let label_quiet_threshold_sec =
+    get_float ~default:300.0 "MASC_LABEL_QUIET_THRESHOLD_SEC"
+
+  (** Dashboard mission briefing cache TTL (seconds). Default: 300 (5 min). *)
+  let briefing_cache_ttl_sec =
+    get_float ~default:300.0 "MASC_BRIEFING_CACHE_TTL_SEC"
+
+  (** Keeper world observation bootstrap window (seconds). Default: 300 (5 min). *)
+  let bootstrap_window_sec =
+    get_float ~default:300.0 "MASC_KEEPER_BOOTSTRAP_WINDOW_SEC"
+
+  (** SSE buffer TTL (seconds). Default: 300 (5 min). *)
+  let sse_buffer_ttl_sec =
+    get_float ~default:300.0 "MASC_SSE_BUFFER_TTL_SEC"
+
+  (** Cancellation token cleanup interval (seconds). Default: 300 (5 min). *)
+  let cancellation_cleanup_sec =
+    get_float ~default:300.0 "MASC_CANCELLATION_CLEANUP_SEC"
+
+  (** Provider run finished TTL (seconds). Default: 3600 (1 hour). *)
+  let provider_run_ttl_sec =
+    get_float ~default:3600.0 "MASC_PROVIDER_RUN_TTL_SEC"
+
+  (** Operator digest stalled session threshold (seconds). Default: 300 (5 min). *)
+  let stalled_session_threshold_sec =
+    get_float ~default:300.0 "MASC_STALLED_SESSION_THRESHOLD_SEC"
+end
+
 (** {1 Internal Safety Configuration} *)

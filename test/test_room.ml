@@ -252,7 +252,6 @@ let with_memory_test_env f =
     lock_expiry_minutes = 30;
     backend_config;
     backend = Room_utils.Memory memory_backend;
-    scope = Default;
   } in
   let _ = Room.init config ~agent_name:(Some "claude") in
   try

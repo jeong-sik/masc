@@ -42,7 +42,7 @@ let with_config f =
 let select_room config room_id =
   Room.write_current_room config room_id;
   Room.ensure_room_bootstrap config room_id;
-  Room.config_with_resolved_scope config
+  config
 
 let test_current_room_defaults_to_default () =
   with_config (fun config ->

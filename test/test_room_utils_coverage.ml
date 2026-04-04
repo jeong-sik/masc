@@ -547,7 +547,6 @@ let make_test_config ~base_path ~cluster_name : Room_utils.config =
     lock_expiry_minutes = 30;
     backend_config;
     backend = Room_utils.Memory memory_backend;
-    scope = Default;
   }
 
 let test_masc_root_dir_default_cluster () =

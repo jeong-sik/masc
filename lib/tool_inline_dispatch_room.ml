@@ -47,7 +47,7 @@ let handle_start (ctx : context) : result option =
       if not (Sys.file_exists expanded && Sys.is_directory expanded) then
         Error (Printf.sprintf "Directory not found: %s" expanded)
       else begin
-        let cfg = Room.default_config expanded |> Room.config_with_resolved_scope in
+        let cfg = Room.default_config expanded in
         if Room.is_initialized cfg then begin
           state.Mcp_server.room_config <- cfg;
           Ok cfg
@@ -228,7 +228,7 @@ let handle_set_room (ctx : context) : result option =
     if not (Sys.file_exists masc_dir && Sys.is_directory masc_dir) then
       Some (false, Printf.sprintf "No .masc/ directory found in: %s\nRun masc_init to initialize, or choose a MASC-enabled directory." resolved)
     else begin
-      state.Mcp_server.room_config <- Room.default_config expanded |> Room.config_with_resolved_scope;
+      state.Mcp_server.room_config <- Room.default_config expanded;
       let rc = state.Mcp_server.room_config in
       (* GC: reap zombie agents when entering a room (uses newly resolved config).
          Best-effort: GC failure must not block set_room. *)

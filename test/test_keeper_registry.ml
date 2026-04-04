@@ -356,7 +356,6 @@ let make_test_config base_path : Room_setup.config =
     lock_expiry_minutes = 2;
     backend_config;
     backend = Room_setup.Memory (Backend.Memory.create ());
-    scope = Room_setup.Default;
   }
 
 let test_resolve_config_scoped_hit () =

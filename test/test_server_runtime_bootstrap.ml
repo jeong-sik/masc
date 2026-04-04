@@ -182,7 +182,7 @@ let test_force_jsonl_fallback_env () =
 
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
-      let agents_dir = Room.agents_dir (Room.default_config dir |> Room.config_with_resolved_scope) in
+      let agents_dir = Room.agents_dir (Room.default_config dir) in
       Fs_compat.mkdir_p agents_dir;
       write_file (Filename.concat agents_dir "alice.json") "{}";
       let state = Mcp_server.create_state ~base_path:dir in
@@ -206,7 +206,7 @@ let test_restore_persisted_sessions_uses_flat_agents_dir () =
 let test_keeper_paths_use_cluster_root () =
   with_temp_dir "startup-cluster" (fun dir ->
       with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
-          let config = Room.default_config dir |> Room.config_with_resolved_scope in
+          let config = Room.default_config dir in
           let keeper_dir = Keeper_types.keeper_dir config in
           let expected_root =
             Filename.concat
@@ -218,7 +218,7 @@ let test_keeper_paths_use_cluster_root () =
 
 let test_room_init_bootstraps_keeper_runtime_dirs () =
   with_temp_dir "startup-keeper-dirs" (fun dir ->
-      let config = Room.default_config dir |> Room.config_with_resolved_scope in
+      let config = Room.default_config dir in
       ignore (Room.init config ~agent_name:None);
       let root_dir = Room.masc_root_dir config in
       let keeper_dir = Filename.concat root_dir "keepers" in

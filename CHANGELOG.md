@@ -1,6 +1,21 @@
 # Changelog
 
 
+## [2.222.0] - 2026-04-04
+
+### Added
+- **OAS validation bridge** -- delegate MCP tool input validation to OAS `Tool_input_validation` with type coercion (#4992).
+- **Interrupt/approve tools** -- LangGraph-style interrupt pattern for dangerous operations with user approval (#4993).
+
+### Fixed
+- **Dead tool pruning** -- remove 7 dead tools and phantom references (-261 lines) (#4989).
+- **Keeper proactive cycle** -- separate proactive cycle state from visible output to prevent leaking internal state (#4997).
+- **Keeper overflow retry** -- stabilize keeper overflow retry and namespace wording (#4993).
+- **Dashboard keeper lifecycle** -- fix dashboard keeper lifecycle routes (#4988).
+
+### Changed
+- **Lenient_json for autoresearch** -- use `Safe_ops.parse_json_safe` instead of lenient recovery for deterministic parsing (#4945).
+
 ## [2.221.0] - 2026-04-04
 
 ### Added

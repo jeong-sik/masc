@@ -56,6 +56,7 @@ let dispatch
     ~(name : string)
     ~(args : Yojson.Safe.t)
   : (bool * string) option =
+  let starts prefix = String.starts_with ~prefix name in
   (* Wrap dispatch in try-catch to normalize exceptions into error tuples.
      Tool_*.dispatch functions may raise on unexpected JSON shapes or
      backend failures. Without this, exceptions escape to the keeper loop
@@ -81,7 +82,104 @@ let dispatch
       Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name }
         ~name ~args
   | Mod_misc ->
-      Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args
+      if starts "masc_portal_" then
+        Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args
+      else if starts "masc_team_session_" then
+        (match require_sw (), require_clock () with
+         | Ok sw, Ok clock ->
+             Tool_team_session.dispatch
+               { Tool_team_session.config; agent_name; sw; clock;
+                 proc_mgr = get_proc_mgr_opt ();
+                 net = get_net_opt () }
+               ~name ~args
+         | Error e, _ | _, Error e -> Some (false, e))
+      else if starts "masc_voice_" then
+        (match require_sw (), require_clock () with
+         | Ok sw, Ok clock ->
+             Tool_voice.dispatch
+               { agent_name; sw; clock; net = get_net_opt () }
+               ~name ~args
+         | Error e, _ | _, Error e -> Some (false, e))
+      else if starts "masc_operator_"
+              || List.mem name [ "masc_surface_audit"; "masc_collaboration_evidence" ] then
+        Some (false,
+          Printf.sprintf "tool '%s' is an operator tool (use MCP client)" name)
+      else if starts "masc_auth_" then
+        Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args
+      else if starts "masc_a2a_"
+              || List.mem name [ "masc_poll_events"; "masc_heartbeat_result" ] then
+        Tool_a2a.dispatch { Tool_a2a.config; agent_name } ~name ~args
+      else if starts "masc_relay_" then
+        (match require_sw () with
+         | Ok sw ->
+             Tool_relay.dispatch
+               { Tool_relay.config; agent_name; sw;
+                 proc_mgr = get_proc_mgr_opt () }
+               ~name ~args
+         | Error e -> Some (false, e))
+      else if starts "masc_run_" then
+        Tool_run.dispatch { Tool_run.config } ~name ~args
+      else if List.mem name [ "masc_pause"; "masc_resume"; "masc_pause_status" ] then
+        if String.equal name "masc_pause_status" then
+          Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args
+        else
+          Some (false,
+            Printf.sprintf
+              "tool '%s' is blocked in keeper context (lifecycle-mutating control tools are operator-only)"
+              name)
+      else if starts "masc_library_" then
+        let library_ctx : Tool_library.context = { agent_name } in
+        Tool_library.dispatch library_ctx ~name ~args
+      else if starts "masc_improve_loop_" then
+        Tool_improve_loop.dispatch
+          { Tool_improve_loop.config; agent_name;
+            sw = Eio_context.get_switch_opt ();
+            clock = Eio_context.get_clock_opt ();
+            proc_mgr = get_proc_mgr_opt ();
+            net = get_net_opt () }
+          ~name ~args
+      else if starts "masc_repair_loop_" then
+        let repair_ctx : _ Tool_repair_loop_types.context =
+          { config; agent_name;
+            sw = Eio_context.get_switch_opt ();
+            clock = Eio_context.get_clock_opt ();
+            proc_mgr = get_proc_mgr_opt () }
+        in
+        Tool_repair_loop.dispatch repair_ctx ~name ~args
+      else if starts "masc_autoresearch_"
+              || String.equal name "masc_repo_synthesis_swarm_start" then
+        Tool_autoresearch.dispatch
+          { Tool_autoresearch.base_path = config.base_path;
+            agent_name = Some agent_name;
+            start_operation = None;
+            start_team_session = None;
+            config = Some config;
+            sw = Eio_context.get_switch_opt ();
+            clock = Eio_context.get_clock_opt () }
+          ~name ~args
+      else if starts "masc_runtime_" then
+        Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name }
+          ~name ~args
+      else if starts "masc_unit_"
+              || starts "masc_operation_"
+              || starts "masc_dispatch_"
+              || starts "masc_observe_"
+              || starts "masc_detachment_"
+              || starts "masc_policy_"
+              || starts "masc_room_strategy_" then
+        let ctx : (_, _) Tool_command_plane.context =
+          { config; agent_name;
+            sw = Eio_context.get_switch_opt ();
+            clock = Eio_context.get_clock_opt ();
+            net = get_net_opt ();
+            mcp_state = None; mcp_session_id = None; auth_token = None }
+        in
+        Tool_command_plane.dispatch ctx ~name ~args
+      else if List.mem name [ "masc_tool_grant"; "masc_tool_revoke"; "masc_tool_list" ] then
+        let ok, json = Tool_shard.execute name args in
+        Some (ok, Yojson.Safe.to_string json)
+      else
+        Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args
   | Mod_suspend ->
       Tool_suspend.dispatch { Tool_suspend.config; caller_agent = Some agent_name }
         ~name ~args

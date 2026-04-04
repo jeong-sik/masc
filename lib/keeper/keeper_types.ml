@@ -168,7 +168,7 @@ let legacy_keeper_internal_tool_names =
   Tool_catalog.tools_for_surface Tool_catalog.Keeper
 ;;
 
-let legacy_standard_tool_names = Tool_catalog.core_tools
+let legacy_session_min_tool_names = Tool_catalog_surfaces.session_min_tools
 
 let migrate_legacy_restricted_tools names =
   Custom (normalize_tool_names (legacy_keeper_internal_tool_names @ names))
@@ -313,7 +313,7 @@ let tool_access_projection_of_meta_json (json : Yojson.Safe.t) =
     match string_list_field_result ~field_name:"tool_allowlist" json with
     | Ok names -> Ok (migrate_legacy_restricted_tools names)
     | Error msg -> Error msg)
-  else Ok (migrate_legacy_restricted_tools legacy_standard_tool_names)
+  else Ok (migrate_legacy_restricted_tools legacy_session_min_tool_names)
 ;;
 
 let tool_access_of_meta_json (json : Yojson.Safe.t) =

@@ -275,7 +275,6 @@ let dispatch (ctx : context) ~(name : string) : result option =
           `Assoc [
             ("name", `String schema.name);
             ("description", `String schema.description);
-            ("tier", `String (Tool_catalog.tier_to_string (Tool_catalog.tool_tier schema.name)));
           ]
         ) matches in
         Some (true, Yojson.Safe.to_string (`Assoc [

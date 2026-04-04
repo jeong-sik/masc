@@ -213,20 +213,50 @@ let test_surface_resolution_respects_candidates () =
   check bool "drops candidate outside surface" false
     (List.mem "totally_unknown" resolved)
 
-let test_keeper_denied_surface_blocks_tools () =
-  let denied_tools = Tool_catalog.tools_for_surface Tool_catalog.Keeper in
+let test_keeper_denied_list_blocks_tools () =
+  let denied_tools = Tool_catalog_surfaces.keeper_denied_tools in
   let policy = {
     Tool_access_policy.allow = All;
-    deny = Surface Tool_catalog.Keeper;
+    deny = Names denied_tools;
   } in
-  check bool "keeper surface has tools" true
+  check bool "keeper denied list has tools" true
     (List.length denied_tools > 0);
   List.iter (fun tool_name ->
     check bool
-      (Printf.sprintf "%s denied by Keeper surface" tool_name)
+      (Printf.sprintf "%s denied by keeper denied list" tool_name)
       false
       (Tool_access_policy.allows_name policy tool_name)
   ) denied_tools
+
+let test_session_min_tools_remain_narrow () =
+  let names = Tool_catalog_surfaces.session_min_tools in
+  check bool "session_min has masc_status" true
+    (List.mem "masc_status" names);
+  check bool "session_min has masc_claim_next" true
+    (List.mem "masc_claim_next" names);
+  check bool "session_min omits board_delete" false
+    (List.mem "masc_board_delete" names);
+  check bool "session_min omits worktree_remove" false
+    (List.mem "masc_worktree_remove" names);
+  check bool "session_min omits code_delete" false
+    (List.mem "masc_code_delete" names);
+  check bool "session_min omits team_session_step" false
+    (List.mem "masc_team_session_step" names)
+
+let test_local_worker_tools_remain_curated () =
+  let names = Tool_catalog_surfaces.local_worker_tools in
+  check bool "local_worker has board_search" true
+    (List.mem "masc_board_search" names);
+  check bool "local_worker has code_search" true
+    (List.mem "masc_code_search" names);
+  check bool "local_worker has run_init" true
+    (List.mem "masc_run_init" names);
+  check bool "local_worker omits board_delete" false
+    (List.mem "masc_board_delete" names);
+  check bool "local_worker omits code_delete" false
+    (List.mem "masc_code_delete" names);
+  check bool "local_worker omits tool_admin_snapshot" false
+    (List.mem "masc_tool_admin_snapshot" names)
 
 (* ================================================================ *)
 (* of_allowlist convenience constructor                              *)
@@ -689,8 +719,12 @@ let () =
         [
           test_case "surface respects candidates" `Quick
             test_surface_resolution_respects_candidates;
-          test_case "Keeper surface blocks" `Quick
-            test_keeper_denied_surface_blocks_tools;
+          test_case "keeper denied list blocks" `Quick
+            test_keeper_denied_list_blocks_tools;
+          test_case "session_min remains narrow" `Quick
+            test_session_min_tools_remain_narrow;
+          test_case "local_worker remains curated" `Quick
+            test_local_worker_tools_remain_curated;
         ] );
       ( "of_allowlist",
         [

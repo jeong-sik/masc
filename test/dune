@@ -54,7 +54,6 @@
         test_keeper_allowed_paths
         test_keeper_compaction
         test_metrics_rotation
-        test_tool_tier
         test_tool_access_policy
         test_tool_access_role
         test_tool_token
@@ -109,7 +108,6 @@
           test_keeper_allowed_paths
           test_keeper_compaction
           test_metrics_rotation
-          test_tool_tier
           test_tool_access_policy
           test_tool_access_role
           test_tool_token

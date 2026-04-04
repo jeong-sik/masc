@@ -39,12 +39,9 @@ let () =
         ] );
       ( "passthrough_dead_entries",
         [
-          test_case "all passthrough names exist in visible schemas" `Quick
+          test_case "all passthrough names exist in schema registry" `Quick
             (fun () ->
-              let all_schemas =
-                Config.visible_tool_schemas ~include_hidden:true
-                  ~include_deprecated:false ()
-              in
+              let all_schemas = Config.raw_all_tool_schemas in
               let schema_names =
                 List.map
                   (fun (s : Types.tool_schema) -> s.name)
@@ -83,17 +80,6 @@ let () =
                   check bool (name ^ " omitted from public agent surface") false
                     (List.mem name names))
                 banned);
-        ] );
-      ( "tier_inclusion",
-        [
-          test_case "core ⊂ extended" `Quick (fun () ->
-              List.iter
-                (fun name ->
-                  check bool
-                    (name ^ " core should be in extended")
-                    true
-                    (Tool_catalog.is_in_tier Tool_catalog.Extended name))
-                Tool_catalog.core_tools);
         ] );
       ( "annotation_overrides",
         [
@@ -222,9 +208,9 @@ let () =
           test_case "internal tools are not public" `Quick
             (fun () ->
               let internal =
-                [ "masc_code_search";
-                  "masc_team_session_step"; "masc_auth_create_token";
-                  "masc_worktree_create"; "masc_governance_set" ]
+                [ "masc_auth_create_token";
+                  "masc_governance_set"; "masc_tool_grant";
+                  "masc_tool_revoke"; "masc_runtime_verify" ]
               in
               List.iter
                 (fun name ->
@@ -237,8 +223,7 @@ let () =
                 Config.raw_all_tool_schemas
                 |> List.map (fun (s : Types.tool_schema) -> s.name)
               in
-              (* masc_team_session_step has a schema but is not public *)
-              let internal = "masc_team_session_step" in
+              let internal = "masc_runtime_verify" in
               check bool (internal ^ " in registry") true
                 (List.mem internal all_names);
               check bool (internal ^ " not public") false

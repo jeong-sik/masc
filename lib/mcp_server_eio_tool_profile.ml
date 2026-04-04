@@ -56,11 +56,7 @@ WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_ve
 WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isolation) → work → masc_transition(done). \
 Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work. \
-TIERS: tools in 3 tiers (each tool has x-tier annotation). \
-Essential (~20): join, leave, status, add_task, transition, broadcast, heartbeat, plan_init/get/set_task/update, who, dashboard, worktree_create. \
-Standard (~55): + board_*, team_session_*, governance, decision_*, handover_*, spawn, agents. \
-Full: all tools. Use masc_tool_help to discover tools beyond essential tier. \
-Pass tier=essential to tools/list to reduce tool count."
+Use masc_tool_help to inspect tool contracts and prefer the smallest useful surface."
 
 let apply_budget_filter ?budget_tokens schemas =
   match budget_tokens with
@@ -108,11 +104,17 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
               Tool_catalog.is_public_mcp schema.name)
             without_internal
     | Managed_agent ->
+        let registered =
+          Config.raw_all_tool_schemas
+          |> Tool_help_registry.canonicalize_schemas
+          |> dedupe_tool_schemas_by_name
+        in
         let passthrough =
-          Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false ()
+          registered
           |> List.filter (fun (schema : Types.tool_schema) ->
                  List.mem schema.name managed_agent_passthrough_tool_names
-                 && Tool_catalog.is_visible ~include_hidden:true schema.name)
+                 && (Tool_catalog.metadata schema.name).lifecycle
+                    <> Tool_catalog.Deprecated)
         in
         dedupe_tool_schemas_by_name
           (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
@@ -523,7 +525,6 @@ let tool_output_schema_field = function
   | _ -> None
 
 let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
-  let tier_str = Tool_catalog.tier_to_string (Tool_catalog.tool_tier schema.name) in
   let base =
     [
       ("name", `String schema.name);
@@ -533,7 +534,6 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
         `List
           (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
-      ("x-tier", `String tier_str);
     ]
     @ Tool_catalog.metadata_to_fields schema.name
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
@@ -554,7 +554,6 @@ type tools_list_params = {
   include_hidden : bool;
   include_deprecated : bool;
   include_usage : bool;
-  tier : string option;
   cursor : string option;
 }
 
@@ -639,7 +638,7 @@ let requested_tool_list_params params =
   let* fields = strict_assoc_params params in
   let allowed =
     [ "_meta"; "names"; "include_hidden"; "include_deprecated"; "include_usage";
-      "tier"; "cursor" ]
+      "cursor" ]
   in
   let unknown =
     fields
@@ -670,16 +669,6 @@ let requested_tool_list_params params =
       | _ -> Error "Invalid params: names must be an array of strings"
     in
     let* cursor = cursor_param payload in
-    let* tier =
-      match payload |> member "tier" with
-      | `Null -> Ok None
-      | `String s -> (
-          match Tool_catalog.tier_of_string (String.lowercase_ascii s) with
-          | Some _ -> Ok (Some s)
-          | None ->
-              Error "Invalid params: tier must be one of: essential, standard, full")
-      | _ -> Error "Invalid params: tier must be a string"
-    in
     let* include_hidden = bool_param payload "include_hidden" in
     let* include_deprecated = bool_param payload "include_deprecated" in
     let* include_usage = bool_param payload "include_usage" in
@@ -689,7 +678,6 @@ let requested_tool_list_params params =
         include_hidden;
         include_deprecated;
         include_usage;
-        tier;
         cursor;
       }
 

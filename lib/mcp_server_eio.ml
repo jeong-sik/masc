@@ -97,7 +97,7 @@ let () =
   Tool_tag_init.register_all ();
   Tool_board.register ();
   mark_tag_registry_initialized ();
-  (* Inject masc_* schemas into keeper bridge for tier-based filtering.
+  (* Inject masc_* schemas into keeper bridge for explicit policy filtering.
      Uses Config.raw_all_tool_schemas which includes Board schemas
      not present in Tools.all_schemas_extended. *)
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;

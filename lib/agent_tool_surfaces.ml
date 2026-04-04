@@ -24,7 +24,7 @@ let prefixed_tool_names names =
   names |> List.map (fun name -> "mcp__masc__" ^ name)
 
 let spawned_agent_public_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Public
+  Tool_catalog_surfaces.spawned_agent_tools
 
 let spawned_agent_prefixed_tools : string list =
   prefixed_tool_names spawned_agent_public_tool_names

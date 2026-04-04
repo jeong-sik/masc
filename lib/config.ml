@@ -14,11 +14,21 @@ let dedupe_schemas (schemas : Types.tool_schema list) =
 let raw_all_tool_schemas : Types.tool_schema list =
   dedupe_schemas
     (Tools.raw_schemas
+    @ Tool_schemas_control.schemas
+    @ Tool_schemas_a2a.schemas
     @ Tool_schemas_misc.schemas
     @ Tool_board.tools
     @ Tool_keeper.schemas
+    @ Tool_operator.schemas
+    @ Tool_local_runtime.schemas
+    @ Tool_command_plane.schemas
+    @ Tool_team_session.schemas
+    @ Tool_voice.schemas
+    @ Tool_autoresearch.schemas
     @ Tool_compact.schemas
+    @ Tool_repair_loop.schemas
     @ Tool_agent_timeline.schemas
+    @ Tool_shard.schemas
     )
 
 (** Validate tool schemas at module initialization time.

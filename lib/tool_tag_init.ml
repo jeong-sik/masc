@@ -18,12 +18,19 @@ let register_all () =
     "masc_bounded_run";
     "masc_verify_request"; "masc_verify_submit";
     "masc_verify_pending"; "masc_verify_auto";
+    "masc_mcp_session";
+    "masc_cancellation"; "masc_subscription"; "masc_progress";
+    "masc_governance_set"; "masc_spawn";
+    "masc_episode_flush"; "masc_episode_list";
+    "masc_recall_search";
     (* board *)
     "masc_board_post"; "masc_board_comment";
     "masc_board_list"; "masc_board_get";
     "masc_board_vote"; "masc_board_stats";
     "masc_board_search"; "masc_board_comment_vote";
+    "masc_board_profile"; "masc_board_hearths"; "masc_board_migrate";
     "masc_board_delete";
+    "masc_board_reclassify";
   ];
 
   (* ── Mod_task: non-schema tools ─────────────────────────────── *)
@@ -42,6 +49,24 @@ let register_all () =
     "masc_code_shell"; "masc_code_git";
   ];
 
+  (* ── Mod_misc umbrella: delegated by name inside the dispatcher ── *)
+  reg Mod_misc [
+    "masc_a2a_discover"; "masc_a2a_query_skill"; "masc_a2a_delegate";
+    "masc_a2a_subscribe"; "masc_a2a_unsubscribe";
+    "masc_poll_events"; "masc_heartbeat_result";
+    "masc_relay_checkpoint"; "masc_relay_now";
+    "masc_relay_smart_check"; "masc_relay_status";
+    "masc_library_list"; "masc_library_read"; "masc_library_add";
+    "masc_library_promote"; "masc_library_search";
+    "masc_verify_handoff";
+    "masc_gc"; "masc_cleanup_zombies";
+    "masc_tool_stats"; "masc_tool_help";
+    "masc_tool_admin_snapshot"; "masc_tool_admin_update";
+    "masc_keeper_tool_catalog";
+    "masc_feature_flags";
+    "masc_tool_grant"; "masc_tool_revoke"; "masc_tool_list";
+  ];
+
   (* ── Mod_handover: non-schema tools ─────────────────────────── *)
   reg Mod_handover [
     "masc_handover_create"; "masc_handover_list";
@@ -56,11 +81,6 @@ let register_all () =
 
   (* Mod_suspend: fully covered by schemas — no entries needed *)
 
-  (* ── Mod_misc: Tool_misc ──────────────────────────────────────── *)
-  reg Mod_misc [
-    "masc_dashboard"; "masc_tool_help";
-  ];
-
   (* ── Schema-gap fills for modules with partial schema exports ── *)
   reg Mod_room [
     "masc_workflow_guide"; "masc_check";
@@ -68,6 +88,8 @@ let register_all () =
   ];
   reg Mod_agent [
     "masc_agent_card";
+    "masc_register_capabilities"; "masc_find_by_capability";
+    "masc_collaboration_graph"; "masc_consolidate_learning"; "masc_get_metrics";
   ];
 
   ()

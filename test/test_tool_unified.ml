@@ -13,14 +13,14 @@ let () =
     [
       ( "tool_info",
         [
-          test_case "known essential tool returns correct tier" `Quick (fun () ->
+          test_case "known tool returns visible metadata" `Quick (fun () ->
               let info = Tool_unified.tool_info "masc_join" in
-              check string "tier" "essential"
-                (Tool_catalog.tier_to_string info.tier));
-          test_case "unknown tool returns full tier" `Quick (fun () ->
+              check string "visibility" "default"
+                (Tool_catalog.visibility_to_string info.visibility));
+          test_case "unknown tool remains hidden" `Quick (fun () ->
               let info = Tool_unified.tool_info "__test_unknown_xyz" in
-              check string "tier" "full"
-                (Tool_catalog.tier_to_string info.tier));
+              check string "visibility" "hidden"
+                (Tool_catalog.visibility_to_string info.visibility));
         ] );
       ( "tool_info_to_json",
         [
@@ -30,8 +30,8 @@ let () =
               let open Yojson.Safe.Util in
               check string "name" "masc_status"
                 (json |> member "name" |> to_string);
-              check string "tier" "essential"
-                (json |> member "tier" |> to_string);
+              check string "visibility" "default"
+                (json |> member "visibility" |> to_string);
               (* is_read_only depends on init, just check field exists *)
               let _ = json |> member "is_read_only" |> to_bool in
               ());
@@ -45,17 +45,18 @@ let () =
               let _ = report |> member "distinct_tools_called" |> to_int in
               let _ = report |> member "top_20" |> to_list in
               let _ = report |> member "never_called_count" |> to_int in
-              let _ = report |> member "tier_distribution" in
+              let _ = report |> member "tool_distribution" in
               let _ = report |> member "dispatch_v2_enabled" |> to_bool in
               let _ = report |> member "registered_count" |> to_int in
               ());
-          test_case "tier_distribution has all tiers" `Quick (fun () ->
+          test_case "tool_distribution has expected counts" `Quick (fun () ->
               let report = Tool_unified.summary_report () in
               let open Yojson.Safe.Util in
-              let dist = report |> member "tier_distribution" in
-              let _ = dist |> member "essential" |> to_int in
-              let _ = dist |> member "standard_only" |> to_int in
-              let _ = dist |> member "full_only" |> to_int in
+              let dist = report |> member "tool_distribution" in
+              let _ = dist |> member "total" |> to_int in
+              let _ = dist |> member "public" |> to_int in
+              let _ = dist |> member "visible" |> to_int in
+              let _ = dist |> member "hidden" |> to_int in
               ());
         ] );
     ]

@@ -12,7 +12,7 @@ open Keeper_tool_registry
 let keeper_denied_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create 32 in
   List.iter (fun name -> Hashtbl.replace tbl name ())
-    (Tool_catalog.tools_for_surface Tool_catalog.Keeper);
+    Tool_catalog_surfaces.keeper_denied_tools;
   tbl
 
 let dedupe_tool_schemas (schemas : Types.tool_schema list) =

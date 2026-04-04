@@ -194,18 +194,13 @@ let public_tool_help_schemas () =
   Config.visible_tool_schemas ()
 
 let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
-    ?(include_deprecated = false) ?(include_usage = false) ?tier ?cursor
+    ?(include_deprecated = false) ?(include_usage = false) ?cursor
     state id =
   let usage_summary =
     if include_usage then
       Some (Telemetry_eio.summarize_tool_usage ?fs:state.Mcp_server.fs state.Mcp_server.room_config)
     else
       None
-  in
-  let tier_filter =
-    match tier with
-    | None -> None
-    | Some s -> Tool_catalog.tier_of_string (String.lowercase_ascii s)
   in
   let tools =
     TP.tool_schemas_for_profile ~include_hidden ~include_deprecated
@@ -215,11 +210,6 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
        | Some wanted ->
            List.filter (fun (schema : Types.tool_schema) ->
              List.mem schema.name wanted))
-    |> (match tier_filter with
-       | None -> Fun.id
-       | Some t ->
-           List.filter (fun (schema : Types.tool_schema) ->
-             Tool_catalog.is_in_tier t schema.name))
     |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
            String.compare a.name b.name)
   in
@@ -457,7 +447,7 @@ let handle_request
                    | "tools/list" -> (
                        match TP.requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
-                       | Ok { names; include_hidden; include_deprecated; include_usage; tier; cursor } ->
+                       | Ok { names; include_hidden; include_deprecated; include_usage; cursor } ->
                            let list_profile =
                              match profile with
                              | Managed_agent | Operator_remote -> profile
@@ -465,7 +455,7 @@ let handle_request
                            in
                            handle_list_tools_eio ~profile:list_profile ?names
                              ~include_hidden ~include_deprecated ~include_usage
-                             ?tier ?cursor state id)
+                             ?cursor state id)
                    | "tools/call" ->
                        (match req.params with
                        | Some params ->

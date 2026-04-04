@@ -1,7 +1,6 @@
 (** Tests for Tool_budget — token budget limiter for tool descriptions *)
 
 module Tool_budget = Masc_mcp.Tool_budget
-module Tool_catalog = Masc_mcp.Tool_catalog
 
 let mk_schema name desc : Types.tool_schema =
   { name; description = desc; input_schema = `Assoc [] }
@@ -9,16 +8,16 @@ let mk_schema name desc : Types.tool_schema =
 (* Helper: always returns 0 usage *)
 let no_usage _ = 0
 
-let essential_schema =
+let join_schema =
   mk_schema "masc_join" "Join the coordination room."
 
-let standard_schema =
+let board_schema =
   mk_schema "masc_board_post" "Post a message to the board."
 
-let full_schema =
+let debug_schema =
   mk_schema "masc_risc_pipeline_status" "Get RISC pipeline status for advanced debugging."
 
-let all_test_schemas = [ essential_schema; standard_schema; full_schema ]
+let all_test_schemas = [ join_schema; board_schema; debug_schema ]
 
 let () =
   let open Alcotest in
@@ -54,40 +53,37 @@ let () =
               in
               check int "all tools" 3 (List.length result));
         ] );
-      ( "tier_priority",
+      ( "usage_priority",
         [
-          test_case "Essential tier tools are included first" `Quick (fun () ->
-              (* Budget enough for ~1 tool description only *)
-              let budget = Tool_budget.estimate_tokens essential_schema.description in
+          test_case "highest-usage tool is included first" `Quick (fun () ->
+              let budget = Tool_budget.estimate_tokens join_schema.description in
+              let usage_counts name =
+                if name = "masc_board_post" then 50 else 0
+              in
               let result =
                 Tool_budget.filter_by_budget ~budget_tokens:budget
-                  ~usage_counts:no_usage ~tool_schemas:all_test_schemas
+                  ~usage_counts ~tool_schemas:all_test_schemas
               in
               check int "one tool" 1 (List.length result);
-              check string "essential first"
-                "masc_join"
+              check string "highest usage first"
+                "masc_board_post"
                 (List.hd result).name);
-          test_case "Essential before Standard before Full" `Quick (fun () ->
-              (* Give enough budget for exactly 2 tools *)
-              let budget =
-                Tool_budget.estimate_tokens essential_schema.description
-                + Tool_budget.estimate_tokens standard_schema.description
-              in
+          test_case "ties fall back to name ordering" `Quick (fun () ->
+              let s1 = mk_schema "masc_board_search" "Search the board." in
+              let s2 = mk_schema "masc_board_post" "Post to the board." in
+              let budget = Tool_budget.estimate_tokens s1.description in
               let result =
                 Tool_budget.filter_by_budget ~budget_tokens:budget
-                  ~usage_counts:no_usage ~tool_schemas:all_test_schemas
+                  ~usage_counts:no_usage ~tool_schemas:[ s1; s2 ]
               in
-              check int "two tools" 2 (List.length result);
-              check string "first is essential"
-                "masc_join"
-                (List.nth result 0).name;
-              check string "second is standard"
+              check int "one tool" 1 (List.length result);
+              check string "alphabetical tiebreaker"
                 "masc_board_post"
-                (List.nth result 1).name);
+                (List.hd result).name);
         ] );
       ( "usage_frequency",
         [
-          test_case "higher usage ranked first within same tier" `Quick (fun () ->
+          test_case "higher usage ranked first" `Quick (fun () ->
               let s1 = mk_schema "masc_board_post" "Post a message." in
               let s2 = mk_schema "masc_board_search" "Search the board." in
               let usage_counts name =

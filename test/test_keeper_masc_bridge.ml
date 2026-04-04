@@ -505,9 +505,7 @@ let test_denied_tools_excluded_from_injection () =
   prime_keeper_bridge ();
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
-  let denied =
-    Masc_mcp.Tool_catalog.tools_for_surface Masc_mcp.Tool_catalog.Keeper
-  in
+  let denied = Masc_mcp.Tool_catalog_surfaces.keeper_denied_tools in
   List.iter
     (fun denied_name ->
       Alcotest.(check bool)
@@ -529,9 +527,7 @@ let test_denied_excluded_from_allowed_names () =
   prime_keeper_bridge ();
   let meta = make_meta () in
   let names = KET.keeper_allowed_tool_names meta in
-  let denied =
-    Masc_mcp.Tool_catalog.tools_for_surface Masc_mcp.Tool_catalog.Keeper
-  in
+  let denied = Masc_mcp.Tool_catalog_surfaces.keeper_denied_tools in
   List.iter
     (fun denied_name ->
       Alcotest.(check bool)

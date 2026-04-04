@@ -362,6 +362,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     end else
       agent_name
   in
+  let starts prefix = String.starts_with ~prefix name in
 
   (* Auto-register session for non-read-only tools *)
   if agent_name <> "unknown" && not is_read_only then
@@ -462,7 +463,128 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_agent_timeline ->
         Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name } ~name ~args:coerced_args
     | Mod_misc ->
-        Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args:coerced_args
+        if starts "masc_portal_" then
+          Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args:coerced_args
+        else if starts "masc_team_session_" then
+          Tool_team_session.dispatch
+            { Tool_team_session.config; agent_name; sw; clock;
+              proc_mgr = state.Mcp_server.proc_mgr;
+              net = state.Mcp_server.net }
+            ~name ~args:coerced_args
+        else if starts "masc_voice_" then
+          Tool_voice.dispatch
+            { agent_name; sw; clock; net = state.Mcp_server.net }
+            ~name ~args:coerced_args
+        else if starts "masc_operator_"
+                || List.mem name [ "masc_surface_audit"; "masc_collaboration_evidence" ] then
+          Tool_operator.dispatch
+            { Tool_operator.config; agent_name; sw; clock;
+              proc_mgr = state.Mcp_server.proc_mgr;
+              net = state.Mcp_server.net;
+              mcp_session_id }
+            ~name ~args:coerced_args
+        else if starts "masc_auth_" then
+          Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args:coerced_args
+        else if starts "masc_a2a_"
+                || List.mem name [ "masc_poll_events"; "masc_heartbeat_result" ] then
+          Tool_a2a.dispatch { Tool_a2a.config; agent_name } ~name ~args:coerced_args
+        else if starts "masc_relay_" then
+          Tool_relay.dispatch
+            { Tool_relay.config; agent_name; sw;
+              proc_mgr = state.Mcp_server.proc_mgr }
+            ~name ~args:coerced_args
+        else if starts "masc_run_" then
+          Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
+        else if List.mem name [ "masc_pause"; "masc_resume"; "masc_pause_status" ] then
+          Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args:coerced_args
+        else if starts "masc_library_" then
+          let library_ctx : Tool_library.context = { agent_name } in
+          Tool_library.dispatch library_ctx ~name ~args:coerced_args
+        else if starts "masc_improve_loop_" then
+          Tool_improve_loop.dispatch
+            {
+              Tool_improve_loop.config;
+              agent_name;
+              sw = Some sw;
+              clock = Some clock;
+              proc_mgr = state.Mcp_server.proc_mgr;
+              net = state.Mcp_server.net;
+            }
+            ~name ~args:coerced_args
+        else if starts "masc_repair_loop_" then
+          let repair_ctx : _ Tool_repair_loop_types.context =
+            {
+              config;
+              agent_name;
+              sw = Some sw;
+              clock = Some clock;
+              proc_mgr = state.Mcp_server.proc_mgr;
+            }
+          in
+          Tool_repair_loop.dispatch repair_ctx ~name ~args:coerced_args
+        else if starts "masc_autoresearch_"
+                || String.equal name "masc_repo_synthesis_swarm_start" then
+          let start_team_session ~goal ~operation_id ~loop_id:_ ~target_file:_
+              ~program_note:_ =
+            match state.Mcp_server.proc_mgr, state.Mcp_server.net with
+            | None, _ -> Error "process_mgr not available"
+            | Some _process_mgr, None -> Error "net not available for team session"
+            | Some process_mgr, Some net ->
+                let env = object
+                  method clock = clock
+                  method process_mgr = process_mgr
+                  method net = net
+                end in
+                Team_session_engine_eio.start_session ~sw ~env ~config
+                  ~created_by:agent_name ~goal ~duration_seconds:900
+                  ~execution_scope:Team_session_types.Limited_code_change
+                  ~checkpoint_interval_sec:60 ~min_agents:1
+                  ~scale_profile:Team_session_types.Scale_standard
+                  ~control_profile:
+                    Team_session_types.Control_hierarchical_quality_v1
+                  ~orchestration_mode:Team_session_types.Assist
+                  ~communication_mode:Team_session_types.Comm_broadcast
+                  ~model_cascade:[]
+                  ~fallback_policy:Team_session_types.Fallback_cascade_then_task
+                  ~instruction_profile:Team_session_types.Profile_strict
+                  ~alert_channel:Team_session_types.Alert_broadcast
+                  ~auto_resume:true
+                  ~report_formats:
+                    [ Team_session_types.Markdown; Team_session_types.Json ]
+                  ~agent_names:[] ~operation_id
+          in
+          let autoresearch_ctx : Tool_autoresearch.context =
+            { base_path = config.base_path;
+              agent_name = Some agent_name;
+              start_operation = None;
+              start_team_session = Some start_team_session;
+              config = Some config;
+              sw = Some sw;
+              clock = Some clock }
+          in
+          Tool_autoresearch.dispatch autoresearch_ctx ~name ~args:coerced_args
+        else if starts "masc_runtime_" then
+          Tool_local_runtime.dispatch
+            { Tool_local_runtime.config; agent_name }
+            ~name ~args:coerced_args
+        else if starts "masc_unit_"
+                || starts "masc_operation_"
+                || starts "masc_dispatch_"
+                || starts "masc_observe_"
+                || starts "masc_detachment_"
+                || starts "masc_policy_"
+                || starts "masc_room_strategy_" then
+          let command_plane_ctx : (_, _) Tool_command_plane.context =
+            { config; agent_name; sw = Some sw; clock = Some clock;
+              net = state.Mcp_server.net; mcp_state = Some state;
+              mcp_session_id; auth_token }
+          in
+          Tool_command_plane.dispatch command_plane_ctx ~name ~args:coerced_args
+        else if List.mem name [ "masc_tool_grant"; "masc_tool_revoke"; "masc_tool_list" ] then
+          let ok, json = Tool_shard.execute name coerced_args in
+          Some (ok, Yojson.Safe.to_string json)
+        else
+          Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args:coerced_args
     | Mod_suspend ->
         Tool_suspend.dispatch { Tool_suspend.config; caller_agent = Some agent_name } ~name ~args:coerced_args
     | Mod_keeper ->

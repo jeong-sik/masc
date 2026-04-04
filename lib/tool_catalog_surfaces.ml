@@ -100,7 +100,7 @@ type surface =
   | Keeper
   | System
 
-(** Public surface: all tools available to MCP clients and spawned agents. *)
+(** Public surface: tools visible from the default MCP tools/list endpoint. *)
 let public_surface_tools =
   [
     (* Room lifecycle *)
@@ -121,48 +121,171 @@ let public_surface_tools =
     "masc_board_post"; "masc_board_list"; "masc_board_get";
     "masc_board_comment"; "masc_board_vote"; "masc_board_delete";
     "masc_board_stats"; "masc_board_comment_vote";
-    "masc_board_search";
+    "masc_board_profile"; "masc_board_hearths";
     (* Agent discovery *)
     "masc_agents"; "masc_dashboard"; "masc_agent_card";
     "masc_agent_timeline";
     (* Utility *)
     "masc_tool_help"; "masc_web_search"; "masc_check";
     (* Production *)
-    "masc_bounded_run";
-    "masc_deliver"; "masc_note_add";
-    (* Git/Code *)
-    "masc_worktree_create"; "masc_worktree_list"; "masc_worktree_remove";
-    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
-    "masc_code_write"; "masc_code_edit"; "masc_code_delete";
-    "masc_code_shell"; "masc_code_git";
-    (* Team session *)
+    "masc_bounded_run"; "masc_recall_search";
+    (* Verification *)
+    "masc_verify_auto"; "masc_verify_handoff"; "masc_verify_pending";
+    "masc_verify_request"; "masc_verify_status"; "masc_verify_submit";
+  ]
+
+let spawned_agent_tools =
+  [
+    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
+    "masc_task_history"; "masc_broadcast"; "masc_join"; "masc_leave";
+    "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
+    "masc_messages";
+    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
+    "masc_handover_create"; "masc_handover_list"; "masc_handover_claim";
+    "masc_handover_get";
+    "masc_board_list"; "masc_board_post"; "masc_board_comment";
+    "masc_board_vote"; "masc_board_get";
+    "masc_tool_help"; "masc_web_search";
     "masc_team_session_start"; "masc_team_session_step";
     "masc_team_session_status"; "masc_team_session_events";
     "masc_team_session_finalize"; "masc_team_session_stop";
     "masc_team_session_report"; "masc_team_session_list";
-    (* Spawn / Events *)
-    "masc_spawn"; "masc_poll_events";
-    (* Handover *)
-    "masc_handover_create"; "masc_handover_list"; "masc_handover_get";
-    "masc_handover_claim";
-    (* Verification *)
-    "masc_verify_auto"; "masc_verify_pending";
-    "masc_verify_request"; "masc_verify_status"; "masc_verify_submit";
-    (* Workflow *)
-    "masc_workflow_guide";
+    "masc_poll_events"; "masc_spawn";
+    "masc_note_add";
+    "masc_code_delete"; "masc_code_edit"; "masc_code_git";
+    "masc_code_shell"; "masc_code_write";
+    "masc_deliver";
+    "masc_plan_clear_task"; "masc_plan_get_task";
+    "masc_update_priority";
+    "masc_verify_handoff"; "masc_workflow_guide";
+  ]
+
+let local_worker_tools =
+  [
+    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
+    "masc_add_task"; "masc_heartbeat";
+    "masc_board_post"; "masc_board_list"; "masc_board_get";
+    "masc_board_comment"; "masc_board_vote"; "masc_board_search";
+    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
+    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
+    "masc_run_init"; "masc_run_plan"; "masc_run_log";
+    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
+    "masc_repair_loop_start"; "masc_repair_loop_status";
+    "masc_repair_loop_iterate"; "masc_repair_loop_stop";
+  ]
+
+let session_min_tools =
+  [
+    "masc_status"; "masc_tasks"; "masc_claim_next";
+    "masc_plan_set_task"; "masc_transition"; "masc_add_task";
+    "masc_broadcast"; "masc_heartbeat";
+  ]
+
+let keeper_denied_tools =
+  [
+    "masc_room_delete";
+    "masc_force_leave";
+    "masc_admin_reset"; "masc_admin_cleanup";
+    "masc_gc_force"; "masc_config_set";
+    "masc_reset";
+    "masc_spawn";
+    "masc_operator_action"; "masc_operator_confirm";
+    "masc_operator_judgment_write";
+    "masc_execute"; "masc_execute_dry_run";
   ]
 
 let keeper_surface_tools = keeper_internal_tools
 
+let dedupe_keep_order names =
+  let seen = Hashtbl.create (List.length names) in
+  List.filter
+    (fun name ->
+      if Hashtbl.mem seen name then
+        false
+      else (
+        Hashtbl.replace seen name ();
+        true))
+    names
+
+let hidden_callable_surface_tools =
+  dedupe_keep_order (spawned_agent_tools @ local_worker_tools)
+  |> List.filter (fun name -> not (List.mem name public_surface_tools))
+
 let system_surface_tools =
   [
-    (* Session lifecycle — auto-called *)
-    "masc_init"; "masc_set_room"; "masc_suspend";
-    (* Context management *)
-    "masc_compact_context";
+    "masc_room_delete"; "masc_force_leave";
+    "masc_admin_reset"; "masc_admin_cleanup";
+    "masc_gc_force"; "masc_config_set";
+    "masc_reset";
+    "masc_execute"; "masc_execute_dry_run";
+    (* Session lifecycle / MCP protocol internals *)
+    "masc_mcp_session"; "masc_suspend"; "masc_listen";
+    "masc_init"; "masc_reset"; "masc_register_capabilities";
+    "masc_set_room";
+    (* Governance / concurrency control *)
+    "masc_governance_set";
+    "masc_lock"; "masc_unlock";
     (* Heartbeat system loop *)
-    "masc_heartbeat_start"; "masc_heartbeat_stop"; "masc_heartbeat_list";
+    "masc_heartbeat_start"; "masc_heartbeat_stop";
+    "masc_heartbeat_list"; "masc_heartbeat_result";
+    (* Task lifecycle / agent evaluation *)
+    "masc_cancel_task"; "masc_claim_task"; "masc_complete_task";
+    "masc_release_task"; "masc_set_current_task";
+    "masc_agent_fitness"; "masc_agent_relations";
+    "masc_meta_cognition_snapshot"; "masc_consolidate_learning";
+    "masc_find_by_capability"; "masc_get_metrics";
+    "masc_select_agent"; "masc_agent_update"; "masc_task_history";
+    (* Maintenance / misc admin *)
+    "masc_cleanup_zombies"; "masc_gc"; "masc_compact_context";
+    "masc_cancellation"; "masc_subscription"; "masc_progress";
+    "masc_feature_flags"; "masc_pause_status";
+    "masc_tool_stats"; "masc_tool_admin_snapshot"; "masc_tool_admin_update";
+    "masc_keeper_tool_catalog"; "masc_config";
+    (* Auth / operator / control *)
+    "masc_auth_create_token";
+    "masc_auth_disable"; "masc_auth_enable"; "masc_auth_list";
+    "masc_auth_refresh"; "masc_auth_revoke"; "masc_auth_status";
+    "masc_operator_snapshot"; "masc_operator_digest";
+    "masc_operator_action"; "masc_operator_confirm";
+    "masc_operator_judgment_write"; "masc_surface_audit";
+    "masc_collaboration_evidence"; "masc_pause"; "masc_resume";
+    "masc_runtime_verify";
+    "masc_keeper_create_from_persona";
+    (* Command plane *)
+    "masc_dispatch_assign"; "masc_dispatch_escalate"; "masc_dispatch_plan";
+    "masc_dispatch_rebalance"; "masc_dispatch_recall"; "masc_dispatch_tick";
+    "masc_observe_alerts"; "masc_observe_capacity";
+    "masc_observe_operations"; "masc_observe_swarm";
+    "masc_observe_topology"; "masc_observe_traces";
+    "masc_operation_checkpoint"; "masc_operation_finalize";
+    "masc_operation_pause"; "masc_operation_resume";
+    "masc_operation_start"; "masc_operation_status"; "masc_operation_stop";
+    "masc_room_strategy_get"; "masc_room_strategy_set";
+    "masc_unit_define"; "masc_unit_list";
+    "masc_unit_reassign"; "masc_unit_reparent";
+    "masc_detachment_list"; "masc_detachment_status";
+    "masc_policy_status"; "masc_policy_approve";
+    "masc_policy_deny"; "masc_policy_update";
+    "masc_policy_freeze_unit"; "masc_policy_kill_switch";
+    (* Hidden callable operational tools *)
+    "masc_archive_view"; "masc_collaboration_graph";
+    "masc_error_add"; "masc_error_resolve";
+    "masc_relay_checkpoint"; "masc_relay_now";
+    "masc_relay_smart_check"; "masc_relay_status";
+    "masc_library_add"; "masc_library_list"; "masc_library_promote";
+    "masc_library_read"; "masc_library_search";
+    "masc_run_init"; "masc_run_plan"; "masc_run_log";
+    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
+    "masc_repair_loop_start"; "masc_repair_loop_status";
+    "masc_repair_loop_iterate"; "masc_repair_loop_stop";
+    "masc_autoresearch_start"; "masc_autoresearch_status";
+    "masc_autoresearch_stop"; "masc_autoresearch_inject";
+    "masc_autoresearch_cycle"; "masc_autoresearch_swarm_start";
+    "masc_repo_synthesis_swarm_start";
+    "masc_team_session_compare"; "masc_team_session_prove";
+    "masc_tool_grant"; "masc_tool_revoke"; "masc_tool_list";
   ]
+  @ hidden_callable_surface_tools
 
 (* ================================================================ *)
 (* Surface query functions                                          *)

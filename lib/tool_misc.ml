@@ -317,11 +317,6 @@ let handle_keeper_tool_catalog _ctx args =
   let include_deprecated = get_bool args "include_deprecated" false in
   let limit = max 1 (min 500 (get_int args "limit" 50)) in
   let offset = max 0 (get_int args "offset" 0) in
-  let tier_filter =
-    match get_string_opt args "tier" |> Option.map String.lowercase_ascii with
-    | None -> None
-    | Some raw -> Tool_catalog.tier_of_string raw
-  in
   let server_tools =
     (if include_hidden || include_deprecated then
        Config.all_tool_schemas
@@ -334,10 +329,6 @@ let handle_keeper_tool_catalog _ctx args =
        Config.visible_tool_schemas ())
     |> List.filter (fun schema -> String.length schema.Types.name >= 5
                                  && String.equal (String.sub schema.Types.name 0 5) "masc_")
-    |> (match tier_filter with
-        | None -> Fun.id
-        | Some tier ->
-            List.filter (fun schema -> Tool_catalog.is_in_tier tier schema.Types.name))
   in
   let tool_json (schema : Types.tool_schema) =
     `Assoc

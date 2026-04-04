@@ -1,9 +1,8 @@
-(** Tool_catalog — Visibility, lifecycle, and tier metadata for MCP tools.
+(** Tool_catalog — Visibility and lifecycle metadata for MCP tools.
 
     Central registry for tool access control:
     - Visibility: Default (public) vs Hidden (internal-only)
-    - Lifecycle: Active, Deprecated, Placeholder
-    - Tier: Core (~25) < Extended (all) *)
+    - Lifecycle: Active, Deprecated, Placeholder *)
 
 (** {1 Types} *)
 
@@ -15,8 +14,6 @@ type implementation_status =
   | Adapter
   | Simulation
   | Placeholder
-
-type tier = Core | Extended
 
 type metadata = {
   visibility : visibility;
@@ -50,9 +47,12 @@ val placeholder_tools_enabled : unit -> bool
 
 (** {1 Public tool surface} *)
 
+val public_tools : string list
+(** Canonical alias for [Tool_catalog_surfaces.public_surface_tools]. *)
+
 val public_mcp_tools : string list
-(** Alias for [Tool_catalog_surfaces.public_surface_tools].
-    Prefer the surfaces module directly for new code. *)
+(** Legacy alias for [public_tools].
+    Prefer [public_tools] or the surfaces module directly for new code. *)
 
 val is_public_mcp : string -> bool
 (** O(1) membership check against the public surface. *)
@@ -73,16 +73,6 @@ val allow_direct_call : string -> bool
 val visibility_to_string : visibility -> string
 val lifecycle_to_string : lifecycle -> string
 val implementation_status_to_string : implementation_status -> string
-val tier_to_string : tier -> string
-val tier_of_string : string -> tier option
-
-(** {1 Tier system} *)
-
-val tool_tier : string -> tier
-val is_in_tier : tier -> string -> bool
-val tier_tool_count : tier -> int
-
-val core_tools : string list
 
 (** {1 JSON metadata} *)
 

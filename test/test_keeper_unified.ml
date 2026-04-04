@@ -1450,6 +1450,41 @@ let test_social_model_routes_blocker_to_board_post () =
             (contains_substring post.body "blocked")
       | _ -> fail "expected one request-help board post")
 
+let test_social_model_tool_only_turn_skips_protocol_violation () =
+  let result =
+    make_run_result ~text:"" ~tools:["masc_heartbeat"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1
+  in
+  let routed, state =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation result
+  in
+  check string "speech act" "defer"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "silent"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check (option string) "no protocol violation blocker" None state.blocker;
+  check string "visible response suppressed" "" routed.response_text;
+  check (list string) "tool list preserved" ["masc_heartbeat"] routed.tools_used
+
+let test_social_model_infers_board_comment_from_tool_use () =
+  let result =
+    make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_heartbeat"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1
+  in
+  let routed, state =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation result
+  in
+  check string "speech act" "comment_board"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "board_comment"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check (option string) "no protocol violation blocker" None state.blocker;
+  check string "visible response empty" "" routed.response_text;
+  check (list string) "tool list preserved"
+    ["keeper_board_comment"; "masc_heartbeat"] routed.tools_used
+
 (* ---------- render_inline_skip_reason tests ---------- *)
 
 let str_contains s sub =
@@ -1639,6 +1674,10 @@ let () =
             test_social_model_requires_explicit_headers;
           test_case "social model routes blocker to board post" `Quick
             test_social_model_routes_blocker_to_board_post;
+          test_case "social model tool-only turn skips protocol violation" `Quick
+            test_social_model_tool_only_turn_skips_protocol_violation;
+          test_case "social model infers board comment from tool use" `Quick
+            test_social_model_infers_board_comment_from_tool_use;
           test_case "render_inline deny" `Quick
             test_render_inline_skip_reason_deny;
           test_case "render_inline cost" `Quick

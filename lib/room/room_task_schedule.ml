@@ -7,18 +7,14 @@ open Types
 include Room_utils
 include Room_state
 
-(** Default threshold for stale Todo task auto-archive (days). *)
-let default_stale_threshold_days = 7
-
 (** Claim next highest priority unclaimed task.
     Optional [exclude_task_ids] prevents re-claiming known bad tasks in the same loop run.
 
     Scheduling logic:
     - Auto-releases any previous claim held by this agent (BUG-004)
     - Applies starvation prevention: tasks waiting >24h get priority boost
-    - Auto-archives stale Todo tasks older than [stale_threshold_days]
     - Within same effective priority, prefers older tasks (FIFO) *)
-let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_days=default_stale_threshold_days) () =
+let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
   ensure_initialized config;
 
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
@@ -86,40 +82,11 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
         if priority_cmp <> 0 then priority_cmp
         else compare b.created_at a.created_at  (* Newer first to unblock stale queues *)
       ) working_tasks in
-      (* BUG-009: Auto-archive stale Todo tasks (>N days old) to prevent queue clogging *)
-      let stale_cutoff = now -. (float_of_int stale_threshold_days *. 86400.0) in
-      let stale, fresh_tasks = List.partition (fun (t : Types.task) ->
-        match t.task_status with
-        | Todo ->
-          (match parse_time t.created_at with
-           | Some created -> created < stale_cutoff
-           | None -> false)
-        | _ -> false
-      ) sorted in
-      (* Re-derive working_tasks after stale removal so subsequent
-         write_backlog calls do not restore archived tasks. *)
-      let working_tasks =
-        if stale <> [] then begin
-          let stale_ids = List.map (fun (t : Types.task) -> t.id) stale in
-          let remaining = List.filter (fun (t : Types.task) ->
-            not (List.mem t.id stale_ids)
-          ) working_tasks in
-          write_backlog config { backlog with tasks = remaining };
-          log_event config (Printf.sprintf
-            "{\"type\":\"stale_task_auto_archive\",\"count\":%d,\"threshold_days\":%d,\"ts\":\"%s\"}"
-            (List.length stale) stale_threshold_days (now_iso ()));
-          let _ = broadcast config ~from_agent:"system"
-            ~content:(Printf.sprintf "📦 Auto-archived %d stale Todo task(s) (>%dd old)"
-              (List.length stale) stale_threshold_days) in
-          remaining
-        end else
-          working_tasks
-      in
       let unclaimed = List.filter (fun t ->
         match t.task_status with
         | Todo -> true
         | _ -> false
-      ) fresh_tasks in
+      ) sorted in
       (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
       let all_excluded = match released_task_id with

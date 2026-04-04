@@ -392,7 +392,7 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
   const normalizedTasks = (Array.isArray(data.tasks) ? data.tasks : [])
     .map(normalizeTask)
     .filter((row): row is Task => row !== null)
-  setArrayByKeyIfChanged(tasks, normalizedTasks, t => t.id)
+  setArrayByKeyIfChanged(tasks, normalizedTasks, t => `${t.id}:${t.status ?? ''}`)
   const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
     .map(normalizeMessage)
     .filter((row): row is Message => row !== null)

@@ -284,9 +284,9 @@ let personas_dirs_with inputs resolution =
     if resolution.personas.exists then [ resolution.personas.path ] else []
   in
   let explicit_personas_dir_override = trim_opt inputs.env_personas_dir in
-  (* inputs.env_personas_dir is populated only from MASC_PERSONAS_DIR.
-     A generic config-root env override should still include HOME/base
-     personas dirs. *)
+  (* inputs.env_personas_dir is populated only from MASC_PERSONAS_DIR, so
+     only that explicit override becomes sole-source. A generic config-root
+     env override still leaves HOME/base personas discovery enabled. *)
   match explicit_personas_dir_override with
   | Some _ -> dedupe_paths primary
   | _ ->

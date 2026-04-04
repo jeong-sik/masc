@@ -181,8 +181,6 @@ let dispatch ctx ~name ~args : result option =
   | "masc_note_add" -> Some (handle_note_add ctx args)
   | "masc_deliver" -> Some (handle_deliver ctx args)
   | "masc_plan_get" -> Some (handle_plan_get ctx args)
-  | "masc_error_add" -> Some (handle_error_add ctx args)
-  | "masc_error_resolve" -> Some (handle_error_resolve ctx args)
   | "masc_plan_set_task" -> Some (handle_plan_set_task ctx args)
   | "masc_plan_get_task" -> Some (handle_plan_get_task ctx args)
   | "masc_plan_clear_task" -> Some (handle_plan_clear_task ctx args)

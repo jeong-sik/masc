@@ -64,7 +64,7 @@ let all_entries =
           logs_ref = Some "/api/v1/dashboard/logs";
           metrics_ref = Some "/metrics";
           proof_ref = Some "/api/v1/dashboard/proof";
-          tool_name = Some "masc_collaboration_evidence";
+          tool_name = Some "masc_operator_snapshot";
         };
     };
     {
@@ -100,7 +100,7 @@ let all_entries =
           logs_ref = Some "/api/v1/dashboard/logs";
           metrics_ref = Some "/metrics";
           proof_ref = None;
-          tool_name = Some "masc_collaboration_evidence";
+          tool_name = Some "masc_operator_snapshot";
         };
     };
     {

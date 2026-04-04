@@ -214,14 +214,7 @@ let maybe_tick_from_keepalive ~(config : Room.config) ~(agent_name : string)
   else
     ()
 
-let dispatch (ctx : _ context) ~name ~args : result option =
-  match name with
-  | "masc_improve_loop_start" -> Some (handle_start ctx args)
-  | "masc_improve_loop_status" -> Some (handle_status ctx args)
-  | "masc_improve_loop_pause" -> Some (handle_pause ctx args)
-  | "masc_improve_loop_resume" -> Some (handle_resume ctx args)
-  | "masc_improve_loop_tick" -> Some (tick_with_driver default_driver ctx args)
-  | _ -> None
+let dispatch (_ctx : _ context) ~name:_ ~args:_ : result option = None
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

@@ -34,7 +34,6 @@ let admin_only_tools =
     "masc_policy_freeze_unit";
     "masc_policy_kill_switch";
     (* CanAdmin — board moderation *)
-    "masc_board_reclassify";
     "masc_board_delete";
     (* CanAdmin — auth *)
     "masc_auth_create_token";
@@ -66,12 +65,11 @@ let worker_only_tools =
     "masc_listen";
     "masc_heartbeat";
     (* CanBroadcast — transport *)
-    "masc_webrtc_offer";
-    "masc_webrtc_answer";
     "channel_gate";
     (* CanBroadcast — capability registry *)
     "masc_register_capabilities";
-    "masc_find_by_capability";
+    (* CanBroadcast — capability registry *)
+    "masc_register_capabilities";
     (* CanBroadcast — agent management *)
     "masc_agent_update";
     "masc_operator_action";
@@ -82,24 +80,6 @@ let worker_only_tools =
     "masc_keeper_msg";
     "masc_keeper_repair";
     "masc_keeper_create_from_persona";
-    (* CanBroadcast — voice *)
-    "masc_voice_speak";
-    "masc_voice_session_start";
-    "masc_voice_session_end";
-    "masc_voice_conference_start";
-    "masc_voice_conference_end";
-    "masc_voice_ping_pong";
-    (* CanBroadcast — org units *)
-    "masc_unit_define";
-    "masc_unit_reparent";
-    "masc_unit_reassign";
-    (* CanBroadcast — operations *)
-    "masc_operation_start";
-    "masc_operation_checkpoint";
-    "masc_operation_pause";
-    "masc_operation_resume";
-    "masc_operation_stop";
-    "masc_operation_finalize";
     (* CanBroadcast — dispatch *)
     "masc_dispatch_assign";
     "masc_dispatch_rebalance";

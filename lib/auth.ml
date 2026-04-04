@@ -268,24 +268,16 @@ let legacy_permission_for_tool = function
   | "masc_join" -> Some CanJoin
   | "masc_leave" -> Some CanLeave
   | "masc_status" | "masc_who" | "masc_tasks" | "masc_messages"
-  | "masc_transport_status" | "masc_websocket_discovery"
   | "masc_agents" | "masc_portal_status"
   | "masc_worktree_list"
   | "masc_task_history" | "masc_operator_snapshot"
   | "masc_operator_digest" | "masc_surface_audit"
-  | "masc_collaboration_evidence"
   | "masc_keeper_status" | "masc_keeper_list"
   | "masc_runtime_verify"
-  | "masc_unit_list" | "masc_operation_status"
   | "masc_policy_status" | "masc_dispatch_plan"
-  | "masc_observe_topology" | "masc_observe_operations"
-  | "masc_observe_swarm" | "masc_observe_capacity" | "masc_observe_alerts"
-  | "masc_observe_traces"
-  | "masc_voice_sessions" | "masc_voice_agent"
   | "masc_agent_card" | "masc_agent_fitness"
-  | "masc_agent_relations" | "masc_a2a_discover" | "masc_a2a_query_skill"
+  | "masc_agent_relations"
   | "masc_dashboard" | "masc_check"
-  | "masc_collaboration_graph" | "masc_episode_list"
   | "masc_feature_flags" | "masc_get_metrics"
   | "masc_meta_cognition_snapshot" | "masc_poll_events"
   | "masc_recall_search" | "masc_room_strategy_get"
@@ -303,22 +295,14 @@ let legacy_permission_for_tool = function
   | "masc_done" | "masc_update_priority" | "masc_transition" | "masc_release" ->
       Some CanCompleteTask
   | "masc_broadcast" | "masc_listen" | "masc_heartbeat"
-  | "masc_webrtc_offer" | "masc_webrtc_answer"
   | "channel_gate"
   | "masc_register_capabilities" | "masc_find_by_capability"
   | "masc_agent_update" | "masc_operator_action"
   | "masc_keeper_up" | "masc_keeper_down" | "masc_keeper_msg"
   | "masc_keeper_repair"
   | "masc_keeper_create_from_persona"
-  | "masc_voice_speak" | "masc_voice_session_start"
-  | "masc_voice_session_end" | "masc_voice_conference_start"
-  | "masc_voice_conference_end" | "masc_voice_ping_pong"
-  | "masc_operator_confirm" | "masc_unit_define"
-  | "masc_unit_reparent"
-  | "masc_unit_reassign" | "masc_operation_start"
-  | "masc_operation_checkpoint" | "masc_operation_pause"
-  | "masc_operation_resume" | "masc_operation_stop"
-  | "masc_operation_finalize" | "masc_dispatch_assign"
+  | "masc_operator_confirm"
+  | "masc_dispatch_assign"
   | "masc_dispatch_rebalance" | "masc_dispatch_escalate"
   | "masc_dispatch_recall" | "masc_policy_approve"
   | "masc_policy_deny" | "masc_policy_update" ->
@@ -341,13 +325,13 @@ let legacy_permission_for_tool = function
       Some CanReadState
   | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
   | "masc_board_comment_vote" -> Some CanBroadcast
-  | "masc_board_reclassify" | "masc_board_delete" -> Some CanAdmin
+  | "masc_board_delete" -> Some CanAdmin
   (* Auth tools - special handling *)
   | "masc_auth_enable" | "masc_auth_disable"
   | "masc_auth_revoke" -> Some CanInit  (* Admin only *)
   | "masc_auth_create_token" -> Some CanAdmin  (* Allowed when auth is enabled *)
   | "masc_auth_status" | "masc_auth_refresh" -> Some CanReadState
-  | "masc_tool_stats" | "masc_tool_help" | "masc_keeper_tool_catalog"
+  | "masc_tool_stats" | "masc_tool_help"
   | "masc_tool_list" -> Some CanReadState
   | "masc_tool_grant" | "masc_tool_revoke" -> Some CanAdmin
   | "masc_tool_admin_snapshot" -> Some CanReadState

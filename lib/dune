@@ -358,7 +358,6 @@
    tool_command_plane_schemas_02
    tool_library
    tool_deep_review
-   tool_budget
    tool_catalog
    tool_schema_dsl
    tool_result

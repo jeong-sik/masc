@@ -65,6 +65,7 @@ let keeper_base_tool_names =
   [ "keeper_time_now"; "keeper_context_status"; "keeper_memory_search" ]
 
 let keeper_filesystem_tool_names = [ "keeper_fs_read" ]
+let keeper_filesystem_write_tool_names = [ "keeper_fs_edit" ]
 let keeper_library_tool_names = [ "keeper_library_search"; "keeper_library_read" ]
 
 let keeper_core_masc_tool_names =

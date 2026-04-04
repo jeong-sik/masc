@@ -96,6 +96,93 @@ let forbidden_shell_chars =
 let contains_forbidden_shell_chars cmd =
   String.exists (fun ch -> List.mem ch forbidden_shell_chars) cmd
 
+(** Relaxed metacharacter set for Coding/Full preset keepers.
+    Allows [|] (pipes) and fd-to-fd redirects like [2>&1].
+    Still blocks [;] [`] [$] and control chars.
+    [&] is checked at pattern level: [>&] (redirect) is allowed,
+    [&&] (chaining) and standalone [&] (background) are blocked. *)
+let forbidden_shell_chars_coding_base =
+  [ ';'; '`'; '$'; '\n'; '\r' ]
+
+(** Returns [true] if [cmd] contains a dangerous [&] usage.
+    [>&] in redirect context (e.g. [2>&1]) is safe; [&&] and standalone [&]
+    are command chaining/background operators. *)
+let has_dangerous_ampersand cmd =
+  let len = String.length cmd in
+  let rec check i =
+    if i >= len then false
+    else if cmd.[i] <> '&' then check (i + 1)
+    else if i > 0 && cmd.[i - 1] = '>' then
+      (* Part of >& redirect syntax — safe *)
+      check (i + 1)
+    else
+      true
+  in
+  check 0
+
+let contains_forbidden_shell_chars_coding cmd =
+  String.exists (fun ch -> List.mem ch forbidden_shell_chars_coding_base) cmd
+  || has_dangerous_ampersand cmd
+
+let contains_substring s needle =
+  let s_len = String.length s in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if i + needle_len > s_len then false
+    else if String.sub s i needle_len = needle then true
+    else loop (i + 1)
+  in
+  if needle_len = 0 then true else loop 0
+
+let has_process_substitution cmd =
+  contains_substring cmd "<(" || contains_substring cmd ">("
+
+let split_pipeline_segments cmd =
+  let segments =
+    String.split_on_char '|' cmd |> List.map String.trim
+  in
+  if List.exists (fun segment -> segment = "") segments then
+    Error "Pipes must separate complete allowed commands."
+  else Ok segments
+
+let split_shell_tokens cmd =
+  String.split_on_char ' ' cmd
+  |> List.map String.trim
+  |> List.filter (fun token -> token <> "")
+
+let is_digits_only s start stop =
+  let rec loop i =
+    if i >= stop then true
+    else if Char.code s.[i] >= Char.code '0' && Char.code s.[i] <= Char.code '9'
+    then loop (i + 1)
+    else false
+  in
+  loop start
+
+let is_safe_fd_redirect_token token =
+  let len = String.length token in
+  let check op_char =
+    let rec find i =
+      if i + 1 >= len then None
+      else if token.[i] = op_char && token.[i + 1] = '&' then Some i
+      else find (i + 1)
+    in
+    match find 0 with
+    | None -> false
+    | Some op_idx ->
+      let rhs_start = op_idx + 2 in
+      (op_idx = 0 || is_digits_only token 0 op_idx)
+      && rhs_start < len
+      && is_digits_only token rhs_start len
+  in
+  check '>' || check '<'
+
+let has_unsafe_redirection cmd =
+  split_shell_tokens cmd
+  |> List.exists (fun token ->
+         (contains_substring token ">" || contains_substring token "<")
+         && not (is_safe_fd_redirect_token token))
+
 let extract_command_name cmd =
   let trimmed = String.trim cmd in
   if trimmed = "" then None
@@ -130,6 +217,37 @@ let validate_command_with_allowlist ~allowed_commands cmd =
 let validate_command cmd =
   validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
 
+(** Relaxed command validation for Coding/Full preset keepers.
+    Allows pipes and redirects; validates every command in the pipeline
+    against [dev_allowed_commands]. *)
+let validate_command_coding cmd =
+  let trimmed = String.trim cmd in
+  if trimmed = "" then Error "command must not be empty"
+  else if contains_forbidden_shell_chars_coding trimmed then
+    Error "Shell injection syntax (;, &&, standalone &, `, $) not allowed."
+  else if has_process_substitution trimmed then
+    Error "Process substitution (<(...) or >(...)) is not allowed."
+  else if has_unsafe_redirection trimmed then
+    Error "File redirects are not allowed. Only fd redirects like 2>&1 are permitted."
+  else
+    match split_pipeline_segments trimmed with
+    | Error _ as err -> err
+    | Ok segments ->
+      let rec validate_segments = function
+        | [] -> Ok ()
+        | segment :: rest -> (
+            match extract_command_name segment with
+            | None -> Error "command must not be empty"
+            | Some name when List.mem name dev_allowed_commands ->
+              validate_segments rest
+            | Some name ->
+              Error
+                (Printf.sprintf
+                   "Command blocked: %s is not in the approved dev command allowlist"
+                   name))
+      in
+      validate_segments segments
+
 (** Check if a command performs write/mutating operations.
     Returns [true] for commands like [git push], [git commit],
     [make deploy], [npm publish], [mv], [cp], etc.
@@ -149,6 +267,136 @@ let is_write_operation cmd =
   | cmd_name :: _ ->
     List.mem cmd_name ["mv"; "cp"; "mkdir"; "touch"; "chmod"]
   | [] -> false
+
+(** Detect truly destructive commands that must be blocked even for
+    Coding/Full preset keepers. Delegates to [Eval_gate.detect_destructive]
+    for the full 19-pattern check as a fallback. *)
+let is_destructive_bash_operation cmd =
+  let parts =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+  in
+  let is_short_option arg =
+    String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-'
+  in
+  let has_short_flag flag arg =
+    is_short_option arg && String.contains arg flag
+  in
+  let is_protected_branch_target arg =
+    let target = String.lowercase_ascii arg in
+    List.mem target
+      [ "main"; "master"; "origin/main"; "origin/master";
+        "refs/heads/main"; "refs/heads/master" ]
+    || List.exists
+         (fun suffix -> String.ends_with ~suffix target)
+         [ ":main"; ":master"; ":origin/main"; ":origin/master";
+           ":refs/heads/main"; ":refs/heads/master" ]
+  in
+  match parts with
+  | "git" :: "push" :: rest ->
+    List.exists
+      (fun arg ->
+        arg = "--force" || arg = "-f"
+        || String.starts_with ~prefix:"--force-with-lease" arg)
+      rest
+    || List.exists is_protected_branch_target rest
+  | "git" :: "reset" :: rest ->
+    List.mem "--hard" rest
+  | "rm" :: rest ->
+    let option_args =
+      List.filter
+        (fun arg -> String.length arg > 0 && arg.[0] = '-')
+        rest
+    in
+    let has_recursive =
+      List.exists
+        (fun arg ->
+          arg = "--recursive"
+          || has_short_flag 'r' arg
+          || has_short_flag 'R' arg)
+        option_args
+    in
+    let has_force =
+      List.exists
+        (fun arg -> arg = "--force" || has_short_flag 'f' arg)
+        option_args
+    in
+    has_recursive && has_force
+  | _ ->
+    (match Eval_gate.detect_destructive cmd with
+     | Some _ -> true
+     | None -> false)
+
+let redact_url_credentials token =
+  let redact_after_scheme token scheme =
+    if String.starts_with ~prefix:scheme token then
+      let scheme_len = String.length scheme in
+      match String.index_from_opt token scheme_len '@' with
+      | Some at_idx ->
+        let slash_idx =
+          match String.index_from_opt token scheme_len '/' with
+          | Some idx -> idx
+          | None -> String.length token
+        in
+        if at_idx < slash_idx then
+          String.sub token 0 scheme_len ^ "[REDACTED]"
+          ^ String.sub token at_idx (String.length token - at_idx)
+        else token
+      | None -> token
+    else token
+  in
+  token |> fun t -> redact_after_scheme t "https://"
+  |> fun t -> redact_after_scheme t "http://"
+
+let redact_inline_secret_assignment token =
+  let redact_after token marker =
+    if contains_substring token marker then
+      let marker_len = String.length marker in
+      let rec find i =
+        if i + marker_len > String.length token then None
+        else if String.sub token i marker_len = marker then Some i
+        else find (i + 1)
+      in
+      match find 0 with
+      | Some idx ->
+        String.sub token 0 (idx + marker_len) ^ "[REDACTED]"
+      | None -> token
+    else token
+  in
+  token |> fun t -> redact_after t ":_authToken="
+  |> fun t -> redact_after t "_authToken="
+  |> fun t -> redact_after t "token="
+  |> fun t -> redact_after t "password="
+  |> fun t -> redact_after t "passwd="
+  |> fun t -> redact_after t "api-key="
+
+let sanitize_command_for_log cmd =
+  let sensitive_flags =
+    [ "--token"; "--password"; "--passwd"; "--auth-token"; "--api-key" ]
+  in
+  let parts =
+    String.split_on_char ' ' cmd
+  in
+  let rec redact prev_sensitive acc = function
+    | [] -> String.concat " " (List.rev acc)
+    | part :: rest ->
+      let part =
+        if prev_sensitive && part <> "" then "[REDACTED]"
+        else
+          part
+          |> redact_url_credentials
+          |> redact_inline_secret_assignment
+      in
+      let next_sensitive =
+        List.mem (String.lowercase_ascii part) sensitive_flags
+      in
+      redact next_sensitive (part :: acc) rest
+  in
+  redact false [] parts
+
+let truncate_for_log ?(max_len = 240) s =
+  if String.length s <= max_len then s
+  else String.sub s 0 max_len ^ "..."
 
 (* --- gh CLI validation for keeper_github --- *)
 

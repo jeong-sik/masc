@@ -56,6 +56,9 @@ let loop_summary_json (base_path : string)
         Json_util.string_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.session_id) link) );
       ( "operation_id",
         Json_util.string_opt_to_json (Option.bind link (fun (l : Autoresearch_types.swarm_link) -> l.operation_id)) );
+      ( "task_id",
+        Json_util.string_opt_to_json
+          (Option.bind link (fun (l : Autoresearch_types.swarm_link) -> l.task_id)) );
       ( "linked_at",
         Json_util.float_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.linked_at) link) );
       ( "queued_hypothesis",
@@ -98,6 +101,9 @@ let persisted_to_loop_summary_json (base_path : string)
         Json_util.string_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.session_id) link) );
       ( "operation_id",
         Json_util.string_opt_to_json (Option.bind link (fun (l : Autoresearch_types.swarm_link) -> l.operation_id)) );
+      ( "task_id",
+        Json_util.string_opt_to_json
+          (Option.bind link (fun (l : Autoresearch_types.swarm_link) -> l.task_id)) );
       ( "linked_at",
         Json_util.float_opt_to_json (Option.map (fun (l : Autoresearch_types.swarm_link) -> l.linked_at) link) );
       ( "queued_hypothesis",

@@ -30,9 +30,60 @@ export interface Task {
   status?: 'todo' | 'in_progress' | 'claimed' | 'done' | 'cancelled'
   priority?: number
   assignee?: string
+  assignee_kind?: string | null
   description?: string
   created_at?: string
   updated_at?: string
+  contract?: TaskContract | null
+  handoff_context?: TaskHandoffContext | null
+  gate?: TaskGateSnapshot | null
+  execution_links?: TaskExecutionLinks | null
+}
+
+export interface TaskExecutionLinks {
+  operation_id?: string | null
+  session_id?: string | null
+  autoresearch_loop_id?: string | null
+}
+
+export interface TaskContract {
+  strict?: boolean
+  completion_contract?: string[]
+  required_evidence?: string[]
+  inspect_gate_evidence?: string[]
+  verify_gate_evidence?: string[]
+  links?: TaskExecutionLinks | null
+}
+
+export interface TaskHandoffContext {
+  summary: string
+  reason?: string | null
+  next_step?: string | null
+  failure_mode?: string | null
+  evidence_refs?: string[]
+  updated_at?: string | null
+  updated_by?: string | null
+}
+
+export interface TaskGateCheck {
+  evidence: string
+  outcome: 'satisfied' | 'missing' | 'failed' | 'unsupported'
+  detail: string
+}
+
+export interface TaskGateEvaluation {
+  status: 'ready' | 'blocked' | 'inconclusive'
+  checks?: TaskGateCheck[]
+  reasons?: string[]
+}
+
+export interface TaskGateSnapshot {
+  strict?: boolean
+  completion_contract?: string[]
+  unmet_completion_contract?: string[]
+  done?: TaskGateEvaluation
+  inspect_to_implement?: TaskGateEvaluation | null
+  verify_to_review?: TaskGateEvaluation | null
 }
 
 export interface Message {

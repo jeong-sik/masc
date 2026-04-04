@@ -28,6 +28,25 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
           ("type", `String "string");
           ("description", `String "Task description");
         ]);
+        ("contract", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Optional persisted task contract for strict deterministic completion gating.");
+          ("properties", `Assoc [
+            ("strict", `Assoc [ ("type", `String "boolean") ]);
+            ("completion_contract", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+            ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+            ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+            ("verify_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+            ("links", `Assoc [
+              ("type", `String "object");
+              ("properties", `Assoc [
+                ("operation_id", `Assoc [ ("type", `String "string") ]);
+                ("session_id", `Assoc [ ("type", `String "string") ]);
+                ("autoresearch_loop_id", `Assoc [ ("type", `String "string") ]);
+              ]);
+            ]);
+          ]);
+        ]);
       ]);
       ("required", `List [`String "title"]);
     ];
@@ -58,6 +77,16 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
               ("description", `Assoc [
                 ("type", `String "string");
                 ("description", `String "Task description");
+              ]);
+              ("contract", `Assoc [
+                ("type", `String "object");
+                ("properties", `Assoc [
+                  ("strict", `Assoc [ ("type", `String "boolean") ]);
+                  ("completion_contract", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                  ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                  ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                  ("verify_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                ]);
               ]);
             ]);
             ("required", `List [`String "title"]);
@@ -201,6 +230,17 @@ After masc_add_task or masc_claim_next; pair with masc_deliver before action='do
         ("reason", `Assoc [
           ("type", `String "string");
           ("description", `String "Cancellation reason (used with action='cancel')");
+        ]);
+        ("handoff_context", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Typed handoff payload used when action='release' on strict contract tasks.");
+          ("properties", `Assoc [
+            ("summary", `Assoc [ ("type", `String "string") ]);
+            ("reason", `Assoc [ ("type", `String "string") ]);
+            ("next_step", `Assoc [ ("type", `String "string") ]);
+            ("failure_mode", `Assoc [ ("type", `String "string") ]);
+            ("evidence_refs", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+          ]);
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "task_id"; `String "action"]);

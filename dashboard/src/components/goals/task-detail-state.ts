@@ -17,6 +17,7 @@ export const activeFilter = signal<ActivityFilter>('all')
 export interface NormalizedTaskEvent {
   label: string
   agent: string | null
+  actorKind: string | null
   taskId: string | null
   ts: string | null
   notes: string | null
@@ -25,21 +26,27 @@ export interface NormalizedTaskEvent {
 interface TaskHistoryRow {
   type?: string
   agent?: string
+  actor_kind?: string
   task?: string
   task_id?: string
   action?: string
   ts?: string
   ts_iso?: string
   notes?: string
+  reason?: string
+  handoff_context?: {
+    summary?: string
+  } | null
 }
 
 function normalizeTaskHistory(raw: TaskHistoryRow[]): NormalizedTaskEvent[] {
   return raw.map(r => ({
     label: r.action ?? (r.type ? r.type.replace('task_', '') : 'unknown'),
     agent: r.agent ?? null,
+    actorKind: r.actor_kind ?? null,
     taskId: r.task ?? r.task_id ?? null,
     ts: r.ts ?? r.ts_iso ?? null,
-    notes: r.notes ?? null,
+    notes: r.notes ?? r.handoff_context?.summary ?? r.reason ?? null,
   }))
 }
 

@@ -111,12 +111,85 @@ let completion_rejection_message ?(allow_force = false) reason =
       "Completion rejected by anti-rationalization gate: %s\n\
        Revise your completion notes to describe actual work, then retry." reason
 
+let parse_task_contract args =
+  match args |> member "contract" with
+  | `Null -> Ok None
+  | (`Assoc _ as json) -> (
+      match Types.task_contract_of_yojson json with
+      | Ok contract -> Ok (Some contract)
+      | Error error ->
+          Error
+            (Printf.sprintf "Invalid contract payload: %s" error))
+  | _ -> Error "contract must be an object when provided"
+
+let parse_handoff_context ~(agent_name : string) args =
+  match args |> member "handoff_context" with
+  | `Null -> Ok None
+  | (`Assoc _ as json) -> (
+      match Types.task_handoff_context_of_yojson json with
+      | Error error ->
+          Error
+            (Printf.sprintf "Invalid handoff_context payload: %s" error)
+      | Ok handoff_context ->
+          let summary = String.trim handoff_context.summary in
+          if summary = "" then
+            Error "handoff_context.summary is required"
+          else
+            Ok
+              (Some
+                 {
+                   handoff_context with
+                   summary;
+                   evidence_refs =
+                     List.sort_uniq String.compare handoff_context.evidence_refs;
+                   updated_at = Some (Types.now_iso ());
+                   updated_by = Some agent_name;
+                 }))
+  | _ -> Error "handoff_context must be an object when provided"
+
+let task_has_persisted_contract = function
+  | Some (task : Types.task) -> Option.is_some task.contract
+  | None -> false
+
+let strict_release_requires_handoff = function
+  | Some ({ contract = Some contract; _ } : Types.task) -> contract.strict
+  | _ -> false
+
+let contract_gate_rejection_message (snapshot : Task_contract_gate.task_snapshot)
+    =
+  let reasons =
+    snapshot.done_gate.reasons @ snapshot.unmet_completion_contract
+    |> List.sort_uniq String.compare
+  in
+  let details =
+    match reasons with
+    | [] -> "task contract gate is not ready"
+    | reasons -> String.concat "; " reasons
+  in
+  Printf.sprintf
+    "Completion rejected by persisted task contract gate: %s"
+    details
+
+let persisted_contract_rejection ~(ctx : context)
+    ~(task_opt : Types.task option) ~(notes : string) =
+  match task_opt with
+  | Some task when Option.is_some task.contract ->
+      let snapshot =
+        Task_contract_gate.evaluate ~completion_notes:notes ctx.config task
+      in
+      if Task_contract_gate.done_gate_allows_completion snapshot then
+        None
+      else
+        Some (contract_gate_rejection_message snapshot)
+  | _ -> None
+
 (* Handlers *)
 
 let handle_add_task ctx args =
   let title = get_string args "title" "" in
   let priority = get_int args "priority" 3 in
   let description = get_string args "description" "" in
+  let contract_result = parse_task_contract args in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
   if trimmed_title = "" then
@@ -124,7 +197,12 @@ let handle_add_task ctx args =
   else if priority < 1 || priority > 5 then
     (false, Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
   else
-    (true, Room.add_task ctx.config ~title:trimmed_title ~priority ~description)
+    match contract_result with
+    | Error error -> (false, error)
+    | Ok contract ->
+        ( true,
+          Room.add_task ?contract ctx.config ~title:trimmed_title ~priority
+            ~description )
 
 let handle_batch_add_tasks ctx args =
   let tasks_json = match args |> member "tasks" with
@@ -138,19 +216,35 @@ let handle_batch_add_tasks ctx args =
     let title = String.trim (t |> member "title" |> to_string) in
     let priority = t |> member "priority" |> to_int_option |> Option.value ~default:3 in
     let description = t |> member "description" |> to_string_option |> Option.value ~default:"" in
+    let contract =
+      match t |> member "contract" with
+      | `Null -> Ok None
+      | (`Assoc _ as json) -> (
+          match Types.task_contract_of_yojson json with
+          | Ok contract -> Ok (Some contract)
+          | Error error ->
+              Error
+                (Printf.sprintf "item[%d]: invalid contract payload: %s" idx
+                   error))
+      | _ -> Error (Printf.sprintf "item[%d]: contract must be an object" idx)
+    in
     if title = "" then
       Error (Printf.sprintf "item[%d]: title cannot be empty" idx)
     else if priority < 1 || priority > 5 then
       Error (Printf.sprintf "item[%d]: priority must be 1-5, got %d" idx priority)
     else
-      Ok (title, priority, description)
+      match contract with
+      | Ok contract -> Ok (title, priority, description, contract)
+      | Error error -> Error error
   ) tasks_json in
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in
   if errors <> [] then
     (false, Printf.sprintf "Validation failed:\n%s" (String.concat "\n" errors))
   else
-    let tasks = List.filter_map (function Ok t -> Some t | Error _ -> None) validated in
-    (true, Room.batch_add_tasks ctx.config tasks)
+    let tasks =
+      List.filter_map (function Ok t -> Some t | Error _ -> None) validated
+    in
+    (true, Room.batch_add_tasks_with_contracts ctx.config tasks)
 
 let handle_claim ctx args =
   if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
@@ -201,8 +295,19 @@ let handle_release ctx args =
   | Error e -> result_to_response (Error e)
   | Ok task_id ->
   let expected_version = get_int_opt args "expected_version" in
-  result_to_response
-    (Room.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ?expected_version ())
+  let tasks = Room.get_tasks_raw ctx.config in
+  let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
+  let handoff_context = parse_handoff_context ~agent_name:ctx.agent_name args in
+  (match handoff_context with
+   | Error error -> (false, error)
+   | Ok handoff_context ->
+       if strict_release_requires_handoff task_opt && Option.is_none handoff_context
+       then
+         (false, "Strict task release requires handoff_context.summary")
+       else
+         result_to_response
+           (Room.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
+              ?expected_version ?handoff_context ()))
 
 let handle_done ctx args =
   let task_id = get_string args "task_id" "" in
@@ -230,6 +335,14 @@ let handle_done ctx args =
   let result =
     if not (can_review_completion ~task_opt ~agent_name:ctx.agent_name) then
       Room.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes
+    else if task_has_persisted_contract task_opt then
+      (match
+         persisted_contract_rejection ~ctx ~task_opt ~notes
+       with
+      | Some reason -> Error (Types.TaskInvalidState reason)
+      | None ->
+          Room.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
+            ~notes)
     else
       let gate_rejection =
         review_completion_notes
@@ -357,6 +470,7 @@ let transition_known_args =
     "force";
     "completion_contract";
     "evaluator_cascade";
+    "handoff_context";
   ]
 
 let handle_transition ctx args =
@@ -390,6 +504,7 @@ let handle_transition ctx args =
     | items -> Some items
   in
   let evaluator_cascade = get_string_opt args "evaluator_cascade" in
+  let handoff_context = parse_handoff_context ~agent_name:ctx.agent_name args in
   let expected_version = get_int_opt args "expected_version" in
   let force_raw = get_bool args "force" false in
   (* force=true requires admin privilege: initial_admin or Admin role *)
@@ -405,21 +520,37 @@ let handle_transition ctx args =
   in
   let tasks = Room.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
-  (* Anti-rationalization gate: verify completion notes before allowing "done" *)
+  match handoff_context with
+  | Error error -> (false, error)
+  | Ok handoff_context ->
+  if action = Types.Release && strict_release_requires_handoff task_opt
+     && Option.is_none handoff_context
+  then
+    (false, "Strict task release requires handoff_context.summary")
+  else
   let gate_rejection =
-    if action = Types.Done_action && not force && can_review_completion ~task_opt ~agent_name:ctx.agent_name then
-      review_completion_notes
-        ~completion_contract
-        ~evaluator_cascade
-        ~ctx
-        ~task_opt
-        ~task_id
-        ~notes
-    else None
+    if action = Types.Done_action && not force then
+      if task_has_persisted_contract task_opt then
+        persisted_contract_rejection ~ctx ~task_opt ~notes
+      else if can_review_completion ~task_opt ~agent_name:ctx.agent_name then
+        review_completion_notes
+          ~completion_contract
+          ~evaluator_cascade
+          ~ctx
+          ~task_opt
+          ~task_id
+          ~notes
+      else
+        None
+    else
+      None
   in
   match gate_rejection with
   | Some reason ->
-    (false, completion_rejection_message ~allow_force:true reason)
+    if task_has_persisted_contract task_opt then
+      (false, reason)
+    else
+      (false, completion_rejection_message ~allow_force:true reason)
   | None ->
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
@@ -447,7 +578,8 @@ let handle_transition ctx args =
   let rec try_transition attempt =
     let ev = if attempt = 0 then expected_version else None in
     let r = Room.transition_task_r ctx.config ~agent_name:ctx.agent_name
-              ~task_id ~action ?expected_version:ev ~notes ~reason () in
+              ~task_id ~action ?expected_version:ev ~notes ~reason
+              ?handoff_context () in
     if is_version_mismatch r && attempt < max_cas_retries then begin
       Log.Task.info "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
         task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);

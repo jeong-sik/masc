@@ -230,18 +230,29 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   in
   let tasks_json =
     List.map (fun (t : Types.task) ->
-      `Assoc [
-        ("id", `String t.id);
-        ("title", `String t.title);
-        ("status", `String (Types.string_of_task_status t.task_status));
-        ("priority", `Int t.priority);
-        ("assignee",
-         match t.task_status with
-         | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } ->
-             `String assignee
-         | _ -> `Null);
-      ]
-    )
+      let base_fields =
+        [
+          ("id", `String t.id);
+          ("title", `String t.title);
+          ("description", `String t.description);
+          ("status", `String (Types.string_of_task_status t.task_status));
+          ("priority", `Int t.priority);
+          ( "assignee",
+            match t.task_status with
+            | Claimed { assignee; _ }
+            | InProgress { assignee; _ }
+            | Done { assignee; _ } ->
+                `String assignee
+            | _ -> `Null );
+          ("created_at", `String t.created_at);
+        ]
+      in
+      let projection_fields =
+        match Task_contract_gate.task_projection_json config t with
+        | `Assoc fields -> fields
+        | _ -> []
+      in
+      `Assoc (base_fields @ projection_fields))
       (List.filter
          (fun (t : Types.task) ->
            match t.task_status with
@@ -863,8 +874,8 @@ let dashboard_task_assignee (task : Types.task) =
       Some assignee
   | Todo | Cancelled _ -> None
 
-let dashboard_task_json (task : Types.task) =
-  `Assoc
+let dashboard_task_json config (task : Types.task) =
+  let base_fields =
     [
       ("id", `String task.id);
       ("title", `String task.title);
@@ -874,6 +885,13 @@ let dashboard_task_json (task : Types.task) =
       ("assignee", Json_util.string_opt_to_json (dashboard_task_assignee task));
       ("created_at", `String task.created_at);
     ]
+  in
+  let projection_fields =
+    match Task_contract_gate.task_projection_json config task with
+    | `Assoc fields -> fields
+    | _ -> []
+  in
+  `Assoc (base_fields @ projection_fields)
 
 let dashboard_agent_json (agent : Types.agent) =
   let profile = Dashboard_execution_helpers.get_agent_profile agent.name in

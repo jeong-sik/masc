@@ -352,6 +352,151 @@ let worktree_info_of_yojson json =
     Ok { branch; path; git_root; repo_name }
   with e -> Error (Printexc.to_string e)
 
+(** Task execution links - tie task state to runtime evidence producers *)
+type task_execution_links = {
+  operation_id : string option;
+  session_id : string option;
+  autoresearch_loop_id : string option;
+} [@@deriving show]
+
+let task_execution_links_to_yojson (links : task_execution_links) =
+  `Assoc
+    [
+      ("operation_id", Json_util.string_opt_to_json links.operation_id);
+      ("session_id", Json_util.string_opt_to_json links.session_id);
+      ( "autoresearch_loop_id",
+        Json_util.string_opt_to_json links.autoresearch_loop_id );
+    ]
+
+let task_execution_links_of_yojson json =
+  let open Yojson.Safe.Util in
+  try
+    Ok
+      {
+        operation_id = json |> member "operation_id" |> to_string_option;
+        session_id = json |> member "session_id" |> to_string_option;
+        autoresearch_loop_id =
+          json |> member "autoresearch_loop_id" |> to_string_option;
+      }
+  with e -> Error (Printexc.to_string e)
+
+(** Task contract - persisted deterministic gate inputs *)
+type task_contract = {
+  strict : bool;
+  completion_contract : string list;
+  required_evidence : string list;
+  inspect_gate_evidence : string list;
+  verify_gate_evidence : string list;
+  links : task_execution_links;
+} [@@deriving show]
+
+let task_contract_string_list json key =
+  let open Yojson.Safe.Util in
+  match json |> member key with
+  | `List items ->
+      items
+      |> List.filter_map (function
+           | `String value ->
+               let trimmed = String.trim value in
+               if trimmed = "" then None else Some trimmed
+           | _ -> None)
+  | _ -> []
+
+let string_list_to_yojson values =
+  `List (List.map (fun value -> `String value) values)
+
+let task_contract_to_yojson (contract : task_contract) =
+  `Assoc
+    [
+      ("strict", `Bool contract.strict);
+      ( "completion_contract",
+        string_list_to_yojson contract.completion_contract );
+      ("required_evidence", string_list_to_yojson contract.required_evidence);
+      ( "inspect_gate_evidence",
+        string_list_to_yojson contract.inspect_gate_evidence );
+      ( "verify_gate_evidence",
+        string_list_to_yojson contract.verify_gate_evidence );
+      ("links", task_execution_links_to_yojson contract.links);
+    ]
+
+let task_contract_of_yojson json =
+  let open Yojson.Safe.Util in
+  try
+    let strict =
+      json |> member "strict" |> to_bool_option |> Option.value ~default:false
+    in
+    let links =
+      match json |> member "links" with
+      | `Null ->
+          {
+            operation_id = None;
+            session_id = None;
+            autoresearch_loop_id = None;
+          }
+      | links_json -> (
+          match task_execution_links_of_yojson links_json with
+          | Ok links -> links
+          | Error _ ->
+              {
+                operation_id = None;
+                session_id = None;
+                autoresearch_loop_id = None;
+              })
+    in
+    Ok
+      {
+        strict;
+        completion_contract = task_contract_string_list json "completion_contract";
+        required_evidence = task_contract_string_list json "required_evidence";
+        inspect_gate_evidence =
+          task_contract_string_list json "inspect_gate_evidence";
+        verify_gate_evidence =
+          task_contract_string_list json "verify_gate_evidence";
+        links;
+      }
+  with e -> Error (Printexc.to_string e)
+
+(** Handoff context persisted across release/reclaim cycles *)
+type task_handoff_context = {
+  summary : string;
+  reason : string option;
+  next_step : string option;
+  failure_mode : string option;
+  evidence_refs : string list;
+  updated_at : string option;
+  updated_by : string option;
+} [@@deriving show]
+
+let task_handoff_context_to_yojson (context : task_handoff_context) =
+  `Assoc
+    [
+      ("summary", `String context.summary);
+      ("reason", Json_util.string_opt_to_json context.reason);
+      ("next_step", Json_util.string_opt_to_json context.next_step);
+      ("failure_mode", Json_util.string_opt_to_json context.failure_mode);
+      ("evidence_refs", string_list_to_yojson context.evidence_refs);
+      ("updated_at", Json_util.string_opt_to_json context.updated_at);
+      ("updated_by", Json_util.string_opt_to_json context.updated_by);
+    ]
+
+let task_handoff_context_of_yojson json =
+  let open Yojson.Safe.Util in
+  try
+    let summary =
+      json |> member "summary" |> to_string_option |> Option.value ~default:""
+    in
+    Ok
+      {
+        summary;
+        reason = json |> member "reason" |> to_string_option;
+        next_step = json |> member "next_step" |> to_string_option;
+        failure_mode = json |> member "failure_mode" |> to_string_option;
+        evidence_refs = task_contract_string_list json "evidence_refs";
+        updated_at = json |> member "updated_at" |> to_string_option;
+        updated_by = json |> member "updated_by" |> to_string_option;
+      }
+  with e -> Error (Printexc.to_string e)
+
 (** Task definition *)
 type task = {
   id: string;
@@ -364,6 +509,8 @@ type task = {
   worktree: worktree_info option; [@default None]  (* linked worktree info *)
   required_role: role; [@default Unassigned]  (** Role required to claim this task *)
   stage: Task_stage.t option; [@default None]  (** Coding task stage gate *)
+  contract: task_contract option; [@default None]
+  handoff_context: task_handoff_context option; [@default None]
 } [@@deriving show]
 
 (* Manual yojson for task *)
@@ -392,7 +539,20 @@ let task_to_yojson t =
     | None -> with_role
     | Some s -> with_role @ [("stage", Task_stage.to_yojson s)]
   in
-  let with_role = with_stage in
+  let with_contract = match t.contract with
+    | None -> with_stage
+    | Some contract ->
+        with_stage @ [ ("contract", task_contract_to_yojson contract) ]
+  in
+  let with_handoff_context = match t.handoff_context with
+    | None -> with_contract
+    | Some handoff_context ->
+        with_contract
+        @
+        [ ( "handoff_context",
+            task_handoff_context_to_yojson handoff_context ) ]
+  in
+  let with_role = with_handoff_context in
   (* Merge status fields into task *)
   match status_json with
   | `Assoc status_fields -> `Assoc (with_role @ status_fields)
@@ -425,8 +585,37 @@ let task_of_yojson json =
       | Some s -> (match Task_stage.of_string s with Ok st -> Some st | Error _ -> None)
       | None -> None
     in
+    let contract = match json |> member "contract" with
+      | `Null -> None
+      | contract_json ->
+          (match task_contract_of_yojson contract_json with
+           | Ok contract -> Some contract
+           | Error _ -> None)
+    in
+    let handoff_context = match json |> member "handoff_context" with
+      | `Null -> None
+      | handoff_json ->
+          (match task_handoff_context_of_yojson handoff_json with
+           | Ok handoff_context -> Some handoff_context
+           | Error _ -> None)
+    in
     match task_status_of_yojson json with
-    | Ok task_status -> Ok { id; title; description; task_status; priority; files; created_at; worktree; required_role; stage }
+    | Ok task_status ->
+        Ok
+          {
+            id;
+            title;
+            description;
+            task_status;
+            priority;
+            files;
+            created_at;
+            worktree;
+            required_role;
+            stage;
+            contract;
+            handoff_context;
+          }
     | Error e -> Error e
   with e -> Error (Printexc.to_string e)
 

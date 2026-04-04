@@ -63,7 +63,7 @@ let cleanup_zombies
     config =
   ensure_initialized config;
 
-  (* Single path: agents_dir derives from config.scope *)
+  (* agents_dir under .masc/ *)
   let agents_path = agents_dir config in
   let scan_paths =
     if Sys.file_exists agents_path then [ agents_path ] else []

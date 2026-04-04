@@ -350,7 +350,7 @@ let room_overview_section (snapshots : room_snapshot list) : section =
         snapshot.locks
     ) snapshots
   in
-  { title = "Namespaces"; content; empty_msg = "(no namespaces)" }
+  { title = "Scopes"; content; empty_msg = "(no scopes)" }
 
 let room_section now (snapshot : room_snapshot) : section =
   let (active, pending) = split_tasks snapshot.tasks in
@@ -367,9 +367,9 @@ let room_section now (snapshot : room_snapshot) : section =
   {
     title =
       if snapshot.is_current then
-        Printf.sprintf "Namespace: %s (flattened current)" snapshot.room_id
+        Printf.sprintf "Scope: %s (flattened current)" snapshot.room_id
       else
-        Printf.sprintf "Namespace: %s" snapshot.room_id;
+        Printf.sprintf "Scope: %s" snapshot.room_id;
     content;
     empty_msg = "";
   }
@@ -498,7 +498,7 @@ let generate ?(scope = All) (config : Room_utils.config) : string =
   let swarm = swarm_json config in
   let header =
     Printf.sprintf
-      "========================================\n   MASC Dashboard   %s\n   Namespace: %s (flattened) | %d namespace%s | %d agents\n========================================"
+      "========================================\n   MASC Dashboard   %s\n   Scope: %s (flattened) | %d scope%s | %d agents\n========================================"
       timestamp
       current_room
       (List.length room_ids)
@@ -583,7 +583,7 @@ let generate_compact ?(scope = All) (config : Room_utils.config) : string =
   in
   String.concat "\n"
     [
-      Printf.sprintf "MASC [%s namespace] %d agents / %d tasks"
+      Printf.sprintf "MASC [%s scope] %d agents / %d tasks"
         current_room (List.length all_agents)
         (List.length all_tasks);
       Printf.sprintf "ATTENTION: %s" attention_line;

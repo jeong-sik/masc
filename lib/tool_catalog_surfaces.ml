@@ -134,32 +134,26 @@ let public_surface_tools =
     "masc_verify_request"; "masc_verify_status"; "masc_verify_submit";
   ]
 
+(** Spawned agent tools: tools available to OAS-spawned agents. *)
 let spawned_agent_tools =
   [
     "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
-    "masc_task_history"; "masc_broadcast"; "masc_join"; "masc_leave";
-    "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
+    "masc_broadcast"; "masc_join"; "masc_leave";
+    "masc_who"; "masc_add_task"; "masc_heartbeat";
     "masc_messages";
     "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
-    "masc_handover_create"; "masc_handover_list"; "masc_handover_claim";
-    "masc_handover_get";
+    "masc_handover_create"; "masc_handover_list"; "masc_handover_get";
     "masc_board_list"; "masc_board_post"; "masc_board_comment";
     "masc_board_vote"; "masc_board_get";
     "masc_tool_help"; "masc_web_search";
-    "masc_team_session_start"; "masc_team_session_step";
-    "masc_team_session_status"; "masc_team_session_events";
-    "masc_team_session_finalize"; "masc_team_session_stop";
-    "masc_team_session_report"; "masc_team_session_list";
-    "masc_poll_events"; "masc_spawn";
     "masc_note_add";
     "masc_code_delete"; "masc_code_edit"; "masc_code_git";
     "masc_code_shell"; "masc_code_write";
     "masc_deliver";
-    "masc_plan_clear_task"; "masc_plan_get_task";
-    "masc_update_priority";
     "masc_verify_handoff"; "masc_workflow_guide";
   ]
 
+(** Local worker tools: narrow subset for OAS local workers. *)
 let local_worker_tools =
   [
     "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
@@ -168,10 +162,6 @@ let local_worker_tools =
     "masc_board_comment"; "masc_board_vote"; "masc_board_search";
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";
     "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
-    "masc_run_init"; "masc_run_plan"; "masc_run_log";
-    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
-    "masc_repair_loop_start"; "masc_repair_loop_status";
-    "masc_repair_loop_iterate"; "masc_repair_loop_stop";
   ]
 
 let session_min_tools =
@@ -267,23 +257,6 @@ let system_surface_tools =
     "masc_policy_status"; "masc_policy_approve";
     "masc_policy_deny"; "masc_policy_update";
     "masc_policy_freeze_unit"; "masc_policy_kill_switch";
-    (* Hidden callable operational tools *)
-    "masc_archive_view"; "masc_collaboration_graph";
-    "masc_error_add"; "masc_error_resolve";
-    "masc_relay_checkpoint"; "masc_relay_now";
-    "masc_relay_smart_check"; "masc_relay_status";
-    "masc_library_add"; "masc_library_list"; "masc_library_promote";
-    "masc_library_read"; "masc_library_search";
-    "masc_run_init"; "masc_run_plan"; "masc_run_log";
-    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
-    "masc_repair_loop_start"; "masc_repair_loop_status";
-    "masc_repair_loop_iterate"; "masc_repair_loop_stop";
-    "masc_autoresearch_start"; "masc_autoresearch_status";
-    "masc_autoresearch_stop"; "masc_autoresearch_inject";
-    "masc_autoresearch_cycle"; "masc_autoresearch_swarm_start";
-    "masc_repo_synthesis_swarm_start";
-    "masc_team_session_compare"; "masc_team_session_prove";
-    "masc_tool_grant"; "masc_tool_revoke"; "masc_tool_list";
   ]
   @ hidden_callable_surface_tools
 

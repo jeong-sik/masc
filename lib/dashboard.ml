@@ -245,9 +245,9 @@ let room_snapshot (config : Room_utils.config) ~current_room room_id =
   {
     room_id;
     is_current = String.equal room_id current_room;
-    agents = Room.get_agents_raw_in_room config room_id;
-    tasks = Room.get_tasks_raw_in_room config room_id;
-    messages = Room.get_messages_raw_in_room config ~room_id ~since_seq:0 ~limit:max_recent_messages;
+    agents = Room.get_active_agents config;
+    tasks = Room.get_tasks_safe config;
+    messages = Room.get_messages_raw config ~since_seq:0 ~limit:max_recent_messages;
     locks = count_locks_for_room config room_id;
   }
 

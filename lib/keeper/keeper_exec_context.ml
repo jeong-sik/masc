@@ -1051,7 +1051,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
         try
           if
             not
-              (Room.is_agent_joined_in_room config ~room_id
+              (Room.is_agent_joined config
                  ~agent_name:meta.agent_name)
           then begin
             Room.ensure_room_bootstrap config room_id;
@@ -1060,7 +1060,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
                  ~capabilities:[ "keeper" ] ())
           end;
           ignore
-            (Room.heartbeat_in_room config ~room_id ~agent_name:meta.agent_name);
+            (Room.heartbeat config ~agent_name:meta.agent_name);
           room_id :: acc
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           log_keeper_exn ~label:(Printf.sprintf "room presence sync failed for %s in %s" meta.name room_id) exn;

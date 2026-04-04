@@ -120,7 +120,7 @@ let collect_message_scope ~(config : Room.config) ~(meta : keeper_meta) :
         let since_seq = room_cursor_for meta room_id in
         let messages =
           try
-            Room.get_all_messages_raw_in_room config ~room_id ~since_seq
+            Room.get_all_messages_raw config ~since_seq
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | _ -> []

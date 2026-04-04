@@ -35,20 +35,17 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
       ("version", `String Version.version);
     ]
 
-let current_room_id _config = "default"
-
 let tasks_safe config =
-  if Room.is_initialized config then Room.get_tasks_raw_in_room config (current_room_id config)
+  if Room.is_initialized config then Room.get_tasks_safe config
   else []
 
 let agents_safe config =
-  if Room.is_initialized config then Room.get_agents_raw_in_room config (current_room_id config)
+  if Room.is_initialized config then Room.get_active_agents config
   else []
 
 let messages_safe config =
   if Room.is_initialized config then
-    Room.get_messages_raw_in_room config ~room_id:(current_room_id config) ~since_seq:0
-      ~limit:50
+    Room.get_messages_raw config ~since_seq:0 ~limit:50
   else []
 
 

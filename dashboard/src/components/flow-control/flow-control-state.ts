@@ -3,7 +3,7 @@ import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
 import { createAsyncResource, getData } from '../../lib/async-state'
 
-export type FlowState = 'unknown' | 'running' | 'paused'
+export type FlowState = 'unknown' | 'initializing' | 'running' | 'paused'
 export const flowState = signal<FlowState>('unknown')
 export const flowLoading = signal(false)
 
@@ -22,8 +22,16 @@ export const maintenanceLoading = signal(false)
 export async function fetchPauseStatus(): Promise<void> {
   try {
     const raw = await callMcpTool('masc_pause_status', {})
-    const parsed = JSON.parse(raw) as { paused?: boolean; status?: string }
-    flowState.value = parsed.paused === true || parsed.status === 'paused' ? 'paused' : 'running'
+    const parsed = JSON.parse(raw) as { paused?: boolean | null; status?: string; initializing?: boolean }
+    if (parsed.paused === true || parsed.status === 'paused') {
+      flowState.value = 'paused'
+      return
+    }
+    if (parsed.initializing === true || parsed.status === 'initializing') {
+      flowState.value = 'initializing'
+      return
+    }
+    flowState.value = 'running'
   } catch { flowState.value = 'unknown' }
 }
 

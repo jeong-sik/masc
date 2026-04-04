@@ -112,9 +112,10 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_team_session_step" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains team_session_finalize" true
     (List.mem "mcp__masc__masc_team_session_finalize" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains portal_send" true
+  (* portal_send and a2a_delegate pruned from spawned surface in #4999 *)
+  Alcotest.(check bool) "no portal_send in spawned" false
     (List.mem "mcp__masc__masc_portal_send" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains a2a_delegate" true
+  Alcotest.(check bool) "no a2a_delegate in spawned" false
     (List.mem "mcp__masc__masc_a2a_delegate" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "omits run_deliverable" false
     (List.mem "mcp__masc__masc_run_deliverable" Spawn.masc_mcp_tools);

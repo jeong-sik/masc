@@ -79,12 +79,9 @@ let test_spawned_agent_surface_stays_curated () =
     (List.mem "mcp__masc__masc_status" names);
   check bool "contains team_session_step" true
     (List.mem "mcp__masc__masc_team_session_step" names);
-  check bool "contains voice agent" true
-    (List.mem "mcp__masc__masc_voice_agent" names);
-  check bool "contains voice speak" true
-    (List.mem "mcp__masc__masc_voice_speak" names);
-  check bool "contains voice ping pong" true
-    (List.mem "mcp__masc__masc_voice_ping_pong" names)
+  (* voice tools were pruned from spawned_agent surface in #4999 *)
+  check bool "no voice agent in spawned surface" false
+    (List.mem "mcp__masc__masc_voice_agent" names)
 
 let test_privileged_keeper_surface_is_split () =
   check bool "keeper_bash privileged" true

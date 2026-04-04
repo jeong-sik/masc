@@ -279,17 +279,21 @@ let test_to_yojson () =
   Alcotest.(check bool) "signal_count > 0" true (signal_count > 0);
   let unsafe = json |> member "unsafe_edit_risk" |> to_list in
   Alcotest.(check bool) "unsafe not empty" true (List.length unsafe > 0);
-  let autonomous_signal =
-    List.find
+  match
+    List.find_opt
       (fun item ->
         item |> member "type" |> to_string
         |> String.equal "autonomous_execution_scope")
       unsafe
-  in
-  Alcotest.(check string) "worker_name preserved" "worker-proof"
-    (autonomous_signal |> member "worker_name" |> to_string);
-  Alcotest.(check string) "legacy tool_name alias preserved" "worker-proof"
-    (autonomous_signal |> member "tool_name" |> to_string)
+  with
+  | Some autonomous_signal ->
+      Alcotest.(check string) "worker_name preserved" "worker-proof"
+        (autonomous_signal |> member "worker_name" |> to_string);
+      Alcotest.(check string) "legacy tool_name alias preserved" "worker-proof"
+        (autonomous_signal |> member "tool_name" |> to_string)
+  | None ->
+      Alcotest.fail
+        "Expected unsafe_edit_risk to contain an autonomous_execution_scope signal"
 
 (* --- Test suite --- *)
 

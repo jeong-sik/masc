@@ -27,7 +27,8 @@ let normalize_allowed_path_for_check ~(root : string) (path : string) : string o
     let candidate =
       if Filename.is_relative raw then Filename.concat root raw else raw
     in
-    Some (normalize_path_for_check candidate |> strip_trailing_slashes)
+    let normalized = normalize_path_for_check candidate |> strip_trailing_slashes in
+    if normalized = "" then None else Some normalized
 
 let absolute_allowed_paths ~(config : Room.config) ~(allowed_paths : string list)
     : string list =
@@ -57,22 +58,23 @@ let resolve_keeper_target_path ~(config : Room.config)
     else if allowed_paths = [] then
       Ok candidate
     else
+      let allowed_norms =
+        allowed_paths
+        |> List.filter_map (normalize_allowed_path_for_check ~root:root_norm)
+      in
       let matches_any =
         List.exists
-          (fun allowed_path ->
-             match normalize_allowed_path_for_check ~root:root_norm allowed_path with
-             | None -> false
-             | Some allowed_norm ->
-               target_norm = allowed_norm
-               || starts_with ~prefix:(allowed_norm ^ "/") target_norm)
-          allowed_paths
+          (fun allowed_norm ->
+             target_norm = allowed_norm
+             || starts_with ~prefix:(allowed_norm ^ "/") target_norm)
+          allowed_norms
       in
       if matches_any then Ok candidate
       else
         Error
           (Printf.sprintf
              "path_not_in_allowed_paths: %s (allowed: [%s])"
-             raw (String.concat ", " allowed_paths))
+             raw (String.concat ", " allowed_norms))
 
 (** Compute effective allowed_paths from keeper meta, applying scope-based
     defaults when the operator has not set an explicit list.

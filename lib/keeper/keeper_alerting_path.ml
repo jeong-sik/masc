@@ -20,6 +20,20 @@ let normalize_path_for_check (path : string) : string =
     in
     Filename.concat parent_norm (Filename.basename path)
 
+let normalize_allowed_path_for_check ~(root : string) (path : string) : string option =
+  let raw = String.trim path in
+  if raw = "" then None
+  else
+    let candidate =
+      if Filename.is_relative raw then Filename.concat root raw else raw
+    in
+    Some (normalize_path_for_check candidate |> strip_trailing_slashes)
+
+let absolute_allowed_paths ~(config : Room.config) ~(allowed_paths : string list)
+    : string list =
+  let root = project_root_of_config config in
+  allowed_paths |> List.filter_map (normalize_allowed_path_for_check ~root)
+
 let resolve_keeper_target_path ~(config : Room.config)
     ~(allowed_paths : string list) ~(raw_path : string)
     : (string, string) result =
@@ -43,18 +57,15 @@ let resolve_keeper_target_path ~(config : Room.config)
     else if allowed_paths = [] then
       Ok candidate
     else
-      let rel =
-        let prefix = root_norm ^ "/" in
-        if starts_with ~prefix target_norm then
-          String.sub target_norm (String.length prefix)
-            (String.length target_norm - String.length prefix)
-        else ""
-      in
       let matches_any =
-        List.exists (fun ap ->
-          let ap' = strip_trailing_slashes ap in
-          rel = ap' || starts_with ~prefix:(ap' ^ "/") rel
-        ) allowed_paths
+        List.exists
+          (fun allowed_path ->
+             match normalize_allowed_path_for_check ~root:root_norm allowed_path with
+             | None -> false
+             | Some allowed_norm ->
+               target_norm = allowed_norm
+               || starts_with ~prefix:(allowed_norm ^ "/") target_norm)
+          allowed_paths
       in
       if matches_any then Ok candidate
       else

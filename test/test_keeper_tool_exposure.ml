@@ -373,6 +373,43 @@ let test_path_allowed_paths_filter_strips_all_trailing_slashes () =
     check bool "lib path allowed with repeated trailing slash" true
       (Result.is_ok ok_result))
 
+let test_path_absolute_allowed_paths_filter () =
+  let dir = make_path_test_dir () in
+  let lib_dir = Filename.concat dir "lib" in
+  (try Unix.mkdir lib_dir 0o755
+   with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    let ok_result = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:[lib_dir] ~raw_path:"lib/foo.ml" in
+    check bool "absolute lib path allowed" true (Result.is_ok ok_result);
+    let err_result = Keeper_alerting_path.resolve_keeper_target_path
+      ~config ~allowed_paths:[lib_dir] ~raw_path:"src/bar.ml" in
+    check bool "absolute lib still rejects src" true (Result.is_error err_result))
+
+let test_absolute_allowed_paths_normalization () =
+  let dir = make_path_test_dir () in
+  let lib_dir = Filename.concat dir "lib" in
+  let docs_dir = Filename.concat dir "docs" in
+  (try Unix.mkdir lib_dir 0o755
+   with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  (try Unix.mkdir docs_dir 0o755
+   with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
+    Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Room.default_config dir in
+    let normalized =
+      Keeper_alerting_path.absolute_allowed_paths
+        ~config
+        ~allowed_paths:["lib/"; docs_dir ^ "//"]
+    in
+    check (list string) "normalized absolute allowed paths"
+      [Unix.realpath lib_dir; Unix.realpath docs_dir]
+      normalized)
+
 let test_path_allowed_paths_single_trailing_slash () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
@@ -490,6 +527,10 @@ let () =
       test_case "allowed_paths filter" `Quick test_path_allowed_paths_filter;
       test_case "allowed_paths strip all trailing slashes" `Quick
         test_path_allowed_paths_filter_strips_all_trailing_slashes;
+      test_case "absolute allowed_paths filter" `Quick
+        test_path_absolute_allowed_paths_filter;
+      test_case "absolute allowed_paths normalization" `Quick
+        test_absolute_allowed_paths_normalization;
       test_case "allowed_paths single trailing slash" `Quick
         test_path_allowed_paths_single_trailing_slash;
       test_case "empty path rejected" `Quick test_path_empty_rejected;

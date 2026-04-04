@@ -1,8 +1,7 @@
 include Cp_unit_projection
 
 let safe_live_agents config =
-  let room_id = Room.current_room_id config in
-  Room.get_agents_raw_in_room config room_id
+  Room.get_agents_raw_in_room config "default"
   |> List.filter (fun (agent : Types.agent) ->
          try Room.is_agent_joined config ~agent_name:agent.name with
          | Sys_error _ | Not_found -> false)

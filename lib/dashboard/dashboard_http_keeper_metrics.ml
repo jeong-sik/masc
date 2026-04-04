@@ -218,7 +218,7 @@ let keeper_metrics_24h_json
           b.sample_points <- b.sample_points + 1;
           b.context_ratio_sum <- b.context_ratio_sum +. context_ratio;
           let channel = Safe_ops.json_string ~default:"turn" "channel" j in
-          if channel = "proactive" then begin
+          if channel = "scheduled_autonomous" || channel = "proactive" then begin
             incr proactive_points;
             b.proactive_points <- b.proactive_points + 1;
             let proactive_obj = Yojson.Safe.Util.member "proactive" j in
@@ -412,4 +412,3 @@ let top_count_name_and_count
 
 let get_agent_identity (name : string) =
   Dashboard_execution_helpers.get_agent_identity name
-

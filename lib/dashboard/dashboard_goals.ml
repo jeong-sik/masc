@@ -169,7 +169,7 @@ let rec tree_node_to_json node =
 
 let dashboard_goals_tree_json ~(config : Room.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
-  let tasks = Room.get_tasks_raw_in_room config (Room.current_room_id config) in
+  let tasks = Room.get_tasks_raw_in_room config "default" in
   let forest = build_forest ~goals ~tasks in
   let total_goals = List.length goals in
   let active_goals =

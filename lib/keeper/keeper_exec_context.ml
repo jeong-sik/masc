@@ -1028,11 +1028,8 @@ let set_room_cursor meta room_id seq =
     last_seen_seq_by_room = dedupe_keep_order ((room_id, seq) :: kept);
   }
 
-let room_ids_for_meta config (meta : keeper_meta) : string list =
-  match Keeper_contract.room_scope_of_string meta.room_scope with
-  | Keeper_contract.All ->
-      [ Room.current_room_id config ]
-  | Keeper_contract.Current -> [ Room.current_room_id config ]
+let room_ids_for_meta _config (_meta : keeper_meta) : string list =
+  [ "default" ]
 
 let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
   let room_ids = room_ids_for_meta config meta in

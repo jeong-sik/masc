@@ -35,9 +35,7 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
       ("version", `String Version.version);
     ]
 
-let current_room_id config =
-  let _ = config in
-  "default"
+let current_room_id _config = "default"
 
 let tasks_safe config =
   if Room.is_initialized config then Room.get_tasks_raw_in_room config (current_room_id config)

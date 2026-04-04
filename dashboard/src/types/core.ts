@@ -353,7 +353,7 @@ export type PipelineStage =
   | 'tool_use'
   | 'compacting'
   | 'handoff'
-  | 'proactive'
+  | 'scheduled_autonomous'
   | 'offline'
 
 // Aggregated metrics computed by the backend over a sliding window.

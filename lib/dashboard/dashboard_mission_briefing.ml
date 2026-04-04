@@ -135,12 +135,12 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
     in
     let snapshot_json =
       (* Reuse the same lightweight summary shape as the operator/mission
-         dashboard surfaces. The briefing only needs session status/events and
-         keeper rows; pulling full command-plane and message payloads here
-         duplicates the heaviest snapshot path and can spike memory on rooms
-         with many keepers. *)
+         dashboard surfaces. The briefing only needs session status/events;
+         keeper metadata can come from mission_json. Pulling keepers,
+         command-plane, and message payloads here duplicates the heaviest
+         snapshot path and can spike memory on rooms with many keepers. *)
       Operator_control.snapshot_json ~actor:actor_name ~view:"summary"
-        ~include_messages:false ~include_sessions:true ~include_keepers:true
+        ~include_messages:false ~include_sessions:true ~include_keepers:false
         ~include_summary_fields:false ~include_command_plane:false
         ~lightweight_summary:true ctx
     in
@@ -168,7 +168,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       Briefing_compactors.relevant_sessions_for_briefing ~current_namespace ~now_ts sessions
     in
     let keepers =
-      match snapshot_json |> member_assoc "keepers" |> member_assoc "items" with
+      match mission_json |> member_assoc "keeper_briefs" with
       | `List items -> items
       | _ -> []
     in

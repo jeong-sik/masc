@@ -26,7 +26,7 @@ let status config =
   Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" cluster_name);
   if cluster_name <> state.project then
     Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
-  Buffer.add_string buf (Printf.sprintf "📍 Namespace: %s (flattened)\n" current_room);
+  Buffer.add_string buf (Printf.sprintf "📍 Scope: %s (flattened)\n" current_room);
   Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" config.base_path);
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf "📌 Players:\n";

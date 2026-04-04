@@ -195,13 +195,13 @@ let explicit_metadata : (string * metadata) list =
         (hidden_active "Forced garbage collection removes persisted artifacts and should be treated as destructive.") );
     ( "masc_room_delete",
       with_semantic_flags ~destructive:true
-        (hidden_active "Namespace deletion removes persisted state and should be treated as destructive.") );
+        (hidden_active "Scope deletion removes persisted state and should be treated as destructive.") );
     ( "masc_room_destroy",
       with_semantic_flags ~destructive:true
-        (hidden_active "Namespace destruction removes persisted state and should be treated as destructive.") );
+        (hidden_active "Scope destruction removes persisted state and should be treated as destructive.") );
     ( "masc_force_leave",
       with_semantic_flags ~destructive:true
-        (hidden_active "Forced membership removal mutates namespace state and should be treated as destructive.") );
+        (hidden_active "Forced membership removal mutates scope state and should be treated as destructive.") );
     ( "masc_force_remove_agent",
       with_semantic_flags ~destructive:true
         (hidden_active "Forced agent removal mutates namespace state and should be treated as destructive.") );

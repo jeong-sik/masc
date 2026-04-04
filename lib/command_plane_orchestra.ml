@@ -294,7 +294,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
                     (string_opt namespace "namespace" |> Option.value ~default:"default") );
                 ( "reason",
                   `String
-                    "Namespace-wide view is healthy enough; start from the command overview."
+                    "Scope-wide view is healthy enough; start from the command overview."
                 );
                 ("suggested_surface", `String "summary");
                 ("suggested_params", `Assoc []);

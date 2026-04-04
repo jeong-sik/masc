@@ -178,7 +178,7 @@ let build_watch_section ~room_health ~incident_count ~recommended_action_count
   in
   let evidence =
     []
-    |> evidence_add_if risky_room (Printf.sprintf "Namespace health is %s" room_health)
+    |> evidence_add_if risky_room (Printf.sprintf "Scope health is %s" room_health)
     |> evidence_add_if (incident_count > 0)
          (Printf.sprintf "Incident count is %d" incident_count)
     |> evidence_add_if (recommended_action_count > 0)
@@ -191,7 +191,7 @@ let build_watch_section ~room_health ~incident_count ~recommended_action_count
   if risky_room then
     ( "risk",
       Printf.sprintf
-        "Namespace health is %s with %d incidents and %d recommended actions."
+        "Scope health is %s with %d incidents and %d recommended actions."
         room_health incident_count recommended_action_count,
       evidence )
   else if incident_count > 0 || recommended_action_count > 0 then

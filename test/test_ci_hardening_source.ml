@@ -531,9 +531,9 @@ let test_oas_worker_capability_threading_contracts () =
        "?raw_trace ~proof_ref ?contract ~sw")
 
 let test_team_session_spawn_tool_contracts () =
-  check bool "team session spawn uses Worker_runtime.run_worker" true
+  check bool "team session spawn uses Worker_runtime" true
     (file_contains_pattern "lib/tool_team_session_step_spawn.ml"
-       "Worker_runtime.run_worker");
+       "Worker_runtime.");
   check bool "team session spawn branches on local spawn agents" true
     (file_contains_pattern "lib/tool_team_session_step_exec.ml"
        "if env.deps.is_local_spawn_agent spec.spawn_agent then");

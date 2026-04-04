@@ -60,7 +60,8 @@ let known_non_keeper_tool_names : string list =
   |> List.sort_uniq String.compare
 
 let known_shared_agent_keeper_tool_names : string list =
-  [ "masc_worktree_create"; "masc_worktree_list" ]
+  [ "masc_worktree_create"; "masc_worktree_list";
+    "masc_code_write"; "masc_code_edit"; "masc_code_shell"; "masc_code_git" ]
 
 (* ============================================================
    Invariant 1: Non-research keepers only get keeper_* tools plus

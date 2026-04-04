@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [2.220.0] - 2026-04-04
+
+### Added
+- **Keeper turn throttling** -- Eio.Semaphore-based concurrency limiter prevents keepalive storms when multiple keeper sessions overlap (#4967, #4826).
+- **Structured field-path validation** -- tool argument errors now return structured field-path feedback for actionable keeper retry (#4973, #4963).
+- **BM25 visibility budget shrink** -- constrain always-include budget in keeper tool retrieval to reduce noise (#4975, #4961).
+
+### Fixed
+- **Review followups** -- address review comments from #4940 and #4942 (#4960).
+- **Local runtime base path sanitization** -- sanitize inherited base paths for direct binary execution (#4966).
+
 ## [2.219.0] - 2026-04-04
 
 ### Added

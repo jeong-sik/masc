@@ -14,8 +14,8 @@ type config = {
 }
 
 let default_config = {
-  port = 8935;
-  host = "127.0.0.1";
+  port = Env_config_core.masc_http_port_int ();
+  host = Env_config_core.masc_host ();
   max_connections = 128;
 }
 

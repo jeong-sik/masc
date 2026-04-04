@@ -1,6 +1,169 @@
 # Changelog
 
 
+## [2.232.0] - 2026-04-04
+
+### Changed
+- **Room legacy cleanup** -- remove legacy room warning system and inline scope branches (#5123).
+
+## [2.231.0] - 2026-04-04
+
+### Changed
+- **Dead keeper concepts removal** -- remove dead reward/policy model and unused config (-356 lines) (#5114).
+
+## [2.230.0] - 2026-04-04
+
+### Added
+- **RFC-0001 Gate A instrumentation** -- det/nondet boundary instrumentation modules (#5110).
+
+### Fixed
+- **Provider hardcoding** -- abstract hardcoded provider checks in oas_model_resolve (#5111).
+- **Silent exception swallowing** -- replace with WARN logs (#5113).
+- **Shutdown cleanup** -- use mark_dead for keeper shutdown, document sticky flag (#5112).
+- **Tool error detail** -- include error detail in MCP tool call failure logs (#5108).
+- **Dashboard warm timeout** -- increase namespace-truth warm timeout 5s to 8s (#5107).
+- **Shutdown fiber crash** -- distinguish shutdown fiber cleanup from real crashes (#5106).
+
+### Changed
+- **Remove tier metadata** -- remove tool tier metadata and filters (#5109).
+
+## [2.229.0] - 2026-04-04
+
+### Added
+- **Task contract loop** -- task-centered contract loop with deterministic gating (#5099).
+
+### Changed
+- **Deduplicate contains_ci** -- extract contains_ci into String_util module (#5098).
+
+## [2.228.0] - 2026-04-04
+
+### Changed
+- **Spawned-agent lifecycle prompt** -- align the spawned-agent lifecycle prompt with the handover flow so the merged prompt/tool-surface update from #5029 ships on the next release.
+
+## [2.227.0] - 2026-04-04
+
+### Added
+- **Goal convergence detection** -- detect task convergence and extend keeper action vocabulary (#5084).
+- **Proactive similarity PBT** -- property-based and unit tests for proactive similarity scoring (#5085).
+
+### Changed
+- **SSOT batch 4** -- centralize internal timers and TTLs across 11 files (#5081).
+
+## [2.226.0] - 2026-04-04
+
+### Added
+- **Goal complexity analyzer** -- idempotent task dispatch with Karpathy complexity scoring (#5073).
+
+### Changed
+- **SSOT batch 3** -- named constants for alert weights, drift thresholds, context_ratio across 8 files (#5078).
+- **OAS pin refresh** -- bump OAS pin after overflow fix (#5049).
+
+## [2.225.0] - 2026-04-04
+
+### Added
+- **Task goal decomposition** -- extend task schema with goal decomposition metadata (#5070).
+
+### Fixed
+- **Vendor/model hardcoding** -- remove 7 HIGH vendor/model hardcoding violations from MASC layer (#5064).
+- **Harness tool_matrix path** -- resolve tool_matrix runner path from build context (#5065).
+- **Dashboard stagnation_score** -- make stagnation_score optional in meta-cognition parse (#5071).
+
+### Changed
+- **SSOT batch 2** -- configurable thresholds and named constants across 4 files (#5063).
+- **Provider_adapter SSOT** -- consolidate 3 agent maps into Provider_adapter SSOT (#5060).
+- **Precompile regex** -- precompile regex patterns in keeper_text_processing (#5062).
+
+## [2.224.0] - 2026-04-04
+
+### Added
+- **SSOT consolidation** -- consolidate SSOT violations and mark Det/NonDet boundaries (#5038).
+- **OAS Tool_middleware** -- use OAS Tool_middleware, remove duplicate schema conversion (#5007).
+- **Keeper voice tools** -- add keeper voice tools to internal SSOT surface (#5059).
+
+### Fixed
+- **Route constants** -- extract keeper route constants and reject unknown actions (#5037).
+- **Dashboard contrast** -- improve text contrast readability on dark backgrounds (#5033).
+- **Orphaned tools** -- register 25 orphaned tool schemas as Deprecated (#5052).
+
+## [2.223.0] - 2026-04-04
+
+### Fixed
+- **OAS SDK pin bump** -- bump to v0.100.7 to resolve `Cdal_proof.Context_overflow` compilation failure on main (#5034).
+- **Context_overflow matches** -- remove direct pattern matches that depended on missing OAS variant (#5025).
+- **Operator judge room key** -- clarify operator judge room key compatibility (#5000).
+
+### Changed
+- **Dead proactive code removal** -- remove 475 lines of unused proactive generation code (#5003).
+- **OAS tool retry policy** -- wire internal OAS tool retry policy (#5009).
+
+## [2.222.0] - 2026-04-04
+
+### Added
+- **OAS validation bridge** -- delegate MCP tool input validation to OAS `Tool_input_validation` with type coercion (#4992).
+- **Interrupt/approve tools** -- LangGraph-style interrupt pattern for dangerous operations with user approval (#4993).
+
+### Fixed
+- **Dead tool pruning** -- remove 7 dead tools and phantom references (-261 lines) (#4989).
+- **Keeper proactive cycle** -- separate proactive cycle state from visible output to prevent leaking internal state (#4997).
+- **Keeper overflow retry** -- stabilize keeper overflow retry and namespace wording (#4993).
+- **Dashboard keeper lifecycle** -- fix dashboard keeper lifecycle routes (#4988).
+
+### Changed
+- **Lenient_json for autoresearch** -- replace `Safe_ops.parse_json_safe` with `Llm_provider.Lenient_json.parse` for deterministic recovery parsing (#4945).
+
+## [2.221.0] - 2026-04-04
+
+### Added
+- **Keeper tool matrix smoke test** -- basic smoke test for keeper tool discovery and BM25 ranking (#4984).
+
+### Fixed
+- **Dashboard text contrast** -- improve text contrast on dark backgrounds for readability (#4983).
+- **Dashboard json viewer followups** -- carry forward interactive viewer improvements from superseded rollout (#4982).
+- **Eio mutex poisoning** -- prevent Eio mutex poisoning in `with_test_env` (#4949).
+- **CI stabilization** -- stabilize quick-suite follow-ups and test alignment (#4930, #4901).
+- **OAS capacity-aware backoff** -- restore capacity-aware local backoff for provider adapter (#4986).
+- **Keeper autoboot** -- fix keeper autoboot for declarative janitor cleanup (#4987).
+- **Cascade config local-first** -- make cascade config local-first with llama:auto (#4981).
+- **OAS SDK pin truth** -- bump the `agent_sdk` floor to `0.100.7` and sync CI/runtime pin + docs for internal tool retry policy wiring (#5009, #5012).
+
+## [2.220.0] - 2026-04-04
+
+### Added
+- **Keeper turn throttling** -- Eio.Semaphore-based concurrency limiter prevents keepalive storms when multiple keeper sessions overlap (#4967, #4826).
+- **Structured field-path validation** -- tool argument errors now return structured field-path feedback for actionable keeper retry (#4973, #4963).
+- **BM25 visibility budget shrink** -- constrain always-include budget in keeper tool retrieval to reduce noise (#4975, #4961).
+
+### Fixed
+- **Review followups** -- address review comments from #4940 and #4942 (#4960).
+- **Local runtime base path sanitization** -- sanitize inherited base paths for direct binary execution (#4966).
+
+## [2.219.0] - 2026-04-04
+
+### Added
+- **RFC-0001 Det/NonDet boundary hardening** -- design RFC for deterministic/nondeterministic boundary hardening, emotional recovery loop, and adversarial harness (#4824).
+- **Dashboard rich UI components** -- JsonViewerCard for structured data, Markdown rendering with Shiki syntax highlighting for code blocks, Loader2 spinners, scrollable tables, custom scrollbars (#4977, #4959, #4932, #4935, #4844, #4952, #4951, #4939).
+- **Metacognition observation and threshold modules** -- deterministic keeper behavior metrics and configurable threshold alerting with per-keeper cooldown (#4946).
+- **Post-build Valgrind memory leak check** -- CI workflow for detecting memory leaks (#4884).
+
+### Fixed
+- **Server 98% CPU hang** -- replace Eio.Fiber.yield spin loop with Time_compat.sleep in dashboard cache and operator snapshot polling (#4948).
+- **Autoresearch history rewrite** -- build gate downgrade now rewrites loop history so subsequent cycles receive the corrected decision (#4950).
+- **Dashboard memory growth** -- cap snapshot cache, bound keeper snapshot concurrency, reduce mission snapshot memory pressure (#4921, #4940, #4926).
+- **Blocking auth/IO offload** -- move blocking auth and live-context IO off main fiber (#4916).
+- **Test alignment** -- fix stale test wording (Scope to Namespace, namespace to project), align CI expectations (#4969, #4972, #4944).
+
+### Changed
+- **Keeper meta parsing split** -- decompose keeper meta parsing and keepalive helpers into separate modules (#4947).
+- **Provider vendor-agnostic** -- remove provider_family type, MASC is now fully vendor-agnostic (#4942).
+- **Project-scope language simplification** -- unify namespace/project terminology across codebase (#4936).
+- **God file sweep** -- decompose 5 god files into 13 sub-modules (-2,599 lines) (#4914).
+- **Dashboard loading UX** -- improve loading states and fix pause status crash on uninitialized rooms (#4867).
+- **FetchScheduler reuse** -- reuse FetchScheduler for transport health SSE refreshes (#4866).
+
+### Performance
+- **Dashboard parallel rendering** -- move command_plane_json into parallel fiber block (#4933).
+- **Keeper snapshot concurrency cap** -- prevent unbounded concurrent snapshot fetches (#4940).
+
 ## [2.218.0] - 2026-04-03
 
 ### Added

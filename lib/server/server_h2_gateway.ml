@@ -534,6 +534,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/dashboard/goals" ->
+          let state = get_server_state () in
+          let json =
+            dashboard_goals_tree_http_json
+              ~config:state.Mcp_server.room_config
+          in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
+
       | `GET, "/api/v1/dashboard/mission" ->
           let state = get_server_state () in
           let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in
@@ -770,7 +778,8 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `GET, "/api/v1/openapi.json" ->
           let host_header = get_header_any_case httpun_request.headers "host" in
           let (resolved_host, resolved_port) = match host_header with
-            | Some header -> parse_host_port (Some header) "127.0.0.1" 8935
+            | Some header -> parse_host_port (Some header)
+                (Env_config_core.masc_host ()) (Env_config_core.masc_http_port_int ())
             | None -> ("", 0)
           in
           let json =

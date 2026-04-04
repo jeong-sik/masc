@@ -66,15 +66,29 @@ module Keeper_stream = Server_routes_http_keeper_stream
            |> List.filteri (fun idx _ -> idx >= offset && idx < offset + limit)
          in
          let tasks_json = List.map (fun (t : Types.task) ->
-           `Assoc [
-             ("id", `String t.id);
-             ("title", `String t.title);
-             ("status", `String (Types.string_of_task_status t.task_status));
-             ("priority", `Int t.priority);
-             ("assignee", match t.task_status with
-               | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } -> `String assignee
-               | _ -> `Null);
-           ]
+           let base_fields =
+             [
+               ("id", `String t.id);
+               ("title", `String t.title);
+               ("description", `String t.description);
+               ("status", `String (Types.string_of_task_status t.task_status));
+               ("priority", `Int t.priority);
+               ( "assignee",
+                 match t.task_status with
+                 | Claimed { assignee; _ }
+                 | InProgress { assignee; _ }
+                 | Done { assignee; _ } ->
+                     `String assignee
+                 | _ -> `Null );
+               ("created_at", `String t.created_at);
+             ]
+           in
+           let projection_fields =
+             match Task_contract_gate.task_projection_json config t with
+             | `Assoc fields -> fields
+             | _ -> []
+           in
+           `Assoc (base_fields @ projection_fields)
          ) page in
          let json = `Assoc [
            ("tasks", `List tasks_json);

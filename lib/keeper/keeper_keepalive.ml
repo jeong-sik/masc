@@ -22,6 +22,18 @@ let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
 let set_bus bus = bus_ref := Some bus
 let get_bus () = !bus_ref
 
+let keeper_turn_throttle_limit =
+  Keeper_config.int_of_env_default
+    "MASC_KEEPER_AUTOBOOT_MAX" ~default:3 ~min_v:1 ~max_v:20
+;;
+
+let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
+
+let with_keeper_turn_slot f =
+  Eio.Semaphore.acquire turn_semaphore;
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release turn_semaphore) f
+;;
+
 (** Optional gRPC client + env — set at server bootstrap when
     [MASC_AGENT_TRANSPORT=grpc]. When set, heartbeat sends
     status pings over gRPC unary RPC. *)
@@ -104,6 +116,14 @@ let wakeup_relevant_keeper_for_board_signal
          (fun (_meta, (matched : Keeper_world_observation.board_signal_match)) ->
             matched.explicit_mention)
   in
+  let global_scope =
+    candidates
+    |> List.filter (fun (meta, _matched) ->
+         match Keeper_contract.scope_kind_of_string meta.scope_kind with
+         | Keeper_contract.Global -> true
+         | Keeper_contract.Local ->
+             Keeper_contract.room_scope_of_string meta.room_scope = Keeper_contract.All)
+  in
   let wake_meta (meta : keeper_meta) reason =
     if
       board_reactive_wakeup_allowed
@@ -121,7 +141,9 @@ let wakeup_relevant_keeper_for_board_signal
   match explicit with
   | _ :: _ ->
     explicit |> List.iter (fun (meta, _matched) -> wake_meta meta "explicit_mention")
-  | [] -> ()
+  | [] ->
+    global_scope
+    |> List.iter (fun (meta, _matched) -> wake_meta meta "global_scope")
 ;;
 
 let max_consecutive_heartbeat_failures () =
@@ -433,26 +455,53 @@ let run_keepalive_unified_turn
           ~config:ctx.config
           ~meta:meta_after_triage
       in
+      let has_message_signal =
+        obs.pending_mentions <> [] || obs.pending_scope_messages <> []
+      in
+      let should_run_turn =
+        (not (Atomic.get stop))
+        && Keeper_world_observation.should_run_unified_turn
+             ~meta:meta_after_triage
+             obs
+      in
+      let meta_after_observe =
+        Keeper_world_observation.apply_message_cursor_updates
+          meta_after_triage
+          obs.message_cursor_updates
+      in
+      if (not should_run_turn)
+         && (not has_message_signal)
+         && obs.message_cursor_updates <> []
+      then (
+        match write_meta ctx.config meta_after_observe with
+        | Ok () -> ()
+        | Error e ->
+            Log.Keeper.warn "write_meta failed (message cursor update): %s" e);
       if Atomic.get stop
       then meta_after_triage
-      else if Keeper_world_observation.should_run_unified_turn ~meta:meta_after_triage obs
+      else if should_run_turn
       then (
-        match
-          Keeper_unified_turn.run_unified_turn
-            ~config:ctx.config
-            ~meta:meta_after_triage
-            ~observation:obs
-            ~generation:meta_after_triage.runtime.generation
-        with
-        | Error e ->
-          Log.Keeper.error "unified turn failed: %s" e;
-          (match read_meta ctx.config meta_after_triage.name with
-           | Ok (Some latest) -> latest
-           | _ -> meta_after_triage)
-        | Ok updated -> updated)
-      else meta_after_triage
+        with_keeper_turn_slot (fun () ->
+          match
+            Keeper_unified_turn.run_unified_turn
+              ~config:ctx.config
+              ~meta:meta_after_observe
+              ~observation:obs
+              ~generation:meta_after_observe.runtime.generation
+          with
+          | Error e ->
+            Log.Keeper.error "unified turn failed: %s" e;
+            (match read_meta ctx.config meta_after_observe.name with
+             | Ok (Some latest) -> latest
+             | _ -> meta_after_observe)
+          | Ok updated -> updated))
+      else if (not has_message_signal) && obs.message_cursor_updates <> [] then
+        meta_after_observe
+      else
+        meta_after_triage
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
+    | Keeper_registry.Keeper_heartbeat_failure _ as e -> raise e
     | exn ->
       Log.Keeper.error "unified turn exception: %s" (Printexc.to_string exn);
       meta_after_triage)

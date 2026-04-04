@@ -20,6 +20,8 @@ type adapter = {
   runtime_kind : runtime_kind;
   auth_mode : auth_mode;
   aliases : string list;
+  spawn_key : string option;       (** Key into Spawn.default_configs. None = not spawnable via CLI. *)
+  default_voice : string option;   (** Default TTS voice name. None = no voice assignment. *)
 }
 
 type voice_adapter = {
@@ -79,25 +81,35 @@ let cn_gemini = "gemini-api"
 let cn_glm = "glm"
 let cn_openrouter = "openrouter"
 
+(** Single source of truth for all agent adapters.
+    spawn_key maps to Spawn.default_configs keys.
+    default_voice maps to TTS voice names.
+    Adding a new agent = adding one entry here. *)
 let direct_adapters =
   [
     {
       canonical_name = cn_llama;
       runtime_kind = Local;
       auth_mode = No_auth;
-      aliases = [ "llama"; "llama.cpp"; "llamacpp" ];
+      aliases = [ cn_llama; "llama.cpp"; "llamacpp" ];
+      spawn_key = Some "llama";
+      default_voice = Some "Laura";
     };
     {
       canonical_name = cn_claude;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ANTHROPIC_API_KEY";
-      aliases = [ "claude-api"; "claude"; "anthropic" ];
+      aliases = [ cn_claude; "claude"; "anthropic"; "claude-code"; "claude-api" ];
+      spawn_key = Some "claude";
+      default_voice = Some "Sarah";
     };
     {
       canonical_name = cn_codex;
       runtime_kind = Direct_api;
       auth_mode = Api_key "OPENAI_API_KEY";
-      aliases = [ "codex-api"; "openai" ];
+      aliases = [ cn_codex; "openai"; "codex-cli"; "codex-api" ];
+      spawn_key = Some "codex";
+      default_voice = Some "George";
     };
     {
       canonical_name = cn_gemini;
@@ -108,19 +120,25 @@ let direct_adapters =
             project_env = google_cloud_project_env;
             location_env = google_cloud_location_env;
           };
-      aliases = [ "gemini-api"; "gemini"; "google" ];
+      aliases = [ cn_gemini; "gemini"; "google"; "gemini-cli"; "gemini-api" ];
+      spawn_key = Some "gemini";
+      default_voice = Some "Roger";
     };
     {
       canonical_name = cn_glm;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ZAI_API_KEY";
-      aliases = [ "glm"; "glm_cloud"; "zai" ];
+      aliases = [ cn_glm; "glm_cloud"; "zai" ];
+      spawn_key = None;
+      default_voice = None;
     };
     {
       canonical_name = cn_openrouter;
       runtime_kind = Direct_api;
       auth_mode = Api_key "OPENROUTER_API_KEY";
-      aliases = [ "openrouter" ];
+      aliases = [ cn_openrouter ];
+      spawn_key = None;
+      default_voice = None;
     };
   ]
 
@@ -156,6 +174,44 @@ let voice_adapters =
     voice_mcp_adapter;
   ]
 
+(** The "custom" provider prefix represents user-provided self-hosted
+    endpoints (e.g. "custom:model@url").  It is not in [direct_adapters]
+    because it has no fixed config; it is always considered available and
+    requires no API key. *)
+let cn_custom = "custom"
+
+(** Returns true if the provider name represents a local runtime that
+    uses runtime discovery (e.g. the live /props probe for per-slot
+    context).  Any provider with [runtime_kind = Local] qualifies.
+    Adding a new local provider (ollama, vllm, ...) only requires
+    adding an entry with [runtime_kind = Local] in [direct_adapters]. *)
+let requires_discovery pname =
+  let normalized = normalize_label pname in
+  List.exists
+    (fun (adapter : adapter) ->
+      adapter.runtime_kind = Local
+      && List.exists (fun alias -> normalize_label alias = normalized) adapter.aliases)
+    direct_adapters
+
+(** Returns true if the provider is self-hosted and always considered
+    available (no API key validation needed).  Covers both
+    [runtime_kind = Local] adapters and the special "custom" prefix. *)
+let is_local_provider pname =
+  let normalized = normalize_label pname in
+  normalized = cn_custom || requires_discovery pname
+
+(** Default fallback label for local runtime when no other preferred
+    model labels are configured.  Uses "provider:auto" for the first
+    [Local] adapter found. *)
+let default_local_fallback_label () =
+  match
+    List.find_opt
+      (fun (adapter : adapter) -> adapter.runtime_kind = Local)
+      direct_adapters
+  with
+  | Some adapter -> adapter.canonical_name ^ ":auto"
+  | None -> "auto"
+
 let resolve_direct_adapter label =
   let normalized = normalize_label label in
   List.find_opt
@@ -165,6 +221,33 @@ let resolve_direct_adapter label =
 
 let resolve_direct_canonical_name label =
   Option.map (fun (adapter : adapter) -> adapter.canonical_name) (resolve_direct_adapter label)
+
+(** Resolve spawn_key for an agent label.
+    Returns the key to look up in Spawn.default_configs. *)
+let resolve_spawn_key label =
+  match resolve_direct_adapter label with
+  | Some adapter -> adapter.spawn_key
+  | None -> None
+
+(** Resolve default TTS voice for an agent label. *)
+let resolve_default_voice label =
+  match resolve_direct_adapter label with
+  | Some adapter -> adapter.default_voice
+  | None -> None
+
+(** All agents that are spawnable via CLI. *)
+let spawnable_canonical_names () =
+  direct_adapters
+  |> List.filter_map (fun a -> if a.spawn_key <> None then Some a.canonical_name else None)
+
+(** All agent voices as (canonical_name, voice_name) pairs.
+    For backward compatibility with voice_bridge_core. *)
+let all_agent_voices () =
+  direct_adapters
+  |> List.filter_map (fun a ->
+    match a.default_voice with
+    | Some v -> Some (a.canonical_name, v)
+    | None -> None)
 
 let resolve_voice_adapter label =
   let normalized = normalize_label label in
@@ -259,8 +342,8 @@ let legacy_voice_base_url_opt () =
   | None, None -> None
   | _ ->
       warn_legacy_voice_env_once ();
-      let host = Option.value host_opt ~default:"127.0.0.1" in
-      let port = Option.value port_opt ~default:"8936" in
+      let host = Option.value host_opt ~default:(Env_config.Voice.default_host) in
+      let port = Option.value port_opt ~default:(string_of_int Env_config.Voice.default_port) in
       Some (Printf.sprintf "http://%s:%s" host port)
 
 let http_listener_env_explicit () =
@@ -501,9 +584,10 @@ let auth_env_var_of_adapter (adapter : adapter) =
 let provider_auth_available label =
   match resolve_direct_adapter label with
   | Some adapter ->
-      (match auth_env_var_of_adapter adapter with
-       | Some env_name -> env_present env_name
-       | None -> true)
+      (match adapter.auth_mode with
+       | No_auth -> true
+       | Api_key env_name -> env_present env_name
+       | Vertex_adc { project_env; _ } -> env_present project_env)
   | None -> false
 
 (** Derive the auth_kind string for a provider by looking up its
@@ -600,9 +684,10 @@ let default_model_label_for_adapter (adapter : adapter) =
     hardcoding vendor env var names. *)
 let auto_label_for_adapter (adapter : adapter) =
   let is_available =
-    match auth_env_var_of_adapter adapter with
-    | Some env_name -> env_present env_name
-    | None -> true  (* No_auth providers always available *)
+    match adapter.auth_mode with
+    | No_auth -> true
+    | Api_key env_name -> env_present env_name
+    | Vertex_adc { project_env; _ } -> env_present project_env
   in
   if not is_available then None
   else

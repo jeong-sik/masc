@@ -1,19 +1,20 @@
 include Dashboard_execution_sessions
 
 (** Signal-age guardrail thresholds (seconds).
-    Named constants instead of magic numbers scattered in match arms. *)
-let signal_stale_sec = 1200.0   (** 20 min — no fresh signal = "quiet/bad" *)
-let signal_quiet_sec = 600.0    (** 10 min — borderline = "quiet/warn" *)
-let signal_live_sec  = 300.0    (** 5 min  — recent enough to count as "live" *)
+    SSOT: [Env_config.Dashboard] module (configurable via env vars). *)
+let signal_stale_sec = Env_config.Dashboard.signal_stale_sec
+let signal_quiet_sec = Env_config.Dashboard.signal_quiet_sec
+let signal_live_sec  = Env_config.Dashboard.signal_live_sec
 
 (** Keeper context-ratio lifecycle thresholds.
-    Higher ratio = closer to context limit = more urgency. *)
-let ctx_handoff_imminent = 0.85
-let ctx_preparing        = 0.70
-let ctx_compacting       = 0.50
+    SSOT: [Env_config.Dashboard] module. *)
+let ctx_handoff_imminent = Env_config.Dashboard.ctx_handoff_imminent
+let ctx_preparing        = Env_config.Dashboard.ctx_preparing
+let ctx_compacting       = Env_config.Dashboard.ctx_compacting
 
-(** Keeper action-age threshold (seconds). *)
-let keeper_action_stale_sec = 3600.0  (** 1 hour — last autonomous action too old *)
+(** Keeper action-age threshold (seconds).
+    SSOT: [Env_config.Dashboard] module. *)
+let keeper_action_stale_sec = Env_config.Dashboard.keeper_action_stale_sec
 
 let task_assignee (task : Types.task) =
   match task.task_status with

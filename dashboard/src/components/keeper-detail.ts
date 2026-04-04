@@ -338,7 +338,7 @@ export function KeeperDetailOverlay() {
                   const lastUsed = series.length > 0 ? series[series.length - 1]?.model_used : null
                   const display = lastUsed || keeper.active_model || keeper.model
                   return display ? html`
-                    <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-mono bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.2)]"
+                    <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-mono bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.2)]"
                       title=${lastUsed && keeper.model ? `마지막 호출: ${lastUsed}\n설정: ${keeper.model}` : ''}
                     >${display}</span>
                   ` : null
@@ -372,7 +372,7 @@ export function KeeperDetailOverlay() {
                 >기동</button>`
               if (isRunning) return html`
                 <button type="button"
-                  class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
+                  class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
                   onClick=${() => {
                     void (async () => {
                       const confirmed = await requestConfirm({

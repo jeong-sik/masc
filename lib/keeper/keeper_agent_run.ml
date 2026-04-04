@@ -10,6 +10,10 @@
 
     @since Phase 5 — Keeper Agent.run encapsulation *)
 
+(** BM25 confidence threshold below which tool selection falls back to
+    the full policy-allowed preset. *)
+let bm25_confidence_threshold = 0.5
+
 (** Structured prompt result from [build_turn_prompt] callback.
     [system_prompt] contains hard constraints (identity, policy guards,
     tool guidance, direct-reply mode) that must stay in the system prompt.
@@ -128,21 +132,28 @@ let prioritized_disclosed_tool_names
     acc
 
 let log_keeper_proof ~(keeper_name : string) (proof : Agent_sdk.Cdal_proof.t) =
+  let status_string =
+    Agent_sdk.Cdal_proof.show_result_status proof.result_status
+    |> fun raw ->
+    match String.rindex_opt raw '.' with
+    | Some idx when idx + 1 < String.length raw ->
+        String.sub raw (idx + 1) (String.length raw - idx - 1)
+    | _ -> raw
+    |> String.lowercase_ascii
+  in
   match proof.result_status with
   | Agent_sdk.Cdal_proof.Completed ->
       if Keeper_types_profile.keeper_debug then
         Log.Keeper.debug "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
           keeper_name proof.run_id
           (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
-          (Agent_sdk.Cdal_proof.show_result_status proof.result_status)
+          status_string
           (List.length proof.raw_evidence_refs)
-  | Agent_sdk.Cdal_proof.Errored
-  | Agent_sdk.Cdal_proof.Timed_out
-  | Agent_sdk.Cdal_proof.Cancelled ->
+  | _ ->
       Log.Keeper.warn "keeper:%s proof: run_id=%s mode=%s status=%s evidence_refs=%d"
         keeper_name proof.run_id
         (Agent_sdk.Execution_mode.to_string proof.effective_execution_mode)
-        (Agent_sdk.Cdal_proof.show_result_status proof.result_status)
+        status_string
         (List.length proof.raw_evidence_refs)
 
 let log_keeper_contract_verdict
@@ -486,16 +497,19 @@ let run_turn
     ) tool_entries
   in
   let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config scoped_tool_entries in
+  (* Visibility measurement (#4961): log universe size vs BM25 scope *)
+  if Keeper_types_profile.keeper_debug then
+    Log.Keeper.debug "keeper:%s tool visibility: total=%d preset_scoped=%d bm25_indexed=%d"
+      meta.name
+      (List.length tool_entries)
+      (List.length preset_scoped_names)
+      (List.length scoped_tool_entries);
   (* Layer 0: Core tools — always visible to the LLM regardless of preset.
-     With preset-scoped BM25 (#4637), category anchors are no longer needed
-     because the smaller pool surfaces relevant tools directly. *)
-  let always_include_tools =
-    Keeper_exec_tools.core_always_tools
-    @ [ "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
-        "keeper_tasks_list";
-        "keeper_tools_list" ]         (* self-introspection — #4519 *)
-    |> Keeper_exec_tools.dedupe_tool_names
-  in
+     Kept to 5 survival-critical tools (#4961).  Other coordination tools
+     (keeper_broadcast, keeper_task_claim, keeper_task_done, keeper_tasks_list,
+     keeper_time_now, masc_tool_help) are now BM25-retrievable, freeing
+     ranking budget for context-relevant tools. *)
+  let always_include_tools = Keeper_exec_tools.core_always_tools in
   (* Layer 2: Universe — all tool names that the dispatch can handle.
      keeper_tools is now built from the universe (not just policy), so
      this includes all candidate tools minus denied.  BM25 retrieval
@@ -509,12 +523,16 @@ let run_turn
      Full-preset keepers can have 300+ policy-allowed tools; sending all
      of them as fallback produces ~39K tokens which exceeds 8K model
      context windows.  Cap to max_fallback_tools, prioritizing keeper_*
-     tools (preset-scoped, always relevant) then standard-tier MASC
+     tools (preset-scoped, always relevant) then session-min MASC
      tools (coordination essentials).  See #4592. *)
   let policy_allowed =
     Keeper_exec_tools.keeper_allowed_tool_names !meta_ref
   in
-  let max_fallback_tools = 30 in
+  let max_tools_per_turn =
+    if is_retry then Keeper_config.keeper_retry_max_tools_per_turn ()
+    else Keeper_config.keeper_max_tools_per_turn ()
+  in
+  let max_fallback_tools = min 30 max_tools_per_turn in
   let fallback_tools =
     let candidates =
       List.filter (fun name ->
@@ -529,14 +547,14 @@ let run_turn
         String.starts_with ~prefix:"keeper_" n) candidates in
       let masc_std = List.filter (fun n ->
         String.starts_with ~prefix:"masc_" n
-        && Tool_catalog_tiers.is_in_tier Standard n
+        && Tool_catalog.is_on_surface Tool_catalog.Session_min n
       ) candidates in
       let merged = keeper @ masc_std in
       if List.length merged > max_fallback_tools then
         List.filteri (fun i _ -> i < max_fallback_tools) merged
       else merged
   in
-  let confidence_threshold = 0.5 in
+  let confidence_threshold = bm25_confidence_threshold in
   (* Runtime tool overlay: external callers (masc_tool_grant/revoke)
      push Tool_op.t values here. The hook applies them each turn.
      If caller provides one, use it; otherwise create a local one. *)
@@ -594,10 +612,7 @@ let run_turn
           | [] -> 0.0
         in
         let use_fallback = top_score < confidence_threshold in
-        let max_tools =
-          Keeper_config.int_of_env_default
-            "MASC_KEEPER_MAX_TOOLS_PER_TURN" ~default:40 ~min_v:5 ~max_v:200
-        in
+        let max_tools = max_tools_per_turn in
         let portal_ctx : Tool_portal.context = {
           config;
           agent_name = meta.name;
@@ -648,6 +663,18 @@ let run_turn
                  what you accomplished and what the next generation should do. \
                  Do NOT start new tool work. If you need more turns, call extend_turns."
                 turn max_turns
+            in
+            (match ctx with
+             | None -> Some warning
+             | Some existing -> Some (existing ^ "\n\n" ^ warning))
+          else if is_retry then
+            let warning =
+              Printf.sprintf
+                "[RETRY] The previous attempt overflowed the model context. \
+                 Stay concise, prefer already-loaded context, and only use the \
+                 smallest essential tool set if a tool call is strictly necessary. \
+                 Current tool budget: %d."
+                max_tools
             in
             (match ctx with
              | None -> Some warning
@@ -768,6 +795,7 @@ let run_turn
           ~hooks
           ~context_reducer:reducer
           ~memory
+          ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
           ~max_turns
           ~max_idle_turns:5
           ~temperature

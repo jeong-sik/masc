@@ -55,24 +55,7 @@ let test_skill_route_context_text_standalone () =
     (let re = Str.regexp_string "delivery" in
      try ignore (Str.search_forward re text 0); true with Not_found -> false)
 
-let test_skill_route_system_prompt_uses_context_text () =
-  let route : KSR.keeper_skill_route =
-    { primary_skill = "code_review"; secondary_skills = []; reason = "" }
-  in
-  let base = "Base prompt here." in
-  let combined = KSR.skill_route_system_prompt_agent
-    ~base_system_prompt:base
-    ~fallback_route:route
-    ~soul_profile:"research" in
-  let standalone = KSR.skill_route_context_text
-    ~fallback_route:route
-    ~soul_profile:"research" in
-  (* Combined should be base + separator + standalone *)
-  let expected = Printf.sprintf "%s\n\n%s" base standalone in
-  check string "system_prompt_agent = base + context_text"
-    expected combined
-
-(* ── hard constraint: direct_reply_mode ─────────────────── *)
+(* ── hard constraint: direct_reply_mode ──────────────��──── *)
 
 let test_direct_reply_stays_in_system () =
   let base = "Identity prompt." in
@@ -146,8 +129,6 @@ let () =
       ( "skill_route_context_text",
         [
           test_case "standalone text" `Quick test_skill_route_context_text_standalone;
-          test_case "system_prompt_agent = base + context_text" `Quick
-            test_skill_route_system_prompt_uses_context_text;
         ] );
       ( "hard_constraints",
         [

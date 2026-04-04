@@ -718,6 +718,32 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
                                       | Error e ->
                                           `Assoc [ ("status", `String "error"); ("message", `String e) ])
                                 in
+                                let task_link_json =
+                                  let operation_id =
+                                    Team_session_store.operation_id_for_session
+                                      ctx.config session_id
+                                  in
+                                  match
+                                    Room.link_task_execution_artifacts_r
+                                      ctx.config ~task_id:run_task_id
+                                      ~session_id ?operation_id ()
+                                  with
+                                  | Ok message ->
+                                      `Assoc
+                                        [
+                                          ("status", `String "ok");
+                                          ("message", `String message);
+                                        ]
+                                  | Error error ->
+                                      `Assoc
+                                        [
+                                          ("status", `String "error");
+                                          ( "message",
+                                            `String
+                                              (Types.masc_error_to_string error)
+                                          );
+                                        ]
+                                in
                                 Some
                                   (`Assoc
                                     [
@@ -725,6 +751,7 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
                                       ("init", init_json);
                                       ("note", note_json);
                                       ("deliverable", deliverable_json);
+                                      ("task_link", task_link_json);
                                     ])
                           in
                           let refreshed_session =

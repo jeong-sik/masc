@@ -163,7 +163,7 @@ function toneBorderClass(tone: SituationTone): string {
 
 function toneBgClass(tone: SituationTone): string {
   if (tone === 'bad') return 'bg-[rgba(239,68,68,0.06)]'
-  if (tone === 'warn') return 'bg-[rgba(251,191,36,0.05)]'
+  if (tone === 'warn') return 'bg-[var(--warn-10)]'
   return 'bg-[var(--white-3)]'
 }
 

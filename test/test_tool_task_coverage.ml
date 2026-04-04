@@ -178,6 +178,125 @@ let () = test "handle_transition_respects_completion_contract_and_records_custom
   Eval_calibration.reset_store_for_testing ()
 )
 
+let () = test "handle_add_task_persists_contract" (fun () ->
+  let ctx = make_test_ctx () in
+  let (success, result) =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Strict task");
+          ( "contract",
+            `Assoc
+              [
+                ("strict", `Bool true);
+                ( "completion_contract",
+                  `List [ `String "deliverable-ready" ] );
+                ("required_evidence", `List [ `String "run_deliverable" ]);
+              ] );
+        ])
+  in
+  if not success then failwith result;
+  match Room.get_tasks_raw ctx.config with
+  | [ task ] -> (
+      match task.contract with
+      | Some contract ->
+          assert contract.strict;
+          assert (contract.required_evidence = [ "run_deliverable" ])
+      | None -> failwith "expected persisted task contract")
+  | _ -> failwith "expected exactly one task"
+)
+
+let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Strict deliverable task");
+          ( "contract",
+            `Assoc
+              [
+                ("strict", `Bool true);
+                ( "completion_contract",
+                  `List [ `String "deliverable-ready" ] );
+                ("required_evidence", `List [ `String "run_deliverable" ]);
+              ] );
+        ])
+  in
+  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let success_missing, result_missing =
+    Tool_task.handle_done ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("notes", `String "deliverable-ready");
+        ])
+  in
+  assert (not success_missing);
+  assert (str_contains result_missing "persisted task contract gate");
+  ignore (Run_eio.init ctx.config ~task_id:"task-001" ~agent_name:(Some "test-agent"));
+  ignore
+    (Run_eio.set_deliverable ctx.config ~task_id:"task-001"
+       ~content:"deliverable-ready");
+  let success_done, result_done =
+    Tool_task.handle_done ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("notes", `String "deliverable-ready");
+        ])
+  in
+  if not success_done then failwith result_done
+)
+
+let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Strict release task");
+          ("contract", `Assoc [ ("strict", `Bool true) ]);
+        ])
+  in
+  let _ = Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ]) in
+  let success_missing, result_missing =
+    Tool_task.handle_transition ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "release");
+        ])
+  in
+  assert (not success_missing);
+  assert (str_contains result_missing "handoff_context.summary");
+  let success_release, result_release =
+    Tool_task.handle_transition ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "release");
+          ( "handoff_context",
+            `Assoc
+              [
+                ("summary", `String "blocked on integration fixture");
+                ("next_step", `String "reproduce with real fixture");
+                ( "evidence_refs",
+                  `List [ `String "task-001"; `String "session:test" ] );
+              ] );
+        ])
+  in
+  if not success_release then failwith result_release;
+  match Room.get_tasks_raw ctx.config with
+  | [ task ] -> (
+      match task.handoff_context with
+      | Some handoff_context ->
+          assert (handoff_context.summary = "blocked on integration fixture");
+          assert (handoff_context.updated_by = Some "test-agent")
+      | None -> failwith "expected persisted handoff_context")
+  | _ -> failwith "expected exactly one task"
+)
+
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim direct")]) in

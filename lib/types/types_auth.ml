@@ -140,7 +140,7 @@ let rec masc_error_to_string = function
   | AgentNotFound name -> Printf.sprintf "❌ Agent not found: %s" name
   | AgentNotJoined name -> Printf.sprintf "❌ Agent not joined: %s. Use masc_join first." name
   | AgentAlreadyJoined name -> Printf.sprintf "⚠ %s is already in the room" name
-  | TaskNotFound id -> Printf.sprintf "❌ Task not found: %s" id
+  | TaskNotFound id -> Printf.sprintf "❌ Task not found: %s. Call masc_status to refresh your task list." id
   | TaskAlreadyClaimed { task_id; by } ->
       Printf.sprintf
         "❌ Task %s is currently owned by %s. Ask that agent to finish it, or claim a different task."
@@ -297,8 +297,6 @@ type permission =
   | CanCreateWorktree
   | CanRemoveWorktree
   | CanVote
-  | CanInterrupt
-  | CanApprove
   | CanAdmin
 [@@deriving show { with_path = false }]
 
@@ -320,7 +318,7 @@ let permissions_for_role = function
       CanBroadcast;
       CanOpenPortal; CanSendPortal;
       CanCreateWorktree; CanRemoveWorktree;
-      CanVote; CanInterrupt; CanApprove;
+      CanVote;
       CanAdmin;
     ]
 

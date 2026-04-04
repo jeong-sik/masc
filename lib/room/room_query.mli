@@ -57,6 +57,11 @@ val get_messages_raw_in_room :
   config -> room_id:string -> since_seq:int -> limit:int ->
   Types.message list
 
+(** Return all raw messages for a specific room after [since_seq], ordered
+    from oldest unseen to newest unseen. *)
+val get_all_messages_raw_in_room :
+  config -> room_id:string -> since_seq:int -> Types.message list
+
 (** {1 Formatted Output} *)
 
 (** List tasks with optional filters, returning a formatted string. *)

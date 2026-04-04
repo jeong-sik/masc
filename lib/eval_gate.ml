@@ -11,6 +11,9 @@
 
     @since 2.73.0 *)
 
+(** Cost warning ratio (80%% of budget). Standard capacity planning threshold. *)
+let eval_cost_warn_ratio = 0.8
+
 (* ================================================================ *)
 (* Configuration                                                     *)
 (* ================================================================ *)
@@ -336,7 +339,7 @@ let post_eval
      alerts at 80%%). Gives ~20%% remaining budget for the agent to wrap up
      gracefully rather than hitting a hard wall mid-operation. *)
   let new_cost = accumulated_cost +. cost in
-  let cost_warn_ratio = 0.8 in
+  let cost_warn_ratio = eval_cost_warn_ratio in
   let approaching_limit = new_cost >= config.max_cost_usd *. cost_warn_ratio in
   let should_warn = approaching_limit in
   let warning =

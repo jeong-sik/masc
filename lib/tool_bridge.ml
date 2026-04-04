@@ -22,51 +22,14 @@ let of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string = function
 
 (** {1 Schema Conversion}
 
-    Convert MASC JSON Schema (input_schema) to OAS [tool_param list].
-    MASC schemas use raw JSON objects; OAS uses typed [tool_param] records. *)
+    Delegates to [Agent_sdk.Mcp.json_schema_to_params] — the canonical
+    JSON Schema to OAS [tool_param list] conversion.
 
-let param_type_of_string = function
-  | "string" -> Agent_sdk.Types.String
-  | "integer" -> Agent_sdk.Types.Integer
-  | "number" -> Agent_sdk.Types.Number
-  | "boolean" -> Agent_sdk.Types.Boolean
-  | "array" -> Agent_sdk.Types.Array
-  | "object" -> Agent_sdk.Types.Object
-  | _ -> Agent_sdk.Types.String
+    @since 2.221.0 — delegates to OAS Mcp module (removes 40-line duplicate) *)
 
-(** Extract OAS [tool_param list] from a MASC [input_schema] JSON object.
+let param_type_of_string = Agent_sdk.Mcp.json_schema_type_to_param_type
 
-    Reads ["properties"] and ["required"] fields from the JSON Schema.
-    Unknown types default to [String]. *)
-let params_of_json_schema (schema : Yojson.Safe.t) : Agent_sdk.Types.tool_param list =
-  let open Yojson.Safe.Util in
-  let props =
-    try schema |> member "properties" |> to_assoc
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
-  in
-  let required_keys =
-    try schema |> member "required" |> to_list |> List.filter_map (fun j ->
-      try Some (to_string j) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
-  in
-  List.filter_map (fun (key, prop) ->
-    try
-      let type_str =
-        try prop |> member "type" |> to_string
-        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> "string"
-      in
-      let description =
-        try prop |> member "description" |> to_string
-        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
-      in
-      Some {
-        Agent_sdk.Types.name = key;
-        description;
-        param_type = param_type_of_string type_str;
-        required = List.mem key required_keys;
-      }
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
-  ) props
+let params_of_json_schema = Agent_sdk.Mcp.json_schema_to_params
 
 (** {1 OAS Tool.t Creation}
 

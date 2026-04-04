@@ -254,10 +254,14 @@ let compute_judgments
       | exn ->
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
-let should_backoff ~sw:_ ~net:_ =
+let should_backoff ~sw ~net =
   try
-    (* local_capacity_for_selections removed from OAS SDK. TODO(#4326) *)
-    false
+    let capacity =
+      Llm_provider.Cascade_config.local_capacity_for_selections ~sw ~net
+        [ "operator_judge" ]
+    in
+    capacity.all_discovered && capacity.endpoints_found > 0
+    && capacity.process_available <= 0
   with exn ->
     Eio.traceln
       "[operator] capacity check failed in should_backoff: %s"

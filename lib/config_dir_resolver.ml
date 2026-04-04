@@ -283,12 +283,11 @@ let personas_dirs_with inputs resolution =
   let primary =
     if resolution.personas.exists then [ resolution.personas.path ] else []
   in
-  (* When MASC_PERSONAS_DIR is explicitly set, it acts as the sole
-     override — do not append $HOME or $MASC_BASE_PATH dirs.
-     Check the input env var directly rather than the resolved source,
-     because child_item inherits the config_root source (which may be
-     Env from MASC_CONFIG_DIR) even when MASC_PERSONAS_DIR is unset. *)
-  match trim_opt inputs.env_personas_dir with
+  let explicit_personas_dir_override = trim_opt inputs.env_personas_dir in
+  (* inputs.env_personas_dir is populated only from MASC_PERSONAS_DIR, so
+     only that explicit override becomes sole-source. A generic config-root
+     env override still leaves HOME/base personas discovery enabled. *)
+  match explicit_personas_dir_override with
   | Some _ -> dedupe_paths primary
   | _ ->
     let extra_candidates =

@@ -263,14 +263,10 @@ After masc_tool_admin_snapshot to review current state before making changes.";
   };
   {
     name = "masc_keeper_tool_catalog";
-    description = "List visible masc_* tools with keeper wrapper coverage, filterable by tier or visibility.";
+    description = "List visible masc_* tools with keeper wrapper coverage, filterable by visibility.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("tier", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional tier filter: essential, standard, full");
-        ]);
         ("include_hidden", `Assoc [
           ("type", `String "boolean");
           ("description", `String "Include hidden tools in the catalog");

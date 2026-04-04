@@ -26,6 +26,12 @@ let keeper_board_tool_names =
     "keeper_board_search";
   ]
 
+let keeper_optional_board_tool_names =
+  [
+    (* Deliberately excluded from default presets. Explicit opt-in only. *)
+    "keeper_board_delete";
+  ]
+
 let keeper_voice_tool_names =
   [ "keeper_voice_speak"; "keeper_voice_listen"; "keeper_voice_agent";
     "keeper_voice_sessions";
@@ -59,6 +65,7 @@ let keeper_base_tool_names =
   [ "keeper_time_now"; "keeper_context_status"; "keeper_memory_search" ]
 
 let keeper_filesystem_tool_names = [ "keeper_fs_read" ]
+let keeper_filesystem_write_tool_names = [ "keeper_fs_edit" ]
 let keeper_library_tool_names = [ "keeper_library_search"; "keeper_library_read" ]
 
 let keeper_core_masc_tool_names =
@@ -89,14 +96,14 @@ let keeper_coding_masc_tool_names =
 
 (* ── Layer 0: Core tools (always executable, always visible) ───── *)
 
-(** Tools that bypass policy restrictions.  A keeper with Minimal
-    preset still needs masc_status/heartbeat/help to function.
-    These are the survival-critical tools. *)
+(** Tools that bypass policy restrictions.  Survival-critical only:
+    orientation (status), liveness (heartbeat), session control
+    (extend_turns), self-introspection (tools_list), and token
+    budget awareness (context_status).  Other tools moved to BM25
+    retrieval to free ranking budget.  See #4961. *)
 let core_always_tools =
-  [ "keeper_time_now"; "keeper_context_status";
-    "keeper_tools_list"; "keeper_tasks_list";
-    "masc_status"; "masc_heartbeat"; "masc_tool_help";
-    "extend_turns" ]
+  [ "keeper_context_status"; "keeper_tools_list";
+    "masc_status"; "masc_heartbeat"; "extend_turns" ]
 
 let core_always_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length core_always_tools) in

@@ -64,7 +64,7 @@ const TOOL_CATEGORIES: Array<{ match: (n: string) => boolean; icon: string; colo
   { match: n => n.includes('bash'),                         icon: '>', color: 'text-[#4ade80]' },
   { match: n => n.includes('edit') || n.includes('fs'),     icon: 'E', color: 'text-[#fbbf24]' },
   { match: n => n.includes('board') || n.includes('social'),icon: 'B', color: 'text-[#a78bfa]' },
-  { match: n => n.includes('github'),                       icon: 'G', color: 'text-[#9ad9ff]' },
+  { match: n => n.includes('github'),                       icon: 'G', color: 'text-[var(--accent)]' },
   { match: n => n.includes('search') || n.includes('read'), icon: 'R', color: 'text-[#60a5fa]' },
 ]
 const DEFAULT_TOOL_STYLE = { icon: 'T', color: 'text-[#94a3b8]' }
@@ -119,10 +119,10 @@ function TrajectoryEntryRow({ entry }: { entry: TrajectoryEntry }) {
           <span class="text-xs font-mono font-medium ${cat.color}">${entry.tool_name}</span>
           <span class="text-[10px] text-[var(--text-dim)]">T${entry.turn}R${entry.round}</span>
           ${gateRejected
-            ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[rgba(239,68,68,0.1)] text-[#ef4444]">거부: ${entry.gate.reason ?? ''}</span>`
+            ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[#ef4444]">거부: ${entry.gate.reason ?? ''}</span>`
             : null}
           ${entry.error
-            ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[rgba(239,68,68,0.1)] text-[#ef4444]">오류</span>`
+            ? html`<span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[#ef4444]">오류</span>`
             : null}
         </div>
 

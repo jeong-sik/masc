@@ -333,6 +333,7 @@ let linked_status_json ~base_path (link : swarm_link) =
     [
       ("loop_id", `String link.loop_id);
       ("session_id", `String link.session_id);
+      ("task_id", Json_util.string_opt_to_json link.task_id);
       ("status", `String status);
       ("current_cycle", `Int current_cycle);
       ("best_score", `Float best_score);

@@ -25,7 +25,7 @@ let test_pre_hook_observes () =
   Tool_dispatch.register_name_tag ~tool_name:"__hook_test" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
-    None);
+    Tool_dispatch.Pass);
   let token = match Tool_dispatch.mint_token ~name:"__hook_test" with Ok t -> t | Error e -> Alcotest.fail e in
   let result = Tool_dispatch.dispatch_structured ~token ~args:`Null in
   (* Pre-hook ran, then handler *)
@@ -43,7 +43,7 @@ let test_pre_hook_short_circuits () =
   Tool_dispatch.register_name_tag ~tool_name:"__hook_blocked" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
     log_call "pre_block";
-    Some { Tool_result.success = false;
+    Tool_dispatch.Reject { Tool_result.success = false;
            data = `String "blocked";
            tool_name = name;
            duration_ms = 0.0 });
@@ -68,18 +68,18 @@ let test_multiple_pre_hooks_first_wins () =
   (* First hook: observe only *)
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre1";
-    None);
+    Tool_dispatch.Pass);
   (* Second hook: blocks *)
   Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
     log_call "pre2_block";
-    Some { Tool_result.success = false;
+    Tool_dispatch.Reject { Tool_result.success = false;
            data = `String "denied";
            tool_name = name;
            duration_ms = 0.0 });
   (* Third hook: should not run *)
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre3";
-    None);
+    Tool_dispatch.Pass);
   let token = match Tool_dispatch.mint_token ~name:"__hook_multi" with Ok t -> t | Error e -> Alcotest.fail e in
   let _ = Tool_dispatch.dispatch_structured ~token ~args:`Null in
   (* pre1 passes, pre2 blocks, pre3 and handler never called *)
@@ -158,7 +158,7 @@ let test_full_lifecycle () =
   Tool_dispatch.register_name_tag ~tool_name:"__hook_full" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
-    None);
+    Tool_dispatch.Pass);
   Tool_dispatch.register_post_hook (fun r ->
     log_call "post";
     r);
@@ -185,7 +185,7 @@ let test_unknown_tool_skips_hooks () =
   setup ();
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre_should_not_run";
-    None);
+    Tool_dispatch.Pass);
   Tool_dispatch.register_post_hook (fun r ->
     log_call "post_should_not_run";
     r);

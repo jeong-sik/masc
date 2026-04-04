@@ -113,18 +113,3 @@ val user_visible_reply_text : ?fallback:string -> string -> string
 (** Check if text appears fragmentary (incomplete sentence fragments). *)
 val looks_fragmentary_history_text : string -> bool
 
-(** {1 Proactive Behavior} *)
-
-(** Generate proactive prompt for idle keeper. *)
-val proactive_prompt_for_keeper :
-  meta:keeper_meta ->
-  idle_seconds:int ->
-  Keeper_memory.keeper_state_snapshot option ->
-  string ->
-  string
-
-(** Generate retry instruction for proactive attempt. *)
-val proactive_retry_instruction : int -> reason:string -> string
-
-(** Get temperature for proactive attempt. *)
-val proactive_temperature : cascade_name:string -> int -> float

@@ -6,7 +6,8 @@
     The server runs in a forked Eio fiber alongside the HTTP/SSE server.
     It uses grpc-direct's Eio-native implementation for h2c (HTTP/2 cleartext). *)
 
-let default_port = 8936
+(** SSOT: [Env_config.Transport.grpc_port]. *)
+let default_port = Env_config.Transport.grpc_port
 let health_service_name = "grpc.health.v1.Health"
 
 (** Read the configured gRPC port from environment or use default. *)
@@ -402,7 +403,7 @@ let create_server
     Grpc_eio.Health.Serving;
   let server =
     Grpc_eio.Server.create
-      ~config:{ Grpc_eio.Server.default_config with port; host = "127.0.0.1" }
+      ~config:{ Grpc_eio.Server.default_config with port; host = Env_config_core.masc_host () }
       ()
   in
   let server_ref = ref server in

@@ -4,10 +4,9 @@
     1. Hidden tools do not leak into spawned agent passthrough lists
     2. Passthrough list entries correspond to real tool schemas (no dead entries)
     3. SDK alias tools have consistent visibility with Tool_catalog
-    4. Tier system maintains essential ⊂ standard ⊂ full inclusion
-    5. Annotation overrides in Tool_catalog take precedence
-    6. Public MCP surface is a valid subset of the full registry
-    7. Non-public tools remain callable via dispatch *)
+    4. Annotation overrides in Tool_catalog take precedence
+    5. Public MCP surface is a valid subset of the full registry
+    6. Non-public tools remain callable via dispatch *)
 
 module Tool_catalog = Masc_mcp.Tool_catalog
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
@@ -83,37 +82,6 @@ let () =
                   check bool (name ^ " omitted from public agent surface") false
                     (List.mem name names))
                 banned);
-        ] );
-      ( "tier_inclusion",
-        [
-          test_case "essential ⊂ standard" `Quick (fun () ->
-              let essentials =
-                List.filter
-                  (fun name ->
-                    Tool_catalog.is_in_tier Tool_catalog.Essential name)
-                  Tool_catalog.essential_tools
-              in
-              List.iter
-                (fun name ->
-                  check bool
-                    (name ^ " essential should be in standard")
-                    true
-                    (Tool_catalog.is_in_tier Tool_catalog.Standard name))
-                essentials);
-          test_case "standard ⊂ full" `Quick (fun () ->
-              let standards =
-                List.filter
-                  (fun name ->
-                    Tool_catalog.is_in_tier Tool_catalog.Standard name)
-                  Tool_catalog.standard_tools
-              in
-              List.iter
-                (fun name ->
-                  check bool
-                    (name ^ " standard should be in full")
-                    true
-                    (Tool_catalog.is_in_tier Tool_catalog.Full name))
-                standards);
         ] );
       ( "annotation_overrides",
         [

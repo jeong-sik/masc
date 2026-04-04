@@ -126,3 +126,129 @@ let get_int_required args key =
 (** Monadic bind for [(ok, string) result] → [(bool * string)].
     Chains required field extractions with early error return. *)
 let ( let*! ) r f = match r with Ok v -> f v | Error e -> (false, e)
+
+(** {1 Structured Field Validation}
+
+    Machine-readable field-path error feedback for keeper tool argument
+    validation.  Callers receive which field failed, what was expected,
+    and what was received, enabling deterministic self-correction.
+
+    @since 2.170.0
+    @see <https://github.com/jeong-sik/masc-mcp/issues/4963> *)
+
+(** Validation constraint that a field must satisfy. *)
+type field_constraint =
+  | Required          (** field must be present *)
+  | Non_empty         (** string field must not be empty after trimming *)
+  | Type_string       (** value must be a JSON string *)
+  | Type_int          (** value must be a JSON integer *)
+  | Type_float        (** value must be a JSON number *)
+  | Type_bool         (** value must be a JSON boolean *)
+  | Min_int of int    (** integer must be >= min *)
+  | Max_int of int    (** integer must be <= max *)
+  | One_of of string list  (** string must be one of the listed values *)
+
+let field_constraint_to_string = function
+  | Required -> "required"
+  | Non_empty -> "non_empty"
+  | Type_string -> "type_string"
+  | Type_int -> "type_int"
+  | Type_float -> "type_float"
+  | Type_bool -> "type_bool"
+  | Min_int v -> Printf.sprintf "min_int(%d)" v
+  | Max_int v -> Printf.sprintf "max_int(%d)" v
+  | One_of vs -> Printf.sprintf "one_of(%s)" (String.concat "," vs)
+
+(** A single field-level validation error. *)
+type field_error = {
+  field : string;
+  constraint_violated : field_constraint;
+  message : string;
+  expected : string option;
+  received : string option;
+}
+
+let field_error_to_yojson (e : field_error) : Yojson.Safe.t =
+  `Assoc (
+    [ ("field", `String e.field);
+      ("constraint", `String (field_constraint_to_string e.constraint_violated));
+      ("message", `String e.message) ]
+    @ (match e.expected with Some v -> [("expected", `String v)] | None -> [])
+    @ (match e.received with Some v -> [("received", `String v)] | None -> [])
+  )
+
+(** Build a structured validation error response with per-field errors.
+    Produces: [\{"status":"error","error_code":"validation_error",
+    "field_errors":[...],"message":"N field error(s)"\}] *)
+let validation_error_response (errors : field_error list) : string =
+  let field_errors = List.map field_error_to_yojson errors in
+  Yojson.Safe.to_string
+    (`Assoc [
+      ("status", `String "error");
+      ("error_code", `String "validation_error");
+      ("field_errors", `List field_errors);
+      ("message", `String (Printf.sprintf "%d field error(s)" (List.length errors)));
+    ])
+
+(** Convenience: [(false, validation_error_response errors)] *)
+let validation_error_result errors = (false, validation_error_response errors)
+
+(** {2 Field Validators}
+
+    Each validator returns [Ok value] or [Error field_error].
+    Use [validate_all] to collect multiple errors before returning. *)
+
+(** Validate that a string field is present and non-empty. *)
+let validate_string_required args field : (string, field_error) result =
+  match Safe_ops.json_string_opt field args with
+  | Some s when String.trim s <> "" -> Ok (String.trim s)
+  | Some s ->
+    Error { field; constraint_violated = Non_empty;
+            message = Printf.sprintf "%s must not be empty" field;
+            expected = Some "non-empty string";
+            received = Some (Printf.sprintf "%S" s) }
+  | None ->
+    Error { field; constraint_violated = Required;
+            message = Printf.sprintf "%s is required" field;
+            expected = Some "string"; received = None }
+
+(** Validate that an integer field is present. *)
+let validate_int_required args field : (int, field_error) result =
+  match Safe_ops.json_int_opt field args with
+  | Some i -> Ok i
+  | None ->
+    Error { field; constraint_violated = Required;
+            message = Printf.sprintf "%s is required" field;
+            expected = Some "integer"; received = None }
+
+(** Validate that an integer field (if present) is within [min, max]. *)
+let validate_int_range args field ~min_v ~max_v ~default : (int, field_error) result =
+  let v = get_int args field default in
+  if v < min_v then
+    Error { field; constraint_violated = Min_int min_v;
+            message = Printf.sprintf "%s must be >= %d" field min_v;
+            expected = Some (Printf.sprintf ">= %d" min_v);
+            received = Some (string_of_int v) }
+  else if v > max_v then
+    Error { field; constraint_violated = Max_int max_v;
+            message = Printf.sprintf "%s must be <= %d" field max_v;
+            expected = Some (Printf.sprintf "<= %d" max_v);
+            received = Some (string_of_int v) }
+  else Ok v
+
+(** Validate that a string field (if present) is one of allowed values. *)
+let validate_one_of args field ~allowed ~default : (string, field_error) result =
+  let v = get_string args field default in
+  if List.mem v allowed then Ok v
+  else
+    Error { field; constraint_violated = One_of allowed;
+            message = Printf.sprintf "%s must be one of: %s" field (String.concat ", " allowed);
+            expected = Some (String.concat "|" allowed);
+            received = Some v }
+
+(** Collect all field errors from a list of validation results.
+    Returns [Ok values] if all pass, [Error field_errors] otherwise. *)
+let validate_all (results : (unit, field_error) result list) : (unit, field_error list) result =
+  let errors = List.filter_map (function Error e -> Some e | Ok () -> None) results in
+  if errors = [] then Ok ()
+  else Error errors

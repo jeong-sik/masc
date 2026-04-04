@@ -252,7 +252,7 @@ let run_server ~sw:_ ~env ~host ~port ~base_path =
 (** CLI options *)
 let port =
   let doc = "Port to listen on" in
-  Arg.(value & opt int 8935 & info ["p"; "port"] ~docv:"PORT" ~doc)
+  Arg.(value & opt int (Env_config_core.masc_http_port_int ()) & info ["p"; "port"] ~docv:"PORT" ~doc)
 
 let host =
   let default = Env_config.masc_host () in

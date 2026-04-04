@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
+import { JsonViewerCard } from '../common/json-viewer'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { ActionButton } from '../common/button'
-import { Markdown } from '../common/markdown'
 import type { KeeperConversationDetails, KeeperConversationEntry } from '../../types'
 
 export type ChatTranscriptVariant = 'default' | 'messenger'
@@ -205,7 +205,7 @@ export function ChatMessageBubble({
           ? html`
               <button
                 type="button"
-                class=${`border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--text-body)] ${
+                class=${`border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)] ${
                   isMessenger ? 'rounded-xl px-2.5 py-1' : 'rounded-full px-3 py-1'
                 }`}
                 onClick=${() => { setExpanded(!expanded) }}
@@ -219,7 +219,7 @@ export function ChatMessageBubble({
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
             ${detailItems.map(item => html`
-              <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.16)] bg-[rgba(71,184,255,0.08)] px-2.5 py-1 text-[10px] font-medium text-[#bfe8ff]">
+              <span class="inline-flex items-center rounded-full border border-[rgba(71,184,255,0.16)] bg-[var(--accent-10)] px-2.5 py-1 text-[10px] font-medium text-[#bfe8ff]">
                 ${item}
               </span>
             `)}
@@ -244,7 +244,7 @@ export function ChatMessageBubble({
                 ? html`
                     <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                       ${overview.map(item => html`
-                        <div class="rounded-2xl border border-[rgba(148,163,184,0.12)] bg-[rgba(255,255,255,0.03)] px-3 py-2.5">
+                        <div class="rounded-2xl border border-[rgba(148,163,184,0.12)] bg-[var(--white-3)] px-3 py-2.5">
                           <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">${item.label}</div>
                           <div class="mt-1 text-[13px] font-semibold text-[var(--text-strong)]">${item.value}</div>
                         </div>
@@ -269,8 +269,8 @@ export function ChatMessageBubble({
                       <div class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">상태 스냅샷</div>
                       <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                         ${state.map(item => html`
-                          <div class="rounded-2xl border border-[rgba(71,184,255,0.14)] bg-[rgba(71,184,255,0.06)] px-3 py-2.5">
-                            <div class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#9ad9ff]">${item.label}</div>
+                          <div class="rounded-2xl border border-[var(--accent-soft)] bg-[rgba(71,184,255,0.06)] px-3 py-2.5">
+                            <div class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--accent)]">${item.label}</div>
                             <div class="mt-1 text-[12px] leading-[1.55] text-[var(--text-body)]">${item.value}</div>
                           </div>
                         `)}
@@ -283,13 +283,13 @@ export function ChatMessageBubble({
                     <div class="flex flex-col gap-2">
                       <button
                         type="button"
-                        class="self-start rounded-full border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-3 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[rgba(255,255,255,0.08)] hover:text-[var(--text-body)]"
+                        class="self-start rounded-full border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-3 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)]"
                         onClick=${() => { setRawExpanded(!rawExpanded) }}
                       >
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}
                       </button>
                       ${rawExpanded
-                        ? html`<div class="mt-2"><${Markdown} text=${`\`\`\`json\n${JSON.stringify(entry.details.rawPayload, null, 2)}\n\`\`\``} /></div>`
+                        ? html`<div class="mt-2"><${JsonViewerCard} data=${entry.details.rawPayload} /></div>`
                         : null}
                     </div>
                   `
@@ -333,7 +333,7 @@ export function ChatTranscript({
     >
       ${entries.length === 0
         ? html`
-            <div class="flex min-h-[220px] flex-col items-center justify-center rounded-[18px] border border-dashed border-[rgba(148,163,184,0.18)] bg-[rgba(255,255,255,0.03)] px-6 text-center">
+            <div class="flex min-h-[220px] flex-col items-center justify-center rounded-[18px] border border-dashed border-[rgba(148,163,184,0.18)] bg-[var(--white-3)] px-6 text-center">
               <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">직접 메시지 없음</div>
               <div class="mt-3 max-w-[34rem] text-[13px] leading-[1.7] text-[var(--text-secondary)]">${emptyText}</div>
             </div>

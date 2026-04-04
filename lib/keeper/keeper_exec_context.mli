@@ -211,29 +211,6 @@ val build_keeper_system_prompt :
 
 val append_trait_clause : base:string -> clause:string -> string
 
-val proactive_prompt_for_keeper :
-  meta:keeper_meta ->
-  idle_seconds:int ->
-  keeper_state_snapshot option ->
-  string ->
-  string
-
-(** {1 Proactive Generation} *)
-
-type proactive_generation_result = {
-  reply : string;
-  usage : Agent_sdk.Types.api_usage;
-  model_used : string;
-  latency_ms : int;
-  attempts : int;
-  total_cost_usd : float;
-  fallback_applied : bool;
-  tools_used : string list;
-}
-
-val proactive_retry_instruction : int -> reason:string -> string
-val proactive_temperature : cascade_name:string -> int -> float
-
 (** {1 Text Processing} *)
 
 val strip_state_blocks_text : string -> string
@@ -244,27 +221,13 @@ val user_visible_reply_text : ?fallback:string -> string -> string
 val normalize_proactive_text : string -> string
 val extract_checkin_text : string -> string option
 
-(** {1 Proactive Quality Checks} *)
+(** {1 Fragment Detection (used by dashboard)} *)
 
 val proactive_has_terminal_punct : string -> bool
 val proactive_has_terminal_korean_ending : string -> bool
 val proactive_has_terminal_ending : string -> bool
 val proactive_looks_fragmentary : string -> bool
-val proactive_fallback_reply : meta:keeper_meta -> idle_seconds:int -> string
-val proactive_quality_check : string -> (string, string) result
 val looks_fragmentary_history_text : string -> bool
-
-(** {1 Proactive Generation Entry Point} *)
-
-val run_proactive_generation :
-  model_labels:string list ->
-  config:Room.config ->
-  ctx_work:working_context ->
-  meta:keeper_meta ->
-  continuity_snapshot:keeper_state_snapshot option ->
-  continuity_summary:string ->
-  idle_seconds:int ->
-  proactive_generation_result option
 
 (** {1 Memory Check} *)
 

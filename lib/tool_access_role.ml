@@ -6,13 +6,12 @@
     - Worker tier: CanAddTask, CanClaimTask, CanCompleteTask, CanBroadcast,
                    CanOpenPortal, CanSendPortal, CanCreateWorktree,
                    CanRemoveWorktree
-    - Admin tier:  CanInit, CanReset, CanInterrupt, CanApprove, CanAdmin
+    - Admin tier:  CanInit, CanReset, CanAdmin
 
     @since 2.204.0 *)
 
 (* ================================================================ *)
-(* Admin-only tools (CanInit + CanReset + CanInterrupt +             *)
-(*                   CanApprove + CanAdmin)                          *)
+(* Admin-only tools (CanInit + CanReset + CanAdmin)                  *)
 (* ================================================================ *)
 
 let admin_only_tools =
@@ -43,12 +42,6 @@ let admin_only_tools =
     "masc_tool_grant";
     "masc_tool_revoke";
     "masc_tool_admin_update";
-    (* CanInterrupt *)
-    "masc_interrupt";
-    "masc_branch";
-    (* CanApprove *)
-    "masc_approve";
-    "masc_reject";
   ]
 
 (* ================================================================ *)

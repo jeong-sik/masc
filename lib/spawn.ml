@@ -51,10 +51,8 @@ You are running as a MASC-managed agent. Follow these lifecycle rules:
 
 1. **Session Start**: Call `mcp__masc__masc_join` with your agent name
 2. **Heartbeat**: Call `mcp__masc__masc_heartbeat` every 2 minutes during long tasks
-3. **Context Monitoring**: Estimate context pressure and use explicit relay tools:
-   - Check pressure with `mcp__masc__masc_relay_status(messages=..., tool_calls=...)`
-   - Save state with `mcp__masc__masc_relay_checkpoint(summary=..., messages=..., tool_calls=...)`
-   - Trigger successor handoff with `mcp__masc__masc_relay_now(...)` when relay is advised
+3. **Context Handoff**: If context pressure rises or you are about to stop mid-task,
+   write a structured handover with `mcp__masc__masc_handover_create`
 4. **Task Completion**: Call `mcp__masc__masc_transition` with action="done" then `mcp__masc__masc_leave`
 
 Example lifecycle:
@@ -63,14 +61,12 @@ mcp__masc__masc_join(agent_name="gemini", capabilities=["typescript","react"])
 ... work ...
 mcp__masc__masc_heartbeat(agent_name="gemini")  // every 2 min
 ... more work ...
-mcp__masc__masc_relay_status(messages=24, tool_calls=8)
-mcp__masc__masc_relay_checkpoint(summary="summary of work so far", messages=24, tool_calls=8)
-... continue or handoff via mcp__masc__masc_relay_now(...) ...
+mcp__masc__masc_handover_create(...)  // when a successor needs your state
 mcp__masc__masc_transition(agent_name="gemini", task_id="task-XXX", action="done")
 mcp__masc__masc_leave(agent_name="gemini")
 ```
 
-IMPORTANT: If relay pressure is high, checkpoint your state and hand off explicitly. Do not ignore it.
+IMPORTANT: If you cannot finish in one pass, hand off explicitly before leaving.
 ---
 |}
 
@@ -139,18 +135,7 @@ let parse_gemini_output raw =
     let cached_tokens =
       match from_usage "cachedContentTokenCount" with
       | Some _ as v -> v | None -> from_stats_first ["cached"] in
-    let cost_usd =
-      match input_tokens, output_tokens, cached_tokens with
-      | Some inp, Some out, Some cached ->
-          let uncached = inp - cached in
-          Some (float_of_int uncached *. 0.00015 /. 1000.0
-                +. float_of_int cached *. 0.000015 /. 1000.0
-                +. float_of_int out *. 0.0006 /. 1000.0)
-      | Some inp, Some out, None ->
-          Some (float_of_int inp *. 0.00015 /. 1000.0
-                +. float_of_int out *. 0.0006 /. 1000.0)
-      | _ -> None
-    in
+    let cost_usd = Safe_ops.json_float_opt "total_cost_usd" json in
     { text = response_text; input_tokens; output_tokens;
       cache_creation_tokens = None; cache_read_tokens = cached_tokens; cost_usd }
   with Yojson.Json_error _ ->
@@ -196,55 +181,39 @@ let default_configs = [
   });
 ]
 
-(** Map CLI tool names and provider aliases to default_configs keys. *)
-let spawn_alias_map = [
-  ("claude-code", "claude");
-  ("claude-api", "claude");
-  ("anthropic", "claude");
-  ("gemini-cli", "gemini");
-  ("gemini-api", "gemini");
-  ("google", "gemini");
-  ("codex-cli", "codex");
-  ("codex-api", "codex");
-  ("openai", "codex");
-  ("llama.cpp", "llama");
-  ("llamacpp", "llama");
-]
-
 (** Get spawn config for agent.
-    Resolves CLI tool names (e.g. "claude-code") and provider canonical names
-    (e.g. "claude-api") to the short keys used in default_configs. *)
+    Resolves all aliases via Provider_adapter registry (SSOT).
+    spawn_alias_map removed — aliases are now in Provider_adapter.direct_adapters. *)
 let get_config agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
   match List.assoc_opt normalized default_configs with
   | Some _ as result -> result
   | None ->
-    match List.assoc_opt normalized spawn_alias_map with
+    match Provider_adapter.resolve_spawn_key normalized with
     | Some key -> List.assoc_opt key default_configs
     | None -> None
 
-(** Build MCP flags as argument list (no shell escaping needed) *)
+(** Build MCP flags as argument list (no shell escaping needed).
+    Uses spawn_key (not canonical_name) to match Spawn.default_configs keys. *)
 let build_mcp_args agent_name tools =
   if tools = [] then []
   else
-    match Provider_adapter.resolve_direct_canonical_name agent_name |> Option.value ~default:agent_name with
-  | "claude" ->
-    (* Claude: --allowedTools "tool1,tool2,..." *)
-    let tools_str = String.concat "," tools in
-    ["--allowedTools"; tools_str]
-  | "gemini" ->
-    (* Gemini: --allowed-mcp-server-names masc --allowed-tools tool1 tool2 *)
-    ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"] @ tools
-  | "codex" ->
-    (* Codex: Uses config.toml MCP servers automatically, no extra flags needed *)
-    []
-  | "llama" ->
-    []
-  | _ -> []
+    let key = Provider_adapter.resolve_spawn_key agent_name
+              |> Option.value ~default:agent_name in
+    match key with
+    | "claude" ->
+      let tools_str = String.concat "," tools in
+      ["--allowedTools"; tools_str]
+    | "gemini" ->
+      ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"] @ tools
+    | "codex" | "llama" -> []
+    | _ -> []
 
 let build_prompt_args agent_name prompt =
-  match Provider_adapter.resolve_direct_canonical_name agent_name |> Option.value ~default:agent_name with
-  | "gemini-api" -> ["-p"; prompt]
+  let key = Provider_adapter.resolve_spawn_key agent_name
+            |> Option.value ~default:agent_name in
+  match key with
+  | "gemini" -> ["-p"; prompt]
   | _ -> []
 
 (** Parse command string into executable and arguments *)

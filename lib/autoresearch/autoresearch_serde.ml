@@ -146,6 +146,7 @@ let swarm_link_to_yojson (link : swarm_link) : Yojson.Safe.t =
       ("loop_id", `String link.loop_id);
       ("session_id", `String link.session_id);
       ("operation_id", Json_util.string_opt_to_json link.operation_id);
+      ("task_id", Json_util.string_opt_to_json link.task_id);
       ("target_file", `String link.target_file);
       ("program_note", Json_util.string_opt_to_json link.program_note);
       ("created_by", Json_util.string_opt_to_json link.created_by);
@@ -158,6 +159,7 @@ let swarm_link_of_yojson (json : Yojson.Safe.t) : swarm_link =
     loop_id = json |> member "loop_id" |> to_string;
     session_id = json |> member "session_id" |> to_string;
     operation_id = json |> member "operation_id" |> to_string_option;
+    task_id = json |> member "task_id" |> to_string_option;
     target_file = json |> member "target_file" |> to_string;
     program_note = json |> member "program_note" |> to_string_option;
     created_by = json |> member "created_by" |> to_string_option;

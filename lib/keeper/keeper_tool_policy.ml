@@ -15,6 +15,17 @@ let keeper_denied_set : (string, unit) Hashtbl.t =
     (Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied);
   tbl
 
+let dedupe_tool_schemas (schemas : Types.tool_schema list) =
+  let seen = Hashtbl.create (max 16 (List.length schemas)) in
+  List.filter
+    (fun (schema : Types.tool_schema) ->
+      if Hashtbl.mem seen schema.name then
+        false
+      else (
+        Hashtbl.replace seen schema.name ();
+        true))
+    schemas
+
 let is_keeper_denied (name : string) : bool =
   Hashtbl.mem keeper_denied_set name
 
@@ -71,7 +82,7 @@ let select_existing_masc_tool_names names =
 
 (* ── Candidate aggregation ────────────────────────────────────── *)
 
-let keeper_all_candidate_tool_names () =
+let keeper_base_candidate_tool_names () =
   dedupe_tool_names
     ( keeper_internal_candidate_tool_names
     @ keeper_voice_tool_names
@@ -80,6 +91,16 @@ let keeper_all_candidate_tool_names () =
     @ keeper_coding_tool_names
     @ keeper_autoresearch_tool_names
     @ injected_masc_tool_names () )
+
+let explicit_optional_candidate_tool_names (meta : keeper_meta) =
+  let requested =
+    match meta.tool_access with
+    | Preset { also_allow; _ } -> also_allow
+    | Custom allowlist -> allowlist
+  in
+  requested
+  |> List.filter (fun name -> List.mem name keeper_optional_board_tool_names)
+  |> dedupe_tool_names
 
 (* ── Presets ──────────────────────────────────────────────────── *)
 
@@ -100,6 +121,7 @@ let preset_allowlist = function
       dedupe_tool_names
         ( keeper_base_tool_names
         @ keeper_filesystem_tool_names
+        @ keeper_filesystem_write_tool_names
         @ keeper_library_tool_names
         @ keeper_shell_readonly_tool_names
         @ keeper_coordination_tool_names
@@ -118,7 +140,7 @@ let preset_allowlist = function
         @ keeper_governance_tool_names
         @ keeper_autoresearch_tool_names
         @ select_existing_masc_tool_names keeper_core_masc_tool_names )
-  | Full -> keeper_all_candidate_tool_names ()
+  | Full -> keeper_base_candidate_tool_names ()
 
 let tool_policy_of_meta (meta : keeper_meta) =
   let allow =
@@ -148,7 +170,10 @@ let tool_name_set names =
   tbl
 
 let tool_access_lookup_of_meta (meta : keeper_meta) =
-  let candidate_names = keeper_all_candidate_tool_names () in
+  let candidate_names =
+    dedupe_tool_names
+      (keeper_base_candidate_tool_names () @ explicit_optional_candidate_tool_names meta)
+  in
   let candidate_set = tool_name_set candidate_names in
   let allow_names =
     Tool_access_policy.resolve
@@ -280,6 +305,7 @@ let keeper_preset_universe_model_tools (meta : keeper_meta) : Types.tool_schema 
   in
   all_schemas
   |> List.filter (fun tool -> List.mem tool.Types.name scoped)
+  |> dedupe_tool_schemas
 
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     Types.tool_schema list =
@@ -297,6 +323,7 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     let result =
       all_schemas
       |> List.filter (fun tool -> List.mem tool.Types.name allowed)
+      |> dedupe_tool_schemas
     in
     let count = List.length result in
     if count > 100 then
@@ -320,3 +347,4 @@ let keeper_universe_model_tools (meta : keeper_meta) : Types.tool_schema list =
   in
   all_schemas
   |> List.filter (fun tool -> List.mem tool.Types.name universe)
+  |> dedupe_tool_schemas

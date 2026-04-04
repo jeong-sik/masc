@@ -15,6 +15,13 @@ module Oas = Agent_sdk
 (* ================================================================ *)
 
 let test_counter = ref 0
+let test_net : ([ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ref) =
+  ref None
+
+let require_test_net () =
+  match !test_net with
+  | Some net -> net
+  | None -> failwith "test net not initialized"
 
 let temp_dir prefix =
   incr test_counter;
@@ -39,6 +46,118 @@ let _parse_json s =
   with Yojson.Json_error e -> failwith ("invalid json: " ^ e)
 
 let _field key json = Yojson.Safe.Util.member key json
+
+let make_local_provider ?(model_id = "mock-model") () : Oas.Provider.config =
+  {
+    Oas.Provider.provider = Oas.Provider.Local { base_url = "http://127.0.0.1:1" };
+    model_id;
+    api_key_env = "";
+  }
+
+let make_noop_tool () =
+  Oas.Tool.create
+    ~name:"noop"
+    ~description:"No-op test tool"
+    ~parameters:[]
+    (fun _ -> Ok Oas.Types.{ content = "ok" })
+
+let openai_text_response ?(id = "chatcmpl-1") text =
+  Printf.sprintf
+    {|{"id":"%s","object":"chat.completion","model":"mock","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}|}
+    id text
+
+let escape_json_string s =
+  let buf = Buffer.create (String.length s) in
+  String.iter
+    (fun c ->
+      match c with
+      | '"' -> Buffer.add_string buf "\\\""
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | _ -> Buffer.add_char buf c)
+    s;
+  Buffer.contents buf
+
+let openai_tool_use_response tool_name input_json =
+  Printf.sprintf
+    {|{"id":"chatcmpl-t","object":"chat.completion","model":"mock","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"%s","arguments":"%s"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":15,"completion_tokens":10,"total_tokens":25}}|}
+    tool_name (escape_json_string input_json)
+
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop idx =
+    if needle_len = 0 then
+      true
+    else if idx + needle_len > haystack_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  loop 0
+
+let start_multi_mock ~sw ~net ~port (responses : string list) =
+  let idx = Atomic.make 0 in
+  let handler _conn _req body =
+    let _ = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let n = List.length responses in
+    let i = Atomic.fetch_and_add idx 1 in
+    let resp = List.nth responses (i mod n) in
+    Cohttp_eio.Server.respond_string ~status:`OK ~body:resp ()
+  in
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork ~sw (fun () ->
+      Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port
+
+let find_free_port () =
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close socket)
+    (fun () ->
+      Unix.setsockopt socket Unix.SO_REUSEADDR true;
+      match Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)) with
+      | () ->
+          (match Unix.getsockname socket with
+           | Unix.ADDR_INET (_, port) -> Some port
+           | _ -> failwith "unexpected socket address")
+      | exception Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) -> None)
+
+let with_raw_trace prefix f =
+  let dir = temp_dir prefix in
+  let path = Filename.concat dir "trace.jsonl" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      match Oas.Raw_trace.create ~path () with
+      | Ok raw_trace -> f raw_trace
+      | Error err -> Alcotest.fail (Oas.Error.to_string err))
+
+let check_policy_matches_default_internal label
+    (policy : Oas.Tool_retry_policy.t option) =
+  let expected = Oas.Tool_retry_policy.default_internal in
+  let actual =
+    match policy with
+    | Some policy -> policy
+    | None -> Alcotest.fail (label ^ ": missing retry policy")
+  in
+  Alcotest.(check int) (label ^ ": max_retries")
+    expected.max_retries actual.max_retries;
+  Alcotest.(check bool) (label ^ ": retry_on_validation_error")
+    expected.retry_on_validation_error actual.retry_on_validation_error;
+  Alcotest.(check bool) (label ^ ": retry_on_recoverable_tool_error")
+    expected.retry_on_recoverable_tool_error
+    actual.retry_on_recoverable_tool_error;
+  Alcotest.(check bool) (label ^ ": structured feedback")
+    true
+    (match actual.feedback_style with
+     | Oas.Tool_retry_policy.Structured_tool_result -> true
+     | Oas.Tool_retry_policy.Plain_error_text -> false)
 
 (* ================================================================ *)
 (* SSE Event Bridge Tests (OAS #215 streaming verification)         *)
@@ -308,6 +427,234 @@ let test_resume_model_id_falls_back_to_meta_model () =
   let checkpoint = make_checkpoint () in
   Alcotest.(check string) "meta model fallback" "meta-model"
     (Worker_oas.resume_model_id_of_checkpoint meta checkpoint)
+
+let test_oas_worker_exec_build_defaults_without_retry_policy () =
+  let provider = make_local_provider () in
+  let config =
+    Oas_worker_exec.default_config
+      ~name:"oas-worker-default"
+      ~provider
+      ~model_id:"mock-model"
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  match Oas_worker_exec.build ~net:(require_test_net ()) ~config with
+  | Ok agent ->
+      let policy = (Oas.Agent.options agent).tool_retry_policy in
+      Alcotest.(check bool) "default leaves retry disabled" true
+        (Option.is_none policy);
+      Oas.Agent.close agent
+  | Error err -> Alcotest.fail err
+
+let test_oas_worker_exec_build_applies_retry_policy () =
+  let provider = make_local_provider () in
+  let base_config =
+    Oas_worker_exec.default_config
+      ~name:"oas-worker-retry"
+      ~provider
+      ~model_id:"mock-model"
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let config =
+    { base_config with
+      tool_retry_policy = Some Oas.Tool_retry_policy.default_internal }
+  in
+  match Oas_worker_exec.build ~net:(require_test_net ()) ~config with
+  | Ok agent ->
+      let policy = (Oas.Agent.options agent).tool_retry_policy in
+      check_policy_matches_default_internal "exec build opt-in" policy;
+      Oas.Agent.close agent
+  | Error err -> Alcotest.fail err
+
+let test_worker_build_agent_uses_default_internal_retry_policy () =
+  with_raw_trace "worker_build_agent_retry" @@ fun raw_trace ->
+  let meta = make_worker_meta () in
+  let provider = make_local_provider ~model_id:meta.effective_model () in
+  match
+    Worker_oas.build_agent
+      ~net:(require_test_net ())
+      ~meta
+      ~provider
+      ~system_prompt:"worker system"
+      ~tools:[ make_noop_tool () ]
+      ~hooks:Oas.Hooks.empty
+      ~raw_trace
+      ~heartbeat_callbacks:[]
+      ()
+  with
+  | Ok agent ->
+      let policy = (Oas.Agent.options agent).tool_retry_policy in
+      check_policy_matches_default_internal "worker build_agent" policy;
+      Oas.Agent.close agent
+  | Error err -> Alcotest.fail err
+
+let test_build_resume_config_propagates_retry_policy () =
+  with_raw_trace "worker_resume_config_retry" @@ fun raw_trace ->
+  let provider = make_local_provider () in
+  let (_config, options) =
+    Worker_container.build_resume_config
+      ~worker_name:"resume-worker"
+      ~provider
+      ~model_id:"mock-model"
+      ~system_prompt:"resume system"
+      ~tools:[ make_noop_tool () ]
+      ~max_turns:7
+      ~thinking_enabled:true
+      ~hooks:Oas.Hooks.empty
+      ~raw_trace
+      ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
+      ()
+  in
+  let policy = options.tool_retry_policy in
+  check_policy_matches_default_internal "resume config" policy
+
+let test_worker_build_agent_validation_retry_success () =
+  try
+    Eio.Switch.run @@ fun sw ->
+    let responses =
+      [
+        openai_tool_use_response "get_time" {|{}|};
+        openai_tool_use_response "get_time" {|{"timezone":"UTC"}|};
+        openai_text_response "The time is 12:00 UTC";
+      ]
+    in
+    let port = match find_free_port () with Some port -> port | None -> Alcotest.skip () in
+    let url =
+      try start_multi_mock ~sw ~net:(require_test_net ()) ~port responses
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    let provider : Oas.Provider.config =
+      {
+        provider = Oas.Provider.Local { base_url = url };
+        model_id = "mock-model";
+        api_key_env = "";
+      }
+    in
+    let time_tool =
+      Oas.Tool.create
+        ~name:"get_time"
+        ~description:"Get current time"
+        ~parameters:
+          [
+            {
+              name = "timezone";
+              param_type = Oas.Types.String;
+              description = "tz";
+              required = true;
+            };
+          ]
+        (fun _input -> Ok Oas.Types.{ content = "12:00 UTC" })
+    in
+    with_raw_trace "worker_build_agent_validation_retry" @@ fun raw_trace ->
+    let meta = make_worker_meta () in
+    match
+      Worker_oas.build_agent
+        ~net:(require_test_net ())
+        ~meta
+        ~provider
+        ~system_prompt:"worker system"
+        ~tools:[ time_tool ]
+        ~hooks:Oas.Hooks.empty
+        ~raw_trace
+        ~heartbeat_callbacks:[]
+        ()
+    with
+    | Ok agent ->
+        Fun.protect
+          ~finally:(fun () -> Oas.Agent.close agent)
+          (fun () ->
+            match Oas.Agent.run ~sw agent "what time is it?" with
+            | Ok resp ->
+                let text =
+                  resp.Oas.Types.content
+                  |> List.filter_map (function Oas.Types.Text s -> Some s | _ -> None)
+                  |> String.concat ""
+                in
+                Alcotest.(check string) "final text after retry"
+                  "The time is 12:00 UTC" text;
+                Eio.Switch.fail sw Exit
+            | Error err -> Alcotest.fail (Oas.Error.to_string err))
+    | Error err -> Alcotest.fail err
+  with Exit -> ()
+
+let test_worker_build_agent_validation_retry_exhausted () =
+  try
+    Eio.Switch.run @@ fun sw ->
+    let responses =
+      [
+        openai_tool_use_response "get_time" {|{}|};
+        openai_tool_use_response "get_time" {|{}|};
+        openai_tool_use_response "get_time" {|{}|};
+        openai_text_response "should not happen";
+      ]
+    in
+    let port =
+      match find_free_port () with Some port -> port | None -> Alcotest.skip ()
+    in
+    let url =
+      try start_multi_mock ~sw ~net:(require_test_net ()) ~port responses
+      with
+      | Unix.Unix_error (Unix.EPERM, "bind", _)
+      | Unix.Unix_error (Unix.EACCES, "bind", _) ->
+          Alcotest.skip ()
+    in
+    let provider : Oas.Provider.config =
+      {
+        provider = Oas.Provider.Local { base_url = url };
+        model_id = "mock-model";
+        api_key_env = "";
+      }
+    in
+    let time_tool =
+      Oas.Tool.create
+        ~name:"get_time"
+        ~description:"Get current time"
+        ~parameters:
+          [
+            {
+              name = "timezone";
+              param_type = Oas.Types.String;
+              description = "tz";
+              required = true;
+            };
+          ]
+        (fun _input -> Ok Oas.Types.{ content = "12:00 UTC" })
+    in
+    with_raw_trace "worker_build_agent_validation_retry_exhausted" @@ fun raw_trace ->
+    let meta = make_worker_meta () in
+    match
+      Worker_oas.build_agent
+        ~net:(require_test_net ())
+        ~meta
+        ~provider
+        ~system_prompt:"worker system"
+        ~tools:[ time_tool ]
+        ~hooks:Oas.Hooks.empty
+        ~raw_trace
+        ~heartbeat_callbacks:[]
+        ()
+    with
+    | Ok agent ->
+        Fun.protect
+          ~finally:(fun () -> Oas.Agent.close agent)
+          (fun () ->
+            match Oas.Agent.run ~sw agent "what time is it?" with
+            | Ok _ -> Alcotest.fail "expected retry exhaustion error"
+            | Error
+                (Oas.Error.Agent
+                  (Oas.Error.ToolRetryExhausted { attempts; limit; detail })) ->
+                Alcotest.(check int) "default_internal attempts" 2 attempts;
+                Alcotest.(check int) "default_internal limit" 2 limit;
+                Alcotest.(check bool) "detail mentions tool" true
+                  (contains_substring ~needle:"get_time" detail);
+                Eio.Switch.fail sw Exit
+            | Error err -> Alcotest.fail (Oas.Error.to_string err))
+    | Error err -> Alcotest.fail err
+  with Exit -> ()
 
 (* ================================================================ *)
 (* Keeper checkpoint boundary tests                                  *)
@@ -673,7 +1020,7 @@ let test_overflow_retry_legacy_restore_failure_falls_back_to_oas () =
       match
         Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
           ~base_dir ~meta ~model:"llama:auto"
-          ~primary_model_max_tokens:256
+          ~primary_model_max_tokens:512
       with
       | None ->
           Alcotest.fail
@@ -681,7 +1028,7 @@ let test_overflow_retry_legacy_restore_failure_falls_back_to_oas () =
       | Some recovery ->
           let recovered_ctx =
             Keeper_exec_context.context_of_oas_checkpoint recovery.checkpoint
-              ~primary_model_max_tokens:256
+              ~primary_model_max_tokens:512
           in
           Alcotest.(check int) "fallback uses OAS generation" 11
             recovery.turn_generation;
@@ -780,17 +1127,19 @@ let test_overflow_retry_saves_compacted_checkpoint () =
       match
         Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
           ~base_dir ~meta ~model:"llama:auto"
-          ~primary_model_max_tokens:256
+          ~primary_model_max_tokens:512
       with
       | None -> Alcotest.fail "expected overflow retry recovery to compact"
       | Some recovery ->
           let recovered_ctx =
             Keeper_exec_context.context_of_oas_checkpoint recovery.checkpoint
-              ~primary_model_max_tokens:256
+              ~primary_model_max_tokens:512
           in
           Alcotest.(check bool) "token count reduced" true
             (Keeper_exec_context.token_count recovered_ctx < before_tokens);
-          Alcotest.(check int) "max tokens clamped" 256 recovered_ctx.max_tokens)
+          Alcotest.(check bool) "token count fits retry budget" true
+            (Keeper_exec_context.token_count recovered_ctx <= 512);
+          Alcotest.(check int) "max tokens clamped" 512 recovered_ctx.max_tokens)
 
 (* ================================================================ *)
 (* Same-trace checkpoint continuity regression (OAS #467)            *)
@@ -928,6 +1277,7 @@ let test_restart_continuity_load_oas_non_empty () =
 
 let () =
   Eio_main.run @@ fun env ->
+  test_net := Some env#net;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio_guard.enable ();
   Alcotest.run "OAS Worker" [
@@ -962,6 +1312,18 @@ let () =
         test_resume_model_id_prefers_checkpoint_model;
       Alcotest.test_case "meta model fallback" `Quick
         test_resume_model_id_falls_back_to_meta_model;
+      Alcotest.test_case "oas_worker default leaves retry disabled" `Quick
+        test_oas_worker_exec_build_defaults_without_retry_policy;
+      Alcotest.test_case "oas_worker opt-in applies retry policy" `Quick
+        test_oas_worker_exec_build_applies_retry_policy;
+      Alcotest.test_case "worker build_agent installs retry policy" `Quick
+        test_worker_build_agent_uses_default_internal_retry_policy;
+      Alcotest.test_case "resume config propagates retry policy" `Quick
+        test_build_resume_config_propagates_retry_policy;
+      Alcotest.test_case "worker build_agent retries validation errors" `Quick
+        test_worker_build_agent_validation_retry_success;
+      Alcotest.test_case "worker build_agent exhausts validation retries deterministically" `Quick
+        test_worker_build_agent_validation_retry_exhausted;
     ];
     "keeper_checkpoint_boundary", [
       Alcotest.test_case "prefers OAS checkpoint over legacy" `Quick

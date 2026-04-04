@@ -74,7 +74,11 @@ let is_room_lifecycle_broadcast (event : Activity_graph.event) =
   match string_member_opt "content" event.payload with
   | Some content ->
       String.ends_with ~suffix:"joined the room" content
+      || String.ends_with ~suffix:"joined the namespace" content
       || String.ends_with ~suffix:"left the room" content
+      || String.ends_with ~suffix:"left the namespace" content
+      || String_util.contains_substring content " rejoined the namespace"
+      || String_util.contains_substring content " rejoined namespace "
   | None -> false
 
 let relevant_activity_event (event : Activity_graph.event) =

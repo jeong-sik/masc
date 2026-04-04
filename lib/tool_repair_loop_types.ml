@@ -282,7 +282,7 @@ let state_of_json (json : Yojson.Safe.t) : state =
     validator_profile =
       Option.value ~default:"snippet_ocamlc" (json_string_opt "validator_profile" json);
     model_label =
-      Option.value ~default:"llama:qwen3.5-9b-local" (json_string_opt "model_label" json);
+      Option.value ~default:Env_config.Local_runtime.default_model (json_string_opt "model_label" json);
     max_attempts = Option.value ~default:2 (json_int_opt "max_attempts" json);
     attempt_count = Option.value ~default:0 (json_int_opt "attempt_count" json);
     artifact_session_id =

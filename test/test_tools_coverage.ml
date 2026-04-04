@@ -203,7 +203,9 @@ let test_masc_transition_schema () =
           Alcotest.(check bool) "has completion_contract" true
             (List.mem_assoc "completion_contract" props);
           Alcotest.(check bool) "has evaluator_cascade" true
-            (List.mem_assoc "evaluator_cascade" props)
+            (List.mem_assoc "evaluator_cascade" props);
+          Alcotest.(check bool) "has handoff_context" true
+            (List.mem_assoc "handoff_context" props)
       | None -> Alcotest.fail "masc_transition missing properties");
       match get_json_list "required" schema.input_schema with
       | Some reqs ->
@@ -220,7 +222,8 @@ let test_masc_add_task_schema () =
       | Some props ->
           Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
           Alcotest.(check bool) "has priority" true (List.mem_assoc "priority" props);
-          Alcotest.(check bool) "has description" true (List.mem_assoc "description" props)
+          Alcotest.(check bool) "has description" true (List.mem_assoc "description" props);
+          Alcotest.(check bool) "has contract" true (List.mem_assoc "contract" props)
       | None -> Alcotest.fail "masc_add_task missing properties"
 
 let test_masc_operator_snapshot_schema () =

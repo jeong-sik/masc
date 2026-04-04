@@ -18,7 +18,7 @@ import { prettyJson, displayStatus } from '../../lib/status-label'
 export { relativeTime, formatElapsed, toneClass, toneBorder, toneBg, chainStatusTone, sessionStatusTone, expiryTone, prettyJson, displayStatus }
 
 export function alertBorderTone(tone: string): string {
-  if (tone === 'warn') return 'border-[rgba(251,191,36,0.26)]'
+  if (tone === 'warn') return 'border-[var(--warn-30)]'
   if (tone === 'bad') return 'border-[rgba(248,113,113,0.3)]'
   return ''
 }

@@ -1,32 +1,26 @@
 (** Tool description budget limiter.
 
-    Ranks tools by tier and usage frequency, truncates when budget exceeded.
+    Ranks tools by usage frequency, truncates when budget exceeded.
     Token estimation: ~4 characters per token (conservative approximation). *)
 
 (** CJK-aware token estimate delegated to OAS Context_reducer. *)
 let estimate_tokens (s : string) : int =
   if s = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens s
 
-let tier_rank (name : string) : int =
-  match Tool_catalog.tool_tier name with
-  | Tool_catalog.Essential -> 0
-  | Tool_catalog.Standard -> 1
-  | Tool_catalog.Full -> 2
-
 let filter_by_budget ~budget_tokens ~usage_counts
     ~(tool_schemas : Types.tool_schema list) : Types.tool_schema list =
   if budget_tokens <= 0 then []
   else
-    (* Sort: tier ascending (Essential first), then usage descending *)
+    (* Sort: higher usage first, then name for deterministic output. *)
     let sorted =
       List.sort
         (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
-          let ta = tier_rank a.name in
-          let tb = tier_rank b.name in
-          if ta <> tb then Int.compare ta tb
+          let usage_cmp =
+            Int.compare (usage_counts b.name) (usage_counts a.name)
+          in
+          if usage_cmp <> 0 then usage_cmp
           else
-            (* Higher usage first *)
-            Int.compare (usage_counts b.name) (usage_counts a.name))
+            String.compare a.name b.name)
         tool_schemas
     in
     (* Accumulate tools until budget is exhausted *)

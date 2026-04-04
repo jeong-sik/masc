@@ -56,6 +56,7 @@ type registry_entry = {
   last_agent_count : int;
   board_wakeups : (string, float) Hashtbl.t;
   board_cursor_ts : float;
+  board_cursor_post_id : string option;
   tool_usage : (string, Keeper_types.tool_call_entry) Hashtbl.t;
 }
 
@@ -169,6 +170,13 @@ val get_board_cursor_ts : base_path:string -> string -> float
 
 (** Update board event cursor timestamp. No-op if not found. *)
 val set_board_cursor_ts : base_path:string -> string -> float -> unit
+
+(** Get board event cursor token. Returns [(0.0, None)] if not found. *)
+val get_board_cursor : base_path:string -> string -> float * string option
+
+(** Update board event cursor token. No-op if not found. *)
+val set_board_cursor :
+  base_path:string -> string -> float -> string option -> unit
 
 (** Record a tool call for a keeper. No-op if not found. *)
 val record_tool_use :

@@ -99,10 +99,27 @@ type overflow_retry_plan = {
   retry_generation : int;
 }
 
+let overflow_retry_history_budget
+    ~(available_context : int)
+    ~(system_prompt : string)
+    ~(user_message : string) : int =
+  let prompt_tokens =
+    Agent_sdk.Context_reducer.estimate_char_tokens system_prompt
+    + Agent_sdk.Context_reducer.estimate_char_tokens user_message
+  in
+  let prompt_reserve = max 1024 prompt_tokens in
+  let tool_reserve =
+    Keeper_config.keeper_retry_max_tools_per_turn () * 220
+  in
+  let safety_reserve = 512 in
+  max 256 (available_context - (prompt_reserve + tool_reserve + safety_reserve))
+
 let recover_context_overflow_retry
     ~(meta : keeper_meta)
     ~(base_dir : string)
     ~(primary_max_context : int)
+    ~(system_prompt : string)
+    ~(user_message : string)
     ~(error : string) : overflow_retry_plan option =
   match context_overflow_limit error with
   | None -> None
@@ -111,18 +128,22 @@ let recover_context_overflow_retry
         if primary_max_context <= 0 then actual_limit
         else min primary_max_context actual_limit
       in
+      let retry_history_budget =
+        overflow_retry_history_budget ~available_context:retry_max_context
+          ~system_prompt ~user_message
+      in
       let model = Keeper_exec_context.checkpoint_model_of_meta meta in
       match
         Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
           ~base_dir ~meta ~model
-          ~primary_model_max_tokens:retry_max_context
+          ~primary_model_max_tokens:retry_history_budget
       with
       | Some recovery ->
           Log.Keeper.warn
-            "%s: context overflow retry prepared with compacted checkpoint (%d->%d tokens, max_context=%d, generation=%d)"
+            "%s: context overflow retry prepared with compacted checkpoint (%d->%d tokens, max_context=%d, history_budget=%d, generation=%d)"
             meta.name recovery.compaction.before_tokens
             recovery.compaction.after_tokens
-            retry_max_context recovery.turn_generation;
+            retry_max_context retry_history_budget recovery.turn_generation;
           Some
             {
               retry_max_context;
@@ -136,10 +157,25 @@ let recover_context_overflow_retry
 
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
-  if observation.pending_mentions <> [] || observation.pending_board_events <> [] then
+  if observation.pending_mentions <> []
+     || observation.pending_board_events <> []
+     || observation.pending_scope_messages <> []
+  then
     "turn"
   else
     "proactive"
+
+let is_proactive_cycle_of_observation
+    (observation : Keeper_world_observation.world_observation) : bool =
+  String.equal (decision_channel_of_observation observation) "proactive"
+
+let proactive_outcome_of_result ~(has_text : bool) ~(has_tool_calls : bool) :
+    proactive_cycle_outcome =
+  match has_text, has_tool_calls with
+  | false, false -> Proactive_silent
+  | true, false -> Proactive_text_response
+  | false, true -> Proactive_tool_use
+  | true, true -> Proactive_mixed_response
 
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
@@ -154,6 +190,7 @@ let observed_triggers_of_observation
   let add trigger = triggers := trigger :: !triggers in
   if observation.pending_mentions <> [] then add "direct_mention";
   if observation.pending_board_events <> [] then add "board_activity";
+  if observation.pending_scope_messages <> [] then add "scope_message";
   if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
   if observation.failed_task_count > 0 then add "failed_task";
   if observation.active_goals <> [] && observation.idle_seconds > 0 then
@@ -167,10 +204,14 @@ let observed_affordances_of_observation
   let add affordance = affordances := affordance :: !affordances in
   if observation.pending_mentions <> [] then add "reply_in_room";
   if observation.pending_board_events <> [] then add "board_post_or_comment";
+  if observation.pending_scope_messages <> [] then add "message_sweep";
   if observation.unclaimed_task_count > 0 then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";
   if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
   List.rev !affordances
+
+let has_substantive_tool_calls (tools_used : string list) : bool =
+  List.exists (fun tool_name -> tool_name <> "masc_heartbeat") tools_used
 
 let response_requests_confirmation (text : string) : bool =
   let trimmed = String.trim text in
@@ -275,6 +316,7 @@ let append_decision_record
             [
               ("pending_mentions", `Int (List.length observation.pending_mentions));
               ("pending_board_events", `Int (List.length observation.pending_board_events));
+              ("pending_scope_messages", `Int (List.length observation.pending_scope_messages));
               ("active_goals", `Int (List.length observation.active_goals));
               ("idle_seconds", `Int observation.idle_seconds);
               ("context_ratio", `Float observation.context_ratio);
@@ -362,7 +404,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ~output_tokens:result.usage.output_tokens ()
   in
   let has_tool_calls = result.tools_used <> [] in
+  let has_substantive_tools = has_substantive_tool_calls result.tools_used in
   let has_text = String.trim result.response_text <> "" in
+  let is_proactive_cycle = is_proactive_cycle_of_observation observation in
   let is_board_reactive = observation.pending_board_events <> [] in
   let is_mention_reactive = observation.pending_mentions <> [] in
   let rt = meta.runtime in
@@ -399,25 +443,45 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         last_total_tokens = Keeper_exec_context.total_tokens result.usage;
         last_latency_ms = latency_ms;
       };
-      (* Proactive count: any turn that produced text or tools *)
+      (* Deterministic proactive cycle accounting is separated from
+         nondeterministic model output visibility. *)
       proactive_rt = {
         count_total =
           rt.proactive_rt.count_total
-          + (if update_proactive_rt && (has_text || has_tool_calls) then 1 else 0);
+          + (if update_proactive_rt && is_proactive_cycle then 1 else 0);
         last_ts =
-          (if update_proactive_rt && (has_text || has_tool_calls) then now_ts
+          (if update_proactive_rt && is_proactive_cycle then now_ts
            else rt.proactive_rt.last_ts);
+        visible_count_total =
+          rt.proactive_rt.visible_count_total
+          + (if update_proactive_rt
+               && is_proactive_cycle
+               && (has_text || has_substantive_tools)
+             then 1
+             else 0);
+        last_visible_ts =
+          (if update_proactive_rt
+              && is_proactive_cycle
+              && (has_text || has_substantive_tools)
+           then now_ts
+           else rt.proactive_rt.last_visible_ts);
+        last_outcome =
+          (if update_proactive_rt && is_proactive_cycle then
+             proactive_outcome_of_result ~has_text ~has_tool_calls
+           else rt.proactive_rt.last_outcome);
         last_reason =
-          (if not update_proactive_rt then rt.proactive_rt.last_reason
-           else if has_tool_calls then
+          (if not update_proactive_rt || not is_proactive_cycle then rt.proactive_rt.last_reason
+           else if has_substantive_tools then
              Printf.sprintf "unified:tools=[%s]"
                (String.concat "," result.tools_used)
-           else if has_text then "unified:text_response"
-           else rt.proactive_rt.last_reason);
+           else if not has_text then
+             "unified:" ^ proactive_cycle_outcome_to_string Proactive_silent
+            else if has_text then "unified:text_response"
+            else rt.proactive_rt.last_reason);
         last_preview =
-          (if not update_proactive_rt then rt.proactive_rt.last_preview
+          (if not update_proactive_rt || not is_proactive_cycle then rt.proactive_rt.last_preview
            else if has_text then short_preview result.response_text
-           else if has_tool_calls then
+           else if has_substantive_tools then
              Printf.sprintf "(tools: %s)" (String.concat ", " result.tools_used)
            else rt.proactive_rt.last_preview);
       };
@@ -470,6 +534,14 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
     else if String.trim result.response_text <> "" then "text_turn"
     else "noop"
   in
+  let proactive_outcome =
+    if String.equal channel "proactive" then
+      Some
+        (proactive_outcome_of_result
+           ~has_text:(String.trim result.response_text <> "")
+           ~has_tool_calls:(result.tools_used <> []))
+    else None
+  in
   let metrics_store = keeper_metrics_store config meta.name in
   let snapshot =
     `Assoc
@@ -507,6 +579,10 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
           | Some reason -> `String reason
           | None -> `Null);
         ("work_kind", `String work_kind);
+        ( "proactive_outcome",
+          match proactive_outcome with
+          | Some outcome -> `String (proactive_cycle_outcome_to_string outcome)
+          | None -> `Null );
         ("tool_call_count", `Int result.tool_calls_made);
         ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
         ( "action_source",
@@ -613,8 +689,10 @@ let broadcast_lifecycle_events ~(name : string)
   | _ -> ()
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
+    ~(observation : Keeper_world_observation.world_observation)
     ~(reason : string) ?social_state () : keeper_meta =
   let now_ts = Time_compat.now () in
+  let is_proactive_cycle = is_proactive_cycle_of_observation observation in
   let preview =
     let trimmed = String.trim reason in
     if trimmed = "" then "unified turn failed"
@@ -630,8 +708,21 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         last_latency_ms = latency_ms;
       };
       proactive_rt = { meta.runtime.proactive_rt with
-        last_reason = "unified:error:" ^ String.trim reason;
-        last_preview = preview;
+        count_total =
+          meta.runtime.proactive_rt.count_total
+          + (if is_proactive_cycle then 1 else 0);
+        last_ts =
+          if is_proactive_cycle then now_ts
+          else meta.runtime.proactive_rt.last_ts;
+        last_outcome =
+          if is_proactive_cycle then Proactive_error
+          else meta.runtime.proactive_rt.last_outcome;
+        last_reason =
+          if is_proactive_cycle then "unified:error:" ^ String.trim reason
+          else meta.runtime.proactive_rt.last_reason;
+        last_preview =
+          if is_proactive_cycle then preview
+          else meta.runtime.proactive_rt.last_preview;
       };
       last_speech_act =
         (match social_state with
@@ -729,7 +820,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                            && should_attempt_context_overflow_retry e -> (
                 match
                   recover_context_overflow_retry ~meta ~base_dir
-                    ~primary_max_context ~error:e
+                    ~primary_max_context ~system_prompt ~user_message ~error:e
                 with
                 | Some retry_plan ->
                     let retry_meta =
@@ -759,7 +850,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Social.derive_failure_state ~meta ~observation ~reason:e
           in
           let updated_meta =
-            update_metrics_from_failure meta ~latency_ms ~reason:e
+            update_metrics_from_failure meta ~latency_ms ~observation ~reason:e
               ~social_state ()
           in
           append_decision_record ~config ~meta:updated_meta ~observation
@@ -779,17 +870,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           in
           if count >= threshold then begin
             Log.Keeper.error
-              "%s: %d consecutive turn failures (threshold=%d), marking crashed"
+              "%s: %d consecutive turn failures (threshold=%d), escalating to supervisor crash path"
               meta.name count threshold;
             let reason = Keeper_registry.Turn_consecutive_failures count in
-            Keeper_registry.set_failure_reason ~base_path meta.name (Some reason);
-            Keeper_registry.set_state ~base_path meta.name
-              Keeper_registry.Crashed;
-            Keeper_registry.record_crash ~base_path meta.name
-              (Time_compat.now ())
-              (Keeper_registry.failure_reason_to_string reason);
-            Keeper_registry.record_error ~base_path meta.name
-              (Printf.sprintf "turn_consecutive_failures(%d)" count)
+            raise
+              (Keeper_registry.Keeper_heartbeat_failure
+                 { reason; keeper_name = meta.name })
           end;
           Error e
       | Ok result ->
@@ -838,14 +924,25 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~primary_model_max_tokens:primary_max_context
               ~checkpoint:result.checkpoint
           in
+          let scope_only_reactive =
+            observation.pending_scope_messages <> []
+            && observation.pending_mentions = []
+            && observation.pending_board_events = []
+          in
           (* 6. Observe result and update metrics *)
           let updated_meta =
             update_metrics_from_result lifecycle.updated_meta ~latency_ms
-              ~observation ~social_state result
+              ~observation
+              ~social_state
+              ~update_proactive_rt:(not scope_only_reactive)
+              result
           in
           (try
              let channel =
-               if observation.pending_mentions <> [] || observation.pending_board_events <> [] then
+               if observation.pending_mentions <> []
+                  || observation.pending_board_events <> []
+                  || observation.pending_scope_messages <> []
+               then
                  "turn"
                else
                  "proactive"

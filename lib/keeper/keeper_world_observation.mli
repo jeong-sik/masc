@@ -35,6 +35,16 @@ type world_observation = {
   pending_board_events : pending_board_event list;
   (** Structured board events needing triage. *)
 
+  pending_scope_messages : (string * string) list;
+  (** [(from_agent, content)] pairs of unprocessed non-direct messages that a
+      global/all keeper is explicitly allowed to observe in the flattened
+      namespace. *)
+
+  message_cursor_updates : (string * int) list;
+  (** Deterministic message cursor watermarks collected during observation.
+      These are applied to keeper meta before the next turn to avoid
+      reprocessing the same broadcast stream. *)
+
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or proactive). *)
 
@@ -109,6 +119,11 @@ val observe :
   config:Room.config ->
   meta:Keeper_types.keeper_meta ->
   world_observation
+
+val apply_message_cursor_updates :
+  Keeper_types.keeper_meta ->
+  (string * int) list ->
+  Keeper_types.keeper_meta
 
 (** Compute effective proactive cooldown with idle decay.
     After extended idle (> base cooldown), halve the cooldown each

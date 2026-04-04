@@ -52,6 +52,9 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
 let token_count (ctx : working_context) =
   count_tokens ctx.system_prompt ctx.messages
 
+let message_token_count (ctx : working_context) =
+  count_tokens "" ctx.messages
+
 let message_count (ctx : working_context) =
   List.length ctx.messages
 
@@ -809,6 +812,18 @@ let clamp_context_max_tokens
   if clamped = ctx.max_tokens then ctx
   else sync_oas_context { ctx with max_tokens = clamped }
 
+let hard_trim_context_to_budget
+    (ctx : working_context)
+    ~(budget_tokens : int) : working_context =
+  if budget_tokens <= 0 then ctx
+  else
+    let reducer =
+      Agent_sdk.Context_reducer.from_context_config ~max_tokens:budget_tokens ()
+    in
+    let messages = Agent_sdk.Context_reducer.reduce reducer ctx.messages in
+    sync_oas_context
+      { ctx with messages; max_tokens = min ctx.max_tokens budget_tokens }
+
 let forced_overflow_retry_meta
     (meta : keeper_meta)
     ~(turn_generation : int)
@@ -913,15 +928,43 @@ let[@warning "-32"] recover_latest_checkpoint_for_overflow_retry
       let retry_meta =
         forced_overflow_retry_meta meta ~turn_generation ~now_ts
       in
-      let compacted_ctx, trigger, decision =
+      let compacted_ctx, trigger, base_decision =
         compact_if_needed ~meta:retry_meta ~now_ts ctx
       in
-      let compaction_applied =
-        String.starts_with ~prefix:"applied:" decision
+      let strategy_after_tokens = token_count compacted_ctx in
+      let strategy_after_message_tokens =
+        message_token_count compacted_ctx
+      in
+      let compacted_ctx =
+        if
+          primary_model_max_tokens > 0
+          && strategy_after_message_tokens > primary_model_max_tokens
+        then
+          hard_trim_context_to_budget compacted_ctx
+            ~budget_tokens:primary_model_max_tokens
+        else
+          compacted_ctx
       in
       let after_tokens = token_count compacted_ctx in
+      let after_message_tokens = message_token_count compacted_ctx in
+      let hard_trim_applied = after_tokens < strategy_after_tokens in
+      let decision =
+        if hard_trim_applied then
+          Printf.sprintf "%s+budget_trim(%d->%d,msg<=%d)"
+            base_decision strategy_after_tokens after_tokens
+            primary_model_max_tokens
+        else
+          base_decision
+      in
+      let compaction_applied =
+        String.starts_with ~prefix:"applied:" base_decision || hard_trim_applied
+      in
       let meaningful_reduction = after_tokens < before_tokens in
-      if not (compaction_applied && meaningful_reduction) then None
+      let fits_budget =
+        primary_model_max_tokens <= 0
+        || after_message_tokens <= primary_model_max_tokens
+      in
+      if not (compaction_applied && meaningful_reduction && fits_budget) then None
       else
         let compaction =
           {
@@ -1035,188 +1078,7 @@ let append_trait_clause ~(base : string) ~(clause : string) : string =
   else Printf.sprintf "%s; %s" b c
 
 
-let proactive_prompt_for_keeper = Keeper_prompt.proactive_prompt_for_keeper
-
-type proactive_generation_result = {
-  reply: string;
-  usage: Agent_sdk.Types.api_usage;
-  model_used: string;
-  latency_ms: int;
-  attempts: int;
-  total_cost_usd: float;
-  fallback_applied: bool;
-  tools_used: string list;
-}
-
-let proactive_retry_instruction attempt ~(reason : string) =
-  if attempt = 2 then
-    Printf.sprintf
-      "Retry policy: previous attempt failed (%s). You MUST output now with a clearly different angle."
-      reason
-  else
-    Printf.sprintf
-      "Retry policy: previous attempts failed (%s). You MUST output one decisive check-in now, materially different from the last preview."
-      reason
-
-let proactive_temperature ~cascade_name attempt =
-  let fallback () =
-    if attempt <= 1 then Keeper_config.keeper_proactive_temperature_low ()
-    else if attempt = 2 then Keeper_config.keeper_proactive_temperature_mid ()
-    else Keeper_config.keeper_proactive_temperature_high ()
-  in
-  Cascade_inference.resolve_temperature ~cascade_name ~fallback
-
 include Keeper_text_processing
-
-let run_proactive_generation
-    ~(model_labels : string list)
-    ~(config : Room.config)
-    ~(ctx_work : working_context)
-    ~(meta : keeper_meta)
-    ~(continuity_snapshot : keeper_state_snapshot option)
-    ~(continuity_summary : string)
-    ~(idle_seconds : int) : proactive_generation_result option =
-  let primary_model_id = (match Llm_provider.Cascade_config.parse_model_strings model_labels with c :: _ -> c.Llm_provider.Provider_config.model_id | [] -> "auto") in
-  let base_prompt =
-    proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
-  in
-  let max_attempts = Env_config.KeeperProactive.max_attempts in
-  let previous_preview = String.trim meta.runtime.proactive_rt.last_preview in
-  let similarity_threshold = Keeper_config.keeper_proactive_similarity_threshold () in
-  let fallback_skill_route =
-    route_keeper_skill ~soul_profile:meta.soul_profile ~message:"proactive idle automation checkin"
-  in
-  let base_turn_system_prompt =
-    skill_route_system_prompt_agent
-      ~base_system_prompt:ctx_work.system_prompt
-      ~fallback_route:fallback_skill_route
-      ~soul_profile:meta.soul_profile
-  in
-  let turn_system_prompt =
-    append_continuity_context_prompt
-      ~base_prompt:base_turn_system_prompt
-      continuity_snapshot
-      ~continuity_summary
-  in
-  let ctx_ref = ref ctx_work in
-  let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref () in
-  let rec loop attempt usage_acc latency_acc cost_acc retry_hint =
-    if attempt > max_attempts then
-      Some {
-        reply = proactive_fallback_reply ~meta ~idle_seconds;
-        usage = usage_acc;
-        model_used = primary_model_id;
-        latency_ms = latency_acc;
-        attempts = max_attempts;
-        total_cost_usd = cost_acc;
-        fallback_applied = true;
-        tools_used = [];
-      }
-    else
-      let prompt =
-        if String.trim retry_hint = "" then base_prompt
-        else Printf.sprintf "%s\n\n%s" base_prompt retry_hint
-      in
-      let temperature = proactive_temperature ~cascade_name:"heartbeat_action" attempt in
-      let max_tokens =
-        Cascade_inference.resolve_max_tokens
-          ~cascade_name:"keeper_turn"
-          ~fallback:(fun () -> 1024)
-      in
-      let (agent_result, attempt_latency) = timed (fun () ->
-          Oas_worker.run_named ~cascade_name:"keeper_turn"
-            ~goal:prompt ~system_prompt:turn_system_prompt
-            ~tools ~initial_messages:ctx_work.messages
-            ~max_turns:(Keeper_config.keeper_unified_max_turns ())
-            ~temperature ~max_tokens
-            ()) in
-      match agent_result with
-      | Error e ->
-          Log.Keeper.warn "keeper turn OAS worker failed: %s" e;
-          None
-      | Ok result ->
-          let resp = result.Oas_worker.response in
-          let model_used_raw = resp.model in
-          let used_model_id =
-            let cfgs = Llm_provider.Cascade_config.parse_model_strings model_labels in
-            let strip s = if String.length s > 7 && String.sub s (String.length s - 7) 7 = ":latest" then String.sub s 0 (String.length s - 7) else s in
-            let u = strip model_used_raw in
-            match List.find_opt (fun (c : Llm_provider.Provider_config.t) -> c.model_id = model_used_raw || c.model_id = u) cfgs with
-            | Some c -> c.model_id
-            | None -> (match cfgs with c :: _ -> c.model_id | [] -> model_used_raw)
-          in
-          let attempt_usage = usage_of_response resp in
-          let attempt_cost_usd =
-            cost_usd_of_usage attempt_usage ~model_id:used_model_id
-          in
-          let attempt_content =
-            let c = String.trim (Agent_sdk.Types.text_of_content resp.content) in
-            let tool_names = List.filter_map (function
-              | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
-              resp.content in
-            if c = "" && tool_names <> [] then
-              Printf.sprintf "(tools executed: %s)" (String.concat ", " tool_names)
-            else c
-          in
-          let attempt_model_used = resp.model in
-          let attempt_tools_used = List.filter_map (function
-            | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
-            resp.content in
-          let attempt_latency_ms = attempt_latency in
-          let usage_acc = merge_usage usage_acc attempt_usage in
-          let latency_acc = latency_acc + attempt_latency_ms in
-          let cost_acc = cost_acc +. attempt_cost_usd in
-          let trimmed = String.trim attempt_content in
-          if trimmed <> "" then
-            (match proactive_quality_check trimmed with
-             | Error reason when attempt < max_attempts ->
-                 let hint =
-                   proactive_retry_instruction (attempt + 1) ~reason
-                 in
-                 loop (attempt + 1) usage_acc latency_acc cost_acc hint
-             | Error _ ->
-                 Some {
-                   reply = proactive_fallback_reply ~meta ~idle_seconds;
-                   usage = usage_acc;
-                   model_used = attempt_model_used;
-                   latency_ms = latency_acc;
-                   attempts = attempt;
-                   total_cost_usd = cost_acc;
-                   fallback_applied = true;
-                   tools_used = attempt_tools_used;
-                 }
-             | Ok checked_reply ->
-                 let too_similar =
-                   if previous_preview = "" then false
-                   else
-                     proactive_similarity_score
-                       ~candidate:checked_reply
-                       ~previous:previous_preview
-                     >= similarity_threshold
-                 in
-                 if too_similar && attempt < max_attempts then
-                   let hint =
-                     proactive_retry_instruction (attempt + 1) ~reason:"too_similar"
-                   in
-                   loop (attempt + 1) usage_acc latency_acc cost_acc hint
-                 else
-                   Some {
-                     reply = checked_reply;
-                     usage = usage_acc;
-                     model_used = attempt_model_used;
-                     latency_ms = latency_acc;
-                     attempts = attempt;
-                     total_cost_usd = cost_acc;
-                     fallback_applied = false;
-                     tools_used = attempt_tools_used;
-                   })
-          else
-            let hint =
-              proactive_retry_instruction (attempt + 1) ~reason:"empty"
-            in
-            loop (attempt + 1) usage_acc latency_acc cost_acc hint
-  in
-  loop 1 zero_usage 0 0.0 ""
 
 let memory_check_default_json () : Yojson.Safe.t =
   `Assoc [

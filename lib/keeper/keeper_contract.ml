@@ -30,4 +30,5 @@ let parse_room_scope = function
   | _ -> None
 
 let room_scope_to_string = function
-  | Current | All -> "current"
+  | Current -> "current"
+  | All -> "all"

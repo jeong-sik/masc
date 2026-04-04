@@ -82,11 +82,17 @@ let parse_model_code_response response =
        keyword completion, bracket closure — then standard parse.
        Falls back to {raw: string} if all transforms fail. *)
     match Llm_provider.Lenient_json.parse trimmed_response with
-    | `Assoc [("raw", `String _)] ->
+    | `Assoc [("raw", `String raw)] ->
       (* Lenient_json fallback: all recovery transforms failed, raw string returned *)
-      let preview = if String.length trimmed_response > 80
-        then String.sub trimmed_response 0 80 ^ "..."
-        else trimmed_response
+      let preview =
+        raw
+        |> String.split_on_char '\n'
+        |> String.concat " "
+        |> String.trim
+        |> fun normalized ->
+        if String.length normalized > 80
+        then String.sub normalized 0 80 ^ "..."
+        else normalized
       in
       Result.error (Printf.sprintf "MODEL response is not valid JSON after lenient recovery: %s" preview)
     | `Assoc _ as json ->

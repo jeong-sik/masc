@@ -49,16 +49,19 @@ let test_parse_model_code_response_rejects_legacy_xml () =
   match Lib.Autoresearch.parse_model_code_response response with
   | Ok _ -> fail "expected legacy XML response to be rejected"
   | Error err ->
-    check bool "mentions JSON parse error" true (contains err "JSON parse error")
+    check bool "mentions lenient recovery failure" true
+      (contains err "not valid JSON after lenient recovery")
 
-let test_parse_model_code_response_rejects_fenced_json () =
+let test_parse_model_code_response_accepts_fenced_json () =
   let response =
     "```json\n{\"hypothesis\":\"Increase batch size\",\"modified_code\":\"let batch = 64\"}\n```"
   in
   match Lib.Autoresearch.parse_model_code_response response with
-  | Ok _ -> fail "expected fenced JSON response to be rejected"
+  | Ok (hypothesis, code) ->
+    check string "fenced hypothesis" "Increase batch size" hypothesis;
+    check string "fenced code" "let batch = 64" code
   | Error err ->
-    check bool "mentions JSON parse error" true (contains err "JSON parse error")
+    failf "expected fenced JSON response to parse, got %s" err
 
 let test_parse_model_code_response_rejects_missing_fields () =
   let response = {|{"hypothesis":"Increase batch size"}|} in
@@ -82,8 +85,8 @@ let () =
             test_parse_model_code_response_accepts_strict_json;
           test_case "rejects legacy XML tags" `Quick
             test_parse_model_code_response_rejects_legacy_xml;
-          test_case "rejects fenced JSON" `Quick
-            test_parse_model_code_response_rejects_fenced_json;
+          test_case "accepts fenced JSON" `Quick
+            test_parse_model_code_response_accepts_fenced_json;
           test_case "rejects missing fields" `Quick
             test_parse_model_code_response_rejects_missing_fields;
         ] );

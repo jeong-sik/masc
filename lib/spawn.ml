@@ -51,10 +51,8 @@ You are running as a MASC-managed agent. Follow these lifecycle rules:
 
 1. **Session Start**: Call `mcp__masc__masc_join` with your agent name
 2. **Heartbeat**: Call `mcp__masc__masc_heartbeat` every 2 minutes during long tasks
-3. **Context Monitoring**: Estimate context pressure and use explicit relay tools:
-   - Check pressure with `mcp__masc__masc_relay_status(messages=..., tool_calls=...)`
-   - Save state with `mcp__masc__masc_relay_checkpoint(summary=..., messages=..., tool_calls=...)`
-   - Trigger successor handoff with `mcp__masc__masc_relay_now(...)` when relay is advised
+3. **Context Handoff**: If context pressure rises or you are about to stop mid-task,
+   write a structured handover with `mcp__masc__masc_handover_create`
 4. **Task Completion**: Call `mcp__masc__masc_transition` with action="done" then `mcp__masc__masc_leave`
 
 Example lifecycle:
@@ -63,14 +61,12 @@ mcp__masc__masc_join(agent_name="gemini", capabilities=["typescript","react"])
 ... work ...
 mcp__masc__masc_heartbeat(agent_name="gemini")  // every 2 min
 ... more work ...
-mcp__masc__masc_relay_status(messages=24, tool_calls=8)
-mcp__masc__masc_relay_checkpoint(summary="summary of work so far", messages=24, tool_calls=8)
-... continue or handoff via mcp__masc__masc_relay_now(...) ...
+mcp__masc__masc_handover_create(...)  // when a successor needs your state
 mcp__masc__masc_transition(agent_name="gemini", task_id="task-XXX", action="done")
 mcp__masc__masc_leave(agent_name="gemini")
 ```
 
-IMPORTANT: If relay pressure is high, checkpoint your state and hand off explicitly. Do not ignore it.
+IMPORTANT: If you cannot finish in one pass, hand off explicitly before leaving.
 ---
 |}
 

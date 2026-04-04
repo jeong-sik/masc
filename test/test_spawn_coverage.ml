@@ -212,13 +212,13 @@ let test_lifecycle_suffix_has_heartbeat () =
     (try let _ = Str.search_forward (Str.regexp_string "heartbeat") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-let test_lifecycle_suffix_has_relay_status () =
-  check bool "has relay_status" true
-    (try let _ = Str.search_forward (Str.regexp_string "relay_status") Spawn.masc_lifecycle_suffix 0 in true
+let test_lifecycle_suffix_has_handover_create () =
+  check bool "has handover_create" true
+    (try let _ = Str.search_forward (Str.regexp_string "handover_create") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
-let test_lifecycle_suffix_has_relay_checkpoint () =
-  check bool "has relay_checkpoint" true
+let test_lifecycle_suffix_omits_relay_checkpoint () =
+  check bool "omits relay_checkpoint" false
     (try let _ = Str.search_forward (Str.regexp_string "relay_checkpoint") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)
 
@@ -746,8 +746,8 @@ let () =
       test_case "has protocol" `Quick test_lifecycle_suffix_has_protocol;
       test_case "has join" `Quick test_lifecycle_suffix_has_join;
       test_case "has heartbeat" `Quick test_lifecycle_suffix_has_heartbeat;
-      test_case "has relay_status" `Quick test_lifecycle_suffix_has_relay_status;
-      test_case "has relay_checkpoint" `Quick test_lifecycle_suffix_has_relay_checkpoint;
+      test_case "has handover_create" `Quick test_lifecycle_suffix_has_handover_create;
+      test_case "omits relay_checkpoint" `Quick test_lifecycle_suffix_omits_relay_checkpoint;
     ];
     "default_configs", [
       test_case "not empty" `Quick test_default_configs_not_empty;

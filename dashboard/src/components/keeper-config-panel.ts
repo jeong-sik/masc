@@ -686,7 +686,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ModelList} models=${c.coordination.mention_targets} />
       </div>
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 범위</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 네임스페이스</div>
         <${ModelList} models=${c.coordination.joined_room_ids} />
       </div>
 

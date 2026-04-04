@@ -78,12 +78,11 @@ flowchart TD
 
 ## Workflow Pipelines
 
-### 1. Room and Task Hygiene
+### 1. Project Scope and Task Hygiene
 
 ```mermaid
 flowchart LR
-  SetRoom[masc_set_room] --> Join[masc_join]
-  Join --> Status[masc_status]
+  Start[masc_start] --> Status[masc_status]
   Status --> Claim[masc_transition or masc_claim_next]
   Claim --> Plan[masc_plan_set_task]
   Plan --> Worktree[masc_worktree_create]

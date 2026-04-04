@@ -15,9 +15,9 @@ let mcp_profile_by_session : (string, Server_mcp_transport_http_types.tool_profi
 let session_mutex = Eio.Mutex.create ()
 
 let default_base_path () =
-  match Env_config_core.me_root_opt () with
-  | Some path -> path
-  | None -> Sys.getcwd ()
+  (* Match the launcher guard: a direct binary launch from a checkout with its
+     own .masc must not silently inherit a stale parent MASC_BASE_PATH. *)
+  Room_utils_backend_setup.resolve_masc_base_path (Sys.getcwd ())
 
 let is_valid_protocol_version version =
   List.mem version mcp_protocol_versions

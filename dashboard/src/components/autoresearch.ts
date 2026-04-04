@@ -201,15 +201,15 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
   return html`
     <div class="overflow-x-auto overflow-y-auto max-h-[400px] custom-scrollbar rounded-lg border border-[var(--white-6)] bg-[rgba(0,0,0,0.1)]">
       <table class="w-full text-xs">
-        <thead class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md shadow-[0_1px_2px_rgba(0,0,0,0.2)]">
+        <thead>
           <tr class="text-[var(--text-muted)] text-[10px] uppercase tracking-wider border-b border-[var(--white-10)]">
-            <th class="text-left py-2.5 px-3 font-medium">#</th>
-            <th class="text-left py-2.5 px-3 font-medium">가설</th>
-            <th class="text-right py-2.5 px-3 font-medium">이전</th>
-            <th class="text-right py-2.5 px-3 font-medium">이후</th>
-            <th class="text-right py-2.5 px-3 font-medium">변화</th>
-            <th class="text-center py-2.5 px-3 font-medium">판정</th>
-            <th class="text-right py-2.5 px-3 font-medium">시간</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-left py-2.5 px-3 font-medium">#</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-left py-2.5 px-3 font-medium">가설</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">이전</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">이후</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">변화</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-center py-2.5 px-3 font-medium">판정</th>
+            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium shadow-[1px_1px_2px_rgba(0,0,0,0.2)]">시간</th>
           </tr>
         </thead>
         <tbody>

@@ -11,21 +11,19 @@ interface ToolResultProps {
   timestamp: number
 }
 
-function tryParseJson(text: string): { isJson: boolean; parsed: unknown; formatted: string } {
-  try { 
-    const parsed = JSON.parse(text); 
-    return { isJson: true, parsed, formatted: JSON.stringify(parsed, null, 2) } 
-  }
-  catch { 
-    return { isJson: false, parsed: null, formatted: text } 
+function tryParseJson(text: string): { isJson: boolean; parsed: unknown } {
+  try {
+    return { isJson: true, parsed: JSON.parse(text) }
+  } catch {
+    return { isJson: false, parsed: null }
   }
 }
 
 export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolResultProps) {
   const expanded = useSignal(true)
-  const { isJson, parsed, formatted } = tryParseJson(text)
+  const { isJson, parsed } = tryParseJson(text)
   const timeStr = new Date(timestamp).toLocaleTimeString('ko-KR')
-  const lines = formatted.split('\n').length
+  const lines = text.split('\n').length
   return html`
     <div class="flex flex-col gap-2 mt-3">
       <div class="flex items-center gap-2">
@@ -43,9 +41,9 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
         </div>
         ${expanded.value ? html`
           <div class="px-3 py-2 overflow-x-auto max-h-[400px] overflow-y-auto">
-            ${isJson 
+            ${isJson
               ? html`<${JsonViewer} data=${parsed} />`
-              : html`<pre class="text-[12px] font-mono ${success ? 'text-[var(--text-body)]' : 'text-[#fda4af]'}">${formatted}</pre>`
+              : html`<pre class="text-[12px] font-mono ${success ? 'text-[var(--text-body)]' : 'text-[#fda4af]'}">${text}</pre>`
             }
           </div>
         ` : null}

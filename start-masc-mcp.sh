@@ -310,8 +310,13 @@ done
 # Did caller provide --base-path explicitly on CLI?
 BASE_PATH_EXPLICIT=0
 
-# Track whether MASC_BASE_PATH came from caller environment after shell/env-file restoration.
-MASC_BASE_PATH_WAS_SET="${__PRESERVE_MASC_BASE_PATH_SET:-0}"
+# Track whether MASC_BASE_PATH is set after shell/env-file restoration.
+# This must include ~/.zshenv and repo-local env files, not only caller-provided
+# exports, because both paths can accidentally inject a stale parent root.
+MASC_BASE_PATH_WAS_SET=0
+if [ -n "${MASC_BASE_PATH:-}" ]; then
+    MASC_BASE_PATH_WAS_SET=1
+fi
 
 raise_open_file_limit() {
     local desired="${MASC_NOFILE_TARGET:-4096}"
@@ -416,11 +421,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Guard against inherited MASC_BASE_PATH ambiguity. When the caller shell
-# exports a parent project root and both that root and this checkout have
-# their own .masc directories, the server can silently read/write the wrong
-# state tree. Explicit --base-path must still win; inherited env needs an
-# opt-in to survive this ambiguity.
+# Guard against inherited MASC_BASE_PATH ambiguity. When shell startup files
+# or env files inject a parent project root and both that root and this
+# checkout have their own .masc directories, the server can silently
+# read/write the wrong state tree. Explicit --base-path still wins; an
+# inherited/env-file root needs an opt-in to survive this ambiguity.
 if [ "$BASE_PATH_EXPLICIT" != "1" ] && \
    [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && \
    [ -n "$BASE_PATH" ] && \

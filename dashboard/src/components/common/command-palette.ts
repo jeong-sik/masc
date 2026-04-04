@@ -127,7 +127,11 @@ export function CommandPalette() {
     }))
 
     // Add Sessions dynamically
-    const sessions = missionSnapshot.value?.sessions || missionSnapshot.value?.session_briefs || []
+    const snapshotSessions = missionSnapshot.value?.sessions
+    const snapshotSessionBriefs = missionSnapshot.value?.session_briefs
+    const sessions = snapshotSessions?.length
+      ? snapshotSessions
+      : (snapshotSessionBriefs || [])
     const sessionActions: CommandPaletteAction[] = sessions.map(s => ({
       id: `nav-session-${s.session_id}`,
       title: `세션 확인: ${s.goal || s.session_id}`,

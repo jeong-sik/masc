@@ -87,11 +87,9 @@ let [@warning "-32"] cleanup_expired () =
     stale-while-revalidate can fork background fibers. *)
 let _bg_sw : Eio.Switch.t option ref = ref None
 
-type any_clock = Clock : _ Eio.Time.clock -> any_clock
-
-let clock_ref : any_clock option ref = ref None
-
-let set_clock clk = clock_ref := Some (Clock clk)
+(* clock_ref removed: Time_compat.sleep is the single sleep path
+   since the Fiber.yield spin-loop fix (#4948). *)
+let set_clock _clk = ()
 
 let set_sw sw = _bg_sw := Some sw
 
@@ -210,13 +208,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
     | `Hit v -> v
     | `Timed_out -> raise (Compute_timeout (key, true))
     | `Wait slot_cond ->
-      (* Sleep briefly outside the mutex. Prefer the cache-local Eio clock when
-         tests or embedders registered one via [set_clock], and fall back to
-         Time_compat so server paths without an explicit local clock still
-         avoid the pre-fix Fiber.yield spin loop. *)
-      (match !clock_ref with
-       | Some (Clock clk) -> Eio.Time.sleep clk wait_poll_interval_sec
-       | None -> Time_compat.sleep wait_poll_interval_sec);
+      (* Sleep briefly outside the mutex — cooperative suspension point. *)
+      Time_compat.sleep wait_poll_interval_sec;
       try_get ~waited:(waited +. wait_poll_interval_sec)
         ~watching_cond:(Some slot_cond)
     | `Stale (stale_value, cond) ->

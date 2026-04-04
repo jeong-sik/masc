@@ -486,16 +486,19 @@ let run_turn
     ) tool_entries
   in
   let tool_index = Agent_sdk.Tool_index.build ~config:tool_index_config scoped_tool_entries in
+  (* Visibility measurement (#4961): log universe size vs BM25 scope *)
+  if Keeper_types_profile.keeper_debug then
+    Log.Keeper.debug "keeper:%s tool visibility: total=%d preset_scoped=%d bm25_indexed=%d"
+      meta.name
+      (List.length tool_entries)
+      (List.length preset_scoped_names)
+      (List.length scoped_tool_entries);
   (* Layer 0: Core tools — always visible to the LLM regardless of preset.
-     With preset-scoped BM25 (#4637), category anchors are no longer needed
-     because the smaller pool surfaces relevant tools directly. *)
-  let always_include_tools =
-    Keeper_exec_tools.core_always_tools
-    @ [ "keeper_broadcast"; "keeper_task_claim"; "keeper_task_done";
-        "keeper_tasks_list";
-        "keeper_tools_list" ]         (* self-introspection — #4519 *)
-    |> Keeper_exec_tools.dedupe_tool_names
-  in
+     Kept to 5 survival-critical tools (#4961).  Other coordination tools
+     (keeper_broadcast, keeper_task_claim, keeper_task_done, keeper_tasks_list,
+     keeper_time_now, masc_tool_help) are now BM25-retrievable, freeing
+     ranking budget for context-relevant tools. *)
+  let always_include_tools = Keeper_exec_tools.core_always_tools in
   (* Layer 2: Universe — all tool names that the dispatch can handle.
      keeper_tools is now built from the universe (not just policy), so
      this includes all candidate tools minus denied.  BM25 retrieval

@@ -143,7 +143,8 @@ let test_masc_mcp_tools_has_handover () =
   check bool "has handover" true (List.mem "mcp__masc__masc_handover_create" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_relay_status () =
-  check bool "has relay_status" true
+  (* relay_status removed from spawned-agent surface in #5011 *)
+  check bool "omits relay_status (pruned)" false
     (List.mem "mcp__masc__masc_relay_status" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_team_session_step () =
@@ -155,7 +156,8 @@ let test_masc_mcp_tools_has_team_session_finalize () =
     (List.mem "mcp__masc__masc_team_session_finalize" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_a2a_delegate () =
-  check bool "has a2a_delegate" true
+  (* a2a_delegate removed from spawned-agent surface in #4999 *)
+  check bool "omits a2a_delegate (pruned)" false
     (List.mem "mcp__masc__masc_a2a_delegate" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_run_deliverable () =
@@ -175,7 +177,8 @@ let test_masc_mcp_tools_has_tool_admin_snapshot () =
     (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_keeper_tool_catalog () =
-  check bool "includes keeper_tool_catalog" true
+  (* keeper_tool_catalog removed from spawned-agent surface in #5011 *)
+  check bool "omits keeper_tool_catalog (pruned)" false
     (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_tool_list () =

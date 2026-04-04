@@ -785,6 +785,7 @@ let run_turn
           ~hooks
           ~context_reducer:reducer
           ~memory
+          ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
           ~max_turns
           ~max_idle_turns:5
           ~temperature

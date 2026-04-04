@@ -71,6 +71,7 @@ let config_for_label
     ?hooks
     ?context_reducer
     ?memory
+    ?tool_retry_policy
     ?enable_thinking
     ~(description : string option)
     () : Oas_worker_exec.config =
@@ -94,6 +95,7 @@ let config_for_label
     hooks;
     context_reducer;
     memory;
+    tool_retry_policy;
     enable_thinking;
     description;
   }
@@ -123,6 +125,7 @@ let run_named
     ?hooks
     ?context_reducer
     ?memory
+    ?tool_retry_policy
     ?raw_trace
     ?on_event
     ?on_yield
@@ -175,7 +178,7 @@ let run_named
       ~system_prompt ~tools)
     with
       max_turns; max_tokens; temperature; max_idle_turns;
-      guardrails; hooks; context_reducer; memory;
+      guardrails; hooks; context_reducer; memory; tool_retry_policy;
       description = Some (Printf.sprintf "cascade:%s" cascade_name);
       transport = transport_resolved;
       allowed_paths;
@@ -227,6 +230,7 @@ let run_model_by_label
     ?hooks
     ?context_reducer
     ?memory
+    ?tool_retry_policy
     ?enable_thinking
     ?contract
     ?on_event
@@ -250,6 +254,7 @@ let run_model_by_label
           config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
             ~tools ~max_turns ~max_tokens ~temperature
             ~max_idle_turns ?guardrails ?hooks ?context_reducer ?memory
+            ?tool_retry_policy
             ?enable_thinking
             ~description:(Some (Printf.sprintf "model_label:%s" model_label))
             ()
@@ -274,6 +279,7 @@ let run_named_with_masc_tools
     ?guardrails
     ?hooks
     ?memory
+    ?tool_retry_policy
     ?raw_trace
     ?on_event
     ?on_yield
@@ -294,6 +300,7 @@ let run_named_with_masc_tools
   ) masc_tools in
   run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
+    ?tool_retry_policy
     ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref
     ?contract
     ?transport ~yield_on_tool ?sw ?net ()
@@ -310,6 +317,7 @@ let run_model_with_masc_tools
     ?guardrails
     ?hooks
     ?memory
+    ?tool_retry_policy
     ?enable_thinking
     ?contract
     ?raw_trace
@@ -329,7 +337,7 @@ let run_model_with_masc_tools
         let config =
           config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
           ~tools:[] ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
-          ?memory ?enable_thinking
+          ?memory ?tool_retry_policy ?enable_thinking
           ~description:(Some (Printf.sprintf "model_label:%s" model_label))
           ()
       in

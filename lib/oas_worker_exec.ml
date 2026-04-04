@@ -31,6 +31,7 @@ type config = {
   named_cascade : Oas.Api.named_cascade option;
   initial_messages : Oas.Types.message list;
   raw_trace : Oas.Raw_trace.t option;
+  tool_retry_policy : Oas.Tool_retry_policy.t option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
@@ -56,6 +57,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     named_cascade = None;
     initial_messages = [];
     raw_trace = None;
+    tool_retry_policy = None;
     enable_thinking = None;
     transport = Masc_grpc_transport.from_env ();
     allowed_paths = [];
@@ -189,6 +191,10 @@ let build
   in
   let builder = match config.raw_trace with
     | Some raw_trace -> Oas.Builder.with_raw_trace raw_trace builder
+    | None -> builder
+  in
+  let builder = match config.tool_retry_policy with
+    | Some policy -> Oas.Builder.with_tool_retry_policy policy builder
     | None -> builder
   in
   let builder = match config.named_cascade with

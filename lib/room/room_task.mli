@@ -13,6 +13,8 @@ val emit_task_activity :
   config -> agent_name:string -> task_id:string ->
   kind:string -> payload:Yojson.Safe.t -> unit
 
+val task_actor_kind : string -> string
+
 val task_status_to_string : Types.task_status -> string
 
 val task_started_at_unix : Types.task_status -> float
@@ -30,14 +32,19 @@ val observe_task_transition :
 (** {1 Task creation} *)
 
 val add_task :
+  ?contract:Types.task_contract ->
   config -> title:string -> priority:int -> description:string -> string
 
 val add_task_with_role :
+  ?contract:Types.task_contract ->
   config -> title:string -> priority:int -> description:string ->
   required_role:Types_core.role -> string
 
 val batch_add_tasks :
   config -> (string * int * string) list -> string
+
+val batch_add_tasks_with_contracts :
+  config -> (string * int * string * Types.task_contract option) list -> string
 
 (** {1 Task claiming} *)
 
@@ -53,15 +60,17 @@ val claim_task_r :
 val transition_task_r :
   config -> agent_name:string -> task_id:string -> action:Types_core.task_action ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
+  ?handoff_context:Types.task_handoff_context ->
   ?force:bool -> unit -> string Types.masc_result
 
 val release_task_r :
   config -> agent_name:string -> task_id:string ->
-  ?expected_version:int -> unit -> string Types.masc_result
+  ?expected_version:int ->
+  ?handoff_context:Types.task_handoff_context -> unit -> string Types.masc_result
 
 val force_release_task_r :
   config -> agent_name:string -> task_id:string ->
-  unit -> string Types.masc_result
+  ?handoff_context:Types.task_handoff_context -> unit -> string Types.masc_result
 
 val force_done_task_r :
   config -> agent_name:string -> task_id:string ->
@@ -81,6 +90,11 @@ val complete_task_r :
 val cancel_task_r :
   config -> agent_name:string -> task_id:string ->
   reason:string -> string Types.masc_result
+
+val link_task_execution_artifacts_r :
+  config -> task_id:string ->
+  ?session_id:string -> ?operation_id:string -> ?autoresearch_loop_id:string ->
+  unit -> string Types.masc_result
 
 (** {1 Re-exported type (backward compatibility)} *)
 

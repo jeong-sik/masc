@@ -68,6 +68,7 @@ let test_task_with_stage () =
     created_at = "2026-01-01T00:00:00Z";
     worktree = None; required_role = Unassigned;
     stage = Some Task_stage.Implement;
+    contract = None; handoff_context = None;
   } in
   let json = Types_core.task_to_yojson task in
   match Types_core.task_of_yojson json with
@@ -83,6 +84,7 @@ let test_task_without_stage () =
     created_at = "2026-01-01T00:00:00Z";
     worktree = None; required_role = Unassigned;
     stage = None;
+    contract = None; handoff_context = None;
   } in
   let json = Types_core.task_to_yojson task in
   match Types_core.task_of_yojson json with

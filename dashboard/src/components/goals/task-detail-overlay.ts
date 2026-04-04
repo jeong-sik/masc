@@ -28,6 +28,7 @@ import {
 } from './task-detail-state'
 import { TaskActivityList } from './task-activity-list'
 import { goalById, priorityLabel } from './goal-helpers'
+import type { Task, TaskGateEvaluation } from '../../types'
 
 // -- Event timeline (inline, NormalizedTaskEvent shape) --------------
 
@@ -65,7 +66,7 @@ function TaskEventsSection() {
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
                 <span class="text-[12px] font-medium text-text-strong">${evt.label}</span>
-                ${evt.agent ? html`<span class="text-[10px] text-accent">@${evt.agent}</span>` : null}
+                ${evt.agent ? html`<span class="text-[10px] text-accent">@${evt.agent}${evt.actorKind ? ` · ${evt.actorKind}` : ''}</span>` : null}
               </div>
               ${evt.notes ? html`<div class="mt-0.5 text-[11px] text-text-muted whitespace-pre-wrap">${evt.notes}</div>` : null}
             </div>
@@ -73,6 +74,135 @@ function TaskEventsSection() {
           </div>
         `
       })}
+    </div>
+  `
+}
+
+function gateTone(status?: string | null): string {
+  switch (status) {
+    case 'ready': return 'text-ok border-ok/25 bg-ok/10'
+    case 'blocked': return 'text-bad border-bad/25 bg-bad/10'
+    case 'inconclusive': return 'text-warn border-warn/25 bg-warn/10'
+    default: return 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'
+  }
+}
+
+function GateSection({
+  title,
+  gate,
+}: {
+  title: string
+  gate?: TaskGateEvaluation | null
+}) {
+  if (!gate) return null
+
+  return html`
+    <div class="rounded-xl border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+      <div class="flex items-center justify-between gap-3">
+        <div class="text-[12px] font-medium text-text-strong">${title}</div>
+        <span class=${`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${gateTone(gate.status)}`}>${gate.status}</span>
+      </div>
+      ${gate.reasons && gate.reasons.length > 0 ? html`
+        <div class="mt-2 flex flex-col gap-1">
+          ${gate.reasons.slice(0, 4).map(reason => html`
+            <div key=${reason} class="text-[11px] leading-relaxed text-text-muted">${reason}</div>
+          `)}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
+function ContractSection({ task }: { task: Task }) {
+  const contract = task.contract
+  const gate = task.gate
+  if (!contract && !gate) return null
+
+  const completionItems = gate?.completion_contract ?? contract?.completion_contract ?? []
+  const unmetItems = gate?.unmet_completion_contract ?? []
+  const requiredEvidence = contract?.required_evidence ?? []
+
+  return html`
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center gap-2">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">계약 게이트</div>
+        <span class=${`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${contract?.strict ? 'text-accent border-accent/25 bg-accent/10' : 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
+      </div>
+
+      <${GateSection} title="Done Gate" gate=${gate?.done} />
+      <${GateSection} title="Inspect → Implement" gate=${gate?.inspect_to_implement} />
+      <${GateSection} title="Verify → Review" gate=${gate?.verify_to_review} />
+
+      ${completionItems.length > 0 ? html`
+        <div class="rounded-xl border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+          <div class="text-[12px] font-medium text-text-strong">Completion Contract</div>
+          <div class="mt-2 flex flex-col gap-1">
+            ${completionItems.map((item: string) => html`
+              <div key=${item} class=${`text-[11px] ${unmetItems.includes(item) ? 'text-bad' : 'text-text-body'}`}>${item}</div>
+            `)}
+          </div>
+        </div>
+      ` : null}
+
+      ${requiredEvidence.length > 0 ? html`
+        <div class="rounded-xl border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+          <div class="text-[12px] font-medium text-text-strong">Required Evidence</div>
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            ${requiredEvidence.map((item: string) => html`
+              <span key=${item} class="rounded-md border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-[10px] font-mono text-text-body">${item}</span>
+            `)}
+          </div>
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
+function ExecutionLinksSection({ task }: { task: Task }) {
+  const links = task.execution_links
+  const items = [
+    ['session', links?.session_id],
+    ['operation', links?.operation_id],
+    ['autoresearch', links?.autoresearch_loop_id],
+  ].filter(([, value]) => Boolean(value))
+
+  if (items.length === 0) return null
+
+  return html`
+    <div>
+      <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">연결된 실행</div>
+      <div class="flex flex-col gap-2">
+        ${items.map(([label, value]) => html`
+          <div key=${label} class="rounded-xl border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+            <div class="text-[10px] uppercase tracking-[0.12em] text-text-dim">${label}</div>
+            <div class="mt-1 text-[12px] font-mono text-text-body break-all">${value}</div>
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+function HandoffSection({ task }: { task: Task }) {
+  const handoff = task.handoff_context
+  if (!handoff?.summary) return null
+
+  return html`
+    <div>
+      <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">최근 Handoff</div>
+      <div class="rounded-xl border border-warn/20 bg-warn/8 px-4 py-3">
+        <div class="text-[13px] leading-relaxed text-text-body whitespace-pre-wrap">${handoff.summary}</div>
+        ${handoff.reason ? html`<div class="mt-2 text-[11px] text-text-muted">reason: ${handoff.reason}</div>` : null}
+        ${handoff.next_step ? html`<div class="mt-1 text-[11px] text-text-muted">next: ${handoff.next_step}</div>` : null}
+        ${handoff.failure_mode ? html`<div class="mt-1 text-[11px] text-text-muted">failure: ${handoff.failure_mode}</div>` : null}
+        ${handoff.evidence_refs && handoff.evidence_refs.length > 0 ? html`
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            ${handoff.evidence_refs.map((item: string) => html`
+              <span key=${item} class="rounded-md border border-warn/20 bg-[var(--white-5)] px-2 py-0.5 text-[10px] font-mono text-text-body">${item}</span>
+            `)}
+          </div>
+        ` : null}
+      </div>
     </div>
   `
 }
@@ -111,6 +241,7 @@ export function TaskDetailOverlay() {
   const p = task.priority ?? 4
   const keeper = findKeeper(task.assignee)
   const goalIds = assigneeGoalIds(task)
+  const assigneeKind = task.assignee_kind ?? (keeper ? 'keeper' : null)
 
   return html`
     <${DialogOverlay}
@@ -127,7 +258,7 @@ export function TaskDetailOverlay() {
           <div class="mt-1.5 flex flex-wrap items-center gap-2">
             <${StatusBadge} status=${task.status ?? 'todo'} />
             <span class="rounded-md border border-current/20 bg-[var(--white-5)] px-2 py-0.5 text-[11px] font-semibold text-text-body">${priorityLabel(p)}</span>
-            ${task.assignee ? html`<span class="text-[11px] text-accent">@${task.assignee}${keeper ? ' (keeper)' : ''}</span>` : null}
+            ${task.assignee ? html`<span class="text-[11px] text-accent">@${task.assignee}${assigneeKind ? ` (${assigneeKind})` : ''}</span>` : null}
           </div>
         </div>
         <button
@@ -167,6 +298,10 @@ export function TaskDetailOverlay() {
               <div class="text-[13px] leading-relaxed text-text-body whitespace-pre-wrap break-words">${task.description}</div>
             </div>
           ` : null}
+
+          <${ContractSection} task=${task} />
+          <${ExecutionLinksSection} task=${task} />
+          <${HandoffSection} task=${task} />
 
           ${'' /* Goal relation */}
           <${GoalRelationSection} goalIds=${goalIds} />

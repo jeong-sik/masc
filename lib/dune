@@ -333,6 +333,7 @@
    tool_task
    tool_task_schemas
    task_dispatch
+   task_contract_gate
    tool_room
    workflow_guide
    tool_control

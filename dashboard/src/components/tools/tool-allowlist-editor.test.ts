@@ -78,12 +78,15 @@ describe('ResolvedPreview', () => {
     expect(screen.getByText('board-6')).toBeInTheDocument()
     expect(screen.queryByText('board-7')).not.toBeInTheDocument()
     expect(screen.queryByText('extra (1)')).not.toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: `resolved allowlist 전체 ${tools.length}개 보기` })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByText(`전체 ${tools.length}개 보기`)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByText(`전체 ${tools.length}개 보기`))
+    fireEvent.click(toggle)
 
     expect(screen.getByText('board-7')).toBeInTheDocument()
     expect(screen.getByText('extra (1)')).toBeInTheDocument()
     expect(screen.getByText('접기')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'resolved allowlist 접기' })).toHaveAttribute('aria-expanded', 'true')
   })
 })

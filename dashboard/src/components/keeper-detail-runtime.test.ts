@@ -253,12 +253,15 @@ describe('AllowlistPreview', () => {
     expect(screen.getByText('tool-1')).toBeInTheDocument()
     expect(screen.getByText('tool-12')).toBeInTheDocument()
     expect(screen.queryByText('tool-13')).not.toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: '허용된 도구 나머지 3개 보기' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByText('나머지 3개 보기')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('나머지 3개 보기'))
+    fireEvent.click(toggle)
 
     expect(screen.getByText('tool-13')).toBeInTheDocument()
     expect(screen.getByText('tool-15')).toBeInTheDocument()
     expect(screen.getByText('접기')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '허용된 도구 접기' })).toHaveAttribute('aria-expanded', 'true')
   })
 })

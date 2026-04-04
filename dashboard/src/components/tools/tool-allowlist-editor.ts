@@ -151,11 +151,12 @@ export function buildResolvedAllowlistGroups(
 
 export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Map<string, string> }) {
   const [expanded, setExpanded] = useState(false)
-  const toolsKey = tools.join('\u0000')
+  const firstTool = tools[0] ?? null
+  const lastTool = tools.length > 0 ? tools[tools.length - 1] : null
 
   useEffect(() => {
     setExpanded(false)
-  }, [toolsKey])
+  }, [tools.length, firstTool, lastTool])
 
   if (tools.length === 0) {
     return html`
@@ -201,6 +202,8 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
         ? html`
             <button type="button"
               class="self-start text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+              aria-expanded=${expanded}
+              aria-label=${expanded ? 'resolved allowlist 접기' : `resolved allowlist 전체 ${tools.length}개 보기`}
               onClick=${() => setExpanded(value => !value)}
             >
               ${expanded ? '접기' : `전체 ${tools.length}개 보기`}

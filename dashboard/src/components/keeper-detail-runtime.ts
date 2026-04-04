@@ -130,11 +130,12 @@ export function AllowlistPreview({
   previewLimit?: number
 }) {
   const [expanded, setExpanded] = useState(false)
-  const toolsKey = tools.join('\u0000')
+  const firstTool = tools[0] ?? null
+  const lastTool = tools.length > 0 ? tools[tools.length - 1] : null
 
   useEffect(() => {
     setExpanded(false)
-  }, [toolsKey, previewLimit])
+  }, [tools.length, firstTool, lastTool, previewLimit])
 
   if (tools.length === 0) {
     return html`<span class="text-[11px] text-[var(--text-muted)] italic">${emptyLabel}</span>`
@@ -160,6 +161,8 @@ export function AllowlistPreview({
         ? html`
             <button type="button"
               class="self-start text-[10px] text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+              aria-expanded=${expanded}
+              aria-label=${expanded ? '허용된 도구 접기' : `허용된 도구 나머지 ${hiddenCount}개 보기`}
               onClick=${() => setExpanded(value => !value)}
             >
               ${expanded ? '접기' : `나머지 ${hiddenCount}개 보기`}

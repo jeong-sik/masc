@@ -325,6 +325,23 @@ let test_dashboard_component_split_contracts () =
     (file_contains_pattern "lib/room/room_utils_backend_setup.ml"
        "Transaction Pooler companion")
 
+let test_mission_briefing_memory_guard_contracts () =
+  check bool "mission briefing snapshot disables keeper payload" true
+    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+       "~include_keepers:false");
+  check bool "mission briefing snapshot stays off command plane" true
+    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+       "~include_command_plane:false");
+  check bool "mission briefing snapshot stays lightweight" true
+    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+       "~lightweight_summary:true");
+  check bool "mission briefing reuses mission keeper briefs" true
+    (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+       {|mission_json |> member_assoc "keeper_briefs"|});
+  check bool "mission briefing card no longer forces eager operator snapshot" true
+    (file_not_contains_pattern "dashboard/src/components/mission-briefing-card.ts"
+       "refreshOperatorSnapshot({ force: true })")
+
 let test_activity_surface_contracts () =
   check bool "activity tab exposes activity graph label" true
     (file_contains_pattern "dashboard/src/components/activity.ts"
@@ -673,6 +690,8 @@ let () =
              test_room_current_validation_contracts;
            test_case "root redirect contracts" `Quick test_root_redirect_contracts;
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
+           test_case "mission briefing memory guard contracts" `Quick
+             test_mission_briefing_memory_guard_contracts;
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;
            test_case "local review script contracts" `Quick test_local_review_script_contracts;
            test_case "keeper oas cleanup contracts" `Quick test_keeper_oas_cleanup_contracts;

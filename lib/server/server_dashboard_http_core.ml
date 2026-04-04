@@ -456,7 +456,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
             }
           in
           match
-            Operator_control.digest_json ~actor:"dashboard" ~target_type:"room"
+            Operator_control.digest_json ~actor:"dashboard" ~target_type:"namespace"
               ~sessions ?command_plane_summary ?swarm_status ctx
           with
           | Ok json ->
@@ -577,21 +577,24 @@ let operator_digest_http_json ~state ~sw ~clock request =
     | Some ("1" | "true" | "yes") -> Some true
     | _ -> None
   in
-  let default_room_request =
+  let namespace_target_type value =
+    match Option.map (fun raw -> String.lowercase_ascii (String.trim raw)) value with
+    | None -> true
+    | Some "namespace" | Some "room" -> true
+    | Some _ -> false
+  in
+  let default_namespace_request =
     actor = None
     && target_id = None
     && include_workers = None
-    &&
-    match target_type with
-    | None -> true
-    | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "room"
+    && namespace_target_type target_type
   in
-  if default_room_request then
+  if default_namespace_request then
     Ok (cached_surface_json _operator_digest_cache)
   else
     let started_at = Unix.gettimeofday () in
     let effective_target_type =
-      Option.value ~default:"room" target_type
+      Option.value ~default:"namespace" target_type
     in
     match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () ->
       Ok
@@ -611,13 +614,13 @@ let operator_digest_http_json ~state ~sw ~clock request =
                }
              in
              let command_plane_summary, swarm_status =
-               if String.equal effective_target_type "room" then
+               if namespace_target_type (Some effective_target_type) then
                  command_plane_summary_cache_parts ~allow_initializing:false ~state
                else
                  (None, None)
              in
              let sessions =
-               if String.equal effective_target_type "room"
+               if namespace_target_type (Some effective_target_type)
                   && Room.is_initialized config
                then
                  Some (dashboard_active_or_recent_sessions ~clock config)

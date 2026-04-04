@@ -22,7 +22,7 @@ export function TaskCreateForm() {
     return html`
       <div class="flex flex-col gap-3">
         <div class="text-[12px] leading-relaxed text-text-muted">
-          이 방의 백로그에 바로 추가됩니다. 우선순위는 <code class="rounded bg-white/5 px-1 py-0.5 text-[11px] text-text-strong">P1</code>이 가장 높습니다.
+          이 프로젝트의 백로그에 바로 추가됩니다. 우선순위는 <code class="rounded bg-white/5 px-1 py-0.5 text-[11px] text-text-strong">P1</code>이 가장 높습니다.
         </div>
         <${ActionButton}
           variant="primary"

@@ -68,7 +68,7 @@ async function runSocialSweep(): Promise<void> {
     await runOperatorAction({
       actor: currentDashboardActor(),
       action_type: 'social_sweep',
-      target_type: 'room',
+      target_type: 'namespace',
       payload: {},
     })
     invalidateDashboardCache()

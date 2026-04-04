@@ -315,7 +315,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="flex flex-col gap-1.5">
-      <${SignalRow} label="네임스페이스" value=${namespaceName} />
+      <${SignalRow} label="프로젝트 범위" value=${namespaceName} />
       <${SignalRow} label="프로젝트" value=${project} />
       ${clusterVisible ? html`<${SignalRow} label="클러스터" value=${clusterRaw} />` : null}
       <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />

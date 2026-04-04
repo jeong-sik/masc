@@ -414,8 +414,8 @@ export function TransportHealthPanel() {
     : `topology ${data.cluster.topology_source}`
   const namespaceChip =
     data.cluster.cluster && data.cluster.cluster !== 'unknown' && data.cluster.cluster !== 'default'
-      ? `${data.cluster.cluster} / namespace ${data.cluster.room_id}`
-      : `namespace ${data.cluster.room_id}`
+      ? `${data.cluster.cluster} / scope ${data.cluster.room_id}`
+      : `scope ${data.cluster.room_id}`
 
   return html`
     <div class="space-y-4">

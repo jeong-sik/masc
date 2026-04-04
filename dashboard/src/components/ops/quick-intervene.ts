@@ -1,6 +1,6 @@
 // QuickIntervene — unified message input. Pick a target, type, send.
 // Target selection determines action_type automatically:
-//   'room' → broadcast, 'session:{id}' → team_note, 'keeper:{name}' → keeper_message
+//   'namespace' → broadcast, 'session:{id}' → team_note, 'keeper:{name}' → keeper_message
 
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
@@ -16,7 +16,7 @@ import { executeAction, normalizeStatus } from './helpers'
 
 function parseTarget(value: string): {
   action_type: 'broadcast' | 'team_note' | 'keeper_message'
-  target_type: 'room' | 'team_session' | 'keeper'
+  target_type: 'namespace' | 'team_session' | 'keeper'
   target_id?: string
   label: string
 } {
@@ -28,7 +28,7 @@ function parseTarget(value: string): {
     const name = value.slice('keeper:'.length)
     return { action_type: 'keeper_message', target_type: 'keeper', target_id: name, label: name }
   }
-  return { action_type: 'broadcast', target_type: 'room', label: '전체' }
+  return { action_type: 'broadcast', target_type: 'namespace', label: '전체' }
 }
 
 async function submitQuickMessage() {
@@ -80,7 +80,7 @@ export function QuickIntervene() {
           onChange=${(e: Event) => { quickTarget.value = (e.target as HTMLSelectElement).value }}
           disabled=${busy}
         >
-          <option value="room">전체</option>
+          <option value="namespace">전체</option>
           ${runningSessions.map(s => html`
             <option key=${s.session_id} value=${`session:${s.session_id}`}>
               세션 ${s.session_id.slice(0, 8)}

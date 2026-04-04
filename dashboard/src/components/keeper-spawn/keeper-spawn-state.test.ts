@@ -94,10 +94,10 @@ describe('spawnKeeperFromPersona', () => {
     expect(spawnResult.value).toEqual({
       success: false,
       message:
-        'agent-3a9df104 세션은 현재 키퍼 생성 권한이 없습니다. 이 방의 auth가 읽기 전용(default_role=reader)으로 열려 있거나 reader 토큰을 사용 중일 때 생기는 오류입니다. worker/admin Bearer token을 설정하거나 방 기본 권한을 올린 뒤 다시 시도하세요.',
+        'agent-3a9df104 세션은 현재 키퍼 생성 권한이 없습니다. 이 프로젝트의 auth가 읽기 전용(default_role=reader)으로 열려 있거나 reader 토큰을 사용 중일 때 생기는 오류입니다. worker/admin Bearer token을 설정하거나 프로젝트 기본 권한을 올린 뒤 다시 시도하세요.',
     })
     expect(showToast).toHaveBeenCalledWith(
-      '키퍼 생성 실패: agent-3a9df104 세션은 현재 키퍼 생성 권한이 없습니다. 이 방의 auth가 읽기 전용(default_role=reader)으로 열려 있거나 reader 토큰을 사용 중일 때 생기는 오류입니다. worker/admin Bearer token을 설정하거나 방 기본 권한을 올린 뒤 다시 시도하세요.',
+      '키퍼 생성 실패: agent-3a9df104 세션은 현재 키퍼 생성 권한이 없습니다. 이 프로젝트의 auth가 읽기 전용(default_role=reader)으로 열려 있거나 reader 토큰을 사용 중일 때 생기는 오류입니다. worker/admin Bearer token을 설정하거나 프로젝트 기본 권한을 올린 뒤 다시 시도하세요.',
       'error',
     )
   })

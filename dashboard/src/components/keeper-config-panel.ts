@@ -678,14 +678,14 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="프레즌스 간격" value=${c.runtime.presence_keepalive_sec + 's'} />
 
       <${SectionHeader} title="조율" />
-      <${ConfigRow} label="네임스페이스 범위" value=${c.coordination.room_scope || '--'} />
+      <${ConfigRow} label="프로젝트 범위" value=${c.coordination.room_scope || '--'} />
       <${ConfigRow} label="범위 유형" value=${c.coordination.scope_kind || '--'} />
       <div class="mt-1.5">
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>
         <${ModelList} models=${c.coordination.mention_targets} />
       </div>
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 네임스페이스</div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 범위</div>
         <${ModelList} models=${c.coordination.joined_room_ids} />
       </div>
 

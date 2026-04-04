@@ -299,7 +299,7 @@ let status_summary_string (ctx : context) =
   if cluster_name <> state.project then
     Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
   Buffer.add_string buf
-    (Printf.sprintf "📍 Namespace: %s (flattened)\n" current_room);
+    (Printf.sprintf "📍 Scope: %s (flattened)\n" current_room);
   Buffer.add_string buf (Printf.sprintf "📁 Path: %s\n" ctx.config.base_path);
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf

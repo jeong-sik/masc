@@ -72,10 +72,10 @@ let stale_sec_of_iso ~now iso =
 
 let review_action_copy = function
   | "broadcast" -> "전체 공지"
-  | "namespace_pause" -> "네임스페이스 일시정지"
-  | "room_pause" -> "방 일시정지"
-  | "namespace_resume" -> "네임스페이스 재개"
-  | "room_resume" -> "방 재개"
+  | "namespace_pause" -> "프로젝트 일시정지"
+  | "room_pause" -> "프로젝트 일시정지"
+  | "namespace_resume" -> "프로젝트 재개"
+  | "room_resume" -> "프로젝트 재개"
   | "team_note" -> "세션 메모"
   | "team_broadcast" -> "세션 공지"
   | "team_task_inject" -> "세션 작업 주입"

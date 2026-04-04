@@ -197,7 +197,7 @@ function createLiveJudgeWorkflowContext(
     focus_kind: 'live_judgment',
     operation_id: null,
     summary: `${target.name}에게 상황판 요약을 보내 live 판단을 받습니다.`,
-    payload_preview: `namespace ${mission?.summary.namespace ?? mission?.summary.namespace_id ?? 'default'} · attention ${mission?.attention_queue.length ?? 0} · gaps ${metadataGapCount}`,
+    payload_preview: `scope ${mission?.summary.namespace ?? mission?.summary.namespace_id ?? 'default'} · attention ${mission?.attention_queue.length ?? 0} · gaps ${metadataGapCount}`,
     suggested_payload: { message },
     preview: {
       keeper_name: target.name,

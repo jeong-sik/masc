@@ -99,6 +99,7 @@
    dashboard_http_keeper
    dashboard_http_autoresearch
    dashboard_harness_health
+   dashboard_goals
    dashboard_feature_health
    dashboard_http_repo_synthesis
    dashboard_provider_runs
@@ -255,6 +256,7 @@
    goal_guard
    goal_orchestrator
    goal_scheduler
+   convergence
    swarm
    swarm_goal_loop
    worker_run_evidence_summary
@@ -553,6 +555,7 @@
  dashboard_http_keeper
  dashboard_http_autoresearch
  dashboard_harness_health
+ dashboard_goals
  server_routes_http_common
  server_routes_http_pages
  server_routes_http_runtime

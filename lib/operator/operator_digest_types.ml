@@ -76,7 +76,7 @@ type session_digest = {
   risk_digest : Yojson.Safe.t;
 }
 
-let stalled_session_threshold_sec = 300.0
+let stalled_session_threshold_sec = Env_config.InternalTimers.stalled_session_threshold_sec
 let planned_worker_turn_grace_sec = 180.0
 let room_digest_session_limit = 10
 

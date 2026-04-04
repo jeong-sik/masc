@@ -172,7 +172,7 @@ let event_counter = Atomic.make 0
 
 (** Event buffer for resumability - stores (event_id, event_string, timestamp) *)
 let max_buffer_size = 100
-let buffer_ttl_seconds = 300.0
+let buffer_ttl_seconds = Env_config.InternalTimers.sse_buffer_ttl_sec
 let event_buffer : (int * string * float) Queue.t = Queue.create ()
 
 (** Add event to buffer, maintaining max size *)

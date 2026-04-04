@@ -107,6 +107,9 @@ let dashboard_planning_http_json ~(config : Room.config) : Yojson.Safe.t =
           ] );
     ]
 
+let dashboard_goals_tree_http_json ~(config : Room.config) : Yojson.Safe.t =
+  Dashboard_goals.dashboard_goals_tree_json ~config
+
 let operator_action_http_json ~state ~sw ~clock request ~args =
   let ctx : _ Operator_control.context =
     {

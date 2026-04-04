@@ -20,6 +20,7 @@ import type {
   DashboardMissionSessionDetailResponse,
   DashboardProofResponse,
   DashboardPlanningResponse,
+  DashboardGoalsTreeResponse,
   DashboardNamespaceTruthResponse,
   DashboardShellResponse,
   BoardSortMode,
@@ -486,6 +487,10 @@ export function fetchDashboardProof(
 
 export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
   return get('/api/v1/dashboard/planning')
+}
+
+export function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeResponse> {
+  return get('/api/v1/dashboard/goals')
 }
 
 // --- Tool metrics (P4 Phase 4.5) ---

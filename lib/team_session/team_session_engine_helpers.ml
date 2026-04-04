@@ -49,7 +49,7 @@ let room_active_agent_names (config : Room.config) =
   |> Team_session_types.dedup_strings
   |> List.sort String.compare
 
-let session_live_turn_window_sec = 300.0
+let session_live_turn_window_sec = Env_config.InternalTimers.session_live_turn_window_sec
 
 let event_type_of_json json =
   match Yojson.Safe.Util.member "event_type" json with

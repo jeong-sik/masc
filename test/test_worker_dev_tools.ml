@@ -523,6 +523,14 @@ let () =
         match Worker_dev_tools.validate_command_coding "git diff >(/tmp/out)" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block process substitution");
+      Alcotest.test_case "blocks file output redirect" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "echo hi > /tmp/out.txt" with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "should block file output redirect");
+      Alcotest.test_case "blocks file input redirect" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "cat < /etc/passwd" with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "should block file input redirect");
       Alcotest.test_case "allows 2>&1 redirect" `Quick (fun () ->
         match Worker_dev_tools.validate_command_coding "dune test 2>&1" with
         | Ok () -> ()

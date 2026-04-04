@@ -295,7 +295,7 @@ let handle_keeper_bash
                 , `String
                     "This command is destructive (force push, push to main, rm -rf, \
                      etc.) and is blocked for all presets." )
-              ; "cmd", `String cmd
+              ; "cmd", `String cmd_for_log
               ]))
       (* Write gate: only for non-coding presets *)
       else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
@@ -309,7 +309,7 @@ let handle_keeper_bash
                 , `String
                     "This command modifies state (git push/commit, make deploy, etc.). \
                      Use a Coding preset keeper for write access." )
-              ; "cmd", `String cmd
+              ; "cmd", `String cmd_for_log
               ]))
       else (
         if write_enabled && Worker_dev_tools.is_write_operation cmd then

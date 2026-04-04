@@ -97,7 +97,7 @@ let contains_forbidden_shell_chars cmd =
   String.exists (fun ch -> List.mem ch forbidden_shell_chars) cmd
 
 (** Relaxed metacharacter set for Coding/Full preset keepers.
-    Allows [|] (pipes) and [>] [<] (redirects including [2>&1]).
+    Allows [|] (pipes) and fd-to-fd redirects like [2>&1].
     Still blocks [;] [`] [$] and control chars.
     [&] is checked at pattern level: [>&] (redirect) is allowed,
     [&&] (chaining) and standalone [&] (background) are blocked. *)
@@ -145,6 +145,44 @@ let split_pipeline_segments cmd =
     Error "Pipes must separate complete allowed commands."
   else Ok segments
 
+let split_shell_tokens cmd =
+  String.split_on_char ' ' cmd
+  |> List.map String.trim
+  |> List.filter (fun token -> token <> "")
+
+let is_digits_only s start stop =
+  let rec loop i =
+    if i >= stop then true
+    else if Char.code s.[i] >= Char.code '0' && Char.code s.[i] <= Char.code '9'
+    then loop (i + 1)
+    else false
+  in
+  loop start
+
+let is_safe_fd_redirect_token token =
+  let len = String.length token in
+  let check op_char =
+    let rec find i =
+      if i + 1 >= len then None
+      else if token.[i] = op_char && token.[i + 1] = '&' then Some i
+      else find (i + 1)
+    in
+    match find 0 with
+    | None -> false
+    | Some op_idx ->
+      let rhs_start = op_idx + 2 in
+      (op_idx = 0 || is_digits_only token 0 op_idx)
+      && rhs_start < len
+      && is_digits_only token rhs_start len
+  in
+  check '>' || check '<'
+
+let has_unsafe_redirection cmd =
+  split_shell_tokens cmd
+  |> List.exists (fun token ->
+         (contains_substring token ">" || contains_substring token "<")
+         && not (is_safe_fd_redirect_token token))
+
 let extract_command_name cmd =
   let trimmed = String.trim cmd in
   if trimmed = "" then None
@@ -189,6 +227,8 @@ let validate_command_coding cmd =
     Error "Shell injection syntax (;, &&, standalone &, `, $) not allowed."
   else if has_process_substitution trimmed then
     Error "Process substitution (<(...) or >(...)) is not allowed."
+  else if has_unsafe_redirection trimmed then
+    Error "File redirects are not allowed. Only fd redirects like 2>&1 are permitted."
   else
     match split_pipeline_segments trimmed with
     | Error _ as err -> err

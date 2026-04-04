@@ -204,28 +204,27 @@ let get_config agent_name =
     | Some key -> List.assoc_opt key default_configs
     | None -> None
 
-(** Build MCP flags as argument list (no shell escaping needed) *)
+(** Build MCP flags as argument list (no shell escaping needed).
+    Uses spawn_key (not canonical_name) to match Spawn.default_configs keys. *)
 let build_mcp_args agent_name tools =
   if tools = [] then []
   else
-    match Provider_adapter.resolve_direct_canonical_name agent_name |> Option.value ~default:agent_name with
-  | "claude" ->
-    (* Claude: --allowedTools "tool1,tool2,..." *)
-    let tools_str = String.concat "," tools in
-    ["--allowedTools"; tools_str]
-  | "gemini" ->
-    (* Gemini: --allowed-mcp-server-names masc --allowed-tools tool1 tool2 *)
-    ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"] @ tools
-  | "codex" ->
-    (* Codex: Uses config.toml MCP servers automatically, no extra flags needed *)
-    []
-  | "llama" ->
-    []
-  | _ -> []
+    let key = Provider_adapter.resolve_spawn_key agent_name
+              |> Option.value ~default:agent_name in
+    match key with
+    | "claude" ->
+      let tools_str = String.concat "," tools in
+      ["--allowedTools"; tools_str]
+    | "gemini" ->
+      ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"] @ tools
+    | "codex" | "llama" -> []
+    | _ -> []
 
 let build_prompt_args agent_name prompt =
-  match Provider_adapter.resolve_direct_canonical_name agent_name |> Option.value ~default:agent_name with
-  | "gemini-api" -> ["-p"; prompt]
+  let key = Provider_adapter.resolve_spawn_key agent_name
+            |> Option.value ~default:agent_name in
+  match key with
+  | "gemini" -> ["-p"; prompt]
   | _ -> []
 
 (** Parse command string into executable and arguments *)

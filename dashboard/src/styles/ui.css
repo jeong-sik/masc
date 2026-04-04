@@ -160,3 +160,46 @@ button.monitor-row {
 @utility agent-event-badge--task { background: var(--warn-12); color: var(--warn); }
 @utility agent-event-badge--board { background: var(--cyan-12); color: var(--cyan); }
 @utility agent-event-badge--default { background: var(--border-slate-12); color: var(--text-muted); }
+
+/* ── Micro-Interactions (Task 289) ── */
+@utility pressable {
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease-out;
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+    opacity: 0.9;
+  }
+}
+
+@utility hover-lift {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease-out, border-color 0.2s ease-out, background-color 0.2s ease-out;
+  &:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  }
+}
+
+@utility micro-fade {
+  transition: opacity 0.2s ease-in-out, background-color 0.2s ease-in-out, color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+}
+
+/* ── Automatic Global Micro-Interactions (Task 289) ── */
+.cursor-pointer {
+  @apply pressable micro-fade;
+}
+
+.monitor-surface-card, 
+.activity-item, 
+.focus-agent-card, 
+.board-comment,
+.cmd-card,
+.goal-node-card {
+  @apply hover-lift;
+}
+
+/* Explicit button interactions */
+button:not(:disabled),
+.vote-btn,
+.action-btn,
+.tab-item {
+  @apply pressable;
+}

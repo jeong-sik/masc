@@ -386,6 +386,9 @@
    mention_inbox
    agent_reputation
    activity_feed
+   ;; RFC-0001 Gate A: Det/NonDet boundary instrumentation
+   heuristic_metrics
+   agent_stress
    transport
    transport_read_model
    transport_metrics

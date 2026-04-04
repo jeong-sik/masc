@@ -39,19 +39,39 @@ import {
 // Re-export for consumers that import from './governance'
 export { refreshGovernance, loadRuntimeParams, loadParamAudit } from './governance-store'
 
+function governanceCaseTrackingRetired(): boolean {
+  return governanceData.value?.case_tracking_available === false
+}
+
+function governanceRetiredMessage(): string {
+  const note = governanceData.value?.note?.trim()
+  if (note) return note
+  return '거버넌스 케이스 추적은 중단되었고, 이 화면은 live judge 상태와 최근 판단만 표시합니다.'
+}
+
 function GovernanceSummaryStrip() {
   const data = governanceData.value
   const summary = data?.summary
   const oldestAge = summary?.oldest_open_case_age_s
   const lastActivityAge = summary?.last_activity_age_s
+  const caseTrackingRetired = governanceCaseTrackingRetired()
   const isStale = (oldestAge != null && oldestAge > 86400) || (lastActivityAge != null && lastActivityAge > 86400)
   const itemCount = data?.items?.length ?? 0
   const activityCount = data?.activity?.length ?? 0
+  const judgmentCount = data?.judgments?.length ?? 0
+  const retiredValue = '-'
+  const retiredHint = 'retired'
 
   return html`
+    ${caseTrackingRetired ? html`
+      <div class="mb-3.5 flex items-center gap-3 rounded-xl border border-accent/25 bg-accent/10 p-3.5 text-[13px] font-medium text-text-strong shadow-sm" data-testid="governance-retired-banner">
+        <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
+        <div>${governanceRetiredMessage()}</div>
+      </div>
+    ` : null}
     ${isStale ? html`
       <div class="mb-3.5 flex items-center gap-3 rounded-xl border border-warn/30 bg-warn/10 p-3.5 text-[13px] font-medium text-warn shadow-sm">
-        <div class="shrink-0"><${AlertTriangle} size=${18} /></div>
+        <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
         <div>
           모든 열린 케이스가 ${formatAgeSummary(oldestAge)} 이상 경과됨.
           ${lastActivityAge != null ? html` 마지막 활동: ${formatAgeSummary(lastActivityAge)} 전.` : null}
@@ -62,16 +82,18 @@ function GovernanceSummaryStrip() {
     <div class="mb-2.5 flex items-center justify-between px-0.5">
       <div class="flex items-center gap-3">
         <h2 class="text-lg font-bold text-text-strong tracking-wide">거버넌스</h2>
-        <span class="rounded-md border border-white/5 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-muted">진행 중 ${itemCount}건 / 활동 ${activityCount}건</span>
+        <span class="rounded-md border border-white/5 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-muted">
+          ${caseTrackingRetired ? `judge-only / 최근 판단 ${judgmentCount}건` : `진행 중 ${itemCount}건 / 활동 ${activityCount}건`}
+        </span>
       </div>
       ${data?.generated_at ? html`<span class="text-[11px] text-text-dim font-mono">${data.generated_at}</span>` : null}
     </div>
     <div class="mb-5 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
-      <${KpiCard} label="열린 케이스" value=${summary?.cases_open ?? itemCount} />
-      <${KpiCard} label="판정 대기" value=${summary?.pending_ruling ?? 0} />
-      <${KpiCard} label="자동집행 준비" value=${summary?.ready_auto_execute ?? 0} />
-      <${KpiCard} label="관리자 승인 대기" value=${summary?.needs_human_gate ?? 0} />
-      <${KpiCard} label="집행 완료" value=${summary?.executed ?? 0} />
+      <${KpiCard} label="열린 케이스" value=${caseTrackingRetired ? retiredValue : (summary?.cases_open ?? itemCount)} hint=${caseTrackingRetired ? retiredHint : undefined} />
+      <${KpiCard} label="판정 대기" value=${caseTrackingRetired ? retiredValue : (summary?.pending_ruling ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
+      <${KpiCard} label="자동집행 준비" value=${caseTrackingRetired ? retiredValue : (summary?.ready_auto_execute ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
+      <${KpiCard} label="관리자 승인 대기" value=${caseTrackingRetired ? retiredValue : (summary?.needs_human_gate ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
+      <${KpiCard} label="집행 완료" value=${caseTrackingRetired ? retiredValue : (summary?.executed ?? 0)} hint=${caseTrackingRetired ? retiredHint : undefined} />
     </div>
     <${JudgeStatusBar} />
   `
@@ -172,6 +194,13 @@ function governanceEmptyMessage(): string {
   const judgments = data?.judgments ?? []
   const lastActivityAge = data?.summary?.last_activity_age_s
 
+  if (governanceCaseTrackingRetired()) {
+    if (judgments.length > 0) {
+      return '거버넌스 케이스 추적은 중단되었고, 아래 AI Judge 판단만 유지됩니다.'
+    }
+    return governanceRetiredMessage()
+  }
+
   // All items and judgments empty — show guidance
   if (allItems.length === 0 && judgments.length === 0) {
     const ageText = formatAgeSummary(lastActivityAge)
@@ -187,8 +216,9 @@ function governanceEmptyMessage(): string {
 
 function DecisionInbox() {
   const items = filteredItemsByFilter(governanceFilter.value, governanceData.value?.items ?? [])
+  const caseTrackingRetired = governanceCaseTrackingRetired()
   return html`
-    <${Card} title="사건 수신함" class="section mb-5" variant="compact">
+    <${Card} title=${caseTrackingRetired ? '사건 수신함 (retired)' : '사건 수신함'} class="section mb-5" variant="compact">
       <div class="flex flex-col gap-3 governance-inbox">
         ${items.length === 0
           ? html`<${EmptyState} message=${governanceEmptyMessage()} />`
@@ -242,7 +272,7 @@ function JudgmentsSection() {
   const judgments = governanceData.value?.judgments ?? []
   if (judgments.length === 0) return null
   return html`
-    <${Card} title="AI Judge 판단" class="section mb-5" variant="compact">
+    <${Card} title=${governanceCaseTrackingRetired() ? 'AI Judge 판단 (live)' : 'AI Judge 판단'} class="section mb-5" variant="compact">
       <div class="flex flex-col gap-2.5">
         ${judgments.map(j => html`
           <div class="rounded-lg border border-card-border bg-card/34 p-3.5 text-[13px]" data-testid="judgment-item">

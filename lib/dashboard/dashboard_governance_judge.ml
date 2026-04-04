@@ -4,7 +4,9 @@ type runtime_snapshot = {
   judge_online : bool;
   refreshing : bool;
   generated_at : string option;
+  generated_at_unix : float option;
   expires_at : string option;
+  expires_at_unix : float option;
   model_used : string option;
   keeper_name : string;
   last_error : string option;
@@ -166,7 +168,7 @@ let fresh_judgments_json ~base_path ~limit =
     Float.compare (judgment_generated_at b) (judgment_generated_at a))
   |> List.filteri (fun i _ -> i < limit)
 
-let runtime_status base_path =
+let runtime_status_at ~now_ts base_path =
   let st = get_state base_path in
   with_lock st (fun () ->
       {
@@ -174,15 +176,20 @@ let runtime_status base_path =
           st.judge_online
           &&
           (match st.expires_at_unix with
-          | Some expires_at -> Unix.gettimeofday () < expires_at
+          | Some expires_at -> now_ts < expires_at
           | None -> false);
         refreshing = st.refreshing;
         generated_at = st.generated_at;
+        generated_at_unix = st.generated_at_unix;
         expires_at = st.expires_at;
+        expires_at_unix = st.expires_at_unix;
         model_used = st.model_used;
         keeper_name;
         last_error = st.last_error;
       })
+
+let runtime_status base_path =
+  runtime_status_at ~now_ts:(Unix.gettimeofday ()) base_path
 
 let parse_string_list json key =
   match json |> member key with

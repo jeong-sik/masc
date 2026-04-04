@@ -842,9 +842,7 @@ let dashboard_proof_http_json ~state request =
 
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
-  let current_room =
-    Room.read_current_room config |> Option.value ~default:Room.default_namespace_id
-  in
+  let current_room = Room.default_namespace_id in
   let canonical_namespace = Room.default_namespace_id in
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in

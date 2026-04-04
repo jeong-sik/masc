@@ -17,6 +17,8 @@ from typing import Any, cast
 import discord
 from discord import app_commands
 
+from .audit_store import BindingAuditEvent, BindingAuditStore, utc_now_iso
+from .binding_store import BindingStore
 from .config import get_config
 from .formatters import (
     chunk_text,
@@ -71,7 +73,15 @@ class GateBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.gate = GateClient()
         self.cfg = get_config()
-        self.keeper_bindings = self.cfg.keeper_map()
+        self.binding_store = BindingStore(self.cfg.binding_store_path())
+        self.audit_store = BindingAuditStore(self.cfg.binding_audit_path())
+        persisted_bindings = self.binding_store.load()
+        if persisted_bindings is None:
+            self.keeper_bindings = self.cfg.keeper_map()
+            self.binding_source = "env-seed"
+        else:
+            self.keeper_bindings = persisted_bindings
+            self.binding_source = "persisted"
 
     async def setup_hook(self) -> None:
         """Register slash commands on startup."""
@@ -80,6 +90,7 @@ class GateBot(discord.Client):
         self.tree.add_command(keeper_bind)  # pyright: ignore[reportUnknownArgumentType]
         self.tree.add_command(keeper_unbind)  # pyright: ignore[reportUnknownArgumentType]
         self.tree.add_command(keeper_map)  # pyright: ignore[reportUnknownArgumentType]
+        self.tree.add_command(keeper_audit)  # pyright: ignore[reportUnknownArgumentType]
         await self.tree.sync()
         logger.info("Slash commands synced")
 
@@ -91,7 +102,13 @@ class GateBot(discord.Client):
     async def on_ready(self) -> None:
         assert self.user is not None
         logger.info("Bot ready: %s (id=%s)", self.user.name, self.user.id)
-        logger.info("Keeper map: %s", self.keeper_bindings)
+        logger.info(
+            "Keeper map (%s @ %s, audit %s): %s",
+            self.binding_source,
+            self.binding_store.path,
+            self.audit_store.path,
+            self.keeper_bindings,
+        )
 
         healthy = await self.gate.health_check()
         if healthy:
@@ -119,11 +136,39 @@ class GateBot(discord.Client):
                 return inherited, "thread-parent"
         return None, "unmapped"
 
-    def set_channel_binding(self, channel_id: str, keeper_name: str) -> None:
+    def set_channel_binding(self, channel_id: str, keeper_name: str) -> str | None:
+        previous = self.keeper_bindings.get(channel_id)
         self.keeper_bindings[channel_id] = keeper_name
+        return previous
 
     def remove_channel_binding(self, channel_id: str) -> str | None:
         return self.keeper_bindings.pop(channel_id, None)
+
+    def persist_bindings(self) -> None:
+        self.binding_store.save(self.keeper_bindings)
+        self.binding_source = "persisted"
+
+    def append_binding_audit(
+        self,
+        *,
+        action: str,
+        interaction: discord.Interaction,
+        channel_id: str,
+        keeper_name: str,
+        previous_keeper: str | None,
+    ) -> None:
+        self.audit_store.append(
+            BindingAuditEvent(
+                timestamp=utc_now_iso(),
+                action=action,
+                guild_id=str(interaction.guild_id or ""),
+                channel_id=channel_id,
+                keeper_name=keeper_name,
+                actor_id=str(interaction.user.id),
+                actor_name=str(interaction.user),
+                previous_keeper=previous_keeper or "",
+            )
+        )
 
     def _compose_gate_content(self, message: discord.Message) -> str:
         return compose_gate_content(message.content, attachment_lines(message))
@@ -294,6 +339,20 @@ def connector_status_embed(
     return embed
 
 
+def format_audit_event_line(event: BindingAuditEvent) -> str:
+    action = event.action or "unknown"
+    target = event.keeper_name or "-"
+    previous = f" (prev {event.previous_keeper})" if event.previous_keeper else ""
+    actor = event.actor_name or event.actor_id or "unknown"
+    channel = event.channel_id or "-"
+    guild = event.guild_id or "-"
+    timestamp = event.timestamp or "-"
+    return (
+        f"{timestamp} · {action} · channel {channel} · guild {guild} · "
+        f"keeper {target}{previous} · by {actor}"
+    )
+
+
 async def keeper_name_autocomplete(
     interaction: discord.Interaction,
     current: str,
@@ -441,9 +500,33 @@ async def keeper_bind(
             return
 
     channel_id = str(interaction.channel.id)
-    bot.set_channel_binding(channel_id, keeper_name)
+    previous = bot.set_channel_binding(channel_id, keeper_name)
+    try:
+        bot.persist_bindings()
+        bot.append_binding_audit(
+            action="bind",
+            interaction=interaction,
+            channel_id=channel_id,
+            keeper_name=keeper_name,
+            previous_keeper=previous,
+        )
+    except OSError as exc:
+        if previous is None:
+            bot.remove_channel_binding(channel_id)
+        else:
+            bot.set_channel_binding(channel_id, previous)
+        try:
+            bot.persist_bindings()
+        except OSError as rollback_exc:
+            logger.error("Binding rollback failed for %s: %s", channel_id, rollback_exc)
+        embed = format_error_embed(f"failed to persist binding store: {exc}")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
+
     await interaction.followup.send(
-        f"Bound channel `{channel_id}` to keeper `{keeper_name}`.",
+        f"Bound channel `{channel_id}` to keeper `{keeper_name}`.\n"
+        f"Store: `{bot.binding_store.path}`\n"
+        f"Audit: `{bot.audit_store.path}`",
         ephemeral=True,
     )
 
@@ -485,8 +568,29 @@ async def keeper_unbind(interaction: discord.Interaction) -> None:
         )
         return
 
+    try:
+        bot.persist_bindings()
+        bot.append_binding_audit(
+            action="unbind",
+            interaction=interaction,
+            channel_id=channel_id,
+            keeper_name=removed,
+            previous_keeper=removed,
+        )
+    except OSError as exc:
+        bot.set_channel_binding(channel_id, removed)
+        try:
+            bot.persist_bindings()
+        except OSError as rollback_exc:
+            logger.error("Binding rollback failed for %s: %s", channel_id, rollback_exc)
+        embed = format_error_embed(f"failed to persist binding store: {exc}")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
     await interaction.response.send_message(
-        f"Removed binding `{channel_id}` -> `{removed}`.",
+        f"Removed binding `{channel_id}` -> `{removed}`.\n"
+        f"Store: `{bot.binding_store.path}`\n"
+        f"Audit: `{bot.audit_store.path}`",
         ephemeral=True,
     )
 
@@ -508,11 +612,52 @@ async def keeper_map(interaction: discord.Interaction) -> None:
     lines = [
         f"current channel: {interaction.channel_id or 'n/a'}",
         f"resolved keeper: {binding[0] or 'unmapped'} ({binding[1]})",
+        f"binding source: {bot.binding_source}",
+        f"binding store: {bot.binding_store.path}",
+        f"audit log: {bot.audit_store.path}",
         f"runtime bindings: {len(bot.keeper_bindings)}",
     ]
 
     for channel_id, keeper_name in sorted(bot.keeper_bindings.items())[:10]:
         lines.append(f"- {channel_id} -> {keeper_name}")
+
+    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+
+@app_commands.command(
+    name="keeper-audit",
+    description="Show recent Discord binding changes",
+)
+@app_commands.describe(limit="Number of recent audit events to show")
+async def keeper_audit(
+    interaction: discord.Interaction,
+    limit: app_commands.Range[int, 1, 20] = 10,
+) -> None:
+    """Show recent bind/unbind audit entries."""
+    bot = interaction.client
+    assert isinstance(bot, GateBot)
+
+    if not bot.is_admin(interaction):
+        await interaction.response.send_message(
+            "Admin role or Manage Server permission required.",
+            ephemeral=True,
+        )
+        return
+
+    events = bot.audit_store.read_recent(limit=limit)
+    if not events:
+        await interaction.response.send_message(
+            f"No audit entries found in `{bot.audit_store.path}`.",
+            ephemeral=True,
+        )
+        return
+
+    lines = [
+        f"audit log: {bot.audit_store.path}",
+        f"showing last {len(events)} event(s)",
+    ]
+    for event in reversed(events):
+        lines.append(f"- {format_audit_event_line(event)}")
 
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 

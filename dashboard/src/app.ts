@@ -80,7 +80,7 @@ export function App() {
           <div class="min-w-0">
             <div class="flex items-center gap-4">
               <button type="button"
-                class="hidden max-[768px]:flex size-10 items-center justify-center rounded-lg border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.05)] text-[var(--text-body)] cursor-pointer transition-colors hover:bg-[rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+                class="hidden max-[768px]:flex size-10 items-center justify-center rounded-lg border border-[var(--white-10)] bg-[var(--white-5)] text-[var(--text-body)] cursor-pointer transition-colors hover:bg-[rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
                 aria-expanded=${mobileMenuOpen.value}
                 aria-label=${mobileMenuOpen.value ? '탐색 메뉴 닫기' : '탐색 메뉴 열기'}
                 aria-controls="dashboard-side-rail"
@@ -88,7 +88,7 @@ export function App() {
               >
                 ${mobileMenuOpen.value ? html`<${X} size=${20} />` : html`<${Menu} size=${20} />`}
               </button>
-              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[rgba(71,184,255,0.3)] bg-[linear-gradient(135deg,rgba(71,184,255,0.2),rgba(10,28,58,0.8))] text-[15px] font-bold text-[#bfe7ff]">
+              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[rgba(71,184,255,0.3)] bg-[linear-gradient(135deg,rgba(71,184,255,0.2),rgba(10,28,58,0.8))] text-[15px] font-bold text-[var(--text-strong)]">
                 ${currentView?.icon ?? 'M'}
               </div>
               <div class="min-w-0 flex flex-col justify-center">
@@ -98,7 +98,7 @@ export function App() {
                 <h1 class="text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)] leading-none flex items-center gap-1.5">
                   ${currentView?.label ?? 'Multi-Agent Namespace Console'}
                   ${currentSection && currentSection.label !== currentView?.label
-                    ? html`<span class="text-[13px] font-medium text-[rgba(154,217,255,0.5)]">/</span><span class="text-[15px] font-medium text-[rgba(154,217,255,0.8)]">${currentSection.label}</span>`
+                    ? html`<span class="text-[13px] font-medium text-[var(--text-muted)]">/</span><span class="text-[15px] font-medium text-[rgba(154,217,255,0.8)]">${currentSection.label}</span>`
                     : null}
                 </h1>
               </div>

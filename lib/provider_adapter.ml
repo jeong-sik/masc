@@ -85,19 +85,19 @@ let direct_adapters =
       canonical_name = cn_llama;
       runtime_kind = Local;
       auth_mode = No_auth;
-      aliases = [ "llama"; "llama.cpp"; "llamacpp" ];
+      aliases = [ cn_llama; "llama.cpp"; "llamacpp" ];
     };
     {
       canonical_name = cn_claude;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ANTHROPIC_API_KEY";
-      aliases = [ "claude-api"; "claude"; "anthropic" ];
+      aliases = [ cn_claude; "claude"; "anthropic" ];
     };
     {
       canonical_name = cn_codex;
       runtime_kind = Direct_api;
       auth_mode = Api_key "OPENAI_API_KEY";
-      aliases = [ "codex-api"; "openai" ];
+      aliases = [ cn_codex; "openai" ];
     };
     {
       canonical_name = cn_gemini;
@@ -108,19 +108,19 @@ let direct_adapters =
             project_env = google_cloud_project_env;
             location_env = google_cloud_location_env;
           };
-      aliases = [ "gemini-api"; "gemini"; "google" ];
+      aliases = [ cn_gemini; "gemini"; "google" ];
     };
     {
       canonical_name = cn_glm;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ZAI_API_KEY";
-      aliases = [ "glm"; "glm_cloud"; "zai" ];
+      aliases = [ cn_glm; "glm_cloud"; "zai" ];
     };
     {
       canonical_name = cn_openrouter;
       runtime_kind = Direct_api;
       auth_mode = Api_key "OPENROUTER_API_KEY";
-      aliases = [ "openrouter" ];
+      aliases = [ cn_openrouter ];
     };
   ]
 
@@ -501,9 +501,10 @@ let auth_env_var_of_adapter (adapter : adapter) =
 let provider_auth_available label =
   match resolve_direct_adapter label with
   | Some adapter ->
-      (match auth_env_var_of_adapter adapter with
-       | Some env_name -> env_present env_name
-       | None -> true)
+      (match adapter.auth_mode with
+       | No_auth -> true
+       | Api_key env_name -> env_present env_name
+       | Vertex_adc { project_env; _ } -> env_present project_env)
   | None -> false
 
 (** Derive the auth_kind string for a provider by looking up its
@@ -600,9 +601,10 @@ let default_model_label_for_adapter (adapter : adapter) =
     hardcoding vendor env var names. *)
 let auto_label_for_adapter (adapter : adapter) =
   let is_available =
-    match auth_env_var_of_adapter adapter with
-    | Some env_name -> env_present env_name
-    | None -> true  (* No_auth providers always available *)
+    match adapter.auth_mode with
+    | No_auth -> true
+    | Api_key env_name -> env_present env_name
+    | Vertex_adc { project_env; _ } -> env_present project_env
   in
   if not is_available then None
   else

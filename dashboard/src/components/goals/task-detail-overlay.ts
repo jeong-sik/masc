@@ -148,7 +148,7 @@ export function TaskDetailOverlay() {
               type="button"
               class="px-3 py-1.5 rounded-lg text-[12px] font-medium border cursor-pointer transition-colors ${
                 activeTab.value === tab
-                  ? 'border-accent/40 bg-accent/12 text-[#9ad9ff]'
+                  ? 'border-accent/40 bg-accent/12 text-[var(--accent)]'
                   : 'border-transparent text-text-muted hover:bg-[var(--white-8)]'
               }"
               onClick=${() => tab === 'activity' ? switchToActivityTab(task) : (activeTab.value = 'overview')}

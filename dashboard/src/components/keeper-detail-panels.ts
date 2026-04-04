@@ -137,7 +137,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
               const pct = Math.round((count / totalCalls) * 100)
               return html`
                 <div class="flex items-center gap-2 text-xs">
-                  <span class="shrink-0 w-[140px] truncate font-mono text-[11px] text-[#9ad9ff]" title=${model}>${model}</span>
+                  <span class="shrink-0 w-[140px] truncate font-mono text-[11px] text-[var(--accent)]" title=${model}>${model}</span>
                   <div class="flex-1 h-1.5 bg-[var(--white-6)] rounded-full overflow-hidden">
                     <div class="h-full rounded-full bg-[var(--accent)]" style="width:${pct}%"></div>
                   </div>
@@ -307,7 +307,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
         <div class="flex items-center justify-between mb-1.5">
           <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">지연 시간</span>
-          <span class="text-xs font-mono tabular-nums text-[#9ad9ff]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
+          <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
         </div>
         <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
           ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="#9ad9ff" stroke-width="1.5"/>` : null}
@@ -446,7 +446,7 @@ export function RelationshipList({ rels }: { rels: Record<string, string> }) {
     <div class="max-h-[220px] overflow-y-auto flex flex-col gap-1.5">
       ${entries.map(([name, relation]) => html`
         <div class="flex items-center gap-2 py-2 px-3 bg-[var(--white-3)] rounded-lg">
-          <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[11px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${name}</span>
+          <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[11px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${name}</span>
           <span class="text-[11px] text-[var(--text-muted)] font-mono">${relation}</span>
         </div>
       `)}
@@ -461,7 +461,7 @@ export function TraitsList({ traits, label }: { traits: string[]; label: string 
     <div class="mb-3">
       <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold mb-2">${label}</div>
       <div class="flex flex-wrap gap-1.5">
-        ${traits.map(t => html`<span class="inline-flex items-center py-0.5 px-2.5 rounded-full text-[11px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${t}</span>`)}
+        ${traits.map(t => html`<span class="inline-flex items-center py-0.5 px-2.5 rounded-full text-[11px] font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${t}</span>`)}
       </div>
     </div>
   `

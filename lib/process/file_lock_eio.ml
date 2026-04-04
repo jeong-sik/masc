@@ -53,11 +53,43 @@ let get_lock path =
 let run_blocking_lock_op f = Eio_guard.run_in_systhread f
 
 (** Acquire a non-blocking Unix file lock (F_TLOCK) with retry.
-    Opening/closing the descriptor uses a systhread, but the F_TLOCK attempt
-    itself runs directly because it is non-blocking. On success, returns the
+    This is the blocking variant for callers that already run in a systhread
+    (for example backend and Hebbian file I/O paths). On success, returns the
     open file descriptor with the lock held. On timeout, closes the fd and
     raises [Failure]. *)
-let acquire_flock_retry ?clock ~lock_path ~mode ~perm
+let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
+    ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
+  let fd = Unix.openfile lock_path mode perm in
+  let rec acquire attempts =
+    if attempts <= 0 then
+      raise (Failure (Printf.sprintf "%s: flock timeout on %s after %d attempts"
+                        caller lock_path max_attempts))
+    else
+      let success =
+        try
+          Unix.lockf fd Unix.F_TLOCK 0;
+          true
+        with
+        | Unix.Unix_error (Unix.EAGAIN, _, _)
+        | Unix.Unix_error (Unix.EACCES, _, _) -> false
+      in
+      if success then fd
+      else begin
+        Unix.sleepf sleep_sec;
+        acquire (attempts - 1)
+      end
+  in
+  try acquire max_attempts
+  with exn ->
+    (try Unix.close fd with Unix.Unix_error _ -> ());
+    raise exn
+
+(** Fiber-friendly wrapper around [acquire_flock_retry].
+    Opening/closing the descriptor uses a systhread, but the F_TLOCK attempt
+    itself runs directly because it is non-blocking. Retry sleep yields to the
+    Eio scheduler when a clock is available and otherwise sleeps in a
+    systhread so the calling fiber does not block the domain. *)
+let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
     ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
   let fd = run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm) in
   let rec acquire attempts =
@@ -87,7 +119,7 @@ let acquire_flock_retry ?clock ~lock_path ~mode ~perm
     raise exn
 
 let acquire_flock_fd ?clock lock_path =
-  acquire_flock_retry ?clock ~lock_path
+  acquire_flock_retry_cooperative ?clock ~lock_path
     ~mode:[ Unix.O_CREAT; Unix.O_WRONLY ] ~perm:0o644
     ~caller:"File_lock_eio" ()
 

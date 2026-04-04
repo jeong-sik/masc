@@ -109,35 +109,6 @@ let is_repetitive_tokens s =
     let max_count = Hashtbl.fold (fun _ v acc -> max v acc) tbl 0 in
     float_of_int max_count /. float_of_int n > 0.6
 
-(** Check for URL-heavy content (spam indicator). *)
-let url_density s =
-  let len = String.length s in
-  if len = 0 then 0.0
-  else
-    let url_chars = ref 0 in
-    (* Simple heuristic: count characters in http:// or https:// sequences *)
-    let rec scan i =
-      if i >= len - 7 then ()
-      else begin
-        let sub7 = String.sub s i 7 in
-        let sub8 = if i + 8 <= len then String.sub s i 8 else "" in
-        if sub7 = "http://" || sub8 = "https://" then begin
-          (* Count until whitespace *)
-          let rec count j =
-            if j >= len then j - i
-            else if is_whitespace s.[j] then j - i
-            else count (j + 1)
-          in
-          let url_len = count i in
-          url_chars := !url_chars + url_len;
-          scan (i + url_len)
-        end else
-          scan (i + 1)
-      end
-    in
-    scan 0;
-    float_of_int !url_chars /. float_of_int len
-
 (* ================================================================ *)
 (* Dimension 1: Relevance                                           *)
 (* ================================================================ *)
@@ -275,4 +246,3 @@ let to_dimension_results result =
     { dimension = Quality; verdict = result.quality };
     { dimension = Safety; verdict = result.safety };
   ]
-

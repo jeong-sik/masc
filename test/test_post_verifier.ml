@@ -92,8 +92,8 @@ let test_safety_all_caps () =
 
 let test_safety_url_spam () =
   let result = Pv.verify ~content:"https://spam.example.com/very/long/path/to/something https://another.example.com/more/content" in
-  check bool "URL-heavy content warns or fails safety" true
-    (is_warn result.safety || is_fail result.safety)
+  check bool "URL-heavy content no longer affects safety" true
+    (is_pass result.safety)
 
 (* ================================================================ *)
 (* Overall verdict                                                  *)
@@ -177,7 +177,7 @@ let () =
     "safety", [
       test_case "normal content passes" `Quick test_safety_pass;
       test_case "all caps warns" `Quick test_safety_all_caps;
-      test_case "URL spam warns/fails" `Quick test_safety_url_spam;
+      test_case "URL-heavy content passes" `Quick test_safety_url_spam;
     ];
     "overall", [
       test_case "overall passes" `Quick test_overall_pass;

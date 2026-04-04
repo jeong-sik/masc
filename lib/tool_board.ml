@@ -90,9 +90,9 @@ let set_agent_lookup_none () = agent_lookup_hook := None
 
 
 
-(** Check whether [name] is a registered agent.  Prefers the registry
-    lookup (Room.is_agent_joined) when available; falls back to the
-    name-shape heuristic so standalone / test usage still works. *)
+(** Check whether [name] is a registered agent.  Uses the registry
+    lookup (Room.is_agent_joined) when available via [agent_lookup_hook];
+    returns [false] when no hook is installed. *)
 let is_agent name =
   match !agent_lookup_hook with
   | Some lookup -> lookup name

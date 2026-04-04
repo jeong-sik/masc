@@ -190,7 +190,7 @@ let summarize_old_messages ~(keep_recent : int)
 (** Score a list of messages by importance for context compaction.
     Returns [(index, score)] pairs where score is in [0.0, 1.0].
 
-    The score is a weighted sum of 4 factors:
+    The score is a weighted sum of 3 factors:
 
     - recency (0.50): Quadratic decay from newest (1.0) to oldest (0.0).
       Quadratic rather than linear because recent context is disproportionately

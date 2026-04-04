@@ -179,15 +179,9 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_room_delete",
       with_semantic_flags ~destructive:true
         (hidden_active "Namespace deletion removes persisted state and should be treated as destructive.") );
-    ( "masc_room_destroy",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Namespace destruction removes persisted state and should be treated as destructive.") );
     ( "masc_force_leave",
       with_semantic_flags ~destructive:true
         (hidden_active "Forced membership removal mutates namespace state and should be treated as destructive.") );
-    ( "masc_force_remove_agent",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Forced agent removal mutates namespace state and should be treated as destructive.") );
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
         (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );
@@ -202,8 +196,6 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_execute",
       with_semantic_flags ~destructive:true
         (hidden_active "Direct execution can apply privileged side effects and should be treated as destructive.") );
-    ("masc_neo4j_query", destructive_tool);
-    ("masc_pg_query", destructive_tool);
     ("masc_tool_grant", destructive_tool);
     ("masc_tool_revoke", destructive_tool);
     ( "masc_operation_stop",

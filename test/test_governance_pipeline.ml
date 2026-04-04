@@ -216,9 +216,11 @@ let test_risk_metadata_admin_cleanup_override () =
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_metadata_pg_query_override () =
+  (* masc_pg_query removed — no handler, no catalog metadata.
+     assess_risk for unknown tool defaults to low. *)
   let risk = Gp.assess_risk ~tool_name:"masc_pg_query" ~input:no_args in
-  Alcotest.(check string) "pg_query metadata marks destructive"
-    "critical" (Gp.risk_level_to_string risk)
+  Alcotest.(check string) "pg_query (removed) defaults to low"
+    "low" (Gp.risk_level_to_string risk)
 
 let test_risk_payload_empty_overwrite () =
   let risk =

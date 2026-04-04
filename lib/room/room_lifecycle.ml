@@ -7,12 +7,8 @@ open Types
 open Room_utils
 open Room_state
 
-let room_id_of_config (_config : Room_utils_backend_setup.config) = "default"
-
-let compat_room_id config room_id =
-  match validate_room_id room_id with
-  | Ok valid_room_id -> valid_room_id
-  | Error _ -> room_id_of_config config
+(* All operations use default_namespace_id ("default").
+   room_id_of_config and compat_room_id removed — single-namespace. *)
 
 (** Join room - with auto-generated nickname and metadata *)
 let join config ~agent_name ?(agent_type_override=None) ~capabilities
@@ -93,7 +89,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
            "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
            nickname agent_type new_session_id (now_iso ()));
          !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
-           ~room_id:(room_id_of_config config) ~event_kind:"rejoin"
+           ~room_id:default_namespace_id ~event_kind:"rejoin"
            ~details:
              (`Assoc
                [
@@ -151,7 +147,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
     (now_iso ()));
   !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
-    ~room_id:(room_id_of_config config) ~event_kind:"join"
+    ~room_id:default_namespace_id ~event_kind:"join"
     ~details:
       (`Assoc
         [
@@ -169,9 +165,9 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     This compat helper still accepts [room_id], normalizes invalid values to
     the default label for legacy messages/log entries, and shares state with
     [join]. *)
-let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
+let join_in_room config ~room_id:_ ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
-  let legacy_room_id = compat_room_id config room_id in
+  let legacy_room_id = default_namespace_id in
   ensure_room_bootstrap config legacy_room_id;
 
   let agent_type = match agent_type_override with
@@ -333,7 +329,7 @@ let leave config ~agent_name =
       "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
       actual_name (now_iso ()));
     !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:actual_name
-      ~room_id:(room_id_of_config config) ~event_kind:"leave"
+      ~room_id:default_namespace_id ~event_kind:"leave"
       ~details:`Null;
 
     (* Record co-presence relationships via hook (async, non-blocking) *)

@@ -23,4 +23,7 @@ let run_all () =
    | None -> ());
   (* Close all SSE clients *)
   let sse_count = Sse.close_all_clients () in
-  Log.Server.info "Closed %d SSE clients" sse_count
+  Log.Server.info "Closed %d SSE clients" sse_count;
+  (* Close WebSocket sessions *)
+  let ws_count = Server_mcp_transport_ws.close_all () in
+  Log.Server.info "Closed %d WebSocket sessions" ws_count

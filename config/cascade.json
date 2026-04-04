@@ -36,7 +36,7 @@
   "auto_responder_gemini_models": ["llama:auto", "gemini:auto", "glm:auto"],
   "auto_responder_glm_models": ["llama:auto", "glm:auto"],
   "spawn_glm_models": ["llama:auto", "glm:auto"],
-  "keeper_unified_models": ["llama:auto", "glm:auto"],
+  "keeper_unified_models": ["llama:auto"],
   "research_models": ["llama:auto", "glm:auto"],
 
   "_comment_inference": "Per-cascade inference parameters (temperature, max_tokens). Falls back to caller defaults when absent.",

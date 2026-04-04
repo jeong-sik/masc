@@ -150,7 +150,7 @@ let endpoint_url_for_provider provider =
   | "llama" -> Some Env_config_runtime.Llama.server_url
   | "claude-api" -> Some "https://api.anthropic.com"
   | "codex-api" -> Some "https://api.openai.com"
-  | "glm" -> Some "https://api.z.ai"
+  | "glm" -> Some Env_config_runtime.Glm.server_url
   | "gemini-api" -> (
       match Provider_adapter.resolve_gemini_direct_auth () with
       | Provider_adapter.Gemini_vertex_adc { project; location } ->

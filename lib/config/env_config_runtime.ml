@@ -173,6 +173,10 @@ end
     continue to compile without changes. *)
 module Llama = Local_runtime
 
+module Glm = struct
+  let server_url = Env_config_core.get_string ~default:"https://api.z.ai" "ZAI_BASE_URL"
+end
+
 (** {1 Cancellation Token Configuration} *)
 
 module Cancellation = struct

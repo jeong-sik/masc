@@ -486,7 +486,7 @@ let test_core_tools_are_core () =
     (List.mem "masc_broadcast" core);
   check bool "masc_heartbeat is core" true
     (List.mem "masc_heartbeat" core);
-  check bool "masc_tool_help is core" true
+  check bool "masc_tool_help moved to BM25" false
     (List.mem "masc_tool_help" core);
   check bool "extend_turns is core" true
     (List.mem "extend_turns" core);

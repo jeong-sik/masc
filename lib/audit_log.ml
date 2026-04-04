@@ -331,6 +331,9 @@ let log_tool_call config ~agent_id ~tool_name ~success ~error_msg ?cost_estimate
   let outcome = if success then Success else Failure (Option.value error_msg ~default:"unknown") in
   log_action config ~agent_id ~action:(ToolCall tool_name) ?cost_estimate ?token_count ?trace_id ~outcome ()
 
+let remove_assoc_keys keys fields =
+  List.filter (fun (key, _) -> not (List.mem key keys)) fields
+
 let log_system_internal_tool_call config ~agent_id ~tool_name ~success ~error_msg
     ?(details : Yojson.Safe.t = `Null) ?cost_estimate ?token_count ?trace_id () =
   let outcome =
@@ -339,10 +342,11 @@ let log_system_internal_tool_call config ~agent_id ~tool_name ~success ~error_ms
   let details =
     match details with
     | `Assoc fields ->
+        let caller_fields = remove_assoc_keys [ "surface"; "tool_name" ] fields in
         `Assoc
           (("surface", `String "system_internal")
           :: ("tool_name", `String tool_name)
-          :: fields)
+          :: caller_fields)
     | other ->
         `Assoc
           [

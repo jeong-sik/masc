@@ -870,17 +870,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           in
           if count >= threshold then begin
             Log.Keeper.error
-              "%s: %d consecutive turn failures (threshold=%d), marking crashed"
+              "%s: %d consecutive turn failures (threshold=%d), escalating to supervisor crash path"
               meta.name count threshold;
             let reason = Keeper_registry.Turn_consecutive_failures count in
-            Keeper_registry.set_failure_reason ~base_path meta.name (Some reason);
-            Keeper_registry.set_state ~base_path meta.name
-              Keeper_registry.Crashed;
-            Keeper_registry.record_crash ~base_path meta.name
-              (Time_compat.now ())
-              (Keeper_registry.failure_reason_to_string reason);
-            Keeper_registry.record_error ~base_path meta.name
-              (Printf.sprintf "turn_consecutive_failures(%d)" count)
+            raise
+              (Keeper_registry.Keeper_heartbeat_failure
+                 { reason; keeper_name = meta.name })
           end;
           Error e
       | Ok result ->

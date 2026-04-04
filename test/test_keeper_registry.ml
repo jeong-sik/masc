@@ -258,6 +258,14 @@ let test_fiber_health_crashed () =
   | Keeper_types.Fiber_zombie -> ()
   | _ -> fail "expected Fiber_zombie for crashed"
 
+let test_fiber_health_crashed_state_without_done_signal () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "fh3-state" (make_meta "fh3-state") in
+  R.set_state ~base_path:bp "fh3-state" R.Crashed;
+  match R.fiber_health_of ~base_path:bp "fh3-state" with
+  | Keeper_types.Fiber_zombie -> ()
+  | _ -> fail "expected Fiber_zombie for explicit crashed state"
+
 let test_fiber_health_dead_state () =
   R.clear ();
   let _entry = R.register ~base_path:bp "fh4" (make_meta "fh4") in
@@ -453,6 +461,7 @@ let () =
           eio_test "fiber_health unknown" test_fiber_health_unknown;
           eio_test "fiber_health stopped" test_fiber_health_stopped;
           eio_test "fiber_health crashed" test_fiber_health_crashed;
+          eio_test "fiber_health explicit crashed state" test_fiber_health_crashed_state_without_done_signal;
           eio_test "fiber_health dead state" test_fiber_health_dead_state;
           eio_test "shared refs" test_shared_refs;
           eio_test "spawn slots" test_spawn_slots;

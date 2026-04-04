@@ -501,6 +501,7 @@ let run_keepalive_unified_turn
         meta_after_triage
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
+    | Keeper_registry.Keeper_heartbeat_failure _ as e -> raise e
     | exn ->
       Log.Keeper.error "unified turn exception: %s" (Printexc.to_string exn);
       meta_after_triage)

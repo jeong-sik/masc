@@ -1,14 +1,13 @@
 (** Tool_unified — Unified query interface across catalog, registry, and dispatch.
 
     Combines:
-    - Tool_catalog: tier, visibility, lifecycle, metadata
+    - Tool_catalog: visibility, lifecycle, metadata
     - Tool_registry: call statistics (count, success, failure, duration)
     - Tool_dispatch: registration status, read_only, join_required
 *)
 
 type tool_info = {
   name : string;
-  tier : Tool_catalog.tier;
   visibility : Tool_catalog.visibility;
   lifecycle : Tool_catalog.lifecycle;
   is_registered : bool;
@@ -25,7 +24,6 @@ let tool_info name : tool_info =
   in
   {
     name;
-    tier = Tool_catalog.tool_tier name;
     visibility = meta.visibility;
     lifecycle = meta.lifecycle;
     is_registered = Tool_dispatch.is_registered name;
@@ -48,7 +46,6 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
   in
   `Assoc [
     ("name", `String info.name);
-    ("tier", `String (Tool_catalog.tier_to_string info.tier));
     ("visibility", `String (Tool_catalog.visibility_to_string info.visibility));
     ("lifecycle", `String (Tool_catalog.lifecycle_to_string info.lifecycle));
     ("is_registered", `Bool info.is_registered);
@@ -67,17 +64,14 @@ let summary_report () : Yojson.Safe.t =
     List.filter (fun name -> Tool_catalog.is_visible name) all_names
   in
   let never_called = Tool_registry.get_never_called visible_names in
-  let essential_count = Tool_catalog.tier_tool_count Tool_catalog.Essential in
-  let standard_count = Tool_catalog.tier_tool_count Tool_catalog.Standard in
-  let full_count = List.length all_names in
+  let total_count = List.length all_names in
   let visible_count = List.length visible_names in
-  let hidden_count = full_count - visible_count in
-  let tier_dist =
+  let hidden_count = total_count - visible_count in
+  let public_count = List.length Tool_catalog.public_mcp_tools in
+  let tool_dist =
     `Assoc [
-      ("essential", `Int essential_count);
-      ("standard_only", `Int (standard_count - essential_count));
-      ("full_only", `Int (full_count - standard_count));
-      ("total", `Int full_count);
+      ("total", `Int total_count);
+      ("public", `Int public_count);
       ("visible", `Int visible_count);
       ("hidden", `Int hidden_count);
     ]
@@ -98,11 +92,10 @@ let summary_report () : Yojson.Safe.t =
        `Assoc ([
          ("name", `String name);
          ("call_count", `Int stats.Tool_registry.call_count);
-         ("tier", `String (Tool_catalog.tier_to_string (Tool_catalog.tool_tier name)));
        ] @ latency)
      ) top_20));
     ("never_called_count", `Int (List.length never_called));
-    ("tier_distribution", tier_dist);
+    ("tool_distribution", tool_dist);
     ("dispatch_v2_enabled", `Bool Tool_dispatch.v2_enabled);
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
     ("cascade_metrics", Oas_worker.cascade_metrics_json ());

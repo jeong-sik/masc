@@ -1,9 +1,8 @@
-(** Tool_catalog — Visibility, lifecycle, and tier metadata for MCP tools.
+(** Tool_catalog — Visibility and lifecycle metadata for MCP tools.
 
     Central registry for tool access control:
     - Visibility: Default (public) vs Hidden (internal-only)
-    - Lifecycle: Active, Deprecated, Placeholder
-    - Tier: Essential (~20) < Standard (~50) < Full (all) *)
+    - Lifecycle: Active, Deprecated, Placeholder *)
 
 (** {1 Types} *)
 
@@ -15,8 +14,6 @@ type implementation_status =
   | Adapter
   | Simulation
   | Placeholder
-
-type tier = Essential | Standard | Full
 
 type metadata = {
   visibility : visibility;
@@ -73,17 +70,6 @@ val allow_direct_call : string -> bool
 val visibility_to_string : visibility -> string
 val lifecycle_to_string : lifecycle -> string
 val implementation_status_to_string : implementation_status -> string
-val tier_to_string : tier -> string
-val tier_of_string : string -> tier option
-
-(** {1 Tier system} *)
-
-val tool_tier : string -> tier
-val is_in_tier : tier -> string -> bool
-val tier_tool_count : tier -> int
-
-val essential_tools : string list
-val standard_tools : string list
 
 (** {1 JSON metadata} *)
 

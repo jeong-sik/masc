@@ -522,7 +522,6 @@
    tool_autoresearch
    ;; godsplit-catalog: tool_catalog decomposition (private sub-modules)
    tool_catalog_surfaces
-   tool_catalog_tiers
    ;; godsplit-misc: tool_misc decomposition (private sub-modules)
    tool_misc_transport
    tool_misc_admin
@@ -656,7 +655,6 @@
   tool_schema_dsl
   ;; godsplit-catalog: tool_catalog decomposition
   tool_catalog_surfaces
-  tool_catalog_tiers
   ;; godsplit-misc: tool_misc decomposition
   tool_misc_transport
   tool_misc_admin

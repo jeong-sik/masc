@@ -179,7 +179,8 @@ let proactive_outcome_of_result ~(has_text : bool) ~(has_tool_calls : bool) :
 
 let selected_mode_of_result (result : Keeper_agent_run.run_result) : string =
   let text = String.trim result.response_text in
-  if result.tools_used <> [] then "tool_use"
+  if List.exists (fun tool_name -> tool_name <> "masc_heartbeat") result.tools_used
+  then "tool_use"
   else if text = "" then "noop"
   else if String.starts_with ~prefix:"SKIP:" text then "skip_text"
   else "text_response"
@@ -403,7 +404,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ~input_tokens:result.usage.input_tokens
       ~output_tokens:result.usage.output_tokens ()
   in
-  let has_tool_calls = result.tools_used <> [] in
+  let substantive_tool_call_count =
+    result.tools_used
+    |> List.filter (fun tool_name -> tool_name <> "masc_heartbeat")
+    |> List.length
+  in
   let has_substantive_tools = has_substantive_tool_calls result.tools_used in
   let has_text = String.trim result.response_text <> "" in
   let is_proactive_cycle = is_proactive_cycle_of_observation observation in
@@ -467,7 +472,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
            else rt.proactive_rt.last_visible_ts);
         last_outcome =
           (if update_proactive_rt && is_proactive_cycle then
-             proactive_outcome_of_result ~has_text ~has_tool_calls
+             proactive_outcome_of_result ~has_text
+               ~has_tool_calls:has_substantive_tools
            else rt.proactive_rt.last_outcome);
         last_reason =
           (if not update_proactive_rt || not is_proactive_cycle then rt.proactive_rt.last_reason
@@ -488,24 +494,24 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       (* Autonomous action tracking from tool calls *)
       autonomous_action_count =
         rt.autonomous_action_count
-        + (if is_autonomous_turn then List.length result.tools_used else 0);
+        + (if is_autonomous_turn then substantive_tool_call_count else 0);
       autonomous_turn_count =
         rt.autonomous_turn_count + (if is_autonomous_turn then 1 else 0);
       autonomous_text_turn_count =
         rt.autonomous_text_turn_count
-        + (if is_autonomous_turn && has_text && not has_tool_calls then 1 else 0);
+        + (if is_autonomous_turn && has_text && not has_substantive_tools then 1 else 0);
       autonomous_tool_turn_count =
         rt.autonomous_tool_turn_count
-        + (if is_autonomous_turn && has_tool_calls then 1 else 0);
+        + (if is_autonomous_turn && has_substantive_tools then 1 else 0);
       board_reactive_turn_count =
         rt.board_reactive_turn_count + (if is_board_reactive then 1 else 0);
       mention_reactive_turn_count =
         rt.mention_reactive_turn_count + (if is_mention_reactive then 1 else 0);
       noop_turn_count =
         rt.noop_turn_count
-        + (if is_autonomous_turn && not has_text && not has_tool_calls then 1 else 0);
+        + (if is_autonomous_turn && not has_text && not has_substantive_tools then 1 else 0);
       last_autonomous_action_at =
-        (if is_autonomous_turn && has_tool_calls then now_iso ()
+        (if is_autonomous_turn && has_substantive_tools then now_iso ()
          else rt.last_autonomous_action_at);
       last_speech_act = Social.speech_act_to_string social_state.speech_act;
       last_blocker = Option.value ~default:"" social_state.blocker;
@@ -530,7 +536,7 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
   let now_ts = Time_compat.now () in
   let _observation = observation in
   let work_kind =
-    if result.tools_used <> [] then "tool_use"
+    if has_substantive_tool_calls result.tools_used then "tool_use"
     else if String.trim result.response_text <> "" then "text_turn"
     else "noop"
   in
@@ -539,7 +545,7 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
       Some
         (proactive_outcome_of_result
            ~has_text:(String.trim result.response_text <> "")
-           ~has_tool_calls:(result.tools_used <> []))
+           ~has_tool_calls:(has_substantive_tool_calls result.tools_used))
     else None
   in
   let metrics_store = keeper_metrics_store config meta.name in

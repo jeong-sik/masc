@@ -99,17 +99,23 @@ let sanitize_keeper_name (name : string) : string =
        || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.'
     then c else '_') name
 
+let playground_path_of_keeper (name : string) : string =
+  let safe_name = sanitize_keeper_name name in
+  Printf.sprintf ".masc/playground/%s/" safe_name
+
 let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
+  let playground = playground_path_of_keeper meta.name in
   match meta.allowed_paths with
   | ["*"] -> []
-  | _ :: _ as explicit -> explicit
+  | _ :: _ as explicit -> playground :: explicit
   | [] ->
     (match String.lowercase_ascii meta.execution_scope with
      | "workspace" ->
        let safe_name = sanitize_keeper_name meta.name in
-       [ Printf.sprintf ".masc/keepers/%s/" safe_name;
+       [ playground;
+         Printf.sprintf ".masc/keepers/%s/" safe_name;
          ".masc/traces/" ]
-     | _ -> [])
+     | _ -> [ playground ])
 
 let truncate_tool_output ?(max_len = 12000) (s : string) : string =
   if String.length s <= max_len then s

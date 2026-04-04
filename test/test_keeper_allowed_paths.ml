@@ -24,14 +24,15 @@ let make_meta ?(execution_scope = "observe_only") ?(allowed_paths = [])
 let test_observe_only_empty_paths () =
   let meta = make_meta ~execution_scope:"observe_only" ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "observe_only + [] = []" [] effective
+  check (list string) "observe_only + [] = [playground]"
+    [".masc/playground/t/"] effective
 
 let test_observe_only_explicit_paths () =
   let meta = make_meta ~execution_scope:"observe_only"
       ~allowed_paths:["src/"; "lib/"] ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "observe_only + explicit = explicit"
-    ["src/"; "lib/"] effective
+  check (list string) "observe_only + explicit = playground + explicit"
+    [".masc/playground/t/"; "src/"; "lib/"] effective
 
 (* ── workspace scope ── *)
 
@@ -39,15 +40,15 @@ let test_workspace_empty_paths_computed_default () =
   let meta = make_meta ~execution_scope:"workspace"
       ~name:"sangsu" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "workspace + [] = computed default"
-    [".masc/keepers/sangsu/"; ".masc/traces/"] effective
+  check (list string) "workspace + [] = playground + computed default"
+    [".masc/playground/sangsu/"; ".masc/keepers/sangsu/"; ".masc/traces/"] effective
 
 let test_workspace_explicit_paths () =
   let meta = make_meta ~execution_scope:"workspace"
       ~allowed_paths:["src/"; "docs/"] ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "workspace + explicit = explicit"
-    ["src/"; "docs/"] effective
+  check (list string) "workspace + explicit = playground + explicit"
+    [".masc/playground/t/"; "src/"; "docs/"] effective
 
 let test_workspace_star_wildcard () =
   let meta = make_meta ~execution_scope:"workspace"
@@ -60,7 +61,8 @@ let test_workspace_star_wildcard () =
 let test_local_empty_paths () =
   let meta = make_meta ~execution_scope:"local" ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "local + [] = []" [] effective
+  check (list string) "local + [] = [playground]"
+    [".masc/playground/t/"] effective
 
 (* ── wildcard handling ── *)
 
@@ -74,11 +76,12 @@ let test_star_wildcard_any_scope () =
 
 let test_explicit_paths_any_scope () =
   let paths = ["lib/keeper/"; "test/"] in
+  let expected = [".masc/playground/t/"; "lib/keeper/"; "test/"] in
   let scopes = ["observe_only"; "workspace"; "local"] in
   List.iter (fun scope ->
     let meta = make_meta ~execution_scope:scope ~allowed_paths:paths ~name:"t" () in
     let effective = KAP.effective_allowed_paths ~meta in
-    check (list string) (scope ^ " + explicit = explicit") paths effective
+    check (list string) (scope ^ " + explicit = playground + explicit") expected effective
   ) scopes
 
 (* ── keeper name in computed default ── *)
@@ -88,7 +91,24 @@ let test_computed_default_uses_keeper_name () =
       ~name:"cdal-formalist" () in
   let effective = KAP.effective_allowed_paths ~meta in
   check (list string) "name embedded in path"
-    [".masc/keepers/cdal-formalist/"; ".masc/traces/"] effective
+    [".masc/playground/cdal-formalist/";
+     ".masc/keepers/cdal-formalist/"; ".masc/traces/"] effective
+
+(* ── playground path ── *)
+
+let test_playground_path_sanitizes_name () =
+  let path = KAP.playground_path_of_keeper "my keeper/../../etc" in
+  check string "special chars sanitized"
+    ".masc/playground/my_keeper_.._.._.._etc/" path
+
+let test_playground_always_present () =
+  let scopes = ["observe_only"; "workspace"; "local"] in
+  List.iter (fun scope ->
+    let meta = make_meta ~execution_scope:scope ~name:"abc" () in
+    let effective = KAP.effective_allowed_paths ~meta in
+    check bool (scope ^ " has playground")
+      true (List.mem ".masc/playground/abc/" effective)
+  ) scopes
 
 (* ── Runner ── *)
 
@@ -97,17 +117,17 @@ let () =
     [
       ( "effective_allowed_paths",
         [
-          test_case "observe_only + [] = []" `Quick
+          test_case "observe_only + [] = [playground]" `Quick
             test_observe_only_empty_paths;
-          test_case "observe_only + explicit = explicit" `Quick
+          test_case "observe_only + explicit = playground + explicit" `Quick
             test_observe_only_explicit_paths;
-          test_case "workspace + [] = computed default" `Quick
+          test_case "workspace + [] = playground + computed default" `Quick
             test_workspace_empty_paths_computed_default;
-          test_case "workspace + explicit = explicit" `Quick
+          test_case "workspace + explicit = playground + explicit" `Quick
             test_workspace_explicit_paths;
           test_case "workspace + [*] = full access" `Quick
             test_workspace_star_wildcard;
-          test_case "local + [] = []" `Quick
+          test_case "local + [] = [playground]" `Quick
             test_local_empty_paths;
           test_case "[*] wildcard any scope" `Quick
             test_star_wildcard_any_scope;
@@ -115,5 +135,12 @@ let () =
             test_explicit_paths_any_scope;
           test_case "keeper name in computed default" `Quick
             test_computed_default_uses_keeper_name;
+        ] );
+      ( "playground",
+        [
+          test_case "path sanitizes keeper name" `Quick
+            test_playground_path_sanitizes_name;
+          test_case "playground always in allowed_paths" `Quick
+            test_playground_always_present;
         ] );
     ]

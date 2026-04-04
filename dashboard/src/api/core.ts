@@ -249,7 +249,7 @@ async function bootstrapWarmPayload(path: string, res: Response): Promise<unknow
   if (res.status < 500) return null
   let rawText = ''
   try {
-    rawText = await res.clone().text()
+    rawText = await res.text()
   } catch {
     return null
   }

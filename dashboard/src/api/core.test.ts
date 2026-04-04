@@ -136,6 +136,72 @@ describe('get bootstrap warm-up mapping', () => {
     expect(data.message).toContain('warming up')
   })
 
+  it('maps execution not-initialized 5xx to empty execution payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"error":"not initialized"}', {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const data = await get<{
+      generated_at?: string
+      execution_queue?: unknown[]
+      session_briefs?: unknown[]
+      agents?: unknown[]
+    }>('/api/v1/dashboard/execution')
+
+    expect(data.generated_at).toBeDefined()
+    expect(data.execution_queue).toEqual([])
+    expect(data.session_briefs).toEqual([])
+    expect(data.agents).toEqual([])
+  })
+
+  it('maps planning not-initialized 2xx to empty planning payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"error":"not initialized"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const data = await get<{
+      generated_at?: string
+      goals?: unknown[]
+      task_backlog?: { todo?: number }
+    }>('/api/v1/dashboard/planning')
+
+    expect(data.generated_at).toBeDefined()
+    expect(data.goals).toEqual([])
+    expect(data.task_backlog?.todo).toBe(0)
+  })
+
+  it('maps mission not-initialized 5xx to empty mission payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"error":"not initialized"}', {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const data = await get<{
+      generated_at?: string
+      summary?: { room_health?: string }
+      incidents?: unknown[]
+      command_focus?: { session_cards?: unknown[] }
+      operator_targets?: { sessions?: unknown[] }
+    }>('/api/v1/dashboard/mission')
+
+    expect(data.generated_at).toBeDefined()
+    expect(data.summary?.room_health).toBe('initializing')
+    expect(data.incidents).toEqual([])
+    expect(data.command_focus?.session_cards).toEqual([])
+    expect(data.operator_targets?.sessions).toEqual([])
+  })
+
   it('passes through valid 2xx responses on bootstrap paths', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"status":"ok","agents":5}', {

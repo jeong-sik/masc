@@ -476,14 +476,18 @@ let test_keeper_msg_auto_team_session_bridge () =
      harness also exports
      CI_TEST_TIMEOUT_SEC, which is more reliable than ALCOTEST_QUICK_TESTS
      under dune test in CI. See: #1936 *)
-  let local_runtime_available =
-    Masc_mcp.Local_runtime_pool.healthy_runtime_count () > 0
-  in
   if Sys.getenv_opt "MASC_RUN_LIVE_KEEPER_TEAM_SESSION_TEST" <> Some "1"
      || Sys.getenv_opt "CI" = Some "true"
      || Sys.getenv_opt "ALCOTEST_QUICK_TESTS" = Some "1"
-     || Sys.getenv_opt "CI_TEST_TIMEOUT_SEC" <> None
-     || not local_runtime_available then
+     || Sys.getenv_opt "CI_TEST_TIMEOUT_SEC" <> None then
+    Alcotest.skip ()
+  else
+  (* Check runtime availability only after env guards pass — the pool lock
+     uses Eio.Mutex which requires an active Eio runtime. *)
+  let local_runtime_available =
+    Masc_mcp.Local_runtime_pool.healthy_runtime_count () > 0
+  in
+  if not local_runtime_available then
     Alcotest.skip ()
   else
   Eio_main.run @@ fun env ->

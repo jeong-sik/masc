@@ -104,6 +104,8 @@ val run_named :
   ?working_context:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
+  ?max_input_tokens:int ->
+  ?compact_ratio:float ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
@@ -127,6 +129,8 @@ val run_model_by_label :
   ?memory:Oas.Memory.t ->
   ?tool_retry_policy:Oas.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
+  ?max_input_tokens:int ->
+  ?compact_ratio:float ->
   ?contract:Oas.Risk_contract.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
@@ -157,6 +161,8 @@ val run_named_with_masc_tools :
   ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
+  ?max_input_tokens:int ->
+  ?compact_ratio:float ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->
@@ -176,6 +182,8 @@ val run_model_with_masc_tools :
   ?memory:Oas.Memory.t ->
   ?tool_retry_policy:Oas.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
+  ?max_input_tokens:int ->
+  ?compact_ratio:float ->
   ?contract:Oas.Risk_contract.t ->
   ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->

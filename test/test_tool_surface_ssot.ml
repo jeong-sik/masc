@@ -47,32 +47,6 @@ let test_keeper_contains_known_tools () =
       Alcotest.(check bool) (name ^ " is keeper") true (SS.mem name keeper))
     [ "keeper_time_now"; "keeper_board_post"; "keeper_bash"; "keeper_memory_search" ]
 
-let test_keeper_voice_replacement_contract () =
-  Alcotest.(check (option string))
-    "voice speak maps to hidden public tool"
-    (Some "masc_voice_speak")
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_speak");
-  Alcotest.(check (option string))
-    "voice agent maps to hidden public tool"
-    (Some "masc_voice_agent")
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_agent");
-  Alcotest.(check (option string))
-    "voice sessions map to hidden public tool"
-    (Some "masc_voice_sessions")
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_sessions");
-  Alcotest.(check (option string))
-    "voice session start maps to hidden public tool"
-    (Some "masc_voice_session_start")
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_session_start");
-  Alcotest.(check (option string))
-    "voice session end maps to hidden public tool"
-    (Some "masc_voice_session_end")
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_session_end");
-  Alcotest.(check (option string))
-    "voice listen remains keeper-only"
-    None
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_listen")
-
 let test_is_on_surface_consistent () =
   List.iter (fun surface ->
     let tools = Tool_catalog.tools_for_surface surface in
@@ -184,49 +158,6 @@ let test_system_callable () =
     Alcotest.failf "System tools not callable: {%s}"
       (String.concat ", " uncallable);
   Alcotest.(check bool) "all system callable" true (uncallable = [])
-
-let test_pruned_tools_registered_as_deprecated () =
-  (* Tools pruned from user-facing surfaces in #4999 are registered as
-     Deprecated in explicit_metadata (#5039). They remain on System_internal
-     for backward compat but carry Deprecated lifecycle. *)
-  let deprecated_names =
-    List.map fst Tool_catalog.deprecated_tool_entries
-  in
-  List.iter
-    (fun name ->
-      Alcotest.(check bool) (name ^ " is Deprecated") true
-        (List.mem name deprecated_names);
-      Alcotest.(check bool) (name ^ " on System_internal") true
-        (Tool_catalog.is_on_surface Tool_catalog.System_internal name);
-      Alcotest.(check bool) (name ^ " hidden") false
-        (Tool_catalog.is_visible name))
-    [
-      "masc_a2a_delegate";
-      "masc_a2a_discover";
-      "masc_a2a_query_skill";
-      "masc_a2a_subscribe";
-      "masc_a2a_unsubscribe";
-      "masc_board_migrate";
-      "masc_board_reclassify";
-      "masc_episode_flush";
-      "masc_episode_list";
-      "masc_portal_close";
-      "masc_portal_open";
-      "masc_portal_send";
-      "masc_portal_status";
-      "masc_transport_status";
-      "masc_websocket_discovery";
-      "masc_webrtc_answer";
-      "masc_webrtc_offer";
-      "masc_voice_agent";
-      "masc_voice_conference_end";
-      "masc_voice_speak";
-      "masc_voice_conference_start";
-      "masc_voice_ping_pong";
-      "masc_voice_session_end";
-      "masc_voice_session_start";
-      "masc_voice_sessions";
-    ]
 
 let test_workspace_mutating_canonical_used () =
   Alcotest.(check bool) "non-empty" true

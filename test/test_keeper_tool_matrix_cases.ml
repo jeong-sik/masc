@@ -64,16 +64,7 @@ let github_guard_fragments =
     "could not resolve host";
   ]
 
-let voice_guard_fragments =
-  Generic.provider_guard_fragments
-  @
-  [
-    "rec process failed";
-    "no active audio session";
-    "transcription";
-    "microphone";
-    "audio";
-  ]
+(* voice_guard_fragments removed — voice tools pruned *)
 
 let init_keeper_bridge () =
   Masc_test_deps.init_keeper_tool_registry ();
@@ -156,11 +147,7 @@ let ensure_keeper_claim fixture =
     (Masc_mcp.Room.claim_next fixture.config
        ~agent_name:(keeper_agent_name fixture))
 
-let ensure_voice_session fixture =
-  let mgr = Masc_mcp.Keeper_voice_local.get_session_manager () in
-  ignore
-    (Masc_mcp.Voice_session_manager.start_session mgr ~agent_id:fixture.meta.name
-       ~voice:"tool-matrix" ())
+(* ensure_voice_session removed — voice tools pruned *)
 
 let prepare_keeper_name fixture name =
   if
@@ -169,11 +156,6 @@ let prepare_keeper_name fixture name =
         "keeper_board_search" ]
   then
     ignore (Generic.ensure_board_post fixture.generic);
-  if
-    List.mem name
-      [ "keeper_library_search"; "keeper_library_read" ]
-  then
-    ignore (Generic.ensure_library_topic fixture.generic);
   if
     List.mem name
       [ "keeper_task_claim"; "keeper_tasks_list"; "keeper_tasks_audit";
@@ -187,7 +169,6 @@ let prepare_keeper_name fixture name =
         "keeper_task_done" ]
   then
     ensure_keeper_claim fixture;
-  if name = "keeper_voice_session_end" then ensure_voice_session fixture;
   if name = "keeper_memory_search" then
     fixture.ctx_ref :=
       Masc_mcp.Keeper_exec_context.append !(fixture.ctx_ref)
@@ -200,10 +181,7 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
   | "keeper_context_status"
   | "keeper_tools_list"
   | "keeper_tasks_audit"
-  | "keeper_task_claim"
-  | "keeper_voice_agent"
-  | "keeper_voice_sessions"
-  | "keeper_voice_session_end" ->
+  | "keeper_task_claim" ->
       `Assoc []
   | "keeper_memory_search" ->
       `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
@@ -246,16 +224,6 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
       `Assoc [ ("cmd", `String "pwd"); ("timeout_sec", `Float 5.0) ]
   | "keeper_github" ->
       `Assoc [ ("cmd", `String "status"); ("timeout_sec", `Float 5.0) ]
-  | "keeper_voice_speak" ->
-      `Assoc [ ("message", `String "tool matrix hello") ]
-  | "keeper_voice_listen" ->
-      `Assoc [ ("timeout_seconds", `Float 1.0) ]
-  | "keeper_voice_session_start" ->
-      `Assoc [ ("session_name", `String "tool-matrix") ]
-  | "keeper_library_search" ->
-      `Assoc [ ("query", `String "tool matrix") ]
-  | "keeper_library_read" ->
-      `Assoc [ ("topic", `String (Generic.ensure_library_topic fixture.generic)) ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
   | "keeper_task_force_release" ->
       `Assoc
@@ -282,34 +250,11 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
 let keeper_expectation_for_name name =
   match name with
   | "keeper_github" -> Expect_success_or_guard github_guard_fragments
-  | "keeper_voice_listen"
-  | "keeper_voice_agent" ->
-      Expect_success_or_guard voice_guard_fragments
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function
-  | "masc_auth_refresh" ->
-      [ "agent_name must match the authenticated agent";
-        "no credential found" ]
-  | "masc_auth_revoke" -> [ "no credential found" ]
-  | "masc_autoresearch_cycle"
-  | "masc_autoresearch_inject"
-  | "masc_autoresearch_status"
-  | "masc_autoresearch_stop" ->
-      [ "no autoresearch loop running" ]
-  | "masc_autoresearch_swarm_start" ->
-      [ "requires local team-session runtime context" ]
   | "masc_board_migrate" -> [ "requires postgresql backend" ]
   | "masc_get_metrics" -> [ "no metrics found" ]
-  | "masc_library_promote" -> [ "no candidate matching" ]
-  | "masc_portal_send" -> [ "no portal open" ]
-  | "masc_repo_synthesis_swarm_start" ->
-      [ "requires team-session launch support" ]
-  | "masc_voice_conference_start"
-  | "masc_voice_conference_end" ->
-      [ "agent_ids must include at least one agent";
-        "no active voice sessions";
-        "no active session" ]
   | "masc_worktree_remove" -> [ "worktree not found" ]
   | _ -> []
 

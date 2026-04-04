@@ -49,10 +49,6 @@ let strict_success_names =
     "masc_add_task";
     "masc_agent_card";
     "masc_agents";
-    "masc_auth_disable";
-    "masc_auth_enable";
-    "masc_auth_list";
-    "masc_auth_status";
     "masc_batch_add_tasks";
     "masc_board_comment";
     "masc_board_get";
@@ -71,8 +67,6 @@ let strict_success_names =
     "masc_keeper_down";
     "masc_keeper_list";
     "masc_leave";
-    "masc_library_add";
-    "masc_library_list";
     "masc_messages";
     "masc_plan_get";
     "masc_plan_init";
@@ -120,12 +114,7 @@ let endpoint_unavailable_guard_fragments =
 let generic_matrix_excluded_names =
   [
     "masc_keeper_msg";
-    "masc_observe_topology";
-    "masc_operator_snapshot";
-    "masc_policy_status";
-    "masc_repo_synthesis_swarm_start";
     "masc_tool_admin_snapshot";
-    "masc_unit_define";
   ]
 
 let string_starts_with ~prefix s =
@@ -549,12 +538,6 @@ let prepare_for_name fixture name =
     ignore (ensure_worktree_created fixture);
   if List.mem name [ "masc_code_edit"; "masc_code_delete"; "masc_code_git"; "masc_code_shell"; "masc_code_read"; "masc_code_symbols" ] then
     ignore (ensure_code_file fixture);
-  if name = "masc_library_add" then begin
-    mkdir_p (Filename.concat fixture.base_path "me/docs/library");
-    mkdir_p (Filename.concat fixture.base_path "me/docs/library/candidates")
-  end;
-  if List.mem name [ "masc_library_list"; "masc_library_read"; "masc_library_promote"; "masc_library_search" ] then
-    ignore (ensure_library_topic fixture);
   if List.mem name [ "masc_handover_get"; "masc_handover_claim" ] then
     ignore (ensure_handover fixture);
   if name = "masc_unlock" then
@@ -664,8 +647,6 @@ let field_value fixture ~tool_name field_name schema =
   | "offer_id" -> `String (ensure_webrtc_offer fixture)
   | "ice_candidates" -> `List [ `String "candidate:tool-matrix" ]
   | "tool_name" -> `String "masc_status"
-  | "target_agent" when tool_name = "masc_relay_now" ->
-      `String "definitely-missing-agent"
   | "subscription_id" -> `String "subscription-001"
   | "events" -> `List [ `String "agent.joined" ]
   | "worker_name" -> `String "tool-matrix-worker"
@@ -674,7 +655,7 @@ let field_value fixture ~tool_name field_name schema =
   | "decision_confidence" -> `Float 0.9
   | "output" -> `String "tool matrix output"
   | "criteria" -> `List []
-  | "topic" -> `String (ensure_library_topic fixture)
+  | "topic" -> `String "tool-matrix"
   | "include_candidates" -> `Bool true
   | "horizon" -> `String "short"
   | "mode" -> (
@@ -755,7 +736,6 @@ let tool_arguments fixture (schema : Types.tool_schema) =
           [ "source_text"; "max_attempts"; "working_dir" ]
       | "masc_keeper_msg" ->
           [ "timeout_sec" ]
-      | "masc_relay_now" -> [ "target_agent" ]
       | _ -> []
     in
     List.sort_uniq String.compare (required @ optional)
@@ -826,17 +806,9 @@ let guard_fragments_for_name name =
     List.exists
       (fun prefix -> string_starts_with ~prefix name)
       [
-        "masc_a2a_";
-        "masc_autoresearch_";
         "masc_handover_";
         "masc_keeper_";
-        "masc_local_runtime_";
-        "masc_relay_";
-        "masc_repo_synthesis_";
-        "masc_runtime_";
         "masc_spawn";
-        "masc_team_session_";
-        "masc_voice_";
       ]
   then
     provider_guard_fragments @ state_guard_fragments

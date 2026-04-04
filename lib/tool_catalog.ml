@@ -203,7 +203,7 @@ let explicit_metadata : (string * metadata) list =
       { default_metadata with destructive = Some false } );
     (* Tools pruned from all surfaces in #4999 — registered as Deprecated
        so the SSOT orphan check passes while handlers remain for backward compat.
-       Removed from System_internal surface; schema kept for in-flight sessions. *)
+       Removed from System surface; schema kept for in-flight sessions. *)
     ("masc_episode_flush", deprecated "Pruned from all surfaces in #4999");
     ("masc_episode_list", deprecated "Pruned from all surfaces in #4999");
     ("masc_portal_open", deprecated "Pruned from all surfaces in #4999");

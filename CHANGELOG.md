@@ -1,6 +1,21 @@
 # Changelog
 
 
+## [2.234.0] - 2026-04-05
+
+### Added
+- **Keeper playground** -- per-keeper playground directory for scratch files (#5174).
+- **Gate A instrumentation** -- wire 4 heuristic decision sites for det/nondet boundary (#5188).
+- **TOML CI validation** -- add TOML syntax check script and remove deprecated keys (#5185).
+
+### Changed
+- **Boundary cleanup** -- deduplicate sampling params, proof_status, estimate_tokens (#5187).
+- **GLM URL SSOT** -- extract hardcoded GLM URL to provider config (#5189).
+- **Room shim removal** -- remove _in_room shim functions and current_room_id (#5192).
+
+### Fixed
+- **Test warning** -- fix unused variable warning for original_message_count (#5190).
+
 ## [2.233.0] - 2026-04-04
 
 ### Removed

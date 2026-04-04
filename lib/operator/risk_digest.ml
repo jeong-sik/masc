@@ -154,11 +154,13 @@ let drift_signal_to_yojson (signal : drift_signal) : Yojson.Safe.t =
 
 let unsafe_edit_signal_to_yojson (signal : unsafe_edit_signal) : Yojson.Safe.t =
   match signal with
-  | Autonomous_execution_scope name ->
+  | Autonomous_execution_scope worker_name ->
       `Assoc
         [
           ("type", `String "autonomous_execution_scope");
-          ("worker_name", `String name);
+          ("worker_name", `String worker_name);
+          (* Legacy alias for older consumers that still key off tool_name. *)
+          ("tool_name", `String worker_name);
         ]
   | Zero_repair_budget ->
       `Assoc [ ("type", `String "zero_repair_budget") ]

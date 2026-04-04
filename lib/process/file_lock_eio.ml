@@ -53,10 +53,10 @@ let get_lock path =
 let run_blocking_lock_op f = Eio_guard.run_in_systhread f
 
 (** Acquire a non-blocking Unix file lock (F_TLOCK) with retry.
-    Must be called from a systhread — the caller is responsible for
-    wrapping in [run_blocking_lock_op] or [Eio_unix.run_in_systhread].
-    On success, returns the open file descriptor with the lock held.
-    On timeout, closes the fd and raises [Failure]. *)
+    Opening/closing the descriptor uses a systhread, but the F_TLOCK attempt
+    itself runs directly because it is non-blocking. On success, returns the
+    open file descriptor with the lock held. On timeout, closes the fd and
+    raises [Failure]. *)
 let acquire_flock_retry ?clock ~lock_path ~mode ~perm
     ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
   let fd = run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm) in
@@ -65,19 +65,19 @@ let acquire_flock_retry ?clock ~lock_path ~mode ~perm
       raise (Failure (Printf.sprintf "%s: flock timeout on %s after %d attempts"
                         caller lock_path max_attempts))
     else
-      let success = run_blocking_lock_op (fun () ->
+      let success =
         try
           Unix.lockf fd Unix.F_TLOCK 0;
           true
         with
         | Unix.Unix_error (Unix.EAGAIN, _, _)
         | Unix.Unix_error (Unix.EACCES, _, _) -> false
-      ) in
+      in
       if success then fd
       else begin
         (match clock with
          | Some c -> Eio.Time.sleep c sleep_sec
-         | None -> Unix.sleepf sleep_sec);
+         | None -> run_blocking_lock_op (fun () -> Unix.sleepf sleep_sec));
         acquire (attempts - 1)
       end
   in
@@ -104,9 +104,9 @@ let with_mutex path f =
   Eio_guard.with_mutex mu f
 
 (** Run [f] while holding both the cooperative Eio.Mutex and an
-    OS-level flock on [path].lock.  The flock is acquired with F_TLOCK
-    (non-blocking) from a system thread so the Eio scheduler stays free.
-    Max 200 attempts (~2s with sleeps). *)
+    OS-level flock on [path].lock. The flock uses non-blocking F_TLOCK
+    retries; sleep/yield stays scheduler-friendly whether or not a clock
+    is provided. Max 200 attempts (~2s with sleeps). *)
 let with_lock ?clock path f =
   let run_with_flock () =
     let lock_path = path ^ ".lock" in

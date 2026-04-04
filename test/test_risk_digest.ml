@@ -194,7 +194,8 @@ let test_unsafe_edit_high_risk_worker () =
 let test_ambiguity_short_goal () =
   let session = make_session ~goal:"fix" () in
   let result = Risk_digest.compute ~session ~worker_cards:[] in
-  Alcotest.(check bool) "has ambiguity" true (Option.is_some result.ambiguity)
+  Alcotest.(check bool) "short goal no longer implies ambiguity" true
+    (Option.is_none result.ambiguity)
 
 let test_ambiguity_no_contract_multi_worker () =
   let pw : Team_session_types.planned_worker =
@@ -241,7 +242,33 @@ let test_to_yojson () =
       ~required_artifacts:[ "report.md" ]
       ~evidence_refs:[] ~repair_budget:0 ()
   in
-  let session = make_session ~delivery_contract:dc () in
+  let planned_worker : Team_session_types.planned_worker =
+    {
+      spawn_agent = "worker-proof";
+      runtime_actor = None;
+      spawn_role = None;
+      spawn_model = None;
+      execution_scope = Some Team_session_types_enums.Autonomous;
+      thinking_enabled = None;
+      thinking_budget = None;
+      max_turns = None;
+      timeout_seconds = None;
+      worker_class = None;
+      parent_actor = None;
+      capsule_mode = None;
+      runtime_pool = None;
+      lane_id = None;
+      controller_level = None;
+      control_domain = None;
+      supervisor_actor = None;
+      task_profile = None;
+      risk_level = None;
+      routing_confidence = None;
+      routing_reason = None;
+      routing_escalated = false;
+    }
+  in
+  let session = make_session ~delivery_contract:dc ~planned_workers:[ planned_worker ] () in
   let cards = [ make_worker_card ~risk_level:(Some "critical") () ] in
   let result = Risk_digest.compute ~session ~worker_cards:cards in
   let json = Risk_digest.to_yojson result in
@@ -251,7 +278,18 @@ let test_to_yojson () =
   let signal_count = json |> member "signal_count" |> to_int in
   Alcotest.(check bool) "signal_count > 0" true (signal_count > 0);
   let unsafe = json |> member "unsafe_edit_risk" |> to_list in
-  Alcotest.(check bool) "unsafe not empty" true (List.length unsafe > 0)
+  Alcotest.(check bool) "unsafe not empty" true (List.length unsafe > 0);
+  let autonomous_signal =
+    List.find
+      (fun item ->
+        item |> member "type" |> to_string
+        |> String.equal "autonomous_execution_scope")
+      unsafe
+  in
+  Alcotest.(check string) "worker_name preserved" "worker-proof"
+    (autonomous_signal |> member "worker_name" |> to_string);
+  Alcotest.(check string) "legacy tool_name alias preserved" "worker-proof"
+    (autonomous_signal |> member "tool_name" |> to_string)
 
 (* --- Test suite --- *)
 

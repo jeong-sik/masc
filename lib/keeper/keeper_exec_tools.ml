@@ -252,6 +252,11 @@ let handle_keeper_bash
       ~(args : Yojson.Safe.t)
   =
   let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
+  let cmd_for_log =
+    cmd
+    |> Worker_dev_tools.sanitize_command_for_log
+    |> Worker_dev_tools.truncate_for_log
+  in
   let timeout_sec =
     Safe_ops.json_float ~default:30.0 "timeout_sec" args |> fun n -> max 1.0 (min 180.0 n)
   in
@@ -270,7 +275,7 @@ let handle_keeper_bash
     in
     match validate cmd with
     | Error reason ->
-      Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd;
+      Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd_for_log;
       Yojson.Safe.to_string
         (`Assoc
             [ "ok", `Bool false
@@ -281,7 +286,7 @@ let handle_keeper_bash
       (* Destructive guard: always active regardless of preset *)
       if Worker_dev_tools.is_destructive_bash_operation cmd
       then (
-        Log.Keeper.warn "keeper_bash DESTRUCTIVE blocked: %s (keeper=%s)" cmd meta.name;
+        Log.Keeper.warn "keeper_bash DESTRUCTIVE blocked: %s (keeper=%s)" cmd_for_log meta.name;
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false
@@ -295,7 +300,7 @@ let handle_keeper_bash
       (* Write gate: only for non-coding presets *)
       else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
       then (
-        Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s)" cmd meta.name;
+        Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s)" cmd_for_log meta.name;
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false
@@ -308,7 +313,7 @@ let handle_keeper_bash
               ]))
       else (
         if write_enabled && Worker_dev_tools.is_write_operation cmd then
-          Log.Keeper.info "WRITE_AUDIT: keeper=%s cmd=%s" meta.name cmd;
+          Log.Keeper.info "WRITE_AUDIT: keeper=%s cmd=%s" meta.name cmd_for_log;
         let root = project_root_of_config config in
         let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) cmd in
         let st, out =

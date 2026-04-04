@@ -8,6 +8,16 @@ open Masc_mcp
 let find_tool name tools =
   List.find (fun (t : Tool.t) -> t.schema.name = name) tools
 
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  if n_len = 0 then true else loop 0
+
 (* --- Tool structure tests --- *)
 
 let test_tool_count () =
@@ -497,10 +507,22 @@ let () =
         match Worker_dev_tools.validate_command_coding "evil_cmd | head" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block unknown first command");
+      Alcotest.test_case "blocks unknown command after pipe" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "git status | rm -rf /" with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "should block unknown command after pipe");
       Alcotest.test_case "blocks ampersand chaining" `Quick (fun () ->
         match Worker_dev_tools.validate_command_coding "git log && rm -rf /" with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "should block && chaining");
+      Alcotest.test_case "blocks double-pipe chaining" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "git status || rm -rf /" with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "should block || chaining");
+      Alcotest.test_case "blocks process substitution" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "git diff >(/tmp/out)" with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "should block process substitution");
       Alcotest.test_case "allows 2>&1 redirect" `Quick (fun () ->
         match Worker_dev_tools.validate_command_coding "dune test 2>&1" with
         | Ok () -> ()
@@ -519,6 +541,15 @@ let () =
       Alcotest.test_case "blocks push to master" `Quick (fun () ->
         Alcotest.(check bool) "push master" true
           (Worker_dev_tools.is_destructive_bash_operation "git push origin master"));
+      Alcotest.test_case "blocks push refspec to main" `Quick (fun () ->
+        Alcotest.(check bool) "push refspec main" true
+          (Worker_dev_tools.is_destructive_bash_operation "git push origin HEAD:main"));
+      Alcotest.test_case "blocks push refs heads main" `Quick (fun () ->
+        Alcotest.(check bool) "push refs/heads/main" true
+          (Worker_dev_tools.is_destructive_bash_operation "git push origin refs/heads/main"));
+      Alcotest.test_case "blocks force with lease" `Quick (fun () ->
+        Alcotest.(check bool) "force with lease" true
+          (Worker_dev_tools.is_destructive_bash_operation "git push --force-with-lease origin feature/fix-1"));
       Alcotest.test_case "allows push to feature branch" `Quick (fun () ->
         Alcotest.(check bool) "push feature" false
           (Worker_dev_tools.is_destructive_bash_operation "git push origin feature/fix-1"));
@@ -531,11 +562,49 @@ let () =
       Alcotest.test_case "blocks rm -rf" `Quick (fun () ->
         Alcotest.(check bool) "rm -rf" true
           (Worker_dev_tools.is_destructive_bash_operation "rm -rf /"));
+      Alcotest.test_case "blocks rm -fr" `Quick (fun () ->
+        Alcotest.(check bool) "rm -fr" true
+          (Worker_dev_tools.is_destructive_bash_operation "rm -fr build"));
       Alcotest.test_case "allows rm single file" `Quick (fun () ->
         Alcotest.(check bool) "rm single" false
           (Worker_dev_tools.is_destructive_bash_operation "rm foo.txt"));
+      Alcotest.test_case "allows rm -f single file" `Quick (fun () ->
+        Alcotest.(check bool) "rm -f single file" false
+          (Worker_dev_tools.is_destructive_bash_operation "rm -f foo.txt"));
+      Alcotest.test_case "allows rm -f report txt" `Quick (fun () ->
+        Alcotest.(check bool) "rm -f report.txt" false
+          (Worker_dev_tools.is_destructive_bash_operation "rm -f report.txt"));
       Alcotest.test_case "allows git commit" `Quick (fun () ->
         Alcotest.(check bool) "git commit" false
           (Worker_dev_tools.is_destructive_bash_operation "git commit -m 'fix'"));
+    ];
+    "sanitize_command_for_log", [
+      Alcotest.test_case "redacts url credentials" `Quick (fun () ->
+        let redacted =
+          Worker_dev_tools.sanitize_command_for_log
+            "git remote set-url origin https://TOKEN@github.com/org/repo.git"
+        in
+        Alcotest.(check bool) "token removed" false
+          (contains_substring redacted "TOKEN@");
+        Alcotest.(check bool) "placeholder added" true
+          (contains_substring redacted "[REDACTED]@"));
+      Alcotest.test_case "redacts inline auth token assignment" `Quick (fun () ->
+        let redacted =
+          Worker_dev_tools.sanitize_command_for_log
+            "npm config set //registry.npmjs.org/:_authToken=secret-token"
+        in
+        Alcotest.(check bool) "secret removed" false
+          (contains_substring redacted "secret-token");
+        Alcotest.(check bool) "marker preserved" true
+          (contains_substring redacted ":_authToken=[REDACTED]"));
+      Alcotest.test_case "redacts sensitive flag values" `Quick (fun () ->
+        let redacted =
+          Worker_dev_tools.sanitize_command_for_log
+            "gh api --token secret-value /user"
+        in
+        Alcotest.(check bool) "secret removed" false
+          (contains_substring redacted "secret-value");
+        Alcotest.(check bool) "placeholder added" true
+          (contains_substring redacted "--token [REDACTED]"));
     ];
   ]

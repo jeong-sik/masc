@@ -63,6 +63,10 @@ val keeper_masc_tool_names : keeper_meta -> string list
 (** masc_* tool schemas available for a keeper (filtered by allowlist/denylist). *)
 val keeper_masc_tool_schemas : keeper_meta -> Types.tool_schema list
 
+(** Compute the keeper's sender identity for portals and broadcasts.
+    Guards against double "keeper-" prefix. See #5104. *)
+val keeper_agent_sender : meta:keeper_meta -> string
+
 val execute_keeper_tool_call :
   config:Room.config ->
   meta:keeper_meta ->

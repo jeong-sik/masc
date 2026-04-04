@@ -143,8 +143,13 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
               in
               let started_here =
                 if materialized then
-                  Keeper_registry.is_running
-                    ~base_path:ctx.config.base_path m.name
+                  let started_now =
+                    Keeper_registry.is_running
+                      ~base_path:ctx.config.base_path m.name
+                  in
+                  if started_now && max_keepers > 0 then
+                    remaining_slots := max 0 (!remaining_slots - 1);
+                  started_now
                 else if already_running then false
                 else if max_keepers > 0 && !remaining_slots <= 0 then false
                 else (

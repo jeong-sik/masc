@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { Markdown } from "../common/markdown"
 import { useEffect } from 'preact/hooks'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
@@ -33,7 +34,7 @@ import {
   hydrateOpsWorkflow,
   hydrateRecommendedAction,
   hydratedWorkflowId,
-  prettyJson,
+  
   primaryActionForReviewItem,
   relativeAge,
   reviewDecisionReason,
@@ -349,7 +350,7 @@ function renderFriction(item: OperatorReviewItem | null) {
               return html`
                 <div class="text-[13px] leading-[1.45] text-[var(--text-body)]">
                   <strong>${typeof record?.severity === 'string' ? record.severity : 'info'}</strong>
-                  <span> ${typeof record?.summary === 'string' ? record.summary : prettyJson(row)}</span>
+                  <span> ${typeof record?.summary === 'string' ? record.summary : (row)}</span>
                 </div>
               `
             })}
@@ -358,7 +359,7 @@ function renderFriction(item: OperatorReviewItem | null) {
       ` : null}
       <details class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
         <summary class="cursor-pointer text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Raw Friction</summary>
-        <pre class="mt-2 text-[11px] leading-[1.45] overflow-auto">${prettyJson(item.friction)}</pre>
+        <div class=\"max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]\"><${Markdown} text=${'```json\n' + JSON.stringify(item.friction, null, 2) + '\n```'} /></div>
       </details>
     </div>
   `

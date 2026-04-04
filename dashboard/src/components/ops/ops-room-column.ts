@@ -1,6 +1,7 @@
 // Ops — Namespace column: broadcast, pause/resume, task inject, recommended actions, pending confirmations, namespace feed
 
 import { html } from 'htm/preact'
+import { Markdown } from "../common/markdown"
 import { signal } from '@preact/signals'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
@@ -25,7 +26,7 @@ import {
   guidanceLayerTone,
   hydrateRecommendedAction,
   pauseReason,
-  prettyJson,
+  
   runtimeJudgeLabel,
   runtimeJudgeTone,
   submitBroadcast,
@@ -191,7 +192,7 @@ export function OpsRoomColumn() {
                   <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
                   <span>owner ${item.actor ?? 'unknown'}</span>
                 </div>
-                ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[11px] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
+                ${item.preview ? html`<div class=\"max-h-[300px] overflow-auto rounded-xl border border-[var(--white-6)] bg-[var(--bg-0)]\"><${Markdown} text=${'```json\n' + JSON.stringify(item.preview, null, 2) + '\n```'} /></div>` : null}
                 <div class="mt-2 text-[12px] leading-[1.45] text-[var(--text-muted)]">
                   ${canManage ? '' : '읽기 전용'}
                 </div>

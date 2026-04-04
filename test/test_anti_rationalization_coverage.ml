@@ -234,8 +234,7 @@ let () = test "parse_verdict_approve_with_trailing" (fun () ->
 let () = test "parse_verdict_reject_with_reason" (fun () ->
   match Anti_rationalization.parse_verdict "REJECT: vague notes" with
   | Ok (Anti_rationalization.Reject reason) ->
-    assert (String.lowercase_ascii reason |> fun s ->
-      let len = String.length s in len >= 5 && String.sub s 0 5 = "vague")
+    assert (String.equal (String.lowercase_ascii reason) "vague notes")
   | Ok _ -> failwith "expected Reject"
   | Error e -> failwith (Printf.sprintf "unexpected error: %s" e))
 
@@ -256,6 +255,16 @@ let () = test "parse_verdict_unrecognized_returns_error" (fun () ->
   match Anti_rationalization.parse_verdict "I think it looks good" with
   | Error _ -> ()
   | Ok _ -> failwith "expected Error for unrecognized format (ADR D3)")
+
+let () = test "parse_verdict_approved_word_returns_error" (fun () ->
+  match Anti_rationalization.parse_verdict "APPROVED" with
+  | Error _ -> ()
+  | Ok _ -> failwith "expected Error for APPROVED without boundary")
+
+let () = test "parse_verdict_rejected_word_returns_error" (fun () ->
+  match Anti_rationalization.parse_verdict "REJECTED" with
+  | Error _ -> ()
+  | Ok _ -> failwith "expected Error for REJECTED without boundary")
 
 let () = test "parse_verdict_empty_returns_error" (fun () ->
   match Anti_rationalization.parse_verdict "" with

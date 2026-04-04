@@ -1007,11 +1007,23 @@ let keeper_action_kind_of_tool_names tool_names =
 
 
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
-  match active_model_of_meta m with
-  | "" -> Oas_model_resolve.models_of_cascade_name m.cascade_name
+  let configured = Oas_model_resolve.models_of_cascade_name m.cascade_name in
+  let configured_ids =
+    try
+      Llm_provider.Cascade_config.parse_model_strings configured
+      |> List.map (fun (c : Llm_provider.Provider_config.t) -> String.trim c.model_id)
+    with _ -> []
+  in
+  match String.trim (active_model_of_meta m) with
+  | "" -> configured
   | model ->
-      dedupe_keep_order
-        (model :: Oas_model_resolve.models_of_cascade_name m.cascade_name)
+      let model_allowed =
+        List.mem model configured
+        || List.mem model configured_ids
+      in
+      if model_allowed
+      then dedupe_keep_order (model :: configured)
+      else configured
 
 let room_cursor_for meta room_id =
   meta.last_seen_seq_by_room

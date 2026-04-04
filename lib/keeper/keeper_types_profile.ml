@@ -116,6 +116,9 @@ let default_voice_enabled_for _name =
     | Error _ -> false
   with
   | Effect.Unhandled _ -> false
+  | Sys_error _ -> false
+  | Unix.Unix_error _ -> false
+  | _ -> false
 
 let default_voice_channel_for name =
   if default_voice_enabled_for name then "voice_text" else "text_only"

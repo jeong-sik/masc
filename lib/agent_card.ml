@@ -349,7 +349,10 @@ let runtime_supported_interfaces ~host ~port =
 (** Generate default MASC agent card (A2A v0.3 compliant).
     [schemas] defaults to [Config.raw_all_tool_schemas] when provided,
     populating skills dynamically from actual MCP tools. *)
-let generate_default ?(port=8935) ?(host="127.0.0.1") ?(schemas=[]) () : agent_card =
+let generate_default
+    ?(port = Env_config_core.masc_http_port_int ())
+    ?(host = Env_config_core.masc_host ())
+    ?(schemas=[]) () : agent_card =
   let timestamp = now_iso8601 () in
   let skills = match schemas with
     | [] -> []  (* Caller should pass schemas for dynamic skills *)
@@ -443,7 +446,10 @@ let _cache_generation : int ref = ref 0
 (** Get cached agent card, generating if needed.
     [schemas] is used only on first generation or after invalidation.
     Returns [(card, json_string)] for direct HTTP response. *)
-let get_cached ?(port=8935) ?(host="127.0.0.1") ~schemas () : agent_card * string =
+let get_cached
+    ?(port = Env_config_core.masc_http_port_int ())
+    ?(host = Env_config_core.masc_host ())
+    ~schemas () : agent_card * string =
   let gen = !_cache_generation in
   match !_cache with
   | Some c when c.generation = gen -> (c.card, c.card_json)

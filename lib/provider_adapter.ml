@@ -259,8 +259,8 @@ let legacy_voice_base_url_opt () =
   | None, None -> None
   | _ ->
       warn_legacy_voice_env_once ();
-      let host = Option.value host_opt ~default:"127.0.0.1" in
-      let port = Option.value port_opt ~default:"8936" in
+      let host = Option.value host_opt ~default:(Env_config.Voice.default_host) in
+      let port = Option.value port_opt ~default:(string_of_int Env_config.Voice.default_port) in
       Some (Printf.sprintf "http://%s:%s" host port)
 
 let http_listener_env_explicit () =

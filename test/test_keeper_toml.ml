@@ -128,6 +128,155 @@ let test_parse_inline_comment () =
      | _ -> fail "expected Toml_string")
   | Error e -> fail e
 
+let test_parse_multiline_basic_string () =
+  let input = "[keeper]\ninstructions = \"\"\"\nline one\nline two\nline three\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "keeper.instructions" doc with
+     | Some (TL.Toml_string s) ->
+       check string "multiline content" "line one\nline two\nline three\n" s
+     | _ -> fail "expected Toml_string for multiline")
+  | Error e -> fail ("multiline parse failed: " ^ e)
+
+let test_parse_multiline_single_line () =
+  let input = {|key = """inline multiline"""|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "inline multiline" "inline multiline" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("inline multiline failed: " ^ e)
+
+let test_parse_multiline_empty () =
+  let input = "key = \"\"\"\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "empty multiline" "" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("empty multiline failed: " ^ e)
+
+let test_parse_multiline_unterminated () =
+  let input = "key = \"\"\"\nunterminated content" in
+  match TL.parse_toml input with
+  | Ok _ -> fail "expected parse error for unterminated multiline"
+  | Error _ -> ()
+
+let test_parse_multiline_with_escapes () =
+  let input = "key = \"\"\"\nfirst\\nsecond\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "multiline with escape" "first\nsecond\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("multiline escape failed: " ^ e)
+
+let test_parse_multiline_with_values_after () =
+  let input = "[keeper]\ninstructions = \"\"\"\nsome text\n\"\"\"\ngoal = \"test\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "keeper.instructions" doc with
+     | Some (TL.Toml_string s) ->
+       check string "multiline" "some text\n" s
+     | _ -> fail "expected instructions");
+    (match List.assoc_opt "keeper.goal" doc with
+     | Some (TL.Toml_string s) ->
+       check string "goal after multiline" "test" s
+     | _ -> fail "expected goal after multiline")
+  | Error e -> fail ("multiline with values after failed: " ^ e)
+
+let test_parse_multiline_preserves_leading_spaces () =
+  let input = "key = \"\"\"  keep-leading-space\nnext line\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "multiline preserves spaces" "  keep-leading-space\nnext line\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("multiline whitespace preservation failed: " ^ e)
+
+let test_parse_multiline_allows_escaped_triple_quotes () =
+  let input = "key = \"\"\"\ncontains \\\"\\\"\\\" quotes\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "escaped triple quotes" "contains \"\"\" quotes\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("escaped triple quotes failed: " ^ e)
+
+let test_parse_multiline_rejects_trailing_garbage () =
+  let inputs =
+    [
+      "key = \"\"\"inline\"\"\" garbage";
+      "key = \"\"\"\nline\n\"\"\" garbage";
+    ]
+  in
+  List.iter
+    (fun input ->
+      match TL.parse_toml input with
+      | Ok _ -> fail "expected parse error for trailing garbage after multiline close"
+      | Error _ -> ())
+    inputs
+
+let test_parse_multiline_normalizes_crlf () =
+  let input = "key = \"\"\"\r\nfirst\r\nsecond\r\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "crlf normalized" "first\nsecond\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("multiline CRLF failed: " ^ e)
+
+(* TOML spec: up to two `"` immediately after closing `"""` are content. *)
+let test_parse_multiline_single_trailing_quote_inline () =
+  (* Inline multiline string with one trailing quote kept as content. *)
+  let input = {|key = """"one quote""""|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "single trailing quote inline" "\"one quote\"" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("single trailing quote inline failed: " ^ e)
+
+let test_parse_multiline_double_trailing_quote_inline () =
+  (* Inline multiline string with two trailing quotes kept as content. *)
+  let input = {|key = """""two quotes"""""|} in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "double trailing quote inline" "\"\"two quotes\"\"" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("double trailing quote inline failed: " ^ e)
+
+let test_parse_multiline_trailing_quote_on_close_line () =
+  (* Multiline string with one trailing quote on the closing line. *)
+  let input = "key = \"\"\"\nsome content\n\"\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "trailing quote multiline" "some content\n\"" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("trailing quote multiline failed: " ^ e)
+
+let test_parse_multiline_line_ending_backslash () =
+  (* Line-ending backslash joins the next non-whitespace content. *)
+  let input = "key = \"\"\"\nfirst \\\n    second\n\"\"\"" in
+  match TL.parse_toml input with
+  | Ok doc ->
+    (match List.assoc_opt "key" doc with
+     | Some (TL.Toml_string s) ->
+       check string "line ending backslash" "first second\n" s
+     | _ -> fail "expected Toml_string")
+  | Error e -> fail ("line ending backslash failed: " ^ e)
+
 let test_parse_error_unterminated_table () =
   let input = "[missing_bracket" in
   match TL.parse_toml input with
@@ -533,6 +682,28 @@ let () =
           test_case "empty array" `Quick test_parse_empty_array;
           test_case "table" `Quick test_parse_table;
           test_case "inline comment" `Quick test_parse_inline_comment;
+          test_case "multiline basic string" `Quick test_parse_multiline_basic_string;
+          test_case "multiline single line" `Quick test_parse_multiline_single_line;
+          test_case "multiline empty" `Quick test_parse_multiline_empty;
+          test_case "multiline unterminated" `Quick test_parse_multiline_unterminated;
+          test_case "multiline with escapes" `Quick test_parse_multiline_with_escapes;
+          test_case "multiline with values after" `Quick test_parse_multiline_with_values_after;
+          test_case "multiline preserves leading spaces" `Quick
+            test_parse_multiline_preserves_leading_spaces;
+          test_case "multiline allows escaped triple quotes" `Quick
+            test_parse_multiline_allows_escaped_triple_quotes;
+          test_case "multiline rejects trailing garbage" `Quick
+            test_parse_multiline_rejects_trailing_garbage;
+          test_case "multiline normalizes CRLF" `Quick
+            test_parse_multiline_normalizes_crlf;
+          test_case "multiline single trailing quote inline" `Quick
+            test_parse_multiline_single_trailing_quote_inline;
+          test_case "multiline double trailing quote inline" `Quick
+            test_parse_multiline_double_trailing_quote_inline;
+          test_case "multiline trailing quote on close line" `Quick
+            test_parse_multiline_trailing_quote_on_close_line;
+          test_case "multiline line-ending backslash" `Quick
+            test_parse_multiline_line_ending_backslash;
           test_case "error: unterminated table" `Quick test_parse_error_unterminated_table;
           test_case "error: no equals" `Quick test_parse_error_no_equals;
         ] );

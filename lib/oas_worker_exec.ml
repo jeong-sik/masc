@@ -14,6 +14,7 @@ type config = {
   name : string;
   provider : Oas.Provider.config;
   model_id : string;
+  priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
   tools : Oas.Tool.t list;
   max_turns : int;
@@ -41,7 +42,7 @@ type config = {
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
-  { name; provider; model_id; system_prompt; tools;
+  { name; provider; model_id; priority = None; system_prompt; tools;
     max_turns = 20;
     max_idle_turns = 3;
     max_tokens = Oas_worker_cascade.default_max_tokens;
@@ -215,6 +216,11 @@ let build
   in
   let builder = match config.enable_thinking with
     | Some enabled -> Oas.Builder.with_enable_thinking enabled builder
+    | None -> builder
+  in
+  let builder =
+    match config.priority with
+    | Some priority -> Oas.Builder.with_priority priority builder
     | None -> builder
   in
   let builder =

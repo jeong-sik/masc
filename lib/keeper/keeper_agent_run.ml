@@ -252,7 +252,7 @@ let run_turn
     ?on_event
     ?(trajectory_acc : Trajectory.accumulator option)
     ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
-    ?_priority
+    ?priority
     ?(is_retry = false)
     ()
   : (run_result, string) result =
@@ -784,10 +784,14 @@ let run_turn
   let on_resume = if yield_on_tool then Some (fun () ->
     Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" meta.name
   ) else None in
+  let priority =
+    Option.value priority ~default:Llm_provider.Request_priority.Proactive
+  in
   match
         Oas_worker.run_named
           ~cascade_name
           ~goal:user_message
+          ~priority
           ~session_id:meta.runtime.trace_id
           ~system_prompt:turn_system_prompt
           ~tools

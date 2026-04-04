@@ -112,6 +112,7 @@ let config_for_label
 let run_named
     ~cascade_name
     ~goal
+    ?priority
     ?session_id
     ?(system_prompt = "")
     ?(tools = [])
@@ -177,6 +178,7 @@ let run_named
     { (Oas_worker_exec.default_config ~name ~provider ~model_id:primary_provider.model_id
       ~system_prompt ~tools)
     with
+      priority;
       max_turns; max_tokens; temperature; max_idle_turns;
       guardrails; hooks; context_reducer; memory; tool_retry_policy;
       description = Some (Printf.sprintf "cascade:%s" cascade_name);
@@ -270,6 +272,7 @@ let run_model_by_label
 let run_named_with_masc_tools
     ~cascade_name
     ~goal
+    ?priority
     ?(system_prompt = "")
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
@@ -298,7 +301,7 @@ let run_named_with_masc_tools
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
-  run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
+  run_named ~cascade_name ~goal ?priority ~system_prompt ~tools:oas_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
     ?tool_retry_policy
     ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref

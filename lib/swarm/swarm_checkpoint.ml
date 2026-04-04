@@ -94,7 +94,7 @@ let task_to_snapshot (task : Types.task) : task_snapshot =
   }
 
 let build_snapshot (config : Room.config) : swarm_snapshot =
-  let room_id = Room.current_room_id config in
+  let room_id = "default" in
   let agents = Room.get_agents_raw config in
   let backlog = Room.read_backlog config in
   let tasks = backlog.tasks in

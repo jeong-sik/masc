@@ -88,6 +88,28 @@ let test_derive_pipeline_stage_treats_inactive_as_offline () =
   check string "inactive keeper does not advertise a live pipeline stage"
     "offline" stage
 
+let test_derive_pipeline_stage_prefers_scheduled_autonomous () =
+  let meta =
+    let base = make_meta () in
+    {
+      base with
+      runtime =
+        {
+          base.runtime with
+          usage =
+            { base.runtime.usage with last_turn_ts = Time_compat.now () -. 120.0 };
+          proactive_rt =
+            { base.runtime.proactive_rt with last_ts = Time_compat.now () };
+        };
+    }
+  in
+  let stage =
+    ES.derive_pipeline_stage ~meta ~surface_status:"active"
+      ~now_ts:(Time_compat.now ())
+  in
+  check string "recent scheduled autonomous cycle wins pipeline stage"
+    "scheduled_autonomous" stage
+
 let () =
   run "keeper_exec_status"
     [
@@ -105,5 +127,7 @@ let () =
             test_keeper_surface_status_maps_dead_to_inactive;
           test_case "inactive pipeline stage becomes offline" `Quick
             test_derive_pipeline_stage_treats_inactive_as_offline;
+          test_case "scheduled autonomous pipeline stage" `Quick
+            test_derive_pipeline_stage_prefers_scheduled_autonomous;
         ] );
     ]

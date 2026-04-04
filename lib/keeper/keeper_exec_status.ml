@@ -462,7 +462,7 @@ let keeper_diagnostic_json
 (** Derive pipeline stage from keeper_meta timestamps.
     Uses recency thresholds to infer what the keeper is doing.
     Stages: "idle" | "thinking" | "tool_use" | "compacting" | "handoff"
-            | "proactive" | "offline"
+            | "scheduled_autonomous" | "offline"
     The 30s recency window matches the typical keeper turn duration. *)
 let derive_pipeline_stage
     ~(meta : keeper_meta)
@@ -485,14 +485,15 @@ let derive_pipeline_stage
       if meta.runtime.last_handoff_ts <= 0.0 then Float.infinity
       else now_ts -. meta.runtime.last_handoff_ts
     in
-    let proactive_ago =
+    let scheduled_autonomous_ago =
       if meta.runtime.proactive_rt.last_ts <= 0.0 then Float.infinity
       else now_ts -. meta.runtime.proactive_rt.last_ts
     in
     (* Pick the most recent activity within the recency window.
-       Priority order when multiple are recent: handoff > compacting > proactive > thinking *)
+       Priority order when multiple are recent:
+       handoff > compacting > scheduled autonomous > thinking *)
     if handoff_ago < recency_threshold then "handoff"
     else if compaction_ago < recency_threshold then "compacting"
-    else if proactive_ago < recency_threshold then "proactive"
+    else if scheduled_autonomous_ago < recency_threshold then "scheduled_autonomous"
     else if turn_ago < recency_threshold then "thinking"
     else "idle"

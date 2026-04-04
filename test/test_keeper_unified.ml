@@ -399,32 +399,50 @@ let test_scheduled_turn_requires_idle_gate () =
 
 let test_effective_cooldown_no_decay_within_base () =
   (* Within the base cooldown period, no decay should apply. *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:900 in
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:900
+  in
   check int "no decay within base" 1800 result
 
 let test_effective_cooldown_at_boundary () =
   (* Exactly at the base cooldown, no decay yet. *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:1800 in
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:1800
+  in
   check int "no decay at boundary" 1800 result
 
 let test_effective_cooldown_first_decay () =
   (* One full extra period: cooldown halved. *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:3600 in
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:3600
+  in
   check int "first decay halves cooldown" 900 result
 
 let test_effective_cooldown_second_decay () =
   (* Two extra periods: cooldown quartered. *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:5400 in
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:5400
+  in
   check int "second decay quarters cooldown" 450 result
 
 let test_effective_cooldown_floor () =
   (* Four+ extra periods: cooldown at floor (300s default). *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:10800 in
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:10800
+  in
   check int "decay floors at min_cooldown" 300 result
 
 let test_effective_cooldown_max_int () =
-  (* max_int (first proactive ever): should hit floor immediately. *)
-  let result = WO.effective_proactive_cooldown ~base_cooldown:1800 ~since_last:max_int in
+  (* max_int (first scheduled autonomous cycle ever): should hit floor immediately. *)
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:max_int
+  in
   check int "max_int hits floor" 300 result
 
 let test_idle_decay_triggers_turn () =

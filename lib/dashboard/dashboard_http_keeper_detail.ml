@@ -80,8 +80,10 @@ let compute_metrics_window
                 let channel = Safe_ops.json_string ~default:"turn" "channel" j in
                 let is_turn = channel = "turn" in
                 let is_heartbeat = channel = "heartbeat" in
-                let is_proactive = channel = "proactive" in
-                let is_interaction = is_turn || is_proactive in
+                let is_scheduled_autonomous =
+                  channel = "scheduled_autonomous" || channel = "proactive"
+                in
+                let is_interaction = is_turn || is_scheduled_autonomous in
                 let compacted = Safe_ops.json_bool ~default:false "compacted" j in
                 let gen = Safe_ops.json_int ~default:generation "generation" j in
                 let trace_id = Safe_ops.json_string ~default:"" "trace_id" j in
@@ -310,10 +312,10 @@ let compute_metrics_window
                 then
                   incr fallback_count;
                 if is_turn then incr turn_points;
-                if is_proactive then incr proactive_points;
-                if is_proactive && proactive_fallback_applied_now then
+                if is_scheduled_autonomous then incr proactive_points;
+                if is_scheduled_autonomous && proactive_fallback_applied_now then
                   incr proactive_fallback_count;
-                if is_proactive then
+                if is_scheduled_autonomous then
                   (match proactive_preview_now with
                    | Some preview ->
                        proactive_previews_rev := preview :: !proactive_previews_rev

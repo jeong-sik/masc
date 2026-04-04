@@ -3,8 +3,6 @@
     Contains the canonical write entrypoint for team sessions.
     Moved from tool_team_session.ml to reduce file size. *)
 
-module Oas = Agent_sdk
-
 (** Spawn specification parsed from MCP tool arguments. *)
 type spawn_spec = {
   spawn_agent : string;

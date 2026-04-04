@@ -223,6 +223,12 @@ let test_dashboard_execution_namespace_status () =
           (status |> member "room" = `Null);
         check bool "legacy room base path removed" true
           (status |> member "room_base_path" = `Null);
+        let batch = Lib.Server_dashboard_http_core.dashboard_batch_json config in
+        let batch_status = batch |> member "status" in
+        check string "batch current_namespace exposed" "default"
+          (batch_status |> member "current_namespace" |> to_string);
+        check string "batch current_room legacy selector exposed" "default"
+          (batch_status |> member "current_room" |> to_string);
       ))
 
 let test_dashboard_shell_namespace_status () =
@@ -245,6 +251,8 @@ let test_dashboard_shell_namespace_status () =
         (status |> member "namespace" |> to_string);
       check string "shell current_namespace exposed" "default"
         (status |> member "current_namespace" |> to_string);
+      check string "shell current_room exposed" "default"
+        (status |> member "current_room" |> to_string);
       check string "shell namespace mode flattened" "flattened"
         (status |> member "namespace_mode" |> to_string);
       check bool "shell legacy room removed" true
@@ -259,6 +267,9 @@ let test_dashboard_shell_namespace_status () =
         (status |> member "workspace_differs" |> to_bool);
       check string "shell diagnostics current_namespace surfaced" "default"
         (json |> member "projection_diagnostics" |> member "current_namespace"
+        |> to_string);
+      check string "shell diagnostics current_room surfaced" "default"
+        (json |> member "projection_diagnostics" |> member "current_room"
         |> to_string);
       check string "shell diagnostics surface" "shell"
         (json |> member "projection_diagnostics" |> member "surface" |> to_string))

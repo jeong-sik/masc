@@ -5,8 +5,6 @@
 
     @since 2.125.0 *)
 
-module Swarm = Agent_sdk_swarm
-
 (** Create swarm callbacks that bridge MASC supervision into OAS lifecycle.
 
     - [on_iteration_start] → checkpoint write

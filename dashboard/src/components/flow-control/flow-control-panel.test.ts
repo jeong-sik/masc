@@ -2,6 +2,8 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+void vi
+
 const fetchPauseStatus = vi.fn().mockResolvedValue(undefined)
 const pauseRoom = vi.fn().mockResolvedValue(undefined)
 const resumeRoom = vi.fn().mockResolvedValue(undefined)

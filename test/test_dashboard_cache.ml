@@ -258,6 +258,7 @@ let () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio_guard.enable ();
+  Time_compat.set_clock clock;
   Dashboard_cache.set_clock clock;
   let open Alcotest in
   run ~and_exit:false "Dashboard_cache"

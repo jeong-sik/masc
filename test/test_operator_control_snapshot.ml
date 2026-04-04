@@ -295,6 +295,78 @@ let test_snapshot_lightweight_summary_caps_completed_sessions_by_recency () =
       Alcotest.(check bool) "oldest completed session capped out" false
         (List.mem oldest_completed_session_id session_ids))
 
+let test_snapshot_waiters_share_inflight_result () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio_guard.enable ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "owner"));
+      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      Operator_control.invalidate_snapshot_cache ();
+      let ctx = operator_ctx env sw config "owner" in
+      ignore (Operator_control.snapshot_json ctx);
+      let cache_key =
+        Eio.Mutex.use_rw ~protect:true Operator_control_snapshot._snapshot_mu
+          (fun () ->
+            match
+              Hashtbl.to_seq_keys Operator_control_snapshot._snapshot_table
+              |> List.of_seq
+            with
+            | key :: _ -> key
+            | [] -> Alcotest.fail "expected primed snapshot cache key")
+      in
+      Operator_control.invalidate_snapshot_cache ();
+      let cond = Eio.Condition.create () in
+      Eio.Mutex.use_rw ~protect:true Operator_control_snapshot._snapshot_mu
+        (fun () ->
+          Hashtbl.replace Operator_control_snapshot._snapshot_table cache_key
+            (Operator_control_snapshot.Computing { cond }));
+      let waiter_a, resolve_waiter_a = Eio.Promise.create () in
+      let waiter_b, resolve_waiter_b = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve resolve_waiter_a (Operator_control.snapshot_json ctx));
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve resolve_waiter_b (Operator_control.snapshot_json ctx));
+      Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+      let shared =
+        `Assoc
+          [
+            ("trace_id", `String "shared-trace");
+            ("status", `String "ok");
+          ]
+      in
+      Eio.Mutex.use_rw ~protect:true Operator_control_snapshot._snapshot_mu
+        (fun () ->
+          Hashtbl.replace Operator_control_snapshot._snapshot_table cache_key
+            (Operator_control_snapshot.Cached
+               {
+                 value = shared;
+                 expires_at =
+                   Time_compat.now () +. Operator_control_snapshot._snapshot_ttl_s;
+               }));
+      Eio.Condition.broadcast cond;
+      let first = Eio.Promise.await waiter_a in
+      let second = Eio.Promise.await waiter_b in
+      Alcotest.(check string) "waiter a shared trace" "shared-trace"
+        Yojson.Safe.Util.(first |> member "trace_id" |> to_string);
+      Alcotest.(check string) "waiter b shared trace" "shared-trace"
+        Yojson.Safe.Util.(second |> member "trace_id" |> to_string);
+      let cached_retained =
+        Eio.Mutex.use_rw ~protect:true Operator_control_snapshot._snapshot_mu
+          (fun () ->
+            match
+              Hashtbl.find_opt Operator_control_snapshot._snapshot_table cache_key
+            with
+            | Some (Operator_control_snapshot.Cached _) -> true
+            | _ -> false)
+      in
+      Alcotest.(check bool) "healthy inflight slot not evicted" true cached_retained)
+
 let test_orchestra_room_core_shape () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

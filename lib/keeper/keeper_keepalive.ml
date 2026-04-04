@@ -1178,7 +1178,6 @@ let record_keeper_stopped
   if resolve_registry_done entry `Stopped
   then (
     Keeper_registry.set_state ~base_path keeper_name Keeper_registry.Stopped;
-    Keeper_registry.cleanup_tracking ~base_path keeper_name;
     publish_keeper_lifecycle ~event:"stopped" ~keeper_name ~detail)
 ;;
 
@@ -1277,12 +1276,10 @@ let stop_keepalive name =
            | Eio.Cancel.Cancelled _ as e -> raise e
            | _exn -> ())
         | None -> ());
-       if entry.state = Keeper_registry.Running
-       then
-         record_keeper_stopped
-           entry
-           ~base_path:entry.base_path
-           ~keeper_name:entry.name
-           ~detail:"manual stop")
+       record_keeper_stopped
+         entry
+         ~base_path:entry.base_path
+         ~keeper_name:entry.name
+         ~detail:"manual stop")
     entries
 ;;

@@ -499,6 +499,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
               ("scope_kind", `String m.scope_kind);
               ("room_scope", `String m.room_scope);
+              ("paused", `Bool m.paused);
               ("keepalive_running", `Bool keepalive_running);
               ("auto_handoff", `Bool m.auto_handoff);
               ("handoff_threshold", `Float m.handoff_threshold);
@@ -547,6 +548,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
               ("noop_turn_count", `Int m.runtime.noop_turn_count);
               ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
+              ("last_autonomous_action_at",
+                if String.trim m.runtime.last_autonomous_action_at = ""
+                then `Null
+                else `String m.runtime.last_autonomous_action_at);
               ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);
               ("last_visible_proactive_ts", `Float m.runtime.proactive_rt.last_visible_ts);
               ( "last_proactive_outcome"

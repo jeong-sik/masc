@@ -97,6 +97,9 @@ function statusColor(status: string): { bg: string; text: string; dot: string } 
     case 'idle':
     case 'quiet':
       return { bg: 'bg-[rgba(251,191,36,0.12)]', text: 'text-[#fbbf24]', dot: 'bg-[#fbbf24]' }
+    case 'paused':
+    case 'blocked':
+      return { bg: 'bg-[rgba(251,191,36,0.12)]', text: 'text-[#fbbf24]', dot: 'bg-[#fbbf24]' }
     case 'offline':
     case 'inactive':
       return { bg: 'bg-[rgba(148,163,184,0.12)]', text: 'text-[#94a3b8]', dot: 'bg-[#64748b]' }
@@ -115,6 +118,38 @@ function KeeperStatusPill({ status }: { status: string }) {
       <span class="size-2 rounded-full ${c.dot}"></span>
       ${status}
     </span>
+  `
+}
+
+function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
+  const blocker = keeper.last_blocker?.trim()
+  const needsAttention = keeper.paused || Boolean(blocker)
+  if (!needsAttention && !keeper.last_autonomous_action_at) return null
+
+  const toneClass = keeper.paused || blocker
+    ? 'border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]'
+    : 'border-[var(--card-border)] bg-[var(--white-3)]'
+
+  return html`
+    <div class="px-6 pt-4">
+      <div class="rounded-xl border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[12px] text-[var(--text-body)]">
+        ${keeper.paused
+          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[#fbbf24]">일시정지</span>`
+          : null}
+        ${keeper.paused && keeper.keepalive_running
+          ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
+          : null}
+        ${blocker
+          ? html`<span><strong class="text-[var(--text-strong)]">차단 요인</strong> · ${blocker}</span>`
+          : null}
+        ${keeper.last_need
+          ? html`<span><strong class="text-[var(--text-strong)]">최근 필요</strong> · ${keeper.last_need}</span>`
+          : null}
+        ${keeper.last_autonomous_action_at
+          ? html`<span><strong class="text-[var(--text-strong)]">마지막 행동</strong> · <${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>`
+          : null}
+      </div>
+    </div>
   `
 }
 
@@ -315,6 +350,7 @@ export function KeeperDetailOverlay() {
   const keeper = findKeeper(selected.name) ?? selected
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const titleId = `keeper-detail-title-${keeper.name}`
+  const effectiveStatus = keeper.paused ? 'paused' : keeper.status
 
   return html`
     <${DialogOverlay}
@@ -332,7 +368,7 @@ export function KeeperDetailOverlay() {
             <div class="flex flex-col gap-0.5">
               <div class="flex items-center gap-2.5">
                 <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
-                <${KeeperStatusPill} status=${keeper.status} />
+                <${KeeperStatusPill} status=${effectiveStatus} />
                 ${(() => {
                   const series = keeper.metrics_series ?? []
                   const lastUsed = series.length > 0 ? series[series.length - 1]?.model_used : null
@@ -409,6 +445,8 @@ export function KeeperDetailOverlay() {
             </button>
           </div>
         </div>
+
+        <${KeeperRuntimeAlertStrip} keeper=${keeper} />
 
         ${'' /* ── Body ── */}
         <div class="p-6 flex flex-col gap-6">

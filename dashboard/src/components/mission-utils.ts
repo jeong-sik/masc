@@ -208,7 +208,7 @@ export function clearMissionSelection(): void {
 export function liveStateClass(status?: string | null, health?: string | null): string {
   const s = (status ?? health ?? '').trim().toLowerCase()
   if (s === 'offline' || s === 'inactive' || s === 'archived') return 'mission-state-offline'
-  if (s === 'idle' || s === 'quiet' || s === 'stale') return 'mission-state-idle'
+  if (s === 'idle' || s === 'quiet' || s === 'stale' || s === 'paused' || s === 'blocked') return 'mission-state-idle'
   if (s === 'active' || s === 'running' || s === 'ok' || s === 'healthy') return 'mission-state-alive'
   return ''
 }

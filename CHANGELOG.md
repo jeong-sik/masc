@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [2.232.0] - 2026-04-04
+
+### Changed
+- **Room legacy cleanup** -- remove legacy room warning system and inline scope branches (#5123).
+
 ## [2.231.0] - 2026-04-04
 
 ### Changed
